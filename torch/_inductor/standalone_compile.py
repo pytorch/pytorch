@@ -4,7 +4,6 @@ import contextlib
 import copy
 import itertools
 import logging
-import math
 import os
 import pickle
 import shutil
@@ -613,48 +612,7 @@ class NoRunnableInductorModuleError(RuntimeError):
     """
 
 
-def _passthrough_source(gm: GraphModule) -> str | None:
-    placeholders = {
-        node: index
-        for index, node in enumerate(gm.graph.nodes)
-        if node.op == "placeholder"
-    }
-    output = next((node for node in gm.graph.nodes if node.op == "output"), None)
-    if output is None or any(
-        node.op not in ("placeholder", "output") for node in gm.graph.nodes
-    ):
-        return None
-
-    def render(value: Any) -> str:
-        if isinstance(value, torch.fx.Node):
-            if value not in placeholders:
-                raise KeyError(value)
-            return f"args[{placeholders[value]}]"
-        if isinstance(value, tuple):
-            values = ", ".join(render(item) for item in value)
-            return f"({values},)" if len(value) == 1 else f"({values})"
-        if isinstance(value, list):
-            return f"[{', '.join(render(item) for item in value)}]"
-        if isinstance(value, float) and not math.isfinite(value):
-            return f"float({str(value)!r})"
-        if value is None or isinstance(value, (bool, int, float, str)):
-            return repr(value)
-        raise TypeError
-
-    try:
-        result = render(output.args[0])
-    except (KeyError, TypeError):
-        return None
-    # Honor inductor's boxed-call contract of consuming the argument list so a
-    # backward's saved tensors are released as early as the real kernel would.
-    return (
-        f"def call(args):\n    result = {result}\n    args.clear()\n    return result\n"
-    )
-
-
-def _runnable_source(
-    compiled_graph: OutputCode, gm: GraphModule, *, allow_passthrough: bool = False
-) -> str:
+def _runnable_source(compiled_graph: OutputCode) -> str:
     """Return the Inductor output-module source for a compiled inner graph.
 
     ``compile_fx_inner`` returns a ``CompiledFxGraph`` that carries the wrapper-module
@@ -663,8 +621,6 @@ def _runnable_source(
     surface as ``NoRunnableInductorModuleError``.
     """
     source = getattr(compiled_graph, "source_code", None)
-    if not source and allow_passthrough:
-        source = _passthrough_source(gm)
     if not source:
         raise NoRunnableInductorModuleError(
             "the compiled graph produced no runnable Inductor output module: it has no "
@@ -742,10 +698,6 @@ def compile_to_python(
     example_inputs: Sequence[InputType],
     *,
     options: dict[str, Any] | None = None,
-    is_inference: bool = True,
-    is_backward: bool = False,
-    output_strides: list[tuple[str, ...] | None] | None = None,
-    num_user_visible_outputs: int | None = None,
 ) -> tuple[str, bytes | None]:
     """Compile ``gm`` and return ``(inner_python, cache)`` -- the INNER half of the
     backend contract behind ``torch.compiler.precompile``.
@@ -763,15 +715,6 @@ def compile_to_python(
     layer -- a companion change in ``torch._functorch.aot_autograd`` wraps this and
     composes AOTAutograd's codegen'd runtime wrappers around the result.
     Callers must run ``call`` under ``torch.no_grad()`` (the kernels use out= ops).
-    ``is_inference`` selects Inductor's inference or training layout heuristics, while
-    ``is_backward`` enables backward-specific lowering constraints. If ``output_strides``
-    is provided, it is extended with the layouts selected for the graph outputs so an
-    AOTAutograd backward can be lowered against the forward's actual saved-activation
-    layouts. The first ``num_user_visible_outputs`` outputs (all of them when None)
-    are marked user-visible, which under ``keep_output_stride`` (the default; honored
-    from ``config_patches`` as ``torch.compile`` honors ``options``) pins their strides
-    to the graph's instead of letting inductor pad or re-lay-out tensors the caller
-    will hand to autograd or return.
 
     Caller preconditions (this layer does not re-derive them):
 
@@ -869,11 +812,7 @@ def compile_to_python(
     from torch._guards import detect_fake_mode, tracing, TracingContext
     from torch.compiler._cache import CacheArtifactManager
 
-    from .compile_fx import (
-        _cudagraph_trees_clone_live_user_outputs,
-        _recursive_record_user_visible_output_idxs,
-        compile_fx_inner,
-    )
+    from .compile_fx import compile_fx_inner
     from .virtualized import V
 
     # Own a copy: the collective rewrites and inductor may mutate the graph, and ``gm`` may
@@ -892,21 +831,6 @@ def compile_to_python(
     # dims. A post-AOTAutograd graph's shapes are already baked into this metadata, so
     # there is no separate dynamic-shapes knob.
     fake_inputs = _placeholder_fake_inputs(gm)
-    output_node = gm.graph.find_nodes(op="output")[-1]
-    outputs = output_node.args[0] if output_node.args else ()
-    if isinstance(outputs, torch.fx.Node):
-        outputs = (outputs,)
-    outputs = list(outputs)
-    if num_user_visible_outputs is not None:
-        # The caller's prefix; for a training forward this is num_forward,
-        # which also spans mutated-input returns and intermediate bases (a
-        # superset of what compile_fx pins, so strictly more conservative).
-        outputs = outputs[:num_user_visible_outputs]
-    # Like compile_fx's marking, only tensor outputs are user visible; None and
-    # symbolic-int outputs carry no layout.
-    user_visible_output_idxs = [
-        idx for idx, out in enumerate(outputs) if isinstance(out, torch.fx.Node)
-    ]
     fake_mode = detect_fake_mode(fake_inputs)
     if fake_mode is None:
         raise RuntimeError(
@@ -924,33 +848,16 @@ def compile_to_python(
         V.set_fake_mode(fake_mode),
         CacheArtifactManager.with_fresh_cache(),
     ):
-        # Under the caller's config, as compile_fx does: the pin applies only
-        # with keep_output_stride (or cudagraph trees' live-output cloning), so
-        # options={"keep_output_stride": False} is honored here too. Nested
-        # invoke_subgraph subgraphs get the same treatment compile_fx gives them.
-        if config.keep_output_stride or _cudagraph_trees_clone_live_user_outputs():
-            output_node.meta["user_visible_output_idxs"] = user_visible_output_idxs
-        else:
-            output_node.meta["user_visible_output_idxs"] = []
-        _recursive_record_user_visible_output_idxs(gm)
         compiled_graph = compile_fx_inner(
             gm,
             fake_inputs,
             static_input_idxs=(),
             cudagraphs=BoxedBool(False),
-            is_inference=is_inference,
-            is_backward=is_backward,
+            is_inference=True,
             boxed_forward_device_index=BoxedDeviceIndex(None),
         )
         artifacts = torch.compiler.save_cache_artifacts()
-    if output_strides is not None:
-        # The strides Inductor CHOSE for this graph's outputs, which only exist
-        # once it has lowered. A training backward has to be compiled against
-        # the forward's actual choices -- layout optimization is free to hand
-        # back channels-last saved activations -- and this is the only channel
-        # for that, since the caller cannot see the CompiledFxGraph.
-        output_strides.extend(getattr(compiled_graph, "output_strides", None) or [])
-    inner_python = _runnable_source(compiled_graph, gm, allow_passthrough=is_backward)
+    inner_python = _runnable_source(compiled_graph)
     cache = _acceleration_cache_bytes(artifacts)
     return inner_python, cache
 

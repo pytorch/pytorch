@@ -3587,7 +3587,15 @@ def forward(self, primals_1):
         inp_clone = inp.clone()
         out_ref = f3(inp_ref_clone)
         out_test = f3_compiled(inp_clone)
-        self.assertTrue(all("UnbindBackward" in str(o.grad_fn) for o in out_test[:3]))
+        # Regeneration rebuilds each unbind output as a select, so the grad_fn
+        # is a SelectBackward. What has to survive is autograd's refusal to let
+        # us mutate an output of a multi-output view, which rides on
+        # CreationMeta rather than on the grad_fn.
+        for o in out_test[:3]:
+            with self.assertRaisesRegex(
+                RuntimeError, "output of a function that returns multiple views"
+            ):
+                o.mul_(2)
 
         # The last output is not from a multi-output view, so autograd will let us mutate it.
         out_ref[-1].mul_(2)
@@ -5574,6 +5582,57 @@ def forward(self, tangents_1):
 
         self.assertEqual(out_ref, out_test)
         self.assertEqual(a, a2)
+
+    # See https://github.com/pytorch/pytorch/issues/191449
+    def test_dupe_arg_with_no_grad_alias_of_output(self):
+        # Duplicating and mutating an input routes metadata through
+        # AOTDedupeWrapper, which remaps base_idx through add_dupe_map. Only
+        # alias_of_input / is_input hold an input index there; a no-grad alias
+        # of a user output holds a user-output index and must be left alone.
+        # The leading outputs push that index past the input count, so remapping
+        # it used to raise IndexError.
+        def f(x, y):
+            y.mul_(2)
+            a, b, c = x + 1, x + 2, x + 3
+            d = x + 4 + y
+            return a, b, c, d, d.view(-1)
+
+        f_compiled = aot_function(f, nop)
+        x = torch.ones(4)
+        out_ref = f(x, x)
+
+        x2 = torch.ones(4)
+        out_test = f_compiled(x2, x2)
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(x, x2)
+        # Eager returns two distinct objects sharing storage, so the compiled
+        # function must too, or an eager resize_() on the alias corrupts d.
+        self.assertIsNot(out_test[3], out_test[4])
+        self.assertEqual(out_test[3].data_ptr(), out_test[4].data_ptr())
+
+    # See https://github.com/pytorch/pytorch/issues/191449
+    def test_synthetic_base_with_no_grad_alias_of_output(self):
+        # Overlapping aliased inputs plus a mutation build synthetic bases,
+        # which remap base_idx through synthetic_base_info. As with dedup, only
+        # alias_of_input / is_input hold an input index there.
+        def f(x, y):
+            y.mul_(2)
+            a, b, c = x + 1, x + 2, x + 3
+            d = x + 4 + y
+            return a, b, c, d, d.view(-1)
+
+        f_compiled = aot_function(f, nop)
+        base = torch.ones(8)
+        out_ref = f(base[0:6], base[2:8])
+
+        base2 = torch.ones(8)
+        out_test = f_compiled(base2[0:6], base2[2:8])
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(base, base2)
+        self.assertIsNot(out_test[3], out_test[4])
+        self.assertEqual(out_test[3].data_ptr(), out_test[4].data_ptr())
 
     @patch("torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count)
     @patch("torch._functorch.config.debug_assert", True)
@@ -11062,160 +11121,6 @@ def forward(self, primals_1, tangents_1):
         actual = self._run_with_compiled_autograd(run)
         self.assertEqual(actual, expected)
 
-    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
-    def test_backward_epilogue_compiled_autograd_unused_output(self):
-        @torch.compile(backend="aot_eager")
-        def f(x, y):
-            return x.sin(), y.sin()
-
-        x_base = torch.randn(4)
-        y_base = torch.randn(4)
-
-        def run(x_base, y_base):
-            x = x_base.detach().clone().requires_grad_()
-            y = y_base.detach().clone().requires_grad_()
-            out0, out1 = f(x, y)
-            out0.sum().backward()
-            self.assertIsNone(y.grad)
-            return x.grad, y.grad
-
-        expected = run(x_base, y_base)
-        torch._dynamo.reset()
-        actual = self._run_with_compiled_autograd(lambda: run(x_base, y_base))
-        self.assertEqual(actual, expected)
-
-    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
-    def test_compiled_autograd_custom_backward_observes_none_tangent(self):
-        class Fn(torch.autograd.Function):
-            @staticmethod
-            def forward(x, y):
-                return x * 2, y * 3
-
-            @staticmethod
-            def setup_context(ctx, inputs, output):
-                ctx.set_materialize_grads(False)
-                ctx.save_for_backward(*inputs)
-
-            @staticmethod
-            def backward(ctx, grad_x, grad_y):
-                x, y = ctx.saved_tensors
-                if grad_y is None:
-                    return grad_x * x, x * 7
-                return grad_x * x, grad_y * y
-
-        @torch._dynamo.allow_in_graph
-        def opaque(x, y):
-            return Fn.apply(x, y)
-
-        @torch.compile(backend="aot_eager", fullgraph=True)
-        def compiled(x, y):
-            return opaque(x, y)
-
-        x_base = torch.randn(4)
-        y_base = torch.randn(4)
-
-        def run():
-            x = x_base.detach().clone().requires_grad_()
-            y = y_base.detach().clone().requires_grad_()
-            compiled(x, y)[0].sum().backward()
-            return x.grad, y.grad
-
-        expected = (x_base, x_base * 7)
-        actual = self._run_with_compiled_autograd(run)
-        self.assertEqual(actual, expected)
-
-    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
-    def test_compiled_autograd_unused_mutated_input_output(self):
-        @torch.compile(backend="aot_eager")
-        def f(x, y):
-            x.mul_(2)
-            return y.sin(), x.cos()
-
-        def run():
-            x_leaf = torch.randn(4, requires_grad=True)
-            x = x_leaf + 0
-            y = torch.randn(4, requires_grad=True)
-            f(x, y)[0].sum().backward()
-            self.assertEqual(x_leaf.grad, torch.zeros_like(x_leaf))
-            self.assertIsNotNone(y.grad)
-
-        run()
-        torch._dynamo.reset()
-        self._run_with_compiled_autograd(run)
-
-    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
-    def test_compiled_autograd_runtime_grad_output_prototypes(self):
-        @torch.compile(backend="aot_eager", dynamic=True)
-        def f(x):
-            # repeat_backward contains an unsupported zero-propagation sum, so
-            # the missing second tangent must be materialized at runtime.
-            return x.sin(), x.repeat(2, 1)
-
-        def run(size):
-            x = torch.randn(size, requires_grad=True)
-            expected = x.cos().detach()
-            out, _ = f(x)
-            lazy_info = out.grad_fn._forward_cls._lazy_backward_info
-            lazy_info.autograd_trace_info = None
-            out.sum().backward()
-            self.assertEqual(x.grad, expected)
-
-        compiled_autograd_graphs = []
-
-        def compiler_fn(gm):
-            compiled_autograd_graphs.append(gm)
-            return torch.compile(gm, backend="aot_eager", fullgraph=True, dynamic=True)
-
-        self._run_with_compiled_autograd(
-            lambda: (run(4), run(7)), compiler_fn=compiler_fn
-        )
-        self.assertEqual(len(compiled_autograd_graphs), 1)
-        self.assertIn(
-            torch.ops.aten.sum.dim_IntList,
-            [node.target for node in compiled_autograd_graphs[0].graph.nodes],
-        )
-
-    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
-    def test_compiled_autograd_unresolved_none_tangent_diagnostic(self):
-        import torch._dynamo.compiled_autograd as compiled_autograd_impl
-        import torch._functorch._aot_autograd.graph_compile as graph_compile
-        import torch._functorch._aot_autograd.runtime_wrappers as runtime_wrappers
-        from torch._dynamo import compiled_autograd
-
-        def fn(x):
-            y = torch.sin(x)
-            return y[0:4], y[4:8], y.detach(), x * 3
-
-        torch._dynamo.reset()
-        x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
-        with (
-            patch.object(
-                runtime_wrappers, "_dealias_marked_returns", lambda raw, marked: None
-            ),
-            patch.object(
-                graph_compile,
-                "_retrace_backward_for_undefined_grad_outputs",
-                lambda *args, **kwargs: None,
-            ),
-            patch.object(
-                compiled_autograd_impl,
-                "_specialize_bw_module_for_undefined_grad_outputs",
-                lambda *args, **kwargs: None,
-            ),
-            patch.object(
-                runtime_wrappers, "_grad_output_prototype", lambda *args, **kwargs: None
-            ),
-        ):
-            outputs = torch.compile(fn, backend="aot_eager")(x)
-            with (
-                compiled_autograd._enable(lambda gm: gm),
-                torch.autograd.set_multithreading_enabled(False),
-                self.assertRaisesRegex(
-                    RuntimeError, "handed a non-Tensor for a tangent it requires"
-                ),
-            ):
-                outputs[3].sum().backward()
-
     def test_backward_epilogue_compiled_autograd_subclass(self):
         from torch.testing._internal.two_tensor import TwoTensor
 
@@ -11237,41 +11142,6 @@ def forward(self, primals_1, tangents_1):
         actual = self._run_with_compiled_autograd(run)
         self.assertEqual(actual[0], expected[0])
         self.assertEqual(actual[1], expected[1])
-
-    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
-    def test_backward_epilogue_compiled_autograd_subclass_fallback(self):
-        @torch.compile(backend="aot_eager", dynamic=True)
-        def f(x, y):
-            # Dynamic shapes add SymInt arguments between the subclass tensor
-            # leaves that the backward epilogue must group together.
-            return x.sin(), y.repeat(2, 1)
-
-        def run(size):
-            x = TwoTensor(torch.randn(size), torch.randn(size)).requires_grad_()
-            y = TwoTensor(torch.randn(size), torch.randn(size)).requires_grad_()
-            f(x, y)[0].sum().backward()
-            self.assertIsInstance(x.grad, TwoTensor)
-            self.assertEqual(x.grad.a, x.a.cos())
-            self.assertEqual(x.grad.b, x.b.cos())
-            # Masking to None requires the output to be PROVABLY zero; across
-            # the subclass boundary the walker cannot prove it, so the
-            # conservative fallback materializes a zero grad instead. Either
-            # outcome is numerically correct for the unused output.
-            if y.grad is not None:
-                self.assertIsInstance(y.grad, TwoTensor)
-                self.assertEqual(y.grad.a, torch.zeros(size))
-                self.assertEqual(y.grad.b, torch.zeros(size))
-
-        compiled_autograd_graphs = []
-
-        def compiler_fn(gm):
-            compiled_autograd_graphs.append(gm)
-            return torch.compile(gm, backend="aot_eager", fullgraph=True, dynamic=True)
-
-        self._run_with_compiled_autograd(
-            lambda: (run(4), run(7)), compiler_fn=compiler_fn
-        )
-        self.assertEqual(len(compiled_autograd_graphs), 1)
 
     # --- AOTSyntheticBaseWrapper codegen tests ---
 
@@ -11794,6 +11664,40 @@ def forward(self, primals_1, tangents_1):
             ],
             [0, 1, 2],
         )
+
+    def test_collect_metadata_no_grad_no_op_view_of_user_output(self):
+        # https://github.com/pytorch/pytorch/issues/191449
+        # Without gradients, a no-op view of another user output must still be
+        # classified as an alias so the runtime wrapper regenerates a distinct
+        # tensor object; otherwise the backend may return one object for both
+        # outputs, while eager returns distinct objects.
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.schemas import OutputType
+
+        def f(x):
+            base = x + 1
+            return [base.view(-1), base]
+
+        fake_mode = FakeTensorMode()
+        arg = fake_mode.from_tensor(torch.ones(1))
+
+        metadata = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=True,
+            static_input_indices=[],
+        )(arg)
+
+        self.assertEqual(
+            metadata.output_info[0].output_type,
+            OutputType.alias_of_intermediate_base_is_user_output,
+        )
+        self.assertEqual(metadata.output_info[0].base_idx, 1)
+        self.assertEqual(metadata.output_info[1].output_type, OutputType.non_alias)
+        self.assertEqual(metadata.num_intermediate_bases, 0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")

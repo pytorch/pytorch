@@ -2699,6 +2699,21 @@ class SplitGroupOptionsTest(TestCase):
         self.assertEqual(opts._timeout, timedelta(seconds=5))
 
 
+class RegisterBackendWithoutBackendTest(TestCase):
+    def test_second_device_reuses_backend(self):
+        # _register_backend's backend argument defaults to None, and when the
+        # BackendType is already registered setBackend reuses the backend
+        # already stored for it. That reuse path used to dereference the
+        # absent optional to compare bound device ids.
+        backend = C10DBackend(0, 1)
+        pg = dist.ProcessGroup(dist.HashStore(), 0, 1)
+        pg._register_backend(
+            torch.device("cpu"), dist.ProcessGroup.BackendType.CUSTOM, backend
+        )
+        pg._register_backend(torch.device("cuda"), dist.ProcessGroup.BackendType.CUSTOM)
+        self.assertEqual(pg._get_backend(torch.device("cuda")), backend)
+
+
 class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
     @property
     def world_size(self):

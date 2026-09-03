@@ -196,23 +196,6 @@ def call(args):
         with self.assertRaises(NoRunnableInductorModuleError):
             compile_to_python(gm, _flat_inputs(m, x))
 
-    def test_backward_flag_forwarded_to_compile_fx_inner(self):
-        from torch._inductor import compile_fx
-
-        m = _Pointwise().eval()
-        x = torch.randn(5, 4)
-        gm = _capture(m, x)
-        with mock.patch.object(
-            compile_fx, "compile_fx_inner", wraps=compile_fx.compile_fx_inner
-        ) as inner_compile:
-            compile_to_python(
-                gm,
-                _flat_inputs(m, x),
-                is_inference=False,
-                is_backward=True,
-            )
-        self.assertTrue(inner_compile.call_args.kwargs["is_backward"])
-
 
 @requires_cuda_and_triton
 class TestInductorCompileToPythonCudaCodegen(TestCase):
@@ -554,22 +537,6 @@ class TestInductorCompileToPythonContract(TestCase):
         self.assertIn("def call(", src2)
         with torch.no_grad():
             self.assertEqual(_exec(src2)(_flat_inputs(m, x))[0], m(x))
-
-
-class TestInductorCompileToPythonPassthrough(TestCase):
-    def test_passthrough_source_releases_args(self):
-        # The passthrough used for a trivial backward must honor inductor's
-        # boxed-call contract of consuming its argument list so saved tensors
-        # are released as early as a real kernel would release them.
-        from torch._inductor.standalone_compile import _passthrough_source
-
-        gm = torch.fx.symbolic_trace(lambda x: (x,))
-        namespace = {}
-        exec(_passthrough_source(gm), namespace)
-        args = [torch.randn(2)]
-        out = namespace["call"](args)
-        self.assertEqual(len(out), 1)
-        self.assertEqual(args, [])
 
 
 if __name__ == "__main__":

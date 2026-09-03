@@ -40,18 +40,12 @@ eager / compiled path would error -- an intentional trade-off, not a numerics bu
 from __future__ import annotations
 
 import ast
-import itertools
-import logging
 import re
 import threading
-from dataclasses import dataclass, field
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from .codegen import capture_generated_sources, GeneratedSource
 from .source_emit import _REBUILD_HELPER, emit_value
-
-
-log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -122,8 +116,7 @@ _COMPILE_LOCK = threading.RLock()
 # We do NOT reimplement any of this. We CAPTURE AOTAutograd's exact codegen'd wrapper
 # source together with the (pre-exec) globals dict each wrapper closed over: a
 # thread-local sink in codegen.py records one GeneratedSource per wrapper.
-# To trigger the capture we run AOTAutograd ourselves, using grad mode to select the
-# inference path or a joint forward/backward; see ``compile_to_python.grad_enabled``.
+# To trigger the capture we run AOTAutograd ourselves (under no_grad, the inference path)
 # with a capture-only inner compiler: it grabs the dense inner graph and returns a
 # placeholder callable, so AOTAutograd still codegen's the runtime-wrapper chain AROUND
 # that placeholder -- which is what the sink records. Inductor does not run in that pass;
@@ -142,11 +135,8 @@ _COMPILE_LOCK = threading.RLock()
 # structures it consults, in order:
 #   - inner_call_id         -> the inner ``call`` becomes ``_inner_call``
 #   - fn_id_to_name         -> a sibling wrapper's fn becomes that wrapper's own name
-#   - _known_helper_table() -> ``torch`` itself and public torch paths become (import, expr)
-#   - anything else: reconstruct as source via emit_value, which references any
-#     object re-exported by standalone_runtime from that surface (by identity,
-#     see source_emit._standalone_runtime_exports) and rebuilds the rest
-#     field-by-field, or raises.
+#   - _known_helper_table() -> an importable helper becomes (import, expr)
+#   - anything else: reconstruct field-by-field as source (_emit_value), or raise.
 # Recognition is by id() (object identity), not value-equality: for "is this the EXACT
 # object the wrapper closed over," == is the wrong tool (functions don't compare by
 # value, and an equal-but-different object would mis-resolve). Value-equality IS used,
@@ -176,10 +166,9 @@ _COMPILE_LOCK = threading.RLock()
 # torch.autograd.graph.increment_version) or an import from the single small surface
 # standalone_runtime.py (for the AOTAutograd-area internals -- plus CUDARngStateHelper,
 # re-exported there for import-ordering -- whose locations are not themselves a stable
-# contract), the latter routed by source_emit._emit_importable off the identities in
-# standalone_runtime.__all__. That file's IDENTITY CONTRACT -- re-exports must
-# preserve object id -- exists purely so that compile-time lookup keeps matching; the
-# runtime artifact has no id dependency of its own.
+# contract). That file's IDENTITY CONTRACT -- re-exports must preserve object id --
+# exists purely so the COMPOSER's id-lookup keeps matching; it is a compile-time
+# requirement, and the runtime artifact has no id dependency of its own.
 # ======================================================================
 
 
@@ -187,19 +176,39 @@ _COMPILE_LOCK = threading.RLock()
 # import in the standalone module (rather than reconstructed field-by-field). Maps
 # object id -> (import_statement, expression). Built lazily to avoid import cycles.
 def _known_helper_table() -> dict[int, tuple[str, str]]:
-    # Only objects that emit_value cannot route to standalone_runtime by
-    # identity live here; see source_emit._emit_importable for the rest.
+    # Generated artifacts import runtime helpers from the single stable surface
+    # ``standalone_runtime`` (not scattered AOTAutograd internals).
     import torch
 
+    from . import standalone_runtime as rt
+
+    _RT = "from torch._functorch._aot_autograd.standalone_runtime import"
     table: dict[int, tuple[str, str]] = {
-        # Modules have no __qualname__ and increment_version's import path is
-        # not the stable ``import torch``; everything re-exported by
-        # standalone_runtime is routed there by source_emit._emit_importable
-        # (keyed on the same object identities), so it needs no row here.
         id(torch): ("import torch", "torch"),
+        id(rt.normalize_as_list): (f"{_RT} normalize_as_list", "normalize_as_list"),
+        id(rt.mark_dynamo_propagated_dynamic_indices): (
+            f"{_RT} mark_dynamo_propagated_dynamic_indices",
+            "mark_dynamo_propagated_dynamic_indices",
+        ),
         id(torch.autograd.graph.increment_version): (
             "import torch",
             "torch.autograd.graph.increment_version",
+        ),
+        id(rt.gen_alias_from_base): (
+            f"{_RT} gen_alias_from_base",
+            "gen_alias_from_base",
+        ),
+        id(rt._unwrap_tensoralias): (
+            f"{_RT} _unwrap_tensoralias",
+            "_unwrap_tensoralias",
+        ),
+        id(rt.CUDARngStateHelper.get_torch_state_as_tuple): (
+            f"{_RT} CUDARngStateHelper",
+            "CUDARngStateHelper.get_torch_state_as_tuple",
+        ),
+        id(rt.CUDARngStateHelper.set_new_offset): (
+            f"{_RT} CUDARngStateHelper",
+            "CUDARngStateHelper.set_new_offset",
         ),
     }
     return table
@@ -227,14 +236,13 @@ def _resolve_global(
     imports: set[str],
     orch_closure_id: int | None = None,
     orch_entry_name: str | None = None,
-    inner_call_name: str = "_inner_call",
 ) -> str:
     """Return a Python expression (valid in the generated module) that reproduces
     ``obj``, recording any needed import. Raises NotImplementedError if ``obj`` is
     neither the inner call, a sibling wrapper, a known helper, nor source-
     reconstructible (see ``_emit_value``)."""
     if inner_call_id is not None and id(obj) == inner_call_id:
-        return inner_call_name
+        return "_inner_call"
     # An OUTER wrapper (dedup / synthetic base) closes over the orchestration's outer
     # closure as its inner. That closure is not a captured wrapper and has no import
     # path, so wire it to the single-arg orchestration entry adapter the composer emits.
@@ -244,12 +252,6 @@ def _resolve_global(
         return orch_entry_name
     if id(obj) in fn_id_to_name:
         return fn_id_to_name[id(obj)]
-    if (
-        getattr(obj, "__self__", None) is itertools.chain
-        and getattr(obj, "__name__", None) == "from_iterable"
-    ):
-        imports.add("import itertools")
-        return "itertools.chain.from_iterable"
     if id(obj) in helper_table:
         import_stmt, expr = helper_table[id(obj)]
         if import_stmt:
@@ -826,12 +828,7 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     strides has static sizes, and treating it as static would silently specialize the
     artifact to the example strides. (Unbacked symints appearing only in intermediates,
     not on any placeholder, are still missed here, but such a graph fails loudly
-    downstream when emit_value rejects the still-symbolic metadata.)
-
-    Both metadata keys are checked, like ``_resolve_fake_mode``: make_fx stashes the fake
-    under "val", while a Dynamo graph (which torch.compiler.precompile's dynamo tracer
-    feeds here) stashes it under "example_value" -- reading only "val" would call a
-    dynamic Dynamo graph static and silently specialize it to the example sizes."""
+    downstream when emit_value rejects the still-symbolic metadata.)"""
     import torch
 
     def _is_symbolic(v: Any) -> bool:
@@ -840,968 +837,25 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     for node in gm.graph.nodes:
         if node.op != "placeholder":
             continue
-        for key in ("val", "example_value"):
-            val = node.meta.get(key)
-            if _is_symbolic(val):
-                return True
-            if isinstance(val, torch.Tensor) and (
-                any(_is_symbolic(s) for s in val.shape)
-                or any(_is_symbolic(s) for s in val.stride())
-                or _is_symbolic(val.storage_offset())
-            ):
-                return True
-    return False
-
-
-def namespace_module_names(sources: Sequence[str]) -> list[str]:
-    """Suffix every top-level name each module DEFINES, per module.
-
-    Splicing several Inductor modules into ONE namespace is only safe if their
-    top-level names are disjoint, because the code inside a module resolves its
-    siblings as late-bound globals: a module's ``call`` looks up its kernels and
-    its ``_runtime_wrapper`` when INVOKED, not when defined. Two modules of the
-    same computation -- a forward and its backward, or two shape variants of one
-    frame -- otherwise define the same names, and the first silently runs the
-    second's code. Snapshotting each module's entry is not enough for the same
-    reason.
-
-    Rewriting is driven by AST positions rather than a text match, which is what
-    keeps three lookalikes out of it: an attribute (``runner.call`` is an
-    ``Attribute``, not a ``Name``), a nested binding (``def call`` inside
-    ``class Runner`` is not module-level), and an import (``async_compile`` is
-    both a local binding and part of ``torch._inductor.async_compile``).
-    """
-    out: list[str] = []
-    for slot, source in enumerate(sources):
-        tree = ast.parse(source)
-        imported: set[str] = set()
-        defined: set[str] = set()
-        headers: list[tuple[int, str]] = []
-        for node in tree.body:
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                for alias in node.names:
-                    imported.add((alias.asname or alias.name).split(".")[0])
-            elif isinstance(
-                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-            ):
-                defined.add(node.name)
-                headers.append((node.lineno, node.name))
-            elif isinstance(node, ast.Assign):
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        defined.add(target.id)
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                defined.add(node.target.id)
-        targets = defined - imported
-        if not targets:
-            out.append(source)
-            continue
-        suffix = f"_s{slot}"
-        lines = source.split("\n")
-
-        def char_offset(lineno: int, byte_offset: int) -> int:
-            # ast col offsets are UTF-8 byte offsets; the lines are str.
-            line = lines[lineno - 1]
-            if line.isascii():
-                return byte_offset
-            return len(line.encode("utf-8")[:byte_offset].decode("utf-8"))
-
-        edits: dict[int, list[tuple[int, int, str]]] = {}
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Name)
-                and node.id in targets
-                and node.end_col_offset is not None
-            ):
-                edits.setdefault(node.lineno, []).append(
-                    (
-                        char_offset(node.lineno, node.col_offset),
-                        char_offset(node.lineno, node.end_col_offset),
-                        node.id + suffix,
-                    )
-                )
-        for lineno, name in headers:
-            if name not in targets:
-                continue
-            found = re.search(rf"\b{re.escape(name)}\b", lines[lineno - 1])
-            if found is not None:
-                edits.setdefault(lineno, []).append(
-                    (found.start(), found.end(), name + suffix)
-                )
-        for lineno, spans in edits.items():
-            line = lines[lineno - 1]
-            for begin, finish, text in sorted(spans, reverse=True):
-                line = line[:begin] + text + line[finish:]
-            lines[lineno - 1] = line
-        out.append("\n".join(lines))
-    return out
-
-
-# Names the emitted training module binds at module scope and that the capture
-# driver (torch._precompile) reads and writes through call.__globals__. Both
-# sides go through these constants.
-AOT_OBSERVED_UNDEFINED_TANGENT_MASKS = "_AOT_OBSERVED_UNDEFINED_TANGENT_MASKS"
-AOT_BACKWARD_VARIANT_COMPILER = "_AOT_BACKWARD_VARIANT_COMPILER"
-AOT_BACKWARD_VARIANTS = "_AOT_BACKWARD_VARIANTS"
-
-
-def _inner_call_bw_name(index: int) -> str:
-    # Emitted binding of the index-th backward variant's inner inductor call.
-    return f"_inner_call_bw_{index}"
-
-
-@dataclass(frozen=True)
-class _StandaloneBackwardVariant:
-    undefined_grad_out_mask: int | None
-    python_code: str
-    kept_arg_indices: tuple[int, ...] | None = None
-    pruned_output_indices: tuple[int, ...] | None = ()
-    skip_materialize_grad_output_indices: tuple[int, ...] = ()
-
-
-@dataclass(frozen=True)
-class _CompiledBackwardSpecialization:
-    python_code: str
-    call: Callable[[list[Any]], Any]
-    cache: bytes | None
-    kept_arg_indices: tuple[int, ...] | None = None
-    pruned_output_indices: tuple[int, ...] | None = ()
-    skip_materialize_grad_output_indices: tuple[int, ...] = ()
-
-
-@dataclass
-class _CompileToPythonState:
-    """Capture-only state for specializing standalone backwards.
-
-    ``install_capture`` connects the generated module's private compiler hook to
-    ``compile_mask``. Bit ``i`` is set when grad output ``i`` is undefined. Masks are
-    kept CANONICAL throughout -- restricted to the specializable user-output indices
-    (``_specializable_user_grad_output_mask``), exactly like the live runtime path --
-    so a non-differentiable output's always-undefined tangent cannot fork spurious
-    variants or make the auto-covered mask 0 unreachable; every entry point
-    re-canonicalizes defensively. The first
-    real backward with a new mask compiles and runs that specialization immediately,
-    then records its source and cache. After running its examples, the CALLER reads
-    the observed masks out of ``call.__globals__[AOT_OBSERVED_UNDEFINED_TANGENT_MASKS]``
-    and passes them to ``finalize``, which emits only those recorded variants.
-    ``finalize`` does not touch the module globals: the caller is responsible for
-    setting ``AOT_BACKWARD_VARIANT_COMPILER`` back to ``None`` and clearing
-    ``AOT_BACKWARD_VARIANTS`` in that globals dict (see
-    ``torch._precompile._DynamoPythonBackend.finalize_training``). The names are
-    the module-level constants of the same name in this module; consumers must
-    use those rather than the literal strings.
-    """
-
-    forward_python: str
-    backward_python: str
-    captured: list[GeneratedSource]
-    spec: Any
-    backward_graph: GraphModule
-    backward_inputs: list[Any]
-    options: dict[str, Any] | None
-    forward_cache: bytes | None
-    backward_cache: bytes | None
-    forward_inner_call: Callable[..., Any]
-    _capture_backward_call: Callable[[list[Any]], Any] | None = field(
-        default=None, init=False
-    )
-    _specializations: dict[int, _CompiledBackwardSpecialization] = field(
-        default_factory=dict, init=False
-    )
-    _observed_variants: dict[int, _StandaloneBackwardVariant] = field(
-        default_factory=dict, init=False
-    )
-
-    def install_capture(self, globals_dict: dict[str, Any]) -> None:
-        self._capture_backward_call = globals_dict[_inner_call_bw_name(0)]
-        globals_dict[AOT_BACKWARD_VARIANT_COMPILER] = self.compile_mask
-
-    def canonical_mask(self, mask: int) -> int:
-        from . import runtime_wrappers as _rw
-
-        return _rw._specializable_user_grad_output_mask(
-            self.spec.fw_metadata, _rw._bitmask_to_indices(mask)
-        )
-
-    def compile_mask(
-        self, mask: int
-    ) -> tuple[
-        Callable[[list[Any]], Any],
-        tuple[int, ...] | None,
-        tuple[int, ...] | None,
-        tuple[int, ...],
-    ]:
-        with _COMPILE_LOCK:
-            return self._compile_mask(mask)
-
-    def _compile_mask(
-        self, mask: int
-    ) -> tuple[
-        Callable[[list[Any]], Any],
-        tuple[int, ...] | None,
-        tuple[int, ...] | None,
-        tuple[int, ...],
-    ]:
-        # Re-canonicalize defensively: the emitted backward records canonical
-        # masks, but finalize can be handed masks observed on a superseded
-        # sibling backend (a stateful automatic-dynamic recompile) whose
-        # canonical form is computed against ITS metadata.
-        mask = self.canonical_mask(mask)
-        if mask in self._observed_variants:
-            compiled = self._specializations[mask]
-            return (
-                compiled.call,
-                compiled.kept_arg_indices,
-                compiled.pruned_output_indices,
-                compiled.skip_materialize_grad_output_indices,
-            )
-
-        from torch._guards import compile_context, tracing
-        from torch._inductor import (
-            compile_to_python as _inductor_compile_to_python,
-            load_from_python as _inductor_load_from_python,
-        )
-
-        from . import runtime_wrappers as _rw
-        from .graph_compile import _retrace_backward_for_undefined_grad_outputs
-
-        compiled = self._specializations.get(mask)
-        if compiled is None:
-            if not mask:
-                call = self._capture_backward_call
-                if call is None:
-                    call = _inductor_load_from_python(
-                        self.backward_python, self.backward_cache
-                    )
-                compiled = _CompiledBackwardSpecialization(
-                    python_code=self.backward_python,
-                    call=call,
-                    cache=self.backward_cache,
-                )
-            else:
-                specialization_indices = _rw._bitmask_to_indices(mask)
-                result = None
-                attempted_exact_retrace = False
-                retrace_decline_reasons: list[str] = []
-                lazy_info = self.spec.lazy_backward_info
-                if (
-                    isinstance(lazy_info, _rw.AutogradLazyBackwardCompileInfo)
-                    and lazy_info.autograd_trace_info is not None
-                ):
-                    attempted_exact_retrace = True
-                    from .graph_compile import retrace_backward_handling_errors
-
-                    def _retrace() -> Any:
-                        with (
-                            tracing(lazy_info.saved_context),
-                            compile_context(lazy_info.saved_compile_context),
-                        ):
-                            return _retrace_backward_for_undefined_grad_outputs(
-                                lazy_info.autograd_trace_info,
-                                self.spec.aot_config,
-                                specialization_indices,
-                                self.backward_graph,
-                                self.backward_inputs,
-                                decline_reason=retrace_decline_reasons,
-                            )
-
-                    result = retrace_backward_handling_errors(
-                        _retrace, retrace_decline_reasons, specialization_indices
-                    )
-                if result is None:
-                    # The retrace can decline for reasons unrelated to the ABI
-                    # (e.g. the ambient autocast state differs between forward
-                    # and backward, the standard AMP pattern); structural
-                    # specialization preserves the saved-activation ABI and
-                    # stays available, exactly as on the live runtime path.
-                    result = _rw._specialize_bw_module_for_undefined_grad_outputs(
-                        self.backward_graph,
-                        self.backward_inputs,
-                        self.spec.fw_metadata,
-                        specialization_indices,
-                        list(self.backward_inputs),
-                    )
-                if result is None and attempted_exact_retrace:
-                    # Same policy as the live runtime's get_or_compile: a
-                    # declined retrace falls back to the base backward with
-                    # materialized zero tangents (the emitted glue always builds
-                    # grad-output prototypes), never a hard error.
-                    log.warning(
-                        "standalone backward for undefined-output mask %s uses the "
-                        "base backward with materialized zero tangents: %s; "
-                        "structural specialization did not apply",
-                        f"{mask:#b}",
-                        "; ".join(retrace_decline_reasons) or "the retrace declined",
-                    )
-                if result is None:
-                    pruned = (
-                        _rw._pruned_backward_output_indices_for_undefined_grad_outputs(
-                            self.backward_graph,
-                            self.spec.fw_metadata,
-                            specialization_indices,
-                        )
-                    )
-                    call = self._capture_backward_call
-                    if call is None:
-                        call = _inductor_load_from_python(
-                            self.backward_python, self.backward_cache
-                        )
-                    compiled = _CompiledBackwardSpecialization(
-                        python_code=self.backward_python,
-                        call=call,
-                        cache=self.backward_cache,
-                        pruned_output_indices=pruned,
-                    )
-                else:
-                    graph, inputs, kept_arg_indices = result
-                    python_code, cache = _inductor_compile_to_python(
-                        graph,
-                        inputs,
-                        options=self.options,
-                        is_inference=False,
-                        is_backward=True,
-                    )
-                    compiled = _CompiledBackwardSpecialization(
-                        python_code=python_code,
-                        call=_inductor_load_from_python(python_code, cache),
-                        cache=cache,
-                        kept_arg_indices=kept_arg_indices,
-                        skip_materialize_grad_output_indices=specialization_indices,
-                    )
-            self._specializations[mask] = compiled
-
-        self._observed_variants[mask] = _StandaloneBackwardVariant(
-            undefined_grad_out_mask=mask,
-            python_code=compiled.python_code,
-            kept_arg_indices=compiled.kept_arg_indices,
-            pruned_output_indices=compiled.pruned_output_indices,
-            skip_materialize_grad_output_indices=(
-                compiled.skip_materialize_grad_output_indices
-            ),
-        )
-        return (
-            compiled.call,
-            compiled.kept_arg_indices,
-            compiled.pruned_output_indices,
-            compiled.skip_materialize_grad_output_indices,
-        )
-
-    def finalize(self, tangent_masks: Sequence[int]) -> tuple[str, bytes | None]:
-        with _COMPILE_LOCK:
-            return self._finalize(tangent_masks)
-
-    def _finalize(self, tangent_masks: Sequence[int]) -> tuple[str, bytes | None]:
-        from torch.compiler._cache import CacheArtifactManager
-
-        # Mask 0 (a full backward) is always served, whatever the captures ran.
-        canonical = {0, *(self.canonical_mask(mask) for mask in tangent_masks)}
-        masks = sorted(canonical)
-        for mask in masks:
-            if mask not in self._observed_variants:
-                self._compile_mask(mask)
-
-        variants = [self._observed_variants[mask] for mask in masks]
-        caches = [self._specializations[mask].cache for mask in masks]
-
-        return (
-            _compose_training_module(
-                self.forward_python,
-                variants,
-                self.captured,
-                self.spec,
-                self.backward_graph,
-                self.forward_inner_call,
-            ),
-            CacheArtifactManager.merge((self.forward_cache, *caches)),
-        )
-
-
-def _compose_training_module(
-    fw_python: str,
-    backward_variants: Sequence[_StandaloneBackwardVariant],
-    captured: list[GeneratedSource],
-    spec: Any,
-    bw_gm: GraphModule,
-    forward_inner_call: Callable[..., Any],
-) -> str:
-    """Compose a FORWARD and BACKWARD lowering into one standalone module.
-
-    The inference composer nests wrappers around a single ``call``. Training is a
-    different shape: AOTAutograd's own bridge is a ``torch.autograd.Function``
-    whose ``forward``/``backward`` bodies ARE codegen'd source
-    (``compiled_function_forward`` / ``compiled_function_backward``, with
-    ``backward_prologue`` / ``backward_epilogue`` beside them), but the class
-    holding them is ordinary Python, so the composer emits it.
-
-    Both inductor modules are spliced at module level and each one's entry is
-    snapshotted immediately, because the second block rebinds ``call`` /
-    ``Runner`` / the kernels that the first block's code resolves as late-bound
-    globals.
-    """
-
-    from . import runtime_wrappers as _rw
-
-    if spec.backward_state_indices:
-        raise NotImplementedError(
-            "aot_autograd.compile_to_python cannot compose a training graph that "
-            "carries a BackwardState into standalone source yet."
-        )
-
-    orchestrations = [
-        gen for gen in captured if gen.artifact_name == "runtime_wrapper_orchestration"
-    ]
-    if orchestrations:
-        target_origin = orchestrations[-1].origin_id
-        captured = [gen for gen in captured if gen.origin_id == target_origin]
-
-    by_name: dict[str, list[GeneratedSource]] = {}
-    for gen in captured:
-        by_name.setdefault(gen.artifact_name, []).append(gen)
-    missing = [
-        name
-        for name in (
-            "backward_prologue",
-            "backward_epilogue",
-            "compiled_function_forward",
-            "compiled_function_backward",
-            "runtime_wrapper_orchestration",
-        )
-        if name not in by_name
-    ]
-    if missing:
-        raise NotImplementedError(
-            f"aot_autograd.compile_to_python: the training compose expects "
-            f"AOTAutograd to codegen {missing}, which this graph did not produce."
-        )
-
-    imports: set[str] = set()
-    helper_table = _known_helper_table()
-    core_artifacts = {
-        "backward_prologue",
-        "backward_epilogue",
-        "compiled_fn_wrapper",
-        "compiled_function_forward",
-        "compiled_function_backward",
-        "runtime_wrapper_orchestration",
-    }
-    auxiliary = [gen for gen in captured if gen.artifact_name not in core_artifacts]
-    fn_id_to_name = {id(gen.fn): gen.fn_name for gen in auxiliary}
-    orchestration = by_name["runtime_wrapper_orchestration"]
-    if len(orchestration) != 1:
-        raise NotImplementedError(
-            "aot_autograd.compile_to_python expected exactly one training "
-            f"orchestration wrapper, captured {len(orchestration)}."
-        )
-    orch = orchestration[0]
-
-    # Dedupe and synthetic-base wrappers sit outside AOTAutograd's orchestration.
-    # Their innermost closure is not itself a captured function, so identify it and
-    # rebuild the chain around a generated adapter for the autograd Function.
-    inner_names = ("compiled_fn", "_compiled_fn_")
-
-    def inner_ref(gen: GeneratedSource) -> Any:
-        for name in inner_names:
-            if name in gen.globals_dict:
-                return gen.globals_dict[name]
-        return None
-
-    known_inner_ids = {id(forward_inner_call), *fn_id_to_name}
-    orch_closure_ids = {
-        id(ref)
-        for gen in auxiliary
-        if (ref := inner_ref(gen)) is not None and id(ref) not in known_inner_ids
-    }
-    if len(orch_closure_ids) > 1:
-        raise NotImplementedError(
-            "aot_autograd.compile_to_python captured multiple training wrappers "
-            "whose inner callable could not be identified."
-        )
-    orch_closure_id = next(iter(orch_closure_ids), None)
-    outer_wrappers: list[GeneratedSource] = []
-    if orch_closure_id is not None:
-        target_id: int | None = orch_closure_id
-        while target_id is not None:
-            wrapper = next(
-                (
-                    gen
-                    for gen in auxiliary
-                    if gen not in outer_wrappers
-                    and inner_ref(gen) is not None
-                    and id(inner_ref(gen)) == target_id
-                ),
-                None,
-            )
-            if wrapper is None:
-                break
-            outer_wrappers.append(wrapper)
-            target_id = id(wrapper.fn)
-    outer_ids = {id(gen) for gen in outer_wrappers}
-    inner_auxiliary = [gen for gen in auxiliary if id(gen) not in outer_ids]
-
-    forward_call_name = "_inner_call_fw"
-    if id(spec.compiled_fw_func) != id(forward_inner_call):
-        forward_wrapper = fn_id_to_name.get(id(spec.compiled_fw_func))
-        if forward_wrapper is None or id(spec.compiled_fw_func) in {
-            id(gen.fn) for gen in outer_wrappers
-        }:
-            raise NotImplementedError(
-                "aot_autograd.compile_to_python could not identify the captured "
-                "training forward wrapper chain."
-            )
-        forward_call_name = forward_wrapper
-
-    entry_name = "_autograd_orchestration_entry"
-    global_bindings: dict[str, str] = {}
-
-    def splice(gen: GeneratedSource) -> str:
-        hoists = []
-        for name, obj in gen.globals_dict.items():
-            if name == "__builtins__":
-                continue
-            expr = _resolve_global(
-                obj,
-                helper_table,
-                id(forward_inner_call),
-                fn_id_to_name,
-                imports,
-                orch_closure_id,
-                entry_name,
-                inner_call_name="_inner_call_fw",
-            )
-            if name == expr:
-                continue
-            previous = global_bindings.get(name)
-            if previous is not None and previous != expr:
-                raise NotImplementedError(
-                    "aot_autograd.compile_to_python cannot inline training wrappers "
-                    f"that bind {name!r} to different values."
-                )
-            if previous is None:
-                global_bindings[name] = expr
-                hoists.append(f"{name} = {expr}")
-        return "\n".join(hoists + [gen.source, ""])
-
-    blocks = [splice(gen) for gen in inner_auxiliary]
-    blocks += [
-        splice(gen)
-        for name in (
-            "backward_prologue",
-            "backward_epilogue",
-            "compiled_fn_wrapper",
-            "compiled_function_forward",
-            "compiled_function_backward",
-        )
-        for gen in by_name.get(name, [])
-    ]
-    orchestration_block = splice(orch)
-    outer_blocks = [splice(gen) for gen in outer_wrappers]
-
-    fw_metadata_src = emit_value(spec.fw_metadata, imports)
-    # Emit a constructor call, not the pickled object: the tracker's runtime
-    # state belongs fresh in the artifact anyway, and its curr_fwd_iter
-    # (itertools.count) default is unpicklable on Python >= 3.14.
-    rng_src = (
-        "_AutogradRngStateTracker("
-        f"num_rng={emit_value(spec.fw_metadata.num_graphsafe_rng_states, imports)}, "
-        f"graphsafe_idx={emit_value(spec.fw_metadata.graphsafe_rng_state_index, imports)}, "
-        f"device={emit_value(spec.fw_metadata.graphsafe_rng_device, imports)})"
-    )
-    backward_output_dependencies = _rw._backward_output_tangent_dependencies(
-        bw_gm, spec.fw_metadata
-    )
-    backward_output_dependencies_src = emit_value(backward_output_dependencies, imports)
-    # The grad-output indices a backward variant may specialize on (surviving
-    # user outputs). The emitted backward canonicalizes its scanned
-    # undefined-tangent mask over these, exactly like the live runtime path
-    # (_specializable_user_grad_output_mask): a non-differentiable output's
-    # tangent is ALWAYS undefined, so keying the variant table on the raw mask
-    # would make the auto-covered mask 0 unreachable and fail every backward.
-    specializable_indices = _rw._specializable_user_grad_output_indices(
-        spec.fw_metadata, range(spec.fw_metadata.num_forward_returns)
-    )
-    specializable_src = f"frozenset({tuple(sorted(specializable_indices))!r})"
-    # Provably-zero bit per backward output, computed once with EVERY
-    # specializable tangent pruned: a dependency-eligible output's cone
-    # contains exactly the visible tangents its dependency entry lists, so one
-    # pass answers "is output i zero once the tangents it depends on are
-    # undefined" for all of them. The default-variant fallback in
-    # _backward_impl masks only outputs that are BOTH dependency-implied AND in
-    # this set -- dependency alone is wrong for a backward that is not linear
-    # in its tangents (a custom Function returning g + 1 yields a nonzero grad
-    # from an undefined tangent, which eager materializes zeros for). Mirrors
-    # the runtime _pruned_backward_output_indices_for_undefined_grad_outputs.
-    tangent_placeholders = [
-        node
-        for node in bw_gm.graph.find_nodes(op="placeholder")
-        if _rw._is_grad_tangent(node)
-    ]
-    expected_tangents = sum(
-        _rw._tangent_meta_arg_count(meta)
-        for meta in spec.fw_metadata.subclass_tangent_meta
-    )
-    provably_zero_outputs: frozenset[int] = frozenset()
-    if len(tangent_placeholders) == expected_tangents:
-        flat_indices = _rw._undefined_tangent_flat_indices(
-            spec.fw_metadata, specializable_indices
-        )
-        provably_zero_outputs = _rw._provably_zero_backward_output_indices(
-            bw_gm, {tangent_placeholders[i] for i in flat_indices}
-        )
-    provably_zero_src = f"frozenset({tuple(sorted(provably_zero_outputs))!r})"
-    unique_backward_sources: list[str] = []
-    source_indices: dict[str, int] = {}
-    variant_source_indices: list[int] = []
-    for variant in backward_variants:
-        source_index = source_indices.get(variant.python_code)
-        if source_index is None:
-            source_index = len(unique_backward_sources)
-            source_indices[variant.python_code] = source_index
-            unique_backward_sources.append(variant.python_code)
-        variant_source_indices.append(source_index)
-    namespaced_sources = namespace_module_names([fw_python, *unique_backward_sources])
-    fw_ns = namespaced_sources[0]
-    backward_blocks = namespaced_sources[1:]
-    exact_variants: list[str] = []
-    default_variant = "None"
-    for variant, source_index in zip(
-        backward_variants, variant_source_indices, strict=True
-    ):
-        call_name = _inner_call_bw_name(source_index)
-        value = (
-            f"({call_name}, {variant.kept_arg_indices!r}, "
-            f"{variant.pruned_output_indices!r}, "
-            f"{variant.skip_materialize_grad_output_indices!r})"
-        )
-        if variant.undefined_grad_out_mask is None:
-            default_variant = value
-        else:
-            exact_variants.append(f"    {variant.undefined_grad_out_mask!r}: {value},")
-    variants_src = "\n".join([f"{AOT_BACKWARD_VARIANTS} = {{", *exact_variants, "}"])
-    imports |= {
-        "import contextlib",
-        "import torch",
-        "import weakref",
-        "from torch._functorch._aot_autograd.standalone_runtime import "
-        "_AutogradRngStateTracker, _AutogradSavedState, "
-        "_mask_pruned_backward_outputs, "
-        "_pruned_backward_output_indices_from_dependencies, "
-        "_snapshot_external_objects, index_to_external_object_weakref, "
-        "normalize_as_list",
-    }
-
-    # The artifact bakes aot_autograd_prune_unused_outputs=True at emission
-    # time instead of calling _set_grad_output_prototypes, which would re-read
-    # the ambient config wherever the artifact happens to be loaded. Like the
-    # runtime helper, prototypes are built even for a node with a single
-    # differentiable output: a downstream custom Function whose backward
-    # returns None hands that sole tangent in as undefined, and materializing
-    # it needs a prototype.
-    prototypes_expr = "_grad_output_prototypes(raw_returns, _fw_metadata)"
-    imports.add(
-        "from torch._functorch._aot_autograd.standalone_runtime import "
-        "_grad_output_prototypes"
-    )
-
-    glue = f"""
-_fw_metadata = {fw_metadata_src}
-# ViewAndMutationMeta.__post_init__ reads the ambient functionalize_rng_ops config.
-# Restore the values captured when this graph was traced.
-_fw_metadata.is_rng_op_functionalized = {spec.fw_metadata.is_rng_op_functionalized!r}
-_fw_metadata.num_outputs_rng_offset = {spec.fw_metadata.num_outputs_rng_offset!r}
-_fw_metadata.num_forward = {spec.fw_metadata.num_forward!r}
-_saved_state = _AutogradSavedState(metadata=_fw_metadata)
-_rng_state = {rng_src}
-_BACKWARD_OUTPUT_DEPENDENCIES = {backward_output_dependencies_src}
-_BACKWARD_OUTPUT_PROVABLY_ZERO = {provably_zero_src}
-_AOT_SPECIALIZABLE_GRAD_OUT_INDICES = {specializable_src}
-{AOT_OBSERVED_UNDEFINED_TANGENT_MASKS} = set()
-{AOT_BACKWARD_VARIANT_COMPILER} = None
-_NUM_FORWARD_RETURNS = {spec.fw_metadata.num_forward_returns}
-_DISABLE_AMP = {spec.disable_amp!r}
-
-
-def _finalize(ctx, fw_outs):
-    raw_returns = list(fw_outs[:_NUM_FORWARD_RETURNS])
-    # Prune-unused-outputs behavior is baked in at emission time; the ambient
-    # aot_autograd_prune_unused_outputs config must not change the artifact.
-    ctx._aot_prune_unused_outputs_enabled = True
-    ctx.set_materialize_grads(False)
-    protos = {prototypes_expr}
-    ctx._aot_grad_output_prototypes, ctx._aot_grad_output_prototype_objects = protos
-    ctx.mark_non_differentiable(*_transform_raw_returns(raw_returns))
-    ctx._materialize_non_diff_grads = False
-    _snapshot_external_objects(ctx)
-    return tuple(raw_returns)
-
-
-def _backward_impl(ctx, all_args):
-    ctx.maybe_clear_saved_tensors()
-    for idx, obj in getattr(ctx, "_external_objects", {{}}).items():
-        index_to_external_object_weakref[idx] = weakref.ref(obj)
-    inner_call_bw, kept_arg_indices, pruned, _ = ctx._aot_backward_variant
-    if kept_arg_indices is not None:
-        kept_args = [all_args[index] for index in kept_arg_indices]
-        all_args.clear()
-        all_args.extend(kept_args)
-    amp = torch._C._DisableAutocast if _DISABLE_AMP else contextlib.nullcontext
-    with amp():
-        out = inner_call_bw(all_args)
-    out = normalize_as_list(out)
-    if pruned is None:
-        # Dependency alone is not enough to null a grad: only outputs that are
-        # ALSO provably zero with their tangents undefined may be masked (an
-        # affine custom backward yields a nonzero grad from a zero tangent).
-        pruned = tuple(
-            index
-            for index in _pruned_backward_output_indices_from_dependencies(
-                _BACKWARD_OUTPUT_DEPENDENCIES,
-                ctx._undefined_grad_out_indices,
-            )
-            if index in _BACKWARD_OUTPUT_PROVABLY_ZERO
-        )
-    return _mask_pruned_backward_outputs(out, pruned)
-
-
-def _double_backward(ctx, impl_fn, all_args):
-    class _DoubleBackward(torch.autograd.Function):
-        @staticmethod
-        def forward(double_ctx, *unused_args):
-            return impl_fn(double_ctx)
-
-        @staticmethod
-        def backward(ctx, *args):
-            raise RuntimeError(
-                "torch.compile with aot_autograd does not currently support "
-                "double backward"
-            )
-
-    if not any(t.requires_grad for t in all_args if isinstance(t, torch.Tensor)):
-        all_args = [torch.empty(0, requires_grad=True)] + all_args
-    return _DoubleBackward.apply(*all_args)
-
-
-class _CompiledFunction(torch.autograd.Function):
-    boxed_grads_call = True
-
-    @staticmethod
-    def forward(ctx, *deduped_flat_tensor_args):
-        return _compiled_forward(
-            ctx,
-            deduped_flat_tensor_args,
-            _rng_state.add_forward_args,
-            _saved_state.save_from_forward,
-            _finalize,
-            {forward_call_name},
-        )
-
-    @staticmethod
-    def backward(ctx, *flat_args):
-        if len(flat_args) == 1 and isinstance(flat_args[0], list):
-            ctx._undefined_grad_out_indices = tuple(
-                index for index, grad in enumerate(flat_args[0]) if grad is None
-            )
-        else:
-            ctx._undefined_grad_out_indices = ()
-        # Canonical mask: only specializable (surviving user-output) indices
-        # key the variant table -- a non-differentiable output's tangent is
-        # always undefined and must not fork variants (mirrors the live
-        # runtime's _specializable_user_grad_output_mask).
-        mask = sum(
-            1 << index
-            for index in ctx._undefined_grad_out_indices
-            if index in _AOT_SPECIALIZABLE_GRAD_OUT_INDICES
-        )
-        if {AOT_BACKWARD_VARIANT_COMPILER} is not None:
-            {AOT_OBSERVED_UNDEFINED_TANGENT_MASKS}.add(mask)
-        variant = {AOT_BACKWARD_VARIANTS}.get(mask)
-        if variant is None and {AOT_BACKWARD_VARIANT_COMPILER} is not None:
-            variant = {AOT_BACKWARD_VARIANT_COMPILER}(mask)
-            {AOT_BACKWARD_VARIANTS}[mask] = variant
-        if variant is None:
-            variant = _AOT_DEFAULT_BACKWARD_VARIANT
-        if variant is None:
-            raise torch.compiler.PrecompileError(
-                "precompile artifact encountered an undefined-output-tangent "
-                f"bitmask that was not covered by example_inputs: {{mask:#b}}"
-            )
-        ctx._aot_backward_variant = variant
-        ctx._aot_skip_materialize_grad_output_indices = variant[3]
-        return _compiled_backward(
-            flat_args,
-            ctx,
-            _backward_prologue,
-            _rng_state.add_backward_args,
-            _backward_impl,
-            _backward_epilogue,
-            _double_backward,
-        )
-
-
-def _boxed_autograd_apply(args):
-    return _CompiledFunction.apply(*args)
-"""
-
-    if outer_wrappers:
-        entry = f"""
-def {entry_name}(args):
-    return {orch.fn_name}(
-        _boxed_autograd_apply, contextlib.nullcontext, lambda: None, args
-    )
-"""
-        outermost_name = fn_id_to_name[id(outer_wrappers[-1].fn)]
-        public_call = f"""
-def call(flat_inputs):  # noqa: F811
-    return {outermost_name}(list(flat_inputs))
-"""
-    else:
-        entry = ""
-        public_call = f"""
-def call(flat_inputs):  # noqa: F811
-    return {orch.fn_name}(
-        _boxed_autograd_apply, contextlib.nullcontext, lambda: None, list(flat_inputs)
-    )
-"""
-
-    parts = [
-        "# Generated by aot_autograd.compile_to_python (training) -- do not edit.",
-        "",
-        "import torch._dynamo",
-        *sorted(imports),
-        "",
-        "# === Inner Inductor output code: FORWARD ===",
-        fw_ns,
-        "_inner_call_fw = call_s0",
-        "",
-        *[
-            block
-            for index, source in enumerate(backward_blocks, 1)
-            for block in (
-                f"# === Inner Inductor output code: BACKWARD variant {index - 1} ===",
-                source,
-                f"{_inner_call_bw_name(index - 1)} = call_s{index}",
-                "",
-            )
-        ],
-        variants_src,
-        f"_AOT_DEFAULT_BACKWARD_VARIANT = {default_variant}",
-        "",
-        "# === AOTAutograd runtime wrappers ===",
-        *blocks,
-        orchestration_block,
-        glue,
-        entry,
-        *outer_blocks,
-        public_call,
-    ]
-    return "\n".join(parts)
-
-
-def _restride_backward_placeholders(
-    bw_gm: GraphModule,
-    fwd_output_strides: Sequence[tuple[str, ...] | None],
-    spec: Any,
-) -> None:
-    """Restride the backward's saved-activation inputs to what the forward chose.
-
-    Layout optimization lets the compiled forward hand back e.g. channels-last
-    saved activations, so the backward must be lowered against those strides
-    rather than the eager ones its joint trace carries. torch.compile does this
-    in ``_aot_stage2b_bw_compile`` with strides reported out of the forward's
-    lowering; this is the same restride against the strides
-    ``_inductor_compile_to_python`` now reports.
-
-    The rewrite lands on ``node.meta["val"]``, NOT on an example-inputs list:
-    ``inductor.compile_to_python`` rebuilds its fakes from the placeholders'
-    metadata and ignores the inputs it is handed, so restriding a list is a
-    silent no-op through that entry point.
-    """
-    import torch
-    from torch._inductor.utils import shape_env_from_inputs
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
-
-    if not fwd_output_strides:
-        return
-    # Which of the forward's outputs are the saved activations, and where they
-    # sit among the backward's inputs, are both recorded -- guessing positionally
-    # restrides the wrong placeholder and asserts (or miscomputes) at runtime.
-    meta = spec.fw_metadata
-    saved = list(fwd_output_strides[meta.tensors_saved_for_backwards_slice])
-    num_symints = spec.num_symints_saved_for_bw
-    placeholders = [n for n in bw_gm.graph.nodes if n.op == "placeholder"]
-    shape_env = shape_env_from_inputs([node.meta.get("val") for node in placeholders])
-    for index, node in enumerate(placeholders):
         val = node.meta.get("val")
-        if not isinstance(val, torch.Tensor):
-            continue
-        offset = index - num_symints
-        if not (0 <= offset < len(saved)) or not saved[offset]:
-            continue
-        real = tuple(
-            cast("int | torch.SymInt", shape_env.deserialize_symexpr(s))
-            if shape_env is not None and isinstance(s, str)
-            else int(s)
-            for s in saved[offset]
-        )
-        if len(real) == val.dim() and not all(
-            statically_known_true(actual == expected)
-            for actual, expected in zip(val.stride(), real)
+        if _is_symbolic(val):
+            return True
+        if isinstance(val, torch.Tensor) and (
+            any(_is_symbolic(s) for s in val.shape)
+            or any(_is_symbolic(s) for s in val.stride())
+            or _is_symbolic(val.storage_offset())
         ):
-            node.meta["val"] = val.as_strided(val.size(), real)
-
-
-def _graph_differentiates(gm: GraphModule) -> bool:
-    """Whether a dense graph contains a backward computation inline.
-
-    Scoped to call nodes and to the callable target's operator name, matched
-    against aten's ``*_backward`` naming convention (e.g. ``convolution_backward``,
-    ``threshold_backward``). Matching the suffix rather than any occurrence of
-    "backward" avoids a spurious hit on an op whose name merely contains the
-    substring, and avoids stringifying placeholders/get_attrs entirely.
-
-    This is a name heuristic, consulted only when the capture produced no joint
-    graph (``"bw" in dense`` is authoritative otherwise). The dense graph carries
-    no autograd metadata that could say more: functionalization has already
-    erased requires_grad from node values. Its one blind spot is a backward
-    expressed through a custom op whose name lacks the ``_backward`` suffix; such
-    a graph lowers with ``is_inference=True``, i.e. inductor's inference layout
-    heuristics and post-grad passes, which is a performance rather than a
-    correctness difference.
-    """
-    import torch
-
-    for node in gm.graph.nodes:
-        if node.op not in ("call_function", "call_method"):
-            continue
-        target = node.target
-        if isinstance(target, torch._ops.OpOverload):
-            name = target.overloadpacket.__name__
-        else:
-            name = getattr(target, "__name__", None) or str(target)
-        if name.endswith("_backward"):
             return True
     return False
 
 
-def _compile_to_python_with_state(
+def compile_to_python(
     gm: GraphModule,
     example_inputs: Sequence[Any],
     *,
     options: dict[str, Any] | None = None,
-    grad_enabled: bool = False,
-) -> tuple[str, bytes | None, _CompileToPythonState | None]:
+) -> tuple[str, bytes | None]:
     """Compile ``gm`` to ``(python_code, cache)``; see the module docstring.
-
-    ``grad_enabled`` runs the AOTAutograd capture pass under ``enable_grad`` instead of the
-    default ``no_grad``, and covers two different graphs. One performs autograd INTERNALLY
-    -- a Dynamo graph captured with ``trace_autograd_ops``, whose traced
-    ``torch.autograd.grad`` call needs a live autograd graph to differentiate and otherwise
-    fails the capture pass with "element 0 of tensors does not require grad"; that is still
-    an INFERENCE graph at the AOT boundary, since its backward lives inside the traced call.
-    The other has INPUTS that require grad, and AOTAutograd then emits a joint
-    forward+backward: two dense graphs, composed into a module whose ``call`` returns
-    outputs carrying ``grad_fn``, so the caller's ``.backward()`` runs the compiled
-    backward. Leaving it off pins the inference path, which is what you want for a forward
-    you will never differentiate.
 
     THREADING: serialized by a process-global lock (``_COMPILE_LOCK``). The wrapper-source
     capture is thread-local, but the AOTAutograd pass and the inner inductor compile both
@@ -1813,7 +867,6 @@ def _compile_to_python_with_state(
     import copy
 
     import torch
-    from torch._functorch import config as functorch_config
     from torch._higher_order_ops.effects import _get_effect
     from torch._inductor import compile_to_python as _inductor_compile_to_python
     from torch._inductor.compile_fx import compile_fx
@@ -1864,34 +917,21 @@ def _compile_to_python_with_state(
         # compile-time token and never runs.
         captured: list[GeneratedSource] = []
         dense: dict[str, Any] = {}
-        # The training compose needs AOTAutograd's own spec (fw_metadata, RNG
-        # state, disable_amp, the saved/symint counts). It is built during the
-        # capture pass and not otherwise reachable from out here.
-        from . import runtime_wrappers as _rw
-
-        specs: list[Any] = []
 
         def _capture_inner_compile(dense_gm, dense_inputs, **kwargs):
-            # A training graph reaches this TWICE -- once for the forward, once
-            # for the backward -- and inductor says which via is_backward. Keep
-            # the "only one of each" guard per slot; a third call is still
-            # something this layer does not model.
-            slot = "bw" if kwargs.get("is_backward") else "gm"
-            if slot in dense:
+            if "gm" in dense:
                 raise NotImplementedError(
                     "aot_autograd.compile_to_python does not support a graph whose "
-                    f"AOTAutograd lowering emits more than one inner {slot} graph."
+                    "AOTAutograd lowering emits more than one inner forward graph."
                 )
-            dense[slot] = dense_gm
-            dense[f"{slot}_inputs"] = list(dense_inputs)
+            dense["gm"] = dense_gm
             # Retain the placeholder's IDENTITY: it is the authoritative inner call the
             # runtime-wrapper chain closes over. The composer needs it to tell the inner
             # call apart from the orchestration's own outer closure (both surface as a
             # wrapper's inner-ref yet neither is a captured wrapper fn), which is what
             # separates INNER wrappers from the OUTER dedup / synthetic-base wrappers.
             placeholder = make_boxed_func(dense_gm.forward)
-            if slot == "gm":
-                dense["placeholder"] = placeholder
+            dense["placeholder"] = placeholder
             return placeholder
 
         # Drive inductor's own ``compile_fx`` (i.e. its exact AOTAutograd invocation --
@@ -1902,43 +942,26 @@ def _compile_to_python_with_state(
         # the graph (there is no dynamic_shapes knob): a symbolically-traced graph uses
         # ``"from_graph"`` to stay dynamic, a static one ``"from_example_inputs"`` to
         # specialize -- matching what the composer can bake (symbolic view metadata is
-        # rejected downstream). grad mode selects an inference forward or a joint
-        # forward/backward.
+        # rejected downstream). no_grad pins the inference path (one forward module).
         # Deepcopy first so compile_fx cannot mutate the caller's gm (torchbind
         # ProcessGroups smuggled through as shared references). Note: the raw-collective /
         # torchbind rewrites are inductor-lowering prereqs and belong to the step-2 inductor
         # compile, which applies them to the dense graph -- not duplicated here.
         shapes_mode = (
-            "from_tracing_context"
-            if torch._guards.TracingContext.try_get() is not None
-            else (
-                "from_graph" if _graph_has_dynamic_shapes(gm) else "from_example_inputs"
-            )
+            "from_graph" if _graph_has_dynamic_shapes(gm) else "from_example_inputs"
         )
         with (
-            torch.enable_grad() if grad_enabled else torch.no_grad(),
+            torch.no_grad(),
             _standalone_context(gm, shapes_mode, aot=False),
-            functorch_config.patch(
-                enable_autograd_cache=False,
-                enable_remote_autograd_cache=False,
-                # The emitted training glue bakes the undefined-tangent
-                # specialization on (see _AOT_PRUNE_UNUSED_OUTPUTS below), so
-                # capture under it too: that records the autograd trace info
-                # the exact retrace needs, without which every partial-mask
-                # variant silently fell back to structural pruning.
-                aot_autograd_prune_unused_outputs=grad_enabled,
-            ),
             capture_generated_sources(captured),
-            _rw.capture_aot_dispatch_autograd_specs(specs),
         ):
             with _share_torchbind_and_process_group_on_deepcopy():
                 gm_owned = copy.deepcopy(gm)
             compile_fx(
                 gm_owned,
                 example_inputs,
-                # Placeholder returns a boxed callable, not a full OutputCode;
-                # AOTAutograd only wraps it (never inductor-post-compiles it), so
-                # this is fine at runtime.
+                # Placeholder returns a boxed callable, not a full OutputCode; AOTAutograd
+                # only wraps it (never inductor-post-compiles it), so this is fine at runtime.
                 inner_compile=_capture_inner_compile,  # pyrefly: ignore[bad-argument-type]
                 ignore_shape_env=_resolve_ignore_shape_env(shapes_mode),
             )
@@ -1948,105 +971,12 @@ def _compile_to_python_with_state(
                 "forward compiler, so no dense graph was captured."
             )
 
-        # Lower the FORWARD first and take the strides inductor actually chose,
-        # then restride the backward's placeholders to match before lowering it.
-        # This is the fw->bw coupling torch.compile gets from
-        # TracingContext.report_output_strides (graph_compile.py:2841) and feeds
-        # to _aot_stage2b_bw_compile; a capture pass that never lowers cannot
-        # observe it, and two independently-lowered graphs then disagree about
-        # layout -- loudly on a conv net, silently if size asserts are off.
-        has_joint = "bw" in dense
-        differentiates = has_joint or _graph_differentiates(dense["gm"])
-        fwd_output_strides: list[tuple[str, ...] | None] = []
-        # The user-visible outputs of a training forward are its first
-        # num_forward outputs; the rest are saved activations inductor may
-        # re-lay-out freely (the backward is restrided to match below).
-        num_user_outputs = (
-            specs[0].fw_metadata.num_forward if has_joint and len(specs) == 1 else None
+        inner_python, cache = _inductor_compile_to_python(
+            dense["gm"], example_inputs, options=options
         )
-        inner_python, forward_cache = _inductor_compile_to_python(
-            dense["gm"],
-            example_inputs,
-            options=options,
-            is_inference=not differentiates,
-            output_strides=fwd_output_strides,
-            num_user_visible_outputs=num_user_outputs,
+        source = _compose_standalone_module(
+            inner_python, captured, dense["placeholder"]
         )
-        if not has_joint:
-            source = _compose_standalone_module(
-                inner_python, captured, dense["placeholder"]
-            )
-            return source, forward_cache, None
-
-        if len(specs) != 1:
-            raise NotImplementedError(
-                "aot_autograd.compile_to_python expected exactly one training "
-                f"autograd-function spec, captured {len(specs)}."
-            )
-        spec = specs[0]
-
-        _restride_backward_placeholders(dense["bw"], fwd_output_strides, spec)
-        bw_python, backward_cache = _inductor_compile_to_python(
-            dense["bw"],
-            [],
-            options=options,
-            is_inference=False,
-            is_backward=True,
-        )
-        from torch.compiler._cache import CacheArtifactManager
-
-        cache = CacheArtifactManager.merge((forward_cache, backward_cache))
-        source = _compose_training_module(
-            inner_python,
-            [
-                _StandaloneBackwardVariant(
-                    undefined_grad_out_mask=None,
-                    python_code=bw_python,
-                    pruned_output_indices=None,
-                )
-            ],
-            captured,
-            spec,
-            dense["bw"],
-            dense["placeholder"],
-        )
-        state = _CompileToPythonState(
-            forward_python=inner_python,
-            backward_python=bw_python,
-            captured=captured,
-            spec=spec,
-            backward_graph=dense["bw"],
-            backward_inputs=dense["bw_inputs"],
-            options=options,
-            forward_cache=forward_cache,
-            backward_cache=backward_cache,
-            forward_inner_call=dense["placeholder"],
-        )
-    return source, cache, state
-
-
-def compile_to_python(
-    gm: GraphModule,
-    example_inputs: Sequence[Any],
-    *,
-    options: dict[str, Any] | None = None,
-    grad_enabled: bool = False,
-) -> tuple[str, bytes | None]:
-    """Compile ``gm`` to standalone Python source and an optional cache bundle.
-
-    See the module documentation for the generated module's calling convention.
-    ``grad_enabled=True`` includes AOTAutograd's differentiable forward and backward.
-
-    When called inside an active ``TracingContext`` (i.e. from a torch.compile
-    backend), the graph's shapes are taken from that context's shape environment
-    rather than inferred from ``gm``; the emitted source is otherwise the same.
-    """
-    source, cache, _ = _compile_to_python_with_state(
-        gm,
-        example_inputs,
-        options=options,
-        grad_enabled=grad_enabled,
-    )
     return source, cache
 
 
