@@ -103,6 +103,7 @@ instantiate_device_type_tests(
     TestSaveAndLoadAPIAccelerator,
     globals(),
     except_for=("cpu",),
+    allow_xpu=True,
 )
 
 
