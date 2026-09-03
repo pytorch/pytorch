@@ -3886,6 +3886,24 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
                                      kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
                          error_regex=error_msg)
 
+        # error inputs for invalid output size, with a kernel past INT32_MAX:
+        # div_rtn() used to floor-divide in `int`, wrapping the negative output
+        # size positive and letting the kernel read out of bounds.
+        for kernel_size in (2 ** 31 - 1, 2 ** 31, 2147483697):
+            yield ErrorInput(SampleInput(make_arg((2, 10, 4)),
+                                         kwargs={'kernel_size': kernel_size, 'stride': kernel_size,
+                                                 'padding': 0, 'dilation': kernel_size, 'ceil_mode': True}),
+                             error_regex='Invalid computed output size: -')
+        yield ErrorInput(SampleInput(make_arg((2, 10, 4)),
+                                     kwargs={'kernel_size': 2 ** 63 - 1, 'stride': 2 ** 63 - 1}),
+                         error_regex='Invalid computed output size: 0')
+
+        # error inputs when dilation * (kernel_size - 1) + 1 overflows int64
+        yield ErrorInput(SampleInput(make_arg((1, 2, 3)),
+                                     kwargs={'kernel_size': 8608480567731124087, 'padding': 1250999896764,
+                                             'dilation': 1250999896764, 'ceil_mode': True}),
+                         error_regex='effective kernel size overflows')
+
         # error inputs when kernel_size=0
         error_msg = 'kernel_size must be greater than zero'
         yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
@@ -4949,6 +4967,23 @@ def sample_inputs_linear(self, device, dtype, requires_grad, include_empty=True,
     if include_empty:
         yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0))
         yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0), create_tensor(5))
+
+    # 1D weight contracts away the last input dim (out_features == 1 with the
+    # trailing output dim squeezed); its backward used to SIGABRT on MPS, see
+    # https://github.com/pytorch/pytorch/issues/187988. No bias samples: a 1D
+    # weight only takes a scalar bias, which functorch transforms reject, see
+    # https://github.com/pytorch/pytorch/issues/188891.
+    # Skipped on ROCm: the decomposed matmul reduces in a different order than
+    # eager, so test_eager_equivalence (which runs at ~1 ULP tolerance) fails.
+    if torch.version.hip is None:
+        yield SampleInput(create_tensor(8, 3), create_tensor(3))
+        yield SampleInput(create_tensor(2, 3, 4), create_tensor(4))
+        yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(2))
+        if include_empty:
+            # An empty reduction dim and an empty batch, where the shortcuts taken for
+            # zero-element tensors still have to drop the 1D weight's output dim.
+            yield SampleInput(create_tensor(3, 4, 0), create_tensor(0))
+            yield SampleInput(create_tensor(0, 8), create_tensor(8))
 
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
@@ -7088,6 +7123,58 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 
         yield SampleInput(input, target, **kwargs)
 
+def _large_logit_linear_cross_entropy_samples(device, dtype, requires_grad, **kwargs):
+    """Samples whose logits are large, which the curated shapes are not.
+
+    The samples above reach |z| of about 20 at most, median 6, because their
+    tensors come from the shared linear generator. Accuracy of a chunked
+    implementation can depend on |z| well past that: an implementation may hold
+    the logits at low precision -- eager does for fp16 -- and such a buffer
+    stores ``z`` with absolute error proportional to ``|z|`` while the softmax
+    depends on DIFFERENCES of ``z``. Two shapes raise the magnitude two ways
+    that separate those effects: a uniform ``linear_bias`` over otherwise mild
+    logits, which shifts every logit equally and so leaves the softmax
+    mathematically unchanged, isolating storage rounding; and a wide weight
+    range with the target at the argmax, which is genuinely peaked -- the regime
+    a trained head operates in. Targets are class indices in both, like the rest
+    of this generator's chunked samples.
+    """
+    num_batches, in_features, num_classes = 16, 8, 64
+    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+    target = torch.randint(0, num_classes, (num_batches,), device=device)
+
+    # Magnitude only. The narrow input and weight ranges keep the logits
+    # themselves within a few units, so the softmax stays mild and the uniform
+    # bias -- which cancels in the softmax exactly -- is what carries |z| into
+    # the hundreds. Widening these ranges would defeat the sample: the logits
+    # would spread further than the bias shifts them, and it would be testing a
+    # confidently-wrong prediction rather than storage precision.
+    mild_input = make(num_batches, in_features, low=-1, high=1)
+    mild_weight = make(num_classes, in_features, low=-1, high=1)
+    bias = torch.full((num_classes,), 256.0, device=device, dtype=dtype)
+    yield SampleInput(
+        mild_input.requires_grad_(requires_grad),
+        mild_weight.requires_grad_(requires_grad),
+        target,
+        linear_bias=bias.requires_grad_(requires_grad),
+        **kwargs,
+    )
+
+    # Peaked, and correct: a wide weight range spreads the logits by hundreds
+    # and the target sits at the argmax, so the softmax is nearly one-hot --
+    # what a trained head produces, and where the gradient's off-target terms
+    # are smallest relative to the one-hot term.
+    peaked_input = make(num_batches, in_features)
+    peaked_weight = make(num_classes, in_features, low=-8, high=8)
+    argmax_target = (peaked_input.float() @ peaked_weight.float().T).argmax(dim=1)
+    yield SampleInput(
+        peaked_input.requires_grad_(requires_grad),
+        peaked_weight.requires_grad_(requires_grad),
+        argmax_target,
+        **kwargs,
+    )
+
+
 def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *, chunked=False, chunked_none=False, **kwargs_unused):
     # ``chunked=True`` filters to chunked-path samples; the scalar
     # (mean/sum) and reduction='none' subsets are surfaced by separate
@@ -7174,6 +7261,10 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
                 # skip samples with linear bias as unsupported
                 continue
 
+            if linear_weight.dim() == 1:
+                # linear_cross_entropy requires a linear weight of rank >= 2
+                continue
+
             num_classes = linear_weight.shape[0]
             num_batches = linear_input.shape[:-1]
             input_shape = (*num_batches, num_classes)
@@ -7252,6 +7343,20 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
 
             yield SampleInput(linear_input, linear_weight, target, **kwargs)
 
+    # In the flavour this call emits: the chunked variants get their options,
+    # the reference variant gets none, and `none` keeps its own reduction.
+    if chunked:
+        LCEO_kwargs = dict(
+            options=LCEO(batch_chunk_size=4, allow_retain_graph=not chunked_none)
+        )
+        if chunked_none:
+            LCEO_kwargs["reduction"] = "none"
+    else:
+        LCEO_kwargs = {}
+    yield from _large_logit_linear_cross_entropy_samples(
+        device, dtype, requires_grad, **LCEO_kwargs
+    )
+
 
 def sample_inputs_linear_cross_entropy_chunked(op_info, device, dtype, requires_grad, **kw):
     yield from sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, chunked=True, **kw)
@@ -7296,6 +7401,7 @@ def sample_inputs_cutedsl_linear_cross_entropy(op_info, device, dtype, requires_
             yield sample
 
 
+
 def sample_inputs_cutedsl_linear_cross_entropy_none(op_info, device, dtype, requires_grad, **kwargs_unused):
     for sample in sample_inputs_linear_cross_entropy(
         op_info, device, dtype, requires_grad=requires_grad, chunked=True, chunked_none=True
@@ -7326,6 +7432,40 @@ def error_inputs_linear_cross_entropy(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(make_arg(2, 3), make_arg(2, 3), make_arg(2,),
                                  linear_bias=make_arg(3)),
                      error_regex=r"expected linear_bias shape \(2,\), got \(3,\)")
+
+# What every implementation of the chunked linear_cross_entropy ops inherits,
+# whatever computes the loss: the custom op has no Inductor lowering, its
+# options dataclass is not JIT-scriptable, `test_cow_input` hits an unspecified
+# launch failure, and autograd support stops at a first-order VJP -- no
+# forward-mode AD, no double backward, no vmap over the backward.
+#
+# Only entries observed on EVERY variant belong here. An over-applied
+# `expectedFailure` is worse than a missing one -- it turns a passing test into
+# an unexpected success -- which is why `test_jvp`,
+# `test_normalize_operator_exhaustive` and `test_vmap_autograd_grad` stay in the
+# per-variant lists: they do not fail everywhere.
+_lce_chunked_op_skips = (
+    DecorateInfo(unittest.skip("no Inductor lowering for the chunked op"),
+                 "TestInductorOpInfo", "test_comprehensive"),
+    DecorateInfo(unittest.skip("LinearCrossEntropyOptions not JIT-scriptable"),
+                 "TestJit", "test_variant_consistency_jit"),
+    DecorateInfo(unittest.skip("unspecified launch failure"),
+                 "TestCompositeCompliance", "test_cow_input",
+                 device_type="cuda",
+                 active_if=TEST_WITH_ROCM or IS_LINUX or TEST_WITH_TORCHINDUCTOR),
+    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad"),
+    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvpvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvmap"),
+    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapjvpvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjpvjp"),
+    DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp_has_batch_rule"),
+    DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"),
+    DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"),
+)
+
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
@@ -9072,6 +9212,10 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     target = torch.tensor([-1, 2], device=device, dtype=torch.long)
     yield SampleInput(make_input(shape), args=(target,), kwargs={'ignore_index': -1})
+
+    # Noncontiguous target
+    target = torch.randint(num_classes, (2 * shape[0],), device=device)[::2]
+    yield SampleInput(make_input(shape), args=(target,))
 
 
 def sample_inputs_binary_cross_entropy_with_logits(
@@ -12408,9 +12552,6 @@ op_db: list[OpInfo] = [
                    dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-3)}),
                             "TestConsistency", "test_output_grad_match", device_type="mps"),
-               # RuntimeError: value cannot be converted to type double without overflow
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     OpInfo('addmm',
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
@@ -14436,14 +14577,14 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                skipCPUIfNoLapack,
-               # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
            ),
            sample_inputs_func=sample_inputs_lu_unpack),
     OpInfo('lu',
            op=torch.lu,
            dtypes=floating_and_complex_types(),
+           # complex64 backward needs solve_triangular, which is float32-only on
+           # MPS, so only the float forward+backward runs there.
+           backward_dtypesIfMPS=floating_types(),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
@@ -14465,13 +14606,12 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # Exception: linalg.lu_factor(): MPS doesn't support complex types.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
            )),
     OpInfo('lu_solve',
            op=torch.lu_solve,
            dtypes=floating_and_complex_types(),
+           # complex64 backward needs solve_triangular, which is float32-only on MPS.
+           backward_dtypesIfMPS=floating_types(),
            supports_forward_ad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
@@ -14484,8 +14624,6 @@ op_db: list[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
-               # Exception: linalg.solve.triangular(); Only float is supported!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
                DecorateInfo(unittest.skip("Tests different backward paths"),
                             "TestCommon", "test_floating_inputs_are_differentiable"),),
            decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoLinalgsolver]),
@@ -15221,10 +15359,7 @@ op_db: list[OpInfo] = [
                 "TestConsistency", "test_output_match", device_type="mps",
             ),
         ),
-        skips=(
-            # No Inductor lowering for the chunked custom op.
-            DecorateInfo(unittest.skip("no Inductor lowering for the chunked op"),
-                         "TestInductorOpInfo", "test_comprehensive"),
+        skips=_lce_chunked_op_skips + (
             DecorateInfo(unittest.skip("chunked op falls back to reference under "
                                        "torch.jit.trace; covered by unchunked variant"),
                          "TestNNCOpInfo", "test_nnc_correctness"),
@@ -15233,11 +15368,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.skip("nll_loss2d_forward decomposition mismatch on total_weight"),
                 "TestDecomp", "test_comprehensive", device_type="cuda"),
-            # LinearCrossEntropyOptions is a Python dataclass; JIT scripting
-            # cannot infer it. Every chunked sample carries options=..., so
-            # all dtypes hit this -- not just float32.
-            DecorateInfo(unittest.skip("LinearCrossEntropyOptions not JIT-scriptable"),
-                         "TestJit", "test_variant_consistency_jit"),
             # MPS fp16/bf16 accuracy mismatch (same as unchunked variant).
             DecorateInfo(unittest.skip("Inconsistent accuracy"),
                          "TestConsistency", "test_output_match",
@@ -15247,24 +15377,10 @@ op_db: list[OpInfo] = [
                          "TestConsistency", "test_output_grad_match",
                          dtypes=(torch.float16, torch.bfloat16, torch.float32),
                          device_type="mps"),
-            # ROCm: unspecified launch failure on test_cow_input.
-            DecorateInfo(unittest.skip("unspecified launch failure"),
-                         "TestCompositeCompliance", "test_cow_input",
-                         device_type="cuda",
-                         active_if=TEST_WITH_ROCM or IS_LINUX or TEST_WITH_TORCHINDUCTOR),
-            # Chunked op: no jvp / vmap / second derivatives.
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjp"),
+            # Only on this variant: the scalar backward supports neither jvp
+            # nor the normalize pass, while its no_reduction sibling and the
+            # override variants differ in what else they cannot do.
             DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvmap"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapjvpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp_has_batch_rule"),
-            DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"),
-            DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"),
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators",
                          "test_normalize_operator_exhaustive"),
         ),
@@ -15296,9 +15412,7 @@ op_db: list[OpInfo] = [
                 "TestConsistency", "test_output_match", device_type="mps",
             ),
         ),
-        skips=(
-            DecorateInfo(unittest.skip("no Inductor lowering for the chunked op"),
-                         "TestInductorOpInfo", "test_comprehensive"),
+        skips=_lce_chunked_op_skips + (
             DecorateInfo(unittest.skip("chunked op falls back to reference under "
                                        "torch.jit.trace; covered by unchunked variant"),
                          "TestNNCOpInfo", "test_nnc_correctness"),
@@ -15308,8 +15422,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.skip("decomposition precision mismatch (nll_loss2d / dot)"),
                 "TestDecomp", "test_comprehensive"),
-            DecorateInfo(unittest.skip("LinearCrossEntropyOptions not JIT-scriptable"),
-                         "TestJit", "test_variant_consistency_jit"),
             DecorateInfo(unittest.skip("Inconsistent accuracy"),
                          "TestConsistency", "test_output_match",
                          dtypes=(torch.float16, torch.bfloat16),
@@ -15318,25 +15430,10 @@ op_db: list[OpInfo] = [
                          "TestConsistency", "test_output_grad_match",
                          dtypes=(torch.float16, torch.bfloat16, torch.float32),
                          device_type="mps"),
-            DecorateInfo(unittest.skip("unspecified launch failure"),
-                         "TestCompositeCompliance", "test_cow_input",
-                         device_type="cuda",
-                         active_if=TEST_WITH_ROCM or IS_LINUX or TEST_WITH_TORCHINDUCTOR),
-            # No jvp / vmap / second derivatives; the recompute backward also
-            # breaks vmap-over-grad (batched cotangent into in-place buffers).
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjp"),
             DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvmap"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapjvpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp_has_batch_rule"),
+            # Only on this variant: the recompute backward breaks
+            # vmap-over-grad, a batched cotangent into in-place buffers.
             DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmap_autograd_grad"),
-            DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"),
-            DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"),
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators",
                          "test_normalize_operator_exhaustive"),
         ),
@@ -19986,7 +20083,6 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('randint',
            dtypes=all_types_and(torch.half, torch.bfloat16, torch.bool),
-           dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.complex64, torch.bool),
            op=lambda *args, **kwargs:
                wrapper_set_seed(torch.randint, *args, **kwargs),
            supports_out=False,
@@ -21361,11 +21457,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
-        skips=(
-            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
-        ),
         decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack]),
     # `log_softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
@@ -22342,16 +22433,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                 unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
                 device_type='xpu',
                 dtypes=[torch.float64]),
-            # MPS: std does not support automatic differentiation for outputs with complex dtype
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
             # The operator 'aten::std.correction_out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
@@ -22375,16 +22456,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # FIXME: dim=[] reduces all dimensions
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # MPS: std does not support automatic differentiation for outputs with complex dtype
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
         ),
     ),
     ReductionOpInfo(
@@ -22413,16 +22484,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
             # NumPy is giving NaN for this
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_large_input'),
-            # RuntimeError: var does not support automatic differentiation for outputs with complex dtype.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
             # NotImplementedError: The operator 'aten::var.correction_out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
@@ -22446,9 +22507,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # FIXME: dim=[] reduces all dimensions
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # RuntimeError: var does not support automatic differentiation for outputs with complex dtype.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
         ),
     ),
     ReductionOpInfo(
@@ -22648,8 +22706,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                 "test_cow_input",
                 device_type=('cuda', 'xpu'),
             ),
-            DecorateInfo(unittest.skip("FP16 nll_loss cases have not been enabled on MPS yet"),
-                         dtypes=(torch.half,), device_type="mps"),
         ),
     ),
     OpInfo(
@@ -23137,36 +23193,15 @@ if "cutedsl" in dsl_ops_by_dsl:
     # to the op's own accumulator, so what differs from the "chunked" /
     # "chunked_none" variants is only what the override itself imposes: CUDA
     # only, CuTeDSL required, and samples filtered to those the ops receive.
+    # The chunked op's inherited limits come from the shared tuple; only the
+    # gates that are specific to a DSL-backed variant are added here. Notably
+    # NOT inherited: `test_jvp` and `test_normalize_operator_exhaustive`, which
+    # the eager variants declare and these do not -- they pass here, and an
+    # over-applied expectedFailure would report an unexpected success.
     _cutedsl_lce_skips = (
         DecorateInfo(skipCUDAIf(not torch.cuda.is_available(), "CUDA not available")),
         DecorateInfo(skipIfNoCuteDSL),
-        # Same unspecified launch failure the eager chunked variants hit.
-        DecorateInfo(unittest.skip("unspecified launch failure"),
-                     "TestCompositeCompliance", "test_cow_input",
-                     device_type="cuda",
-                     active_if=TEST_WITH_ROCM or IS_LINUX or TEST_WITH_TORCHINDUCTOR),
-        # LinearCrossEntropyOptions is a Python dataclass JIT cannot infer, and
-        # every sample here carries options=...
-        DecorateInfo(unittest.skip("LinearCrossEntropyOptions not JIT-scriptable"),
-                     "TestJit", "test_variant_consistency_jit"),
-        # MissingOperatorWithoutDecomp: the chunked custom ops have no Inductor
-        # lowering.
-        DecorateInfo(unittest.skip("no Inductor lowering for the chunked ops"),
-                     "TestInductorOpInfo", "test_comprehensive"),
-        # Inherited autograd limits: no forward-mode AD, no jvp, no vmap over
-        # the backward, no double backward.
-        DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"),
-        DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"),
-        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad"),
-        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjp"),
-        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvjp"),
-        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvpvjp"),
-        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvmap"),
-        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp"),
-        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjpvjp"),
-        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapjvpvjp"),
-        DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp_has_batch_rule"),
-    )
+    ) + _lce_chunked_op_skips
     _cutedsl_lce_kwargs = dict(
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -26428,27 +26463,12 @@ python_ref_db = [
                 unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
                 device_type='xpu',
                 dtypes=[torch.float64]),
-            # Exception: Dtypes torch.float32 and torch.complex64 are not equal!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
         ),
     ),
     # std_mean and var_mean are not ReductionInfos
     PythonRefInfo(
         "_refs.std_mean",
         torch_opinfo_name="std_mean",
-        skips=(
-            # Exception: Dtypes torch.float32 and torch.complex64 are not equal!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-        ),
     ),
     ReductionPythonRefInfo(
         "_refs.sum",
@@ -26542,26 +26562,12 @@ python_ref_db = [
                 unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
             DecorateInfo(
                 unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
-            # torch._subclasses.fake_tensor.MetadataMismatchError: Dtypes torch.float32 and torch.complex64 are not equal!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
         ),
     ),
     PythonRefInfo(
         "_refs.var_mean",
         torch_opinfo_name="var_mean",
         validate_view_consistency=False,
-        skips=(
-            # torch._subclasses.fake_tensor.MetadataMismatchError: Dtypes torch.float32 and torch.complex64 are not equal!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-        ),
     ),
     #
     # Linear Algebra Operators

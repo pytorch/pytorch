@@ -123,10 +123,13 @@ class TestLinearCrossEntropyOverride(TestCase):
         import torch.nn.modules.linear_cross_entropy as lce_module
         from torch.testing._internal import common_methods_invocations as cmi
 
+        # Keyed on the reduction that has its OWN op, so adding a scalar
+        # reduction to the parametrization picks the scalar generator rather
+        # than silently falling through to the no_reduction one.
         generator = (
-            cmi.sample_inputs_linear_cross_entropy_chunked
-            if reduction == "mean"
-            else cmi.sample_inputs_linear_cross_entropy_chunked_none
+            cmi.sample_inputs_linear_cross_entropy_chunked_none
+            if reduction == "none"
+            else cmi.sample_inputs_linear_cross_entropy_chunked
         )
         with unittest.mock.patch.object(
             lce_module,
