@@ -1173,6 +1173,8 @@ class CacheableAOTConfig:
     # this is always false outside of export.
     pre_dispatch: bool = False
     precompile_backend_id: str | None = None
+    # Read by the cache-loaded autograd.Function at runtime; see AOTConfig.
+    prune_unused_outputs: bool = False
 
     def __post_init__(self) -> None:
         if self.pre_dispatch and not self.is_export:
@@ -1239,6 +1241,7 @@ class AOTConfig:
             enable_log=self.enable_log,
             pre_dispatch=self.pre_dispatch,
             precompile_backend_id=self.precompile_backend_id,
+            prune_unused_outputs=self.prune_unused_outputs,
         )
 
     def __post_init__(self) -> None:

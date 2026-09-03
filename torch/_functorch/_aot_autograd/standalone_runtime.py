@@ -18,18 +18,50 @@ import torch._dynamo  # noqa: F401
 
 # IDENTITY CONTRACT: these names MUST be plain re-exports that preserve the original
 # object identity -- never wrap, decorate, or alias them (e.g. functools.wraps, a thin
-# forwarding lambda, a partial). source_emit._standalone_runtime_exports (and the
-# remaining rows of to_standalone_python._known_helper_table) key on id() of these
-# exact objects to recognize a global the codegen'd wrappers close over or a type
-# their baked metadata is rebuilt from. A wrapper would change id(), so the lookup
-# would silently miss and that object would be referenced by its internal
-# AOTAutograd location instead of this stable surface.
-# The same contract covers ``CUDARngStateHelper`` (imported above for circular-import
-# ordering): the table keys on id() of its ``get_torch_state_as_tuple`` /
-# ``set_new_offset`` staticmethods, so it too must not be wrapped or aliased.
+# forwarding lambda, a partial). source_emit._standalone_runtime_exports keys on id()
+# of these exact objects to recognize a global the codegen'd wrappers close over or a
+# type their baked metadata is rebuilt from (``CUDARngStateHelper`` included: its
+# staticmethods are routed through the class's identity). A wrapper would change
+# id(), so the lookup would silently miss and that object would be referenced by
+# its internal AOTAutograd location instead of this stable surface.
 from torch._prims_common import CUDARngStateHelper
 
-from .descriptors import PlainAOTOutput, TangentAOTInput
+# The whole closed set of descriptor classes: baked ViewAndMutationMeta carries
+# whichever ones the traced function produced (tangent descs wrap input-mutation
+# and intermediate-base outputs as readily as plain ones).
+from .descriptors import (
+    BackwardTokenAOTInput,
+    BackwardTokenAOTOutput,
+    BufferAOTInput,
+    DummyAOTInput,
+    DummyAOTOutput,
+    ForwardTokenAOTInput,
+    ForwardTokenAOTOutput,
+    GradAOTOutput,
+    InputMutationAOTOutput,
+    IntermediateBaseAOTOutput,
+    MetadataMutationAOTOutput,
+    ParamAOTInput,
+    PhiloxBackwardBaseOffsetAOTInput,
+    PhiloxBackwardSeedAOTInput,
+    PhiloxForwardBaseOffsetAOTInput,
+    PhiloxForwardSeedAOTInput,
+    PhiloxUpdatedBackwardOffsetAOTOutput,
+    PhiloxUpdatedForwardOffsetAOTOutput,
+    PlainAOTInput,
+    PlainAOTOutput,
+    SavedForBackwardsAOTOutput,
+    SavedForBackwardsNoVcCheckAOTOutput,
+    SubclassGetAttrAOTInput,
+    SubclassGetAttrAOTOutput,
+    SubclassSizeAOTInput,
+    SubclassSizeAOTOutput,
+    SubclassStrideAOTInput,
+    SubclassStrideAOTOutput,
+    SyntheticBaseAOTInput,
+    TangentAOTInput,
+    ViewBaseAOTInput,
+)
 from .functional_utils import gen_alias_from_base, MetadataKey, ViewMetaSequence
 from .runtime_wrappers import (
     _AutogradRngStateTracker,
@@ -95,8 +127,37 @@ __all__ = [
     "SubclassCreationMeta",
     "TensorAlias",
     "ViewAndMutationMeta",
+    "BackwardTokenAOTInput",
+    "BackwardTokenAOTOutput",
+    "BufferAOTInput",
+    "DummyAOTInput",
+    "DummyAOTOutput",
+    "ForwardTokenAOTInput",
+    "ForwardTokenAOTOutput",
+    "GradAOTOutput",
+    "InputMutationAOTOutput",
+    "IntermediateBaseAOTOutput",
+    "MetadataMutationAOTOutput",
+    "ParamAOTInput",
+    "PhiloxBackwardBaseOffsetAOTInput",
+    "PhiloxBackwardSeedAOTInput",
+    "PhiloxForwardBaseOffsetAOTInput",
+    "PhiloxForwardSeedAOTInput",
+    "PhiloxUpdatedBackwardOffsetAOTOutput",
+    "PhiloxUpdatedForwardOffsetAOTOutput",
+    "PlainAOTInput",
     "PlainAOTOutput",
+    "SavedForBackwardsAOTOutput",
+    "SavedForBackwardsNoVcCheckAOTOutput",
+    "SubclassGetAttrAOTInput",
+    "SubclassGetAttrAOTOutput",
+    "SubclassSizeAOTInput",
+    "SubclassSizeAOTOutput",
+    "SubclassStrideAOTInput",
+    "SubclassStrideAOTOutput",
+    "SyntheticBaseAOTInput",
     "TangentAOTInput",
+    "ViewBaseAOTInput",
     # Subclass-tangent training and output-alias regeneration.
     "_process_runtime_or_materialized_tangent",
     "_wrap_backward_outputs_with_subclasses",
