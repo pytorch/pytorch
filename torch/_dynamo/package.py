@@ -59,11 +59,49 @@ if TYPE_CHECKING:
 
 _CODE_CACHE = WeakIdKeyDictionary()
 
-# code object -> the live CompilePackages that skip_code()d it. Weak on both
+# code object -> the live _RegionInstalls that skip_code()d it. Weak on both
 # sides: a package dropped without unloading must not block a later one.
 _SKIP_INSTALLERS: WeakIdKeyDictionary = WeakIdKeyDictionary()
+
+
+class _OwnedRLock:
+    """A reentrant lock that knows which thread holds it. RLock.acquire(
+    blocking=False) succeeds for the owning thread, so a finalizer fired by gc
+    inside install() could not tell "free" from "held by me" and released into
+    the middle of the caller's critical section."""
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._owner: int | None = None
+        self._depth = 0
+
+    def acquire(self, blocking: bool = True) -> bool:
+        if not self._lock.acquire(blocking):
+            return False
+        self._owner = threading.get_ident()
+        self._depth += 1
+        return True
+
+    def release(self) -> None:
+        self._depth -= 1
+        if self._depth == 0:
+            self._owner = None
+        self._lock.release()
+
+    def __enter__(self) -> None:
+        self.acquire()
+
+    def __exit__(self, *exc: object) -> None:
+        self.release()
+
+    def held_by_this_thread(self) -> bool:
+        # Only the owner writes _owner while it holds the lock, so a reader
+        # that sees its own ident is the owner; any other value means "not us".
+        return self._owner == threading.get_ident()
+
+
 # When both are needed, acquire the operation lock before the registry lock.
-_PACKAGE_INSTALL_LOCK = threading.RLock()
+_PACKAGE_INSTALL_LOCK = _OwnedRLock()
 _INSTALLER_REGISTRY_LOCK = threading.Lock()
 
 
@@ -110,10 +148,11 @@ class _GlobalBinding:
 # right when the stack empties.
 _GLOBAL_BINDINGS: WeakIdKeyDictionary = WeakIdKeyDictionary()
 
-# Installs whose finalizer ran while this thread was inside one of the locks
-# below. gc can fire on any allocation, including one made under a plain Lock,
-# so a finalizer that blocked there would deadlock against its own thread.
-# Drained under _PACKAGE_INSTALL_LOCK by the next install, uninstall or reset.
+# Installs whose finalizer ran while a lock below was held, by another thread or
+# by this one: gc can fire on any allocation, including one made inside
+# install() or _release(), so the finalizer can neither block there nor run
+# inline. Drained under _PACKAGE_INSTALL_LOCK at both ends of every install and
+# release, on reset, and every time a function is wrapped.
 _PENDING_RELEASES: collections.deque["_RegionInstall"] = collections.deque()
 
 
@@ -200,9 +239,14 @@ class _RegionInstall:
             _drain_pending_releases()
 
     def release_from_finalizer(self) -> None:
-        # Never block here: this runs wherever gc happened to fire, possibly on
-        # a thread that already holds a lock below, and the registry lock is
-        # not reentrant.
+        # Never block or run inline under a held lock: this runs wherever gc
+        # happened to fire. The registry lock is not reentrant, and the install
+        # lock is, so a thread inside install() or _release() can take it again
+        # -- but a release in the middle of that critical section deletes or
+        # rebinds the very name the caller is claiming. Defer in both cases.
+        if _PACKAGE_INSTALL_LOCK.held_by_this_thread():
+            _PENDING_RELEASES.append(self)
+            return
         if not _PACKAGE_INSTALL_LOCK.acquire(blocking=False):
             _PENDING_RELEASES.append(self)
             return
@@ -212,6 +256,7 @@ class _RegionInstall:
                 return
             _INSTALLER_REGISTRY_LOCK.release()
             self._release()
+            _drain_pending_releases()
         finally:
             _PACKAGE_INSTALL_LOCK.release()
 
@@ -303,31 +348,62 @@ class _RegionInstall:
 
 def _drain_pending_releases() -> None:
     """Run the finalizer releases that could not take the locks. Caller holds
-    _PACKAGE_INSTALL_LOCK."""
-    while _PENDING_RELEASES:
+    _PACKAGE_INSTALL_LOCK. A release that raises is kept for the next drain
+    rather than dropped -- its skips and globals would otherwise stay behind
+    for the life of the process -- and does not stop the others. Only the
+    releases queued at entry are attempted, so a retried failure cannot spin."""
+    for _ in range(len(_PENDING_RELEASES)):
         try:
             pending = _PENDING_RELEASES.popleft()
         except IndexError:
             return
-        pending._release()
+        try:
+            pending._release()
+        except Exception:
+            _PENDING_RELEASES.append(pending)
+            logger.exception(
+                "Failed to release a package dropped without uninstall(); "
+                "retrying on the next install"
+            )
+
+
+def drain_pending_releases() -> None:
+    """Release what dropped packages left behind, if anything is waiting.
+    Called on every wrap so a skip a dead package installed does not make the
+    next plain torch.compile of that frame run eager until something else
+    happens to install."""
+    if not _PENDING_RELEASES:
+        return
+    with _PACKAGE_INSTALL_LOCK:
+        _drain_pending_releases()
 
 
 # The package serving a function under caching_precompile, keyed on the
 # function and on every wrapper setting the package bakes into what it records
 # or installs: the region, the backend, whether that backend's artifacts carry
-# a CPU codegen target, and the guard filter. Re-wrapping with the same settings
-# joins this package instead of loading and installing the artifact again,
-# which stacked one precompile entry per wrap on the code object; a wrapper
-# with other settings gets its own, or an inductor variant recorded through an
-# adopted eager package would ship without the codegen target the ISA gate
-# reads. Weak, so the entries go with the last wrapper.
+# a CPU codegen target, and the guard filter the recorded guards went through
+# (the package's own serialization filter when it has one, otherwise the
+# wrapper's guard_filter_fn, which under caching_precompile filters the guards
+# that get serialized). Re-wrapping with the same settings joins this package
+# instead of loading and installing the artifact again, which stacked one
+# precompile entry per wrap on the code object; a wrapper with other settings
+# gets its own, or an inductor variant recorded through an adopted eager
+# package would ship without the codegen target the ISA gate reads. Weak, so
+# the entries go with the last wrapper.
 class _SettingKey:
     """A wrapper setting as a dict key. Compared with the setting's own ``==``
     -- torch.compile hands over a fresh _TorchCompileWrapper per call, equal to
     the last one by backend, mode and options but never identical -- and held
     strongly, so an identity hash stays unique while the key is registered.
     _TorchCompileWrapper defines __eq__ and so has no hash; its compiler_name
-    is the stable proxy equal wrappers share."""
+    is the stable proxy equal wrappers share.
+
+    A setting with no ``==`` of its own (a lambda, a functools.partial, a
+    fresh callable instance) therefore compares by identity, and each fresh
+    one gets its own package. That is deliberate: the package bakes the
+    backend's output into what it records, and two distinct callables are
+    only known to agree when they are the same object. It is also exactly the
+    line _TorchCompileWrapper.__eq__ draws, comparing compiler_fn with ``==``."""
 
     __slots__ = ("obj",)
 
@@ -350,10 +426,27 @@ _LivePackageKey = tuple[str, int, _SettingKey, bool, _SettingKey]
 _LIVE_PACKAGES: "weakref.WeakValueDictionary[_LivePackageKey, CompilePackage]" = (
     weakref.WeakValueDictionary()
 )
-# Held across the load, so two threads wrapping at once share one package.
-# Reentrant: installing an artifact imports its modules, and a module that
-# wraps at import time comes back through here.
-_LIVE_PACKAGES_LOCK = threading.RLock()
+
+
+@dataclasses.dataclass
+class _InFlightLoad:
+    """A load acquire_live_package() is running outside the registry lock."""
+
+    thread: int
+    done: threading.Event
+
+
+# Guards the registry, the in-flight loads and the generation only; never held
+# across a load. load() imports the artifact's modules and deserializes its
+# backends, and a module that runs a compiled function at import time needs
+# convert_frame.compile_lock, which torch._dynamo.reset() holds while it comes
+# here to clear the registry.
+_LIVE_PACKAGES_LOCK = threading.Lock()
+_LOADING: dict[_LivePackageKey, _InFlightLoad] = {}
+# Bumped by reset_live_packages(). A load that started before a reset must not
+# register after it: reset() wiped the entries it installed, and a later wrap
+# joining it would compile cold instead of reloading the artifact.
+_LIVE_PACKAGES_GENERATION = 0
 
 
 def live_package_key(
@@ -361,13 +454,18 @@ def live_package_key(
     isolate_recompiles_id: int,
     backend: Callable[..., Any],
     package: "CompilePackage",
+    guard_filter_fn: Callable[..., Any] | None,
 ) -> _LivePackageKey:
+    """``guard_filter_fn`` is the wrapper's Hooks.guard_filter_fn. A package
+    with its own serialization filter records through that; otherwise, under
+    caching_precompile, the runtime filter is the one the serialized guards
+    went through (see CheckFunctionManager)."""
     return (
         CompilePackage.source_id_from_fn(fn),
         isolate_recompiles_id,
         _SettingKey(backend),
         package._default_requires_native_backend_compatibility,
-        _SettingKey(package.serialization_guard_filter_fn),
+        _SettingKey(package.serialization_guard_filter_fn or guard_filter_fn),
     )
 
 
@@ -375,15 +473,37 @@ def acquire_live_package(
     key: _LivePackageKey, package: "CompilePackage", load: Callable[[], None]
 ) -> "CompilePackage":
     """Return the live package under ``key``, or ``load()`` this one and
-    register it. One step under the lock: a get that then registered let two
-    concurrent wrappers each load and install the artifact."""
-    with _LIVE_PACKAGES_LOCK:
-        shared = _LIVE_PACKAGES.get(key)
-        if shared is not None:
-            return shared
+    register it. A second wrapper arriving during the load waits for it and
+    joins the result, so two concurrent wrappers never each install the
+    artifact; a wrapper re-entering from the load itself (a module the artifact
+    imports wraps the same function at import time) cannot wait for itself and
+    loads its own."""
+    while True:
+        with _LIVE_PACKAGES_LOCK:
+            shared = _LIVE_PACKAGES.get(key)
+            if shared is not None:
+                return shared
+            in_flight = _LOADING.get(key)
+            if in_flight is None:
+                in_flight = _LOADING[key] = _InFlightLoad(
+                    threading.get_ident(), threading.Event()
+                )
+                generation = _LIVE_PACKAGES_GENERATION
+                break
+        if in_flight.thread == threading.get_ident():
+            load()
+            return package
+        in_flight.done.wait()
+    try:
         load()
-        _LIVE_PACKAGES[key] = package
-        return package
+        with _LIVE_PACKAGES_LOCK:
+            if generation == _LIVE_PACKAGES_GENERATION:
+                _LIVE_PACKAGES[key] = package
+    finally:
+        with _LIVE_PACKAGES_LOCK:
+            del _LOADING[key]
+        in_flight.done.set()
+    return package
 
 
 def live_packages(
@@ -401,10 +521,12 @@ def live_packages(
 
 
 def reset_live_packages() -> None:
-    """torch._dynamo.reset() cleared the entries these packages installed, so a
+    """reset_code_caches() cleared the entries these packages installed, so a
     later wrap must load the artifact afresh rather than join them."""
+    global _LIVE_PACKAGES_GENERATION
     with _LIVE_PACKAGES_LOCK:
         _LIVE_PACKAGES.clear()
+        _LIVE_PACKAGES_GENERATION += 1
     with _PACKAGE_INSTALL_LOCK:
         _drain_pending_releases()
 
@@ -677,17 +799,14 @@ class _DynamoCodeCacheEntry:
 
 
 def _restore_missing_fields(obj: Any, state: dict[str, Any]) -> None:
-    """Unpickle a dataclass written before some of its fields existed. A plain
-    default is reachable as a class attribute anyway; a default_factory field
-    (system_info) is not, and read as an AttributeError on load."""
+    """Unpickle a dataclass written before some of its fields existed, filling
+    in plain defaults only. Nothing here may be computed on the loading host:
+    a synthesized SystemInfo compared the host to itself and let any artifact
+    missing one install."""
     obj.__dict__.update(state)
     for field in dataclasses.fields(obj):
-        if field.name in state:
-            continue
-        if field.default is not dataclasses.MISSING:
+        if field.name not in state and field.default is not dataclasses.MISSING:
             setattr(obj, field.name, field.default)
-        elif field.default_factory is not dataclasses.MISSING:
-            setattr(obj, field.name, field.default_factory())
 
 
 def _resume_global_renames(
@@ -1146,14 +1265,10 @@ class _DynamoCacheEntry:
     codes: list[_DynamoCodeCacheEntry]
     source_info: SourceInfo
     device_type: str
-    # Probe-free on purpose: this default is what CompileArtifacts(**state)
-    # reaches for a pickle written before the field existed, and running the
-    # C++ toolchain there is seconds on a cold cache and a hard error on a
-    # host with no compiler. Every site that compares the target passes
-    # cpu_codegen= explicitly.
-    system_info: SystemInfo = dataclasses.field(
-        default_factory=functools.partial(SystemInfo.current, cpu_codegen=False)
-    )
+    # None only for a pickle written without it (or one that lost the key);
+    # check_versions() rejects it, since there is nothing to compare the host
+    # against. cache_entry() always records one.
+    system_info: SystemInfo | None = None
     device_types: frozenset[str] | None = None
     requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
@@ -1168,6 +1283,11 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
+        if self.system_info is None:
+            raise RuntimeError(
+                "Compile package records no system info; it cannot be checked "
+                "against this host"
+            )
         device_types = self.device_types or frozenset((self.device_type,))
         check_codegen = self.requires_native_backend_compatibility
         # Determining the codegen target runs the C++ toolchain, so only pay for
@@ -1859,6 +1979,9 @@ class CompilePackage:
                     deserialized_backends,
                     prepared.managers if prepared is not None else {},
                 )
+                # A finalizer that fired on this thread during the install
+                # deferred to here; the failure path drains on its rollback.
+                _drain_pending_releases()
             except BaseException:
                 # A half-installed package is worse than an unloaded one: some
                 # frames serve precompiled code and some do not, and because

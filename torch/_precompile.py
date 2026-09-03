@@ -11,9 +11,8 @@
 ``example_inputs`` is the calling convention: a sequence of calls, each a tuple of
 positional arguments (or an ``ExampleInput`` when keywords are needed). The 2.14 spelling
 ``precompile(fn, *example_args)`` -- one call, positionally -- still works under a
-``FutureWarning``, and ``precompile.accumulate`` drives the calls from the caller's own
-loop instead. ``tracer`` picks the capture front-end, and it is the ONLY thing that does
--- ``make_fx`` takes exactly one call, ``dynamo`` takes as many as you want.
+``FutureWarning``. ``tracer`` picks the capture front-end, and it is the ONLY thing that
+does -- ``make_fx`` takes exactly one call, ``dynamo`` takes as many as you want.
 
 precompile captures your computation with ``make_fx`` (the default ``tracer``) -- a
 NON-STRICT trace of the ATen ops that run when ``fn`` executes once on the example
@@ -24,9 +23,9 @@ outside it and you get an artifact that computes the wrong thing.
 The ``dynamo`` tracer is an alternative capture front-end that analyzes the Python
 (bytecode) rather than tracing one path. It inlines the TRANSFORMED BYTECODE Dynamo
 produces into ``python_code`` (marshalled, rehydrated at load) and lowers the compiled
-subgraph through the same backends; forward and training computations, ``mark_unbacked``
-dynamic shapes, and a ``decompositions`` table all work with it. See the ``tracer`` note at
-the bottom of Note [precompile programming model].
+subgraph through the same backends; forward and training computations and
+``mark_unbacked`` dynamic shapes work with it, while a ``decompositions`` table applies only
+to ``make_fx``. See the ``tracer`` note at the bottom of Note [precompile programming model].
 
 For a computation with graph breaks, or to retain several guarded/recompiled variants,
 pass ``tracer="dynamo"`` with as many calls as you need. Either tracer returns the same
@@ -329,9 +328,9 @@ import io
 import logging
 import os
 import pickle
+import secrets
 import stat
 import sys
-import tempfile
 import types
 import warnings
 from collections.abc import Callable, Mapping, Sequence
@@ -421,8 +420,26 @@ class PrecompiledCallable:
     removes them, and a call after that raises.
     """
 
-    def __init__(self, compiled: Any) -> None:
+    def __init__(self, compiled: Any, cache_status: str = "applied") -> None:
         self._compiled = compiled
+        self._cache_status = cache_status
+
+    @property
+    def cache_status(self) -> str:
+        """cache_status -> str
+
+        Whether ``load`` applied the acceleration cache, and if not why:
+        ``"applied"`` (it matched ``python_code`` and primed the kernel caches;
+        an eager artifact has nothing to prime and still reports this),
+        ``"stale"`` (its ``code_hash`` is not this ``python_code``'s: a rewrite
+        that died between its two files, or a pair from different calls),
+        ``"incompatible"`` (its format or version is another torch build's),
+        ``"unreadable"`` (the envelope could not be read), or
+        ``"prime_failed"`` (the bundle loaded but the kernel caches refused it).
+        Anything but ``"applied"`` means the artifact JITs at serve time where
+        the cache would have primed; a deployment that must not can gate on it.
+        """
+        return self._cache_status
 
     def _call(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
         from torch._dynamo.exc import PackageError, RecompileError
@@ -2004,7 +2021,10 @@ def _build_multigraph_python_source(
     )
     parts.append("# __main__ is skipped: it names the LOADER's script on another")
     parts.append("# machine, which is exactly what a portable artifact is for. torch's")
-    parts.append("# own modules are skipped too: TORCH_VERSION above pins them.")
+    parts.append("# own modules are checked like any other: TORCH_VERSION above is")
+    parts.append(
+        "# baked at build time and does not see an edit to an editable install."
+    )
     parts.append(f"INLINED_SOURCES = {_inlined_sources_to_check(entry)!r}")
     parts.append("")
     parts.append("# The entry's defaults and closure values: a code object carries")
@@ -2082,18 +2102,16 @@ def _build_multigraph_python_source(
 def _inlined_sources_to_check(entry: Any) -> list[tuple[str, int, int, str]]:
     """The inlined-source records a standalone artifact re-checks at load.
 
-    ``__main__`` is the loader's own script on another machine, and a module
-    torch itself ships is pinned by the exact TORCH_VERSION match already, so
-    neither is recorded. A ``torch.``-named module that does NOT resolve to
-    torch's own tree (a test module registered under the name) is kept.
+    ``__main__`` is the loader's own script on another machine, so it is not
+    recorded. torch's own modules ARE, exactly as the installed mode checks
+    them: TORCH_VERSION is baked at build time, so it does not change when a
+    module of an editable install is edited between capture and load, and the
+    two serving modes must give one answer to the same edit.
     """
-    from torch._dynamo.precompile_package import _is_library_module
-
     return sorted(
         (s.module, s.firstlineno, s.lastlineno, s.checksum)
         for s in entry.source_info.inlined_sources
         if s.module != "__main__"
-        and not (s.module.partition(".")[0] == "torch" and _is_library_module(s.module))
     )
 
 
@@ -2167,19 +2185,16 @@ def _reject_varargs_entry(fn: object) -> None:
 
     _reject_uninstallable_entry makes the same check at render time, after
     every example call has run and moved its gradients. Resolve the code object
-    the way capture does: unwind the Dynamo decorator chain (a
-    torch._dynamo.disable wrapper has the inner function's name on a
-    (*args, **kwargs) signature of its own, and capture compiles the inner
-    function, not the wrapper), then a module's forward or a bound method's
-    function. Anything capture itself would refuse is left to it.
+    exactly as capture does (_entry_fn_of unwinds a torch._dynamo.disable
+    wrapper to the function it wraps, then takes a module's forward); anything
+    capture itself would refuse is left to it.
     """
-    from torch._dynamo.eval_frame import innermost_fn
     from torch._dynamo.precompile_package import _entry_fn_of
 
     if not callable(fn):
         return
     try:
-        entry_fn = _entry_fn_of(innermost_fn(fn))
+        entry_fn = _entry_fn_of(fn)
     except (TypeError, AssertionError):
         return
     _reject_varargs(entry_fn.__code__, getattr(entry_fn, "__qualname__", repr(fn)))
@@ -2245,22 +2260,23 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
         code.co_filename not in _WARNED_MAIN_ENTRIES
     ):
         _WARNED_MAIN_ENTRIES.add(code.co_filename)
-        # The load-time rule is in the drivers: a script's artifact loads only
-        # from that script; a file-less __main__'s (REPL, python -c, notebook)
-        # only from a file-less __main__, which the loader cannot tell apart
-        # from the one that captured.
+        # The load-time rule is in the drivers: two scripts must be the same
+        # file; a __main__ with no file (REPL, python -c, notebook) cannot be
+        # told apart from the one that captured, so it is accepted on either
+        # side and the frames read the loader's globals.
         if os.path.isfile(code.co_filename):
             where = (
-                f"the script {code.co_filename}, so the artifact loads only from "
-                f"that same script; load() refuses it from any other script and "
-                f"from a REPL, `python -c` or notebook."
+                f"the script {code.co_filename}, so load() refuses the artifact "
+                f"from any other script. A __main__ with no file (a REPL, "
+                f"`python -c` or a notebook) cannot be told apart from this "
+                f"script: it is accepted, and the frames read the LOADER's globals."
             )
         else:
             where = (
-                "a __main__ with no file (a REPL, `python -c` or a notebook), so "
-                "load() refuses the artifact from any script. A load from another "
-                "file-less __main__ cannot be told apart from this one: it is "
-                "accepted, and the frames read the LOADER's globals."
+                "a __main__ with no file (a REPL, `python -c` or a notebook), "
+                "which load() cannot tell apart from any other __main__: the "
+                "artifact is accepted from any program, and the frames read the "
+                "LOADER's globals."
             )
         log.warning(
             "precompile: %r is defined in __main__, %s Its frames read that "
@@ -2514,6 +2530,8 @@ class PrecompiledModule:
         # bounded marked dim, else {dim: (lo, hi)}). The drivers reject a runtime size
         # outside the declared range (invariant 3). Populated by _compile().
         self._user_input_bounds: list[Any] = []
+        # What load() did with the cache; see the cache_status property.
+        self._cache_status = "applied"
         # Set only on the load() path, where we wrap a reconstructed callable.
         self._loaded_forward: Callable[..., object] | None = None
 
@@ -2524,6 +2542,7 @@ class PrecompiledModule:
         *,
         backend: str,
         tracer: str = "make_fx",
+        cache_status: str = "applied",
     ) -> PrecompiledModule:
         """Build a runnable from load()'s reconstructed forward.
 
@@ -2536,7 +2555,15 @@ class PrecompiledModule:
         """
         obj = cls(None, backend=backend, tracer=tracer)  # type: ignore[arg-type]
         obj._loaded_forward = forward
+        obj._cache_status = cache_status
         return obj
+
+    @property
+    def cache_status(self) -> str:
+        """Whether ``load`` applied the cache, and if not why; see
+        :attr:`torch.compiler.PrecompiledCallable.cache_status` for the values.
+        ``"applied"`` on an object that was not produced by ``load``."""
+        return self._cache_status
 
     def _compile(self, args: tuple[object, ...]) -> None:
         # PrecompiledModule is the make_fx path only: tracer="dynamo" is routed
@@ -2794,52 +2821,61 @@ def _write_artifact(
     and ``load()`` treats a cache whose code_hash does not match as stale --
     python_code is self-contained -- and runs the code alone. The other order
     would leave new code beside a stale cache, which loads the same way, but
-    the code is the half worth keeping current. An accumulating capture
-    rewrites on every call and its promise is that the files on disk always
-    load, so at hundreds of megabytes that window is what this is for.
+    the code is the half worth keeping current. A caller that rewrites the
+    pair repeatedly relies on the files on disk always loading, so at hundreds
+    of megabytes that window is what this is for.
+
+    Modes: a new file gets what a plain ``open()`` would create under the
+    process umask; an existing regular file keeps its mode, a read-only one
+    included (the rename needs no write bit on it); a symlink is replaced by a
+    regular file and whatever it pointed at is left untouched. A directory at
+    either path is refused before anything is written. A process killed
+    mid-write can leave a ``<name>.<random>.tmp`` beside a target, which
+    nothing reclaims.
     """
-    written: list[tuple[str, str | os.PathLike[str]]] = []
+    targets: list[tuple[str, os.stat_result | None, str | bytes]] = []
+    for path, payload in ((cache_path, cache), (artifact_path, python_code)):
+        path = os.fspath(path)
+        try:
+            target = os.lstat(path)
+        except OSError:
+            target = None
+        if target is not None and stat.S_ISDIR(target.st_mode):
+            raise ValueError(
+                f"precompile: {path!r} is a directory; artifact_path and "
+                f"cache_path name the two files to write."
+            )
+        targets.append((path, target, payload))
+    written: list[str] = []
     try:
-        for path, payload in ((cache_path, cache), (artifact_path, python_code)):
-            parent = os.path.dirname(os.fspath(path))
+        for path, target, payload in targets:
+            parent = os.path.dirname(path)
             if parent:
                 os.makedirs(parent, exist_ok=True)
-            # The temp file has to sit beside its target: os.replace cannot
-            # cross devices, and a bare filename's target is the cwd, not
-            # mkstemp's default (the system tmp dir).
-            fd, tmp = tempfile.mkstemp(
-                dir=parent or ".", prefix=os.path.basename(path) + ".", suffix=".tmp"
-            )
-            written.append((tmp, path))
-            # mkstemp opens 0600; keep an existing regular file's mode, else
-            # what a plain open() would create under the current umask. A
-            # symlink's own mode says nothing about what it points at, so a
-            # symlinked target is replaced as if new.
-            try:
-                target = os.lstat(path)
-            except OSError:
-                target = None
-            if target is not None and stat.S_ISREG(target.st_mode):
-                perm = stat.S_IMODE(target.st_mode)
-            else:
-                umask = os.umask(0)
-                os.umask(umask)
-                perm = 0o666 & ~umask
-            os.close(fd)
-            os.chmod(tmp, perm)
+            # The temp file sits beside its target (os.replace cannot cross
+            # devices, and a bare filename's target is the cwd) and is created
+            # with open()'s default mode so the kernel applies the umask:
+            # mkstemp would force 0600, and reading the umask back means
+            # toggling it, which every other thread in the process would see.
+            tmp = f"{path}.{secrets.token_hex(6)}.tmp"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+            written.append(tmp)
             mode, encoding = (
                 ("wb", None) if isinstance(payload, bytes) else ("w", "utf-8")
             )
-            with open(tmp, mode, encoding=encoding) as f:
+            with open(fd, mode, encoding=encoding) as f:
                 f.write(payload)  # type: ignore[arg-type]
                 f.flush()
                 os.fsync(f.fileno())
-        for tmp, path in written:
+            # After the write, so a read-only target's mode can be kept.
+            if target is not None and stat.S_ISREG(target.st_mode):
+                os.chmod(tmp, stat.S_IMODE(target.st_mode))
+        for tmp, (path, _, _) in zip(written, targets):
             os.replace(tmp, path)
     except BaseException:
         # Whatever was not renamed into place -- a write failed, or the second
         # replace did after the first succeeded -- must not stay behind.
-        for tmp, _ in written:
+        for tmp in written:
             with contextlib.suppress(OSError):
                 os.unlink(tmp)
         raise
@@ -2959,9 +2995,10 @@ class _PrecompileApi:
           and because precompile makes the example calls for you, this
           is how you get their results back -- a training capture whose examples
           are real batches can hand the losses on to your metrics without a
-          second forward. Only ``tracer='dynamo'`` runs the calls for real;
-          ``tracer='make_fx'`` traces ``fn`` under proxy/fake tensors, so it
-          writes both files and returns ``[]``.
+          second forward. Only ``tracer='dynamo'`` runs the calls for real, so
+          naming the paths with ``tracer='make_fx'`` -- which traces ``fn``
+          under proxy/fake tensors -- is refused BEFORE ``fn`` runs, rather
+          than handing back nothing after it.
 
         ``tracer`` picks the capture front-end. ``"make_fx"`` (the default) is one
         non-strict ATen trace, so it takes exactly one call and refuses a longer
@@ -3239,6 +3276,18 @@ class _PrecompileApi:
                     "require_* gates describe a multi-variant capture and apply "
                     "only to tracer='dynamo'"
                 )
+            # Before fn runs, not after. The on-disk form's return value IS the
+            # example calls' results, and a make_fx trace has none to give -- so
+            # returning an empty list would hand back "no results" to a caller
+            # whose region had already executed, and whose obvious recovery is
+            # to run it a second time.
+            if out_paths is not None:
+                raise ValueError(
+                    "artifact_path/cache_path return what the example calls "
+                    "returned, which only tracer='dynamo' produces -- a make_fx "
+                    "capture traces fn under proxy tensors. Use tracer='dynamo', "
+                    "or take the pair in memory and write it yourself."
+                )
             from torch._dynamo.precompile_package import _example_call
 
             args, kwargs = _example_call(example_inputs[0])
@@ -3260,15 +3309,7 @@ class _PrecompileApi:
             # rebuilt, and so code_hash is sha256 over exactly the bytes returned
             # to the caller (a matched pair loads).
             python_code = compiled.to_python_code()
-            cache = compiled.to_cache_bytes(python_code)
-            if out_paths is not None:
-                _write_artifact(*out_paths, python_code, cache)
-                # A make_fx capture traces fn under proxy/fake tensors, so what
-                # fn returned during the trace is a proxy rather than a value.
-                # There is no result to hand back; tracer='dynamo' runs the
-                # example calls for real and does return them.
-                return []
-            return python_code, cache
+            return python_code, compiled.to_cache_bytes(python_code)
 
         if decompositions is not None:
             raise ValueError(
@@ -3326,8 +3367,7 @@ class _PrecompileApi:
         with session:
             pass
         # The capture is finished, so hand back the artifact rather than a
-        # session the caller has to know to save. The internal session remains for a
-        # capture whose calls the caller has to make.
+        # session the caller has to know to save.
         python_code, cache = session.artifact(
             require_complete=require_complete,
             require_no_risky_drops=require_no_risky_drops,
@@ -3388,7 +3428,10 @@ class _PrecompileApi:
         rewrite that died between its two files, or a pair from different
         ``precompile()`` calls), is NOT fatal: the cache is acceleration only, so
         ``load`` warns and runs ``python_code`` alone, JIT'ing where it would have
-        primed.
+        primed. The result's ``cache_status`` says which happened: ``"applied"``,
+        or ``"stale"`` / ``"incompatible"`` / ``"unreadable"`` / ``"prime_failed"``
+        for the reason the cache was not; see
+        :attr:`torch.compiler.PrecompiledCallable.cache_status`.
         """
         in_paths = _artifact_paths(
             artifact_path,
@@ -3435,11 +3478,13 @@ class _PrecompileApi:
         # TRACER mismatch is different -- it signals a wrong (python_code, cache) pairing
         # -- so it hard-fails rather than running under foreign metadata.
         artifact = None
+        cache_status = "applied"
         try:
             blob = torch.load(io.BytesIO(cache), weights_only=True)
             if blob.get("format") != _CACHE_FORMAT or blob.get("version") != (
                 _CACHE_VERSION
             ):
+                cache_status = "incompatible"
                 log.warning(
                     "torch.compiler.precompile.load got a cache with format=%r "
                     "version=%r, expected %r / %r; it is likely from a different torch "
@@ -3473,6 +3518,7 @@ class _PrecompileApi:
                 # caches from another artifact's bundle (invariant 7).
                 expected_code_hash = hashlib.sha256(python_code.encode()).hexdigest()
                 if blob.get("code_hash") != expected_code_hash:
+                    cache_status = "stale"
                     log.warning(
                         "torch.compiler.precompile.load got a cache whose code_hash %r "
                         "is not sha256(python_code) %r: the cache is stale -- a write "
@@ -3488,6 +3534,7 @@ class _PrecompileApi:
         except PrecompileError:
             raise
         except Exception as e:
+            cache_status = "unreadable"
             log.warning(
                 "torch.compiler.precompile.load could not read the cache envelope (%s: %s); the "
                 "cache is likely corrupt or from a different torch build. Falling back "
@@ -3506,6 +3553,7 @@ class _PrecompileApi:
             try:
                 torch.compiler.load_cache_artifacts(artifact)
             except Exception as e:
+                cache_status = "prime_failed"
                 log.warning(
                     "torch.compiler.precompile.load could not prime the cache from the "
                     "artifact bundle (%s: %s); it is likely stale or from a different "
@@ -3542,8 +3590,10 @@ class _PrecompileApi:
             if fn is not None:
                 forward._rebind(fn)
             forward._prepare(cast(str, meta["_PACKAGE"]))
-            return PrecompiledCallable(forward)
-        return PrecompiledModule._from_loaded(forward, backend=backend, tracer=tracer)
+            return PrecompiledCallable(forward, cache_status)
+        return PrecompiledModule._from_loaded(
+            forward, backend=backend, tracer=tracer, cache_status=cache_status
+        )
 
 
 precompile = _PrecompileApi()

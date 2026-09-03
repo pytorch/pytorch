@@ -303,6 +303,12 @@ def _precompile_varargs_entry(*args):
 # A torch._dynamo.disable wrapper has the inner function's name on a
 # (*args, **kwargs) signature of its own; capture compiles the inner function.
 _precompile_disabled_entry = torch._dynamo.disable(_precompile_plus_one)
+# Wrapped like the above, but the inner function has a DEFAULTED parameter: the
+# entry binding and varargs check must come from the inner function's signature,
+# not the wrapper's (*args, **kwargs), or the served call cannot bind the default.
+_precompile_disabled_defaulted_entry = torch._dynamo.disable(
+    _precompile_scaled_with_break
+)
 
 
 class _PrecompileRebound:
@@ -971,25 +977,6 @@ def _skip_make_fx_capture_under_dynamo(test):
             patcher = mock.patch.object(owner, name, outside_the_outer_compile(target))
             patcher.start()
             test.addCleanup(patcher.stop)
-
-
-# Loads the artifact a __main__ capture wrote to argv[1:3]; run as a script and
-# as `python -c` to stand for "another program".
-_PRECOMPILE_MAIN_LOADER_SRC = textwrap.dedent(
-    """
-    import sys
-    import torch
-
-    with open(sys.argv[1]) as fh:
-        code = fh.read()
-    with open(sys.argv[2], "rb") as fh:
-        cache = fh.read()
-    try:
-        torch.compiler.precompile.load(code, cache)
-    except torch.compiler.PrecompileError as e:
-        print("REFUSED:", e)
-    """
-)
 
 
 @instantiate_parametrized_tests
@@ -1929,38 +1916,37 @@ class TestPrecompile(TestCase):
             with _maybe_scoped(loaded), torch.no_grad():
                 self.assertEqual(loaded(m, xs[0]), m(xs[0]))
 
-    def test_precompile_make_fx_on_disk_has_no_call_results(self):
-        # make_fx traces fn under proxy/fake tensors, so what it returned during
-        # the trace is a proxy rather than a value. Both files are still
-        # written; there is simply nothing to hand back.
+    def test_precompile_make_fx_refuses_the_on_disk_form_before_running_fn(self):
+        # The on-disk form's return value IS the example calls' results, and a
+        # make_fx trace has none. Refusing BEFORE fn runs is the point: handing
+        # back an empty list afterwards leaves a caller whose region already
+        # executed, whose obvious recovery is to run it again -- a second
+        # backward over storages the first one freed.
+        ran = []
+
+        def entry(model, t):
+            ran.append(1)
+            return model(t)
+
         m = torch.nn.Linear(4, 3)
         x = torch.randn(2, 4)
         with tempfile.TemporaryDirectory() as d:
-            artifact_path = os.path.join(d, "artifact.py")
-            cache_path = os.path.join(d, "artifact.cache")
-            results = torch.compiler.precompile(
-                lambda model, t: model(t),
-                backend="eager",
-                example_inputs=[(m, x)],
-                artifact_path=artifact_path,
-                cache_path=cache_path,
-            )
-            self.assertEqual(results, [])
-            self.assertGreater(os.path.getsize(artifact_path), 0)
-            self.assertGreater(os.path.getsize(cache_path), 0)
-            loaded = torch.compiler.precompile.load(
-                artifact_path=artifact_path, cache_path=cache_path
-            )
-            self.assertEqual(loaded(m, x), m(x))
+            with self.assertRaisesRegex(ValueError, "only tracer='dynamo' produces"):
+                torch.compiler.precompile(
+                    entry,
+                    backend="eager",
+                    example_inputs=[(m, x)],
+                    artifact_path=os.path.join(d, "artifact.py"),
+                    cache_path=os.path.join(d, "artifact.cache"),
+                )
+        self.assertEqual(ran, [])
 
     def test_precompile_artifact_write_leaves_the_previous_pair_on_failure(self):
         # The two halves only load together -- the cache carries a sha256 of
         # exactly the python_code it was emitted with -- so truncating them in
         # place puts a new artifact next to a stale cache for as long as the
-        # write takes. An accumulating capture rewrites on every call and sells
-        # exactly that crash as the thing it protects against.
-        import builtins
-
+        # write takes. A caller that rewrites the pair repeatedly is exposed to
+        # exactly that crash.
         from torch._precompile import _write_artifact
 
         with tempfile.TemporaryDirectory() as d:
@@ -1968,7 +1954,7 @@ class TestPrecompile(TestCase):
             cache_path = os.path.join(d, "a.cache")
             _write_artifact(artifact_path, cache_path, "GOOD = 1\n", b"goodcache")
 
-            real_open = builtins.open
+            real_os_open = os.open
             seen = []
 
             def flaky(path, *args, **kwargs):
@@ -1976,9 +1962,9 @@ class TestPrecompile(TestCase):
                     seen.append(path)
                     if len(seen) == 2:
                         raise OSError("disk full")
-                return real_open(path, *args, **kwargs)
+                return real_os_open(path, *args, **kwargs)
 
-            with mock.patch.object(builtins, "open", flaky):
+            with mock.patch.object(os, "open", flaky):
                 with self.assertRaisesRegex(OSError, "disk full"):
                     _write_artifact(artifact_path, cache_path, "NEW = 2\n", b"newcache")
             with open(artifact_path) as f:
@@ -2036,9 +2022,10 @@ class TestPrecompile(TestCase):
 
     def test_precompile_keeps_a_dict_membership_guard_under_default_gates(self):
         # `if key not in self._cache` is a branch, pinned by DICT_NOT_CONTAINS.
-        # It is module-rooted, so the policy classed it environment and, with
-        # one variant, dropped it: the artifact served the "not present" graph
-        # to a populated cache, 2.0 where eager says 101.0, on default gates.
+        # With one variant every slot looks invariant, so a policy that dropped
+        # whatever held identically dropped it: the artifact served the "not
+        # present" graph to a populated cache, 2.0 where eager says 101.0, on
+        # default gates. Branch-pinning types are never dropped now.
         from torch._precompile import _read_literal
 
         model = _PrecompileCacheModel()
@@ -2185,7 +2172,9 @@ class TestPrecompile(TestCase):
     def test_main_entry_loads_only_from_the_same_script(self):
         # __main__ is whichever script is running: a frame compiled in one
         # would read another's globals. Capture warns; the same script loads;
-        # any other script is refused by name.
+        # another script is refused by name. A file-less __main__ (a REPL,
+        # `python -c`, a notebook) cannot be told apart from the capturing
+        # script, so it is accepted and reads the loader's globals.
         capture_src = textwrap.dedent(
             """
             import sys
@@ -2218,6 +2207,7 @@ class TestPrecompile(TestCase):
                 torch.compiler.precompile.load(
                     artifact_path=sys.argv[1], cache_path=sys.argv[2]
                 )
+                print("LOADED_OK")
             except torch.compiler.PrecompileError as e:
                 print("REFUSED:", e)
             """
@@ -2241,29 +2231,45 @@ class TestPrecompile(TestCase):
             )
             self.assertIn("SAME_SCRIPT_OK", captured.stdout)
             self.assertIn("defined in __main__, the script", captured.stderr)
-            self.assertIn("from a REPL, `python -c` or notebook", captured.stderr)
-            # Another script, and a __main__ with no file at all (a REPL,
-            # `python -c`, a notebook): both are a different program.
-            for argv in (
+            self.assertIn("cannot be told apart from this script", captured.stderr)
+            # Another script is a different program: refused by name.
+            other = subprocess.run(
                 [sys.executable, os.path.join(d, "other.py"), *paths],
+                capture_output=True,
+                text=True,
+                cwd=d,
+                timeout=300,
+            )
+            self.assertEqual(
+                other.returncode,
+                0,
+                f"stdout:\n{other.stdout}\nstderr:\n{other.stderr}",
+            )
+            self.assertIn("REFUSED:", other.stdout)
+            self.assertIn("compiled in __main__", other.stdout)
+            # A file-less __main__ (python -c) cannot be told apart from the
+            # capturing script, so it is accepted rather than refused.
+            noc = subprocess.run(
                 [sys.executable, "-c", load_src, *paths],
-            ):
-                other = subprocess.run(
-                    argv, capture_output=True, text=True, cwd=d, timeout=300
-                )
-                self.assertEqual(
-                    other.returncode,
-                    0,
-                    f"stdout:\n{other.stdout}\nstderr:\n{other.stderr}",
-                )
-                self.assertIn("REFUSED:", other.stdout)
-                self.assertIn("compiled in __main__", other.stdout)
+                capture_output=True,
+                text=True,
+                cwd=d,
+                timeout=300,
+            )
+            self.assertEqual(
+                noc.returncode,
+                0,
+                f"stdout:\n{noc.stdout}\nstderr:\n{noc.stderr}",
+            )
+            self.assertIn("LOADED_OK", noc.stdout)
+            self.assertNotIn("REFUSED:", noc.stdout)
 
     def test_main_entry_loads_where_main_has_no_file(self):
         # `python -c`, a REPL or a notebook has no __main__.__file__, and a
-        # frame compiled there records a placeholder filename. Another
-        # file-less __main__ cannot be told apart from the one that captured,
-        # so it loads; a script is a different program and is refused.
+        # frame compiled there records a placeholder filename. A __main__ with
+        # no file on either side cannot be told apart from the one that
+        # captured, so it is accepted: another file-less __main__ loads, and so
+        # does a script, since the capturing side was file-less and unknown.
         src = textwrap.dedent(
             """
             import sys
@@ -2298,6 +2304,7 @@ class TestPrecompile(TestCase):
                 torch.compiler.precompile.load(
                     artifact_path=sys.argv[1], cache_path=sys.argv[2]
                 )
+                print("LOADED_OK")
             except torch.compiler.PrecompileError as e:
                 print("REFUSED:", e)
             """
@@ -2319,6 +2326,8 @@ class TestPrecompile(TestCase):
             self.assertIn("NO_FILE_OK", proc.stdout)
             self.assertIn("a __main__ with no file", proc.stderr)
             self.assertIn("read the LOADER's globals", proc.stderr)
+            # The capturing side was file-less and so unknown; a script loading
+            # it cannot be ruled out as the same program, so it is accepted.
             script = subprocess.run(
                 [sys.executable, os.path.join(d, "loader.py"), *paths],
                 capture_output=True,
@@ -2331,8 +2340,8 @@ class TestPrecompile(TestCase):
                 0,
                 f"stdout:\n{script.stdout}\nstderr:\n{script.stderr}",
             )
-            self.assertIn("REFUSED:", script.stdout)
-            self.assertIn("no file: a REPL, python -c or notebook", script.stdout)
+            self.assertIn("LOADED_OK", script.stdout)
+            self.assertNotIn("REFUSED:", script.stdout)
 
     def test_summary_and_invariants_pickle(self):
         # Their __module__ says torch.compiler, so that is where pickle looks.
@@ -6570,10 +6579,13 @@ class TestPrecompile(TestCase):
         from torch._precompile import _write_artifact
 
         _, _, code, cache = self._dynamo_eager_artifact()
-        umask = os.umask(0)
-        os.umask(umask)
-        expected = 0o666 & ~umask
         with tempfile.TemporaryDirectory() as d:
+            # What a plain open() creates under this process's umask, without
+            # toggling the umask (which every other thread would see).
+            probe = os.path.join(d, "probe")
+            with open(probe, "w"):
+                pass
+            expected = os.stat(probe).st_mode & 0o777
             artifact_path = os.path.join(d, "m.py")
             cache_path = os.path.join(d, "m.cache")
             _write_artifact(artifact_path, cache_path, code, cache)
@@ -6681,6 +6693,136 @@ class TestPrecompile(TestCase):
             with _maybe_scoped(loaded):
                 self.assertEqual(loaded(m, x), _precompile_plus_one(m, x))
 
+    def test_disable_wrapped_entry_with_a_default_round_trips_and_serves(self):
+        # A torch._dynamo.disable wrapper carries the inner function's name on a
+        # (*args, **kwargs) signature of its own. The entry, its varargs check
+        # and the _ENTRY_BINDING must all come from the inner function, or a
+        # served call with the default omitted has no 'scale' to bind and every
+        # captured variant misses; the varargs check must not refuse it either.
+        m = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_disabled_defaulted_entry,
+                example_inputs=[(m, x)],
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+                require_no_risky_drops=False,
+            )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            # Called without 'scale', so the served frame only binds it if the
+            # artifact carried the inner function's default.
+            self.assertEqual(loaded(m, x), _precompile_scaled_with_break(m, x))
+
+    def test_load_reports_cache_status_when_the_cache_is_stale(self):
+        # A cache whose code_hash is not this python_code's is stale: load runs
+        # python_code alone and says so on the handle, so a deployment that must
+        # not JIT can assert cache_status == "applied".
+        m, x, code, cache = self._dynamo_eager_artifact()
+        fresh = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(fresh.cache_status, "applied")
+        # A trailing comment keeps python_code valid but changes its sha256, so
+        # the cache no longer matches it.
+        stale = torch.compiler.precompile.load(code + "\n# drift\n", cache)
+        self.assertEqual(stale.cache_status, "stale")
+        with _maybe_scoped(stale), torch.no_grad():
+            self.assertEqual(stale(m, x), _precompile_plus_one(m, x))
+
+    def test_load_reports_cache_status_when_the_cache_is_incompatible(self):
+        # A cache from another torch build is acceleration load() cannot use:
+        # it runs python_code alone and says so on the handle, so a deployment
+        # that must not JIT can assert cache_status == "applied".
+        m, x, code, cache = self._dynamo_eager_artifact()
+        fresh = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(fresh.cache_status, "applied")
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        blob["version"] = 999
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        with self.assertLogs("torch._precompile", level="WARNING"):
+            foreign = torch.compiler.precompile.load(code, buf.getvalue())
+        self.assertEqual(foreign.cache_status, "incompatible")
+        with _maybe_scoped(foreign), torch.no_grad():
+            self.assertEqual(foreign(m, x), _precompile_plus_one(m, x))
+
+    def test_inlined_sources_to_check_keeps_torch_modules(self):
+        # TORCH_VERSION is baked at build time and does not change when an
+        # editable install's module is edited, so a standalone artifact records
+        # torch's own inlined sources and re-checks them, exactly as the
+        # installed mode does.
+        import dataclasses
+
+        from torch._dynamo.package import InlinedSource, SourceInfo
+        from torch._precompile import _inlined_sources_to_check
+
+        source_info = SourceInfo(
+            inlined_sources={
+                InlinedSource("torch.nn.functional", 1, 3, "abc"),
+                InlinedSource("__main__", 1, 3, "def"),
+            }
+        )
+        entry = dataclasses.replace(self._dynamo_entry_stub(), source_info=source_info)
+        recorded = _inlined_sources_to_check(entry)
+        modules = {m for m, *_ in recorded}
+        self.assertIn("torch.nn.functional", modules)
+        self.assertNotIn("__main__", modules)
+
+    def _dynamo_entry_stub(self):
+        from torch._precompile import _capture_session, _SessionHandle
+
+        session = _SessionHandle(
+            _capture_session(_precompile_single_graph, backend="eager", dynamic=False)
+        )
+        with session as call:
+            call(torch.randn(3))
+        return session._session._package.cache_entry()
+
+    def test_torch_module_source_change_is_rejected_in_both_serving_modes(self):
+        # A torch-tree module whose recorded source no longer matches is refused
+        # by the standalone driver (from INLINED_SOURCES) and by the installed
+        # path (CompilePackage's inlined-source check), so the two modes give
+        # one answer to an editable-install edit.
+        import dataclasses
+        import importlib
+        import re
+
+        from torch._dynamo.package import (
+            _hash_sourcelines,
+            CompilePackage,
+            InlinedSource,
+            SourceInfo,
+        )
+
+        module = "torch.nn.functional"
+        good = _hash_sourcelines(importlib.import_module(module), 1, 3)
+        bad = ("0" if good[-1] != "0" else "1").join((good[:-1], ""))
+
+        _, x, code, cache = self._dynamo_eager_artifact()
+
+        def with_checksum(checksum):
+            line = f"INLINED_SOURCES = [({module!r}, 1, 3, {checksum!r})]"
+            return re.sub(r"INLINED_SOURCES = .*", line, code, count=1)
+
+        # Standalone: the correct checksum loads, a tampered one is refused.
+        torch.compiler.precompile.load(with_checksum(good), cache)
+        with self.assertRaisesRegex(
+            PrecompileError, f"source code changes detected for {module}"
+        ):
+            torch.compiler.precompile.load(with_checksum(bad), cache)
+
+        # Installed: CompilePackage runs the same check on the cache entry.
+        entry = self._dynamo_entry_stub()
+        tampered = dataclasses.replace(
+            entry,
+            source_info=SourceInfo(inlined_sources={InlinedSource(module, 1, 3, bad)}),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, f"Source code changes detected for {module}"
+        ):
+            CompilePackage(_precompile_single_graph, tampered)
+
     def test_serve_filter_cannot_readmit_identity_guards(self):
         # A serve-time recompile serializes its guards through the package's
         # filter under strict_error, so a custom filter that REPLACED the
@@ -6726,22 +6868,22 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "positional-only"):
             loaded(m, t=x)
 
-    @parametrize("example", ["example_input", "sequence"])
-    def test_positional_example_inputs_are_pointed_at_the_keyword(self, example):
+    def test_positional_example_input_is_pointed_at_the_keyword(self):
         # A lone ExampleInput passed positionally is example_inputs missing its
-        # keyword -- it describes a call, it is not an argument of one. A lone
-        # list or tuple is NOT second-guessed by its contents: a function that
-        # takes one sequence is legitimate, and it takes the FutureWarning path
-        # as the 2.14 spelling of that single-argument call.
+        # keyword -- it describes a call, it is not an argument of one.
         x = torch.randn(2, 4)
-        if example == "example_input":
-            with self.assertRaisesRegex(
-                TypeError, r"ExampleInput positionally.*example_inputs=\[ExampleInput"
-            ):
-                torch.compiler.precompile(
-                    _precompile_plus_one, torch.compiler.ExampleInput((x,))
-                )
-            return
+        with self.assertRaisesRegex(
+            TypeError, r"ExampleInput positionally.*example_inputs=\[ExampleInput"
+        ):
+            torch.compiler.precompile(
+                _precompile_plus_one, torch.compiler.ExampleInput((x,))
+            )
+
+    def test_positional_sequence_is_the_single_argument_of_one_call(self):
+        # A lone list or tuple is NOT second-guessed by its contents: a function
+        # that takes one sequence is legitimate, and it takes the FutureWarning
+        # path as the 2.14 spelling of that single-argument call.
+        x = torch.randn(2, 4)
         with self.assertWarnsRegex(FutureWarning, "example_inputs"):
             code, cache = torch.compiler.precompile(
                 lambda seq: seq[0] + seq[1], [x, x], backend="eager"
@@ -6793,13 +6935,9 @@ class TestPrecompile(TestCase):
     def test_package_dataclasses_load_from_a_pickle_without_newer_fields(self):
         # A field added after an artifact was written comes back at its
         # default. A plain default is a class attribute and needs nothing; a
-        # default_factory field (system_info) is not, and needs __setstate__.
-        from torch._dynamo.package import (
-            _DynamoCacheEntry,
-            InlinedSource,
-            SourceInfo,
-            SystemInfo,
-        )
+        # field whose absence check_versions() rejects (system_info) comes back
+        # None, since there is nothing to compare the host against.
+        from torch._dynamo.package import _DynamoCacheEntry, InlinedSource, SourceInfo
 
         source = InlinedSource("m", 1, 2, "abc", content="body")
         old = copy.copy(source)
@@ -6825,7 +6963,7 @@ class TestPrecompile(TestCase):
         for name in newer:
             old.__dict__.pop(name)
         loaded = pickle.loads(pickle.dumps(old))
-        self.assertIsInstance(loaded.system_info, SystemInfo)
+        self.assertIsNone(loaded.system_info)
         self.assertIsNone(loaded.device_types)
         self.assertTrue(loaded.requires_native_backend_compatibility)
         self.assertIsNone(loaded.fn_name)
@@ -7355,12 +7493,12 @@ def _graph_devices_literal(code: str) -> str:
 
 
 class TestPrecompileNumerics(TestCase):
+    # Numeric-correctness tests run device-generically so the same coverage
+    # exercises the CUDA lowering, not just CPU.
+
     def setUp(self):
         _skip_make_fx_capture_under_dynamo(self)
         super().setUp()
-
-    # Numeric-correctness tests run device-generically so the same coverage
-    # exercises the CUDA lowering, not just CPU.
 
     def test_plain_function(self, device):
         def f(x, y):

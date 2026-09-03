@@ -152,9 +152,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        capture. It applies only to ``tracer="make_fx"``; the dynamo tracer lowers through
        the backend instead and rejects it.
    :param guard_filter_fn: Multi-graph serialization filter; returns one boolean per guard
-       entry. Live capture retains all guards so later examples trigger their recompiles.
-       Risky dropped guards are rejected by default when saving, and every
-       custom-filter drop counts as risky.
+       entry, composed (AND) with the default that drops the guards which cannot be
+       serialized, so a custom filter can only drop more. Live capture retains all guards
+       so later examples trigger their recompiles. Risky dropped guards are rejected by
+       default when saving, and every custom-filter drop counts as risky.
    :param recompile_limit: Maximum multi-graph variants captured per frame; ``None``
        means 256, which overrides a lower ambient accumulated-recompile limit for this
        capture. Applies only to ``tracer="dynamo"``.
@@ -162,7 +163,11 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param invariants: Optional path receiving the multi-graph invariant report.
    :param artifact_path: Optional file to write ``python_code`` to. Pass it together with
        ``cache_path`` -- the two halves load only as a matched pair, so naming one without
-       the other raises. Parent directories are created.
+       the other raises. Parent directories are created. Each file is written to a
+       ``<name>.<random>.tmp`` beside it and renamed into place: a symlink here is replaced
+       by a regular file (its target is left as it was), an existing file keeps its mode, a
+       new one gets what ``open()`` would create under the process umask, and a process
+       killed mid-write can leave the ``.tmp`` behind.
    :param cache_path: Optional file to write ``cache`` to; see ``artifact_path``.
    :param require_complete: Refuse to produce an artifact whose capture was incomplete --
        a call raised, no frame produced compiled code at all, a frame hit
@@ -186,7 +191,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        pair is written to those files and precompile returns instead what each
        ``example_inputs`` call RETURNED, in order, so a capture over real batches can hand
        their results on without a second forward. Only ``tracer="dynamo"`` runs the calls
-       for real; ``tracer="make_fx"`` traces under proxy tensors and returns ``[]``.
+       for real, so naming the paths with ``tracer="make_fx"`` is rejected before ``fn``
+       runs rather than returning nothing after it.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below).
 
@@ -262,12 +268,18 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        :class:`torch.compiler.PrecompiledCallable`, which additionally has ``unload()``
        and ``serve_time_compiles()`` and installs on entering or on the first call. A
        ``dynamo`` artifact of either type accepts keyword arguments; a ``make_fx`` one is
-       positional-only.
+       positional-only. Either kind has a ``cache_status`` attribute: ``"applied"`` when the
+       cache matched ``python_code`` and primed the kernel caches, else ``"stale"``,
+       ``"incompatible"``, ``"unreadable"`` or ``"prime_failed"`` saying why it was not
+       (see :attr:`torch.compiler.PrecompiledCallable.cache_status`); anything but
+       ``"applied"`` JITs at serve time where the cache would have primed.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
        fails to parse or is missing its calling-convention metadata), if ``cache`` is
        paired with a ``python_code`` of another ``backend`` or ``tracer``, if a ``dynamo``
        artifact was produced under another Python or torch version or its inlined sources
-       have changed, or if a runtime call violates the precompile contract. A cache whose
+       have changed (torch's own modules included, in both serving modes: the version
+       string does not see an edit to an editable install), or if a runtime call violates
+       the precompile contract. A cache whose
        ``code_hash`` is not this ``python_code``'s (a stale cache: a rewrite that died
        between its two files, or a pair from different calls) is not fatal -- ``load``
        warns and runs ``python_code`` alone.

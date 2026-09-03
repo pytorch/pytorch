@@ -5304,7 +5304,8 @@ def forward(self, tangents_1):
         self.assertFalse(detached.requires_grad)
         self.assertIsNone(detached.grad_fn)
 
-    def test_detach_output_aliasing_sibling_output(self):
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_detach_output_aliasing_sibling_output(self, backend):
         # No intermediate base here: h * 1 folds to h and detach() no-ops, so
         # two OUTPUT slots hold one object and marking the second marks the
         # first, dropping the only gradient in the model.
@@ -5327,7 +5328,7 @@ def forward(self, tangents_1):
         torch.manual_seed(0)
         mod = Net()
         x = torch.randn(3, requires_grad=True)
-        outs = torch.compile(mod, backend="inductor")(x)
+        outs = torch.compile(mod, backend=backend)(x)
         self.assertEqual(
             [(o.requires_grad, o.grad_fn is not None) for o in outs],
             [(o.requires_grad, o.grad_fn is not None) for o in out_ref],
