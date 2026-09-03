@@ -3048,6 +3048,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 instantiate_device_type_tests(TestProfilerDevice, globals())
 
 
+@instantiate_parametrized_tests
 class TestExperimentalUtils(TestCase):
     def make_tree(self) -> list[MockNode]:
         tree = {
@@ -3145,6 +3146,44 @@ class TestExperimentalUtils(TestCase):
         addr2line = torch._C._profiler.symbolize_addresses(addrs, "addr2line")
         self.assertEqual(len(fast), len(addrs))
         self.assertEqual(len(addr2line), len(fast))
+
+    @unittest.skipIf(
+        not IS_LINUX or not (IS_X86 or IS_ARM64), "linux x86/aarch64 only cpp unwinding"
+    )
+    @parametrize("dwarf_version", [2, 3, 4, 5])
+    def test_fast_symbolize_dwarf_versions(self, dwarf_version):
+        import _ctypes
+        import ctypes
+        import shutil
+
+        cc = shutil.which("gcc") or shutil.which("clang") or shutil.which("cc")
+        if cc is None:
+            self.skipTest("no C compiler available")
+        src = "int square(int x) {\n  int y = x * x;\n  return y + 1;\n}\n"
+        with tempfile.TemporaryDirectory() as d:
+            c_file = os.path.join(d, "square.c")
+            so_file = os.path.join(d, "libsquare.so")
+            with open(c_file, "w") as f:
+                f.write(src)
+            flags = ["-shared", "-fPIC", "-O0", f"-gdwarf-{dwarf_version}"]
+            cmd = [cc, *flags, "-o", so_file, c_file]
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            if r.returncode != 0:
+                self.skipTest(f"{cc} does not support {flags[-1]}: {r.stderr}")
+            lib = ctypes.CDLL(so_file)
+            try:
+                addr = ctypes.cast(lib.square, ctypes.c_void_p).value
+                # symbolize treats addresses as return addresses (pc - 1), so
+                # step a few bytes into the function body
+                frames = torch._C._profiler.symbolize_addresses([addr + 8], "fast")
+                filename, lineno, funcname = frames[0]
+            finally:
+                # unmap before the directory is deleted so later tests that
+                # walk /proc/self/maps do not see a deleted file
+                _ctypes.dlclose(lib._handle)
+            self.assertEqual(funcname, "square")
+            self.assertEqual(os.path.basename(filename), "square.c")
+            self.assertTrue(1 <= lineno <= 4, f"unexpected line {lineno}")
 
     def test_profiler_overload_names(self):
         from torch.library import _scoped_library, fallthrough_kernel

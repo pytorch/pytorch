@@ -33,12 +33,16 @@ struct DebugInfo {
         auto read = readSegmentOffset(L);
         offset = *rnglists_base_ + read;
       }
-      return version_ == 4 ? readRanges4(offset) : readRanges5(offset);
+      return version_ <= 4 ? readRanges4(offset) : readRanges5(offset);
     }
     if (!highpc_) {
       return {};
     }
-    return {{lowpc_, lowpc_ + *highpc_}};
+    auto lowpc = resolveAddr(lowpc_, lowpc_form_);
+    auto highpc = resolveAddr(*highpc_, highpc_form_);
+    bool absolute =
+        highpc_form_ == DW_FORM_addr || highpc_form_ == DW_FORM_addrx;
+    return {{lowpc, absolute ? highpc : lowpc + highpc}};
   }
 
   bool is64bit() {
@@ -54,7 +58,7 @@ struct DebugInfo {
     end_ = (const char*)L.loc() + length_;
     version_ = L.read<uint16_t>();
     UNWIND_CHECK(
-        version_ == 5 || version_ == 4,
+        version_ >= 2 && version_ <= 5,
         "unexpected dwarf version {}",
         version_);
     uint8_t address_size = 0;
@@ -85,6 +89,16 @@ struct DebugInfo {
     return s_.readSegmentOffset(L, is_64bit_);
   }
 
+  // DW_AT_addr_base may appear after DW_AT_low_pc in the CU DIE, so addrx
+  // indices are kept raw during parsing and resolved lazily in ranges()
+  uint64_t resolveAddr(uint64_t value, uint64_t form) {
+    if (form != DW_FORM_addrx) {
+      return value;
+    }
+    return s_.debug_addr.lexer(address_base_ + sizeof(uint64_t) * value)
+        .read<uint64_t>();
+  }
+
   uint64_t readEncoded(CheckedLexer& L, uint64_t encoding) {
     switch (encoding) {
       case DW_FORM_data8:
@@ -93,9 +107,7 @@ struct DebugInfo {
       case DW_FORM_data4:
         return L.read<uint32_t>();
       case DW_FORM_addrx: {
-        auto idx = L.readULEB128();
-        return s_.debug_addr.lexer(address_base_ + sizeof(uint64_t) * idx)
-            .read<uint64_t>();
+        return L.readULEB128();
       }
       case DW_FORM_sec_offset:
         return readSegmentOffset(L);
@@ -121,9 +133,13 @@ struct DebugInfo {
       }
       if (attr == DW_AT_low_pc) {
         lowpc_ = readEncoded(L, form);
+        lowpc_form_ = form;
         LOG_INFO("  lowpc {:x}\n", lowpc_);
       } else if (attr == DW_AT_high_pc) {
+        // DWARF 2/3 (and optionally later) encode high_pc as an absolute
+        // address rather than an offset from low_pc; see ranges()
         highpc_ = readEncoded(L, form);
+        highpc_form_ = form;
         range_ptr_ = std::nullopt;
         LOG_INFO("  highpc {:x}\n", *highpc_);
       } else if (attr == DW_AT_addr_base) {
@@ -138,9 +154,13 @@ struct DebugInfo {
       } else if (form == DW_FORM_string) {
         L.readCString();
       } else if (attr == DW_AT_stmt_list) {
-        UNWIND_CHECK(form == DW_FORM_sec_offset, "unexpected stmt_list form");
+        // DWARF 2/3 use data4/data8 here; DWARF 4+ use sec_offset
+        UNWIND_CHECK(
+            form == DW_FORM_sec_offset || form == DW_FORM_data4 ||
+                form == DW_FORM_data8,
+            "unexpected stmt_list form");
+        line_number_program_offset_ = readEncoded(L, form);
         LOG_INFO("  program table offset {:x}\n", *line_number_program_offset_);
-        line_number_program_offset_ = readSegmentOffset(L);
       } else if (form == DW_FORM_exprloc) {
         auto sz = L.readULEB128();
         L.skip(int64_t(sz));
@@ -197,11 +217,11 @@ struct DebugInfo {
           LOG_INFO("END RANGES\n");
           return ranges;
         case DW_RLE_base_addressx: {
-          base = readEncoded(L, DW_FORM_addrx);
+          base = resolveAddr(readEncoded(L, DW_FORM_addrx), DW_FORM_addrx);
           LOG_INFO("BASE ADDRX {:x}\n", base);
         } break;
         case DW_RLE_startx_length: {
-          auto s = readEncoded(L, DW_FORM_addrx);
+          auto s = resolveAddr(readEncoded(L, DW_FORM_addrx), DW_FORM_addrx);
           auto e = L.readULEB128();
           LOG_INFO("startx_length {:x} {:x}\n", s, e);
           ranges.emplace_back(s, s + e);
@@ -271,7 +291,9 @@ struct DebugInfo {
 
   std::optional<std::pair<uint64_t, uint8_t>> range_ptr_;
   uint64_t lowpc_ = 0;
+  uint64_t lowpc_form_ = DW_FORM_addr;
   std::optional<uint64_t> highpc_;
+  uint64_t highpc_form_ = DW_FORM_data8;
   uint16_t version_ = 0;
   uint64_t address_base_ = 0;
   std::optional<uint64_t> rnglists_base_;
