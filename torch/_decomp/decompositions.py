@@ -1270,6 +1270,13 @@ def logit_backward(
 @aten.dropout.default.py_impl(DispatchKey.Autograd)
 def dropout(input: Tensor, p: float, train: bool | None):
     if train and p != 0:
+        if input.is_complex():
+            # native_dropout's autograd node rejects complex outputs; inline the
+            # real-valued mask math so grad flows through the (complex-safe) mul.
+            if p == 1:
+                return torch.zeros_like(input)
+            bool_mask = torch.rand_like(input.real) > p
+            return bool_mask * input * (1.0 / (1.0 - p))
         return aten.native_dropout(input, p, train)[0]
     else:
         return input
