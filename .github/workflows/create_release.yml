@@ -68,21 +68,46 @@ jobs:
           cp .ci/docker/requirements-docs.txt docs/requirements.txt
       - name: Create source distribution
         run: |
+          # Staged entirely under /tmp. Anything this step leaves in the working
+          # tree is picked up by the PEP 517 sdist below, whose file walk uses
+          # gitignore semantics and so has no allowlist to exclude it: in 2.14.0
+          # the copy and the archive added ~1.55 GB and pushed the sdist over
+          # GitHub's release-asset cap.
           # Create new folder with specified name so extracting the archive yields that
           rm -rf "/tmp/$PT_RELEASE_NAME"
           cp -r "$PWD" "/tmp/$PT_RELEASE_NAME"
-          mv "/tmp/$PT_RELEASE_NAME" .
           # Cleanup
-          rm -rf "$PT_RELEASE_NAME"/.ci
-          find "$PT_RELEASE_NAME" -name '.git*' -exec rm -rv {} \; || true
+          rm -rf "/tmp/$PT_RELEASE_NAME/.ci"
+          find "/tmp/$PT_RELEASE_NAME" -name '.git*' -exec rm -rv {} \; || true
           # Create archive
-          tar -czf "$PT_RELEASE_FILE" "$PT_RELEASE_NAME"
-          echo "Created source archive $PT_RELEASE_FILE with content: $(ls -a "$PT_RELEASE_NAME")"
+          tar -czf "/tmp/$PT_RELEASE_FILE" -C /tmp "$PT_RELEASE_NAME"
+          echo "Created source archive $PT_RELEASE_FILE with content: $(ls -a "/tmp/$PT_RELEASE_NAME")"
+          rm -rf "/tmp/$PT_RELEASE_NAME"
       - name: Create PEP 517 compatible source distribution
         run: |
           pip install build==1.2.2.post1 || exit 1
           python -m build --sdist || exit 1
-          mv dist/$PT_PEP517_RELEASE_FILE . || exit 1
+          mv "dist/$PT_PEP517_RELEASE_FILE" . || exit 1
+          # Only now that the sdist walk is done does the plain archive enter the
+          # working tree.
+          mv "/tmp/$PT_RELEASE_FILE" . || exit 1
+      - name: Check release assets against GitHub's size cap
+        run: |
+          # GitHub rejects release assets of 2 GiB or more. This runs on every
+          # tag, so an rc trips it weeks ahead; the upload step that enforces it
+          # today is gated on `release: published` and fires once, too late to
+          # do anything about.
+          cap=2147483648
+          status=0
+          for f in "$PT_RELEASE_FILE" "$PT_PEP517_RELEASE_FILE"; do
+            sz=$(stat -c%s "$f")
+            echo "$f: $sz bytes"
+            if [ "$sz" -ge "$cap" ]; then
+              echo "::error::$f is $sz bytes, at or over GitHub's $cap-byte release-asset cap"
+              status=1
+            fi
+          done
+          exit "$status"
       - name: Upload source distribution for release
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
