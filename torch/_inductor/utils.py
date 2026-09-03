@@ -12,6 +12,7 @@ import inspect
 import io
 import itertools
 import logging
+import math
 import operator
 import os
 import platform
@@ -2809,8 +2810,30 @@ def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     )
 
 
+def _closest_decompose_k_splits(
+    splits: list[int], target: float, count: int = 2
+) -> list[int]:
+    """Return the splits nearest an occupancy target.
+
+    Log distance treats, for example, half and twice the target equally.  The
+    split count is the tie breaker so that the smaller FP32 partial workspace
+    wins when two candidates are otherwise equally attractive.
+    """
+    return sorted(
+        splits,
+        key=lambda split: (abs(math.log2(max(split, 1) / target)), split),
+    )[:count]
+
+
 @functools.cache
-def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
+def get_k_splits(
+    m: _IntLike,
+    n: _IntLike,
+    k: _IntLike,
+    num_sms: int | None = None,
+    ctas_per_tile: int = 1,
+    max_workspace_bytes: int | None = None,
+) -> list[int]:
     # To limit compile time
     k_splits_limit = config.triton.num_decompose_k_splits
 
@@ -2839,29 +2862,111 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
         if divisor <= max_k_split and divisor >= min_k_split
     ]
 
+    valid_divisors: list[int] = []
     pow_of_2_divisors, mul_of_32_divisors, rest_of_splits = [], [], []
 
     for d in divisors:
-        kPart = k // d
+        d_int = int(d)
+        kPart = int(k // d)
 
         # Smaller than 128 might not even fit in a single tile, BLOCK_K can be 128
         if kPart < 128:
             continue
 
+        valid_divisors.append(d_int)
+
         # Power of 2 divisors are best performing, conform to hardware
         if (kPart & kPart - 1) == 0 and kPart >= 128:
-            pow_of_2_divisors.append(d)
+            pow_of_2_divisors.append(d_int)
         # Else check if creates a multiple of 32
         elif kPart % 32 == 0:
-            mul_of_32_divisors.append(d)
+            mul_of_32_divisors.append(d_int)
         # otherwise, take the smallest values
         else:
-            rest_of_splits.append(d)
+            rest_of_splits.append(d_int)
 
     if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
         return pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
 
-    best_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
+    legacy_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
+
+    # On Blackwell the partial BMM can use a 2CTA kernel.  Ranking solely by
+    # K-part alignment can then badly over-split a skinny GEMM: once there are
+    # enough output tiles for a few GPU waves, additional splits mostly grow
+    # the FP32 partial workspace and the final-reduction traffic.
+    #
+    # Keep this device-aware path opt-in so existing CUDA/ROCm/XPU behavior is
+    # unchanged.  We use a conservative 64x64 output tile estimate, offer the
+    # two nearest exact divisors to each of the 1, 2, and 4 wave targets, and
+    # retain one nearest 8-wave candidate.  The normal end-to-end subgraph
+    # autotuner still makes the final choice.
+    if (
+        num_sms is not None
+        and num_sms > 0
+        and ctas_per_tile > 0
+        and (not isinstance(m, sympy.Expr) or m.is_number)
+        and (not isinstance(n, sympy.Expr) or n.is_number)
+    ):
+        m_hint, n_hint = int(m), int(n)
+        if max_workspace_bytes is not None:
+            valid_divisors = [
+                split
+                for split in valid_divisors
+                if split * m_hint * n_hint * 4 <= max_workspace_bytes
+            ]
+        if len(valid_divisors) <= k_splits_limit:
+            return valid_divisors
+
+        output_tiles = ((m_hint + 63) // 64) * ((n_hint + 63) // 64)
+        wave_targets = [
+            max(
+                2.0,
+                waves * num_sms / (output_tiles * ctas_per_tile),
+            )
+            for waves in (1, 2, 4, 8)
+        ]
+        occupancy_splits: list[int] = []
+        for target in wave_targets[:3]:
+            occupancy_splits.extend(
+                _closest_decompose_k_splits(valid_divisors, target, count=2)
+            )
+
+        occupancy_splits.extend(
+            _closest_decompose_k_splits(
+                valid_divisors, wave_targets[3], count=1
+            )
+        )
+
+        # Preserve one K-part-aligned fallback near the occupancy targets for
+        # vendor BMM shapes where alignment dominates.  This avoids reverting
+        # to an aligned but massively over-split candidate.
+        valid_divisor_set = set(valid_divisors)
+        aligned_splits = [
+            split
+            for split in pow_of_2_divisors + mul_of_32_divisors
+            if split in valid_divisor_set and split not in occupancy_splits
+        ]
+        if not aligned_splits:
+            aligned_splits = [
+                split
+                for split in legacy_splits
+                if split in valid_divisor_set and split not in occupancy_splits
+            ]
+        if aligned_splits:
+            aligned_fallback = min(
+                aligned_splits,
+                key=lambda split: (
+                    min(
+                        abs(math.log2(split / target)) for target in wave_targets
+                    ),
+                    split,
+                ),
+            )
+            occupancy_splits.append(aligned_fallback)
+        best_splits = list(dict.fromkeys(occupancy_splits))
+    else:
+        best_splits = legacy_splits
+
     # Otherwise, conform results to k_splits_limit
     return best_splits[:k_splits_limit]
 
