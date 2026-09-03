@@ -102,8 +102,12 @@ bool ExtraState::has_any_cache_entries() const {
   return this->total_cache_entry_count > 0;
 }
 
-bool ExtraState::has_relevant_entries(int64_t isolate_recompiles_id) const {
+bool ExtraState::has_relevant_entries(int64_t isolate_recompiles_id) {
+  // Reaped nodes die AFTER the lock releases (locals declared before it).
+  std::list<PrecompileEntry> reaped_precompile;
+  std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
   CacheLock lock(this->cache_mutex);
+  this->apply_pending_evictions(reaped_precompile, reaped_cache);
   return this->cache_entry_map.count(isolate_recompiles_id) > 0 ||
       (isolate_recompiles_id >= 0 && this->cache_entry_map.count(-1) > 0);
 }
@@ -147,7 +151,12 @@ void ExtraState::invalidate_locked(
   if (live_entry != nullptr) {
     CHECK(live_entry->_owner == this);
     CHECK(live_entry == &*live_entry->_owner_loc);
-    live_entry->invalidate(py::object(deleted_guard_manager));
+    {
+      // Runs Python (attribute stores, decrefs) that can re-enter this state;
+      // the depth makes a nested reset park instead of destroying live_entry.
+      CachePythonDepth python_depth(this);
+      live_entry->invalidate(py::object(deleted_guard_manager));
+    }
     // Move the cache entry to the end of the list because these will always
     // return False.
     this->move_to_back(live_entry);
@@ -155,6 +164,11 @@ void ExtraState::invalidate_locked(
 }
 
 void ExtraState::drain_pending_invalidations() {
+  if (this->cache_python_depth != 0) {
+    // invalidate_locked relinks a list that a lookup below this frame on this
+    // thread is iterating; the next depth-zero holder drains instead.
+    return;
+  }
   if (!this->has_pending_invalidations.load(std::memory_order_acquire)) {
     return;
   }
@@ -258,13 +272,16 @@ void ExtraState::invalidate(
   {
     std::unique_lock<std::recursive_mutex> lock(
         this->cache_mutex, std::try_to_lock);
-    if (!lock.owns_lock()) {
+    if (!lock.owns_lock() || this->cache_python_depth > 0) {
       // NEVER block on cache_mutex here: invalidate is reached from
       // weakref.finalize, which GC can fire during guard evaluation while
       // ANOTHER ExtraState's cache_mutex is held. Two threads doing that
       // against each other's states would deadlock -- CacheLock releases only
       // the GIL, not the peer's lock. Park the request instead; the next
       // holder of cache_mutex (lookup, or a later invalidate) applies it.
+      // Park too when the recursive mutex admits this call from Python run BY
+      // this state's in-flight lookup: move_to_back would relink the list that
+      // lookup is iterating.
       std::lock_guard<std::mutex> pending_lock(
           this->pending_invalidation_mutex);
       this->pending_invalidations.emplace_back(
@@ -295,13 +312,14 @@ void ExtraState::clear_in_place() {
   {
     CacheLock lock(this->cache_mutex);
     if (this->cache_python_depth > 0) {
-      // This thread is INSIDE lookup()'s guard evaluation (the recursive
-      // cache_mutex is how we got here, via Python run by a guard reaching
-      // reset_code): that lookup holds live iterators into these lists, so
-      // neither destroying nor even relinking their nodes is safe. Park the
-      // clear; the next depth-zero cache_mutex holder applies it. The clear
-      // landing "just after" the interrupted lookup matches the pre-existing
-      // asynchrony of a reset racing a lookup from another thread.
+      // This thread is INSIDE Python run by a holder of this lock, typically
+      // lookup()'s guard evaluation (the recursive cache_mutex is how we got
+      // here, via Python run by a guard reaching reset_code): that lookup
+      // holds live iterators into these lists, so neither destroying nor even
+      // relinking their nodes is safe. Park the clear; the next depth-zero
+      // cache_mutex holder applies it. The clear landing "just after" the
+      // interrupted lookup matches the pre-existing asynchrony of a reset
+      // racing a lookup from another thread.
       this->park_eviction(
           PendingEviction{PendingEviction::CLEAR_ALL, -1, py::none()});
     } else {
@@ -319,6 +337,7 @@ void ExtraState::clear_in_place() {
   {
     std::lock_guard<std::mutex> lock(this->pending_invalidation_mutex);
     dead_pending.swap(this->pending_invalidations);
+    this->has_pending_invalidations.store(false, std::memory_order_release);
   }
   // frame_state itself is only touched under the GIL (see
   // extract_frame_state), which the caller holds. The fresh dict is built
@@ -661,7 +680,7 @@ void lookup(
   for (const auto& entry : extra_state->precompile_entries) {
     if (entry.isolate_recompiles_id == isolate_recompiles_id &&
         torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
-      *maybe_cached_code = entry.code.ptr();
+      *maybe_cached_code = entry.code.inc_ref().ptr();
       return;
     }
   }
@@ -697,11 +716,11 @@ void lookup(
     if (use_lru) {
       extra_state->move_to_front(found, *found_list);
     }
-    *maybe_cached_code = found->code.ptr();
+    *maybe_cached_code = found->code.inc_ref().ptr();
     *trace_annotation = found->trace_annotation;
     return;
   }
-  *maybe_cached_code = py::none().ptr();
+  *maybe_cached_code = py::none().release().ptr();
 }
 
 bool try_lookup_without_guard_eval(
@@ -738,7 +757,7 @@ bool try_lookup_without_guard_eval(
     // may pass.
     if (torch::dynamo::root_guard_manager_has_no_guards(
             first_precompile_entry->root_mgr)) {
-      *maybe_cached_code = first_precompile_entry->code.ptr();
+      *maybe_cached_code = first_precompile_entry->code.inc_ref().ptr();
       return true;
     }
     return false;
@@ -764,12 +783,12 @@ bool try_lookup_without_guard_eval(
     if (use_lru) {
       extra_state->move_to_front(found, *found_list);
     }
-    *maybe_cached_code = found->code.ptr();
+    *maybe_cached_code = found->code.inc_ref().ptr();
     *trace_annotation = found->trace_annotation;
     return true;
   }
 
-  *maybe_cached_code = Py_None;
+  *maybe_cached_code = py::none().release().ptr();
   return true;
 }
 
@@ -818,7 +837,14 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
+    // Reaped nodes die AFTER the lock releases (locals declared before it).
+    std::list<PrecompileEntry> reaped_precompile;
+    std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
     CacheLock lock(extra->cache_mutex);
+    extra->apply_pending_evictions(reaped_precompile, reaped_cache);
+    extra->drain_pending_invalidations();
+    // py::cast below runs Python; same re-entrancy rule as lookup().
+    CachePythonDepth python_depth(extra);
     // Sort by isolate_recompiles_id for deterministic iteration order.
     std::vector<int64_t> ids;
     ids.reserve(extra->cache_entry_map.size());
@@ -845,7 +871,14 @@ py::list _get_cache_entries_for_region(
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
+    // Reaped nodes die AFTER the lock releases (locals declared before it).
+    std::list<PrecompileEntry> reaped_precompile;
+    std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
     CacheLock lock(extra->cache_mutex);
+    extra->apply_pending_evictions(reaped_precompile, reaped_cache);
+    extra->drain_pending_invalidations();
+    // py::cast below runs Python; same re-entrancy rule as lookup().
+    CachePythonDepth python_depth(extra);
     auto it = extra->cache_entry_map.find(isolate_recompiles_id);
     if (it != extra->cache_entry_map.end()) {
       for (CacheEntry& e : it->second) {
@@ -854,6 +887,24 @@ py::list _get_cache_entries_for_region(
     }
   }
   return result;
+}
+
+size_t _get_cache_entry_count_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id) {
+  TORCH_CHECK_TYPE(PyCode_Check(code_obj.ptr()), "expected a code object!");
+  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  ExtraState* extra = get_extra_state(code);
+  if (extra == nullptr) {
+    return 0;
+  }
+  // Reaped nodes die AFTER the lock releases (locals declared before it).
+  std::list<PrecompileEntry> reaped_precompile;
+  std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
+  CacheLock lock(extra->cache_mutex);
+  extra->apply_pending_evictions(reaped_precompile, reaped_cache);
+  auto it = extra->cache_entry_map.find(isolate_recompiles_id);
+  return it == extra->cache_entry_map.end() ? 0 : it->second.size();
 }
 
 void _clear_cache_entries_for_region(
@@ -925,7 +976,11 @@ size_t _get_total_cache_entry_count(const py::handle& code_obj) {
   if (extra == nullptr) {
     return 0;
   }
+  // Reaped nodes die AFTER the lock releases (locals declared before it).
+  std::list<PrecompileEntry> reaped_precompile;
+  std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
   CacheLock lock(extra->cache_mutex);
+  extra->apply_pending_evictions(reaped_precompile, reaped_cache);
   return extra->total_cache_entry_count;
 }
 
