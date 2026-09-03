@@ -98,6 +98,21 @@ _TIMED_FIELDS: dict[int, tuple[int, int, int, int]] = {
 _EXTERNAL = int(ActivityKind.EXTERNAL_CORRELATION)
 
 
+def _bucket_name(annotation: Any) -> str:
+    """The bucket a graph node's spans belong in, given what its resolver returned.
+
+    A graph annotation resolver hands back the node's whole annotation, which the trace
+    exporters spread field by field; timing buckets by one string, so take the ``name``
+    that names the region (a resolver returning a plain name is used as-is). An
+    annotation carrying no ``name`` is not a named region: its spans land in the ``""``
+    bucket, where the eager-name join gets a chance at them and they are otherwise
+    reported as unnamed -- same as work no resolver claimed.
+    """
+    if isinstance(annotation, dict):
+        annotation = annotation.get("name")
+    return str(annotation) if annotation else ""
+
+
 class NodeTimerObserver(CuptiMonitorObserver):
     """Buffers raw per-activity ``(graph_node_id, start_ns, end_ns, stream_id)`` spans the
     monitor delivers; :meth:`drain` returns them as flat numpy columns. Construct with
@@ -258,11 +273,11 @@ class NodeTimerObserver(CuptiMonitorObserver):
         span_names = np.empty(len(gnode), dtype=object)
         span_names[:] = ""
 
-        resolver = self._resolver
+        resolver = self._annotation_resolver
         if resolver is not None:
             uniq_g, inv_g = np.unique(gnode, return_inverse=True)
             g_names = np.array(
-                [(resolver(int(g)) or "") if g else "" for g in uniq_g.tolist()],
+                [_bucket_name(resolver(int(g))) if g else "" for g in uniq_g.tolist()],
                 dtype=object,
             )
             span_names = g_names[inv_g]

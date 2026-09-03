@@ -1,201 +1,201 @@
-name,accuracy,graph_breaks
+name,accuracy,graph_breaks,calls_captured,fallbacks_to_eager
 
 
 
-BERT_pytorch,pass,6
+BERT_pytorch,pass,6,547,0
 
 
 
-Background_Matting,pass_due_to_skip,0
+Background_Matting,pass_due_to_skip,0,0,0
 
 
 
-LearningToPaint,pass,6
+LearningToPaint,pass,6,75,0
 
 
 
-Super_SloMo,pass,7
+Super_SloMo,pass,7,671,0
 
 
 
-alexnet,pass,6
+alexnet,pass,6,26,0
 
 
 
-basic_gnn_edgecnn,pass,20
+basic_gnn_edgecnn,pass,20,102,2
 
 
 
-basic_gnn_gcn,pass,13
+basic_gnn_gcn,pass,13,98,1
 
 
 
-basic_gnn_gin,pass,7
+basic_gnn_gin,pass,7,109,0
 
 
 
-basic_gnn_sage,pass,7
+basic_gnn_sage,pass,7,106,0
 
 
 
-dcgan,pass,6
+dcgan,pass,6,17,0
 
 
 
-demucs,pass,9
+demucs,pass,9,88,1
 
 
 
-densenet121,pass,6
+densenet121,pass,6,435,0
 
 
 
-detectron2_maskrcnn_r_50_c4,eager_fail_to_run,0
+detectron2_maskrcnn_r_50_c4,eager_fail_to_run,0,0,0
 
 
 
-dlrm,pass,6
+dlrm,pass,6,40,0
 
 
 
-drq,pass,7
+drq,pass,7,136,0
 
 
 
-fastNLP_Bert,pass,10
+fastNLP_Bert,pass,10,448,1
 
 
 
-functorch_dp_cifar10,pass,7
+functorch_dp_cifar10,pass,7,276,0
 
 
 
-functorch_maml_omniglot,pass,7
+functorch_maml_omniglot,pass,7,77,0
 
 
 
-lennard_jones,pass,7
+lennard_jones,pass,7,60,0
 
 
 
-llava,model_fail_to_load,0
+llava,model_fail_to_load,0,0,0
 
 
 
-maml_omniglot,pass,7
+maml_omniglot,pass,7,77,0
 
 
 
-microbench_unbacked_tolist_sum,pass,9
+microbench_unbacked_tolist_sum,pass,9,26,2
 
 
 
-mnasnet1_0,pass,7
+mnasnet1_0,pass,7,647,0
 
 
 
-mobilenet_v2,pass,6
+mobilenet_v2,pass,6,157,0
 
 
 
-mobilenet_v2_quantized_qat,eager_fail_to_run,0
+mobilenet_v2_quantized_qat,eager_fail_to_run,0,0,0
 
 
 
-mobilenet_v3_large,pass,7
+mobilenet_v3_large,pass,7,730,0
 
 
 
-moco,pass,13
+moco,pass,13,887,0
 
 
 
-nanogpt,pass,7
+nanogpt,pass,7,858,0
 
 
 
-nvidia_deeprecommender,pass,7
+nvidia_deeprecommender,pass,7,70,0
 
 
 
-opacus_cifar10,eager_fail_to_run,0
+opacus_cifar10,eager_fail_to_run,0,0,0
 
 
 
-phlippe_densenet,pass,6
+phlippe_densenet,pass,6,190,0
 
 
 
-phlippe_resnet,pass,6
+phlippe_resnet,pass,6,75,0
 
 
 
-pytorch_stargan,pass,6
+pytorch_stargan,pass,6,60,0
 
 
 
-pytorch_unet,pass_due_to_skip,7
+pytorch_unet,pass_due_to_skip,7,314,0
 
 
 
-resnet152,pass,7
+resnet152,pass,7,1937,0
 
 
 
-resnet18,pass,6
+resnet18,pass,6,73,0
 
 
 
-resnet50,pass,6
+resnet50,pass,6,179,0
 
 
 
-resnet50_quantized_qat,eager_fail_to_run,0
+resnet50_quantized_qat,eager_fail_to_run,0,0,0
 
 
 
-resnext50_32x4d,pass,7
+resnext50_32x4d,pass,7,679,0
 
 
 
-sam,eager_fail_to_run,0
+sam,eager_fail_to_run,0,0,0
 
 
 
-shufflenet_v2_x1_0,pass,6
+shufflenet_v2_x1_0,pass,6,275,0
 
 
 
-soft_actor_critic,pass,6
+soft_actor_critic,pass,6,56,0
 
 
 
-speech_transformer,pass,16
+speech_transformer,pass,16,1460,1
 
 
 
-squeezenet1_1,pass,6
+squeezenet1_1,pass,6,70,0
 
 
 
-torch_multimodal_clip,pass,7
+torch_multimodal_clip,pass,7,1318,0
 
 
 
-torchrec_dlrm,pass,6
+torchrec_dlrm,pass,6,0,0
 
 
 
-tts_angular,pass,9
+tts_angular,pass,9,70,1
 
 
 
-vgg16,pass,6
+vgg16,pass,6,44,0
 
 
 
-vision_maskrcnn,fail_to_run,38
+vision_maskrcnn,fail_to_run,33,1236,8
 
 
 
-yolov3,pass,8
+yolov3,pass,8,1374,0

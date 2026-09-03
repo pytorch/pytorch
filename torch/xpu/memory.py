@@ -74,6 +74,18 @@ def memory_stats_as_nested_dict(device: Device = None) -> dict[str, Any]:
     return torch._C._xpu_memoryStats(device)
 
 
+def _recurse_add_to_result(
+    result: list[tuple[str, Any]], prefix: str, obj: Any
+) -> None:
+    if isinstance(obj, dict):
+        if prefix:
+            prefix += "."
+        for key, value in obj.items():
+            _recurse_add_to_result(result, prefix + key, value)
+    else:
+        result.append((prefix, obj))
+
+
 def memory_stats(device: Device = None) -> dict[str, Any]:
     r"""Return a dictionary of XPU memory allocator statistics for a given device.
 
@@ -114,17 +126,8 @@ def memory_stats(device: Device = None) -> dict[str, Any]:
     """
     result = []
 
-    def _recurse_add_to_result(prefix: str, obj: Any) -> None:
-        if isinstance(obj, dict):
-            if len(prefix) > 0:
-                prefix += "."
-            for k, v in obj.items():
-                _recurse_add_to_result(prefix + k, v)
-        else:
-            result.append((prefix, obj))
-
     stats = memory_stats_as_nested_dict(device=device)
-    _recurse_add_to_result("", stats)
+    _recurse_add_to_result(result, "", stats)
     result.sort()
 
     return collections.OrderedDict(result)
@@ -601,7 +604,7 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
     Args:
         pool(torch.xpu.MemPool): a :class:`MemPool` object to be made active so that
             allocations route to this pool.
-        device (torch.device or int, optional): selected device. Uses :class:`MemPool on
+        device (torch.device or int, optional): selected device. Uses :class:`MemPool` on
             the current device, given by :func:`~torch.xpu.current_device`,
             if :attr:`device` is ``None`` (default).
 

@@ -2,201 +2,93 @@
 
 #ifdef USE_C10D_NCCL
 
-#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <fmt/core.h>
 #include <nccl.h>
-#include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/StoreManager.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
+#include <cstring>
+#include <exception>
 #include <set>
 
 namespace c10d::nccl2 {
-
-// Initialize the static counter
-int NCCLBootstrap::counter_ = 0;
-
-const std::string kUniqueidXchgMethodAuto = "auto";
-const std::string kUniqueidXchgMethodTCPStore = "tcpstore";
-const std::string kUniqueidXchgMethodDefault = kUniqueidXchgMethodAuto;
 
 NCCLBootstrap::NCCLBootstrap(
     c10::intrusive_ptr<c10d::Store> store,
     c10::Device device,
     int rank,
     int comm_size,
+    uint64_t generation,
     std::shared_ptr<NcclApi> nccl_api,
-    std::shared_ptr<CudaApi> cuda_api,
     std::chrono::milliseconds timeout)
     : timeout_(timeout),
+      generation_(generation),
       store_(std::move(store)),
-      created_internal_store_(false),
       device_(device),
       nccl_api_(std::move(nccl_api)),
-      cuda_api_(std::move(cuda_api)) {
-  // Rank/size come from the c10d Backend ctor. Upstream torchcomms queried
-  // these from TORCHCOMM_RANK/SIZE env (query_ranksize); under c10d they are
-  // known explicitly, so we use them directly.
-  rank_ = rank;
-  comm_size_ = comm_size;
-
-  const char* uniqueid_xchg_env =
-      std::getenv("TORCHCOMM_NCCL_BOOTSTRAP_UNIQUEID_EXCHANGE_METHOD");
-  if (uniqueid_xchg_env == nullptr) {
-    TC_LOG(INFO)
-        << "TORCHCOMM_NCCL_BOOTSTRAP_UNIQUEID_EXCHANGE_METHOD not set, "
-        << "defaulting to " << kUniqueidXchgMethodDefault;
-    uniqueid_xchg_method_ = kUniqueidXchgMethodDefault;
-  } else {
-    uniqueid_xchg_method_ = uniqueid_xchg_env;
-  }
-  std::transform(
-      uniqueid_xchg_method_.begin(),
-      uniqueid_xchg_method_.end(),
-      uniqueid_xchg_method_.begin(),
-      [](unsigned char c) { return std::tolower(c); });
+      rank_(rank),
+      comm_size_(comm_size) {
+  TORCH_CHECK(store_ != nullptr, "NCCLBootstrap requires a store");
 
   if (device_.index() == -1) {
-    int device_count;
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->getDeviceCount(&device_count),
-        "Failed to get CUDA device count");
-
-    device_ = c10::Device(c10::kCUDA, rank_ % device_count);
+    const auto device_count = c10::cuda::device_count_ensure_non_zero();
+    device_ = c10::Device(
+        c10::kCUDA, static_cast<c10::DeviceIndex>(rank_ % device_count));
     TC_LOG(INFO) << "User did not provide device ID; using device cuda:"
                  << static_cast<int>(device_.index());
   }
-
-  CUDA_CHECK(
-      cuda_api_,
-      cuda_api_->setDevice(device_.index()),
-      fmt::format("Failed to set device to {}", device_.index()));
-
-  // Allocate CUDA memory for a single float32 value used in barrier operations
-  CUDA_CHECK(
-      cuda_api_,
-      cuda_api_->malloc(&barrier_buffer_, sizeof(float)),
-      "Failed to allocate barrier buffer");
-}
-
-NCCLBootstrap::~NCCLBootstrap() noexcept {
-  if (barrier_buffer_ != nullptr) {
-    CUDA_CHECK_IGNORE(
-        cuda_api_,
-        cuda_api_->free(barrier_buffer_),
-        "Failed to free barrier buffer");
-    barrier_buffer_ = nullptr;
-  }
-}
-
-std::string NCCLBootstrap::getNCCLStoreKey() {
-  std::string key = fmt::format("{}{}", getNCCLStoreKeyPrefix(), counter_);
-  counter_++;
-  return key;
-}
-
-std::string NCCLBootstrap::getNCCLStoreKeyPrefix() {
-  return "nccl_storekey_";
-};
-
-int NCCLBootstrap::getNCCLStoreKeyCounter() {
-  return counter_;
-}
-
-ncclUniqueId NCCLBootstrap::exchangeUniqueIdStore() {
-  ncclUniqueId uniqueId;
-
-  auto key = getNCCLStoreKey();
-  if (rank_ == 0) {
-    // Generate unique ID on rank 0
-    ncclResult_t ncclErr = nccl_api_->getUniqueId(&uniqueId);
-    if (ncclErr != ncclSuccess) {
-      throw std::runtime_error(
-          "Failed to get NCCL unique ID: " +
-          std::string(nccl_api_->getErrorString(ncclErr)));
-    }
-
-    // Set the unique ID in the store
-    std::vector<uint8_t> vec(
-        reinterpret_cast<uint8_t*>(&uniqueId),
-        reinterpret_cast<uint8_t*>(&uniqueId) + sizeof(uniqueId));
-    store_->set(key, vec);
-  } else {
-    // Other ranks read the broadcast ID
-    store_->wait({key}, timeout_);
-    auto vec = store_->get(key);
-    if (vec.size() != sizeof(ncclUniqueId)) {
-      throw std::runtime_error("Invalid NCCL unique ID size");
-    }
-    uniqueId = *(reinterpret_cast<const ncclUniqueId*>(vec.data()));
-  }
-
-  return uniqueId;
-}
-
-ncclUniqueId NCCLBootstrap::exchangeUniqueIdTCPStore(std::string_view name) {
-  store_ = createPrefixStore(std::string(name), timeout_);
-  created_internal_store_ = true;
-
-  return exchangeUniqueIdStore();
-}
-
-bool NCCLBootstrap::isTCPStoreEnabled() {
-  return std::getenv("MASTER_ADDR") && std::getenv("MASTER_PORT");
 }
 
 ncclUniqueId NCCLBootstrap::exchangeUniqueId(std::string_view name) {
-  if (store_ != nullptr) {
-    return exchangeUniqueIdStore();
-  }
-
-  bool is_tcp_store_enabled = isTCPStoreEnabled();
-  if (uniqueid_xchg_method_ != kUniqueidXchgMethodAuto &&
-      uniqueid_xchg_method_ != kUniqueidXchgMethodTCPStore) {
-    throw std::runtime_error(
-        "Invalid unique ID exchange method " + uniqueid_xchg_method_);
-  }
-  if (!is_tcp_store_enabled) {
-    throw std::runtime_error("No way to exchange unique ID");
-  }
-  return exchangeUniqueIdTCPStore(name);
+  return exchangeUniqueIds(name, 1).front();
 }
 
-void NCCLBootstrap::cleanupTCPStore(ncclComm_t nccl_comm) {
-  if (created_internal_store_) {
-    // Delete the internal store object and do a barrier to ensure that all
-    // processes have deleted their store object too.  This way, when we
-    // create the next torchcomm, we can use the same port to create a new store
-    // object.
-    store_.reset();
+std::vector<ncclUniqueId> NCCLBootstrap::exchangeUniqueIds(
+    std::string_view name,
+    int numIds) {
+  TORCH_INTERNAL_ASSERT(numIds > 0 && numIds <= comm_size_);
 
-    auto stream = cuda_api_->getCurrentCUDAStream(device_.index());
-    ncclResult_t result = nccl_api_->allReduce(
-        barrier_buffer_,
-        barrier_buffer_,
-        1,
-        ncclFloat32,
-        ncclSum,
-        nccl_comm,
-        stream);
-    if (result != ncclSuccess) {
-      TC_LOG(ERROR) << "NCCL AllReduce failed: "
-                    << nccl_api_->getErrorString(result);
-    }
-
-    CUDA_CHECK(
-        cuda_api_,
-        cuda_api_->streamSynchronize(stream),
-        "Stream synchronization failed");
+  auto store =
+      c10::make_intrusive<::c10d::PrefixStore>(std::string(name), store_);
+  auto keyPrefix = fmt::format("nccl_storekey_{}", generation_);
+  std::vector<std::string> keys;
+  keys.reserve(numIds);
+  for (int index = 0; index < numIds; ++index) {
+    keys.push_back(
+        numIds == 1 ? keyPrefix : fmt::format("{}_{}", keyPrefix, index));
   }
+
+  const int rootIndex = detail::getRootIndex(rank_, comm_size_, numIds);
+  if (rootIndex >= 0) {
+    ncclUniqueId uniqueId;
+    const ncclResult_t ncclErr = nccl_api_->getUniqueId(&uniqueId);
+    TORCH_CHECK(
+        ncclErr == ncclSuccess,
+        "Failed to get NCCL unique ID: ",
+        nccl_api_->getErrorString(ncclErr));
+
+    std::vector<uint8_t> vec(
+        reinterpret_cast<uint8_t*>(&uniqueId),
+        reinterpret_cast<uint8_t*>(&uniqueId) + sizeof(uniqueId));
+    store->set(keys[static_cast<size_t>(rootIndex)], vec);
+  }
+
+  store->wait(keys, timeout_);
+  auto values = store->multiGet(keys);
+  std::vector<ncclUniqueId> uniqueIds(numIds);
+  for (int index = 0; index < numIds; ++index) {
+    TORCH_CHECK(
+        values[index].size() == sizeof(ncclUniqueId),
+        "Invalid NCCL unique ID size");
+    std::memcpy(&uniqueIds[index], values[index].data(), sizeof(ncclUniqueId));
+  }
+  return uniqueIds;
 }
 
-// TorchComm-layer hint keys that are consumed by the backend init code
-// (ProcessGroupNCCL::init), not by ncclConfig.  Skip them here to avoid
-// spurious "unsupported hint" warnings.
+// TorchComm-layer hint keys that are not part of ncclConfig.
 static const std::set<std::string> kLayerHints = {
     "is_high_priority_stream",
     std::string(kHintMaxEventPoolSize),
@@ -266,7 +158,8 @@ void populateNcclConfigFromHints(
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.nvlsCTAs=" << config.nvlsCTAs;
     }
-#elif NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
     else if (key == "nChannelsPerNetPeer" || key == "n_channels_per_net_peer") {
       config.nChannelsPerNetPeer = std::stoi(val);
       TC_LOG(INFO) << "[comm=" << name
@@ -276,6 +169,13 @@ void populateNcclConfigFromHints(
       config.nvlinkCentricSched = std::stoi(val);
       TC_LOG(INFO) << "[comm=" << name << "] Setting config.nvlinkCentricSched="
                    << config.nvlinkCentricSched;
+    }
+#endif
+#ifdef NCCL_HAS_HOST_CFT_MODE
+    else if (key == "hostCftMode" || key == "host_cft_mode") {
+      config.hostCftMode = std::stoi(val);
+      TC_LOG(INFO) << "[comm=" << name
+                   << "] Setting config.hostCftMode=" << config.hostCftMode;
     }
 #endif
     else {
@@ -289,32 +189,65 @@ void populateNcclConfigFromHints(
 
 ncclComm_t NCCLBootstrap::createNcclComm(
     const std::string& name,
-    const std::unordered_map<std::string, std::string>& hints) {
-  ncclUniqueId uniqueId;
+    const ncclConfig_t& base_config) {
+  c10::cuda::CUDAGuard gpuGuard(device_);
   ncclComm_t nccl_comm = nullptr;
 
-  uniqueId = exchangeUniqueId(name);
-
   // TODO: add logging on failures and successes
-  // TODO: use scalable init
   // TODO: get the local rank
-  ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+  ncclConfig_t config = base_config;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
   config.commName = name.c_str();
 #endif
 
-  // Populate NCCL config from user-provided hints
-  populateNcclConfigFromHints(config, hints, name);
+  constexpr int kDefaultRanksPerRoot = 128;
+  const int ranksPerRoot =
+      getCvarInt({"TORCH_NCCL_RANKS_PER_ROOT"}, kDefaultRanksPerRoot);
+  TORCH_CHECK_VALUE(
+      ranksPerRoot > 0, "TORCH_NCCL_RANKS_PER_ROOT must be greater than zero");
 
-  ncclResult_t ncclErr = nccl_api_->commInitRankConfig(
-      &nccl_comm, comm_size_, uniqueId, rank_, &config);
-  if (ncclErr != ncclSuccess || nccl_comm == nullptr) {
-    throw std::runtime_error(
-        "Failed to initialize NCCL communicator: " +
-        std::string(nccl_api_->getErrorString(ncclErr)));
+  ncclResult_t ncclErr = ncclInvalidUsage;
+  if (comm_size_ > ranksPerRoot) {
+    const int numRoots = (comm_size_ + ranksPerRoot - 1) / ranksPerRoot;
+    auto uniqueIds = exchangeUniqueIds(name, numRoots);
+    TC_LOG(INFO) << "[comm=" << name << "] Using scalable NCCL init with "
+                 << numRoots << " roots";
+    ncclErr = nccl_api_->commInitRankScalable(
+        &nccl_comm,
+        comm_size_,
+        rank_,
+        static_cast<int>(uniqueIds.size()),
+        uniqueIds.data(),
+        &config);
+  } else {
+    const auto uniqueId = exchangeUniqueId(name);
+    ncclErr = nccl_api_->commInitRankConfig(
+        &nccl_comm, comm_size_, uniqueId, rank_, &config);
   }
-
-  cleanupTCPStore(nccl_comm);
+  TORCH_CHECK(
+      nccl_comm != nullptr,
+      "Failed to initialize NCCL communicator: ",
+      nccl_api_->getErrorString(ncclErr));
+  try {
+    waitForNcclCompletion(
+        *nccl_api_,
+        nccl_comm,
+        ncclErr,
+        timeout_,
+        "Failed to initialize NCCL communicator");
+  } catch (...) {
+    try {
+      waitForNcclCompletion(
+          *nccl_api_,
+          nccl_comm,
+          nccl_api_->commAbort(nccl_comm),
+          timeout_,
+          "Failed to abort NCCL communicator after initialization failure");
+    } catch (const std::exception& e) {
+      LOG(ERROR) << e.what();
+    }
+    throw;
+  }
 
   return nccl_comm;
 }

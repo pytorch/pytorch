@@ -6,13 +6,16 @@
 struct AOTIMetalKernelFunctionOpaque;
 using AOTIMetalKernelFunctionHandle = AOTIMetalKernelFunctionOpaque*;
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 struct AOTIMetalShaderLibraryOpaque;
 using AOTIMetalShaderLibraryHandle = AOTIMetalShaderLibraryOpaque*;
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 // MetalShaderLibrary functions
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_create_shader_library(
     const char* metal_shader_source,
@@ -29,6 +32,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_get_kernel_function(
 // MetalKernelFunction functions
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_mps_start_encoding(AOTIMetalKernelFunctionHandle func);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_set_arg_tensor(
     AOTIMetalKernelFunctionHandle func,
@@ -40,6 +44,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_set_arg_int(
     unsigned idx,
     int64_t val);
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_dispatch_single(
     AOTIMetalKernelFunctionHandle func,
     uint64_t length);
@@ -60,6 +65,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_dispatch_array_with_group_size(
     size_t length_size,
     const uint64_t* group_size,
     size_t group_size_size);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_mps_malloc(void** buffer, size_t num_bytes);
@@ -80,6 +86,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_copy_buffer(
     size_t src_offset,
     size_t dst_offset);
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 // C callback function type for command block execution
 typedef void (*aoti_torch_mps_command_block_callback_t)(
     AOTIMetalKernelFunctionHandle func,
@@ -95,6 +102,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_run_command_block(
     AOTIMetalKernelFunctionHandle func,
     aoti_torch_mps_command_block_callback_t callback,
     void* user_data);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 #ifdef __cplusplus
 } // extern "C"

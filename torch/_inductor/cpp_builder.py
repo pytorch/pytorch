@@ -23,15 +23,19 @@ from collections.abc import Sequence
 from ctypes import cdll, wintypes
 from ctypes.util import find_library
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
+
+
+CppStdlib = Literal["libstdc++", "libc++"]
 
 
 if config.is_fbcode():
@@ -79,8 +83,41 @@ log = logging.getLogger(__name__)
 
 
 # =============================== toolchain ===============================
+def _split_compiler_command(compiler: str) -> list[str]:
+    if _IS_WINDOWS:
+        return [compiler]
+    command = shlex.split(compiler)
+    if not command:
+        raise ValueError("empty compiler command")
+    return command
+
+
+def _compiler_command(compiler: str, *args: str) -> list[str]:
+    return [*_split_compiler_command(compiler), *args]
+
+
+@functools.cache
+def _compiler_version_string(cpp_compiler: str) -> str:
+    try:
+        return (
+            subprocess.check_output(
+                _compiler_command(cpp_compiler, "--version"),
+                stderr=subprocess.DEVNULL,
+            )
+            .strip()
+            .decode(*SUBPROCESS_DECODE_ARGS)
+        )
+    except (FileNotFoundError, subprocess.SubprocessError, ValueError):
+        return ""
+
+
+def _compiler_version_first_line(cpp_compiler: str) -> str:
+    version_string = _compiler_version_string(cpp_compiler)
+    return version_string.splitlines()[0] if version_string else ""
+
+
 @functools.lru_cache(1)
-def cpp_compiler_search(search: str) -> str:
+def cpp_compiler_search(search: Sequence[str | None]) -> str:
     from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
 
     for cxx in search:
@@ -101,9 +138,14 @@ def cpp_compiler_search(search: str) -> str:
                 )
                 with lock:
                     cxx = install_gcc_via_conda()
-            subprocess.check_output([cxx, "--version"])
+            subprocess.check_output(_compiler_command(cxx, "--version"))
             return cxx
-        except (subprocess.SubprocessError, FileNotFoundError, ImportError):
+        except (
+            subprocess.SubprocessError,
+            FileNotFoundError,
+            ImportError,
+            ValueError,
+        ):
             continue
     raise exc.InvalidCxxCompiler
 
@@ -140,7 +182,9 @@ def check_compiler_exist_windows(compiler: str) -> None:
     Check if compiler is ready, in case end user not activate MSVC environment.
     """
     try:
-        subprocess.check_output([compiler, "/help"], stderr=subprocess.STDOUT)
+        subprocess.check_output(
+            _compiler_command(compiler, "/help"), stderr=subprocess.STDOUT
+        )
     except FileNotFoundError as e:
         raise exc.InvalidCxxCompiler(compiler) from e
     except subprocess.SubprocessError:
@@ -344,7 +388,9 @@ def check_mingw_win32_flavor(compiler: str) -> str:
     """
     try:
         out = subprocess.check_output(
-            [compiler, "-v"], stderr=subprocess.STDOUT, text=True
+            _compiler_command(compiler, "-v"),
+            stderr=subprocess.STDOUT,
+            text=True,
         )
     except FileNotFoundError as e:
         raise RuntimeError(f"Compiler: {compiler} is not found.") from e
@@ -482,7 +528,7 @@ def batch_convert_cubins_to_obj(
             )
 
     subprocess.run(
-        [cpp_compiler, "-c", asm_path, "-o", obj_path],
+        _compiler_command(cpp_compiler, "-c", asm_path, "-o", obj_path),
         capture_output=True,
         text=True,
         check=True,
@@ -492,23 +538,30 @@ def batch_convert_cubins_to_obj(
 
 @functools.cache
 def _is_apple_clang(cpp_compiler: str) -> bool:
-    version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
-    return "Apple" in version_string.splitlines()[0]
+    first_line = _compiler_version_first_line(cpp_compiler)
+    return bool(re.search(r"\bApple\b.*\bclang\b", first_line))
 
 
 @functools.cache
 def _is_clang(cpp_compiler: str) -> bool:
-    # Mac OS apple clang maybe named as gcc, need check compiler info.
-    if sys.platform == "darwin":
-        return _is_apple_clang(cpp_compiler)
-    elif _IS_WINDOWS:
+    if _IS_WINDOWS:
         # clang suite have many compilers, and only clang-cl is supported.
         if re.search(r"((clang$)|(clang\+\+$))", cpp_compiler):
             raise RuntimeError(
                 "Please use clang-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
             )
         return bool(re.search(r"(clang-cl)", cpp_compiler))
-    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
+
+    if sys.platform == "darwin" and _is_apple_clang(cpp_compiler):
+        return True
+
+    first_line = _compiler_version_first_line(cpp_compiler)
+    if "Intel" not in first_line and re.search(
+        r"(^|[\s/-])clang version\b", first_line
+    ):
+        return True
+
+    return bool(re.search(r"(^|[/\s-])(clang\+\+|clang)(?=[\s-]|$)", cpp_compiler))
 
 
 @functools.cache
@@ -516,7 +569,16 @@ def _is_gcc(cpp_compiler: str) -> bool:
     # Since "clang++" ends with "g++", the regex match below would validate on it.
     if _is_clang(cpp_compiler):
         return False
-    return bool(re.search(r"(gcc|g\+\+|gnu-c\+\+)", cpp_compiler))
+
+    first_line = _compiler_version_first_line(cpp_compiler)
+    if re.search(
+        r"(^|[\s/-])(gcc|g\+\+|gnu-c\+\+)(?=[\s(-]|$)",
+        first_line,
+        re.IGNORECASE,
+    ):
+        return True
+
+    return bool(re.search(r"(^|[/\s-])(gcc|g\+\+|gnu-c\+\+)(?=[\s-]|$)", cpp_compiler))
 
 
 @functools.cache
@@ -527,7 +589,7 @@ def _is_gcc_version_less_than(cpp_compiler: str, major: int) -> bool:
     try:
         output_msg = (
             subprocess.check_output(
-                [cpp_compiler, "-dumpfullversion", "-dumpversion"],
+                _compiler_command(cpp_compiler, "-dumpfullversion", "-dumpversion"),
                 stderr=subprocess.DEVNULL,
             )
             .strip()
@@ -550,16 +612,15 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 
     try:
         result = subprocess.run(
-            [cpp_compiler, "/help"],
+            _compiler_command(cpp_compiler, "/help"),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
         )
 
-        output_msg = result.stdout.strip().decode(*SUBPROCESS_DECODE_ARGS)
-        lines = output_msg.splitlines()
+        lines = (result.stdout or b"").strip().splitlines()
 
-        return bool(lines) and "Microsoft" in lines[0]
+        return bool(lines) and b"Microsoft" in lines[0]
 
     except OSError:
         return False
@@ -578,14 +639,9 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
             )
 
     try:
-        output_msg = (
-            subprocess.check_output(
-                [cpp_compiler, "--version"], stderr=subprocess.DEVNULL
-            )
-            .strip()
-            .decode(*SUBPROCESS_DECODE_ARGS)
-        )
-        is_intel_compiler = "Intel" in output_msg.splitlines()[0]
+        output_msg = _compiler_version_string(cpp_compiler)
+        lines = output_msg.splitlines()
+        is_intel_compiler = bool(lines) and "Intel" in lines[0]
         if is_intel_compiler:
             if _IS_WINDOWS:
                 if re.search(r"((icx$)|(icx-cc$))", cpp_compiler):
@@ -641,12 +697,16 @@ def get_compiler_version_info(compiler: str) -> str:
     env["LC_ALL"] = "C"  # Don't localize output
     try:
         version_string = subprocess.check_output(
-            [compiler, "-v"], stderr=subprocess.STDOUT, env=env
+            _compiler_command(compiler, "-v"),
+            stderr=subprocess.STDOUT,
+            env=env,
         ).decode(*SUBPROCESS_DECODE_ARGS)
     except Exception:
         try:
             version_string = subprocess.check_output(
-                [compiler, "--version"], stderr=subprocess.STDOUT, env=env
+                _compiler_command(compiler, "--version"),
+                stderr=subprocess.STDOUT,
+                env=env,
             ).decode(*SUBPROCESS_DECODE_ARGS)
         except Exception:
             return ""
@@ -1089,14 +1149,14 @@ def _get_optimization_cflags(
     return cflags, ldflags
 
 
-def _get_shared_cflags(do_link: bool) -> list[str]:
+def _get_shared_cflags(cpp_compiler: str, do_link: bool) -> list[str]:
     if _IS_WINDOWS:
         """
         MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
         https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-library-features?view=msvc-170
         """
         return ["DLL", "MD"]
-    if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
+    if platform.system() == "Darwin" and _is_clang(cpp_compiler):
         # This causes undefined symbols to behave the same as linux
         return ["shared", "fPIC", "undefined dynamic_lookup"]
     flags = []
@@ -1126,7 +1186,7 @@ def get_cpp_options(
 
     cflags = (
         opt_cflags
-        + _get_shared_cflags(do_link)
+        + _get_shared_cflags(cpp_compiler, do_link)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
@@ -1252,6 +1312,7 @@ def _setup_standard_sys_libs(
     cpp_compiler: str,
     aot_mode: bool,
     use_relative_path: bool,
+    cpp_stdlib: CppStdlib,
 ) -> tuple[list[str], list[str], list[str], list[str]]:
     cflags: list[str] = []
     include_dirs: list[str] = []
@@ -1261,22 +1322,43 @@ def _setup_standard_sys_libs(
         return cflags, include_dirs, passthrough_args, ldflags
 
     if config.is_fbcode():
-        # TODO(T203137008) Can we unify these flags with triton_cc_command?
-        cflags.append("nostdinc")
-        # Note that the order of include paths do matter, as a result
-        # we need to have several branches interleaved here
+        if aot_mode and cpp_stdlib == "libc++":
+            stdlib_isystem = build_paths.aoti_libcxx_include
+            # Use -nostdinc++ to strip the default C++ stdlib path, then add
+            # our AOTI libc++ headers via -I.  We avoid -stdlib++-isystem
+            # because it creates an isolated include realm that breaks
+            # libc++'s C header wrappers (ctype.h, stddef.h, etc.).
+            passthrough_args.append(" -nostdinc++")
+            # No -D_LIBCPP_* here: the package's __config_site carries the
+            # configuration and libc++'s own __config includes it, so these
+            # headers self-configure identically to how the archives were
+            # built. Passing flags as well would be a second source of truth.
+            cflags.append("fvisibility=hidden")
+            cflags.append("fvisibility-inlines-hidden")
+
+            # Note that the order of include paths do matter.
+            # libc++ headers must come first so C wrappers are found before
+            # the compiler's or glibc's versions.
+            include_dirs.append(stdlib_isystem)
+        else:
+            # Non-AOT fbcode CPU kernels still rely on the existing libstdc++
+            # toolchain path and may link split translation units that call
+            # generated inline helpers across object boundaries.
+            cflags.append("nostdinc")
+
         include_dirs.append(build_paths.sleef_include)
         include_dirs.append(build_paths.openmp_include)
         include_dirs.append(build_paths.python_include)
         include_dirs.append(build_paths.cc_include)
-        include_dirs.append(build_paths.libgcc_include)
-        include_dirs.append(build_paths.libgcc_arch_include)
-        include_dirs.append(build_paths.libgcc_backward_include)
+        if not aot_mode or cpp_stdlib == "libstdc++":
+            include_dirs.append(build_paths.libgcc_include)
+            include_dirs.append(build_paths.libgcc_arch_include)
+            include_dirs.append(build_paths.libgcc_backward_include)
         include_dirs.append(build_paths.glibc_include)
         include_dirs.append(build_paths.linux_kernel_include)
         include_dirs.append("include")
 
-        if aot_mode and not use_relative_path:
+        if not use_relative_path:
             linker_script = _LINKER_SCRIPT
         else:
             linker_script = os.path.basename(_LINKER_SCRIPT)
@@ -1433,9 +1515,9 @@ def homebrew_libomp() -> tuple[bool, str]:
 @functools.cache
 def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
     try:
-        output = subprocess.check_output([cpp_compiler, "-print-file-name=bin"]).decode(
-            "utf8"
-        )
+        output = subprocess.check_output(
+            _compiler_command(cpp_compiler, "-print-file-name=bin")
+        ).decode("utf8")
         omp_path = os.path.join(output.rstrip(), omp_name)
         if os.path.isfile(omp_path):
             os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -1449,7 +1531,7 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
     def _load_icx_built_in_lib_by_name(cpp_compiler: str, lib_name: str) -> bool:
         try:
             output = subprocess.check_output(
-                [cpp_compiler, f"-print-file-name={lib_name}"],
+                _compiler_command(cpp_compiler, f"-print-file-name={lib_name}"),
                 stderr=subprocess.DEVNULL,
             ).decode(*SUBPROCESS_DECODE_ARGS)
             omp_path = output.rstrip()
@@ -1584,17 +1666,59 @@ def _get_openmp_args(
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
 
 
-def _get_libstdcxx_args() -> tuple[list[str], list[str]]:
+def _validate_cpp_stdlib(
+    cpp_stdlib: CppStdlib, device_type: str, aot_mode: bool
+) -> None:
+    """Reject cpp_stdlib requests that would otherwise be silently ignored.
+
+    The private libc++ is only available in fbcode and wired up for AOT CPU
+    builds: the archives are linked in get_cpp_torch_device_options under
+    device_type == "cpu", and both the header setup and the link flags gate on
+    aot_mode. Any other combination either strips the default stdlib without
+    linking a replacement or quietly produces a libstdc++ artifact, so fail
+    loudly instead.
     """
-    For fbcode cpu case, we should link stdc++ instead assuming the binary where dlopen is executed is built with dynamic stdc++.
+    if cpp_stdlib != "libc++":
+        return
+    if not config.is_fbcode():
+        raise RuntimeError("cpp_stdlib='libc++' is only supported in fbcode.")
+    if device_type != "cpu":
+        raise RuntimeError(
+            "cpp_stdlib='libc++' is only supported with device_type='cpu', "
+            f"got device_type='{device_type}'"
+        )
+    if not aot_mode:
+        raise RuntimeError(
+            "cpp_stdlib='libc++' is only supported with aot_mode=True; "
+            "non-AOT builds link the default libstdc++."
+        )
+
+
+def _get_cpp_stdlib_args(
+    aot_mode: bool, cpp_stdlib: CppStdlib
+) -> tuple[list[str], list[str], list[str]]:
+    """
+    For fbcode AOTI, select either the legacy dynamic libstdc++ dependency or
+    the statically linked private __aoti-namespace libc++.
     """
     lib_dir_paths: list[str] = []
     libs: list[str] = []
-    if config.is_fbcode():
+    passthrough_args: list[str] = []
+    if config.is_fbcode() and aot_mode and cpp_stdlib == "libc++":
+        lib_dir_paths = [build_paths.aoti_libcxx_lib]
+        passthrough_args = [
+            " -nostdlib++",
+            " -Wl,-Bstatic",
+            " -laoti_c++",
+            " -laoti_c++abi",
+            " -Wl,-Bdynamic",
+            " -Wl,--exclude-libs,ALL",
+        ]
+    elif config.is_fbcode():
         lib_dir_paths = [sysconfig.get_config_var("LIBDIR")]
         libs.append("stdc++")
 
-    return lib_dir_paths, libs
+    return lib_dir_paths, libs, passthrough_args
 
 
 def get_mmap_self_macro(
@@ -1630,6 +1754,7 @@ def get_cpp_torch_options(
     use_relative_path: bool,
     use_mmap_weights: bool,
     use_mmap_weights_external: bool,
+    cpp_stdlib: CppStdlib,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
     """
     This function is used to get the build args of torch related build options.
@@ -1656,7 +1781,7 @@ def get_cpp_torch_options(
         sys_libs_include_dirs,
         sys_libs_passthrough_args,
         sys_libs_ldflags,
-    ) = _setup_standard_sys_libs(cpp_compiler, aot_mode, use_relative_path)
+    ) = _setup_standard_sys_libs(cpp_compiler, aot_mode, use_relative_path, cpp_stdlib)
 
     isa_macros, isa_ps_args_build_flags = _get_build_args_of_chosen_isa(vec_isa)
 
@@ -1743,6 +1868,7 @@ class CppTorchOptions(CppOptions):
         min_optimize: bool = False,
         precompiling: bool = False,
         preprocessing: bool = False,
+        cpp_stdlib: CppStdlib = "libstdc++",
     ) -> None:
         super().__init__(
             compile_only=compile_only,
@@ -1773,6 +1899,7 @@ class CppTorchOptions(CppOptions):
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
             use_mmap_weights_external=use_mmap_weights_external,
+            cpp_stdlib=cpp_stdlib,
         )
 
         _append_list(self._definitions, torch_definitions)
@@ -1832,18 +1959,27 @@ def _gen_mingw_import_lib(dll_path: str, def_path: str, import_lib_path: str) ->
     log.info("Generated MinGW import library %s from %s", import_lib_path, dll_name)
 
 
-# MSVC /GS buffer security check stubs for MinGW cross-compilation.
-# CUDA 13.0+ cudart.lib contains MSVC-compiled static objects that reference
-# these symbols (__security_cookie, __security_check_cookie, __GSHandlerCheck).
-# When cross-compiling with MinGW, we provide no-op stubs so the linker can
-# resolve them. At runtime on Windows, the CUDA runtime DLL handles its own
-# security checks internally; the static loader code that references these
-# symbols is a thin shim whose /GS instrumentation is safe to stub out.
+# MSVC /GS and Control Flow Guard stubs for MinGW cross-compilation.
+# CUDA 13.0+ cudart.lib contains MSVC-compiled static objects that reference the
+# /GS symbols (__security_cookie, __security_check_cookie, __GSHandlerCheck); the
+# CUDA 13.2 cudart.lib is additionally built with Control Flow Guard (/guard:cf)
+# and references the CFG dispatch/check function pointers. When cross-compiling
+# with MinGW (no MSVC runtime), we provide stubs so the linker can resolve them.
+# At runtime on Windows the CUDA runtime DLL handles its own security/CFG checks;
+# the static loader code that references these symbols is a thin shim. The /GS
+# and CFG-check stubs are safe no-ops, but the CFG *dispatch* stub must tail-jump
+# to the real target (in rax on x86_64) -- a no-op would drop the indirect call.
 _MSVC_GS_STUBS_SOURCE = """\
 #include <stdint.h>
 uint64_t __security_cookie = 0x00002B992DDFA232ULL;
 void __security_check_cookie(uint64_t cookie) { (void)cookie; }
 void __GSHandlerCheck(void) {}
+void __guard_check_icall_nop(void *target) { (void)target; }
+void (*__guard_check_icall_fptr)(void *target) = __guard_check_icall_nop;
+__attribute__((naked)) void __guard_dispatch_icall_nop(void) {
+    __asm__ __volatile__("jmp *%rax");
+}
+void (*__guard_dispatch_icall_fptr)(void) = __guard_dispatch_icall_nop;
 """
 
 
@@ -2021,6 +2157,7 @@ def get_cpp_torch_device_options(
     device_type: str,
     aot_mode: bool = False,
     compile_only: bool = False,
+    cpp_stdlib: CppStdlib = "libstdc++",
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
     """
     This function is used to get the build args of device related build options.
@@ -2029,6 +2166,19 @@ def get_cpp_torch_device_options(
     3. MISC
     4. Return the build args
     """
+    # CppTorchDeviceOptions validates too, but this is a public entry point in
+    # its own right.
+    _validate_cpp_stdlib(cpp_stdlib, device_type, aot_mode)
+
+    try:
+        device_options = get_interface_for_device(device_type).get_cpp_device_options(
+            aot_mode, compile_only
+        )
+    except NotImplementedError:
+        device_options = None
+    if device_options is not None:
+        return device_options
+
     definitions: list[str] = []
     include_dirs: list[str] = []
     cflags: list[str] = []
@@ -2045,6 +2195,13 @@ def get_cpp_torch_device_options(
 
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
+
+    # cpp_extension resolves CUDA_HOME into a module-level global at import time,
+    # so an fbcode process that imported it before the env var above was written
+    # caches None; refresh the global here so the just-set CUDA_HOME env actually
+    # takes effect for include_paths/library_paths below.
+    if cpp_extension.CUDA_HOME is None and os.environ.get("CUDA_HOME"):
+        cpp_extension.CUDA_HOME = os.environ["CUDA_HOME"]
 
     include_dirs = cpp_extension.include_paths(
         device_type, config.aot_inductor.link_libtorch is None
@@ -2111,11 +2268,15 @@ def get_cpp_torch_device_options(
 
         if device_type == "cpu":
             (
-                stdcxx_lib_dir_paths,
-                stdcxx_libs,
-            ) = _get_libstdcxx_args()
-            libraries_dirs += stdcxx_lib_dir_paths
-            libraries += stdcxx_libs
+                libcxx_lib_dir_paths,
+                libcxx_libs,
+                libcxx_passthrough,
+            ) = _get_cpp_stdlib_args(aot_mode, cpp_stdlib)
+            libraries_dirs += libcxx_lib_dir_paths
+            libraries += libcxx_libs
+            if not compile_only:
+                # Only add link args, when compile_only is false.
+                passthrough_args += libcxx_passthrough
 
     if config.aot_inductor.custom_op_libs:
         libraries += config.aot_inductor.custom_op_libs
@@ -2154,7 +2315,12 @@ class CppTorchDeviceOptions(CppTorchOptions):
         precompiling: bool = False,
         preprocessing: bool = False,
         compiler: str = "",
+        cpp_stdlib: CppStdlib = "libstdc++",
     ) -> None:
+        # Validate before super().__init__, which runs the header setup that
+        # would strip the default stdlib.
+        _validate_cpp_stdlib(cpp_stdlib, device_type, aot_mode)
+
         super().__init__(
             vec_isa=vec_isa,
             include_pytorch=include_pytorch,
@@ -2168,6 +2334,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             precompiling=precompiling,
             preprocessing=preprocessing,
             compiler=compiler,
+            cpp_stdlib=cpp_stdlib,
         )
 
         device_definitions: list[str] = []
@@ -2190,6 +2357,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             device_type=device_type,
             aot_mode=aot_mode,
             compile_only=compile_only,
+            cpp_stdlib=cpp_stdlib,
         )
         _append_list(self._definitions, device_definitions)
         _append_list(self._include_dirs, device_include_dirs)
@@ -2250,7 +2418,7 @@ class CppBuilder:
             Build options to the builder.
         output_dir:
             1. The output_dir the target file will output to.
-            2. The default value is empty string, and then the use current dir as output dir.
+            2. The default value is empty string, and then use the current dir as output dir.
             3. Final target file: output_dir/name.ext
     """
 
@@ -2426,7 +2594,7 @@ class CppBuilder:
             if _IS_WINDOWS:
                 self._libraries_dirs_args += f'/LIBPATH:"{lib_dir}" '
             else:
-                self._libraries_dirs_args += f"-L{lib_dir} "
+                self._libraries_dirs_args += f"-L{shlex.quote(lib_dir)} "
 
         for lib in BuildOption.get_libraries():
             if _IS_WINDOWS:
@@ -2498,16 +2666,31 @@ class CppBuilder:
         if not (config.is_fbcode() and self._use_relative_path):
             return args
         rewritten = []
+        rpath_dirs: OrderedSet[str] = OrderedSet()
         for arg in args:
             tokens = shlex.split(arg)
             new_tokens = []
             for tok in tokens:
                 if os.path.isabs(tok) and os.path.isfile(tok):
                     self._orig_source_paths.append(tok)
+                    # Rewriting the absolute path to a basename makes the
+                    # linker record a bare-basename DT_NEEDED entry, because
+                    # the staged kernel .so files carry no DT_SONAME. That
+                    # basename is unresolvable when the wrapper .so is later
+                    # dlopen'd, so add rpath entries the runtime loader can
+                    # search: $ORIGIN for a kernel .so co-staged next to the
+                    # wrapper, and the kernel .so's original directory as a
+                    # fallback when it is loaded from its cache location.
+                    if self._do_link and tok.endswith(".so"):
+                        rpath_dirs.add(os.path.dirname(tok))
                     new_tokens.append(os.path.basename(tok))
                 else:
                     new_tokens.append(tok)
             rewritten.append(" ".join(shlex.quote(t) for t in new_tokens))
+        if rpath_dirs:
+            rewritten.append("-Wl,-rpath," + shlex.quote("$ORIGIN"))
+            for rpath_dir in rpath_dirs:
+                rewritten.append(f"-Wl,-rpath,{shlex.quote(rpath_dir)}")
         return rewritten
 
     def build_fbcode_re(

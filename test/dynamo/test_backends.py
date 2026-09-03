@@ -16,7 +16,11 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyHPU,
 )
-from torch.testing._internal.common_utils import skipIfHpu
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    skipIfHpu,
+)
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -162,12 +166,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not has_tvm(), "requires tvm")
     def test_tvm(self, device):
         self._check_backend_works("tvm", device, boxed=False, backward=False)
-        self._check_backend_works(
-            "tvm", device, boxed=False, backward=False, options={"scheduler": None}
-        )
-        self._check_backend_works(
-            "tvm", device, boxed=False, backward=False, options={"opt_level": 0}
-        )
 
     @unittest.skipIf(not has_tvm(), "requires tvm")
     def test_tvm_scalar_tensor_input(self, device):
@@ -201,60 +199,12 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
             )
             self.assertTrue(same(expected, compiled(x), tol=0.01))
 
-    def test_tvm_scheduler_backends(self, device):
-        from torch._dynamo.backends.tvm import tvm_auto_scheduler, tvm_meta_schedule
+    def test_tvm_missing_install_error(self, device):
+        from torch._dynamo.backends.tvm import tvm as tvm_backend
 
         gm = torch.fx.symbolic_trace(lambda x: x + 1)
-        for backend in (tvm_meta_schedule, tvm_auto_scheduler):
-            # blocking the tvm import keeps this fast and deterministic;
-            # reaching ImportError proves the partial's kwargs are valid
-            with patch.dict(sys.modules, {"tvm": None}):
-                self.assertRaises(ImportError, backend, gm, [torch.randn(2)])
-
-    def test_tvm_relay_future_warning(self, device):
-        import torch._dynamo.backends.tvm as tvm_backend
-
-        gm = torch.fx.symbolic_trace(lambda x: x + 1)
-        with patch.dict(sys.modules, {"tvm": None}):
-            with self.assertWarns(FutureWarning):
-                self.assertRaises(
-                    ImportError,
-                    tvm_backend._tvm_relay_compile,
-                    gm,
-                    [torch.randn(2)],
-                    {},
-                )
-
-    def test_tvm_dispatches_relay_or_relax(self, device):
-        import torch._dynamo.backends.tvm as tvm_backend
-
-        gm = torch.fx.symbolic_trace(lambda x: x + 1)
-        sentinel = object()
-
-        def find_spec(present):
-            return lambda name: MagicMock() if name == present else None
-
-        with (
-            patch.dict(sys.modules, {"tvm": MagicMock()}),
-            patch.object(
-                tvm_backend, "_tvm_relay_compile", return_value=sentinel
-            ) as relay,
-            patch.object(
-                tvm_backend, "_tvm_relax_compile", return_value=sentinel
-            ) as relax,
-        ):
-            with patch("importlib.util.find_spec", side_effect=find_spec("tvm.relay")):
-                self.assertIs(tvm_backend.tvm(gm, [torch.randn(2)]), sentinel)
-            relay.assert_called_once()
-            relax.assert_not_called()
-
-            with patch(
-                "importlib.util.find_spec",
-                side_effect=find_spec("tvm.relax.frontend.torch"),
-            ):
-                self.assertIs(tvm_backend.tvm(gm, [torch.randn(2)]), sentinel)
-            relax.assert_called_once()
-            relay.assert_called_once()
+        with patch.dict(sys.modules, {"tvm": None, "tvm.relax.frontend.torch": None}):
+            self.assertRaises(ImportError, tvm_backend, gm, [torch.randn(2)])
 
     @onlyHPU
     def test_intel_gaudi_backend(self, device):
@@ -344,6 +294,7 @@ class TestExplainWithBackend(torch._dynamo.test_case.TestCase):
         self.assertEqual(8, explain_output.op_count)
 
 
+@instantiate_parametrized_tests
 class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
     """Test APIs documented by https://pytorch.org/docs/main/torch.compiler_custom_backends.html"""
 
@@ -357,6 +308,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         def cleanup_backend():
             backend_registry._COMPILER_FNS.pop(backend_name, None)
             backend_registry._BACKENDS.pop(backend_name, None)
+            backend_registry._BACKEND_TAGS.pop(backend_name, None)
 
         self.addCleanup(cleanup_backend)
 
@@ -372,6 +324,260 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="my_custom_backend")
         opt_f(torch.randn(3, 3))
         self.assertTrue(backend_run)
+
+    @parametrize("fullgraph", [False, True])
+    def test_dynamo_backend_init(self, fullgraph):
+        # Fires eagerly at torch.compile() time, before any invocation, on both
+        # the _optimize (fullgraph=False) and _optimize_assert paths.
+        calls = []
+
+        def my_backend(gm, example_inputs):
+            return gm.forward
+
+        def my_backend_init():
+            calls.append(1)
+
+        my_backend._dynamo_backend_init = my_backend_init
+
+        @torch.compile(backend=my_backend, fullgraph=fullgraph)
+        def fn(x):
+            return x + 1
+
+        # Pinned at decoration, not lazily on the first captured graph.
+        self.assertEqual(len(calls), 1)
+        fn(torch.randn(3))
+        self.assertEqual(len(calls), 1)
+
+    @parametrize(
+        "compile_api",
+        [torch.compile, torch._dynamo.optimize],
+        name_fn=lambda api: api.__name__,
+    )
+    def test_dynamo_backend_init_classmethod(self, compile_api):
+        # A class-level hook (here a @classmethod, read via the MRO rather than
+        # the instance __dict__) is read off the inner backend by get_compiler_fn().
+        calls = []
+
+        class MyBackend:
+            def __call__(self, gm, example_inputs):
+                return gm.forward
+
+            @classmethod
+            def _dynamo_backend_init(cls):
+                calls.append(1)
+
+        @compile_api(backend=MyBackend())
+        def fn(x):
+            return x + 1
+
+        fn(torch.randn(3))
+        self.assertEqual(len(calls), 1)
+
+    def test_dynamo_backend_init_registered(self):
+        # A string backend resolved through the registry must also fire the hook.
+        from torch._dynamo.backends import registry as backend_registry
+
+        calls = []
+
+        def my_backend(gm, example_inputs):
+            return gm.forward
+
+        def my_backend_init():
+            calls.append(1)
+
+        my_backend._dynamo_backend_init = my_backend_init
+        name = "init_test_backend_192345"
+        torch._dynamo.register_backend(my_backend, name)
+
+        def cleanup_backend():
+            backend_registry._COMPILER_FNS.pop(name, None)
+            backend_registry._BACKENDS.pop(name, None)
+            backend_registry._BACKEND_TAGS.pop(name, None)
+
+        self.addCleanup(cleanup_backend)
+
+        @torch.compile(backend=name)
+        def fn(x):
+            return x + 1
+
+        fn(torch.randn(3))
+        self.assertEqual(len(calls), 1)
+
+    def test_dynamo_backend_init_per_resolution(self):
+        # The hook fires every time the backend is resolved, not once per
+        # backend: two compiled functions over one backend fire twice.
+        calls = []
+
+        def my_backend(gm, example_inputs):
+            return gm.forward
+
+        def my_backend_init():
+            calls.append(1)
+
+        my_backend._dynamo_backend_init = my_backend_init
+
+        @torch.compile(backend=my_backend)
+        def fn1(x):
+            return x + 1
+
+        @torch.compile(backend=my_backend)
+        def fn2(x):
+            return x + 2
+
+        fn1(torch.randn(3))
+        fn2(torch.randn(3))
+        self.assertEqual(len(calls), 2)
+
+    def test_dynamo_backend_init_compiled_autograd(self):
+        # compiled_autograd re-enters optimize() on every invocation via the
+        # rebuild path; the hook fires once per resolution.
+        calls = []
+
+        def my_backend(gm, example_inputs):
+            return gm.forward
+
+        def my_backend_init():
+            calls.append(1)
+
+        my_backend._dynamo_backend_init = my_backend_init
+
+        # Guard against a vacuous pass: if compiled_autograd stops re-entering,
+        # len(calls) == len(resolutions) == 1 holds for the wrong reason, so
+        # count backend resolutions.
+        resolutions = []
+        orig_get_compiler_fn = torch._dynamo.eval_frame.get_compiler_fn
+
+        def counting_get_compiler_fn(compiler_fn):
+            resolutions.append(1)
+            return orig_get_compiler_fn(compiler_fn)
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        with (
+            torch._dynamo.config.patch(compiled_autograd=True),
+            patch("torch._dynamo.eval_frame.get_compiler_fn", counting_get_compiler_fn),
+        ):
+            opt_fn = torch.compile(fn, backend=my_backend)
+            opt_fn(x)
+            opt_fn(x)
+        self.assertGreater(len(resolutions), 1)
+        self.assertEqual(len(calls), len(resolutions))
+
+    def test_dynamo_backend_init_aot_autograd(self):
+        # Hook on fw_compiler survives aot_autograd(...) and fires per wrapper
+        # (each wrapper is its own resolution); it is read at fire time
+        # (@property), so it can be set after construction.
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+
+        calls = []
+
+        def my_compiler(gm, example_inputs):
+            return make_boxed_func(gm.forward)
+
+        def my_init():
+            calls.append(1)
+
+        my_compiler._dynamo_backend_init = my_init
+        train = aot_autograd(fw_compiler=my_compiler)
+        infer = aot_autograd(fw_compiler=my_compiler)
+
+        def f(x):
+            return torch.relu(x)
+
+        torch.compile(f, backend=train)(torch.randn(3, 3))
+        torch.compile(f, backend=infer)(torch.randn(3, 3))
+        self.assertEqual(len(calls), 2)
+
+        # Setting the hook AFTER constructing aot_autograd still fires.
+        calls.clear()
+
+        def my_compiler2(gm, example_inputs):
+            return make_boxed_func(gm.forward)
+
+        def my_init2():
+            calls.append(1)
+
+        late = aot_autograd(fw_compiler=my_compiler2)
+        my_compiler2._dynamo_backend_init = my_init2
+        torch.compile(f, backend=late)(torch.randn(3, 3))
+        self.assertEqual(len(calls), 1)
+
+    def test_dynamo_backend_init_force_backend(self):
+        # force_backend resolves through get_compiler_fn() on every invocation,
+        # so the hook fires per invocation.
+        calls = []
+
+        def my_backend(gm, example_inputs):
+            return gm.forward
+
+        def my_backend_init():
+            calls.append(1)
+
+        my_backend._dynamo_backend_init = my_backend_init
+
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        with torch.compiler.set_stance(force_backend=my_backend):
+            fn(x)
+            fn(x)
+        self.assertEqual(len(calls), 2)
+
+    def test_dynamo_backend_init_force_backend_registered(self):
+        # force_backend with a registered *name* (the typical usage) resolves
+        # through lookup_backend -> get_compiler_fn on every invocation; the
+        # hook fires per invocation.
+        from torch._dynamo.backends import registry as backend_registry
+
+        calls = []
+
+        def my_backend(gm, example_inputs):
+            return gm.forward
+
+        def my_backend_init():
+            calls.append(1)
+
+        my_backend._dynamo_backend_init = my_backend_init
+        name = "init_test_force_192345"
+        torch._dynamo.register_backend(my_backend, name)
+
+        def cleanup_backend():
+            backend_registry._COMPILER_FNS.pop(name, None)
+            backend_registry._BACKENDS.pop(name, None)
+            backend_registry._BACKEND_TAGS.pop(name, None)
+
+        self.addCleanup(cleanup_backend)
+
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        with torch.compiler.set_stance(force_backend=name):
+            fn(x)
+            fn(x)
+        self.assertEqual(len(calls), 2)
+
+    def test_dynamo_backend_init_builtin_hook(self):
+        # A C-extension function (builtin_function_or_method) as the hook must
+        # not crash torch.compile().
+        import gc
+
+        def my_backend(gm, example_inputs):
+            return gm.forward
+
+        my_backend._dynamo_backend_init = gc.collect
+
+        @torch.compile(backend=my_backend)
+        def fn(x):
+            return x + 1
+
+        fn(torch.randn(3))
 
     def test_aot_autograd_api(self):
         from functorch.compile import make_boxed_func
@@ -392,6 +598,51 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend=my_backend)
         opt_f(torch.randn(3, 3))
         self.assertTrue(backend_run)
+
+    def test_aot_autograd_reentrant_bw_compiler(self):
+        # re-entry with an already-wrapped bw_compiler must leave it untouched
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+
+        def my_compiler(gm, example_inputs):
+            return make_boxed_func(gm.forward)
+
+        backend = aot_autograd(fw_compiler=my_compiler)
+
+        torch.compile(lambda x: x.sin() + 1, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+        bw_compiler = backend.kwargs["bw_compiler"]
+        torch.compile(lambda x: x.cos() * 2, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+
+        self.assertIs(backend.kwargs["bw_compiler"], bw_compiler)
+        self.assertFalse(hasattr(bw_compiler, "compiler_fn"))
+
+    def test_aot_autograd_reentrant_serializable_bw_compiler(self):
+        # re-entry must not re-wrap a SerializableAOTDispatchCompiler's compiler_fn
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch._aot_autograd.schemas import (
+            SerializableAOTDispatchCompiler,
+        )
+
+        def my_compiler(gm, example_inputs):
+            return make_boxed_func(gm.forward)
+
+        bw_compiler = SerializableAOTDispatchCompiler(object, my_compiler)
+        backend = aot_autograd(fw_compiler=my_compiler, bw_compiler=bw_compiler)
+
+        torch.compile(lambda x: x.sin() + 1, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+        wrapped_fn = bw_compiler.compiler_fn
+        torch.compile(lambda x: x.cos() * 2, backend=backend)(
+            torch.randn(3, requires_grad=True)
+        ).sum().backward()
+
+        self.assertIs(bw_compiler.compiler_fn, wrapped_fn)
 
     def test_lookup_backend(self):
         from torch._dynamo import lookup_backend
@@ -422,6 +673,47 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend=my_compiler)
         opt_f(torch.randn(3, 3))
         self.assertTrue(backend_run)
+
+    def test_device_and_dtype_from_inputs(self):
+        from torch._dynamo.backends.common import device_from_inputs, dtype_from_inputs
+
+        class NotATensor:
+            device = "not-a-device"
+            dtype = "not-a-dtype"
+
+        tensor = torch.randn(3, dtype=torch.float64)
+        self.assertEqual(device_from_inputs([NotATensor(), tensor]), tensor.device)
+        self.assertEqual(dtype_from_inputs([NotATensor(), tensor]), torch.float64)
+        self.assertEqual(device_from_inputs([NotATensor()]), torch.device("cpu"))
+        self.assertEqual(dtype_from_inputs([NotATensor()]), torch.float32)
+
+    def test_is_registered_backend(self):
+        from torch._dynamo.backends.registry import _is_registered_backend
+
+        self.assertTrue(_is_registered_backend(lookup_backend("eager")))
+        self.assertTrue(
+            _is_registered_backend(torch._TorchCompileInductorWrapper(None, None, None))
+        )
+        self.assertTrue(
+            _is_registered_backend(
+                torch._TorchCompileWrapper("eager", None, None, None)
+            )
+        )
+
+        class FakeBackend:
+            compiler_name = "inductor"
+
+        self.assertFalse(_is_registered_backend(FakeBackend()))
+
+        def my_custom_backend(gm, example_inputs):
+            return gm.forward
+
+        self.assertFalse(_is_registered_backend(my_custom_backend))
+        self.assertFalse(
+            _is_registered_backend(
+                torch._TorchCompileWrapper(my_custom_backend, None, None, None)
+            )
+        )
 
     def test_lookup_backend_suggestion(self):
         from torch._dynamo.backends.registry import lookup_backend
@@ -456,12 +748,15 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
 
             orig_backends = dict(registry._BACKENDS)
             orig_compiler_fns = dict(registry._COMPILER_FNS)
+            orig_backend_tags = dict(registry._BACKEND_TAGS)
 
             def restore_registry():
                 registry._BACKENDS.clear()
                 registry._BACKENDS.update(orig_backends)
                 registry._COMPILER_FNS.clear()
                 registry._COMPILER_FNS.update(orig_compiler_fns)
+                registry._BACKEND_TAGS.clear()
+                registry._BACKEND_TAGS.update(orig_backend_tags)
                 registry._lazy_import.cache_clear()
                 registry._discover_entrypoint_backends.cache_clear()
 

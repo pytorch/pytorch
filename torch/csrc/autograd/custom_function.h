@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/flat_hash_map.h>
@@ -16,6 +17,10 @@ using optional_variable_list = std::vector<std::optional<Variable>>;
 using _jvp_fn_t = std::function<variable_list(variable_list, variable_list)>;
 using _view_as_self_fn_t = std::function<at::Tensor(at::Tensor)>;
 
+// attached_node is set to the node actually attached as the outputs'
+// history: cdata, or the CopySlices node wrapping cdata when a dirty view
+// input forced a rebase. Callers fire node creation hooks on it once the
+// node is fully populated (i.e. after saving variables).
 TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const variable_list& input_vars,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
@@ -25,7 +30,8 @@ TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
-    bool pure_view);
+    bool pure_view,
+    c10::intrusive_ptr<Node>& attached_node);
 
 TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     at::ArrayRef<const Variable*> input_vars,
@@ -36,7 +42,8 @@ TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
-    bool pure_view);
+    bool pure_view,
+    c10::intrusive_ptr<Node>& attached_node);
 
 TORCH_API void check_variable_result(
     const at::TensorBase& original,
@@ -263,7 +270,7 @@ inline variable_list CppNode_apply_functional(
           ", std the corresponding forward input was not a Variable");
       continue;
     }
-    results.emplace_back(outputs[i]);
+    results.emplace_back(std::move(outputs[i]));
   }
 
   return results;
@@ -446,13 +453,8 @@ inline void extract_vars(
 template <typename T>
 std::enable_if_t<std::is_same_v<T, variable_list>, T> to_output_type(
     std::vector<std::optional<Variable>>& output_list) {
-  variable_list result;
-  std::transform(
-      output_list.begin(),
-      output_list.end(),
-      std::back_inserter(result),
-      [](const std::optional<Variable>& var) { return *var; });
-  return result;
+  return c10::fmap(
+      output_list, [](const std::optional<Variable>& var) { return *var; });
 }
 
 template <typename T>
@@ -466,13 +468,7 @@ inline std::vector<std::optional<Variable>> to_optional(Variable& output) {
 }
 
 inline std::vector<std::optional<Variable>> to_optional(variable_list& output) {
-  std::vector<std::optional<Variable>> result;
-  std::transform(
-      output.begin(),
-      output.end(),
-      std::back_inserter(result),
-      [](const Variable& var) { return var; });
-  return result;
+  return c10::fmap<std::optional<Variable>>(output);
 }
 
 template <class T>
@@ -528,6 +524,7 @@ auto Function<T>::apply(Args&&... args)
     return x.view_as(x);
   };
 
+  c10::intrusive_ptr<Node> attached_node;
   auto wrapped_outputs = _wrap_outputs(
       input_vars,
       node->ctx_.get_non_differentiable(),
@@ -537,7 +534,8 @@ auto Function<T>::apply(Args&&... args)
       jvp_fn,
       {},
       view_as_self_fn,
-      false);
+      false,
+      attached_node);
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {
@@ -550,6 +548,10 @@ auto Function<T>::apply(Args&&... args)
 
   if (is_executable) {
     node->save_variables_to_ctx();
+    // Fire only after saved variables are stored on the node.
+    if (attached_node) {
+      fire_node_creation_hooks(attached_node);
+    }
   }
 
   // wrapped_outputs will be a variable_list so, convert it to the correct

@@ -11,7 +11,7 @@ import threading
 import typing
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import sympy
@@ -122,6 +122,49 @@ def maybe_unpack_tma_stable_metadata(
     if tma_meta[0] == "stable":
         return tma_meta[1]  # type: ignore[return-value]
     return None
+
+
+def maybe_unpack_host_tma_descriptor(arg: Any) -> tuple[Any, TMAStableMetadata] | None:
+    """Split a host-side (stable API) TMA descriptor into its base tensor and the
+    metadata needed to rebuild it downstream. Returns None for non-descriptor args.
+
+    Only descriptors equivalent to ``TensorDescriptor.from_tensor(base, block_shape)``
+    can be represented: the metadata carries just the block shape, so the descriptor's
+    shape/strides must be the base tensor's own.
+    """
+    from torch.utils._triton import has_triton_tensor_descriptor_host_tma
+
+    if not has_triton_tensor_descriptor_host_tma():
+        return None
+
+    from triton.tools.tensor_descriptor import TensorDescriptor
+
+    if not isinstance(arg, TensorDescriptor):
+        return None
+
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    def matches(actual: Sequence[Any], expected: Sequence[Any]) -> bool:
+        # Sizes may be symbolic, so compare without installing guards.
+        return len(actual) == len(expected) and all(
+            a is b or statically_known_true(a == b) for a, b in zip(actual, expected)
+        )
+
+    base = arg.base
+    if (
+        not matches(arg.shape, base.shape)
+        or not matches(arg.strides, base.stride())
+        or arg.padding != "zero"
+        or getattr(arg, "round_f32_to_tf32", False)
+    ):
+        raise RuntimeError(
+            "Only TMA descriptors built by TensorDescriptor.from_tensor() with the "
+            "default padding and rounding can be traced; the descriptor's "
+            "shape/strides must match its base tensor because only the block shape is "
+            "carried through the graph."
+        )
+
+    return base, create_tma_stable_metadata(list(arg.block_shape))
 
 
 # TMADescriptorMetadata maps kernel parameter names to the metadata that allows
@@ -558,6 +601,7 @@ def ttir_to_functions(
     )
     region_id_to_block_ids: dict[int, list[int]] = defaultdict(list)
     block_id_to_block_arg_ids: dict[int, list[int]] = {}
+    warp_specialize_partition_block_args: dict[int, list[list[int]]] = defaultdict(list)
     replacements: dict[int, Intermediate | Param] = {}
     reindex_map: dict[int, int] = {}
     next_fake_intermediate = 0
@@ -597,7 +641,7 @@ def ttir_to_functions(
                         reindex(parent_block.get_argument(i).id()),
                     )
                 # the region info is collected via ops' parent blocks to be
-                # used later when the region's encloding op is traversed
+                # used later when the region's enclosing op is traversed
                 parent_region = parent_block.get_parent()
                 if parent_region is not None:
                     region_id_to_block_ids[parent_region.id()].append(parent_block_id)
@@ -640,7 +684,18 @@ def ttir_to_functions(
             fn_name = op.get_str_attr("sym_name")
             functions[fn_name] = fn_ops
         elif child_block_ids:
-            if name in {"scf.if", "scf.for", "scf.while", "tt.reduce", "tt.scan"}:
+            structured_region_ops = {
+                "scf.if",
+                "scf.for",
+                "scf.while",
+                "tt.reduce",
+                "tt.scan",
+            }
+            supported_region_ops = structured_region_ops | {
+                "ttg.warp_specialize",
+                "ttg.warp_specialize.partitions",
+            }
+            if name in supported_region_ops:
                 # for blocked ops: inline the enclosed ops into
                 # the parent block + rewire the last op in each
                 # child block to return the block result
@@ -676,11 +731,7 @@ def ttir_to_functions(
                         for idx in block_id_to_block_arg_ids[block_id]:
                             next_fake_intermediate -= 1
                             replacements[idx] = Intermediate(next_fake_intermediate)
-                    else:
-                        if name not in ("tt.reduce", "tt.scan"):
-                            raise AssertionError(
-                                f"Expected op name to be 'tt.reduce' or 'tt.scan', got {name}"
-                            )
+                    elif name in ("tt.reduce", "tt.scan"):
                         # wire the block arguments to the op arguments
                         num_operands = len(operand_ids)
                         block_arg_ids = block_id_to_block_arg_ids[block_id]
@@ -697,6 +748,38 @@ def ttir_to_functions(
                             replacements[idx] = Intermediate(
                                 operand_ids[i % num_operands]
                             )
+                    elif name == "ttg.warp_specialize.partitions":
+                        block_arg_ids = block_id_to_block_arg_ids[block_id]
+                        # Beta puts explicit captures on this container; stable
+                        # puts them on the enclosing ttg.warp_specialize.
+                        if operand_ids and len(block_arg_ids) != len(operand_ids):
+                            raise RuntimeError(
+                                "Cannot map explicit captures for "
+                                "ttg.warp_specialize.partitions: "
+                                f"{len(block_arg_ids)} block arguments for "
+                                f"{len(operand_ids)} operands"
+                            )
+                        if operand_ids:
+                            for idx, operand_id in zip(block_arg_ids, operand_ids):
+                                replacements[idx] = Intermediate(operand_id)
+                        elif block_arg_ids:
+                            warp_specialize_partition_block_args[
+                                parent_block_id
+                            ].append(block_arg_ids)
+                    else:
+                        block_arg_groups = [block_id_to_block_arg_ids[block_id]]
+                        block_arg_groups.extend(
+                            warp_specialize_partition_block_args.pop(block_id, [])
+                        )
+                        for block_arg_ids in block_arg_groups:
+                            if len(block_arg_ids) not in (0, len(operand_ids)):
+                                raise RuntimeError(
+                                    "Cannot map block arguments for region op "
+                                    f"{name}: {len(block_arg_ids)} block arguments "
+                                    f"for {len(operand_ids)} operands"
+                                )
+                            for idx, operand_id in zip(block_arg_ids, operand_ids):
+                                replacements[idx] = Intermediate(operand_id)
 
                     if block_id in op_stack:
                         block_ops = op_stack.pop(block_id)
@@ -705,7 +788,13 @@ def ttir_to_functions(
                         last_ret, last_ops = block_ops.popitem()
                         if all(
                             op.name
-                            in ("scf.yield", "tt.reduce.return", "tt.scan.return")
+                            in (
+                                "scf.yield",
+                                "tt.reduce.return",
+                                "tt.scan.return",
+                                "ttg.warp_yield",
+                                "ttg.warp_return",
+                            )
                             for op in last_ops
                         ):
                             # if last_ops are all return ops, treat them separately
@@ -718,8 +807,23 @@ def ttir_to_functions(
 
                 scf_results = [Intermediate(idx) for idx in result_ids]
 
+                if name not in structured_region_ops:
+                    return_ops = [
+                        op for op in return_ops if len(op.args) == len(result_ids)
+                    ]
+                    if result_ids and not return_ops:
+                        raise RuntimeError(
+                            f"Cannot map results for region op {name}: no region "
+                            "terminator returns the expected number of values"
+                        )
+
                 if return_ops and all(
-                    (op.name == "scf.yield" and len(result_ids) == len(op.args))
+                    (
+                        len(result_ids) == len(op.args)
+                        and (
+                            op.name == "scf.yield" or name not in structured_region_ops
+                        )
+                    )
                     for op in return_ops
                 ):
                     # [Note: scf.yield fix-up]
@@ -873,18 +977,14 @@ def get_tma_stores(
                 for i, inp in enumerate(op.args):
                     if Param(idx=i) in tma_stores:
                         result.add(inp)
-            elif op.name == "tt.experimental_descriptor_store":
-                if len(op.args) < 1:
-                    raise AssertionError(
-                        f"tt.experimental_descriptor_store expected at least 1 arg, got {len(op.args)}"
-                    )
-                result.add(op.args[0])
-            elif op.name == "tt.descriptor_store":
-                if len(op.args) < 1:
-                    raise AssertionError(
-                        f"tt.descriptor_store expected at least 1 arg, got {len(op.args)}"
-                    )
-                result.add(op.args[0])
+            else:
+                op_info = _KERNEL_ACCESS_OPS.get(op.name)
+                if (
+                    op_info is not None
+                    and op_info.is_tma_store
+                    and op_info.write_indexes is not None
+                ):
+                    result.update(op.args[idx] for idx in op_info.write_indexes(op))
 
     for val in list(result):
         if val in ops:
@@ -908,6 +1008,122 @@ class TensorAccesses:
     can_fuse_epilogue: bool
 
 
+class IgnoreUnknownOp(Protocol):
+    """Returns True if the op should be skipped; otherwise the caller raises."""
+
+    def __call__(self, op: Op) -> bool: ...
+
+
+class ReadWriteIndexes(Protocol):
+    """Return the argument indexes read / written."""
+
+    def __call__(self, op: Op) -> Sequence[int]: ...
+
+
+def first_arg(op: Op) -> list[int]:
+    """Return the first argument index after checking that it exists."""
+    if len(op.args) < 1:
+        raise AssertionError(f"{op.name} expected at least 1 arg, got {len(op.args)}")
+    return [0]
+
+
+def first_two_args(op: Op) -> list[int]:
+    """Cover descriptor positions with and without an optional multicast target."""
+    return list(range(min(2, len(op.args))))
+
+
+@dataclasses.dataclass(frozen=True)
+class _KernelAccessOpInfo:
+    read_indexes: ReadWriteIndexes | None = None
+    write_indexes: ReadWriteIndexes | None = None
+    is_tma_store: bool = False
+    ignore_if: IgnoreUnknownOp | None = None
+
+
+# List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td.
+# What if Triton exposed this?
+_KERNEL_ACCESS_OPS: dict[str, _KernelAccessOpInfo] = {
+    "tt.experimental_descriptor_store": _KernelAccessOpInfo(
+        write_indexes=first_arg, is_tma_store=True
+    ),
+    "tt.descriptor_store": _KernelAccessOpInfo(
+        write_indexes=first_arg, is_tma_store=True
+    ),
+    "tt.store": _KernelAccessOpInfo(write_indexes=first_arg),
+    "tt.atomic_cas": _KernelAccessOpInfo(write_indexes=first_arg),
+    "tt.atomic_rmw": _KernelAccessOpInfo(
+        read_indexes=first_arg, write_indexes=first_arg
+    ),
+    "tt.experimental_tensormap_create": _KernelAccessOpInfo(write_indexes=first_arg),
+    "tt.load": _KernelAccessOpInfo(read_indexes=first_arg),
+    "tt.load_tensor_descriptor": _KernelAccessOpInfo(read_indexes=first_arg),
+    "tt.descriptor_load": _KernelAccessOpInfo(read_indexes=first_arg),
+    "tt.descriptor_reduce": _KernelAccessOpInfo(
+        read_indexes=first_arg, write_indexes=first_arg
+    ),
+    "tt.descriptor_scatter": _KernelAccessOpInfo(write_indexes=first_arg),
+    "tt.descriptor_gather": _KernelAccessOpInfo(read_indexes=first_arg),
+    "ttng.async_tma_copy_global_to_local": _KernelAccessOpInfo(
+        read_indexes=first_two_args
+    ),
+    "ttng.async_tma_copy_local_to_global": _KernelAccessOpInfo(write_indexes=first_arg),
+    "ttng.async_tma_reduce": _KernelAccessOpInfo(
+        read_indexes=first_arg, write_indexes=first_arg
+    ),
+    "ttng.async_tma_scatter": _KernelAccessOpInfo(write_indexes=first_arg),
+    "ttng.async_tma_gather": _KernelAccessOpInfo(read_indexes=first_arg),
+    "tt.elementwise_inline_asm": _KernelAccessOpInfo(ignore_if=lambda op: op.is_pure),
+}
+
+
+def _read_write_indexes(indexes: Sequence[int] | ReadWriteIndexes) -> ReadWriteIndexes:
+    if callable(indexes):
+        return indexes
+    index_tuple = tuple(indexes)
+    return lambda op: index_tuple
+
+
+def register_kernel_access_op(
+    name: str,
+    *,
+    read_indexes: Sequence[int] | ReadWriteIndexes | None = None,
+    write_indexes: Sequence[int] | ReadWriteIndexes | None = None,
+    is_tma_store: bool = False,
+    ignore_if: IgnoreUnknownOp | None = None,
+) -> None:
+    """Register a Triton op for kernel read/write analysis."""
+    if is_tma_store and write_indexes is None:
+        raise AssertionError(
+            f"{name} is marked as a TMA store but has no write indexes"
+        )
+    has_indexes = read_indexes is not None or write_indexes is not None
+    if ignore_if is not None and has_indexes:
+        raise AssertionError(
+            f"{name}: ignore_if cannot be combined with read/write indexes"
+        )
+    _KERNEL_ACCESS_OPS[name] = _KernelAccessOpInfo(
+        read_indexes=(
+            None if read_indexes is None else _read_write_indexes(read_indexes)
+        ),
+        write_indexes=(
+            None if write_indexes is None else _read_write_indexes(write_indexes)
+        ),
+        is_tma_store=is_tma_store,
+        ignore_if=ignore_if,
+    )
+
+
+def unregister_kernel_access_op(name: str) -> None:
+    """
+    Unregister a Triton op from kernel read/write analysis.
+
+    This is mainly useful for tests and temporary backend registrations. It
+    does not reset memoized analysis, so direct analyze_kernel_access callers
+    must reset their own caches.
+    """
+    _KERNEL_ACCESS_OPS.pop(name, None)
+
+
 @MemoizeWithCycleCheck
 def analyze_kernel_access(
     functions: dict[str, dict[Intermediate, list[Op]]],
@@ -929,25 +1145,6 @@ def analyze_kernel_access(
     """
     from torch._inductor.dependencies import Dep, ReadWrites, StarDep
 
-    # Name of mutation op to mutated parameter indices
-    # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
-    # All the OPs that have MemWrite trait.
-    # What if Triton exposed this?
-    WRITE_OPS = {
-        "tt.store": [0],
-        "tt.atomic_cas": [0],
-        "tt.atomic_rmw": [0],
-        "tt.experimental_descriptor_store": [0],
-        "tt.experimental_tensormap_create": [0],
-        "tt.descriptor_store": [0],
-    }
-    READ_OPS = {
-        "tt.load": [0],
-        "tt.load_tensor_descriptor": [0],
-        "tt.descriptor_load": [0],
-    }
-    UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
-
     write_stack: list[Param | Intermediate] = []
     read_stack: list[Param | Intermediate] = []
 
@@ -958,8 +1155,9 @@ def analyze_kernel_access(
         for op in op_list:
             # If we encounter an operation with effects that cannot be reliably analyzed
             # (e.g. `tt.elementwise_inline_asm`), we assume it does not mutate any input parameters.
-            if op.name in UNKNOWN_OPS:
-                if op.name == "tt.elementwise_inline_asm" and op.is_pure:
+            op_info = _KERNEL_ACCESS_OPS.get(op.name)
+            if op_info is not None and op_info.ignore_if is not None:
+                if op_info.ignore_if(op):
                     continue
                 raise RuntimeError(
                     f"ttir analysis hit an op we do not know how to analyze: {op.name}"
@@ -1009,8 +1207,12 @@ def analyze_kernel_access(
                     if name in read_set:
                         read_stack.append(arg)
             else:
-                write_stack.extend(op.args[idx] for idx in WRITE_OPS.get(op.name, []))
-                read_stack.extend(op.args[idx] for idx in READ_OPS.get(op.name, []))
+                if op_info is not None and op_info.write_indexes is not None:
+                    write_stack.extend(
+                        op.args[idx] for idx in op_info.write_indexes(op)
+                    )
+                if op_info is not None and op_info.read_indexes is not None:
+                    read_stack.extend(op.args[idx] for idx in op_info.read_indexes(op))
 
     # For these ops, only the first argument (base pointer) refers to actual
     # memory. The remaining arguments are shape/stride/offset metadata and
@@ -2504,6 +2706,21 @@ class TracingTritonHOPifier(TritonHOPifier):
                 f"Expected TraceableTritonKernelWrapper, got {type(variable)}"
             )
 
+        # Only tensors can be passed as non-const args in the fx graph, so replace
+        # host-side TMA descriptors with their base tensors and carry the descriptor
+        # metadata alongside, mirroring what Dynamo does. Without this the descriptor
+        # would be stashed as an opaque constant arg and downstream consumers (TTIR
+        # generation, Inductor codegen) would not recognize it as a TMA descriptor.
+        combined_args = dict(combined_args)
+        tma_descriptor_metadata: TMADescriptorMetadata = {}
+        for k in list(combined_args.keys()):
+            if (
+                unpacked := maybe_unpack_host_tma_descriptor(combined_args[k])
+            ) is not None:
+                tensor, metadata = unpacked
+                combined_args[k] = tensor
+                tma_descriptor_metadata[k] = metadata
+
         graphable_args, constant_args_idx = self.store_non_graphable_args(combined_args)
         # launch_kwargs records the names passed as kwargs at the Triton launch
         # site. A non-kernel launch kwarg can only be a compiler option, so it
@@ -2530,9 +2747,7 @@ class TracingTritonHOPifier(TritonHOPifier):
             kernel_idx=variable.kernel_idx,
             constant_args_idx=constant_args_idx,
             grid=grids,  # type: ignore[arg-type]
-            # TMA descriptor capturing not yet
-            # supported in non-dynamo tracing
-            tma_descriptor_metadata={},
+            tma_descriptor_metadata=tma_descriptor_metadata,
             kwargs=graphable_args,
             launch_kwargs=launch_kwargs,
         )

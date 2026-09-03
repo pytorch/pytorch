@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import io
 import json
 import operator
 import os
@@ -10,19 +11,31 @@ import time
 import types
 import unittest
 from concurrent.futures import TimeoutError as FuturesTimeoutError
+from concurrent.futures.process import BrokenProcessPool
 from threading import Event
 from unittest.mock import patch
 
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
+    _recv_msg,
+    _SubprocExceptionInfo,
+    MsgHeader,
     raise_testexc,
     SubprocException,
     SubprocKind,
+    SubprocMain,
+    SubprocPickler,
     SubprocPool,
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_FBCODE, IS_LINUX, skipIfWindows
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+    skipIfWindows,
+    subtest,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
 
 
@@ -139,8 +152,16 @@ class TestCompileWorker(TestCase):
         # but EOF never arrives" case: with that path dead, only _health_monitor
         # -> _on_sidecar_death can resolve pending futures. (The complementary
         # test_sidecar_death_eofs_without_watchdog covers the EOF path in
-        # isolation by disabling the watchdog instead.)
-        with patch.object(SubprocPool, "_read_thread", lambda self: None):
+        # isolation by disabling the watchdog instead.) The injected diagnostic
+        # failure proves pending futures are failed before best-effort reporting.
+        with (
+            patch.object(SubprocPool, "_read_thread", lambda self: None),
+            patch.object(
+                SubprocPool,
+                "_log_sidecar_death_diagnostics",
+                side_effect=SystemExit(3),
+            ),
+        ):
             pool = self.make_pool(2)
             try:
                 fut = pool.submit(time.sleep, 600)
@@ -321,6 +342,447 @@ class TestCompileWorker(TestCase):
 class TestCompileWorkerWithTimer(TestCompileWorker):
     def make_pool(self, size):
         return SubprocPool(size, quiesce=True)
+
+
+class TestSubprocPoolCallbackSafety(TestCase):
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_done_callback_can_submit_job(self):
+        code = textwrap.dedent(
+            """
+            import operator
+            import threading
+            import time
+
+            from torch._inductor.compile_worker.subproc_pool import SubprocPool
+
+            pool = SubprocPool(2)
+            callback_done = threading.Event()
+            chained = []
+
+            def callback(future):
+                chained.append(pool.submit(operator.add, 20, 22))
+                callback_done.set()
+
+            first = pool.submit(time.sleep, 1)
+            first.add_done_callback(callback)
+            assert first.result(timeout=60) is None
+            assert callback_done.wait(60), "done callback deadlocked in pool.submit()"
+            assert chained[0].result(timeout=60) == 42
+            pool.shutdown()
+            print("reentrant callback completed")
+            """
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=120
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertIn("reentrant callback completed", result.stdout)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_sidecar_death_completes_all_futures_after_callback_base_exception(self):
+        code = textwrap.dedent(
+            """
+            import threading
+            import time
+
+            from torch._inductor.compile_worker.subproc_pool import SubprocPool
+
+            pool = SubprocPool(2)
+            callback_done = threading.Event()
+            first = pool.submit(time.sleep, 600)
+            second = pool.submit(time.sleep, 600)
+
+            class BrokenWaitCounter:
+                def __exit__(
+                    self, exc_type=None, exc_value=None, traceback=None
+                ):
+                    raise SystemExit(3)
+
+            first_job_id = next(iter(pool.pending_jobs))
+            pool.pending_jobs[first_job_id].waitcounter = BrokenWaitCounter()
+
+            def reentrant_callback(future):
+                try:
+                    pool.submit(time.sleep, 0)
+                except RuntimeError:
+                    callback_done.set()
+                else:
+                    raise AssertionError("submit unexpectedly succeeded on dead pool")
+
+            def base_exception_callback(future):
+                raise SystemExit(3)
+
+            first.add_done_callback(reentrant_callback)
+            first.add_done_callback(base_exception_callback)
+            time.sleep(1)
+            pool.process.kill()
+
+            for future in (first, second):
+                try:
+                    future.result(timeout=60)
+                except Exception:
+                    pass
+                else:
+                    raise AssertionError("sidecar death unexpectedly succeeded")
+            assert callback_done.wait(60), "sidecar-death callback did not run"
+            pool.shutdown()
+            print("all pending futures completed")
+            """
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=120
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertIn("all pending futures completed", result.stdout)
+
+
+class _UnpicklableError(Exception):
+    """Stands in for a job exception that the pickler cannot serialize."""
+
+
+class _FailingPickler(SubprocPickler):
+    def dumps(self, obj):
+        if isinstance(obj, _UnpicklableError):
+            raise RuntimeError("cannot pickle this exception")
+        return super().dumps(obj)
+
+
+class _RefusesFailurePickler(_FailingPickler):
+    """Also refuses the failure details, forcing the empty-payload last resort."""
+
+    def dumps(self, obj):
+        if isinstance(obj, _SubprocExceptionInfo):
+            raise RuntimeError("cannot pickle the failure payload either")
+        return super().dumps(obj)
+
+
+class _RaisesBaseExceptionPickler(SubprocPickler):
+    def dumps(self, obj):
+        raise SystemExit(3)
+
+
+class _RaisesOnBadLoadPickler(SubprocPickler):
+    def loads(self, data):
+        if data == b"bad":
+            raise SystemExit(3)
+        return super().loads(data)
+
+
+class _DoneFuture:
+    """
+    A finished future that runs done callbacks the way concurrent.futures does:
+    inline, swallowing anything they raise. That swallowing is what turned a
+    dead callback into a silent hang, so the fake has to reproduce it.
+    """
+
+    def __init__(self, result=None, exc=None, cancelled=False):
+        self._result = result
+        self._exc = exc
+        self._cancelled = cancelled
+
+    def cancelled(self):
+        return self._cancelled
+
+    def exception(self, timeout=None):
+        if self._cancelled:
+            raise AssertionError("exception() must not be called on a cancelled future")
+        return self._exc
+
+    def result(self, timeout=None):
+        if self._exc is not None:
+            raise self._exc
+        return self._result
+
+    def add_done_callback(self, fn):
+        try:
+            fn(self)
+        except Exception:
+            pass
+
+
+class _FakePool:
+    def __init__(self, future):
+        self._future = future
+
+    def submit(self, fn, *args, **kwargs):
+        return self._future
+
+
+class _EmptyTolerantPickler(SubprocPickler):
+    """
+    Returns a value for empty input instead of raising. Custom picklers are a
+    supported hook (SubprocPool takes one), so "unpickling empty data throws"
+    is not something the parent gets to assume.
+    """
+
+    def loads(self, data):
+        return None if not data else super().loads(data)
+
+
+def _run_callback(future, job_id, pickler):
+    """
+    Run SubprocMain's result callback in-process for a finished job and return
+    the bytes it put on the wire, or b"" if it sent nothing.
+    """
+    read_fd, write_fd = os.pipe()
+    with os.fdopen(read_fd, "rb") as parent_read:
+        with os.fdopen(write_fd, "wb") as sidecar_write:
+            # SubprocMain only reads its command pipe from main(), which we
+            # bypass by calling _submit_inner directly.
+            main = SubprocMain(
+                pickler, SubprocKind.FORK, 1, io.BytesIO(), sidecar_write
+            )
+            # Presetting the pool keeps _start_pool from forking real workers.
+            main.pool = _FakePool(future)
+            with main._inflight_lock:
+                main._inflight[job_id] = time.monotonic()
+
+            main._submit_inner(job_id, b"")
+        # The callback ran inline above and the write end is closed now, so this
+        # reads whatever was sent and then hits EOF. A callback that sent nothing
+        # surfaces as no bytes rather than as a hang.
+        return parent_read.read()
+
+
+@instantiate_parametrized_tests
+class TestSubprocMainResultDelivery(TestCase):
+    # Drive SubprocMain's result callback in-process against a fake pool, so the
+    # two escapes in the pre-send work can be reproduced directly. Running the
+    # callback here rather than through a real sidecar is what lets these tests
+    # fail -- instead of hanging -- when it dies without sending anything.
+
+    @parametrize(
+        "future",
+        [
+            # The job raised and the pickler cannot serialize the exception.
+            subtest(
+                _DoneFuture(exc=_UnpicklableError("boom")),
+                name="unpicklable_exception",
+            ),
+            # A BaseException must become a job failure rather than a successful
+            # result containing the exception object.
+            subtest(_DoneFuture(exc=SystemExit(3)), name="base_exception"),
+            # Future.exception() raises on cancellation, so cancellation must be
+            # handled before reading the outcome.
+            subtest(_DoneFuture(cancelled=True), name="cancelled"),
+            # do_job is supposed to hand back bytes; anything else trips the
+            # isinstance check just before the send.
+            subtest(_DoneFuture(result="not bytes"), name="non_bytes_result"),
+        ],
+    )
+    def test_callback_escape_fails_the_job(self, future):
+        pickler = _FailingPickler()
+        delivered = _run_callback(future, 7, pickler)
+
+        self.assertTrue(
+            delivered, "callback sent nothing: the parent's future would hang forever"
+        )
+        msg_header, job_id, data = _recv_msg(io.BytesIO(delivered))
+        self.assertEqual(msg_header, MsgHeader.JOB)
+        self.assertEqual(job_id, 7)
+        result = pickler.loads(data)
+        self.assertIsInstance(result, _SubprocExceptionInfo)
+        self.assertIn(
+            "SubprocPool failed to deliver a result for job 7", result.details
+        )
+
+    def test_unpicklable_failure_sends_error_frame(self):
+        # Last resort: the pickler refuses even _SubprocExceptionInfo, so there
+        # is no way to describe the failure. Sending an empty payload is still
+        # better than sending nothing. A distinct header keeps an empty success
+        # payload unambiguous (see test_empty_payload_can_be_a_success).
+        delivered = _run_callback(
+            _DoneFuture(exc=_UnpicklableError("boom")), 7, _RefusesFailurePickler()
+        )
+
+        self.assertTrue(
+            delivered, "callback sent nothing: the parent's future would hang forever"
+        )
+        msg_header, job_id, data = _recv_msg(io.BytesIO(delivered))
+        self.assertEqual(msg_header, MsgHeader.JOB_ERROR)
+        self.assertEqual(job_id, 7)
+        self.assertEqual(data, b"")
+
+    def test_base_exception_from_failure_pickler_sends_error_frame(self):
+        delivered = _run_callback(
+            _DoneFuture(exc=_UnpicklableError("boom")),
+            7,
+            _RaisesBaseExceptionPickler(),
+        )
+
+        self.assertTrue(delivered)
+        msg_header, job_id, data = _recv_msg(io.BytesIO(delivered))
+        self.assertEqual(msg_header, MsgHeader.JOB_ERROR)
+        self.assertEqual(job_id, 7)
+        self.assertEqual(data, b"")
+
+    def test_failed_delivery_terminates_sidecar(self):
+        main = SubprocMain(
+            SubprocPickler(), SubprocKind.FORK, 1, io.BytesIO(), io.BytesIO()
+        )
+        main.pool = _FakePool(_DoneFuture(result=b"result"))
+        with main._inflight_lock:
+            main._inflight[7] = time.monotonic()
+
+        def fail_delivery(*args, **kwargs):
+            self.assertIn(7, main._inflight)
+            raise BrokenPipeError("closed result pipe")
+
+        with patch(
+            "torch._inductor.compile_worker.subproc_pool._send_msg",
+            side_effect=fail_delivery,
+        ):
+            with patch(
+                "torch._inductor.compile_worker.subproc_pool._exit_sidecar"
+            ) as exit_sidecar:
+                main._submit_inner(7, b"")
+
+        exit_sidecar.assert_called_once_with()
+        self.assertIn(7, main._inflight)
+
+    def test_broken_pool_submit_retries_are_bounded(self):
+        write_pipe = io.BytesIO()
+        main = SubprocMain(
+            SubprocPickler(), SubprocKind.FORK, 1, io.BytesIO(), write_pipe
+        )
+        with patch.object(
+            main,
+            "_submit_inner",
+            side_effect=BrokenProcessPool("pool is broken"),
+        ) as submit:
+            main.submit(7, b"")
+
+        self.assertEqual(submit.call_count, 3)
+        msg_header, job_id, data = _recv_msg(io.BytesIO(write_pipe.getvalue()))
+        self.assertEqual(msg_header, MsgHeader.JOB)
+        self.assertEqual(job_id, 7)
+        result = main.pickler.loads(data)
+        self.assertIsInstance(result, _SubprocExceptionInfo)
+        self.assertIn("3 consecutive submit attempts", result.details)
+        self.assertNotIn(7, main._inflight)
+
+
+class TestSubprocPoolResultHandling(TestCase):
+    # The job submitted in these tests is one that never finishes, so the
+    # sidecar has no real reply to race the payload injected for it. That lets
+    # the read thread keep running, so the follow-up jobs below are ordinary
+    # round trips through a real pool.
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_bookkeeping_failure_does_not_strand_result(self):
+        class BrokenWaitCounter:
+            def __exit__(self, exc_type=None, exc_value=None, traceback=None):
+                raise SystemExit(3)
+
+        pool = SubprocPool(2)
+        try:
+            fut = pool.submit(time.sleep, 600)
+            (job_id,) = pool.pending_jobs
+            pool.pending_jobs[job_id].waitcounter = BrokenWaitCounter()
+
+            pool._handle_job_result(job_id, pool.pickler.dumps(42))
+            self.assertEqual(fut.result(timeout=60), 42)
+            self.assertEqual(pool.submit(operator.add, 100, 1).result(timeout=60), 101)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_base_exception_payload_surfaces_as_subproc_exception(self):
+        pool = SubprocPool(2)
+        try:
+            fut = pool.submit(time.sleep, 600)
+            (job_id,) = pool.pending_jobs
+            delivered = _run_callback(
+                _DoneFuture(exc=SystemExit(3)), job_id, SubprocPickler()
+            )
+            _, _, data = _recv_msg(io.BytesIO(delivered))
+
+            pool._handle_job_result(job_id, data)
+            expected_error = "the job raised SystemExit"
+            with self.assertRaisesRegex(SubprocException, expected_error):
+                fut.result(timeout=60)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_failure_payload_surfaces_as_subproc_exception(self):
+        # Join the two halves: the exact bytes SubprocMain sends when its
+        # callback dies, handed to a real parent, must fail that job and leave
+        # the pool usable. Only the pipe between them is stubbed out, and every
+        # other test in this file runs a real one.
+        pool = SubprocPool(2)
+        try:
+            fut = pool.submit(time.sleep, 600)
+            (job_id,) = pool.pending_jobs
+            delivered = _run_callback(
+                _DoneFuture(exc=_UnpicklableError("boom")), job_id, _FailingPickler()
+            )
+            _, _, data = _recv_msg(io.BytesIO(delivered))
+
+            pool._handle_job_result(job_id, data)
+            with self.assertRaisesRegex(
+                SubprocException, "SubprocPool failed to deliver a result"
+            ):
+                fut.result(timeout=60)
+
+            # One failed delivery must not take the pool down.
+            self.assertEqual(pool.submit(operator.add, 100, 1).result(timeout=60), 101)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_empty_payload_can_be_a_success(self):
+        pool = SubprocPool(2)
+        try:
+            fut = pool.submit(time.sleep, 600)
+            (job_id,) = pool.pending_jobs
+            with patch.object(pool, "pickler", _EmptyTolerantPickler()):
+                pool._handle_job_result(job_id, b"")
+            self.assertIsNone(fut.result(timeout=60))
+
+            self.assertEqual(pool.submit(operator.add, 100, 1).result(timeout=60), 101)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_error_frame_fails_the_job_without_unpickling(self):
+        pool = SubprocPool(2)
+        try:
+            fut = pool.submit(time.sleep, 600)
+            (job_id,) = pool.pending_jobs
+            with patch.object(pool, "pickler", _EmptyTolerantPickler()):
+                pool._handle_job_result(job_id, b"", failed=True)
+            with self.assertRaisesRegex(
+                SubprocException, "SubprocPool failed to deliver a result"
+            ):
+                fut.result(timeout=60)
+
+            self.assertEqual(pool.submit(operator.add, 100, 1).result(timeout=60), 101)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_base_exception_from_load_fails_only_that_job(self):
+        pool = SubprocPool(2)
+        try:
+            fut = pool.submit(time.sleep, 600)
+            (job_id,) = pool.pending_jobs
+            with patch.object(pool, "pickler", _RaisesOnBadLoadPickler()):
+                pool._handle_job_result(job_id, b"bad")
+            with self.assertRaisesRegex(SubprocException, "pickler raised SystemExit"):
+                fut.result(timeout=60)
+
+            self.assertEqual(pool.submit(operator.add, 100, 1).result(timeout=60), 101)
+        finally:
+            pool.shutdown()
 
 
 class TestCompileWorkerWatchdog(TestCase):
@@ -572,12 +1034,349 @@ class TestTimer(TestCase):
         t.quit()
 
 
+class _FakeTritonKernel:
+    def __init__(self):
+        self.precompiled = False
+        self.prepared_for_pickle = False
+
+    def precompile(self, *, warm_cache_only):
+        self.precompiled = warm_cache_only
+
+    def prepare_for_pickle(self):
+        self.prepared_for_pickle = True
+
+
+class TestSubprocessEnv(TestCase):
+    def assert_path_in_dir(self, path, expected_dir):
+        expected_dir = os.path.abspath(expected_dir)
+        self.assertEqual(
+            os.path.commonpath([os.path.abspath(path), expected_dir]),
+            expected_dir,
+        )
+
+    def test_pycodecache_kernel_compile_sends_full_cache_env(self):
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.runtime.compile_tasks import (
+            _worker_compile_pycodecache_kernel,
+        )
+
+        class FakeFuture:
+            def result(self):
+                return "key", "/tmp/kernel.py", 0
+
+        class FakePool:
+            def __init__(self):
+                self.calls = []
+
+            def submit(self, fn, *args):
+                self.calls.append((fn, args))
+                return FakeFuture()
+
+        env_keys = [
+            "TORCHINDUCTOR_CACHE_DIR",
+            "TRITON_CACHE_DIR",
+            "TORCHINDUCTOR_CUTLASS_DIR",
+        ]
+        old_env = {key: os.environ.get(key) for key in env_keys}
+        pool = FakePool()
+
+        try:
+            os.environ["TORCHINDUCTOR_CACHE_DIR"] = "/tmp/current-inductor-cache"
+            os.environ.pop("TRITON_CACHE_DIR", None)
+            os.environ.pop("TORCHINDUCTOR_CUTLASS_DIR", None)
+
+            with (
+                patch.object(AsyncCompile, "use_process_pool", return_value=True),
+                patch.object(AsyncCompile, "process_pool", return_value=pool),
+            ):
+                AsyncCompile().cutedsl("kernel", "def kernel_main():\n    pass\n")
+                AsyncCompile().nv_universal_gemm(
+                    "kernel", "def kernel_main():\n    pass\n"
+                )
+
+            self.assertEqual(len(pool.calls), 2)
+            for fn, args in pool.calls:
+                self.assertIs(fn, _worker_compile_pycodecache_kernel)
+                self.assertEqual(
+                    args[3],
+                    {
+                        "TORCHINDUCTOR_CACHE_DIR": "/tmp/current-inductor-cache",
+                        "TRITON_CACHE_DIR": None,
+                        "TORCHINDUCTOR_CUTLASS_DIR": None,
+                    },
+                )
+        finally:
+            for key, value in old_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_worker_compile_pycodecache_kernel_clears_cache_env(self):
+        import torch._inductor.runtime.compile_tasks as compile_tasks
+        from torch._inductor.runtime.cache_dir_utils import default_cache_dir
+
+        old_env = {
+            "TORCHINDUCTOR_CACHE_DIR": os.environ.get("TORCHINDUCTOR_CACHE_DIR"),
+            "TRITON_CACHE_DIR": os.environ.get("TRITON_CACHE_DIR"),
+            "TORCHINDUCTOR_CUTLASS_DIR": os.environ.get("TORCHINDUCTOR_CUTLASS_DIR"),
+        }
+        old_last_applied_cache_env = compile_tasks._last_applied_cache_env
+        source_code = "def kernel_main():\n    pass\n"
+
+        try:
+            compile_tasks._last_applied_cache_env = None
+            with tempfile.TemporaryDirectory() as cache_dir:
+                triton_cache_dir = os.path.join(cache_dir, "triton")
+                _, path_1, _ = compile_tasks._worker_compile_pycodecache_kernel(
+                    "kernel",
+                    source_code,
+                    "main",
+                    {
+                        "TORCHINDUCTOR_CACHE_DIR": cache_dir,
+                        "TRITON_CACHE_DIR": triton_cache_dir,
+                        "TORCHINDUCTOR_CUTLASS_DIR": None,
+                    },
+                )
+                self.assert_path_in_dir(path_1, cache_dir)
+                self.assertEqual(os.environ["TORCHINDUCTOR_CACHE_DIR"], cache_dir)
+                self.assertEqual(os.environ["TRITON_CACHE_DIR"], triton_cache_dir)
+                self.assertNotIn("TORCHINDUCTOR_CUTLASS_DIR", os.environ)
+
+                _, path_2, _ = compile_tasks._worker_compile_pycodecache_kernel(
+                    "kernel",
+                    source_code,
+                    "main",
+                    {
+                        "TORCHINDUCTOR_CACHE_DIR": None,
+                        "TRITON_CACHE_DIR": None,
+                        "TORCHINDUCTOR_CUTLASS_DIR": None,
+                    },
+                )
+                self.assert_path_in_dir(path_2, default_cache_dir())
+                self.assertNotEqual(path_1, path_2)
+                self.assertNotIn("TRITON_CACHE_DIR", os.environ)
+                self.assertNotIn("TORCHINDUCTOR_CUTLASS_DIR", os.environ)
+        finally:
+            compile_tasks._last_applied_cache_env = old_last_applied_cache_env
+            for key, value in old_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_nvgemm_precompile_sends_full_cache_env(self):
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _worker_nvgemm_autotuning_precompile,
+        )
+
+        class FakeFuture:
+            def result(self):
+                return None, 0
+
+        class FakePool:
+            def __init__(self):
+                self.calls = []
+
+            def submit(self, fn, *args):
+                self.calls.append((fn, args))
+                return FakeFuture()
+
+        env_keys = [
+            "TORCHINDUCTOR_CACHE_DIR",
+            "TRITON_CACHE_DIR",
+            "TORCHINDUCTOR_CUTLASS_DIR",
+        ]
+        old_env = {key: os.environ.get(key) for key in env_keys}
+        pool = FakePool()
+
+        try:
+            os.environ["TORCHINDUCTOR_CACHE_DIR"] = "/tmp/current-inductor-cache"
+            os.environ.pop("TRITON_CACHE_DIR", None)
+            os.environ.pop("TORCHINDUCTOR_CUTLASS_DIR", None)
+
+            with patch.object(AsyncCompile, "process_pool", return_value=pool):
+                AsyncCompile().nvgemm_precompile(
+                    "kernel",
+                    "GEMM",
+                    "accumulator",
+                    (),
+                    None,
+                    types.SimpleNamespace(
+                        max_active_clusters=None, device_capability=(9, 0)
+                    ),
+                )
+
+            self.assertEqual(len(pool.calls), 1)
+            fn, args = pool.calls[0]
+            self.assertIs(fn, _worker_nvgemm_autotuning_precompile)
+            self.assertEqual(
+                args[5],
+                {
+                    "TORCHINDUCTOR_CACHE_DIR": "/tmp/current-inductor-cache",
+                    "TRITON_CACHE_DIR": None,
+                    "TORCHINDUCTOR_CUTLASS_DIR": None,
+                },
+            )
+        finally:
+            for key, value in old_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_worker_nvgemm_precompile_clears_cache_env(self):
+        import torch
+        import torch._inductor.runtime.compile_tasks as compile_tasks
+        from torch._inductor.codegen.nv_universal_gemm import (
+            nv_universal_gemm_kernel as nvgemm_kernel,
+        )
+
+        old_env = {
+            "TORCHINDUCTOR_CACHE_DIR": os.environ.get("TORCHINDUCTOR_CACHE_DIR"),
+            "TRITON_CACHE_DIR": os.environ.get("TRITON_CACHE_DIR"),
+            "TORCHINDUCTOR_CUTLASS_DIR": os.environ.get("TORCHINDUCTOR_CUTLASS_DIR"),
+        }
+        old_last_applied_cache_env = compile_tasks._last_applied_cache_env
+        meta = types.SimpleNamespace(
+            sizes=(1, 1), strides=(1, 1), device="cpu", dtype=torch.float32
+        )
+        cuda_ctx = types.SimpleNamespace(
+            max_active_clusters=None, device_capability=(9, 0)
+        )
+
+        try:
+            compile_tasks._last_applied_cache_env = None
+            with (
+                tempfile.TemporaryDirectory() as cache_dir,
+                patch.object(
+                    nvgemm_kernel,
+                    "_compile_nvgemm",
+                    return_value=(object(), None, None, False),
+                ),
+                patch("torch._inductor.utils._ensure_fp4_dtype_registered"),
+                patch.object(
+                    nvgemm_kernel, "_patch_max_active_clusters", return_value=[]
+                ),
+            ):
+                triton_cache_dir = os.path.join(cache_dir, "triton")
+                nvgemm_kernel._worker_nvgemm_autotuning_precompile(
+                    "kernel",
+                    "GEMM",
+                    "accumulator",
+                    (meta, meta),
+                    meta,
+                    {
+                        "TORCHINDUCTOR_CACHE_DIR": cache_dir,
+                        "TRITON_CACHE_DIR": triton_cache_dir,
+                        "TORCHINDUCTOR_CUTLASS_DIR": None,
+                    },
+                    cuda_ctx,
+                )
+                self.assertEqual(os.environ["TORCHINDUCTOR_CACHE_DIR"], cache_dir)
+                self.assertEqual(os.environ["TRITON_CACHE_DIR"], triton_cache_dir)
+                self.assertNotIn("TORCHINDUCTOR_CUTLASS_DIR", os.environ)
+
+                nvgemm_kernel._worker_nvgemm_autotuning_precompile(
+                    "kernel",
+                    "GEMM",
+                    "accumulator",
+                    (meta, meta),
+                    meta,
+                    {
+                        "TORCHINDUCTOR_CACHE_DIR": None,
+                        "TRITON_CACHE_DIR": None,
+                        "TORCHINDUCTOR_CUTLASS_DIR": None,
+                    },
+                    cuda_ctx,
+                )
+                self.assertNotIn("TORCHINDUCTOR_CACHE_DIR", os.environ)
+                self.assertNotIn("TRITON_CACHE_DIR", os.environ)
+                self.assertNotIn("TORCHINDUCTOR_CUTLASS_DIR", os.environ)
+        finally:
+            compile_tasks._last_applied_cache_env = old_last_applied_cache_env
+            for key, value in old_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_worker_compile_triton_clears_libdevice_path(self):
+        try:
+            from triton import knobs
+        except ImportError:
+            self.skipTest("triton not available")
+
+        from torch._inductor.runtime.compile_tasks import _worker_compile_triton
+
+        old_env = os.environ.get("TRITON_LIBDEVICE_PATH")
+        old_knob = knobs.nvidia.libdevice_path
+        stale_libdevice_path = "/tmp/stale-libdevice.bc"
+
+        try:
+            kernel, _ = _worker_compile_triton(
+                _FakeTritonKernel,
+                {"TRITON_LIBDEVICE_PATH": stale_libdevice_path},
+                {},
+            )
+            self.assertTrue(kernel.precompiled)
+            self.assertTrue(kernel.prepared_for_pickle)
+            self.assertEqual(os.environ["TRITON_LIBDEVICE_PATH"], stale_libdevice_path)
+            self.assertEqual(knobs.nvidia.libdevice_path, stale_libdevice_path)
+
+            _worker_compile_triton(
+                _FakeTritonKernel,
+                {"TRITON_LIBDEVICE_PATH": None},
+                {},
+            )
+            self.assertNotIn("TRITON_LIBDEVICE_PATH", os.environ)
+            self.assertIsNone(knobs.nvidia.libdevice_path)
+        finally:
+            if old_env is None:
+                os.environ.pop("TRITON_LIBDEVICE_PATH", None)
+            else:
+                os.environ["TRITON_LIBDEVICE_PATH"] = old_env
+            knobs.nvidia.libdevice_path = old_knob
+
+    def test_serialized_fx_compile_restores_subprocess_env(self):
+        from torch._inductor.compile_fx_ext import _SerializedFxCompile
+
+        key = "TEST_INDUCTOR_SUBPROCESS_ENV"
+        mutated_key = "TEST_INDUCTOR_SUBPROCESS_ENV_MUTATED"
+        old_env = os.environ.get(key)
+        old_mutated_env = os.environ.get(mutated_key)
+        os.environ[key] = "parent-value"
+        os.environ.pop(mutated_key, None)
+
+        class StopAfterEnvCheck(Exception):
+            pass
+
+        testcase = self
+
+        class Input:
+            def deserialize(self):
+                testcase.assertNotIn(key, os.environ)
+                os.environ[mutated_key] = "child-value"
+                raise StopAfterEnvCheck
+
+        try:
+            with self.assertRaises(StopAfterEnvCheck):
+                _SerializedFxCompile._run_in_child(Input(), {key: None})
+            self.assertEqual(os.environ[key], "parent-value")
+            self.assertNotIn(mutated_key, os.environ)
+        finally:
+            if old_env is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_env
+            if old_mutated_env is None:
+                os.environ.pop(mutated_key, None)
+            else:
+                os.environ[mutated_key] = old_mutated_env
+
+
 class TestSetTritonLibdevicePath(TestCase):
-    @unittest.skipIf(
-        IS_FBCODE,
-        "knobs.nvidia.libdevice_path mismatch in fbcode CI environment; "
-        "matches sibling test_libdevice_path_* disables",
-    )
     @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
     def test_emulate_precision_casts_sets_libdevice_path(self):
         """Test eager numerics mode sets libdevice path for CUDA libdevice calls."""
@@ -679,10 +1478,18 @@ class TestSetTritonLibdevicePath(TestCase):
         x = torch.randn(10, device="cuda", dtype=torch.float32)
         fn(x)
 
-        # Verify libdevice path was set
+        # Verify libdevice path was set. The exact path is environment-specific
+        # (OSS uses the CUDA_HOME toolkit copy; fbcode uses Triton's bundled
+        # copy), so verify a libdevice bitcode path was set rather than pinning
+        # it to the CUDA_HOME location.
         from triton import knobs
 
-        self.assertEqual(knobs.nvidia.libdevice_path, expected)
+        actual = knobs.nvidia.libdevice_path
+        self.assertTrue(actual, "libdevice path was not set")
+        self.assertTrue(
+            actual.endswith("libdevice.10.bc") and os.path.isfile(actual),
+            f"expected a valid libdevice path, got {actual!r}",
+        )
 
 
 class TestTritonCompileWorker(TestCase):

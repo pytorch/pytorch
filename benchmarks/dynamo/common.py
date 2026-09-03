@@ -1092,7 +1092,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         if kwargs["hf_llm"]:
             # If it's an llm, we want to optimize model.forward, and use
             # the generate function
-            model.forward = torch._dynamo.run(model)
+            model.forward = torch._dynamo.run(model.forward)
             frozen_model_iter_fn = model_iter_fn
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
@@ -1757,6 +1757,12 @@ def get_dynamo_stats():
         {
             "calls_captured": torch._dynamo.utils.counters["stats"]["calls_captured"],
             "unique_graphs": torch._dynamo.utils.counters["stats"]["unique_graphs"],
+            # Frames Dynamo saw but could not convert (SkipFrame / error), so
+            # they fell back to running eagerly.
+            "fallbacks_to_eager": (
+                torch._dynamo.utils.counters["frames"]["total"]
+                - torch._dynamo.utils.counters["frames"]["ok"]
+            ),
             "graph_breaks": sum(torch._dynamo.utils.counters["graph_break"].values()),
             # NB: The plus removes zero counts
             "unique_graph_breaks": len(+torch._dynamo.utils.counters["graph_break"]),
@@ -3042,7 +3048,7 @@ class BenchmarkRunner:
                 if getattr(self, "hf_llm", False):
                     # If it's an llm, we want to optimize model.forward, and use
                     # the generate function
-                    model = optimize_ctx(model)
+                    model.forward = optimize_ctx(model.forward)
                     optimized_model_iter_fn = self.model_iter_fn
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
@@ -4351,7 +4357,8 @@ def run(runner, args, original_dir=None):
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         if (
-            args.training
+            torch.version.hip is not None
+            and args.training
             and args.only is not None
             and args.only
             in {
@@ -4360,13 +4367,14 @@ def run(runner, args, original_dir=None):
         ):
             # With the harness-wide fallback_random=True, inductor falls back
             # to ATen rng for the dropout decomposition. That fallback Philox
-            # path indexes randoms by flat element offset, whereas eager CUDA
+            # path indexes randoms by flat element offset, whereas eager ROCm
             # rng indexes by (thread_id, intra_thread_iter), so the two produce
             # different dropout masks for the same seed and trip DistillGPT2's
-            # tight accuracy tolerance (observed on gfx942). Setting
+            # tight accuracy tolerance (observed on ROCm/gfx942). Setting
             # fallback_random=False re-enables inductor's replace_random passes,
-            # which align the masks with eager. This is correct/harmless on
-            # other backends since it only changes how inductor lowers rng.
+            # which align the masks with eager on that backend. Leave CUDA on
+            # the default fallback path; the Triton RNG path is not
+            # eager-equivalent there and regresses A100 DistillGPT2 accuracy.
             inductor_config.fallback_random = False
 
         # Some models e.g. yolov3 assert batch size on n_gpus
@@ -4690,7 +4698,6 @@ def run(runner, args, original_dir=None):
                 "record_shapes": True,
                 "profile_memory": True,
                 "with_stack": True,
-                "with_modules": True,
                 "activities": activities,
             }
 
