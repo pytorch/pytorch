@@ -1853,7 +1853,7 @@ if __name__ == "__main__":
         a = torch.frombuffer(buf, dtype=torch.uint8, count=page_size)
         if int(torch.version.xpu) < 20260200:
             with self.assertRaisesRegex(
-                RuntimeError,
+                NotImplementedError,
                 "register_host_memory is not supported for the current SYCL compiler version",
             ):
                 pin_memory_utils.pin_memory(a.data_ptr(), a.nbytes)
