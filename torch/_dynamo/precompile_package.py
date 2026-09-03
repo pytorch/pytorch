@@ -60,7 +60,7 @@ from typing_extensions import Self
 
 import torch
 import torch._functorch.config as functorch_config
-from torch._guards import ChainedSource, Source
+from torch._guards import ChainedSource, Guard, Source
 from torch.compiler._precompile_types import (
     ExampleInput,
     FrameInvariants,
@@ -71,7 +71,7 @@ from torch.utils._pytree import tree_leaves
 
 from .convert_frame import CatchErrorsWrapper
 from .exc import PackageError
-from .guards import CheckFunctionManager
+from .guards import CheckFunctionManager, record_live_guard_leaves
 from .package import (
     _BackendId,
     _defining_module_name,
@@ -81,7 +81,7 @@ from .package import (
     PrecompileCacheEntry,
 )
 from .pgo import _use_code_state
-from .source import AttrSource, DictGetItemSource, GlobalSource
+from .source import AttrSource, DictGetItemSource, GlobalSource, LocalSource
 
 
 if TYPE_CHECKING:
@@ -751,6 +751,15 @@ def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
     return tuple(_normalize(part) for part in (code_list or ()))
 
 
+def _drop_key(guard: Guard) -> tuple[str, str, tuple[str, ...]]:
+    # (create_fn, source) alone conflates siblings that share a base: two
+    # HASATTR guards on the same object for different attributes have the same
+    # name, so dropping one unrebuildable guard by that key would also drop its
+    # healthy sibling. The rendered code carries the attribute, so it separates
+    # them; it degrades to the coarse key when a failed guard has no code yet.
+    return (guard.create_fn_name(), guard.name, tuple(guard.code_list or ()))
+
+
 class _PrecompileBackend:
     """Give one explicit session its own Dynamo cache identity."""
 
@@ -1187,6 +1196,61 @@ def _wont_generalize(
     return tuple(sorted(pinned))
 
 
+# Healing re-serializes, which can in principle prune something new. Bounded
+# rather than open: in practice one pass is always enough.
+_VALIDATION_PASSES = 4
+
+
+def _environment_rooted(entries: Sequence[GuardFilterEntry]) -> set[str]:
+    """The slots the precompile contract pins, by what they are ROOTED at.
+
+    Observed variance cannot decide this: varying_guard_slots over a single
+    variant is empty by construction. So classify by the root. Environment is
+    the module structure, the process globals, the global interpreter state and
+    the shape env; a local holding anything else is data the caller passes in,
+    which the contract does not license dropping guards on. Module-rooted is
+    decided by VALUE, not by the name starting with "self", because the public
+    API passes the model in as an argument.
+    """
+    modules = sorted(
+        (
+            e.name
+            for e in entries
+            if e.has_value and isinstance(e.value, torch.nn.Module) and e.name
+        ),
+        key=len,
+    )
+
+    def under_a_module(name: str) -> bool:
+        return any(name == m or name.startswith((f"{m}.", f"{m}[")) for m in modules)
+
+    rooted = set()
+    for e in entries:
+        root = _source_root(e.orig_guard.originating_source)
+        # Anything not rooted at a local is environment outright: a module
+        # global, the global state guards, the shape env.
+        if not isinstance(root, LocalSource) or under_a_module(e.name):
+            rooted.add(e.name)
+    return rooted
+
+
+def _unrebuildable_guards(code_entry: Any, cause: Exception) -> PackageError:
+    """The error for a frame whose serialized guards will not rebuild.
+
+    Phrased as a property of the captured model rather than of precompile: this
+    is reached when a guard's SOURCE reaches state that reconstruction does not
+    restore, which is something the caller can act on, and the underlying
+    exception names it.
+    """
+    return PackageError(
+        f"precompile: the guards captured for {code_entry.python_code.co_name} "
+        f"cannot be rebuilt from their serialized form, so the artifact would "
+        f"fail on the machine that loads it. A guard's source reaches state "
+        f"that reconstructing its inputs does not restore: "
+        f"{type(cause).__name__}: {cause}"
+    )
+
+
 def varying_guard_slots(
     guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
 ) -> frozenset[tuple[str, str]]:
@@ -1196,8 +1260,8 @@ def varying_guard_slots(
     of one frame recorded DIFFERENT facts for it, and also when it is present in
     some variants and absent in others -- a guard only one variant carries is
     what tells that variant apart, and comparing values alone would call it
-    invariant and drop it. On a 62-frame ranking model that second case is 225
-    of the 274 slots kept, so it is the majority of the answer, not an edge.
+    invariant and drop it. That present-in-some case is the majority of what is
+    kept, not an edge.
 
     Everything else held identically in every variant, so it is not serialized:
     see the rationale at the call site in ``torch._precompile``.
@@ -1227,6 +1291,7 @@ def _summarize(
     uncovered: frozenset[str],
     capture_errors: Sequence[str],
     guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+    dropped_code: Mapping[tuple[str, str], str],
 ) -> PrecompileSummary:
     wont_generalize = _wont_generalize(kept, guard_sets)
     return PrecompileSummary(
@@ -1239,6 +1304,11 @@ def _summarize(
         uncovered_frames=tuple(sorted(uncovered)),
         wont_generalize=wont_generalize,
         dropped_guards=tuple(sorted(dropped)),
+        dropped_guard_code=tuple(
+            (gtype, name, dropped_code[(gtype, name)])
+            for gtype, name in sorted(dropped | policy_dropped | risky)
+            if (gtype, name) in dropped_code
+        ),
         kept_guards=tuple(sorted(kept)),
         risky_dropped_guards=tuple(sorted(risky)),
         policy_dropped_guards=tuple(sorted(policy_dropped)),
@@ -1295,6 +1365,12 @@ class PrecompileSession:
         # variant of every frame. Off by default: the capture session API
         # serializes everything serializable, and precompile() turns it on.
         self._prune_invariant_guards = prune_invariant_guards
+        # The leaves every live guard build produced, to compare a rebuild
+        # against; see _report_guard_drift.
+        self._live_guard_leaves: set[tuple[str, str]] = set()
+        # This cycle's leaves only; unioned into the above when the cycle ends.
+        self._cycle_guard_leaves: set[tuple[str, str]] = set()
+        self._drifted_guards: set[tuple[str, str]] = set()
         # A training capture traces with grad on and lowers the backward
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
@@ -1304,9 +1380,14 @@ class PrecompileSession:
         self._keep_graphs = keep_graphs
         self._backend_obj: _PrecompileBackend | None = None
         self._policy_dropped_guards: set[tuple[str, str]] = set()
+        # slot -> the check it rendered as, for every slot dropped by any
+        # route. See PrecompileSummary.dropped_guard_code for why the slot
+        # tuple alone cannot be audited.
+        self._dropped_guard_code: dict[tuple[str, str], str] = {}
         self._dropped_guards: set[tuple[str, str]] = set()
         self._kept_guards: set[tuple[str, str]] = set()
         self._risky_dropped_guards: set[tuple[str, str]] = set()
+        self._warned_unrebuildable: set[tuple[str, str]] = set()
         self._capture_errors: list[str] = []
         self._recorded_exception_keys: set[tuple[type[BaseException], str]] = set()
         # (co_name, co_filename, co_firstlineno) -> one fact set per compilation
@@ -1395,10 +1476,12 @@ class PrecompileSession:
                 raise RuntimeError("PrecompileSession is not active")
             compiled = self._compiled
             self._active_calls += 1
-        from .pgo import _use_code_state
-
         try:
-            with _capture_config(self._training), _use_code_state(self._pgo_state):
+            with (
+                _capture_config(self._training),
+                _use_code_state(self._pgo_state),
+                record_live_guard_leaves(self._cycle_guard_leaves),
+            ):
                 return compiled(*args, **kwargs)
         except BaseException as e:
             self._record_capture_error(e)
@@ -1416,6 +1499,13 @@ class PrecompileSession:
             raise RuntimeError("PrecompileSession is already active")
         stack = contextlib.ExitStack()
         stack.enter_context(_capture_config(self._training))
+        # Unioned into _live_guard_leaves when the cycle ends, rather than
+        # replacing it: every cycle starts a fresh set, and _report_guard_drift
+        # compares EVERY frame in the package against it. Keeping only the last
+        # cycle's leaves would report every frame that cycle did not recompile
+        # as drifted. Installed per call by _call, not here: the recording is
+        # thread-scoped, and a call may run on a thread other than this one.
+        self._cycle_guard_leaves = set()
         self._stack = stack
         try:
             if self._example_inputs:
@@ -1514,6 +1604,7 @@ class PrecompileSession:
                 self._record_capture_error(e)
                 raise
             finally:
+                self._live_guard_leaves |= self._cycle_guard_leaves
                 try:
                     self._take_backend_artifacts()
                 finally:
@@ -1523,6 +1614,8 @@ class PrecompileSession:
                         self._state.notify_all()
         self._recorded_exception_keys.clear()
         # Before the report, so that it describes the artifact actually written.
+        # The rebuildability check for the other path is in artifact()/save(),
+        # where a caller can catch it like every other artifact-quality gate.
         if self._prune_invariant_guards and exc[0] is None:
             self._apply_guard_policy()
         if self._invariants_path is None:
@@ -1541,11 +1634,302 @@ class PrecompileSession:
                 self._invariants_path,
             )
 
+    def _drop_unrebuildable_guards(self) -> None:
+        """
+        Drop the guards that cannot be rebuilt from their own pickle.
+
+        Serialization records a guard's VALUE, and rebuilding the tree walks its
+        SOURCE against the reconstructed scope -- so a source reaching state the
+        reconstruction does not restore serializes fine and then explodes on the
+        serving machine, at load or, in the installed mode, inside the first
+        served call. Rebuild each frame's guards here, and drop the ones that
+        raise rather than refusing the artifact over them: whether a guard can
+        be rebuilt and whether it is worth keeping are different questions, and
+        the second one already has an answer the caller controls.
+
+        Recorded as RISKY rather than as an ordinary drop. Dropping a guard is
+        not free -- a guard whose source is a bare attribute leaves its
+        companion HASATTR behind, which rebuilds INVERTED against the
+        attribute-less value and routes calls into the graph traced for the
+        other branch -- so this must fail closed under the default
+        require_no_risky_drops, and pass only where the caller has said it
+        accepts unchecked slots.
+        """
+        from torch._dynamo.guards import CheckFunctionManager
+        from torch._dynamo.output_graph import OutputGraphCommon
+        from torch._dynamo.package import load_guards_state, SerializedCode
+
+        for code_entry in self._package.code_entries():
+            f_code = None
+            for guarded in code_entry.guarded_codes:
+                if f_code is None:
+                    f_code = SerializedCode.to_code_object(code_entry.python_code)
+                loaded = load_guards_state(guarded.guards_state)
+                failures: list[tuple[Guard, Exception]] = []
+                try:
+                    probe = CheckFunctionManager(
+                        f_code,
+                        OutputGraphCommon(loaded.output_graph),
+                        shape_code_parts=loaded.shape_code_parts,
+                        runtime_global_scope=None,
+                        guard_build_local_state=getattr(loaded, "local_state", None),
+                        explicit_capture=True,
+                        collect_guard_failures=failures,
+                    )
+                except Exception as e:
+                    raise _unrebuildable_guards(code_entry, e) from e
+                if not failures:
+                    # Nothing to drop, so the probe is the tree that ships.
+                    self._report_guard_drift(code_entry, probe.guard_manager)
+                    continue
+                guarded.guards_state = self._validated(
+                    code_entry,
+                    f_code,
+                    self._reserialize_without(code_entry, f_code, loaded, failures),
+                )
+
+    def _report_guard_drift(self, code_entry: Any, rebuilt: Any) -> None:
+        """Warn when a guard rebuilds into something the live build never made.
+
+        A guard that cannot be rebuilt at all raises, and is dropped. The
+        quieter half of the same failure is a guard that rebuilds into a
+        DIFFERENT check, because reconstruction lost a value it reads -- a
+        dimension marking, a subclass's requires_grad. That serializes, loads,
+        and then matches the WRONG branch: a rebuilt-inverted HASATTR routes a
+        call into the graph traced for the other branch rather than recompiling,
+        silently. The drift is recorded in _drifted_guards, which the
+        require_no_risky_drops gate refuses on.
+
+        One-directional on purpose: the invariant-guard policy legitimately
+        drops guards, so a leaf present live and absent at load is expected. A
+        leaf the live build never produced is not.
+
+        Compared against the union of every live build's leaves, not this
+        frame's alone, so a leaf that belongs to another frame is never mistaken
+        for drift: anything left is a check NO live build made, which is why the
+        gate can fail closed on it.
+        """
+        if not self._live_guard_leaves:
+            return
+        extra = rebuilt.leaf_fingerprint() - self._live_guard_leaves
+        if not extra:
+            return
+        self._drifted_guards |= extra
+        log.warning(
+            "precompile: %s's guards rebuild into %d check(s) the capture never "
+            "made, so reconstruction lost something they read. At serve time they "
+            "match the wrong branch instead of recompiling: %s",
+            code_entry.python_code.co_name,
+            len(extra),
+            sorted(f"{cls}: {payload}" for cls, payload in extra)[:5],
+        )
+
+    def _validated(
+        self, code_entry: Any, f_code: types.CodeType, written: bytes
+    ) -> bytes:
+        """Rebuild the pickle that will SHIP, and heal it if it does not.
+
+        The policy pass validates the pickle it READ and ships the one it WROTE.
+        Those differ -- re-serialization rebuilds the value-pruning tree against
+        reconstructed objects, so a value whose identity the reconstruction
+        changed is pruned on the way out even though the guard naming it was
+        kept. Nothing downstream rebuilds the shipped bytes, so that lands on
+        the serving machine as a load failure.
+
+        Loops rather than checking once, because healing re-serializes and a
+        re-serialization is what introduces this class in the first place.
+        """
+        from torch._dynamo.guards import CheckFunctionManager
+        from torch._dynamo.output_graph import OutputGraphCommon
+        from torch._dynamo.package import load_guards_state
+
+        for _ in range(_VALIDATION_PASSES):
+            loaded = load_guards_state(written)
+            failures: list[tuple[Guard, Exception]] = []
+            try:
+                manager = CheckFunctionManager(
+                    f_code,
+                    OutputGraphCommon(loaded.output_graph),
+                    shape_code_parts=loaded.shape_code_parts,
+                    runtime_global_scope=None,
+                    guard_build_local_state=getattr(loaded, "local_state", None),
+                    explicit_capture=True,
+                    collect_guard_failures=failures,
+                )
+            except Exception as e:
+                raise _unrebuildable_guards(code_entry, e) from e
+            if not failures:
+                # This tree is the one the serving machine builds, with the
+                # dropped guards and their companions already gone.
+                self._report_guard_drift(code_entry, manager.guard_manager)
+                return written
+            written = self._reserialize_without(code_entry, f_code, loaded, failures)
+        raise _unrebuildable_guards(
+            code_entry,
+            AssertionError(f"still not rebuildable after {_VALIDATION_PASSES} passes"),
+        )
+
+    def _record_unrebuildable(
+        self, code_entry: Any, failures: list[tuple[Guard, Exception]]
+    ) -> set[tuple[str, str, tuple[str, ...]]]:
+        dropped = set()
+        for guard, exc in failures:
+            dropped.add(_drop_key(guard))
+            slot = (guard.create_fn_name(), guard.name)
+            # The guard leaves the shipped pickle here, before any filter sees
+            # it, so this is where its rendered check is recorded.
+            self._record_dropped_code(slot, guard.code_list)
+            self._dropped_guards.add(slot)
+            self._risky_dropped_guards.add(slot)
+            if slot in self._warned_unrebuildable:
+                continue
+            self._warned_unrebuildable.add(slot)
+            # Naming the frame matters: several frames can guard the same source
+            # string, so "dropped" and "still failing" are otherwise
+            # indistinguishable between one frame swept and another missed.
+            log.warning(
+                "precompile: dropping guard %s on %s in %s -- it cannot be "
+                "rebuilt from the artifact (%s: %s). Nothing checks it at load "
+                "time.",
+                slot[0],
+                slot[1],
+                code_entry.python_code.co_name,
+                type(exc).__name__,
+                exc,
+            )
+        return dropped
+
+    def _reserialize_without(
+        self,
+        code_entry: Any,
+        f_code: types.CodeType,
+        loaded: Any,
+        failures: list[tuple[Guard, Exception]],
+    ) -> bytes:
+        """Re-serialize a frame's guards with the unrebuildable ones removed."""
+        from torch._dynamo.guards import CheckFunctionManager
+        from torch._dynamo.output_graph import OutputGraphCommon
+
+        dropped = self._record_unrebuildable(code_entry, failures)
+
+        def without(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+            return [_drop_key(e.orig_guard) not in dropped for e in entries]
+
+        failures.clear()
+        try:
+            state = CheckFunctionManager(
+                f_code,
+                OutputGraphCommon(loaded.output_graph),
+                shape_code_parts=loaded.shape_code_parts,
+                runtime_global_scope=None,
+                guard_build_local_state=getattr(loaded, "local_state", None),
+                save_guards=True,
+                serialization_guard_filter_fn=without,
+                explicit_capture=True,
+                strict_error=True,
+                collect_guard_failures=failures,
+            ).guards_state
+        except Exception as e:
+            raise _unrebuildable_guards(code_entry, e) from e
+        # drop_failed_guards inside THIS build can remove COMPANION guards --
+        # e.g. the HASATTR paired with a dropped base.attr subject. They leave
+        # the shipped guards_state exactly like the subjects did, so they get
+        # the same recording; otherwise summary().risky_dropped_guards, the
+        # artifact's RISKY section, and the drop warning understate what was
+        # removed, and the auditor those sections exist for cannot judge the
+        # missing hasattr pin.
+        companions = [(g, e) for g, e in failures if _drop_key(g) not in dropped]
+        if companions:
+            self._record_unrebuildable(code_entry, companions)
+        if state is None:
+            raise _unrebuildable_guards(
+                code_entry, AssertionError("save_guards produced no guards_state")
+            )
+        return state
+
     def _apply_guard_policy(self) -> None:
+        """Apply the policy IN PLACE and fold its drops into the session.
+
+        The one-shot path: the capture is over, so consuming the accumulated
+        facts to produce the artifact costs nothing. An accumulating capture
+        must use :meth:`_policy_filtered_codes` instead -- see the warning
+        there for what re-running this would destroy.
+        """
+        dropped = self._run_guard_policy(list(self._package.code_entries()))
+        # Not "risky": the policy is the caller stating that the environment is
+        # fixed and every variation is in the inputs, so a slot that never
+        # varied is out of the artifact's declared domain rather than an
+        # unchecked hazard. summary() subtracts these from the kept set, so the
+        # kept set itself stays as the filters recorded it.
+        self._policy_dropped_guards |= dropped
+        keep_only = varying_guard_slots(self._guard_sets)
+
+        def survives(guard_type: str, name: str) -> bool:
+            # Fail closed, mirroring _run_guard_policy: only an explicitly
+            # droppable type can be re-marked, and a type in no set (one
+            # GuardBuilder grew after the classification) is kept.
+            return (
+                guard_type not in _INVARIANT_DROPPABLE_GUARD_TYPES
+                or (guard_type, _normalize(name)) in keep_only
+            )
+
+        # The facts, unlike the serialized guards above, are still filtered by
+        # observed variance alone -- a GuardFact carries no source object, so it
+        # cannot be root-classified the way _environment_rooted does it. Not a
+        # correctness gap on either path: keep_only is computed before this
+        # loop, so the pruning cannot feed itself, and this whole method never
+        # runs on the accumulating path, where close() retires the session
+        # without going through __exit__. It costs reporting fidelity in
+        # invariants(), nothing more. Dropped facts are RE-MARKED rather than
+        # deleted: the invariants report promises a dropped line is "a
+        # precondition NOTHING checks", and a policy-dropped slot is exactly
+        # that -- omitting it would show an auditor a validity domain far
+        # wider than the artifact's true one.
+        for key, variants in self._guard_sets.items():
+            self._guard_sets[key] = [
+                frozenset(
+                    f
+                    if not f.enforced or survives(f.guard_type, f.source)
+                    else dataclasses.replace(f, enforced=False)
+                    for f in facts
+                )
+                for facts in variants
+            ]
+
+    def _policy_filtered_codes(self) -> list[Any]:
+        """Policy-filtered COPIES of the code entries, session left pristine.
+
+        An accumulating capture renders an artifact after every call, and the
+        policy is not safe to apply to the same state twice. It rewrites each
+        variant's serialized guards and then prunes the facts it derived them
+        from, so a second pass reads bytes the first already filtered against
+        facts the first already edited, and filtering can only ever remove.
+
+        That is not a theoretical loss. varying_guard_slots over a SINGLE
+        variant is empty by construction -- one variant cannot disagree with
+        itself -- so the pass after the first call drops every slot of every
+        frame that is not unconditionally kept. When a later call adds the
+        variant that makes one of those slots discriminate, the earlier variant
+        cannot get it back, and it goes on matching calls that belong to the
+        new graph.
+
+        So the accumulating path filters a copy and keeps its own state
+        pristine. deepcopy treats bytes as atomic, so this duplicates the record
+        structure and not the serialized guard payloads.
+        """
+        codes = copy.deepcopy(list(self._package.code_entries()))
+        # REPLACED, not unioned. keep_only grows as calls add variants, so a
+        # slot dropped by an earlier render can survive a later one, and a
+        # cumulative set would keep reporting it as dropped from an artifact
+        # that carries it. This is the drops in the file being written now.
+        self._policy_dropped_guards = self._run_guard_policy(codes)
+        return codes
+
+    def _run_guard_policy(self, code_entries: list[Any]) -> set[tuple[str, str]]:
         """
         Drop every guard slot whose fact was identical in every variant of every
         frame. Such a slot discriminates nothing, and most of an artifact's
-        guards are of that kind: on a 62-frame ranking model, 738 of 1207 slots.
+        guards are of that kind.
 
         Which slots those are is only knowable once every variant exists, but
         guards are serialized per compilation, as each one is produced. So the
@@ -1561,7 +1945,7 @@ class PrecompileSession:
         keep_only = varying_guard_slots(self._guard_sets)
         dropped: set[tuple[str, str]] = set()
 
-        def survives(guard_type: str, name: str) -> bool:
+        def survives(guard_type: str, name: str, derived: Sequence[str] = ()) -> bool:
             # Fail closed: only an explicitly droppable type can be dropped.
             # Shape-bearing types stay because dropping a value/shape pin
             # silently widens the artifact's domain; unmodelled types stay
@@ -1572,79 +1956,108 @@ class PrecompileSession:
             # classification, kept until someone triages it; and a type whose
             # builder emits nothing under the current config has no check to
             # drop, so dropping it would only report a drop that never was.
+            #
+            # The DERIVED types decide too, the way default_guard_filter_fn
+            # reads them. One Guard can emit several checks -- a
+            # DICT_KEYS_MATCH emits the SEQUENCE_LENGTH for the same dict --
+            # and the filter removes whole Guards, so judging only the
+            # top-level type takes the length check down with its parent and
+            # the artifact answers a four-key dict with the two-key graph.
+            # Only a builder that records its OWN check has extras to judge: one
+            # that delegates wholesale (EMPTY_NN_MODULE_HOOKS_DICT is one
+            # SEQUENCE_LENGTH on the hooks dict) records only the delegate's
+            # type, and its classification above is the one meant for that check.
+            extra = derived if guard_type in derived else ()
             return (
                 guard_type not in _INVARIANT_DROPPABLE_GUARD_TYPES
                 or _is_noop_guard_type(guard_type)
+                or any(d not in _INVARIANT_DROPPABLE_GUARD_TYPES for d in extra)
                 or (guard_type, _normalize(name)) in keep_only
             )
 
         def policy(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+            # Only environment slots are the policy's to drop. See
+            # _environment_rooted for why observed variance cannot decide this.
+            environment = _environment_rooted(entries)
             decisions = []
             for entry in entries:
-                keep = survives(entry.guard_type, entry.name)
+                keep = entry.name not in environment or survives(
+                    entry.guard_type,
+                    entry.name,
+                    tuple(entry.derived_guard_types or ()),
+                )
                 if not keep:
-                    dropped.add((entry.guard_type, entry.name))
+                    slot = (entry.guard_type, entry.name)
+                    dropped.add(slot)
+                    self._record_dropped_code(slot, entry.code)
                 decisions.append(keep)
             return decisions
 
-        for code_entry in self._package.code_entries():
+        for code_entry in code_entries:
             # A bypassed frame has no guards to re-serialize.
             f_code = None
             for guarded in code_entry.guarded_codes:
                 if f_code is None:
                     f_code = SerializedCode.to_code_object(code_entry.python_code)
+                # This rebuild is also the rebuildability check: a guard whose
+                # source cannot be re-evaluated against the reconstructed values
+                # is collected here rather than aborting the frame. Per variant
+                # the public path builds three CheckFunctionManagers: the live
+                # one, this one, and _validated's rebuild of the pickle that
+                # ships (five build_guards calls in all).
+                failures: list[tuple[Guard, Exception]] = []
                 try:
                     # Inside the try: unpickling the capture's own guard state
                     # can fail too, and that must surface as the same
                     # PackageError as a re-serialization failure, not escape
                     # raw out of artifact()/__exit__.
                     loaded = load_guards_state(guarded.guards_state)
-                    pruned = CheckFunctionManager(
+                    manager = CheckFunctionManager(
                         f_code,
                         OutputGraphCommon(loaded.output_graph),
                         shape_code_parts=loaded.shape_code_parts,
                         runtime_global_scope=None,
                         guard_build_local_state=loaded.local_state,
                         save_guards=True,
-                        explicit_capture=True,
                         # The pickle holds only guards that already survived the
                         # default and user filters, so the policy is the whole
-                        # filter here; and a failure is an internal bug, not
-                        # something to bypass silently.
+                        # filter here.
                         serialization_guard_filter_fn=policy,
+                        explicit_capture=True,
                         strict_error=True,
-                    ).guards_state
+                        collect_guard_failures=failures,
+                    )
+                    pruned = manager.guards_state
                     if pruned is None:
                         raise AssertionError("save_guards produced no guards_state")
                 except Exception as e:
-                    raise PackageError(
-                        f"precompile: could not re-serialize the guards of "
-                        f"{code_entry.python_code.co_name} while dropping "
-                        f"invariant ones: {type(e).__name__}: {e}"
-                    ) from e
-                guarded.guards_state = pruned
+                    raise _unrebuildable_guards(code_entry, e) from e
+                if failures:
+                    self._record_unrebuildable(code_entry, failures)
+                guarded.guards_state = self._validated(code_entry, f_code, pruned)
 
-        self._policy_dropped_guards |= dropped
-        # Not "risky": the policy is the caller stating that the environment is
-        # fixed and every variation is in the inputs, so a slot that never
-        # varied is out of the artifact's declared domain rather than an
-        # unchecked hazard.
-        self._kept_guards -= dropped
-        # Re-mark the dropped facts rather than deleting them: the invariants
-        # report written from _guard_sets promises that a dropped line is "a
-        # precondition NOTHING checks", and a policy-dropped slot is exactly
-        # that -- omitting it would show an auditor a validity domain far wider
-        # than the artifact's true one.
-        for key, variants in self._guard_sets.items():
-            self._guard_sets[key] = [
-                frozenset(
-                    f
-                    if not f.enforced or survives(f.guard_type, f.source)
-                    else dataclasses.replace(f, enforced=False)
-                    for f in facts
-                )
-                for facts in variants
-            ]
+        return dropped
+
+    def _record_dropped_code(
+        self, slot: tuple[str, str], code: Sequence[str] | None
+    ) -> None:
+        """Remember what a dropped slot actually checked.
+
+        Accumulate distinct renderings rather than keeping the first: sibling
+        guards can share a (guard_type, name) slot yet check different things --
+        HASATTR for two attributes of one base -- so first-writer-wins would
+        hide the second. Repeats within a slot (once per variant and per
+        re-serialization) collapse because the renderings agree up to the ids
+        _normalize already masks.
+        """
+        rendered = " ; ".join(_render_code(code))
+        if not rendered:
+            return
+        existing = self._dropped_guard_code.get(slot)
+        if existing is None:
+            self._dropped_guard_code[slot] = rendered
+        elif rendered not in existing.split(" | "):
+            self._dropped_guard_code[slot] = f"{existing} | {rendered}"
 
     def _recording_filter(
         self,
@@ -1658,8 +2071,8 @@ class PrecompileSession:
 
         # One object per distinct fact, shared by every compilation that
         # produced it. A recompiled frame repeats nearly all of its guards, so
-        # storing a copy per compilation makes the session grow with variants
-        # rather than with facts: 200 variants of resnet18 held 83MB for 1281.
+        # storing a copy per compilation would make the session grow with
+        # variants rather than with facts.
         pool: dict[_GuardFact, _GuardFact] = {}
 
         def filter_fn(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
@@ -1688,6 +2101,8 @@ class PrecompileSession:
                 enforced = keep or (
                     _is_noop_guard_type(entry.guard_type) and global_state_kept
                 )
+                if not enforced:
+                    self._record_dropped_code(slot, entry.code)
                 target = self._kept_guards if enforced else self._dropped_guards
                 target.add(slot)
                 if not enforced and (by_default or _is_risky_drop(entry, namespaces)):
@@ -1863,13 +2278,14 @@ class PrecompileSession:
         return _summarize(
             self._package.cache_entry(),
             self._dropped_guards,
-            self._kept_guards,
+            self._kept_guards - self._policy_dropped_guards,
             self._policy_dropped_guards,
             risky,
             self._package.truncated_frames,
             self._package.uncovered_frames,
             self._capture_errors,
             self._guard_sets,
+            self._dropped_guard_code,
         )
 
     def _gated_summary(
@@ -1883,6 +2299,11 @@ class PrecompileSession:
         """Run the coverage and guard gates, or raise saying which one failed."""
         if self._stack is not None:
             raise RuntimeError(f"{caller} must be called after the capture block exits")
+        # Here rather than in __exit__ so a caller can catch it like every other
+        # gate below. On the precompile() path _apply_guard_policy already
+        # rebuilt every frame, so this is a no-op there.
+        if not self._prune_invariant_guards:
+            self._drop_unrebuildable_guards()
         summary = self.summary()
         if require_complete and summary.capture_errors:
             raise PackageError(
@@ -1933,6 +2354,22 @@ class PrecompileSession:
                 len(names),
                 names[:8],
                 rest,
+            )
+        # Drift is a guard that rebuilds into a DIFFERENT check than the live
+        # capture made; _report_guard_drift already warned per frame. It fails
+        # closed here for the same reason a risky drop does: at serve time it
+        # matches the wrong branch instead of recompiling, silently.
+        if self._drifted_guards and require_no_risky_drops:
+            raise PackageError(
+                f"Precompilation rebuilt {len(self._drifted_guards)} guard(s) into a "
+                f"different check than the live capture made, because reconstruction "
+                f"lost a value they read: "
+                f"{sorted(f'{cls}: {payload}' for cls, payload in self._drifted_guards)[:8]}. "
+                f"At serve time such a guard matches the wrong branch instead of "
+                f"recompiling -- a rebuilt-inverted HASATTR routes a call into the graph "
+                f"traced for the other branch, silently. Make the value reachable through "
+                f"a serializable guard, or pass require_no_risky_drops=False to accept "
+                f"the risk explicitly."
             )
         if require_complete:
             if summary.guarded_codes == 0:
@@ -2015,107 +2452,12 @@ class PrecompileSession:
         created, and ``precompile_load`` takes it straight back. Same contract
         as ``invariants``.
         """
-        if self._stack is not None:
-            raise RuntimeError("save() must be called after the capture block exits")
-        summary = self.summary()
-        if require_complete and summary.capture_errors:
-            raise PackageError(
-                "Precompilation is incomplete because capture raised: "
-                f"{list(summary.capture_errors)}. Re-run every example successfully, "
-                "or pass require_complete=False to save the partial artifact."
-            )
-        if require_no_dropped_guards and summary.dropped_guards:
-            raise PackageError(
-                f"Precompilation dropped {len(summary.dropped_guards)} guard(s) that "
-                f"were not serialized: {list(summary.dropped_guards)}. Rebinding any "
-                f"of those sources between capture and load can silently serve a graph "
-                f"traced against the old value. Pass require_no_dropped_guards=False "
-                f"only to select the relaxed risky-drop policy."
-            )
-        if summary.risky_dropped_guards and require_no_risky_drops:
-            raise PackageError(
-                f"Precompilation dropped guard(s) that can affect dispatch on "
-                f"{[n for _, n in summary.risky_dropped_guards]}. Each of those names "
-                f"either a configuration-dependent identity slot or a guard discarded "
-                f"by a custom filter. Nothing checks it at load time, so a different "
-                f"value can silently select the wrong graph instead of recompiling. "
-                f"Make the value reachable through a serializable guard, pin both "
-                f"machines to the same value, or pass "
-                f"require_no_risky_drops=False to accept the risk explicitly."
-            )
-        elif summary.risky_dropped_guards:
-            # The caller explicitly accepted the risk. Measured on stock models: torchvision
-            # resnet18 and mobilenet_v3 report none, timm's ViT reports one (a
-            # re-exported torch._assert) and transformers' Qwen2 reports 33,
-            # nearly all of them library internals that no deployment swaps.
-            names = [n for _, n in summary.risky_dropped_guards]
-            # The cut below is in guard-type order and says nothing about
-            # severity: Qwen2's one genuinely config-selected drop sorts past
-            # it, so a truncated report has to say where the rest are.
-            rest = (
-                ""
-                if len(names) <= 8
-                else f" Only the first 8 are shown, cut in guard-type order "
-                f"rather than by severity; summary().risky_dropped_guards has "
-                f"all {len(names)}."
-            )
-            log.warning(
-                "precompile: %d dropped guard(s) can affect dispatch, so nothing "
-                "checks them at load: %s.%s Audit them against "
-                "your deployment; this warning appears only because "
-                "require_no_risky_drops=False explicitly accepted them.",
-                len(names),
-                names[:8],
-                rest,
-            )
-        if require_complete:
-            if summary.guarded_codes == 0:
-                raise PackageError(
-                    "Precompilation captured no compiled code. Capture happens by "
-                    "execution, so the callable must actually be run inside the "
-                    "capture block. A call Dynamo could not turn into guarded code "
-                    "is reported separately as an uncovered frame."
-                )
-            if summary.truncated:
-                raise PackageError(
-                    f"Precompilation is incomplete: at least "
-                    f"{len(summary.truncated)} frame(s) exceeded recompile_limit "
-                    f"(currently {self._recompile_limit}) and are missing variants: "
-                    f"{list(summary.truncated)}. That list is a lower bound -- hitting "
-                    f"the limit also puts every frame called beneath the named one "
-                    f"into run-only mode, so those stop capturing too and never "
-                    f"re-enter Dynamo to report it. A frame needs one slot per "
-                    f"variant, and frames shared across module instances accumulate "
-                    f"them. Raise recompile_limit, or pass require_complete=False to "
-                    f"accept an artifact that is more incomplete than this list shows."
-                )
-            if summary.uncovered_frames:
-                raise PackageError(
-                    f"Precompilation exercised frame(s) that produced NO guarded code "
-                    f"at all: {list(summary.uncovered_frames)}. Those paths are absent "
-                    f"from the artifact, and such a frame is skipped at install and runs "
-                    f"eager, so serving() cannot report that gap. This is expected for a "
-                    f"frame that only dispatches to covered submodules; it also looks "
-                    f"exactly like a frame Dynamo gave up on (check "
-                    f"TORCH_LOGS=graph_breaks for gb0124). A frame that hit the recompile "
-                    f"limit has working variants and is reported as truncated instead. "
-                    f"Pass require_complete=False once you have confirmed which."
-                )
-            if summary.bypassed:
-                raise PackageError(
-                    f"Precompilation is incomplete: {len(summary.bypassed)} frame(s) "
-                    f"were bypassed and will serve nothing: {list(summary.bypassed)}. "
-                    f"This usually means their guards could not be serialized. Pass "
-                    f"require_complete=False to accept a partial artifact."
-                )
-        if summary.wont_generalize:
-            log.warning(
-                "precompile: %d value(s) are pinned to what capture saw (%s). A call "
-                "supplying anything else misses every graph, so exercise each value "
-                "you need to serve inside the capture block.",
-                len(summary.wont_generalize),
-                list(summary.wont_generalize),
-            )
+        summary = self._gated_summary(
+            require_complete=require_complete,
+            require_no_risky_drops=require_no_risky_drops,
+            require_no_dropped_guards=require_no_dropped_guards,
+            caller="save()",
+        )
         self._take_backend_artifacts()
         store = _SingleFileStore(self._backend_artifacts)
         if self._backend == "eager":

@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: pt2"]
 import ast
 import base64
+import contextlib
 import copy
 import functools
 import gc
@@ -853,6 +854,73 @@ _precompile_reads_shadowed = {
     "dispatch_keys": lambda x: x * x.dispatch_keys,
     "_fake_device": lambda x: x * x._fake_device,
 }
+
+
+class _PrecompileClassAttrCfg:
+    # A CLASS attribute, so the instance __dict__ lacks it and Dynamo guards
+    # its absence with NOT_PRESENT_IN_GENERIC_DICT -- a type no never-drop
+    # list covers.
+    mode = "a"
+
+
+def _precompile_class_attr_branch(cfg, x):
+    return x * (2.0 if cfg.mode == "a" else 100.0)
+
+
+class _PrecompileHasattrCfg:
+    """Branched on by hasattr, so the branch taken depends on a HASATTR guard."""
+
+
+def _precompile_hasattr_branch(cfg, x):
+    if hasattr(cfg, "fast"):
+        return x * 2.0
+    return x * 100.0
+
+
+def _precompile_dict_len(d, x):
+    # len(d) rides on the same Guard as the key check, as a DERIVED type.
+    return d["a"] * len(d)
+
+
+class _PrecompileAccumModel(torch.nn.Module):
+    """Three branches behind a graph break, so each mode is its own variant."""
+
+    def __init__(self):
+        super().__init__()
+        self.l = torch.nn.Linear(8, 4)
+
+    def forward(self, x, mode):
+        y = self.l(x)
+        torch._dynamo.graph_break()
+        if mode == "a":
+            return y.sum() * 2
+        if mode == "b":
+            return y.sum() + 1
+        return y.sum() - 3
+
+
+def _precompile_accum_forward(model, x, mode):
+    return model(x, mode)
+
+
+def _precompile_attr_probe(x):
+    tmp = x.side_note  # noqa: F841 -- installs HASATTR without a value guard
+    return x + 1
+
+
+def _serialized_guard_names(code):
+    """Every guard name actually present in a shipped artifact's guard state."""
+    from torch._dynamo.package import load_guards_state
+    from torch._precompile import _read_literal
+
+    names = []
+    for frame in pickle.loads(
+        base64.b64decode(_read_literal(ast.parse(code), "_FRAMES"))
+    ):
+        for variant in frame["variants"]:
+            state = load_guards_state(variant["guards_state"])
+            names += [g.name for g in state.output_graph.guards]
+    return " ".join(names)
 
 
 # precompile drives make_fx internally, which cannot symbolically trace a
@@ -4990,6 +5058,266 @@ class TestPrecompile(TestCase):
             _LUT_MODULE.LUT = _LUT_MODULE.LUT.double()
             with self.assertRaisesRegex(RuntimeError, "no captured variant"):
                 loaded(x)
+
+    def _spy_on_guard_drift(self, stack, drift):
+        """Patch _report_guard_drift to append each newly recorded drift to ``drift``."""
+        from torch._dynamo.precompile_package import PrecompileSession
+
+        real = PrecompileSession._report_guard_drift
+
+        def spy(session, code_entry, rebuilt):
+            before = set(session._drifted_guards)
+            real(session, code_entry, rebuilt)
+            drift.extend(session._drifted_guards - before)
+
+        stack.enter_context(
+            mock.patch.object(PrecompileSession, "_report_guard_drift", spy)
+        )
+
+    @parametrize("api", ["session", "public"])
+    def test_guards_that_cannot_be_rebuilt_are_dropped_not_refused(self, api):
+        # A guard that cannot be rebuilt is dropped and recorded, not grounds
+        # for refusing the other frames. Whether it is worth keeping is a
+        # separate question with an answer the caller already controls, so the
+        # drop is RISKY: the default rail still refuses, and only a caller who
+        # said it accepts unchecked slots gets an artifact.
+        # Fault-injected, because the reachable causes are fixed.
+        from torch._dynamo.exc import PackageError
+        from torch._dynamo.guards import GuardsStatePickler
+        from torch._dynamo.precompile_package import precompile_capture
+        from torch._precompile import _parse_artifact_metadata
+
+        model = _PrecompileReadsAttr()
+        x = torch.randn(8)
+        x._cpu_copy = torch.randn(8)
+        # Stop carrying ONE attribute, leaving the rest intact, so this can tell
+        # a dropped guard apart from a wrecked artifact. Bound before patching,
+        # or the replacement calls itself.
+        real_carry = GuardsStatePickler._carried_tensor_attributes
+
+        def drop_only_cpu_copy(self, obj):
+            carried = real_carry(self, obj)
+            if carried:
+                carried = {k: v for k, v in carried.items() if k != "_cpu_copy"}
+            return carried or None
+
+        drop = mock.patch.object(
+            GuardsStatePickler, "_carried_tensor_attributes", drop_only_cpu_copy
+        )
+        if api == "session":
+            with drop, torch.no_grad():
+                session = precompile_capture(_precompile_call_model, backend="eager")
+                with session as compiled:
+                    compiled(model, x)
+                with self.assertRaisesRegex(PackageError, "can affect dispatch"):
+                    session.artifact(require_complete=False)
+                summary = session.summary()
+            self.assertTrue(
+                any("_cpu_copy" in name for _, name in summary.risky_dropped_guards)
+            )
+            return
+        drift = []
+        with contextlib.ExitStack() as stack, drop, torch.no_grad():
+            self._spy_on_guard_drift(stack, drift)
+            with self.assertRaisesRegex(PrecompileError, "can affect dispatch"):
+                torch.compiler.precompile(
+                    _precompile_call_model,
+                    backend="eager",
+                    dynamic=False,
+                    tracer="dynamo",
+                    example_inputs=[(model, x)],
+                )
+            with self.assertLogs("torch._dynamo.precompile_package", "WARNING") as cm:
+                code, cache = torch.compiler.precompile(
+                    _precompile_call_model,
+                    backend="eager",
+                    dynamic=False,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                    example_inputs=[(model, x)],
+                )
+        meta = _parse_artifact_metadata(code)
+        self.assertIn("_cpu_copy", str(meta["RISKY_DROPPED_GUARDS"]))
+        # Recorded is not enough: the pickle is what the serving machine
+        # rebuilds from, so a dropped guard still in it fails there exactly
+        # as it failed here.
+        self.assertNotIn("_cpu_copy", _serialized_guard_names(code))
+        # drop_failed_guards() removes the guard and its HASATTR companion
+        # before any filter entry is built, so the filter's recording never
+        # saw them; they are recorded where they leave the pickle, so the
+        # RISKY section, DROPPED_GUARD_CODE and the drop warning agree on what
+        # was removed. The companion's inverted HASATTR is not in the tree that
+        # ships, so it is not drift either; and each slot warns once, not once
+        # per Guard object per rebuild.
+        self.assertIn(["HASATTR", "L['x']"], meta["RISKY_DROPPED_GUARDS"])
+        checks = [c for _, _, c in meta["DROPPED_GUARD_CODE"] if "_cpu_copy" in c]
+        self.assertTrue(checks, meta["DROPPED_GUARD_CODE"])
+        self.assertEqual(drift, [])
+        dropping = [m for m in cm.output if "dropping guard HASATTR on L['x']" in m]
+        self.assertEqual(len(dropping), 1, cm.output)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        # Serving is the point: dropping the guard is only useful if what
+        # is left still matches the call it was captured on.
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(model, x), _precompile_call_model(model, x))
+
+    def test_guard_drift_is_reported(self):
+        # The loud half of a lossy reconstruction is a guard that will not
+        # rebuild at all. The quiet half is one that rebuilds into a DIFFERENT
+        # check, which serializes, loads, and then matches the wrong branch.
+        # Injected for real: the reconstructed scope the rebuild reads is
+        # edited on the way in, so the EQUALS_MATCH on ``mode`` rebakes to a
+        # constant no live build made, and that guard is what ships.
+        import torch._dynamo.package as package
+
+        real_load = package.load_guards_state
+
+        def rebake(guards_state):
+            loaded = real_load(guards_state)
+            scope = loaded.output_graph.local_scope
+            if scope.get("mode") == "a":
+                scope["mode"] = "z"
+            return loaded
+
+        model = _PrecompileAccumModel()
+        x = torch.randn(3, 8)
+        drift = []
+        with contextlib.ExitStack() as stack, torch.no_grad():
+            self._spy_on_guard_drift(stack, drift)
+            torch.compiler.precompile(
+                _precompile_accum_forward,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, x, "a")],
+            )
+            self.assertEqual(drift, [])
+            with mock.patch.object(package, "load_guards_state", rebake):
+                with self.assertRaisesRegex(PrecompileError, "different check") as ctx:
+                    torch.compiler.precompile(
+                        _precompile_accum_forward,
+                        backend="eager",
+                        dynamic=False,
+                        tracer="dynamo",
+                        example_inputs=[(model, x, "a")],
+                    )
+        self.assertTrue(
+            any("L['mode'] == 'z'" in payload for _, payload in drift), drift
+        )
+        self.assertIn("L['mode'] == 'z'", str(ctx.exception))
+
+    def test_precompile_records_what_each_dropped_slot_checked(self):
+        # A slot is named by its type and SOURCE, and for some types that is
+        # not enough to judge the drop. A dropped HASATTR on a source may be
+        # the benign companion of a kept TENSOR_MATCH on the same source, or
+        # the only thing pinning an optional attribute, and those want very
+        # different reactions from whoever is auditing the artifact. The
+        # rendered check names the attribute and tells them apart.
+        from torch._precompile import _parse_artifact_metadata
+
+        cfg = _PrecompileClassAttrCfg()
+        x = torch.ones(3)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_class_attr_branch,
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(cfg, x)],
+                require_no_risky_drops=False,
+            )
+        meta = _parse_artifact_metadata(code)
+        rendered = meta["DROPPED_GUARD_CODE"]
+        self.assertTrue(rendered, "no dropped slot carried its check")
+        for gtype, name, check in rendered:
+            self.assertIsInstance(gtype, str)
+            self.assertIsInstance(name, str)
+            # The point of the field: something to read, not an empty slot.
+            self.assertTrue(check)
+        # And every slot named here is one of the slots reported as dropped.
+        every_drop = {
+            (t, n)
+            for key in (
+                "DROPPED_GUARDS",
+                "RISKY_DROPPED_GUARDS",
+                "POLICY_DROPPED_GUARDS",
+            )
+            for t, n in meta[key]
+        }
+        for gtype, name, _ in rendered:
+            self.assertIn((gtype, name), every_drop)
+
+    @parametrize("subject", ["object_attr", "tensor_attr"])
+    def test_hasattr_guard_survives_serialization(self, subject):
+        # hasattr is a branch, and the HASATTR guard is all that pins it. It
+        # was lost two ways. A single-variant capture makes every slot look
+        # invariant -- varying_guard_slots over one variant is empty by
+        # construction -- so the policy dropped an object's HASATTR on fully
+        # default gates, with RISKY_DROPPED_GUARDS = [] and no error. And a
+        # tensor attribute whose ONLY guard is HASATTR (a getattr dynamo traces
+        # without a value guard) was never registered with the guard tree, so
+        # serialization pruned it and the rebuilt HASATTR recomputed val=False.
+        # Either way the artifact answered a caller on the OTHER branch with
+        # the captured one instead of refusing.
+        if subject == "object_attr":
+            entry, gates = _precompile_hasattr_branch, {}
+            with_attr = _PrecompileHasattrCfg()
+            with_attr.fast = True
+            x = torch.ones(3)
+            served, refused = (with_attr, x), (_PrecompileHasattrCfg(), x)
+            self.assertNotEqual(entry(*served)[0].item(), entry(*refused)[0].item())
+        else:
+            entry, gates = _precompile_attr_probe, {"require_no_risky_drops": False}
+            noted = torch.randn(4)
+            noted.side_note = torch.ones(1)
+            served, refused = (noted,), (torch.randn(4),)
+        with torch.no_grad():
+            # Deliberately every other gate at its default.
+            code, cache = torch.compiler.precompile(
+                entry,
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+                example_inputs=[served],
+                **gates,
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(*served), entry(*served))
+            # Refused, rather than served the captured branch's answer.
+            with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                loaded(*refused)
+
+    def test_precompile_keeps_a_guard_whose_derived_type_must_survive(self):
+        # One Guard can emit several checks: a DICT_KEYS_MATCH emits the
+        # SEQUENCE_LENGTH for the same dict, as a DERIVED type. The filter
+        # removes whole Guards, so judging only the top-level type took the
+        # length check down with its parent and a four-key dict was answered
+        # with the two-key graph.
+        two = {"a": torch.ones(3), "b": torch.ones(3)}
+        four = {k: torch.ones(3) for k in ("a", "b", "c", "e")}
+        x = torch.ones(3)
+        self.assertNotEqual(
+            _precompile_dict_len(two, x)[0].item(),
+            _precompile_dict_len(four, x)[0].item(),
+        )
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_dict_len,
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(two, x)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(two, x), _precompile_dict_len(two, x))
+            with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                loaded(four, x)
 
 
 def _graph_devices_literal(code: str) -> str:

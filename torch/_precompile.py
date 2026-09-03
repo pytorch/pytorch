@@ -1527,13 +1527,18 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
             "USER_INPUT_BOUNDS",
         }
     found: dict[str, object] = {}
+    # Parsed when present, never required: the guard-audit sections are
+    # reporting, and artifacts predating them load unchanged. An auditor
+    # reading a shipped artifact wants them back as data rather than by
+    # grepping the source.
+    optional = {"POLICY_DROPPED_GUARDS", "DROPPED_GUARD_CODE"}
     for node in tree.body:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:
             continue
         target = node.targets[0]
         if not isinstance(target, ast.Name):
             continue
-        if target.id in wanted:
+        if target.id in wanted or target.id in optional:
             try:
                 found[target.id] = ast.literal_eval(node.value)
             except (ValueError, SyntaxError) as e:
@@ -1832,6 +1837,18 @@ def _build_multigraph_python_source(
     parts.append("# captured domain along one of these is served, not refused.")
     parts.append(
         f"POLICY_DROPPED_GUARDS = {[list(g) for g in summary.policy_dropped_guards]!r}"
+    )
+    parts.append("")
+    parts.append("# What a dropped slot above actually checked, where it renders one.")
+    parts.append("# A slot is named by")
+    parts.append("# its type and SOURCE, which for some types does not say enough to")
+    parts.append("# judge the drop: a dropped HASATTR on a source may be the benign")
+    parts.append("# companion of a kept TENSOR_MATCH on the same source, or the only")
+    parts.append("# thing pinning an optional attribute. The rendered check names the")
+    parts.append("# attribute and tells the two apart.")
+    parts.append(
+        f"DROPPED_GUARD_CODE = "
+        f"{[list(g) for g in getattr(summary, 'dropped_guard_code', ())]!r}"
     )
     parts.append("")
     parts.append("# Values pinned to exactly what capture saw; any other value misses.")
