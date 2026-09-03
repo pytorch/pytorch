@@ -380,10 +380,9 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         if (
             inductor_meta.get("max_autotune")
             and (
-                inductor_meta.get(
-                    "enable_experimental_large_output_outer_reductions"
-                )
+                inductor_meta.get("enable_experimental_large_output_outer_reductions")
                 or config.triton.enable_experimental_large_output_outer_reductions
+                or config.triton.autotune_experimental_large_output_outer_reductions
             )
             and not inductor_meta.get("deterministic")
             and not inductor_meta.get("are_deterministic_algorithms_enabled")
@@ -396,9 +395,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             and size_hints["x"] >= 8192
             and rnumel >= 128
         ):
-            result_configs.append(
-                make_config(128, 8, num_warps=1, min_num_warps=1)
-            )
+            result_configs.append(make_config(128, 8, num_warps=1, min_num_warps=1))
 
         return self._finalize_configs(
             result_configs, make_config, size_hints, inductor_meta
@@ -643,8 +640,8 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 inductor_meta=inductor_meta,
                 triton_meta=triton_meta,
             )
-        for config in configs:
-            config.kwargs["RSPLIT"] = split  # type: ignore[union-attr]
+        for candidate_config in configs:
+            candidate_config.kwargs["RSPLIT"] = split  # type: ignore[union-attr]
         return configs
 
     def apply_rsplit_size(

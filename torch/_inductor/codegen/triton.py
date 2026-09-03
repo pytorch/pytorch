@@ -7161,7 +7161,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if (
             config.max_autotune
-            and config.triton.enable_experimental_large_output_outer_reductions
+            and (
+                config.triton.enable_experimental_large_output_outer_reductions
+                or config.triton.autotune_experimental_large_output_outer_reductions
+            )
             and not config.deterministic
             and not config.batch_invariant
             and not torch.are_deterministic_algorithms_enabled()
