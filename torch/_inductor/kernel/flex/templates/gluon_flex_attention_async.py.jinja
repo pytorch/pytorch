@@ -1,0 +1,343 @@
+{#- One KV loop over the block-sparse column list, staged by async DMA.
+    full=false walks the partially-masked blocks and applies mask_mod;
+    full=true walks the fully-unmasked ones and skips it. Emitted twice by
+    the two call sites below -- a macro rather than a @gluon.jit helper so
+    the generated code is unchanged and the hot loop keeps its register
+    allocation. -#}
+{%- macro kv_loop(full) %}
+{%- set kv_idx_name = "FULL_KV_IDX" if full else "KV_IDX" %}
+{%- set kv_nblk_name = "FULL_KV_NUM_BLKS" if full else "KV_NUM_BLKS" %}
+    kv_indices = {{ kv_idx_name }} + sparse_kv_idx_offset
+    # Clamped because this index is read whatever kv_num_blocks says, and a
+    # BlockMask that has been _adjust()ed keeps cropped-out indices in place -- so
+    # for a row left with no blocks it can still name one past KV_LEN. The
+    # prologue below issues its DMAs before block_n_end is consulted. Buffer loads
+    # bounds-check on CDNA, so an unclamped address reads zeros rather than
+    # faulting, but nothing here should rest on that.
+    kv_start = tl.minimum(tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE, last_start)
+    kv_num_blocks = tl.load({{ kv_nblk_name }} + sparse_kv_num_blks_offset)
+    block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
+
+{%- if full %}
+    gl.barrier()
+{%- endif %}
+    # Prime the pipeline: start the DMA for the first NUM_BUF blocks.
+    n_ahead = kv_start
+    for stage in gl.static_range(NUM_BUF):
+        cdna4_async.buffer_load_to_shared(kt_smem.index(stage), k_base,
+                                          kt_dma_off + n_ahead.to(INDEX_DTYPE) * stride_kn)
+        cdna4_async.buffer_load_to_shared(v_smem.index(stage), v_base,
+                                          v_dma_off + n_ahead.to(INDEX_DTYPE) * stride_vn)
+        cdna4_async.commit_group()
+        n_ahead = tl.minimum(n_ahead + get_offset_for_next_block(
+            stage, kv_indices, kv_num_blocks,
+            SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N, BLOCKS_ARE_CONTIGUOUS), last_start)
+
+    offs_n_base = kv_start
+    for start_n in tl.range(0, block_n_end, loop_unroll_factor=GLUON_UNROLL):
+        cur = start_n % NUM_BUF
+        offs_n_mma = offs_n_base + gl.arange(0, BLOCK_N, layout=mma_offs_n_col)
+
+        # Wait for this block's transfer, leaving the next one in flight.
+        cdna4_async.wait_group(NUM_BUF - 1)
+        kt_dot = cdna4_async.load_shared_relaxed(kt_smem.index(cur), kt_dot_layout)
+
+        qk = gl.zeros([BLOCK_M, BLOCK_N], dtype=gl.float32, layout=mma_layout)
+        qk = mfma_cdna4(q_dot, kt_dot, qk)
+{%- if not SCORE_MOD_IS_IDENTITY %}
+        qk = qk * SM_SCALE
+{%- endif %}
+
+{%- if IS_DIVISIBLE %}
+        m = offs_m_mma[:, None]
+        n = offs_n_mma[None, :]
+{%- else %}
+        m = get_bounded_indices(offs_m_mma[:, None], Q_LEN)
+        n = get_bounded_indices(offs_n_mma[None, :], KV_LEN)
+{%- endif %}
+
+{%- if SCORE_MOD_IS_IDENTITY %}
+        post_mod_scores = qk
+{%- else %}
+        {{ modification(
+            subgraph_number=0,
+            output_name="post_mod_scores",
+            score="qk",
+            b="off_zq",
+            h="off_hq",
+            m="m",
+            n="n",
+            out="qk",
+            input_shapes={
+                "score": ("BLOCK_M", "BLOCK_N"),
+                "m": ("BLOCK_M", "1"),
+                "n": ("1", "BLOCK_N"),
+            },
+            input_dtypes={"b": "index", "h": "index", "m": "index", "n": "index"},
+        ) | indent_except_first(2) }}
+{%- endif %}
+
+{%- if not full %}
+        {{ modification(
+            subgraph_number=1,
+            output_name="mask_mod_output",
+            score="qk",
+            b="off_zq",
+            h="off_hq",
+            m="m",
+            n="n",
+            input_shapes={
+                "score": ("BLOCK_M", "BLOCK_N"),
+                "m": ("BLOCK_M", "1"),
+                "n": ("1", "BLOCK_N"),
+            },
+            input_dtypes={"b": "index", "h": "index", "m": "index", "n": "index"},
+        ) | indent_except_first(2) }}
+
+{%- if not IS_DIVISIBLE %}
+        mask_mod_output = mask_mod_output & (offs_n_mma[None, :] < KV_LEN)
+{%- endif %}
+        post_mod_scores = gl.where(mask_mod_output, post_mod_scores, neg_inf_tile)
+{%- elif not IS_DIVISIBLE %}
+        post_mod_scores = gl.where(offs_n_mma[None, :] < KV_LEN, post_mod_scores, neg_inf_tile)
+{%- endif %}
+        # Change of base for exp2: scale the row max (BLOCK_M values) rather than
+        # the whole score tile, and fold the tile's scale into the exp2 argument so
+        # it costs one FMA instead of a multiply plus a subtract.
+        m_ij = gl.maximum(m_i, gl.max(post_mod_scores, axis=1) * QK_SCALE)
+        m_ij_safe = gl.where(m_ij == float("-inf"), zero_row, m_ij)
+        alpha = gl.exp2(m_i - m_ij_safe)
+        p = gl.exp2(post_mod_scores * QK_SCALE - m_ij_safe[:, None])
+        l_i = l_i * alpha + gl.sum(p, axis=1)
+        acc = acc * alpha[:, None]
+
+        v_dot = cdna4_async.load_shared_relaxed(v_smem.index(cur), v_dot_layout)
+        p_dot = gl.convert_layout(p.to(MATMUL_PRECISION), p_dot_layout)
+        acc = mfma_cdna4(p_dot, v_dot, acc)
+        m_i = m_ij
+
+        # This buffer is free now; start the block NUM_BUF ahead into it. The
+        # barrier is the WAR guard: the reads above must finish everywhere before
+        # the DMA overwrites the slot.
+        block_off = get_offset_for_next_block(
+            start_n, kv_indices, kv_num_blocks,
+            SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N, BLOCKS_ARE_CONTIGUOUS
+        )
+        offs_n_base = offs_n_base + block_off
+        # The slot refilled below is next read NUM_BUF iterations from here, so the
+        # prefetch has to advance by *that* iteration's delta, not this one's. They
+        # differ whenever the scheduled block starts are unevenly spaced, which is
+        # any mask whose kv_indices has irregular gaps -- dense and causal both give
+        # evenly spaced starts, which is why the difference is invisible on them.
+        # The index is clamped because a prefetch past the last block is never
+        # consumed, and get_offset_for_next_block would read past kv_indices.
+        produce_off = get_offset_for_next_block(
+            tl.minimum(start_n + NUM_BUF, block_n_end - 1), kv_indices, kv_num_blocks,
+            SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N, BLOCKS_ARE_CONTIGUOUS
+        )
+        gl.barrier()
+        cdna4_async.buffer_load_to_shared(kt_smem.index(cur), k_base,
+                                          kt_dma_off + n_ahead.to(INDEX_DTYPE) * stride_kn)
+        cdna4_async.buffer_load_to_shared(v_smem.index(cur), v_base,
+                                          v_dma_off + n_ahead.to(INDEX_DTYPE) * stride_vn)
+        cdna4_async.commit_group()
+        n_ahead = tl.maximum(tl.minimum(n_ahead + produce_off, last_start), 0)
+
+    # Drain the transfers still in flight from the loop's lookahead.
+    cdna4_async.wait_group(0)
+{%- endmacro %}
+{{def_kernel("Q", "K", "V", "LSE", "MAX", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
+    # Gluon FlexAttention forward, async-DMA variant (AMD CDNA4 / gfx950).
+    #
+    # Same FlexAttention scaffolding and score_mod/mask_mod rendering as the
+    # synchronous template, but K/V are staged global -> LDS by the CDNA4 DMA
+    # (buffer_load_to_shared) into double-buffered shared memory, so the transfer
+    # for the next KV block overlaps this block's MFMAs and softmax.
+    #
+    # The DMA requires exact register/lane/warp bases for the offsets and a
+    # padded shared layout; those cannot be improvised (the plain Blocked /
+    # Swizzled layouts fail to lower). The combinations below are the ones taken
+    # from the hand-tuned gfx950 kernel; the choices hook only offers this
+    # template for those, and everything else uses the synchronous template.
+
+    tl.static_assert(SPARSE_Q_BLOCK_SIZE >= BLOCK_M and SPARSE_Q_BLOCK_SIZE % BLOCK_M == 0)
+    tl.static_assert(SPARSE_KV_BLOCK_SIZE >= BLOCK_N and SPARSE_KV_BLOCK_SIZE % BLOCK_N == 0)
+
+    stride_qz, stride_qh, stride_qm, stride_qk = {{stride("Q")}}
+    stride_kz, stride_kh, stride_kn, stride_kk = {{stride("K")}}
+    stride_vz, stride_vh, stride_vn, stride_vk = {{stride("V")}}
+
+    ZQ = {{size("Q", 0)}}
+    HQ = {{size("Q", 1)}}
+    Q_LEN = {{size("Q", 2)}}
+    ZKV = {{size("K", 0)}}
+    KV_LEN = {{size("K", 2)}}
+
+    MATMUL_PRECISION = Q.dtype.element_ty
+    RCP_LN2: tl.constexpr = 1.44269504
+{%- if SCORE_MOD_IS_IDENTITY %}
+    # score_mod is the identity, so sm_scale has not been applied to the tile
+    # yet: fold it into the same FMA that does the change of base.
+    QK_SCALE: tl.constexpr = SM_SCALE * RCP_LN2
+{%- else %}
+    QK_SCALE: tl.constexpr = RCP_LN2
+{%- endif %}
+    NUM_BUF: tl.constexpr = GLUON_NUM_BUF
+
+    # ---------------- Gluon layouts ----------------
+    num_warps: gl.constexpr = gl.num_warps()
+    threads_per_warp: gl.constexpr = GLUON_THREADS_PER_WARP
+    k_width: gl.constexpr = 8
+    pv_k_width: gl.constexpr = 4
+
+    mma_layout: gl.constexpr = AMDMFMALayout(version=4, instr_shape=[32, 32, 16],
+                                             transposed=True, warps_per_cta=[num_warps, 1])
+    q_dot_layout: gl.constexpr = DotOperandLayout(operand_index=0, parent=mma_layout, k_width=k_width)
+    kt_dot_layout: gl.constexpr = DotOperandLayout(operand_index=1, parent=mma_layout, k_width=k_width)
+    p_dot_layout: gl.constexpr = DotOperandLayout(operand_index=0, parent=mma_layout, k_width=pv_k_width)
+    v_dot_layout: gl.constexpr = DotOperandLayout(operand_index=1, parent=mma_layout, k_width=pv_k_width)
+
+    blocked_layout: gl.constexpr = gl.BlockedLayout(
+        size_per_thread=[1, 8], threads_per_warp=[threads_per_warp // 4, 4],
+        warps_per_cta=[num_warps, 1], order=[1, 0])
+
+    offs_m_layout: gl.constexpr = gl.SliceLayout(dim=1, parent=blocked_layout)
+    offs_d_layout: gl.constexpr = gl.SliceLayout(dim=0, parent=blocked_layout)
+    mma_offs_m_row: gl.constexpr = gl.SliceLayout(dim=1, parent=mma_layout)
+    mma_offs_n_col: gl.constexpr = gl.SliceLayout(dim=0, parent=mma_layout)
+    mma_m_layout: gl.constexpr = gl.SliceLayout(dim=1, parent=mma_layout)
+
+    # ---- DMA staging layouts ----
+    # Selected in Python from the target's ladder (gluon_dma_layouts.py) and
+    # rendered here, so the choices hook cannot offer a config whose bases are
+    # missing: it offers this body exactly when the lookup succeeds.
+    kt_offset_bases: gl.constexpr = {{GLUON_KT_OFFSET_BASES}}
+    v_offset_bases: gl.constexpr = {{GLUON_V_OFFSET_BASES}}
+    kt_async_layout: gl.constexpr = DistributedLinearLayout(
+        reg_bases={{GLUON_KT_REG_BASES}},
+        lane_bases={{GLUON_KT_LANE_BASES}},
+        warp_bases={{GLUON_KT_WARP_BASES}}, block_bases=[],
+        shape=[QK_HEAD_DIM_ROUNDED, BLOCK_N])
+    v_async_layout: gl.constexpr = DistributedLinearLayout(
+        reg_bases={{GLUON_V_REG_BASES}},
+        lane_bases={{GLUON_V_LANE_BASES}},
+        warp_bases={{GLUON_V_WARP_BASES}}, block_bases=[],
+        shape=[BLOCK_N, V_HEAD_DIM_ROUNDED])
+
+    kt_smem_layout: gl.constexpr = PaddedSharedLayout(
+        interval_padding_pairs=[[512, 8]], offset_bases=kt_offset_bases, cga_layout=[],
+        shape=[QK_HEAD_DIM_ROUNDED, BLOCK_N])
+    v_smem_layout: gl.constexpr = PaddedSharedLayout(
+        interval_padding_pairs=[[512, 32]], offset_bases=v_offset_bases, cga_layout=[],
+        shape=[BLOCK_N, V_HEAD_DIM_ROUNDED])
+
+    # offset index tensors must be slices of the DMA layouts
+    kt_dma_d: gl.constexpr = gl.SliceLayout(dim=1, parent=kt_async_layout)
+    kt_dma_n: gl.constexpr = gl.SliceLayout(dim=0, parent=kt_async_layout)
+    v_dma_n: gl.constexpr = gl.SliceLayout(dim=1, parent=v_async_layout)
+    v_dma_d: gl.constexpr = gl.SliceLayout(dim=0, parent=v_async_layout)
+
+    # ---------------- program ids ----------------
+    q_start = gl.program_id(0)
+    off_zq = gl.program_id(1)
+    off_hq = gl.program_id(2)
+    off_zkv = off_zq % ZKV
+    off_hkv = off_hq // GQA_SHARED_HEADS
+
+    q_base = Q + off_zq * stride_qz + off_hq * stride_qh
+    k_base = K + off_zkv * stride_kz + off_hkv * stride_kh
+    v_base = V + off_zkv * stride_vz + off_hkv * stride_vh
+
+    # ---------------- block-sparse bookkeeping ----------------
+    SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
+    SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
+    sparse_idx_z = off_zq % SPARSE_Z
+    sparse_idx_hq = off_hq % SPARSE_HQ
+    SPARSE_Q_MULTIPLE: tl.constexpr = (SPARSE_Q_BLOCK_SIZE // BLOCK_M)
+    SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
+    stride_kv_num_blks_h = {{stride("KV_NUM_BLKS", 1)}}
+    stride_kv_idx_h = {{stride("KV_IDX", 1)}}
+    stride_kv_idx_m = {{stride("KV_IDX", 2)}}
+    sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_hq
+    sparse_kv_num_blks_offset = sparse_hz_offset * stride_kv_num_blks_h + q_start // SPARSE_Q_MULTIPLE
+    sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + (q_start // SPARSE_Q_MULTIPLE) * stride_kv_idx_m  # noqa: B950
+
+    # ---------------- offsets ----------------
+    offs_m = q_start * BLOCK_M + gl.arange(0, BLOCK_M, layout=offs_m_layout)
+    offs_d = gl.arange(0, QK_HEAD_DIM_ROUNDED, layout=offs_d_layout)
+    offs_vd = gl.arange(0, V_HEAD_DIM_ROUNDED, layout=offs_d_layout)
+    offs_m_mma = q_start * BLOCK_M + gl.arange(0, BLOCK_M, layout=mma_offs_m_row)
+
+    kt_d = gl.arange(0, QK_HEAD_DIM_ROUNDED, layout=kt_dma_d)
+    kt_n = gl.arange(0, BLOCK_N, layout=kt_dma_n)
+    v_n = gl.arange(0, BLOCK_N, layout=v_dma_n)
+    v_d = gl.arange(0, V_HEAD_DIM_ROUNDED, layout=v_dma_d)
+    # Element offsets within K / V for one block, minus the block's own start.
+    kt_dma_off = kt_d[:, None].to(INDEX_DTYPE) * stride_kk + kt_n[None, :].to(INDEX_DTYPE) * stride_kn
+    v_dma_off = v_n[:, None].to(INDEX_DTYPE) * stride_vn + v_d[None, :].to(INDEX_DTYPE) * stride_vk
+
+    # ---------------- Q ----------------
+    q_smem = gl.allocate_shared_memory(
+        Q.dtype.element_ty, [BLOCK_M, QK_HEAD_DIM_ROUNDED],
+        layout=gl.SwizzledSharedLayout(vec=8, per_phase=1, max_phase=16, order=[1, 0]))
+    q_ptrs = q_base + offs_m[:, None].to(INDEX_DTYPE) * stride_qm + offs_d[None, :].to(INDEX_DTYPE) * stride_qk
+    q = gl.load(q_ptrs, mask=(offs_m[:, None] < Q_LEN) & (offs_d[None, :] < QK_HEAD_DIM), other=0.0)
+    q_smem.store(q)
+    q_dot = q_smem.load(q_dot_layout)
+
+    # ---------------- double-buffered LDS for the DMA ----------------
+    kt_smem = gl.allocate_shared_memory(
+        Q.dtype.element_ty, [NUM_BUF, QK_HEAD_DIM_ROUNDED, BLOCK_N], layout=kt_smem_layout)
+    v_smem = gl.allocate_shared_memory(
+        Q.dtype.element_ty, [NUM_BUF, BLOCK_N, V_HEAD_DIM_ROUNDED], layout=v_smem_layout)
+
+    # ---------------- accumulators ----------------
+    m_i = gl.full([BLOCK_M], float("-inf"), dtype=gl.float32, layout=mma_m_layout)
+    l_i = gl.zeros([BLOCK_M], dtype=gl.float32, layout=mma_m_layout)
+    acc = gl.zeros([BLOCK_M, V_HEAD_DIM_ROUNDED], dtype=gl.float32, layout=mma_layout)
+    neg_inf_tile = gl.full([BLOCK_M, BLOCK_N], float("-inf"), dtype=gl.float32, layout=mma_layout)
+    zero_row = gl.zeros([BLOCK_M], dtype=gl.float32, layout=mma_m_layout)
+    one_row = gl.full([BLOCK_M], 1.0, dtype=gl.float32, layout=mma_m_layout)
+
+    # Largest in-range block start, so a prefetch past the end re-reads the last
+    # block instead of running off the tensor (cheaper than a per-element mask).
+    #
+    # This is only a block start when BLOCK_N divides KV_LEN, and this body is
+    # offered on exactly that condition -- gluon_flex.py::_async_body gates on it.
+    # Without the gate the clamp fires on a block that is actually read, and the
+    # rows staged here are not the rows offs_n_base tells mask_mod/score_mod they
+    # are, so the output is wrong rather than imprecise. Same reason the DMA
+    # staging ladder lives in the hook: a precondition of the body belongs
+    # wherever the body is chosen.
+    last_start = tl.maximum(KV_LEN - BLOCK_N, 0)
+
+    # ==================== partial blocks: score_mod AND mask_mod ====================
+{{ kv_loop(false) }}
+
+    # ==================== full blocks: score_mod only ====================
+    if HAS_FULL_BLOCKS:
+{{ kv_loop(true) | indent(4) }}
+
+    # ==================== epilogue ====================
+    l_i = gl.where(l_i == 0.0, one_row, l_i)
+    acc = acc / l_i[:, None]
+
+    idx_zq = off_zq
+    idx_hq = off_hq
+    idx_m = offs_m[:, None].to(INDEX_DTYPE)
+    idx_d = offs_vd[None, :].to(INDEX_DTYPE)
+    mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
+    acc_out = gl.convert_layout(acc, blocked_layout)
+
+    {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc_out", "mask", val_shape=("BLOCK_M", "V_HEAD_DIM_ROUNDED"))}}
+
+    if OUTPUT_LOGSUMEXP:
+        off_hz = off_zq * HQ + off_hq
+        lse = m_i + gl.log2(l_i)
+        lse_blk = gl.convert_layout(lse, offs_m_layout)
+        gl.store(LSE + off_hz * Q_LEN + offs_m, lse_blk, mask=offs_m < Q_LEN)
+
+    if OUTPUT_MAX:
+        off_hz = off_zq * HQ + off_hq
+        m_blk = gl.convert_layout(m_i, offs_m_layout)
+        gl.store(MAX + off_hz * Q_LEN + offs_m, m_blk, mask=offs_m < Q_LEN)

@@ -1391,8 +1391,15 @@ class CachingAutotuner(KernelInterface):
         ast_source_cls = getattr(self.fn, "ASTSource", None)
         is_gluon = getattr(self.fn, "is_gluon", None)
         if ast_source_cls is None and is_gluon is not None and is_gluon():
-            from triton.experimental.gluon._runtime import GluonASTSource
-
+            try:
+                from triton.experimental.gluon._runtime import GluonASTSource
+            except ImportError as e:
+                # The function says it is Gluon, so falling back to the plain
+                # ASTSource would fail later and less legibly.
+                raise RuntimeError(
+                    "kernel is a Gluon function but this Triton has no "
+                    "triton.experimental.gluon runtime; please upgrade"
+                ) from e
             ast_source_cls = GluonASTSource
         if ast_source_cls is None:
             ast_source_cls = ASTSource
