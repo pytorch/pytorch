@@ -724,9 +724,12 @@ def _restore_degraded_kwargs(
     configs (coordesc only varies ints), so the candidates supply the typed
     value: for each key whose candidate values degrade, take the candidate that
     serializes to the cached value. Returns False when a degraded key has no
-    such candidate, in which case the caller must re-autotune rather than
+    such candidate, or when the candidates that do serialize to it disagree on
+    the typed value, in which case the caller must re-autotune rather than
     reconstruct a wrong-typed constexpr. IntEnum/str-mixin members ==-match
-    their unwrapped values and are not degraded.
+    their unwrapped values and are not degraded. Degradation is only detectable
+    from candidate values, so a cached key that appears in no candidate's
+    kwargs (num_warps, coordesc-only knobs) passes through unchanged.
     """
     for key, cached in list(best_config.items()):
         # pyrefly: ignore [missing-attribute]
@@ -737,16 +740,28 @@ def _restore_degraded_kwargs(
         if not matches:
             return False
         # The typed value is only recoverable if every candidate that
-        # serializes to the cached value agrees on it (Mode.A vs its raw 1
-        # would both serialize to 1); otherwise the choice would depend on
+        # serializes to the cached value agrees on it, structurally (Mode.A vs
+        # its raw 1 both serialize to 1; so do (1, 2) and (1.0, 2), and Triton
+        # specializes on that difference); otherwise the choice would depend on
         # candidate order.
-        if any(
-            val != matches[0] or type(val) is not type(matches[0])
-            for val in matches[1:]
-        ):
+        if any(not _same_typed_value(val, matches[0]) for val in matches[1:]):
             return False
         best_config[key] = matches[0]
     return True
+
+
+def _same_typed_value(a: Any, b: Any) -> bool:
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, (list, tuple)):
+        return len(a) == len(b) and all(_same_typed_value(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict):
+        return len(a) == len(b) and all(
+            k in b and _same_typed_value(v, b[k]) for k, v in a.items()
+        )
+    if isinstance(a, enum.Enum):
+        return a is b
+    return bool(a == b)
 
 
 def _json_config_value(value: Any) -> Any:

@@ -30,7 +30,7 @@ import torch._dynamo  # noqa: F401
 from torch._prims_common import CUDARngStateHelper
 
 from .descriptors import PlainAOTOutput, TangentAOTInput
-from .functional_utils import gen_alias_from_base
+from .functional_utils import gen_alias_from_base, MetadataKey, ViewMetaSequence
 from .runtime_wrappers import (
     _AutogradRngStateTracker,
     _AutogradSavedState,
@@ -38,9 +38,11 @@ from .runtime_wrappers import (
     _grad_output_prototypes,
     _mask_pruned_backward_outputs,
     _materialize_missing_grad_outputs,
+    _process_runtime_or_materialized_tangent,
     _pruned_backward_output_indices_from_dependencies,
     _snapshot_external_objects,
     _unwrap_tensoralias,
+    _wrap_backward_outputs_with_subclasses,
     AOTDispatchAutograd,
     index_to_external_object_weakref,
     KeptTangentInfo,
@@ -56,6 +58,7 @@ from .schemas import (
     TensorAlias,
     ViewAndMutationMeta,
 )
+from .subclass_utils import wrap_tensor_subclasses
 from .utils import normalize_as_list
 
 
@@ -94,4 +97,10 @@ __all__ = [
     "ViewAndMutationMeta",
     "PlainAOTOutput",
     "TangentAOTInput",
+    # Subclass-tangent training and output-alias regeneration.
+    "_process_runtime_or_materialized_tangent",
+    "_wrap_backward_outputs_with_subclasses",
+    "wrap_tensor_subclasses",
+    "MetadataKey",
+    "ViewMetaSequence",
 ]

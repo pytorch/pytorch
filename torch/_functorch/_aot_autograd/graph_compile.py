@@ -2507,10 +2507,14 @@ def _retrace_backward_for_undefined_grad_outputs(
 ) -> tuple[torch.fx.GraphModule, list[Any], tuple[int, ...]] | None:
     """Retrace with literal ``None`` tangents while preserving the forward ABI.
 
-    Returns ``None`` when the retraced backward needs an input the already-compiled
-    forward did not save, or when a tensor subclass needs the structural fallback.
-    When ``decline_reason`` is provided, a human-readable reason is appended to
-    it on every declined (``None``) return.
+    Returns ``None`` (declines) when the retrace cannot be trusted to match the
+    compiled forward: no partition function or original forward was captured,
+    the autocast state differs from capture time, a tensor subclass tangent
+    needs the structural fallback, the retraced forward's user-output ABI
+    differs, a saved activation matches no (or several) original by
+    fingerprint, or the retraced backward needs an input the compiled forward
+    did not save. When ``decline_reason`` is provided, a human-readable reason
+    is appended to it on every declined return.
     """
 
     def declined(reason: str) -> None:
@@ -2522,7 +2526,8 @@ def _retrace_backward_for_undefined_grad_outputs(
         return None
     # The joint trace was autocast-dispatched under the compile-time autocast
     # state; retracing under a diverged ambient state produces graphs whose
-    # dtypes silently differ, which the name-only ABI check below cannot see.
+    # dtypes silently differ, which neither the desc-keyed ABI check nor the
+    # saved-activation fingerprints below can see (they hash ops, not dtypes).
     # The cache-enabled bit is recreated instead of compared: dynamo disables
     # the autocast cache while tracing (e.g. compiled autograd backward), and
     # the bit cannot change the retraced graph's dtypes.
@@ -3154,7 +3159,16 @@ def _cache_autograd_info(
                     guards_expr=guards_expr,
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw=num_symints_saved_for_bw,
-                    serialized_bw_module=serialize_graph_module(bw_module),
+                    # serialize_graph_module wipes node.meta in place, and the
+                    # lazy backward info keeps THIS bw_module for the undefined-
+                    # tangent retrace (which binds saved activations by desc and
+                    # fingerprint) and for structural pruning (which needs
+                    # meta["val"]); serialize a copy so those keep working after
+                    # the entry is saved, both at forward time (eager backward)
+                    # and after the first lazy backward compile.
+                    serialized_bw_module=serialize_graph_module(
+                        copy.deepcopy(bw_module)
+                    ),
                     min_cut_info_str=min_cut_info_str,
                 )
                 AOTAutogradCache.save(

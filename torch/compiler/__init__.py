@@ -7,10 +7,6 @@ from typing_extensions import ParamSpec
 
 import torch
 from torch._guards import GuardProvenance as GuardProvenance
-
-
-# Public re-export: the docs and test_public_bindings key on __module__.
-GuardProvenance.__module__ = "torch.compiler"
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 
 # ``torch.compiler.precompile``: make_fx AOT capture -> self-contained Python source
