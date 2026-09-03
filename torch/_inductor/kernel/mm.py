@@ -57,7 +57,7 @@ from ..utils import (
     use_triton_template,
     use_triton_tma_template,
 )
-from .decompose_k import blackwell_decompose_k_subgraph_template
+from .decompose_k import blackwell_decompose_k_partial
 from .mm_common import (
     _is_static_problem,
     _use_small_mm_pointwise,
@@ -222,16 +222,26 @@ def _check_addmm_input_metadata(inp, mat1, mat2) -> None:
     )
 
 
-def decomposeK(a, b, k_splits):
+def decomposeK(a, b, k_splits, bmm_backend="aten", bmm_config_index=-1):
     m = a.shape[0]
-    n = b.shape[1]
     k = a.shape[1]
 
-    k_parts = k // k_splits
-    B = k_splits
-    a_reshaped = torch.permute(a.reshape(m, B, k_parts), (1, 0, 2))
-    b_reshaped = b.reshape(B, k_parts, n)
-    result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
+    if bmm_backend == "aten":
+        n = b.shape[1]
+        k_parts = k // k_splits
+        a_reshaped = torch.permute(a.reshape(m, k_splits, k_parts), (1, 0, 2))
+        b_reshaped = b.reshape(k_splits, k_parts, n)
+        result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
+    elif bmm_backend == "triton":
+        result = blackwell_decompose_k_partial(
+            a,
+            b,
+            k_splits,
+            bmm_config_index,
+        )
+    else:
+        raise AssertionError(f"unsupported decompose-K BMM backend: {bmm_backend}")
+
     reduced_buf = torch.sum(result, 0)
     return reduced_buf.to(a.dtype)
 
@@ -247,18 +257,27 @@ class DecomposeKSugraphTemplate(SubgraphTemplate):
         input_nodes: list[Buffer],
         layout: Layout,
         k_split: int,
+        bmm_backend: str = "aten",
+        bmm_config_index: int = -1,
     ) -> SubgraphChoiceCaller:
         from torch._dispatch.python import enable_python_dispatcher
 
         from ..decomposition import select_decomp_table
 
-        name = f"decompose_k_mm_{k_split}_split"
-        description = f"{k_split=}"
+        name = f"decompose_k_mm_{k_split}_split_{bmm_backend}"
+        if bmm_backend == "triton":
+            name = f"{name}_config_{bmm_config_index}"
+        description = f"{k_split=}, {bmm_backend=}, {bmm_config_index=}"
 
         with enable_python_dispatcher():
             decompositions = select_decomp_table()
             fn = make_fx(
-                functools.partial(decomposeK, k_splits=k_split),
+                functools.partial(
+                    decomposeK,
+                    k_splits=k_split,
+                    bmm_backend=bmm_backend,
+                    bmm_config_index=bmm_config_index,
+                ),
                 decompositions,
             )
 
@@ -432,20 +451,15 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         if aten_extra_kwargs:
             kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
 
+    if out_dtype is None and is_nonzero:
+        if use_decompose_k_choice(m, n, k):
+            templates_to_use.append(decompose_k_subgraph_template)
+
     if (
         out_dtype is None
         and is_nonzero
         and use_triton_template(layout, check_max_autotune=True)
     ):
-        if use_decompose_k_choice(m, n, k):
-            templates_to_use.append(decompose_k_subgraph_template)
-            if (
-                inductor_config.triton.enable_blackwell_decompose_k
-                and use_triton_blackwell_tma_template(
-                    mat1, mat2, output_layout=layout, add_guards=True
-                )
-            ):
-                templates_to_use.append(blackwell_decompose_k_subgraph_template)
         # Triton Templates typically perform very poorly for large K.
         # Its highly unlikely that if we want to use decompose_k, then
         # Triton will ever win.
