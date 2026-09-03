@@ -648,7 +648,17 @@ def _cmake_str(value: str) -> str:
 
 def _write_atomic(path: str, text: str) -> str:
     """Write via a temp file + rename, so a crash cannot leave a partial file
-    that CMake would read as authoritative."""
+    that CMake would read as authoritative.
+
+    Identical content is left alone: these files are build inputs, and restamping them
+    recompiles the generated sources and relinks torch_cuda on every run, which dirties
+    every target that consumes it."""
+    try:
+        with open(path) as f:
+            if f.read() == text:
+                return path
+    except OSError:
+        pass
     # The pid in the name, not just the target's: nothing locks the artifacts dir, so
     # two generations in flight (a hand stage-2 run beside `spin develop`) shared one
     # staging file -- the second truncated it under the first, and the first published
@@ -960,7 +970,15 @@ def main(argv: list[str] | None = None) -> None:
     # write_nothing_to_embed states, and what the other two invalidation sites do.
     # The nothing-to-embed form names no sources, so it invalidates as completely as
     # unlinking without dropping CMake's configure dependency.
-    if os.path.exists(os.path.join(args.artifacts_dir, CMAKE_INCLUDE)):
+    include = os.path.join(args.artifacts_dir, CMAKE_INCLUDE)
+    original = None
+    if os.path.exists(include):
+        # Kept so the timestamp can be restored below: this write and the final one
+        # both differ from what is on disk, so the pair restamps the include even when
+        # generation changes nothing, and it is a configure dependency.
+        st = os.stat(include)
+        with open(include) as f:
+            original = (f.read(), st.st_atime_ns, st.st_mtime_ns)
         write_nothing_to_embed(args.artifacts_dir)
 
     # decl_id -> its arch dirs, so one declaration generates once however many
@@ -1219,9 +1237,18 @@ def main(argv: list[str] | None = None) -> None:
         print(f"wrote {out} ({n} kernels)")
     ver = write_version_script(args.artifacts_dir, all_prefixes)
     print(f"wrote {ver}")
-    print(
-        f"wrote {write_cmake_include(args.artifacts_dir, [p[1] for p in pending], link_objects, ver, args.dsl_runtime, args.arch_list)}"
+    written = write_cmake_include(
+        args.artifacts_dir,
+        [p[1] for p in pending],
+        link_objects,
+        ver,
+        args.dsl_runtime,
+        args.arch_list,
     )
+    print(f"wrote {written}")
+    with open(written) as f:
+        if original is not None and f.read() == original[0]:
+            os.utime(written, ns=original[1:])
 
 
 if __name__ == "__main__":

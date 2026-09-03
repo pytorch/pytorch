@@ -598,6 +598,82 @@ def _refuse_cache_drift(before: dict[str, tuple[str, str]]) -> None:
     )
 
 
+def _editable_rebuild_finder() -> object | None:
+    """The installed editable finder, if it rebuilds torch on import.
+
+    scikit-build-core's ``editable.rebuild`` (also SKBUILD_EDITABLE_REBUILD) installs a
+    meta-path finder that runs `cmake --build` and `cmake --install` on the first
+    `import torch`. Read from sys.meta_path rather than from pyproject.toml or the
+    environment: the finder is what the torch on this path actually does.
+    """
+    for finder in sys.meta_path:
+        if type(finder).__name__.startswith("ScikitBuild") and getattr(
+            finder, "rebuild_flag", False
+        ):
+            return finder
+    return None
+
+
+def _refuse_editable_rebuild() -> None:
+    """Refuse to run under an import-time rebuild.
+
+    Every probe here imports torch in a subprocess, so each one would trigger that
+    build and install -- overwriting the library this script relinked, and making the
+    final embedded-kernels check describe whatever the probe just built.
+    """
+    if _editable_rebuild_finder() is None:
+        return
+    raise RuntimeError(
+        "native-AOT stage 2: this torch was installed with scikit-build-core's "
+        "editable.rebuild enabled, so importing torch rebuilds and reinstalls it. "
+        "Stage 2 relinks torch_cuda and copies it over that install, and its probes "
+        "import torch, so the two would race and the result would not be the library "
+        "this script verified. Reinstall without editable.rebuild (unset "
+        "SKBUILD_EDITABLE_REBUILD and the pyproject setting), or set "
+        "TORCH_NATIVE_AOT=0 to skip stage 2."
+    )
+
+
+def _lib_snapshot() -> dict[str, tuple[int, int]]:
+    """(mtime, size) for every file in the build tree's lib/ except torch_cuda's.
+
+    Stage 2 installs libtorch_cuda.so and nothing else, so these are exactly the
+    libraries a relink may rebuild but this script will not ship.
+    """
+    lib = os.path.join(BUILD_DIR, "lib")
+    out = {}
+    with os.scandir(lib) as entries:
+        for e in entries:
+            if e.name == "libtorch_cuda.so" or not e.is_file(follow_symlinks=False):
+                continue
+            st = e.stat(follow_symlinks=False)
+            out[e.name] = (st.st_mtime_ns, st.st_size)
+    return out
+
+
+def _refuse_unshipped_rebuilds(before: dict[str, tuple[int, int]]) -> None:
+    """Refuse a relink that rebuilt a library stage 2 does not install.
+
+    `--target torch_cuda` builds its DEPENDENCIES too, so a source edited since the
+    last full build lands in libtorch_cpu.so (or c10) as well -- and only
+    libtorch_cuda.so is copied over the installed torch, leaving the two mismatched.
+    Every supported caller builds everything immediately before this, so a difference
+    here means stage 2 was run by hand against an edited tree.
+    """
+    after = _lib_snapshot()
+    rebuilt = sorted(n for n, v in after.items() if before.get(n, v) != v)
+    if not rebuilt:
+        return
+    raise RuntimeError(
+        f"native-AOT stage 2: relinking torch_cuda also rebuilt "
+        f"{', '.join(rebuilt[:4])}{' and others' if len(rebuilt) > 4 else ''}, which "
+        f"stage 2 does not install -- the tree has sources newer than the last full "
+        f"build, and installing libtorch_cuda.so alone would leave the two "
+        f"mismatched. Re-run the build (`spin develop`, or `pip install -e .` "
+        f"followed by this script), which installs them together."
+    )
+
+
 def _cmake_for_this_build() -> str:
     """The cmake that configured this build tree, else cmake from PATH.
 
@@ -796,6 +872,8 @@ def main(argv: list[str] | None = None) -> int:
     # TORCH_NATIVE_AOT=0 is a kill switch even on the binary-build path.
     if _opted_out():
         return 0  # _opted_out() reports the value and where it came from
+    # After the opt-out, like every other refusal, and before the first probe.
+    _refuse_editable_rebuild()
     # --wheel means torch was installed on the line above, so "not importable" is a
     # broken build, not "not applicable"; hence ahead of the gates that need torch.
     if args.wheel and not _torch_probe("True"):
@@ -906,7 +984,10 @@ def main(argv: list[str] | None = None) -> int:
     build_lib = os.path.join(BUILD_DIR, "lib", "libtorch_cuda.so")
     # Taken across the relink, for the size delta reported below.
     before = os.path.getsize(build_lib) if os.path.exists(build_lib) else 0
+    siblings = _lib_snapshot()
     _run_child(relink, "relinking torch_cuda", cwd=BUILD_DIR)
+    # Before the copy, so a mismatched pair never reaches the installed torch.
+    _refuse_unshipped_rebuilds(siblings)
 
     if not os.path.exists(build_lib):
         raise RuntimeError(f"expected relinked library at {build_lib}")
