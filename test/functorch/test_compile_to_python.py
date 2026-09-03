@@ -576,11 +576,10 @@ class TestAOTCompileToPython(TestCase):
 
     def test_restride_evaluates_backed_and_refuses_unbacked_strides(self):
         # CompiledFxGraph.output_strides entries are PRINTED stride
-        # expressions (strings). A backed symbolic one evaluates to its hint
-        # through the placeholder's shape_env (the way compile_fx reports output
-        # strides) and is compared under suppress_guards, so a matching stride
-        # leaves the symbolic placeholder alone; an unbacked or unevaluable one
-        # refuses, which keeps the pickled-bundle fallback.
+        # expressions (strings). A symbolic one is rebuilt over the placeholder's
+        # shape symbols and compared proof-only, so a matching stride leaves the
+        # symbolic placeholder alone; a symbol the shape env never created, or an
+        # unevaluable string, refuses, which keeps the pickled-bundle fallback.
         import types as types_mod
 
         from torch._functorch._aot_autograd.to_standalone_python import (

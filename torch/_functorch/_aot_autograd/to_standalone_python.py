@@ -1415,7 +1415,7 @@ def _restride_backward_placeholders(
     silent no-op through that entry point.
     """
     import torch
-    from torch.fx.experimental.symbolic_shapes import guard_or_true
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
 
     if not fwd_output_strides:
         return
@@ -1433,45 +1433,38 @@ def _restride_backward_placeholders(
         offset = index - num_symints
         if not (0 <= offset < len(saved)) or not saved[offset]:
             continue
-        # CompiledFxGraph.output_strides entries are PRINTED stride
-        # expressions (strings). A backed symbolic one ("3*s0") evaluates to its
-        # hint through the placeholder's shape_env, the way compile_fx reports
-        # output strides; only an unbacked or otherwise unevaluable expression is
-        # refused, since lowering the backward against strides other than the
-        # ones the forward chose risks silently wrong gradients.
+        # CompiledFxGraph.output_strides entries are PRINTED stride expressions.
+        # A symbolic one is rebuilt as a SymInt over the placeholder's shape
+        # symbols and kept symbolic, exactly as _aot_stage2b_bw_compile does:
+        # resolving it to a hint would bake one call's sizes into the backward.
         fake_mode = getattr(val, "fake_mode", None)
         shape_env = fake_mode.shape_env if fake_mode is not None else None
         try:
-            real = tuple(
-                int(s) if shape_env is None else int(shape_env.evaluate_symexpr(s))
+            inductor_stride = tuple(
+                int(s) if shape_env is None else shape_env.deserialize_symexpr(s)
                 for s in saved[offset]
             )
-        except (NameError, TypeError, ValueError) as e:
+        # deserialize_symexpr asserts on a symbol this shape env never created.
+        except (AssertionError, NameError, TypeError, ValueError) as e:
             raise NotImplementedError(
                 "aot_autograd.compile_to_python cannot restride the backward for "
                 f"unevaluable forward output strides {saved[offset]!r}."
             ) from e
-        if len(real) != val.dim():
+        if len(inductor_stride) != val.dim():
             raise NotImplementedError(
                 "aot_autograd.compile_to_python got a rank-"
-                f"{len(real)} forward output stride for a rank-{val.dim()} "
+                f"{len(inductor_stride)} forward output stride for a rank-{val.dim()} "
                 "backward placeholder; the saved-activation mapping does not "
                 "line up, so restriding here would target the wrong input."
             )
-        # Compared under suppress_guards with guard_or_true, as
-        # _aot_stage2b_bw_compile does, so a symbolic stride is neither
-        # specialized nor guarded on by the comparison itself.
-        suppress = (
-            shape_env.suppress_guards()
-            if shape_env is not None
-            else contextlib.nullcontext()
+        # Proof-only comparison: no guard is installed and a hint match is not
+        # mistaken for equality (see _aot_stage2b_bw_compile).
+        different = any(
+            not statically_known_true(ph_stride == inductor_stride[k])
+            for k, ph_stride in enumerate(val.stride())
         )
-        with suppress:
-            different = any(
-                guard_or_true(val.stride()[k] != real[k]) for k in range(val.dim())
-            )
         if different:
-            node.meta["val"] = val.as_strided(val.size(), real)
+            node.meta["val"] = val.as_strided(val.size(), inductor_stride)
 
 
 def compile_to_python(

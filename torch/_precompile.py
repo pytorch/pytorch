@@ -1,34 +1,24 @@
-"""Ahead-of-time precompilation: ``precompile(...)`` writes a dynamo-traced artifact to disk
-and returns the example calls' results; ``precompile.artifact(...)`` returns the
-``(python_code, cache)`` pair in memory (``make_fx`` tracer by default; ``dynamo`` also
-available).
+"""Ahead-of-time precompilation (``make_fx`` tracer by default; ``dynamo`` also available).
 
-    python_code, cache = torch.compiler.precompile.artifact(fn, example_inputs=[(model, x)])
+    python_code, cache = torch.compiler.precompile(fn, example_inputs=[(model, x)])
     f_c = torch.compiler.precompile.load(python_code, cache)
     out = f_c(model, x)                 # pass the model again at runtime
 
-    python_code, cache = torch.compiler.precompile.artifact(
+    python_code, cache = torch.compiler.precompile(
         fn, example_inputs=[(model, x1), (model, x2)], tracer="dynamo"
     )
 
-    # Straight to disk, taking back what the example calls returned.
-    results = torch.compiler.precompile(
-        fn, example_inputs=[(model, x1), (model, x2)],
-        artifact_path="model.py", cache_path="model.cache",
-    )
-
 ``example_inputs`` is the calling convention: a sequence of calls, each a tuple of
-positional arguments (or an ``ExampleInput`` when keywords are needed). The spelling 2.14
-shipped, ``precompile(fn, *example_inputs)`` returning the pair, still works for one
-release behind a FutureWarning. ``tracer`` picks ``artifact``'s capture front-end, and it
-is the ONLY thing that does -- ``make_fx`` takes exactly one call, ``dynamo`` takes as
-many as you want; ``precompile(...)`` itself is always ``dynamo``.
+positional arguments (or an ``ExampleInput`` when keywords are needed). The 2.14 spelling
+``precompile(fn, *example_inputs)`` still works as one call, with a FutureWarning.
+``tracer`` picks the capture front-end, and it is the ONLY thing that does -- ``make_fx``
+takes exactly one call, ``dynamo`` takes as many as you want.
 
-``precompile.artifact`` captures your computation with ``make_fx`` (its default
-``tracer``) -- a NON-STRICT trace of the ATen ops that run when ``fn`` executes once on
-the example inputs. It does not analyze your Python, so it comes with an explicit
-contract (the programming model): stay inside it and the artifact faithfully reproduces
-``fn``; step outside it and you get an artifact that computes the wrong thing.
+precompile captures your computation with ``make_fx`` (the default ``tracer``) -- a
+NON-STRICT trace of the ATen ops that run when ``fn`` executes once on the example
+inputs. It does not analyze your Python, so it comes with an explicit contract (the
+programming model): stay inside it and the artifact faithfully reproduces ``fn``; step
+outside it and you get an artifact that computes the wrong thing.
 
 The ``dynamo`` tracer is an alternative capture front-end that analyzes the Python
 (bytecode) rather than tracing one path. It inlines the TRANSFORMED BYTECODE Dynamo
@@ -347,7 +337,6 @@ from torch import Tensor
 from torch.compiler._precompile_types import (
     ExampleInput,
     FrameInvariants,
-    GuardFact,
     PrecompileSummary,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -414,10 +403,6 @@ class PrecompileError(RuntimeError):
     refusal; ``None`` otherwise.
     """
 
-    # Re-exported in torch.compiler.__all__, so pickle and test_public_bindings
-    # resolve it there.
-    __module__ = "torch.compiler"
-
     #: What the call that raised this returned, when it ran before the refusal:
     #: an accumulating capture's step has already executed by the time its
     #: artifact gate refuses, so the result rides on the error. ``None`` otherwise.
@@ -434,8 +419,6 @@ class PrecompiledRunnable:
     them apart. Part of the prototype ``torch.compiler.precompile`` API, so it
     may change without a deprecation cycle.
     """
-
-    __module__ = "torch.compiler"
 
     installed: bool = False
     """Whether calling this handle installs onto the captured code objects."""
@@ -461,8 +444,6 @@ class PrecompiledCallable(PrecompiledRunnable):
     ``torch.compiler.precompile`` API, so it may change without a deprecation
     cycle.
     """
-
-    __module__ = "torch.compiler"
 
     def __init__(self, compiled: Any) -> None:
         self._compiled = compiled
@@ -818,10 +799,8 @@ class AccumulatingCapture:
 class PrecompileSession:
     r"""Execution-driven multi-graph capture session (internal).
 
-    :func:`precompile` and :meth:`precompile.artifact` drive one of these
-    themselves for ``tracer="dynamo"`` -- entering it, running the example calls,
-    and rendering the artifact to disk or as the ``(python_code, cache)`` pair --
-    and :meth:`precompile.accumulate` wraps one in an ``AccumulatingCapture``, so
+    :func:`precompile` drives one of these itself for ``tracer="dynamo"`` -- entering it,
+    running the example calls, and returning the finished ``(python_code, cache)`` -- so
     callers never receive one.
     """
 
@@ -878,8 +857,8 @@ class PrecompileSession:
     ) -> tuple[str, bytes]:
         r"""artifact(*, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False) -> tuple[str, bytes]
 
-        Render the capture as ``(python_code, cache)``, the same pair
-        :meth:`torch.compiler.precompile.artifact` returns, and
+        Render the capture as ``(python_code, cache)``, the same pair the
+        :func:`torch.compiler.precompile` returns, and
         reload it with :func:`torch.compiler.precompile.load`.
 
         ``python_code`` is a self-contained module exposing ``forward``; it is
@@ -1948,6 +1927,7 @@ def _emit_driver_source(forward_fn_name: str) -> str:
     selected forward variant to the public ``forward``. Emitting the TEXT (rather than
     importing the module from the artifact) keeps python_code self-contained and
     version-frozen (Note [precompile programming model], invariant 7)."""
+    import inspect
 
     from torch import _precompile_driver as driver
 
@@ -2571,6 +2551,7 @@ def _build_multigraph_artifact(
 
 def _emit_multigraph_driver_source() -> str:
     """Emit the multi-graph driver as text, the same getsource path the others use."""
+    import inspect
 
     from torch import _precompile_driver as driver
 
@@ -2580,6 +2561,7 @@ def _emit_multigraph_driver_source() -> str:
 
 def _emit_installed_driver_source() -> str:
     """Emit the installing driver as text, the same getsource path the others use."""
+    import inspect
 
     from torch import _precompile_driver as driver
 
@@ -3067,19 +3049,17 @@ def _make_inlined_forward(python_code: str) -> Callable[..., object]:
 class _PrecompileApi:
     """Callable namespace implementing ``torch.compiler.precompile`` and its loaders.
 
-    This whole surface -- the call, ``artifact``, ``accumulate``, ``load``, and
-    the objects they return -- is a prototype API: signatures, error types and
-    the artifact format may change between releases without a deprecation cycle.
+    This whole surface -- the call, ``load``, and the objects they return -- is a
+    prototype API: signatures, error types and the artifact format may change
+    between releases without a deprecation cycle.
 
-    A single instance is exposed as ``torch.compiler.precompile``; calling it
-    writes an artifact to disk, ``artifact`` returns the ``(python_code, cache)``
-    pair in memory, ``accumulate`` captures across the caller's own loop, and
-    ``load`` reloads a saved artifact. It is a class (rather than a function with
-    attached attributes) so these operations and the error type are explicit
-    members.
+    A single instance is exposed as ``torch.compiler.precompile``; calling it precompiles a
+    computation and ``torch.compiler.precompile.load`` reloads the resulting source
+    artifacts. It is a class (rather than a function with attached attributes) so these
+    operations and the error type are explicit members.
 
-    The contract for the call, ``artifact``, ``accumulate`` and ``load`` is Note
-    [precompile programming model] in this module.
+    The contract for both ``__call__`` and ``load`` is Note [precompile programming
+    model] in this module.
     """
 
     # Reported so test_public_bindings / introspection see this as ``torch.compiler``.
@@ -3097,11 +3077,6 @@ class _PrecompileApi:
     # not have to reach into a private module.
     AccumulatingCapture = AccumulatingCapture
 
-    # What summary() and invariants() return, documented under this path.
-    PrecompileSummary = PrecompileSummary
-    FrameInvariants = FrameInvariants
-    GuardFact = GuardFact
-
     def __reduce__(self) -> str:
         # torch.compiler.precompile is a process-wide singleton; pickle/deepcopy must
         # round-trip to the SAME object (the instance carries no per-call state) rather
@@ -3115,149 +3090,8 @@ class _PrecompileApi:
     def __call__(
         self,
         fn: Callable[..., object],
-        /,
-        # The 2.14 spelling: the one example call passed positionally.
-        *example_args: object,
-        example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
-        artifact_path: str | os.PathLike[str] | None = None,
-        cache_path: str | os.PathLike[str] | None = None,
-        backend: str = "inductor",
-        tracer: str | None = None,
-        decompositions: dict | None = None,
-        guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None,
-        recompile_limit: int = 256,
-        dynamic: bool | None = None,
-        invariants: str | None = None,
-        require_complete: bool = True,
-        require_no_risky_drops: bool = True,
-        require_no_dropped_guards: bool = False,
-        training: bool = False,
-        keep_example_grads: bool = False,
-    ) -> list[object] | tuple[str, bytes]:
-        """Precompile ``fn`` to two files and return what the example calls returned.
-
-        ``example_inputs`` is the calling convention: a sequence of calls, each a
-        tuple of positional arguments (or an ``ExampleInput`` carrying keywords).
-        precompile makes those calls itself, for real, writes the artifact --
-        the matched ``(python_code, cache)`` pair -- to ``artifact_path`` and
-        ``cache_path``, and hands back the calls' results in order. Both paths
-        are required: a real capture's artifact runs to hundreds of megabytes of
-        source, so it is kept out of memory, and the results are how a training
-        capture over real batches hands its losses on without a second forward.
-        Reload with ``load(artifact_path=..., cache_path=...)``.
-
-        For the pair in memory use :meth:`artifact`, which takes the same
-        arguments (plus the ``make_fx`` tracer and ``decompositions``) and is
-        where the full contract -- backends, tracers, ``guard_filter_fn``, the
-        ``require_*`` gates, gradients, dynamic shapes -- is documented. Read
-        Note [precompile programming model] before relying on an artifact.
-
-        This form is ``tracer="dynamo"`` only. A make_fx trace runs ``fn`` under
-        proxy tensors and has no results to give, so it is refused BEFORE ``fn``
-        runs rather than handing back an empty list after it. Passing ``tracer``
-        or ``decompositions`` here raises ``TypeError`` naming :meth:`artifact`.
-
-        .. deprecated:: 2.15
-
-            ``precompile(fn, *example_inputs, backend="inductor", tracer="make_fx",
-            decompositions=None)`` -- the spelling 2.14 shipped, with the one
-            example call passed positionally -- still returns the
-            ``(python_code, cache)`` pair, with a ``FutureWarning``. It is
-            :meth:`artifact` called with ``example_inputs=[example_inputs]``; write
-            that instead. Combining it with ``example_inputs``, ``artifact_path`` or
-            ``cache_path`` raises ``TypeError``.
-
-        Example::
-
-            losses = torch.compiler.precompile(
-                train_step,
-                training=True,
-                example_inputs=[(model, batch) for batch in batches],
-                artifact_path="model.py",
-                cache_path="model.cache",
-            )
-            step = torch.compiler.precompile.load(
-                artifact_path="model.py", cache_path="model.cache"
-            )
-        """
-        torch._C._log_api_usage_once("torch.compiler.precompile")
-        if example_args:
-            if (example_inputs, artifact_path, cache_path) != (None, None, None):
-                raise TypeError(
-                    "precompile got positional example arguments together with "
-                    "example_inputs, artifact_path or cache_path. The example calls "
-                    "go in example_inputs: precompile(fn, example_inputs=[(arg0, "
-                    "arg1)], artifact_path=..., cache_path=...)."
-                )
-            warnings.warn(
-                "torch.compiler.precompile(fn, *example_inputs) is deprecated and "
-                "will stop returning the (python_code, cache) pair in a future "
-                "release; use torch.compiler.precompile.artifact(fn, "
-                "example_inputs=[(...)]) for the pair, or precompile(fn, "
-                "example_inputs=[...], artifact_path=..., cache_path=...) to write "
-                "it to disk.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            return self.artifact(
-                fn,
-                backend=backend,
-                tracer="make_fx" if tracer is None else tracer,
-                decompositions=decompositions,
-                example_inputs=[tuple(example_args)],
-                guard_filter_fn=guard_filter_fn,
-                recompile_limit=recompile_limit,
-                dynamic=dynamic,
-                invariants=invariants,
-                require_complete=require_complete,
-                require_no_risky_drops=require_no_risky_drops,
-                require_no_dropped_guards=require_no_dropped_guards,
-                training=training,
-                keep_example_grads=keep_example_grads,
-            )
-        if tracer is not None or decompositions is not None:
-            raise TypeError(
-                "precompile(...) takes neither tracer= nor decompositions=: it "
-                "always captures with the dynamo tracer and writes the artifact to "
-                "disk. Use precompile.artifact(fn, example_inputs=[...], tracer=..., "
-                "decompositions=...) for the (python_code, cache) pair in memory."
-            )
-        out_paths = _artifact_paths(
-            artifact_path,
-            cache_path,
-            who="precompile",
-            neither="Pass both, or use precompile.artifact() for the (python_code, cache) pair in memory.",
-        )
-        if out_paths is None:
-            raise ValueError(
-                "precompile writes the artifact to artifact_path and cache_path and "
-                "returns what the example calls returned; pass both paths, or use "
-                "precompile.artifact() for the (python_code, cache) pair in memory."
-            )
-        python_code, cache, results = self._capture(
-            fn,
-            backend=backend,
-            tracer="dynamo",
-            decompositions=None,
-            example_inputs=example_inputs,
-            guard_filter_fn=guard_filter_fn,
-            recompile_limit=recompile_limit,
-            dynamic=dynamic,
-            invariants=invariants,
-            require_complete=require_complete,
-            require_no_risky_drops=require_no_risky_drops,
-            require_no_dropped_guards=require_no_dropped_guards,
-            training=training,
-            keep_example_grads=keep_example_grads,
-            collect_results=True,
-        )
-        _write_artifact(*out_paths, python_code, cache)
-        return results
-
-    def artifact(
-        self,
-        fn: Callable[..., object],
-        /,
+        # Deprecated 2.14 spelling: the single example call passed positionally.
+        # Accepted as example_inputs=[example_args] with a FutureWarning.
         *example_args: object,
         backend: str = "inductor",
         tracer: str = "make_fx",
@@ -3273,7 +3107,7 @@ class _PrecompileApi:
         training: bool = False,
         keep_example_grads: bool = False,
     ) -> tuple[str, bytes]:
-        """Ahead-of-time precompile ``fn`` against example inputs, in memory.
+        """Ahead-of-time precompile ``fn`` against example inputs.
 
         .. warning::
 
@@ -3284,10 +3118,12 @@ class _PrecompileApi:
         positional arguments (or an ``ExampleInput`` carrying keywords). precompile makes
         those calls itself and returns ``(python_code, cache)``.
 
-        This is the in-memory form. Calling ``torch.compiler.precompile`` itself
-        instead writes the same pair to ``artifact_path`` and ``cache_path`` and
-        returns what the example calls returned; see its docstring. Everything
-        below applies to both.
+        .. deprecated:: 2.15
+
+            ``precompile(fn, *example_inputs)`` -- the 2.14 spelling, with the one
+            example call passed positionally -- still works and is read as
+            ``example_inputs=[example_inputs]``, with a ``FutureWarning``. Passing
+            both forms at once raises ``ValueError``.
 
         By default precompile snapshots and clears the example model's
         gradients before the calls and restores them afterwards, so a capture
@@ -3430,16 +3266,15 @@ class _PrecompileApi:
         bound checks. A shared ``shape_id`` is the way to get the check there;
         ``tracer="dynamo"`` enforces it either way, since the asserts ride in the graph.
 
-        The artifact is ``(python_code, cache)`` -- a self-contained, executable
-        Python source string (the single source of truth for the calling
-        convention) and a binary cache holding ONLY the backend artifact (NO
-        metadata, NO weights). Reload it with
-        ``torch.compiler.precompile.load(python_code, cache)``, or, for the
-        on-disk form, ``load(artifact_path=..., cache_path=...)``.
+        precompile returns ``(python_code, cache)`` -- a self-contained,
+        executable Python source string (the single source of truth for the calling
+        convention) and a binary cache holding ONLY the backend artifact (NO metadata,
+        NO weights). Reload it with
+        ``torch.compiler.precompile.load(python_code, cache)``.
 
         ``fn`` is the whole computation, e.g.::
 
-            python_code, cache = torch.compiler.precompile.artifact(
+            python_code, cache = torch.compiler.precompile(
                 lambda model, x: model(x), example_inputs=[(model, x)]
             )
 
@@ -3448,7 +3283,7 @@ class _PrecompileApi:
                 loss_fn(model(x), t).backward()  # or return autograd.grad(...)
 
 
-            python_code, cache = torch.compiler.precompile.artifact(
+            python_code, cache = torch.compiler.precompile(
                 train_step, example_inputs=[(model, x, t)], training=True
             )
 
@@ -3482,54 +3317,20 @@ class _PrecompileApi:
         inductor backend -- a runtime input whose stride / memory format differs from
         the example's (invariant 6).
         """
-        torch._C._log_api_usage_once("torch.compiler.precompile.artifact")
+        torch._C._log_api_usage_once("torch.compiler.precompile")
         if example_args:
-            raise TypeError(
-                f"precompile.artifact takes no positional example arguments (got "
-                f"{len(example_args)}). The example call goes in example_inputs: "
-                f"precompile.artifact(fn, example_inputs=[(arg0, arg1)]); pass "
-                f"tracer='dynamo' to capture several calls, with the graph breaks "
-                f"and recompilations between them."
+            if example_inputs is not None:
+                raise ValueError(
+                    "precompile got both positional example arguments and "
+                    "example_inputs=; pass the example call(s) in example_inputs only."
+                )
+            warnings.warn(
+                "torch.compiler.precompile(fn, *example_inputs) is deprecated; pass "
+                "example_inputs=[(...)] instead",
+                FutureWarning,
+                stacklevel=2,
             )
-        python_code, cache, _ = self._capture(
-            fn,
-            backend=backend,
-            tracer=tracer,
-            decompositions=decompositions,
-            example_inputs=example_inputs,
-            guard_filter_fn=guard_filter_fn,
-            recompile_limit=recompile_limit,
-            dynamic=dynamic,
-            invariants=invariants,
-            require_complete=require_complete,
-            require_no_risky_drops=require_no_risky_drops,
-            require_no_dropped_guards=require_no_dropped_guards,
-            training=training,
-            keep_example_grads=keep_example_grads,
-            collect_results=False,
-        )
-        return python_code, cache
-
-    def _capture(
-        self,
-        fn: Callable[..., object],
-        *,
-        backend: str,
-        tracer: str,
-        decompositions: dict | None,
-        example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None,
-        guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None,
-        recompile_limit: int,
-        dynamic: bool | None,
-        invariants: str | None,
-        require_complete: bool,
-        require_no_risky_drops: bool,
-        require_no_dropped_guards: bool,
-        training: bool,
-        keep_example_grads: bool,
-        collect_results: bool,
-    ) -> tuple[str, bytes, list[object]]:
-        """Capture and render; the results list is empty unless collected."""
+            example_inputs = [tuple(example_args)]
         if backend not in ("inductor", "eager"):
             raise ValueError(
                 f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
@@ -3601,7 +3402,7 @@ class _PrecompileApi:
             # rebuilt, and so code_hash is sha256 over exactly the bytes returned
             # to the caller (a matched pair loads).
             python_code = compiled.to_python_code()
-            return python_code, compiled.to_cache_bytes(python_code), []
+            return python_code, compiled.to_cache_bytes(python_code)
 
         if decompositions is not None:
             raise ValueError(
@@ -3643,19 +3444,15 @@ class _PrecompileApi:
                     # eager "backend" is an fx graph with no source to emit.
                     keep_graphs=backend != "eager",
                     prune_invariant_guards=True,
-                    collect_results=collect_results,
                 )
             )
             with session:
                 pass
-            # The capture is finished, so hand back the artifact rather than a
-            # session the caller has to know to save.
-            python_code, cache = session.artifact(
+            return session.artifact(
                 require_complete=require_complete,
                 require_no_risky_drops=require_no_risky_drops,
                 require_no_dropped_guards=require_no_dropped_guards,
             )
-        return python_code, cache, session.example_results()
 
     def accumulate(
         self,
@@ -3970,3 +3767,15 @@ precompile = _PrecompileApi()
 precompile.__name__ = "precompile"  # type: ignore[attr-defined]
 precompile.__qualname__ = "precompile"  # type: ignore[attr-defined]
 precompile.__doc__ = _PrecompileApi.__call__.__doc__
+
+# Every public method and class reachable through the singleton is public under
+# torch.compiler.precompile, so report its module/qualname there (mirroring the
+# singleton fixup above) rather than under this private module.
+for _name, _member in vars(_PrecompileApi).items():
+    if _name.startswith("_"):
+        continue
+    if inspect.isfunction(_member) or inspect.isclass(_member):
+        _member.__module__ = "torch.compiler"
+        _member.__qualname__ = f"precompile.{_name}"
+PrecompiledCallable.__module__ = "torch.compiler"
+PrecompiledRunnable.__module__ = "torch.compiler"
