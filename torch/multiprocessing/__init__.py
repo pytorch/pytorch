@@ -45,7 +45,6 @@ from .spawn import (
     ProcessExitedException,
     ProcessRaisedException,
     spawn,
-    SpawnContext,
     start_processes,
 )
 

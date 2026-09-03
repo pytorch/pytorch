@@ -1764,7 +1764,6 @@ coverage_ignore_classes = [
     "ProcessException",
     "ProcessExitedException",
     "ProcessRaisedException",
-    "SpawnContext",
     # torch.nn.cpp
     "ModuleWrapper",
     "OrderedDictWrapper",
