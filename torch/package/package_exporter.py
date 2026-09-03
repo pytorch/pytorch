@@ -224,8 +224,13 @@ class PackageExporter:
         if isinstance(f, (str, os.PathLike)):
             f = os.fspath(f)
             self.buffer: IO[bytes] | None = None
-        else:  # is a byte buffer
+        elif hasattr(f, "write"):
             self.buffer = f
+        else:
+            raise TypeError(
+                "f arg should be a string, PathLike, or binary IO object, "
+                f"got {type(f)} instead."
+            )
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
