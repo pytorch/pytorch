@@ -540,6 +540,8 @@ PyObject* dynamo__custom_eval_frame(
     force_callback_on_cache_miss =
         lookup_optional(callback, force_callback_marker_name) != nullptr;
   }
+  // The marker also keeps a RUN_ONLY recursive action from demoting callees to
+  // Py_False: their misses must reach the same callback rather than run eager.
   if (!force_callback_on_cache_miss ||
       strategy.recursive_action != FrameAction::RUN_ONLY) {
     recursive_callback =
@@ -584,6 +586,10 @@ PyObject* dynamo__custom_eval_frame(
         is_skip_guard_eval_unsafe);
     _pytorch_record_function_exit(rf);
   }
+  // The lookups hand back an OWNED reference: the entry that owns the code
+  // object can be evicted the moment the cache lock drops.
+  py::object cached_code_owner =
+      py::reinterpret_steal<py::object>(maybe_cached_code);
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
@@ -599,17 +605,6 @@ PyObject* dynamo__custom_eval_frame(
     fail();
     return eval_result;
   }
-
-  // The lookups above hand back a BORROWED pointer and then drop the cache
-  // lock. Everything below can release the GIL -- has_relevant_entries takes
-  // CacheLock, and the guard-collective hook runs Python -- so a concurrent
-  // unload can destroy the entry that owns this code object before
-  // eval_custom() runs it. A precompile entry is often that code object's only
-  // owner, so the result is a freed pointer handed to the interpreter. Own it
-  // for the rest of the frame. (trace_annotation is already safe: lookup
-  // copies it out of the entry while holding the cache lock.)
-  py::object cached_code_owner =
-      py::reinterpret_borrow<py::object>(maybe_cached_code);
 
   // NB: We only do guard collectives when there are compiled code entries
   // for the current region (or the default region); this reduces
