@@ -80,6 +80,13 @@ class TORCH_API NCCLSymmetricMemory : public SymmetricMemory {
   size_t get_window_offset();
 
  private:
+#ifdef USE_ROCM
+  friend class NCCLSymmetricMemoryAllocator;
+
+  bool is_live() const;
+  void check_liveness() const;
+#endif
+
   c10::intrusive_ptr<NCCLPeerAllocInfo> pai_;
   size_t offset_;
   int rank_;
