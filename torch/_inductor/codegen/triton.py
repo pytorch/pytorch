@@ -3356,6 +3356,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             collections.defaultdict(dict)
         )
         self.tma_min_block_sizes = dict[str, int]()
+        # Top-k selection wants few warps per row; see the reduction heuristic.
+        self.topk_sort: bool = False
         self.host_tma_descriptor_args: dict[str, TensorDescriptorOptions] = {}
         self._host_tma_non_materializable: OrderedSet[str] = OrderedSet()
         self._host_tma_non_materializable_buffers: OrderedSet[str] | None = None
@@ -6723,6 +6725,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         cse_compute = functools.partial(self.cse.generate, self.compute)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
 
+        key_dtype = dtypes[0]
         dtypes = tuple(upcast_compute_type(dtype) for dtype in dtypes)
         if len(dtypes) != len(values):
             raise AssertionError(
@@ -6771,9 +6774,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else:
                 if stable:
                     raise AssertionError("top-k selection is unstable")
+                self.topk_sort = True
                 line = (
                     f"triton_helpers.topk_with_index({broadcasted_values[0]}, {broadcasted_values[1]},"
-                    f" {rnumel}, {next_power_of_2(top_k)}, {dim}, descending={descending})"
+                    f" {rnumel}, {top_k}, {dim}, descending={descending},"
+                    f" key_dtype={triton_type(key_dtype)})"
                 )
             result_vars = cse_multiple(line, broadcasted_values, masks, dtypes)
         else:
@@ -7282,6 +7287,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
+        if self.topk_sort:
+            out["topk_sort"] = True
         if config.deterministic or config.test_configs.force_filter_reduction_configs:
             out["has_loadstore_with_contiguous_rdim"] = (
                 self.has_load_with_contiguous_rdim
