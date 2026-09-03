@@ -238,6 +238,23 @@ class _DynamoCodeCacheEntry:
     has_compile_id: bool = False
     bypassed: bool = False
 
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        _restore_missing_fields(self, state)
+
+
+def _restore_missing_fields(obj: Any, state: dict[str, Any]) -> None:
+    """Unpickle a dataclass written before some of its fields existed. A plain
+    default is reachable as a class attribute anyway; a default_factory field
+    (system_info) is not, and read as an AttributeError on load."""
+    obj.__dict__.update(state)
+    for field in dataclasses.fields(obj):
+        if field.name in state:
+            continue
+        if field.default is not dataclasses.MISSING:
+            setattr(obj, field.name, field.default)
+        elif field.default_factory is not dataclasses.MISSING:
+            setattr(obj, field.name, field.default_factory())
+
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
     if len(entry.function_names) != 1:
@@ -595,16 +612,17 @@ class _DynamoCacheEntry:
     fn_name: str | None = None
     fn_first_lineno: str | None = None
 
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        _restore_missing_fields(self, state)
+
     @property
     def backend_ids(self) -> set[_BackendId]:
         return {backend_id for code in self.codes for backend_id in code.backend_ids}
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
-        device_types = getattr(self, "device_types", None) or frozenset(
-            (self.device_type,)
-        )
-        check_codegen = getattr(self, "requires_native_backend_compatibility", True)
+        device_types = self.device_types or frozenset((self.device_type,))
+        check_codegen = self.requires_native_backend_compatibility
         # Determining the codegen target runs the C++ toolchain, so only pay for
         # it when this artifact actually records one to compare against.
         current_system_info = SystemInfo.current(
@@ -629,9 +647,7 @@ class _DynamoCacheEntry:
             "fn_name": self.fn_name,
             "fn_first_lineno": self.fn_first_lineno,
             "device_type": self.device_type,
-            "device_types": sorted(
-                getattr(self, "device_types", None) or frozenset((self.device_type,))
-            ),
+            "device_types": sorted(self.device_types or frozenset((self.device_type,))),
             "backend_ids": list(self.backend_ids),
         }
 
@@ -828,14 +844,12 @@ class CompilePackage:
                         )
 
                 self._source_info = dynamo.source_info
-                self._device_types = set(
-                    getattr(dynamo, "device_types", None) or (dynamo.device_type,)
-                )
 
             main, *codes = dynamo.codes
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
+            self._device_types = set(dynamo.device_types or (dynamo.device_type,))
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
