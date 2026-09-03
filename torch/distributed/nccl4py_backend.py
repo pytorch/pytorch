@@ -86,8 +86,19 @@ class NCCL4PyBackend(C10DBackend):
         self._store = store
         self._options = C10DBackend.Options("nccl4py", timeout=timeout)
 
+        # TODO (thisisatharva-rh): workaround. The basic creator API only passes the group-local
+        # rank, which is not a valid device index for a subgroup, so we recover
+        # the device from the default group. The proper fix is to migrate to the
+        # extended_api=True, which supplies the resolved device directly
+
         device_count = torch.cuda.device_count()
-        self._device = torch.device("cuda", rank % device_count)
+        if dist.is_initialized():
+            default_pg = dist.distributed_c10d._get_default_group()
+            self._device = default_pg.bound_device_id or torch.device(
+                "cuda", default_pg.rank() % device_count
+            )
+        else:
+            self._device = torch.device("cuda", rank % device_count)
         torch.cuda.set_device(self._device)
 
         if rank == 0:
