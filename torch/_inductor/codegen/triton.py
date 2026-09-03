@@ -7396,23 +7396,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return True
         return False
 
-    def pointer_range_kwargs(self) -> dict[str, Any]:
-        """``config_of`` kwargs deciding whether ``tt.pointer_range=32`` may be emitted.
+    def pointer_range_override(self) -> tuple[int, ...] | None:
+        """Suppress ``tt.pointer_range=32`` when this kernel uses atomics.
 
-        On HIP the annotation lets the backend use buffer ops. Buffer atomics exist but
-        are far slower than global atomics under contention, so a kernel that uses
-        atomics must not be tagged. Every path that builds triton_meta has to reach the
-        same decision -- this class and ``TritonTemplateKernel``, which does not go
-        through ``codegen_kernel`` -- so the rule lives in one place.
-
-        Only valid once the kernel body exists, since it depends on
-        ``atomic_add_found``.
+        On HIP the annotation lets the backend use buffer ops, and buffer atomics are
+        far slower than global ones under contention. ``()`` suppresses; ``None`` lets
+        ``config_of`` decide, which is also where the config flag is applied. Only
+        valid once the kernel body exists, since it reads ``atomic_add_found``.
         """
-        if torch.version.hip is not None and (
-            self.atomic_add_found or not config.triton.emit_pointer_range_32
-        ):
-            return {"pointer_range_override": ()}
-        return {}
+        if torch.version.hip is not None and self.atomic_add_found:
+            return ()
+        return None
 
     def codegen_kernel(self, name=None) -> str:
         """
@@ -7616,7 +7610,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             config_of(
                 signature,
                 skip_cpp_wrapper_input_tensor_alignment=True,
-                **self.pointer_range_kwargs(),
+                pointer_range_override=self.pointer_range_override(),
             )
         ]
 

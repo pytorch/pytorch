@@ -916,7 +916,9 @@ class TritonTemplateKernel(TritonKernel):
         }
         # Rendered from a deferred hook, so the body -- including any subgraph
         # modifications that emit atomics -- already exists at this point.
-        triton_meta["configs"] = [config_of(signature, **self.pointer_range_kwargs())]
+        triton_meta["configs"] = [
+            config_of(signature, pointer_range_override=self.pointer_range_override())
+        ]
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", None)
