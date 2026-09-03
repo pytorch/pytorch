@@ -1105,10 +1105,14 @@ _INVARIANT_DROPPABLE_GUARD_TYPES = frozenset(
         "BUILTIN_MATCH",
         "CLASS_MATCH",
         "CLOSURE_MATCH",
-        # Transient per-tensor storage-sharing flag: it materializes on the
-        # first write and is not stable across a capture/serve boundary, so
-        # keeping it would fail on a semantically identical non-COW input and
-        # force a spurious serve-time recompile.
+        # COW_TENSOR_MATCH pins a folded torch._C._is_cow_tensor branch, so by
+        # value it reads like the shape-bearing membership guards -- but unlike
+        # them it is an unserializable lambda guard, so the DEFAULT filter drops
+        # it before the policy runs and _is_risky_drop flags that drop, refusing
+        # at the default gates. It lives here rather than in the shape-bearing
+        # set because the policy keeping it would be futile (it can never be
+        # serialized) and because, unlike a dropped membership guard, its loss
+        # is never silent.
         "COW_TENSOR_MATCH",
         "DICT_VERSION",
         "DUAL_LEVEL",
