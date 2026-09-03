@@ -2745,6 +2745,33 @@ class TestTensorCreation(TestCase):
                 torch.eye(n, m, out=res2)
                 self.assertEqual(res1, res2)
 
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_eye_no_threshold_regression(self, device, dtype):
+        # Regression test for issue #48251: ensure contiguous-square correctness
+        # across the parallel_for threshold.
+        if device != 'cpu':
+            self.skipTest('CPU-only optimization')
+        if dtype == torch.bfloat16:
+            self.skipTest('bfloat16 not supported in eye')
+
+        for d in [50, 100, 150, 181, 182, 200, 256]:
+            result = torch.eye(d, device=device, dtype=dtype)
+            expected = torch.zeros(d, d, dtype=dtype, device=device)
+            expected.diagonal().fill_(1)
+            self.assertEqual(result, expected)
+
+    def test_eye_non_square_unchanged(self, device):
+        for dtype in (torch.float32, torch.float64):
+            for n, m in [(3, 5), (5, 3), (4, 7), (7, 4)]:
+                result = torch.eye(n, m, device=device, dtype=dtype)
+                expected = torch.zeros(n, m, dtype=dtype, device=device)
+                expected.diagonal().fill_(1)
+                self.assertEqual(result, expected)
+
+    def test_eye_zero_dim(self, device):
+        result = torch.eye(0, device=device, dtype=torch.float32)
+        self.assertEqual(result.shape, (0, 0))
+
     @precisionOverride({torch.float: 1e-8, torch.double: 1e-10})
     @dtypes(*floating_and_complex_types())
     def test_linspace_vs_numpy(self, device, dtype):

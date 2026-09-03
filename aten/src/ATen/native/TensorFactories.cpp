@@ -629,6 +629,29 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
+  if (sz == 0)
+    return result;
+
+  // Skip parallel_for's thread-pool init overhead for the common
+  // contiguous-square case. See issue #48251.
+  if (n == m && result.is_contiguous()) {
+    AT_DISPATCH_V2(
+        result.scalar_type(),
+        "eye",
+        [&]() -> void {
+          scalar_t* result_data = result.data_ptr<scalar_t>();
+          for (int64_t i = 0; i < sz; ++i) {
+            result_data[i * (n + 1)] = 1;
+          }
+        },
+        kBFloat16,
+        kHalf,
+        kBool,
+        AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+        AT_EXPAND(AT_FLOAT8_TYPES));
+    return result;
+  }
+
   AT_DISPATCH_V2(
       result.scalar_type(),
       "eye",
