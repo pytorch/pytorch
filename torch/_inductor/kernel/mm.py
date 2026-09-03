@@ -136,10 +136,10 @@ flydsl_mm_template = FlyDSLTemplate(
     source=load_kernel_template("flydsl_mm"),
 )
 
-blackwell_ws_persistent_device_tma_mm_template = TritonTemplate(
-    name="blackwell_ws_persistent_device_tma",
+blackwell_ws_persistent_tma_mm_template = TritonTemplate(
+    name="blackwell_ws_persistent_tma",
     grid=persistent_mm_grid,
-    source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_mm"),
+    source=load_kernel_template("triton_blackwell_ws_persistent_tma_mm"),
 )
 
 
@@ -580,7 +580,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             if use_triton_blackwell_tma_template(
                 mat1, mat2, output_layout=layout, add_guards=True
             ):
-                templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+                templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
             elif use_triton_tma_template(
                 mat1, mat2, output_layout=layout, add_guards=True
             ):
@@ -873,7 +873,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         if use_triton_blackwell_tma_template(
             mat1, mat2, output_layout=layout, add_guards=True
         ):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+            templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
         elif use_triton_tma_template(mat1, mat2, output_layout=layout, add_guards=True):
             if torch.version.hip is None:
                 templates_to_use.append(persistent_tma_mm_template)
@@ -1269,10 +1269,8 @@ def tuned_scaled_mm_v2(
             )
             and not bias
         ):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
-                overriders
-            )
+            templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
+            kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = overriders
 
         if use_triton_scaling_template(
             scale_option_a, scale_option_b, epilogue_scaling_types
@@ -1446,10 +1444,8 @@ def tuned_scaled_mm(
             )
             and not bias
         ):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
-                overriders
-            )
+            templates_to_use.append(blackwell_ws_persistent_tma_mm_template)
+            kwarg_overrides[blackwell_ws_persistent_tma_mm_template.uid] = overriders
 
         if use_triton_scaling_template(
             scale_option_a, scale_option_b, epilogue_scaling_types
