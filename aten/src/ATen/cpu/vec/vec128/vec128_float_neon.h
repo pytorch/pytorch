@@ -495,8 +495,13 @@ class Vectorized<float> {
 #if defined(CPU_CAPABILITY_SVE128)
   Vectorized<float> sin() const {
     svfloat32_t sve_input = neon_to_sve(values);
-
-    svfloat32_t sve_result = sinf(sve_input, svptrue_b32());
+    const svbool_t pg = svptrue_b32();
+    const svbool_t large = svacge(pg, sve_input, svdup_n_f32(0x1p20f));
+    if (C10_UNLIKELY(svptest_any(pg, large))) {
+      return USE_SLEEF(
+          Vectorized<float>(Sleef_sinf4_u10(values)), map(std::sin));
+    }
+    svfloat32_t sve_result = sinf_fast_path(sve_input);
 
     return Vectorized<float>(sve_to_neon(sve_result));
   }
@@ -507,8 +512,13 @@ class Vectorized<float> {
 #if defined(CPU_CAPABILITY_SVE128)
   Vectorized<float> cos() const {
     svfloat32_t sve_input = neon_to_sve(values);
-
-    svfloat32_t sve_result = cosf(sve_input, svptrue_b32());
+    const svbool_t pg = svptrue_b32();
+    const svbool_t large = svacge(pg, sve_input, svdup_n_f32(0x1p20f));
+    if (C10_UNLIKELY(svptest_any(pg, large))) {
+      return USE_SLEEF(
+          Vectorized<float>(Sleef_cosf4_u10(values)), map(std::cos));
+    }
+    svfloat32_t sve_result = cosf_fast_path(sve_input);
 
     return Vectorized<float>(sve_to_neon(sve_result));
   }
