@@ -22,9 +22,9 @@ def _dummy_fn(name: str) -> Callable:
 
 
 def is_available() -> bool:
-    r"""Return ``True`` if GDS (GPUDirect Storage) support is built in.
+    r"""Return ``True`` if GPU Direct Storage (GDS) support is built in.
 
-    This requires PyTorch to be built with cuFile (CUDA) or hipFile (ROCm).
+    This requires PyTorch to be built with GDS support.
     """
     return torch._C._has_gds
 
@@ -61,7 +61,7 @@ if not is_available():
 
 
 def gds_register_buffer(s: Storage) -> None:
-    """Registers a storage on a CUDA device as a cufile buffer.
+    """Registers a storage on a GPU as a GDS buffer.
 
     Example::
 
@@ -77,7 +77,7 @@ def gds_register_buffer(s: Storage) -> None:
 
 
 def gds_deregister_buffer(s: Storage) -> None:
-    """Deregisters a previously registered storage on a CUDA device as a cufile buffer.
+    """Deregisters a previously registered GDS buffer.
 
     Example::
 
@@ -94,11 +94,12 @@ def gds_deregister_buffer(s: Storage) -> None:
 
 
 class GdsFile:
-    r"""Wrapper around cuFile.
+    r"""Wrapper around the GDS driver.
 
-    cuFile is a file-like interface to the GPUDirect Storage (GDS) API.
+    GDS is a file-like interface for direct transfers between storage and GPU memory.
 
     See the `cufile docs <https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api>`_
+    and the `hipFile docs <https://rocm.docs.amd.com/projects/hipFile/en/latest/>`_
     for more details.
 
     Args:
@@ -140,18 +141,18 @@ class GdsFile:
         os.close(self.fd)
 
     def register_handle(self) -> None:
-        """Registers file descriptor to cuFile Driver.
+        """Registers file descriptor to the GDS driver.
 
-        This is a wrapper around ``cuFileHandleRegister``.
+        This is a wrapper around the GDS driver's handle registration.
         """
         if self.handle is not None:
             raise AssertionError("Cannot register a handle that is already registered.")
         self.handle = torch._C._gds_register_handle(self.fd)
 
     def deregister_handle(self) -> None:
-        """Deregisters file descriptor from cuFile Driver.
+        """Deregisters file descriptor from the GDS driver.
 
-        This is a wrapper around ``cuFileHandleDeregister``.
+        This is a wrapper around the GDS driver's handle deregistration.
         """
         if self.handle is None:
             raise AssertionError("Cannot deregister a handle that is not registered.")
@@ -161,8 +162,8 @@ class GdsFile:
     def load_storage(self, storage: Storage, offset: int = 0) -> None:
         """Loads data from the file into the storage.
 
-        This is a wrapper around ``cuFileRead``. ``storage.nbytes()`` of data
-        will be loaded from the file at ``offset`` into the storage.
+        This is a wrapper around the GDS driver's file-read operation. ``storage.nbytes()``
+        of data will be loaded from the file at ``offset`` into the storage.
 
         Args:
             storage (Storage): Storage to load data into.
@@ -175,8 +176,8 @@ class GdsFile:
     def save_storage(self, storage: Storage, offset: int = 0) -> None:
         """Saves data from the storage into the file.
 
-        This is a wrapper around ``cuFileWrite``. All bytes of the storage
-        will be written to the file at ``offset``.
+        This is a wrapper around the GDS driver's file-write operation. All bytes of the
+        storage will be written to the file at ``offset``.
 
         Args:
             storage (Storage): Storage to save data from.
