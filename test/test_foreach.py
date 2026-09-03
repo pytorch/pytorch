@@ -23,7 +23,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     OpDTypes,
     ops,
-    skipCUDAIf,
     skipXPU,
 )
 from torch.testing._internal.common_dtype import (
@@ -2234,6 +2233,7 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
 
     hw_classification = HardwareClassification.CUDA
 
+    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     @parametrize(
         "label,a_dtype,b_dtype,K,expected",
         [
@@ -2247,7 +2247,7 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
         name_fn=lambda label, *_: label,
     )
     def test_foreach_mm_can_use_nvmath_cublaslt_grouped_mm(
-        self, device, label, a_dtype, b_dtype, K, expected
+        self, label, a_dtype, b_dtype, K, expected
     ):
         from torch._native.ops.foreach_mm.impl import (
             _can_use_nvmath_cublaslt_grouped_mm,
@@ -2258,6 +2258,7 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
         self.assertEqual(_can_use_nvmath_cublaslt_grouped_mm(A, B), expected)
 
     # One case per _foreach_mm_route branch; reads only metadata, does not require GPU.
+    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     @parametrize(
         "label,dtype,shapes,available,expected",
         [
@@ -2304,7 +2305,7 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
         ],
         name_fn=lambda label, *_: label,
     )
-    def test_foreach_mm_route(self, device, label, dtype, shapes, available, expected):
+    def test_foreach_mm_route(self, label, dtype, shapes, available, expected):
         from torch._native.ops.foreach_mm import impl
 
         A = [torch.randn(M, K, dtype=dtype) for (M, N, K) in shapes]
@@ -2315,7 +2316,9 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
         ):
             self.assertEqual(impl._foreach_mm_route(A, B), expected)
 
-    @skipCUDAIf(not SM90OrLater, "requires SM90+")
+    @unittest.skipUnless(
+        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+    )
     @parametrize(
         "label,a_shape,b_shape,a_dtype,b_dtype",
         [
@@ -2329,16 +2332,16 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
         ],
         name_fn=lambda label, *_: label,
     )
-    def test_foreach_mm_cond_rejects(
-        self, device, label, a_shape, b_shape, a_dtype, b_dtype
-    ):
+    def test_foreach_mm_cond_rejects(self, label, a_shape, b_shape, a_dtype, b_dtype):
         from torch._native.ops.foreach_mm.impl import _foreach_mm_cond
 
-        A = [torch.randn(*a_shape, dtype=a_dtype, device=device) for _ in range(2)]
-        B = [torch.randn(*b_shape, dtype=b_dtype, device=device) for _ in range(2)]
+        A = [torch.randn(*a_shape, dtype=a_dtype, device="cuda") for _ in range(2)]
+        B = [torch.randn(*b_shape, dtype=b_dtype, device="cuda") for _ in range(2)]
         self.assertFalse(_foreach_mm_cond(A, B))
 
-    @skipCUDAIf(not SM90OrLater, "requires SM90+")
+    @unittest.skipUnless(
+        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+    )
     @parametrize(
         "label,shapes",
         [
@@ -2350,15 +2353,15 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
         ],
         name_fn=lambda label, shapes: label,
     )
-    def test_foreach_mm_fallback_correctness(self, device, label, shapes):
+    def test_foreach_mm_fallback_correctness(self, label, shapes):
         from torch._native.ops.foreach_mm import impl
 
         A = [
-            torch.randn(M, K, dtype=torch.bfloat16, device=device)
+            torch.randn(M, K, dtype=torch.bfloat16, device="cuda")
             for (M, N, K) in shapes
         ]
         B = [
-            torch.randn(K, N, dtype=torch.bfloat16, device=device)
+            torch.randn(K, N, dtype=torch.bfloat16, device="cuda")
             for (M, N, K) in shapes
         ]
         ref = [torch.mm(a, b) for a, b in zip(A, B)]
@@ -2370,7 +2373,9 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
             self.assertEqual(o, r)
 
     @skipIfNoNvmath
-    @skipCUDAIf(not SM90OrLater, "requires SM90+")
+    @unittest.skipUnless(
+        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+    )
     @parametrize(
         "label,shapes",
         [
@@ -2393,7 +2398,7 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
         ],
         name_fn=lambda label, shapes: label,
     )
-    def test_foreach_mm_nvmath(self, device, label, shapes):
+    def test_foreach_mm_nvmath(self, label, shapes):
         from torch._native.ops.foreach_mm.impl import _check_nvmath_cublaslt
 
         if not _check_nvmath_cublaslt():
@@ -2401,10 +2406,10 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
                 "cuBLASLt grouped GEMM unavailable (nvmath present but "
                 "cublasLtGroupedMatrixLayoutCreate missing)"
             )
-        self._check(shapes, torch.bfloat16, device)
+        self._check(shapes, torch.bfloat16, "cuda")
 
 
-instantiate_device_type_tests(TestForeachMMCUDA, globals(), only_for="cuda")
+instantiate_parametrized_tests(TestForeachMMCUDA)
 
 
 if __name__ == "__main__":
