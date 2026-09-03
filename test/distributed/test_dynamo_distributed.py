@@ -1630,7 +1630,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             pg = dist.distributed_c10d.GroupMember.NON_GROUP_MEMBER
             self.assertEqual(f(x), x + 1)
 
-    @skipIfXpu  # ProcessGroupXCCL doesn't support _set_default_timeout yet.
+    @skipIfXpu  # ProcessGroupXCCL doesn't support set_timeout yet.
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "fx_graph_cache", False)
     @patch.object(torch._inductor.config, "fx_graph_remote_cache", False)
@@ -1655,8 +1655,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 y = 2 * x
                 return y.sum()
 
-            backend = pg._get_backend(torch.device(device))
-            backend._set_default_timeout(timedelta(seconds=sleep_time - 2))
+            dist.set_timeout(timedelta(seconds=sleep_time - 2), pg)
 
             x = torch.ones(4, device=device)
 
@@ -1682,7 +1681,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
-    @skipIfXpu  # ProcessGroupXCCL doesn't support _set_default_timeout yet.
+    @skipIfXpu  # ProcessGroupXCCL doesn't support set_timeout yet.
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "fx_graph_cache", True)
     @patch.object(torch._inductor.config, "fx_graph_remote_cache", False)
@@ -1703,8 +1702,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 y = 2 * x
                 return y.sum()
 
-            backend = pg._get_backend(torch.device(device))
-            backend._set_default_timeout(timedelta(seconds=5))
             counters.clear()
 
             x = torch.ones(4, device=device)
@@ -1719,6 +1716,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             w.wait()
             torch.accelerator.synchronize(device)
             torch._dynamo.reset()
+            dist.set_timeout(timedelta(seconds=5), pg)
+            dist.barrier()
 
             if self.rank == 0:
                 with fresh_cache():
