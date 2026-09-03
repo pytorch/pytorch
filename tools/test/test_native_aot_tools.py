@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import contextlib
+import glob
 import importlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import types
@@ -60,6 +62,39 @@ def _no_ambient_arch(device=None):
     # _effective_arch tests -- so an empty value is equivalent to absent here.
     stack.enter_context(mock.patch.dict(os.environ, env, clear=False))
     return stack
+
+
+def _manifest(artifacts_dir):
+    """What the generator told CMake, parsed back: {"arch_list": str|None,
+    "sources": [...], "objects": [...]}.
+
+    The generator emits native_aot.cmake -- the CMake CALLS, not data -- so this
+    reads the quoted paths out of its target_sources() and the arch list out of its
+    header comment. Tests assert the same invariants as when it was a manifest
+    file; only the artifact changed."""
+    out = {"arch_list": None, "sources": [], "objects": []}
+    path = os.path.join(artifacts_dir, gen_aot_lib.CMAKE_INCLUDE)
+    with open(path) as f:
+        text = f.read()
+    if "TORCH_CUDA_ARCH_LIST=" in text:
+        m = re.search(r"TORCH_CUDA_ARCH_LIST='([^']*)'", text)
+        if m is None:
+            raise AssertionError(f"{path}: arch list present but unquoted:\n{text}")
+        out["arch_list"] = m.group(1)
+    elif "without an arch list" in text:
+        # The generator makes no claim -- a hand run or an on-device export. A
+        # DISTINCT value from None, which means "the file said nothing at all".
+        out["arch_list"] = "absent"
+    block = text.partition("target_sources(torch_cuda PRIVATE")[2].partition(")")[0]
+    for line in block.splitlines():
+        line = line.strip()
+        if not (line.startswith('"') and line.endswith('"')):
+            continue
+        raw = line[1:-1]
+        for char in (";", "$", '"', "\\"):
+            raw = raw.replace("\\" + char, char)
+        (out["objects"] if raw.endswith(".o") else out["sources"]).append(raw)
+    return out
 
 
 _DECL_REL = os.path.relpath(
@@ -825,6 +860,36 @@ class _FakeDecl:
         return f"{launch_fn}(self, out, at::cuda::getCurrentCUDAStream());"
 
 
+@contextlib.contextmanager
+def _patched_generation(ops, declarations=(_FakeDecl,)):
+    """What every gen_aot_lib.main() test patches: the ops dir discovery walks,
+    the declarations it loads (None to use the real loader on a written aot.py,
+    or a callable to answer per path), and the two native_functions.yaml lookups
+    -- "fakeop" is not a real op, so the real ones raise."""
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.object(gen_aot_lib, "OPS_DIR", ops))
+        if declarations is not None:
+            load = (
+                declarations
+                if callable(declarations)
+                else lambda path: list(declarations)
+            )
+            stack.enter_context(
+                mock.patch.object(gen_aot_lib.decl, "load_declarations", load)
+            )
+        stack.enter_context(
+            mock.patch.object(
+                gen_aot_lib,
+                "impl_signature_params",
+                lambda op: "const at::Tensor & self, int64_t k",
+            )
+        )
+        stack.enter_context(
+            mock.patch.object(gen_aot_lib, "precomputed_args", lambda op: [])
+        )
+        yield
+
+
 class TestInt32SizeGate(unittest.TestCase):
     # The exported ABI carries int32_t shape slots while aten sizes are int64_t, so
     # the gate must decline oversized dims rather than let the cast truncate them.
@@ -1133,6 +1198,28 @@ class TestStructuredIntrospection(unittest.TestCase):
         )
         self.assertIn("precomputes NOTHING", raw)
         self.assertIn("arrive RAW", raw)
+
+
+class TestAtomicWrites(unittest.TestCase):
+    def test_a_failed_write_leaves_neither_a_partial_file_nor_a_tmp(self):
+        # CMake reads the emitted file as authoritative, so a half-written one is
+        # worse than none; asserting the final content alone would not show that.
+        with tempfile.TemporaryDirectory() as d:
+            target = os.path.join(d, "manifest.txt")
+            with open(target, "w") as f:
+                f.write("PREVIOUS\n")
+            real_replace = os.replace
+            with mock.patch.object(
+                gen_aot_lib.os, "replace", side_effect=OSError("simulated failure")
+            ):
+                with self.assertRaises(OSError):
+                    gen_aot_lib._write_atomic(target, "NEW\n")
+            self.assertIs(real_replace, os.replace)
+            with open(target) as f:
+                self.assertEqual(f.read(), "PREVIOUS\n", "target was clobbered")
+            self.assertEqual(
+                [f for f in os.listdir(d) if f.endswith(".tmp")], [], "left a .tmp"
+            )
 
 
 class TestShippedVsDeclaredArchs(unittest.TestCase):
@@ -1789,6 +1876,157 @@ class TestToolchainRegistry(unittest.TestCase):
             tc.validate_build_result({"prefix": "x", "fn": object(), "tensor_args": []})
 
 
+CUBIN_SIDECAR = {
+    "prefix": "fakemm_f32",
+    "kind": "triton",
+    "symbol": "_fakemm_kernel",
+    "spec": {"dtype": "float32"},
+    "launch": {"grid_x": "B_dim*((M+31)/32)"},
+    "shared": 512,
+    "block_x": 128,
+    "args": [
+        {"name": "a", "kind": "tensor"},
+        {"name": "B_dim", "kind": "scalar", "ctype": "int32_t"},
+        {"name": "M", "kind": "scalar", "ctype": "int32_t"},
+    ],
+}
+
+
+class TestEndToEndGeneration(unittest.TestCase):
+    _DECL = (
+        'ATEN_OP = "fakeop"\n'
+        'DISPATCH_KEY = "CUDA"\n'
+        'KERNEL_MODULE = "kernel.py"\n'
+        "def kernel_precompile_grid():\n"
+        '    return [{"N": 1024, "K": 8}]\n'
+        "def covered_axes(self, k):\n"
+        '    return {"N": 0, "K": k}\n'
+        "def cpp_dispatch(spec):\n"
+        "    return f\"N == {spec['N']}\"\n"
+        "def cpp_launch(spec, launch_fn):\n"
+        '    return f"{launch_fn}();"\n'
+    )
+
+    @contextlib.contextmanager
+    def _generated(self, touch=True, header=None, arch_list=None):
+        """Run main() over a one-kernel tree; yield (artifacts_dir, error|None).
+
+        ``touch`` writes the artifacts the sidecar claims; ``header`` overwrites
+        the ABI header, for the cases where generation must REFUSE and the
+        interesting assertion is that nothing was left behind; ``arch_list`` is
+        passed through as --arch-list."""
+        with tempfile.TemporaryDirectory() as art, tempfile.TemporaryDirectory() as ops:
+            art_op = os.path.join(art, "sm_100a", "fakeop")
+            os.makedirs(art_op)
+            if touch:
+                _touch_artifacts(art_op, SIDECAR["prefix"])
+            if header is not None:
+                with open(os.path.join(art_op, SIDECAR["prefix"] + ".h"), "w") as f:
+                    f.write(header)
+            sidecar = dict(
+                SIDECAR,
+                spec={"N": 1024, "K": 8},
+                sources=_current_sources(),
+                runtimes=_RUNTIMES,
+                version=export.SIDECAR_VERSION,
+            )
+            with open(os.path.join(art_op, SIDECAR["prefix"] + ".json"), "w") as f:
+                json.dump(sidecar, f)
+            os.makedirs(os.path.join(ops, "fakeop"))
+            with open(os.path.join(ops, "fakeop", "aot.py"), "w") as f:
+                f.write(self._DECL)
+            err = None
+            with _patched_generation(ops, declarations=None):
+                argv = ["--artifacts-dir", art]
+                if arch_list is not None:
+                    argv += ["--arch-list", arch_list]
+                try:
+                    gen_aot_lib.main(argv)
+                except Exception as e:
+                    err = e
+            yield art, err
+
+    def test_main_writes_aot_source(self):
+        # Artifacts live at <root>/<arch>/<decl_id>/. _generated writes them for real,
+        # since generation refuses a sidecar describing a file that is not there.
+        with self._generated() as (art, err):
+            self.assertIsNone(err)
+            art_op = os.path.join(art, "sm_100a", "fakeop")
+            out = os.path.join(art, "fakeop", "aot_fakeop_cuda.cpp")
+            self.assertTrue(os.path.exists(out))
+            with open(out) as f:
+                src = f.read()
+            self.assertIn("fakeop_cuda_aot_kernel", src)
+            # The include reaches from the generated source at <root>/<decl_id>/ into
+            # the arch tree; inverted, every generated file fails to compile.
+            self.assertIn(f'#include "../sm_100a/fakeop/{SIDECAR["prefix"]}.h"', src)
+            # The emitted file is everything CMake reads: the sources to compile, the
+            # objects to link, and the arch list they were generated for.
+            man = _manifest(art)
+            self.assertEqual(man["sources"], [out])
+            self.assertEqual(
+                man["objects"], [os.path.join(art_op, SIDECAR["prefix"] + ".o")]
+            )
+            for p in man["sources"] + man["objects"]:
+                self.assertTrue(os.path.isabs(p), f"{p} is not absolute")
+            # No --arch-list was passed, so the file must claim NOTHING rather than
+            # "", which CMake distinguishes. A literal, not os.getenv.
+            self.assertEqual(man["arch_list"], "absent")
+            # Version-script CONTENTS, not just existence: written from an empty
+            # prefix list it localizes nothing, exporting every kernel symbol.
+            with open(os.path.join(art, gen_aot_lib.VERSION_SCRIPT)) as f:
+                ver = f.read()
+            self.assertIn(f"{SIDECAR['prefix']}_*;", ver)
+            self.assertIn(f"_mlir_*{SIDECAR['prefix']}*;", ver)
+
+    def test_main_records_the_arch_list_it_was_given(self):
+        # A literal, not os.getenv: the recorded claim must come from the flag rather
+        # than from the ambient environment.
+        with self._generated(arch_list="9.0a;10.0a") as (art, err):
+            self.assertIsNone(err)
+            self.assertEqual(_manifest(art)["arch_list"], "9.0a;10.0a")
+
+    def test_main_refuses_a_sidecar_whose_object_is_absent(self):
+        # The launcher would be emitted and the object missing at link time. A
+        # comment in test_main_writes_aot_source claimed to cover this; it
+        # creates the artifacts and never reaches the refusal.
+        with self._generated(touch=False) as (art, err):
+            self.assertIsNotNone(err, "expected a refusal")
+            self.assertIn("not on disk", str(err))
+            # ...and nothing was left behind for the CMake glob to compile.
+            self.assertFalse(glob.glob(os.path.join(art, "*", "aot_*.cpp")))
+
+    def test_main_refuses_an_int32_stride_abi(self):
+        # validate_abi's only production call site, since TestAbiValidation invokes the
+        # method directly. A real export's layout with mX's strides narrowed to int32.
+        pre = SIDECAR["prefix"]
+        bad = "".join(
+            f"typedef struct {{ void* data; int32_t dynamic_shapes[2];\n"
+            f"  {w} dynamic_strides[1]; }} {pre}_Tensor_{t}_t;\n"
+            for t, w in (("mX", "int32_t"), ("mOut", "int64_t"))
+        )
+        with self._generated(header=bad) as (
+            art,
+            err,
+        ):
+            self.assertIsNotNone(err, "expected a refusal")
+            self.assertIn("must be declared 64-bit", str(err))
+            self.assertFalse(glob.glob(os.path.join(art, "*", "aot_*.cpp")))
+
+    def test_main_tolerates_missing_artifacts_dir(self):
+        # Zero declarations: export creates no artifacts dir at all, so main() must
+        # no-op rather than raise FileNotFoundError.
+        import sys
+
+        with tempfile.TemporaryDirectory() as d:
+            argv = sys.argv
+            sys.argv = ["gen_aot_lib.py", "--artifacts-dir", os.path.join(d, "absent")]
+            try:
+                gen_aot_lib.main()
+            finally:
+                sys.argv = argv
+
+
 class TestDeclarationArchs(unittest.TestCase):
     def test_a_malformed_archs_entry_is_refused_at_load(self):
         # _SM_RE accepts "sm_9" and "sm_1000", which name no capability. Refused by the
@@ -1920,7 +2158,78 @@ class TestInt32GateTypeClassifier(unittest.TestCase):
         self.assertEqual(gen_aot_lib._int32_size_gate("int64_t k, bool largest"), "")
 
 
+class TestGeneratedVersionScript(unittest.TestCase):
+    def test_patterns_are_anchored_on_the_kernel_prefix(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = gen_aot_lib.write_version_script(tmpdir, ["topk_f32_n1024_k8"])
+            with open(path) as f:
+                text = f.read()
+        # <prefix>_* covers every symbol the DSL emits for the kernel; enumerating known
+        # suffixes leaves _args_spec, _kernel_info and friends in torch_cuda's ABI.
+        self.assertIn("topk_f32_n1024_k8_*;", text)
+        self.assertIn("_mlir_*topk_f32_n1024_k8*;", text)
+        # The DIRECTIVE line, not the word, which VER_TMPL's own comment also contains:
+        # `global:` here exports every DSL symbol, the inverse of the file's purpose.
+        self.assertIn("\n  local:\n", text)
+        self.assertNotIn("\n  global:\n", text)
+        # EVERY pattern names the prefix, so this fails for any that would reach past
+        # this kernel's symbols. Indented and ";"-terminated selects the pattern lines,
+        # not the script's closing "};" or its comment block.
+        patterns = [
+            l.strip()
+            for l in text.splitlines()
+            if l.startswith("    ") and l.strip().endswith(";")
+        ]
+        self.assertTrue(patterns)
+        for p in patterns:
+            self.assertIn("topk_f32_n1024_k8", p, f"unanchored pattern: {p}")
+
+
 class TestRegistryConsistency(unittest.TestCase):
+    def test_artifact_exts_are_shared_by_both_sweeps(self):
+        # One notion of "kernel artifact", through both sweeps with a toolchain neither
+        # knew about: asserting the union contains each kind's exts is a tautology.
+        class _Novel(toolchains.Toolchain):
+            kind = "novel"
+            artifact_exts = (".novelobj",)
+
+        with mock.patch.dict(toolchains.TOOLCHAINS, {"novel": _Novel()}, clear=False):
+            self.assertIn(".novelobj", toolchains.all_artifact_exts())
+            # Sweep 1: export's orphan check, which REPORTS an artifact no sidecar
+            # claims; naming it is what proves the shared set.
+            with tempfile.TemporaryDirectory() as d:
+                open(os.path.join(d, "k.novelobj"), "w").close()
+                with contextlib.redirect_stdout(io.StringIO()) as said:
+                    export._check_no_orphan_artifacts(d, [])
+                self.assertIn("k.novelobj", said.getvalue())
+
+            # Sweep 2: generation's no-declaration check. "other" is declared so
+            # by_id is non-empty; an empty one means the tree declares nothing.
+            class _OtherDecl(_FakeDecl):
+                ATEN_OP = "other"
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                art = os.path.join(tmpdir, "sm_100a", "fakeop")
+                os.makedirs(art)
+                open(os.path.join(art, "k.novelobj"), "w").close()
+                ops = os.path.join(tmpdir, "_ops")
+                os.makedirs(os.path.join(ops, "other"))
+                open(os.path.join(ops, "other", "aot.py"), "w").close()
+                with (
+                    mock.patch.object(gen_aot_lib, "OPS_DIR", ops),
+                    mock.patch.object(
+                        gen_aot_lib.decl,
+                        "load_declarations",
+                        return_value=[_OtherDecl],
+                    ),
+                ):
+                    out = io.StringIO()
+                    with contextlib.redirect_stdout(out):
+                        gen_aot_lib.main(["--artifacts-dir", tmpdir])
+                    # Reported, per arch directory, and NOT fatal: see
+                    # TestOrphanArtifactSafety for why.
+                    self.assertIn("no declaration", out.getvalue())
+
     def test_link_exts_must_be_a_subset_of_artifact_exts(self):
         # Generation links `if ext in link_exts`, so an ext the kind cannot produce
         # contributes nothing: a green link, then an undefined symbol at first call.
@@ -2172,6 +2481,131 @@ class TestGeneratedCoversGuards(unittest.TestCase):
         self.assertEqual(line.count('", &::'), 1)
 
 
+class TestSourceCommitOrdering(unittest.TestCase):
+    """Generation writes NOTHING until every declaration has passed its refusals,
+    and every file it does write is written atomically. Both properties exist
+    because the main build compiles whatever is on disk at configure time, and
+    stage 2 -- the only writer -- runs after that build."""
+
+    def _tree(self, root, decl_id, prefix, ok=True):
+        art = os.path.join(root, "sm_100a", decl_id)
+        os.makedirs(art, exist_ok=True)
+        _touch_artifacts(art, prefix, exts=(".o", ".h") if ok else (".h",))
+        with open(os.path.join(art, prefix + ".json"), "w") as f:
+            json.dump(
+                dict(
+                    SIDECAR,
+                    prefix=prefix,
+                    spec={"N": 1024, "K": 8},
+                    sources=_current_sources(),
+                    runtimes=_RUNTIMES,
+                    version=export.SIDECAR_VERSION,
+                ),
+                f,
+            )
+        return art
+
+    def test_no_source_is_written_when_a_later_declaration_is_refused(self):
+        # TWO declarations, the second refusing: with one, the refusal happens before
+        # that declaration's own source would be written. What this prevents is the
+        # first's FRESH source beside the previous run's objects.
+        with tempfile.TemporaryDirectory() as art, tempfile.TemporaryDirectory() as ops:
+            self._tree(art, "aaa", "aaa_p__sm100a", ok=True)
+            self._tree(art, "bbb", "bbb_p__sm100a", ok=False)  # .o missing
+
+            class _Aaa(_FakeDecl):
+                ATEN_OP = "aaa"
+
+            class _Bbb(_FakeDecl):
+                ATEN_OP = "bbb"
+
+            for name in ("aaa", "bbb"):
+                os.makedirs(os.path.join(ops, name))
+                open(os.path.join(ops, name, "aot.py"), "w").close()
+            decls = {"aaa": [_Aaa], "bbb": [_Bbb]}
+            with _patched_generation(
+                ops, lambda path: decls[os.path.basename(os.path.dirname(path))]
+            ):
+                with self.assertRaisesRegex(RuntimeError, "not on"):
+                    gen_aot_lib.main(["--artifacts-dir", art])
+            self.assertEqual(glob.glob(os.path.join(art, "*", "aot_*.cpp")), [])
+            self.assertFalse(
+                os.path.exists(os.path.join(art, gen_aot_lib.CMAKE_INCLUDE)),
+                "no native_aot.cmake: its presence marks a finished generation",
+            )
+
+    def test_the_old_cmake_is_invalidated_before_any_source_is_written(self):
+        # Sources are individually atomic but their paths are deterministic, and the
+        # previous file already names them, so a run that dies between two sources
+        # leaves a fresh source paired with the previous run's object list.
+        order = []
+        real = gen_aot_lib._write_atomic
+        # Annotated: pyrefly types an unannotated {} as Unknown, and indexing it gives
+        # `Unknown | None`, which assertIn's `container` parameter refuses.
+        state: dict[str, str] = {}
+
+        with tempfile.TemporaryDirectory() as art, tempfile.TemporaryDirectory() as ops:
+            self._tree(art, "fakeop", SIDECAR["prefix"])
+            os.makedirs(os.path.join(ops, "fakeop"))
+            open(os.path.join(ops, "fakeop", "aot.py"), "w").close()
+            stale = os.path.join(art, gen_aot_lib.CMAKE_INCLUDE)
+            with open(stale, "w") as f:
+                f.write("ARCH_LIST_ABSENT\nOBJECT=/gone/old.o\n")
+
+            def include_now():
+                if not os.path.exists(stale):
+                    return ""
+                with open(stale) as f:
+                    return f.read()
+
+            def spy(path, text):
+                name = os.path.basename(path)
+                order.append(name)
+                if name.startswith("aot_"):
+                    state.setdefault("cmake_then", include_now())
+                return real(path, text)
+
+            with (
+                _patched_generation(ops),
+                mock.patch.object(gen_aot_lib, "_write_atomic", spy),
+            ):
+                gen_aot_lib.main(["--artifacts-dir", art])
+        # The previous CONTENT goes, not the file: unlinking it drops CMake's configure
+        # dependency and leaves the next generation invisible to `cmake --build`.
+        self.assertNotIn("OBJECT=/gone/old.o", state["cmake_then"])
+        self.assertIn("Nothing to embed", state["cmake_then"])
+        # ...and the new one is written LAST, after every source.
+        self.assertEqual(order[-1], gen_aot_lib.CMAKE_INCLUDE)
+
+    def test_every_written_file_goes_through_the_atomic_writer(self):
+        # TestAtomicWrites exercises _write_atomic directly, which cannot see a call
+        # site that stopped using it. All three writers are checked here.
+        calls = []
+        real = gen_aot_lib._write_atomic
+
+        def spy(path, text):
+            calls.append(os.path.basename(path))
+            return real(path, text)
+
+        with tempfile.TemporaryDirectory() as art, tempfile.TemporaryDirectory() as ops:
+            self._tree(art, "fakeop", SIDECAR["prefix"])
+            os.makedirs(os.path.join(ops, "fakeop"))
+            open(os.path.join(ops, "fakeop", "aot.py"), "w").close()
+            with (
+                _patched_generation(ops),
+                mock.patch.object(gen_aot_lib, "_write_atomic", spy),
+            ):
+                gen_aot_lib.main(["--artifacts-dir", art])
+        self.assertIn(gen_aot_lib.CMAKE_INCLUDE, calls)
+        self.assertIn("native_aot_local.ver", calls)
+        # The generated source too: CMake only checks it exists, so a truncated one is
+        # compiled by the main build.
+        self.assertTrue(
+            any(c.startswith("aot_") and c.endswith(".cpp") for c in calls),
+            f"the generated source was not written atomically: {calls}",
+        )
+
+
 class TestSizeGateIsPerKindNotPerFile(unittest.TestCase):
     def test_one_narrowing_kind_among_several_emits_the_gate(self):
         # A mixed sidecar list is the only shape that tells `any` from `all` here, and
@@ -2236,6 +2670,69 @@ class TestExportMain(unittest.TestCase):
         seen = []
         self._main([], {"TORCH_CUDA_ARCH_LIST": ""}, seen)
         self.assertEqual(seen, [[None]])
+
+    def test_a_pending_export_invalidates_the_previous_generation(self):
+        # The EXPORT half of "invalidate the previous generation first": artifacts are
+        # direct link inputs in build.ninja, so an interrupted export plus a plain
+        # `cmake --build` relinks torch_cuda from two revisions' objects.
+        from tools.native_aot.gen_aot_lib import CMAKE_INCLUDE
+
+        with tempfile.TemporaryDirectory() as out:
+            stale = os.path.join(out, CMAKE_INCLUDE)
+            with open(stale, "w") as f:
+                f.write("# the previous generation\n")
+            job = (
+                "fakeop",
+                "aot",
+                {"N": 1},
+                os.path.join(out, "sm_100a", "fakeop"),
+                "sm_100a",
+            )
+            with (
+                mock.patch.object(
+                    export, "_collect_jobs", lambda ops, root, archs: [job]
+                ),
+                mock.patch.object(export, "_job_needed", lambda j, force: True),
+                mock.patch.object(export, "_run_job", lambda j: "k__sm100a"),
+                mock.patch.dict(
+                    os.environ, {"TORCH_CUDA_ARCH_LIST": "10.0a"}, clear=False
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                export.main(["--out-dir", out])
+            # OVERWRITTEN, not removed: a deleted include is not registered as a
+            # configure dependency, so the next generation would be invisible to
+            # `cmake --build`. The empty variant keeps the dependency alive.
+            self.assertTrue(os.path.exists(stale), "the include must survive")
+            with open(stale) as f:
+                self.assertEqual(f.read(), gen_aot_lib.NOTHING_TO_EMBED)
+
+    def test_a_refusal_invalidates_the_generation_it_tells_you_to_break(self):
+        # Every refusal in _collect_jobs advises `rm -rf <arch tree>`, which the previous
+        # generation names every object of, so the next build must not die on a missing
+        # source inside a @generated file that names no remedy.
+        from tools.native_aot.gen_aot_lib import CMAKE_INCLUDE
+
+        with tempfile.TemporaryDirectory() as out:
+            stale = os.path.join(out, CMAKE_INCLUDE)
+            with open(stale, "w") as f:
+                f.write("# names objects in the tree the user is about to delete\n")
+
+            def refuse(ops, root, archs):
+                raise RuntimeError("kernel artifacts with no sidecar; run `rm -rf ...`")
+
+            with (
+                mock.patch.object(export, "_collect_jobs", refuse),
+                mock.patch.dict(
+                    os.environ, {"TORCH_CUDA_ARCH_LIST": "10.0a"}, clear=False
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+                self.assertRaisesRegex(RuntimeError, "no sidecar"),
+            ):
+                export.main(["--out-dir", out])
+            self.assertTrue(os.path.exists(stale), "the include must survive")
+            with open(stale) as f:
+                self.assertEqual(f.read(), gen_aot_lib.NOTHING_TO_EMBED)
 
     def test_an_arch_list_with_no_exportable_arch_exports_nothing(self):
         # Not an error: a CUDA build for Ampere alone simply has no AOT kernels.
@@ -2466,6 +2963,218 @@ class TestOrphanCheckIsCalled(unittest.TestCase):
         self.assertTrue(jobs, "the export still runs; the orphan is only disk")
 
 
+class TestEmittedCMake(unittest.TestCase):
+    """caffe2/CMakeLists.txt is one include() and holds no logic, so every decision is
+    emitted here. These assert the emitted CALLS, which is what CMake consumes."""
+
+    def _emit(self, tmpdir, dsl=None, arch_list="10.0a", sources=None, objects=None):
+        src = os.path.join(tmpdir, "aot_fakeop_cuda.cpp")
+        with open(src, "w") as f:
+            f.write("// generated\n")
+        obj = os.path.join(tmpdir, "k.o")
+        with open(obj, "w") as f:
+            f.write("")
+        ver = os.path.join(tmpdir, "native_aot_local.ver")
+        with open(ver, "w") as f:
+            f.write("{ local: *; };\n")
+        path = gen_aot_lib.write_cmake_include(
+            tmpdir,
+            [src] if sources is None else sources,
+            [obj] if objects is None else objects,
+            ver,
+            dsl,
+            arch_list,
+        )
+        with open(path) as f:
+            return f.read()
+
+    def test_the_blocks_are_separated_by_one_blank_line(self):
+        # The layout lives in the join, not the templates: gluing the blocks together
+        # still emits valid CMake, so nothing else here would notice.
+        with tempfile.TemporaryDirectory() as d:
+            emitted = self._emit(d, dsl=os.path.join(d, "libdsl.a"))
+        for boundary in (
+            "endif()\n\n# Linux only",
+            "endif()\n\n# Re-run configure",
+            'generated source(s)")\n\nset_source_files_properties(',
+            "EXTERNAL_OBJECT TRUE)\n\ntarget_sources(",
+            ")\n\n# whole-archive is NOT needed",
+        ):
+            with self.subTest(boundary=boundary.splitlines()[-1]):
+                self.assertIn(boundary, emitted)
+        self.assertNotIn("\n\n\n", emitted)
+
+    def test_a_non_linux_configure_embeds_nothing(self):
+        # The embed is GNU-linker specific, so the file bails once, up front: guarding
+        # only the linker blocks would leave target_sources embedding objects a
+        # non-Linux link neither version-scripts nor exclude-libs.
+        with tempfile.TemporaryDirectory() as d:
+            emitted = self._emit(d, dsl=os.path.join(d, "libdsl.a"))
+        before, guard, after = emitted.partition("if(NOT UNIX OR APPLE)")
+        self.assertTrue(guard, "no platform guard emitted")
+        # The CALL, not the word: the comment above the guard names it too.
+        self.assertNotIn("target_sources(torch_cuda", before)
+        self.assertIn("return()", after.split("endif()")[0])
+        # ONE exit: no block below re-tests the platform.
+        self.assertNotIn("APPLE", after)
+
+    def test_the_linker_options_are_emitted_de_duplication_safe(self):
+        # Three hazards: the compiler driver splits -Wl, (what LINKER: expands to) on
+        # COMMAS; target_link_options de-duplicates bare -Xlinker tokens, which stops
+        # torch_cuda linking at all; and SHELL: splits its own value on SPACES, so the
+        # path must be quoted inside it.
+        with tempfile.TemporaryDirectory() as d:
+            emitted = self._emit(d, dsl=os.path.join(d, "libdsl.a"))
+        self.assertNotIn('"LINKER:', emitted)
+        self.assertNotIn('"-Xlinker" "--', emitted)
+        for opt in ("--version-script", "--exclude-libs"):
+            with self.subTest(option=opt):
+                self.assertIn(f'"SHELL:-Xlinker {opt} -Xlinker \\"', emitted)
+
+    def test_paths_are_absolute_and_quoted(self):
+        # CMake resolves a relative path against a different directory than the
+        # generator, and an unquoted one breaks on the first space.
+        with tempfile.TemporaryDirectory() as d:
+            rel = os.path.relpath(d)
+            emitted = self._emit(rel)
+        for line in emitted.splitlines():
+            if line.strip().startswith('"') and line.strip().endswith('"'):
+                self.assertTrue(
+                    line.strip()[1:].startswith("/"), f"not absolute: {line!r}"
+                )
+
+    def test_the_install_rpath_property_is_set_on_the_target(self):
+        # Stage 2's hand copy over site-packages matches what install writes only
+        # because of this property, Dependencies.cmake setting
+        # CMAKE_BUILD_WITH_INSTALL_RPATH FALSE globally. Without it the shipped library
+        # carries the builder's build-tree RUNPATH.
+        with tempfile.TemporaryDirectory() as d:
+            emitted = self._emit(d)
+        prop = "BUILD_WITH_INSTALL_RPATH TRUE"
+        self.assertIn(f"set_target_properties(torch_cuda PROPERTIES {prop})", emitted)
+
+    def test_the_status_line_stage_two_greps_for_is_emitted(self):
+        # A contract across two files: stage 2 refuses to relink unless the reconfigure
+        # echoes this, so a reworded message fails every stage-2 build with a
+        # diagnostic blaming the CMake cache. Asserted on the side that emits it.
+        with tempfile.TemporaryDirectory() as d:
+            emitted = self._emit(d)
+        self.assertIn(f'message(STATUS "{gen_aot_lib.EMBED_STATUS} ', emitted)
+
+    def test_a_semicolon_in_a_path_is_refused(self):
+        # Escaping it as \; yields a literal semicolon, but CMake re-splits source
+        # lists on it downstream, so the build asks for the prefix before it. Refused
+        # here rather than emitted as a file that configures and cannot build.
+        with tempfile.TemporaryDirectory() as d:
+            odd = os.path.join(d, "semi;colon")
+            os.makedirs(odd)
+            with self.assertRaisesRegex(RuntimeError, "splits source lists"):
+                self._emit(odd)
+
+    def test_spaces_and_dollars_survive_escaped(self):
+        # Assert the emitted PATH, with the escaping spelled out here rather than taken
+        # from _cmake_str: the prose in the emitted file contains `\$` and `\"` of its
+        # own, so a "is there a backslash-dollar anywhere" assertion would pass with the
+        # escaper deleted.
+        with tempfile.TemporaryDirectory() as d:
+            cases = (
+                ("has space", "has space"),
+                ("has$dollar", "has\\$dollar"),
+                # ${...} and $ENV{...}, not just a bare $: the linker options quote
+                # their path by hand, and unescaped there CMake expands the reference
+                # away -- configure passes, the source compiles, and the link fails on
+                # a version script that never existed. A bare $ survives raw, so only
+                # these spellings exercise the escaping.
+                ("has${brace}x", "has\\${brace}x"),
+                ("has$ENV{HOME}x", "has\\$ENV{HOME}x"),
+            )
+            for name, want in cases:
+                with self.subTest(path=name):
+                    odd = os.path.join(d, name)
+                    os.makedirs(odd, exist_ok=True)
+                    emitted = self._emit(odd)
+                    self.assertIn(f"{d}/{want}/aot_fakeop_cuda.cpp", emitted)
+                    # The version-script option, which is the half that was raw.
+                    ver = f'\\"{d}/{want}/native_aot_local.ver\\"'
+                    self.assertIn(f"-Xlinker {ver}", emitted)
+
+    def test_a_quote_or_backslash_in_a_path_is_refused(self):
+        # Not escapable: the version script reaches the linker inside a SHELL:
+        # argument, meeting a second level of quoting, and cmake then fails to parse
+        # the emitted include -- a syntax error pointing at caffe2/CMakeLists.txt.
+        for name in ('has"quote', "has\\back"):
+            with self.subTest(path=name), tempfile.TemporaryDirectory() as d:
+                odd = os.path.join(d, name)
+                os.makedirs(odd)
+                with self.assertRaisesRegex(RuntimeError, "cannot embed"):
+                    self._emit(odd)
+
+    def test_the_opt_out_is_emitted_not_left_to_cmake(self):
+        # Only CMake runs at configure time and a previous run's file can be on
+        # disk, so the check has to exist -- but it is generated, which is what
+        # keeps caffe2/CMakeLists.txt free of it. CMake truthiness, so OFF/false/no
+        # work like 0, matching build_stage2._OPT_OUT_VALUES.
+        with tempfile.TemporaryDirectory() as d:
+            emitted = self._emit(d)
+        # The BLOCK, in order. Three independent substrings would pass with either arm
+        # inverted (embedding when the user opted out), with either return() deleted,
+        # or with the cache read unconditionally.
+        self.assertIn(
+            'if(DEFINED ENV{TORCH_NATIVE_AOT} AND NOT "$ENV{TORCH_NATIVE_AOT}" '
+            'STREQUAL "")\n'
+            '  if(NOT "$ENV{TORCH_NATIVE_AOT}")\n'
+            '    message(STATUS "native-AOT: '
+            'TORCH_NATIVE_AOT=$ENV{TORCH_NATIVE_AOT}, not embedding kernels")\n'
+            "    return()\n"
+            "  endif()\n"
+            'elseif(DEFINED TORCH_NATIVE_AOT AND NOT "${TORCH_NATIVE_AOT}")\n'
+            '  message(STATUS "native-AOT: TORCH_NATIVE_AOT=${TORCH_NATIVE_AOT}, '
+            'not embedding kernels")\n'
+            "  return()\n"
+            "endif()\n",
+            emitted,
+        )
+
+    def test_invalidation_keeps_the_include_so_a_later_generation_is_seen(self):
+        # CMake keeps a configure dependency on an include()d file only if it
+        # existed at configure time, so DELETING it made the next generation
+        # invisible to `cmake --build`: it relinked without the kernels, reported
+        # success, and stayed that way however often the tree was regenerated.
+        # Overwriting reads the same to the build and keeps the dependency.
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, gen_aot_lib.CMAKE_INCLUDE)
+            with open(path, "w") as f:
+                f.write("target_sources(torch_cuda PRIVATE /x/aot_op_cuda.cpp)\n")
+            with contextlib.redirect_stdout(io.StringIO()) as said:
+                export._invalidate_generation(d)
+            self.assertTrue(os.path.exists(path), "the include must survive")
+            with open(path) as f:
+                text = f.read()
+        self.assertEqual(text, gen_aot_lib.NOTHING_TO_EMBED)
+        self.assertIn("invalidated", said.getvalue())
+
+    def test_no_prefixes_writes_no_version_script(self):
+        # An empty `local:` block is a syntax error to ld, and the path is one an
+        # already-configured build.ninja still names through LINK_DEPENDS, so a
+        # relink without a reconfigure would fail on a @generated file.
+        with tempfile.TemporaryDirectory() as d:
+            stale = os.path.join(d, gen_aot_lib.VERSION_SCRIPT)
+            with open(stale, "w") as f:
+                f.write("{\n  local:\n    old_*;\n};\n")
+            path = gen_aot_lib.write_version_script(d, [])
+            self.assertEqual(path, stale)
+            self.assertFalse(os.path.exists(stale), "a stale script must go too")
+
+    def test_nothing_is_emitted_when_there_are_no_sources(self):
+        # No generated source means no launcher references the objects, so there is
+        # nothing to embed -- and the file must not name them, or CMake would link
+        # objects nothing calls.
+        with tempfile.TemporaryDirectory() as d:
+            emitted = self._emit(d, sources=[])
+        self.assertNotIn("target_sources", emitted)
+        self.assertIn("Nothing to embed", emitted)
+
+
 class TestParamListSplitting(unittest.TestCase):
     """Both the size gate and the covers device read pick parameters out of a
     rendered C++ signature, so the split has to survive a template argument
@@ -2501,6 +3210,242 @@ class TestParamListSplitting(unittest.TestCase):
         self.assertIn("self.sizes().begin()", gate)
         self.assertIn("out.has_value()", gate)
         self.assertNotIn("mask", gate)
+
+
+class TestArchScopedGeneration(unittest.TestCase):
+    """Nothing prunes arch trees, so an incremental build whose TORCH_CUDA_ARCH_LIST
+    changed still holds the tree for the dropped arch. It must be neither generated
+    from nor linked, and must not fail the build."""
+
+    def _tree(self, tmpdir, arch, prefix, stale_sources=False):
+        d = os.path.join(tmpdir, arch, "fakeop")
+        os.makedirs(d)
+        _touch_artifacts(d, prefix)
+        rel = _DECL_REL
+        digest = (
+            "0" * 16
+            if stale_sources
+            else export._file_hash(os.path.join(export.REPO, rel))
+        )
+        with open(os.path.join(d, prefix + ".json"), "w") as f:
+            json.dump(
+                dict(
+                    SIDECAR,
+                    version=export.SIDECAR_VERSION,
+                    prefix=prefix,
+                    arch=arch,
+                    spec={"N": 1024, "K": 8},
+                    sources={rel: digest},
+                    runtimes=_RUNTIMES,
+                ),
+                f,
+            )
+        return d
+
+    def _generate(self, tmpdir, argv):
+        # The ops dir must not live under the artifacts dir: discovery reads every
+        # top-level directory there as an arch tree.
+        with tempfile.TemporaryDirectory() as ops:
+            os.makedirs(os.path.join(ops, "fakeop"), exist_ok=True)
+            open(os.path.join(ops, "fakeop", "aot.py"), "w").close()
+            with _patched_generation(ops):
+                gen_aot_lib.main(["--artifacts-dir", tmpdir, *argv])
+
+    def test_a_declaration_with_cpp_covers_emits_the_predicate(self):
+        # main()'s covers assembly: every other covers test calls gen_op directly, and
+        # losing it falls back to a covered_axes that carries neither gate.
+        class _CoversDecl(_FakeDecl):
+            @staticmethod
+            def cpp_covers():
+                return "return self.scalar_type() == at::kFloat && k == 8;"
+
+        signature = (
+            "const at::Tensor & self, int64_t k",
+            "covers_fakeop(Tensor self, int k) -> bool",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._tree(tmpdir, "sm_100a", "fakeop_p__sm100a")
+            with (
+                tempfile.TemporaryDirectory() as ops,
+                mock.patch.object(
+                    gen_aot_lib, "covers_signature", lambda op: signature
+                ),
+            ):
+                os.makedirs(os.path.join(ops, "fakeop"))
+                open(os.path.join(ops, "fakeop", "aot.py"), "w").close()
+                with _patched_generation(ops, declarations=(_CoversDecl,)):
+                    gen_aot_lib.main(["--artifacts-dir", tmpdir])
+            with open(os.path.join(tmpdir, "fakeop", "aot_fakeop_cuda.cpp")) as f:
+                src = f.read()
+        self.assertIn("bool fakeop_cuda_covers(", src)
+        self.assertIn('m.def("covers_fakeop(Tensor self, int k) -> bool"', src)
+
+    def test_the_dsl_runtime_reaches_the_emitted_cmake(self):
+        # Through main(), not write_cmake_include directly, so both hops are pinned.
+        # Nothing links torch_cuda with --no-undefined, so dropping the archive links
+        # green and the first AOT call fails on an undefined symbol.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._tree(tmpdir, "sm_100a", "fakeop_p__sm100a")
+            archive = os.path.join(tmpdir, "libcuda_dialect_runtime_static.a")
+            open(archive, "w").close()
+            self._generate(tmpdir, ["--dsl-runtime", archive])
+            with open(os.path.join(tmpdir, gen_aot_lib.CMAKE_INCLUDE)) as f:
+                emitted = f.read()
+        self.assertIn(f'target_link_libraries(torch_cuda PRIVATE "{archive}")', emitted)
+        self.assertIn("--exclude-libs", emitted)
+
+    def test_tree_outside_the_arch_list_is_ignored_not_generated(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._tree(tmpdir, "sm_100a", "fakeop_p__sm100a")
+            self._tree(tmpdir, "sm_90a", "fakeop_p__sm90a")
+            self._generate(tmpdir, ["--archs", "sm_100a"])
+            with open(os.path.join(tmpdir, "fakeop", "aot_fakeop_cuda.cpp")) as f:
+                src = f.read()
+            self.assertIn("launch_fakeop_p__sm100a", src)
+            self.assertNotIn("sm90a", src)
+            # ...and its objects are not in the link set either.
+            listed = " ".join(_manifest(tmpdir)["objects"])
+            self.assertIn("sm_100a", listed)
+            self.assertNotIn("sm_90a", listed)
+
+    def test_object_list_excludes_the_tie_break_loser(self):
+        # Every consumer must use the same surviving set, or the object list carries
+        # the dropped arch's objects with no launcher referencing them.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._tree(tmpdir, "sm_100a", "fakeop_p__sm100a")
+            self._tree(tmpdir, "sm_100", "fakeop_p__sm100")
+            self._generate(tmpdir, [])
+            with open(os.path.join(tmpdir, "fakeop", "aot_fakeop_cuda.cpp")) as f:
+                src = f.read()
+            listed = _manifest(tmpdir)["objects"]
+            # One launcher, one object, and they are the same kernel.
+            self.assertEqual(len(listed), 1, listed)
+            self.assertIn("/sm_100a/", listed[0])
+            self.assertIn("launch_fakeop_p__sm100a", src)
+            for obj in listed:
+                prefix = os.path.basename(obj)[: -len(".o")]
+                self.assertIn(f"void launch_{prefix}(", src)
+
+    def test_generated_source_is_deleted_when_the_sidecars_are_gone(self):
+        # The tree exists but holds no sidecar -- a partial `rm`. Skipping leaves a
+        # source referencing entry points whose object nothing listed.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tree = self._tree(tmpdir, "sm_100a", "fakeop_p__sm100a")
+            self._generate(tmpdir, [])
+            out = os.path.join(tmpdir, "fakeop", "aot_fakeop_cuda.cpp")
+            self.assertTrue(os.path.exists(out))
+            for f in os.listdir(tree):
+                if f.endswith(".json"):
+                    os.remove(os.path.join(tree, f))
+            self._generate(tmpdir, [])
+            self.assertFalse(os.path.exists(out), "stale source survived")
+            self.assertEqual(_manifest(tmpdir)["sources"], [])
+
+    def test_emitted_paths_are_absolute_from_a_relative_artifacts_dir(self):
+        # The documented usage is `--artifacts-dir build/native_aot`, and CMake
+        # resolves a relative path against a different directory than the generator.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._tree(tmpdir, "sm_100a", "fakeop_p__sm100a")
+            rel = os.path.relpath(tmpdir, os.getcwd())
+            self._generate(rel, [])
+            man = _manifest(tmpdir)
+            self.assertTrue(man["sources"] and man["objects"])
+            for p in man["sources"] + man["objects"]:
+                self.assertTrue(os.path.isabs(p), f"{p} is not absolute")
+
+    def test_stale_tree_outside_the_arch_list_does_not_fail_the_build(self):
+        # The trap: the ignored tree is ALSO stale, so judging its staleness would stop
+        # the build to demand a re-export of an arch this build dropped.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._tree(tmpdir, "sm_100a", "fakeop_p__sm100a")
+            self._tree(tmpdir, "sm_90a", "fakeop_p__sm90a", stale_sources=True)
+            self._generate(tmpdir, ["--archs", "sm_100a"])
+            self.assertTrue(
+                os.path.exists(os.path.join(tmpdir, "fakeop", "aot_fakeop_cuda.cpp"))
+            )
+
+    def test_generated_source_is_deleted_when_no_artifacts_remain(self):
+        # Deleting an arch tree by hand left the .cpp behind, and the link glob
+        # then compiled a file whose #include "../<arch>/..." no longer resolves.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tree = self._tree(tmpdir, "sm_100a", "fakeop_p__sm100a")
+            self._generate(tmpdir, [])
+            out = os.path.join(tmpdir, "fakeop", "aot_fakeop_cuda.cpp")
+            self.assertTrue(os.path.exists(out))
+            import shutil
+
+            shutil.rmtree(os.path.dirname(tree))
+            self._generate(tmpdir, [])
+            self.assertFalse(os.path.exists(out))
+
+
+class TestSidecarFieldValidation(unittest.TestCase):
+    """Generation reads these fields straight into emitted C++, so a value it
+    cannot use must fail here rather than as a compiler error in a @generated
+    file, or as a wrongly-read field."""
+
+    def _run(self, tmpdir, sc, extra_argv=()):
+        d = os.path.join(tmpdir, "sm_100a", "fakeop")
+        os.makedirs(d)
+        for e in (".o", ".h"):
+            open(os.path.join(d, "k__sm100a" + e), "w").close()
+        with open(os.path.join(d, "k__sm100a.json"), "w") as f:
+            json.dump(sc, f)
+        opsdir = os.path.join(tmpdir, "_ops")
+        os.makedirs(os.path.join(opsdir, "fakeop"))
+        open(os.path.join(opsdir, "fakeop", "aot.py"), "w").close()
+        with _patched_generation(opsdir):
+            gen_aot_lib.main(["--artifacts-dir", tmpdir, *extra_argv])
+
+    def _sc(self, **over):
+        # N and K: _FakeDecl.cpp_dispatch reads both grid axes, so a case that
+        # gets PAST the refusals can still generate.
+        sc = {
+            "version": export.SIDECAR_VERSION,
+            "prefix": "k__sm100a",
+            "kind": "cutedsl",
+            "arch": "sm_100a",
+            "spec": {"N": 1, "K": 8},
+            "tensor_args": [],
+        }
+        sc.update(over)
+        return sc
+
+    def test_prefix_must_be_a_c_identifier(self):
+        # The prefix names extern "C" entry points, so the pattern is spelled out rather
+        # than \w, which is Unicode-aware and accepts "h\u00e9llo".
+        for prefix in ("k-sm100a", "h\u00e9llo__sm100a", "1k__sm100a"):
+            with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as tmpdir:
+                with self.assertRaisesRegex(RuntimeError, "not a C identifier"):
+                    self._run(tmpdir, self._sc(prefix=prefix))
+
+    def test_schema_version_mismatch_is_not_waivable(self):
+        # --allow-stale exists for artifacts whose SOURCES drifted, which still describe
+        # themselves readably; a schema bump may not, so forcing past it misreads.
+        for argv in ((), ("--allow-stale",)):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sc = self._sc(version=export.SIDECAR_VERSION + 1)
+                with self.assertRaisesRegex(RuntimeError, "sidecar schema version"):
+                    self._run(tmpdir, sc, argv)
+
+    def test_allow_stale_generates_anyway(self):
+        # The permissive half of the flag: the sibling test only proves a schema bump
+        # ignores it, not that the escape hatch works.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sc = self._sc(sources={"tools/native_aot/decl.py": "0" * 16})
+            self._run(tmpdir, sc, ("--allow-stale",))
+            self.assertTrue(
+                glob.glob(os.path.join(tmpdir, "*", "aot_*.cpp")),
+                "--allow-stale must still generate",
+            )
+
+    def test_stale_error_names_the_arches_and_a_command_that_fixes_them(self):
+        # A bare `export.py` re-run maintains only the arch it resolves for, so the
+        # message has to name the arches and the --arch invocation.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sc = self._sc(sources={"tools/native_aot/decl.py": "0" * 16})
+            with self.assertRaisesRegex(RuntimeError, r"--arch sm_100a"):
+                self._run(tmpdir, sc)
 
 
 class TestSizeGateIsPerToolchain(unittest.TestCase):
@@ -2605,6 +3550,182 @@ class TestSelectiveIncludes(unittest.TestCase):
         ):
             with self.subTest(header=h):
                 self.assertIn(f"#include {h}", src)
+
+
+class TestOrphanArtifactSafety(unittest.TestCase):
+    """Generation must never destroy exported kernels: a .cpp costs nothing to
+    regenerate, a .o costs a full export."""
+
+    def _art(self, tmpdir, arches=("sm_100a", "sm_90a")):
+        """The one layout: kernels at <root>/<arch>/<decl_id>/, and the
+        generated source that covers every arch at <root>/<decl_id>/.
+        Returns the FIRST arch dir and the source dir, since orphan handling
+        touches each differently -- the .cpp is regenerable and gets deleted, the
+        kernels never do.
+
+        TWO arch dirs, each holding a differently-named artifact: with one, a
+        report that names art_dirs[0] while listing basenames gathered from every
+        tree reads exactly like one that names each directory."""
+        op = os.path.join(tmpdir, arches[0], "fakeop")
+        for arch in arches:
+            d = os.path.join(tmpdir, arch, "fakeop")
+            os.makedirs(d)
+            for ext in (".o", ".h", ".json"):
+                with open(os.path.join(d, f"k_{arch}{ext}"), "w") as f:
+                    f.write("x")
+        src = os.path.join(tmpdir, "fakeop")
+        os.makedirs(src)
+        with open(os.path.join(src, "aot_fakeop_cuda.cpp"), "w") as f:
+            f.write("x")
+        return op, src
+
+    def test_a_sidecar_without_a_kind_is_refused(self):
+        # The stale check reads the kind first, so a sidecar naming none would be judged
+        # by another toolchain's compiler versions. Written by hand.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            art = os.path.join(tmpdir, "sm_100a", "fakeop")
+            os.makedirs(art)
+            _touch_artifacts(art, "k__sm100a")
+            with open(os.path.join(art, "k__sm100a.json"), "w") as f:
+                json.dump(
+                    {
+                        "version": export.SIDECAR_VERSION,
+                        "prefix": "k__sm100a",
+                        "arch": "sm_100a",
+                    },
+                    f,
+                )
+            opsdir = os.path.join(tmpdir, "_ops")
+            os.makedirs(os.path.join(opsdir, "fakeop"))
+            open(os.path.join(opsdir, "fakeop", "aot.py"), "w").close()
+            with (
+                mock.patch.object(gen_aot_lib, "OPS_DIR", opsdir),
+                mock.patch.object(
+                    gen_aot_lib.decl, "load_declarations", return_value=[_FakeDecl]
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "names no kind"):
+                    gen_aot_lib.main(["--artifacts-dir", tmpdir])
+
+    def test_same_prefix_from_two_arch_dirs_is_fatal(self):
+        # Prefixes carry their arch, so this needs a copied tree (rsynced artifacts, a
+        # hand-made sm_100a.bak). Caught here, not as a redefinition at link time.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for rel in (
+                os.path.join("sm_100a", "fakeop"),
+                os.path.join("sm_100a_copy", "fakeop"),
+            ):
+                d = os.path.join(tmpdir, rel)
+                os.makedirs(d)
+                for fn in ("k__sm100a.o", "k__sm100a.h"):
+                    with open(os.path.join(d, fn), "w") as f:
+                        f.write("x")
+                with open(os.path.join(d, "k__sm100a.json"), "w") as f:
+                    json.dump(
+                        {
+                            "version": export.SIDECAR_VERSION,
+                            "prefix": "k__sm100a",
+                            "arch": "sm_100a",
+                            "kind": "cutedsl",
+                        },
+                        f,
+                    )
+            # The duplicate check runs after a declaration is matched, so fakeop must
+            # be declared. gen_aot_lib imports export inside main(), so patch that.
+            opsdir = os.path.join(tmpdir, "_ops")
+            os.makedirs(os.path.join(opsdir, "fakeop"))
+            open(os.path.join(opsdir, "fakeop", "aot.py"), "w").close()
+            with (
+                mock.patch.object(gen_aot_lib, "OPS_DIR", opsdir),
+                mock.patch.object(
+                    gen_aot_lib.decl, "load_declarations", return_value=[_FakeDecl]
+                ),
+                mock.patch.object(export, "sources_current", return_value=True),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "present in both"):
+                    gen_aot_lib.main(["--artifacts-dir", tmpdir])
+
+    def test_archs_cannot_be_given_no_values(self):
+        # Stage 2 composes `--archs *archs`, so an empty list yields a bare flag and
+        # nargs="*" assigns [], which would pass every tree through the filter.
+        with tempfile.TemporaryDirectory() as d:
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    gen_aot_lib.main(["--artifacts-dir", d, "--archs"])
+
+    def test_no_declarations_at_all_leaves_the_artifacts_alone(self):
+        # A commit earlier in the stack (or a bisect) declares nothing; that
+        # is not the same as every artifact being orphaned.
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            tempfile.TemporaryDirectory() as opsdir,
+        ):
+            op, src = self._art(tmpdir)
+            # An EMPTY ops dir: "declares nothing" must not depend on which
+            # commit of the stack is checked out.
+            with (
+                mock.patch.object(gen_aot_lib, "OPS_DIR", opsdir),
+                contextlib.redirect_stdout(io.StringIO()) as printed,
+            ):
+                gen_aot_lib.main(["--artifacts-dir", tmpdir])
+            left = sorted(os.listdir(op))
+            src_left = sorted(os.listdir(src))
+            said = printed.getvalue()
+        # The ARTIFACTS are what must survive a bisect -- they cost a full export.
+        self.assertIn("k_sm_100a.o", left)
+        self.assertIn("k_sm_100a.h", left)
+        # The generated source must not survive: this run emitted a "nothing to embed"
+        # include, so a leftover .cpp has stage 2 report kernels and fail the build.
+        self.assertNotIn("aot_fakeop_cuda.cpp", src_left)
+        # ...and nothing is REPORTED as undeclared: these artifacts predate the
+        # declarations rather than being orphaned by them.
+        self.assertNotIn("with no declaration", said)
+
+    def test_orphan_with_other_declarations_is_reported_and_keeps_artifacts(self):
+        # With declarations present an unclaimed dir is a real orphan: drop the generated
+        # .cpp, keep the objects, and report. Not fatal, since the emitted CMake names
+        # exact paths so an unnamed artifact cannot be linked anyway.
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            tempfile.TemporaryDirectory() as opsdir,
+        ):
+            op, src = self._art(tmpdir)
+            # by_id is built by walking OPS_DIR, so declare something there.
+            os.makedirs(os.path.join(opsdir, "otherop"))
+            open(os.path.join(opsdir, "otherop", "aot.py"), "w").close()
+            with (
+                mock.patch.object(gen_aot_lib, "OPS_DIR", opsdir),
+                mock.patch.object(
+                    gen_aot_lib.decl, "load_declarations", return_value=[_OtherDecl]
+                ),
+            ):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    gen_aot_lib.main(["--artifacts-dir", tmpdir])
+            # Names the directory the files are actually IN, or a multi-arch orphan
+            # points at files that are not in the directory named.
+            said = out.getvalue()
+            self.assertIn("no declaration", said)
+            # EVERY arch dir named alongside ITS OWN artifacts, so "delete this
+            # directory" does not leave the other trees behind.
+            for arch in ("sm_100a", "sm_90a"):
+                one = os.path.join(tmpdir, arch, "fakeop")
+                line = next(l for l in said.splitlines() if l.startswith(one))
+                self.assertIn(f"k_{arch}.o", line)
+                other = "sm_90a" if arch == "sm_100a" else "sm_100a"
+                self.assertNotIn(f"k_{other}.o", line)
+            left = sorted(os.listdir(op))
+            src_left = sorted(os.listdir(src))
+        self.assertIn("k_sm_100a.o", left)
+        # The regenerable source is dropped from <root>/<decl_id>/, so nothing compiles
+        # it against a stub that no longer exists.
+        self.assertNotIn("aot_fakeop_cuda.cpp", src_left)
+
+
+class _OtherDecl(_FakeDecl):
+    """A declaration whose decl_id does not match the artifact dir above."""
+
+    ATEN_OP = "otherop"
 
 
 class TestMissingArtifacts(unittest.TestCase):
