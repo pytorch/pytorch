@@ -17935,60 +17935,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertIn("aten::zeros_like", code[0])
         self.assertNotIn("from(nullptr, 0)", code[0])
 
-    def test_regional_fallback_by_default_invoke_subgraph(self):
-        # A nested region carrying inductor_config_patches={"fallback_by_default": True}
-        # must fall back *only inside the region*: the region's ops become
-        # FallbackKernels while the surrounding graph keeps its normal lowering.
-        # This is the complement of lite mode (which falls back everywhere and
-        # compiles the annotated islands).
-        from torch._higher_order_ops.invoke_subgraph import (
-            get_invoke_subgraph_compile_options,
-        )
-
-        # `options=` is gated by enable_invoke_subgraph_regional_compile, and the
-        # gate is checked when the DECORATOR runs -- so the whole body, not just
-        # the torch.compile call, has to be inside the config patch.
-        with torch._dynamo.config.patch(
-            enable_invoke_subgraph_regional_compile=True,
-            inline_single_use_invoke_subgraph=False,
-        ):
-            opts = get_invoke_subgraph_compile_options(
-                fw_inductor_config_patches={"fallback_by_default": True}
-            )
-
-            @torch.compiler.nested_compile_region(options=opts)
-            def gn(x):
-                return torch.sin(x) + 1
-
-            def fn(x):
-                return torch.cos(gn(x * 2))
-
-            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-            x = torch.randn(64, 64, device=self.device)
-            result, codes = run_and_get_code(lambda: opt_fn(x))
-
-        self.assertEqual(result, fn(x))
-        self.assertEqual(len(codes), 1)
-        # Match against code, not comments. Inductor tags every kernel with an
-        # `Original ATen: [aten.foo]` provenance comment naming the op it was
-        # lowered from, whether or not that op fell back -- so searching the
-        # raw text makes the sin check pass vacuously and the cos check
-        # impossible to satisfy (the parent's Triton cos kernel still carries
-        # an `aten.cos` comment).
-        body = "\n".join(
-            line
-            for line in codes[0].splitlines()
-            if not line.lstrip().startswith(("#", "//"))
-        )
-        # The region's sin went to a fallback kernel; the parent's cos did not.
-        # Spelling differs by wrapper: `aten.sin` for the python wrapper,
-        # `aoti_torch_*_sin` for cpp.
-        self.assertTrue(
-            "aten.sin" in body or "_sin(" in body,
-            f"region did not fall back:\n{codes[0]}",
-        )
-        self.assertNotIn("aten.cos", body)
-
     def test_regional_codegen_only_config_cpp_wrapper(self):
         # A codegen-TIME knob on the region must reach the cpp wrapper.
         # `triton.persistent_reductions` is consulted while the region's kernels

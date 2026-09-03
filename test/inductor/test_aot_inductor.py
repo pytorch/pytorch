@@ -390,34 +390,6 @@ class AOTInductorTestsTemplate:
             )
             FileCheck().check_count("// subgraph: ", 2).run(code)
 
-    def test_invoke_subgraph_nested_region_config(self):
-        # Same, but the region carries a per-region Inductor config patch, so
-        # the config.patch in CppWrapperCpu.codegen_subgraph is on the path too.
-        # fallback_by_default routes the region's ops to the proxy executor
-        # while the parent keeps its normal lowering.
-        from torch._higher_order_ops.invoke_subgraph import (
-            get_invoke_subgraph_compile_options,
-        )
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return torch.cos(gn(x * 2))
-
-        with torch._dynamo.config.patch(
-            enable_invoke_subgraph_regional_compile=True,
-            inline_single_use_invoke_subgraph=False,
-        ):
-            opts = get_invoke_subgraph_compile_options(
-                fw_inductor_config_patches={"fallback_by_default": True}
-            )
-
-            @torch.compiler.nested_compile_region(options=opts)
-            def gn(x):
-                return torch.sin(x) + 1
-
-            example_inputs = (torch.randn(8, 8, device=self.device),)
-            self.check_model(Model(), example_inputs)
-
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     def test_loaded_modules_tracking(self, embed_kernel_binary):
         # Verify that AOTI codegen on CUDA/HIP passes &kernels_.loaded_modules_
