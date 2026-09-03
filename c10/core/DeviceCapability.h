@@ -19,7 +19,7 @@ enum ScalarTypeIndex {
 };
 
 /**
- * @brief DeviceCapability represents the the common capabilities that all
+ * @brief DeviceCapability represents the common capabilities that all
  * devices should support.
  *
  * This struct provides a compact way to represent the common capabilities that
