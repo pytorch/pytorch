@@ -1,10 +1,13 @@
 # Owner(s): ["module: dynamo"]
 
+import copy
 import gc
 import importlib
 import os
+import pickle
 import sys
 import tempfile
+import threading
 import unittest
 
 import torch
@@ -14,7 +17,13 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
+from torch._dynamo.package import (
+    CompilePackage,
+    DiskDynamoStore,
+    DynamoCache,
+    InMemoryDynamoStore,
+    SystemInfo,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
@@ -86,6 +95,278 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
         cache_entry = package.cache_entry()
         self.assertEqual(cache_entry.codes[0].backend_ids, [backend_id])
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_rewrapping_a_function_shares_its_installed_package(self):
+        # Each torch.compile wrapper used to load and install the artifact for
+        # itself, stacking one precompile entry per wrap on the code object.
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        def fn(x):
+            return x.sin() + 1
+
+        x = torch.randn(3)
+        torch.compile(fn, backend="inductor")(x)
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        wrappers = [torch.compile(fn, backend="inductor") for _ in range(4)]
+        self.assertEqual(wrappers[0](x), fn(x))
+        (package,) = dynamo_package.live_packages(fn, -1)
+        # install() assigns the loaded frame a compile id; serving assigns none.
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
+        for index in range(1, 4):
+            self.assertEqual(wrappers[index](x), fn(x))
+            self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
+            self.assertEqual(dynamo_package.live_packages(fn, -1), [package])
+        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
+        counters = torch._dynamo.utils.counters["dynamo_cache"]
+        self.assertEqual(counters["dynamo_cache_hit"], 1)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_dropping_every_wrapper_releases_the_precompile_entries(self):
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        def fn(x):
+            return x.sin() + 1
+
+        x = torch.randn(3)
+        torch.compile(fn, backend="inductor")(x)
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        wrappers = [torch.compile(fn, backend="inductor") for _ in range(2)]
+        wrappers[0](x)
+        wrappers[1](x)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
+
+        wrappers.pop()
+        gc.collect()
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
+        self.assertEqual(wrappers[0](x), fn(x))
+        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
+
+        del wrappers
+        gc.collect()
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        self.assertEqual(dynamo_package.live_packages(fn, -1), [])
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_rewrapping_with_other_settings_gets_its_own_package(self):
+        # The recorded entry bakes in the wrapper's backend: an inductor wrapper
+        # adopting the package an eager wrapper loaded recorded an inductor CPU
+        # kernel with no codegen target for the ISA gate to check.
+        def fn(x):
+            return x.sin() + 1
+
+        x = torch.randn(3)
+        key = CompilePackage.source_id_from_fn(fn)
+        eager = torch.compile(fn, backend="eager")
+        self.assertEqual(eager(x), fn(x))
+        entry = PrecompileContext._dynamo_cache_entries[key]
+        self.assertFalse(entry.requires_native_backend_compatibility)
+        self.assertIsNone(entry.system_info.cpu_codegen_target)
+
+        inductor = torch.compile(fn, backend="inductor")
+        self.assertEqual(inductor(x), fn(x))
+        self.assertEqual(len(dynamo_package.live_packages(fn, -1)), 2)
+        entry = PrecompileContext._dynamo_cache_entries[key]
+        self.assertTrue(entry.requires_native_backend_compatibility)
+        if dynamo_package._current_cpu_codegen_target() is None:
+            raise unittest.SkipTest("no C++ toolchain: no CPU codegen target recorded")
+        self.assertIsNotNone(entry.system_info.cpu_codegen_target)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_concurrent_wraps_share_one_package(self):
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        def fn(x):
+            return x.sin() + 1
+
+        x = torch.randn(3)
+        torch.compile(fn, backend="inductor")(x)
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        barrier = threading.Barrier(2)
+        wrappers, errors = [], []
+
+        def wrap():
+            # Config overrides are thread-local; the decorator's does not reach here.
+            try:
+                with torch._dynamo.config.patch(caching_precompile=True):
+                    barrier.wait(20)
+                    wrappers.append(torch.compile(fn, backend="inductor"))
+            except BaseException as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=wrap) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(60)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(wrappers), 2)
+        self.assertEqual(len(dynamo_package.live_packages(fn, -1)), 1)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
+        self.assertEqual(
+            torch._dynamo.utils.counters["dynamo_cache"]["dynamo_cache_hit"], 1
+        )
+        for wrapper in wrappers:
+            self.assertEqual(wrapper(x), fn(x))
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_only_a_dynamo_reset_forgets_the_live_package(self):
+        # test/export/test_hop.py calls _reset_guarded_backend_cache() directly;
+        # forgetting the registry there made the next wrap stack a second entry.
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        def fn(x):
+            return x.sin() + 1
+
+        x = torch.randn(3)
+        torch.compile(fn, backend="inductor")(x)
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        first = torch.compile(fn, backend="inductor")
+        self.assertEqual(first(x), fn(x))
+        torch._dynamo.eval_frame._reset_guarded_backend_cache()
+        second = torch.compile(fn, backend="inductor")
+        self.assertEqual(second(x), fn(x))
+        self.assertEqual(len(dynamo_package.live_packages(fn, -1)), 1)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
+
+        torch._dynamo.reset()
+        self.assertEqual(dynamo_package.live_packages(fn, -1), [])
+        third = torch.compile(fn, backend="inductor")
+        self.assertEqual(third(x), fn(x))
+        self.assertEqual(len(dynamo_package.live_packages(fn, -1)), 1)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_dropping_every_wrapper_releases_everything_install_wrote(self):
+        # The finalizer released the precompile entries only. The process-wide
+        # skip of a frame with no guarded code and the installed globals stayed,
+        # so a later plain torch.compile of the function ran eager.
+        from torch._C._dynamo.eval_frame import get_code_exec_strategy
+        from torch._dynamo.types import FrameAction
+
+        def fn(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return y + 1
+
+        x = torch.randn(3)
+        torch.compile(fn, backend="inductor")(x)
+        key = CompilePackage.source_id_from_fn(fn)
+        entry = PrecompileContext._dynamo_cache_entries[key].codes[0]
+        self.assertIs(
+            entry.python_code,
+            dynamo_package.SerializedCode.from_code_object(fn.__code__),
+        )
+        entry.guarded_codes.clear()
+        entry.backend_ids.clear()
+        PrecompileContext.save_to_dynamo_cache()
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+
+        wrappers = [torch.compile(fn, backend="inductor") for _ in range(2)]
+        self.assertEqual(wrappers[0](x), fn(x))
+        (package,) = dynamo_package.live_packages(fn, -1)
+        module = sys.modules[__name__]
+        installed = {
+            g.name: g.value for g in package._region_install.installed_globals[module]
+        }
+        self.assertTrue(installed)
+        for name, value in installed.items():
+            self.assertIs(module.__dict__[name], value)
+        self.assertEqual(
+            get_code_exec_strategy(fn.__code__).cur_action, FrameAction.SKIP
+        )
+        self.assertIn(fn.__code__, dynamo_package._SKIP_INSTALLERS)
+
+        del wrappers, package
+        gc.collect()
+        self.assertEqual(dynamo_package.live_packages(fn, -1), [])
+        self.assertEqual(
+            get_code_exec_strategy(fn.__code__).cur_action, FrameAction.DEFAULT
+        )
+        self.assertNotIn(fn.__code__, dynamo_package._SKIP_INSTALLERS)
+        for name in installed:
+            self.assertNotIn(name, module.__dict__)
+
+        with torch._dynamo.config.patch(caching_precompile=False):
+            counter = torch._dynamo.testing.CompileCounter()
+            self.assertEqual(torch.compile(fn, backend=counter)(x), fn(x))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_cache_entry_loads_from_a_pickle_without_newer_fields(self):
+        # A pickle written before these fields existed must still load and pass
+        # check_versions(), which reads them directly.
+        def fn(x):
+            return x + 1
+
+        code_entry = dynamo_package._DynamoCodeCacheEntry(
+            python_code=dynamo_package.SerializedCode.from_code_object(fn.__code__),
+            python_module=__name__,
+            function_names=[],
+            guarded_codes=[],
+            import_sources={},
+            backend_ids=[],
+            code_source=None,
+            install_to_global=False,
+        )
+        old_code_entry = copy.copy(code_entry)
+        old_code_entry.__dict__.pop("bypassed")
+        entry = dynamo_package._DynamoCacheEntry(
+            codes=[old_code_entry],
+            source_info=dynamo_package.SourceInfo(set()),
+            device_type="cpu",
+            device_types=frozenset({"cpu"}),
+        )
+        old = copy.copy(entry)
+        for name in (
+            "device_types",
+            "requires_native_backend_compatibility",
+            "system_info",
+        ):
+            old.__dict__.pop(name)
+
+        loaded = pickle.loads(pickle.dumps(old))
+        self.assertIsNone(loaded.device_types)
+        self.assertTrue(loaded.requires_native_backend_compatibility)
+        self.assertIsInstance(loaded.system_info, SystemInfo)
+        self.assertIsNone(loaded.system_info.cpu_codegen_target)
+        self.assertFalse(loaded.codes[0].bypassed)
+        loaded.check_versions()
+        self.assertEqual(loaded.debug_info()["device_types"], ["cpu"])
+
+    def test_loaded_cache_entry_is_not_mutated_by_a_recompile(self):
+        # initialize() must work on its own copy of the entry: the store keeps
+        # the original, and a recompile on the loaded package appends a guarded
+        # code whose backend the store never had.
+        store = InMemoryDynamoStore()
+
+        def fn(x):
+            return x + 1
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize("eager", dynamic=False, package=package)(
+            fn
+        )
+        compiled_fn(torch.randn(3))
+        for backend_id, backend in package.cached_backends.items():
+            store.record_eager_backend(backend_id, backend)
+        store.save_package(package, "key")
+        stored = store.packages["key"].dynamo
+        self.assertEqual(len(stored.codes[0].guarded_codes), 1)
+
+        torch._dynamo.reset()
+        loaded, backends = store.load_package(fn, "key")
+        loaded.install(backends)
+        compiled_fn = torch._dynamo.optimize("eager", dynamic=False, package=loaded)(fn)
+        compiled_fn(torch.randn(3))
+        compiled_fn(torch.randn(4))
+        self.assertEqual(len(loaded.cache_entry().codes[0].guarded_codes), 2)
+        self.assertEqual(len(stored.codes[0].guarded_codes), 1)
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
@@ -520,62 +801,6 @@ def add(x, y):
 
         torch._dynamo.reset()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
-
-    @torch._dynamo.config.patch(caching_precompile=True)
-    def test_rewrapping_a_function_shares_its_installed_package(self):
-        # Each torch.compile wrapper used to load and install the artifact for
-        # itself, stacking one precompile entry per wrap on the code object.
-        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-
-        def fn(x):
-            return x.sin() + 1
-
-        x = torch.randn(3)
-        torch.compile(fn, backend="inductor")(x)
-        self._save_and_reload(expected_backends=1, expected_dynamo=1)
-
-        wrappers = [torch.compile(fn, backend="inductor") for _ in range(4)]
-        self.assertEqual(wrappers[0](x), fn(x))
-        package = dynamo_package.live_package(fn, -1)
-        self.assertIsNotNone(package)
-        # install() assigns the loaded frame a compile id; serving assigns none.
-        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
-        for index in range(1, 4):
-            self.assertEqual(wrappers[index](x), fn(x))
-            self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
-            self.assertIs(dynamo_package.live_package(fn, -1), package)
-        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
-        counters = torch._dynamo.utils.counters["dynamo_cache"]
-        self.assertEqual(counters["dynamo_cache_hit"], 1)
-
-    @torch._dynamo.config.patch(caching_precompile=True)
-    def test_dropping_every_wrapper_releases_the_precompile_entries(self):
-        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-
-        def fn(x):
-            return x.sin() + 1
-
-        x = torch.randn(3)
-        torch.compile(fn, backend="inductor")(x)
-        self._save_and_reload(expected_backends=1, expected_dynamo=1)
-
-        wrappers = [torch.compile(fn, backend="inductor") for _ in range(2)]
-        wrappers[0](x)
-        wrappers[1](x)
-        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
-
-        wrappers.pop()
-        gc.collect()
-        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
-        self.assertEqual(wrappers[0](x), fn(x))
-        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
-        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
-
-        del wrappers
-        gc.collect()
-        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
-        self.assertIsNone(dynamo_package.live_package(fn, -1))
-
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @parametrize("isolate_recompiles", (False, True))
