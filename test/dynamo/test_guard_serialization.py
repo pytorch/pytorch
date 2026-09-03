@@ -584,6 +584,29 @@ class TestGuardSerialization(TestGuardSerializationBase):
         p_bad = torch.randn(5, requires_grad=True)
         self._test_check_fn(ref, loaded, {"d": d, "p": p_bad}, False)
 
+    def test_subclass_inner_grad_aliased_by_unguarded_local(self):
+        # Dynamo's TENSOR_MATCH on a wrapper subclass also guards each inner
+        # tensor, so the upfront grad walk reaches inner.grad even though it is
+        # also a leaf of d, pickled before x is reduced; pin that, since a grad
+        # first met as an unguarded leaf is memoized as _Missing.
+        def fn(d, x):
+            return x * 1 + len(d)
+
+        inner = torch.randn(4, requires_grad=True)
+        (inner * 2).sum().backward()
+        x = SubclassWithMeta(inner, extra=2)
+        d = {"g": inner.grad}
+        types_ = ("TENSOR_MATCH", "TYPE_MATCH")
+        ref, loaded = self._test_serialization(types_, fn, d, x)
+        x_new = SubclassWithMeta(torch.randn(4, requires_grad=True), extra=2)
+        self._test_check_fn(ref, loaded, {"d": d, "x": x_new}, True)
+        from torch._dynamo.package import load_guards_state
+
+        loaded_x = load_guards_state(
+            self._cached_guards_state
+        ).output_graph.local_scope["x"]
+        self.assertEqual(loaded_x.a.grad.shape, inner.grad.shape)
+
     def test_grad_metadata_guard_round_trips(self):
         # Reading x.grad installs a guard on the grad tensor (via GradSource),
         # which also registers the grad in the guard tree, so this passes with
@@ -609,9 +632,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
     def test_subclass_grad_metadata_guard_round_trips(self):
         # The wrapper-subclass reduce path used to return before the grad was
         # registered, so only inner tensors' grads round-tripped and the outer
-        # subclass came back with .grad dropped; a guard reading x.grad then
-        # rejected every candidate. Mirror test_grad_metadata_guard_round_trips
-        # on a subclass input.
+        # subclass came back with .grad None; rebuilding the guard on x.grad
+        # against the loaded state then failed with an AttributeError on that
+        # None. Mirror test_grad_metadata_guard_round_trips on a subclass input.
         def f(x):
             return x.grad + 1
 
