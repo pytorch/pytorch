@@ -301,14 +301,23 @@ def _cuda_fatbin_command(
     return cmd
 
 
-def get_device_information(device_type: str) -> dict[str, str]:
+def get_device_information(
+    device_type: str, *, check_build: bool = True
+) -> dict[str, str]:
     """
     Gets all the current device information used to compile the .so.
+
+    With ``check_build=False``, ``AOTI_CPU_ISA`` is detected from cpuinfo
+    without dry-compiling toolchain probes (multi-second on machines with a
+    cold inductor cache). Use it on paths that only describe the host, such
+    as package loading, rather than compile for it.
     """
     metadata: dict[str, str] = {
         "AOTI_PLATFORM": sys.platform,
         "AOTI_MACHINE": platform.machine(),
-        "AOTI_CPU_ISA": str(torch._inductor.cpu_vec_isa.pick_vec_isa()).upper(),
+        "AOTI_CPU_ISA": str(
+            torch._inductor.cpu_vec_isa.pick_vec_isa(check_build=check_build)
+        ).upper(),
         "AOTI_COMPUTE_CAPABILITY": str(
             get_interface_for_device(device_type).get_compute_capability()
         ),
