@@ -4257,11 +4257,17 @@ class SIMDScheduling(BaseScheduling):
         kernel.finalize_indexing(all_indexing.keys())
 
         # Second pass to do codegen
+        phase = 0
+        kernel.set_codegen_phase(phase)
         for node in node_schedule:
             if node is DisableReduction:
                 stack.enter_context(kernel.disable_reduction())
+                phase += 1
+                kernel.set_codegen_phase(phase)
             elif node is EnableReduction:
                 stack.close()
+                phase += 1
+                kernel.set_codegen_phase(phase)
             else:
                 # TODO - use split ranges ?
                 self._prepare_loop_body(node._body)
