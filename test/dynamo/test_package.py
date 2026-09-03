@@ -1448,7 +1448,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
             install_to_global=False,
         )
         old_code_entry = copy.copy(code_entry)
-        old_code_entry.__dict__.pop("bypassed")
+        old_code_entry.__dict__.pop("bypass_reason")
         entry = dynamo_package._DynamoCacheEntry(
             codes=[old_code_entry],
             source_info=dynamo_package.SourceInfo(set()),
@@ -1463,7 +1463,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
         loaded = pickle.loads(pickle.dumps(old))
         self.assertIsNone(loaded.device_types)
         self.assertTrue(loaded.requires_native_backend_compatibility)
-        self.assertFalse(loaded.codes[0].bypassed)
+        self.assertIsInstance(loaded.system_info, SystemInfo)
+        self.assertIsNone(loaded.system_info.cpu_codegen_target)
+        self.assertIsNone(loaded.codes[0].bypass_reason)
         loaded.check_versions()
         self.assertEqual(loaded.debug_info()["device_types"], ["cpu"])
 

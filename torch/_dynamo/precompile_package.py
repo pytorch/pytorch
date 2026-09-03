@@ -104,9 +104,11 @@ from __future__ import annotations
 import collections
 import contextlib
 import copy
+import dataclasses
 import functools
 import hashlib
 import importlib.machinery
+import itertools
 import logging
 import os
 import pickle
@@ -1375,6 +1377,34 @@ def _warn_risky_drops(risky: Sequence[tuple[str, str]]) -> None:
     )
 
 
+def _grad_snapshot(
+    fn: object, examples: Sequence[ExampleInput | tuple[object, ...]]
+) -> dict[torch.Tensor, torch.Tensor | None]:
+    """Every tensor an example could accumulate a gradient into, and its .grad.
+
+    Keyed by the tensor itself so one entry survives a tensor appearing in
+    several examples; Tensor hashes by identity, which is what is wanted here.
+    """
+    found: dict[torch.Tensor, torch.Tensor | None] = {}
+
+    def visit(value: object) -> None:
+        if isinstance(value, torch.Tensor):
+            found.setdefault(value, value.grad)
+        elif isinstance(value, torch.nn.Module):
+            for tensor in itertools.chain(value.parameters(), value.buffers()):
+                found.setdefault(tensor, tensor.grad)
+
+    visit(fn if isinstance(fn, torch.nn.Module) else getattr(fn, "__self__", None))
+    for example in examples:
+        args, kwargs = _example_call(example)
+        for leaf in tree_leaves((args, kwargs)):
+            visit(leaf)
+        # tree_leaves flattens a Module to nothing, so visit the raw arguments too.
+        for value in (*args, *kwargs.values()):
+            visit(value)
+    return found
+
+
 def varying_guard_slots(
     guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
 ) -> frozenset[tuple[str, str]]:
@@ -1415,6 +1445,7 @@ def _summarize(
     uncovered: frozenset[str],
     capture_errors: Sequence[str],
     guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+    unrendered: Mapping[str, str],
 ) -> PrecompileSummary:
     wont_generalize = _wont_generalize(kept, guard_sets)
     return PrecompileSummary(
@@ -1431,6 +1462,7 @@ def _summarize(
         risky_dropped_guards=tuple(sorted(risky)),
         policy_dropped_guards=tuple(sorted(policy_dropped)),
         capture_errors=tuple(capture_errors),
+        unrendered_backends=tuple(sorted(unrendered.items())),
     )
 
 
@@ -1495,6 +1527,9 @@ class PrecompileSession:
         self._keep_graphs = keep_graphs
         self._backend_obj: _PrecompileBackend | None = None
         self._policy_dropped_guards: set[tuple[str, str]] = set()
+        # backend id -> why its subgraph could not be composed to source and so
+        # ships only in the pickled bundle; see rendered_backends.
+        self._unrendered_backends: dict[str, str] = {}
         self._dropped_guards: set[tuple[str, str]] = set()
         self._kept_guards: set[tuple[str, str]] = set()
         self._risky_dropped_guards: set[tuple[str, str]] = set()
@@ -1631,6 +1666,7 @@ class PrecompileSession:
             raise RuntimeError("PrecompileSession cannot be re-entered")
         if self._stack is not None:
             raise RuntimeError("PrecompileSession is already active")
+        grads: dict[torch.Tensor, torch.Tensor | None] = {}
         stack = contextlib.ExitStack()
         # Backends must serialize into the artifact rather than into the
         # process-local inductor cache.
@@ -1665,6 +1701,15 @@ class PrecompileSession:
                 _register_explicit_compile_region(isolate_recompiles_id, self)
                 self._optimized = optimize_ctx(self._fn)
             self._compiled = self._optimized
+            # A training example runs a real backward, which ACCUMULATES into
+            # the caller's tensors. Snapshot and clear first, restore in the
+            # finally below: capturing a model must not leave its gradients
+            # changed, and on the documented warmup-step-then-capture flow it
+            # would otherwise double them. make_fx does the same; see the
+            # rationale at torch._precompile._capture.
+            grads = _grad_snapshot(self._fn, self._example_inputs)
+            for tensor in grads:
+                tensor.grad = None
             # Automatic examples are the ordinary no_grad inference path.
             # inference_mode is a distinct guarded state and is disabled here
             # even when the caller entered it before starting capture.
@@ -1711,6 +1756,11 @@ class PrecompileSession:
                     self._finished = True
             raise
         finally:
+            # The SAME grad object, not a copy: a caller holding a prior p.grad
+            # reference, or optimizer state keyed on grad identity, must not be
+            # invalidated by having been used as an example.
+            for tensor, grad in grads.items():
+                tensor.grad = grad
             # Guard/backend state is already in the package. Do not retain the
             # caller's potentially large CPU/GPU example tensors with the session.
             self._example_inputs = ()
@@ -2081,6 +2131,7 @@ class PrecompileSession:
             self._package.uncovered_frames,
             self._capture_errors,
             self._guard_sets,
+            unrendered=self._unrendered_backends,
         )
 
     def _gated_summary(
@@ -2241,7 +2292,10 @@ class PrecompileSession:
         output, which has a source form (the make_fx tracer emits exactly this),
         unlike the guard trees and transformed bytecode beside it. Anything that
         fails to render -- a training graph, an effectful op, a graph with no
-        compute -- is simply absent here and stays pickled.
+        compute -- is absent here and stays pickled, warned about once and
+        listed in ``summary().unrendered_backends``, because a training
+        artifact that quietly falls back to the bundle is not the readable one
+        the caller asked for.
 
         Rendering re-runs AOTAutograd + Inductor on the retained graph, so it is
         a second lowering, paid once per subgraph that reaches the artifact.
@@ -2250,13 +2304,6 @@ class PrecompileSession:
 
         if self._backend_obj is None or self._backend == "eager":
             return {}
-        if self._training:
-            # compile_to_python pins AOTAutograd to the INFERENCE path, so a
-            # training graph renders as a forward with the backward silently
-            # dropped -- the served output would lose its grad_fn. That is a
-            # wrong answer rather than a failed render, so it cannot be left to
-            # the except below; refuse up front and keep the bundle.
-            return {}
         rendered: dict[str, str] = {}
         for backend_id in backend_ids:
             held = self._backend_obj.graphs.get(str(backend_id))
@@ -2264,9 +2311,22 @@ class PrecompileSession:
                 continue
             gm, fakes = held
             try:
-                source, _ = aot_autograd.compile_to_python(gm, fakes)
+                # grad_enabled is what makes AOTAutograd emit the joint
+                # forward+backward for a training capture; without it the
+                # backward is silently absent and the served output loses its
+                # grad_fn.
+                source, _ = aot_autograd.compile_to_python(
+                    gm, fakes, grad_enabled=self._training
+                )
             except Exception as e:
-                log.debug("precompile: %s stays pickled (%s)", backend_id, e)
+                reason = f"{type(e).__name__}: {e}"
+                self._unrendered_backends[str(backend_id)] = reason
+                log.warning(
+                    "precompile: subgraph %s could not be composed to source "
+                    "and stays pickled (%s)",
+                    backend_id,
+                    reason,
+                )
                 continue
             rendered[str(backend_id)] = source
         from torch._functorch._aot_autograd.to_standalone_python import (
@@ -2275,6 +2335,12 @@ class PrecompileSession:
 
         keys = list(rendered)
         return dict(zip(keys, namespace_module_names([rendered[k] for k in keys])))
+
+    def _with_unrendered(self, summary: PrecompileSummary) -> PrecompileSummary:
+        # Rendering runs after the gates, so the gated summary predates what
+        # rendered_backends learned; the header must describe the file written.
+        unrendered = tuple(sorted(self._unrendered_backends.items()))
+        return dataclasses.replace(summary, unrendered_backends=unrendered)
 
     def _collect_backends(self) -> dict[str, Any]:
         """The compiled subgraphs this capture produced, keyed by backend id."""
@@ -2333,13 +2399,14 @@ class PrecompileSession:
 
         entry = self._package.cache_entry()
         backends = self._collect_backends()
+        rendered = self.rendered_backends(list(backends))
         return _build_multigraph_artifact(
             entry,
             backends,
-            summary,
+            self._with_unrendered(summary),
             self._backend,
             self._entry_fn,
-            self.rendered_backends(list(backends)),
+            rendered,
             grad_enabled=self._capture_grad_mode(),
         )
 

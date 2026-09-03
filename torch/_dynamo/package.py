@@ -786,6 +786,9 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
+    # Why Dynamo gave up on this frame. Known at the bypass site and otherwise
+    # only reachable via tlparse, which leaves a refusal downstream guessing.
+    bypass_reason: str | None = None
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         _restore_missing_fields(self, state)
@@ -1777,10 +1780,11 @@ class CompilePackage:
         """
         return (*self._codes, *self._region_install.codes)
 
-    def bypass_current_entry(self) -> None:
+    def bypass_current_entry(self, reason: str | None = None) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
+        self._current_entry.bypass_reason = reason
 
     def add_resume_function(
         self,

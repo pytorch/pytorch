@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import copyreg
 import dataclasses
 import functools
 import io
@@ -323,6 +324,85 @@ def _make_function_cycle():
 
 
 CYCLE_BASE, CYCLE_WRAPPER = _make_function_cycle()
+
+
+class CarriedPayload:
+    def __init__(self, size):
+        self.size = size
+
+
+class ReconstructedByReduce:
+    # __reduce__ decides what its arguments MEAN, so a pruned attribute arrives
+    # as a constructor argument rather than as an attribute nobody reads. The
+    # check makes that fail loudly instead of reconstructing a wrong object.
+    def __init__(self, tag, payload):
+        if not isinstance(payload, CarriedPayload):
+            raise TypeError(f"payload must be a CarriedPayload, got {type(payload)}")
+        self.tag = tag
+        self.payload = payload
+
+    def __reduce__(self):
+        return (type(self), (self.tag, self.payload))
+
+
+class ReconstructedBySetstate:
+    # The default protocol hands __setstate__ the whole __dict__, so a pruned
+    # attribute arrives as a field this __setstate__ reads.
+    def __init__(self, tag, payload):
+        self.tag = tag
+        self.payload = payload
+
+    def __setstate__(self, state):
+        if not isinstance(state["payload"], CarriedPayload):
+            raise TypeError(f"payload must be a CarriedPayload, got {state['payload']}")
+        self.__dict__.update(state)
+
+
+class ReconstructedByNewargs:
+    # __getnewargs__ feeds a validating __new__ under the DEFAULT __reduce_ex__,
+    # so a pruned attribute arrives as a constructor argument.
+    def __new__(cls, payload):
+        if not isinstance(payload, CarriedPayload):
+            raise TypeError(f"payload must be a CarriedPayload, got {payload}")
+        return super().__new__(cls)
+
+    def __init__(self, payload):
+        self.tag = "tag"
+        self.payload = payload
+
+    def __getnewargs__(self):
+        return (self.payload,)
+
+
+class CopyregReduced:
+    # copyreg.pickle registers the reducer from OUTSIDE the class, so no pickle
+    # hook is present on the class itself; _builds_its_own_pickle must still
+    # detect it via the dispatch table, or a pruned attribute reaches the
+    # validating rebuild as the sentinel instead of the value guarded siblings
+    # of it were traced against.
+    def __init__(self, tag, payload):
+        if not isinstance(payload, CarriedPayload):
+            raise TypeError(f"payload must be a CarriedPayload, got {payload}")
+        self.tag = tag
+        self.payload = payload
+
+
+def _rebuild_copyreg(tag, payload):
+    return CopyregReduced(tag, payload)
+
+
+copyreg.pickle(CopyregReduced, lambda o: (_rebuild_copyreg, (o.tag, o.payload)))
+
+
+class Point(NamedTuple):
+    x: int
+    y: int
+
+
+class TaggedPoint(Point):
+    # No __slots__, so an instance carries a __dict__ alongside its items, and
+    # namedtuple's __getnewargs__ returns only the items.
+    pass
 
 
 # --- an empty closure cell -------------------------------------------------
@@ -1056,6 +1136,83 @@ class TestGuardSerialization(TestGuardSerializationBase):
         got = pickle.loads(buf.getvalue())["fn"]
         self.assertEqual(got.__module__, w.__module__)
         self.assertEqual(got.__doc__, w.__doc__)
+
+    def test_guard_on_an_object_that_reconstructs_itself(self):
+        # Pruning replaces an unguarded attribute by id, which only comes back
+        # as a missing attribute under the DEFAULT protocol. A class with its own
+        # __reduce__ gets the sentinel as a constructor ARGUMENT instead, so its
+        # attributes must not be pruned at all.
+        obj = ReconstructedByReduce("tag", CarriedPayload(3))
+
+        def fn(x):
+            if obj.tag == "tag":
+                return x + 1
+            return x - 1
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "obj": obj}, True)
+
+    def test_guard_on_an_object_whose_setstate_or_new_reads_state(self):
+        # __reduce__ is not the only hook that reads a pruned value back: the
+        # default protocol hands __setstate__ the whole __dict__, and
+        # __getnewargs__ feeds __new__. Either saw the sentinel and raised at
+        # load, so both classes must keep every attribute.
+        from torch._dynamo.guards import _builds_its_own_pickle
+
+        self.assertFalse(_builds_its_own_pickle(CarriedPayload))
+        for obj in (
+            ReconstructedBySetstate("tag", CarriedPayload(3)),
+            ReconstructedByNewargs(CarriedPayload(3)),
+        ):
+            self.assertTrue(_builds_its_own_pickle(type(obj)))
+
+            def fn(x):
+                if obj.tag == "tag":
+                    return x + 1
+                return x - 1
+
+            with self.subTest(cls=type(obj).__name__):
+                ref, loaded = self._test_serialization(
+                    "EQUALS_MATCH", fn, torch.randn(3)
+                )
+                self._test_check_fn(
+                    ref, loaded, {"x": torch.randn(3), "obj": obj}, True
+                )
+
+    def test_guard_on_a_copyreg_registered_class(self):
+        # A reducer registered with copyreg.pickle decides what its arguments
+        # mean, exactly as a __reduce__ on the class would, so pruning a sibling
+        # attribute would hand the rebuild the sentinel. It must be kept whole.
+        from torch._dynamo.guards import _builds_its_own_pickle
+
+        self.assertTrue(_builds_its_own_pickle(CopyregReduced))
+        obj = CopyregReduced("tag", CarriedPayload(3))
+
+        def fn(x):
+            if obj.tag == "tag":
+                return x + 1
+            return x - 1
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "obj": obj}, True)
+
+    def test_guard_on_a_namedtuple_subclass_with_an_unpicklable_extra(self):
+        # Every namedtuple has a __getnewargs__, but it returns the ITEMS, which
+        # pruning never touches, so a subclass carrying __dict__ extras is pruned
+        # like any other user object rather than pickled whole.
+        from torch._dynamo.guards import _builds_its_own_pickle
+
+        self.assertFalse(_builds_its_own_pickle(TaggedPoint))
+        pt = TaggedPoint(1, 2)
+        pt.scratch = (i for i in ())
+
+        def fn(x):
+            if pt.x == 1:
+                return x + 1
+            return x - 1
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "pt": pt}, True)
 
     def test_tensor_match(self):
         def f(x: torch.Tensor):

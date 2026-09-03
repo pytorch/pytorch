@@ -1567,7 +1567,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     # reporting, and artifacts predating them load unchanged. An auditor
     # reading a shipped artifact wants them back as data rather than by
     # grepping the source.
-    optional = {"POLICY_DROPPED_GUARDS", "CAPTURE_GRAD_ENABLED"}
+    optional = {"POLICY_DROPPED_GUARDS", "UNRENDERED_BACKENDS", "CAPTURE_GRAD_ENABLED"}
     for node in tree.body:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:
             continue
@@ -1898,6 +1898,12 @@ def _build_multigraph_python_source(
     parts.append("# Values pinned to exactly what capture saw; any other value misses.")
     parts.append(f"WONT_GENERALIZE = {tuple(summary.wont_generalize)!r}")
     parts.append("")
+    parts.append("# (backend id, reason) for each compiled subgraph that could not be")
+    parts.append("# composed to readable source and so ships only in _BACKENDS below.")
+    parts.append(
+        f"UNRENDERED_BACKENDS = {[list(g) for g in summary.unrendered_backends]!r}"
+    )
+    parts.append("")
     if serving_mode == "installed":
         reachable = _reachable_frames(frames)
         dead = sorted(
@@ -2000,10 +2006,14 @@ def _build_multigraph_python_source(
         if len(rendered) < len(backends):
             parts.append(
                 f"#    ({len(backends) - len(rendered)} could not be rendered and "
-                f"stay in _BACKENDS)"
+                f"stay in _BACKENDS; UNRENDERED_BACKENDS above says which and why)"
             )
     else:
         parts.append("# 3. Compiled subgraphs -- OPAQUE")
+        if summary.unrendered_backends:
+            parts.append(
+                "#    (UNRENDERED_BACKENDS above says why each stays in _BACKENDS)"
+            )
     parts.append("#")
     parts.append("# base64(pickle) of the backend artifacts the frames call by name.")
     parts.append("# " + "=" * 70)
@@ -2150,15 +2160,18 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
     if not any(f["variants"] for f in entry_frames):
         # The entry frame having no variants has two very different causes, and
         # guessing the wrong one sends the caller restructuring code that was
-        # never the problem. If Dynamo BYPASSED the frame, say that, because
-        # the thin-wrapper advice below is then simply wrong.
-        bypassed = [code for code in entry.codes if code.bypassed]
+        # never the problem. If Dynamo BYPASSED the frame, it recorded why --
+        # say that, because the thin-wrapper advice below is then simply wrong.
+        bypassed = [
+            code for code in entry.codes if code.bypassed and code.bypass_reason
+        ]
         if bypassed:
+            reasons = ", ".join(sorted({str(c.bypass_reason) for c in bypassed}))
             raise PrecompileError(
                 f"precompile captured no dispatchable graph for {entry.fn_name!r}: "
                 f"{len(bypassed)} frame(s) were BYPASSED during capture, so their "
-                f"guards were never written. Fix that rather than restructuring "
-                f"the captured callable."
+                f"guards were never written. Reason: {reasons}. Fix that rather "
+                f"than restructuring the captured callable."
             )
         # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
         # frame (external_utils.wrap_inline's `inner`) rather than the module:
@@ -3135,12 +3148,9 @@ class _PrecompileApi:
                 training=bool(training),
                 prune_invariant_guards=True,
                 # Retain graphs only where they will actually be rendered: an
-                # eager "backend" is an fx graph with no source to emit, and a
-                # training graph is refused by rendered_backends because
-                # compile_to_python would drop its backward. Retaining anyway
-                # would deepcopy every compiled graph and hold it for the
-                # session, to produce nothing.
-                keep_graphs=backend != "eager" and not training,
+                # eager "backend" is an fx graph with no source to emit, and
+                # retaining deepcopies every compiled graph.
+                keep_graphs=backend != "eager",
             )
         )
         with session:
