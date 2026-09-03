@@ -2550,10 +2550,10 @@ def get_k_splits(
     legacy_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
     needs_bounded_ranking = len(valid_divisors) > k_splits_limit
 
-    # On Blackwell the partial BMM can use a 2CTA kernel.  Ranking solely by
-    # K-part alignment can then badly over-split a skinny GEMM: once there are
-    # enough output tiles for a few GPU waves, additional splits mostly grow
-    # the FP32 partial workspace and the final-reduction traffic.
+    # A caller can provide its backend-specific CTA geometry. Ranking solely
+    # by K-part alignment can badly over-split a skinny GEMM: once there are
+    # enough output CTAs for a few GPU waves, additional splits mostly grow the
+    # FP32 partial workspace and final-reduction traffic.
     #
     # Keep this device-aware path opt-in so existing CUDA/ROCm/XPU behavior is
     # unchanged.  We use a conservative 64x64 output tile estimate, offer the

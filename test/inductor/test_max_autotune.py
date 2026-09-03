@@ -2903,7 +2903,7 @@ class TestMaxAutotune(TestCase):
             "max_autotune_gemm_search_space": "DEFAULT",
         }
     )
-    def test_decompose_k_blackwell_split_candidates(self):
+    def test_decompose_k_blackwell_aten_split_candidates(self):
         get_k_splits.cache_clear()
         candidates = get_k_splits(
             80,
