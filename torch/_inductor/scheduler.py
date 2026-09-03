@@ -9208,16 +9208,30 @@ class Scheduler:
         ):
             return False
 
-        if not all(
-            SIMDKernel.is_compatible((red_numel, red_rnumel), sn.get_ranges())
-            for sn in snodes
-        ):
-            return False
-
         # Nothing to reindex if the pointwise already uses the reduction split.
         target_iter_sizes = (red_numel, red_rnumel)
         if all(tuple(sn._sizes[0]) == target_iter_sizes for sn in snodes):
             return False
+
+        # Loop order to apply before reindexing each node: the identity when
+        # its ranges already split into the reduction's groups, otherwise the
+        # dims broadcast by its read of the reduction output move last, e.g.
+        # (6, 16, 7, 16) reading scale[7*d0 + d2] becomes (6, 7, 16, 16).
+        orders: list[tuple[int, ...]] = []
+        for sn in snodes:
+            order = tuple(range(len(sn._sizes[0])))
+            if not SIMDKernel.is_compatible(target_iter_sizes, sn.get_ranges()):
+                if not config.loop_ordering_after_fusion:
+                    return False
+                order = self._reduction_output_first_order(
+                    reduction_node.get_buffer_names(), sn, red_numel
+                )
+                if order is None or not SIMDKernel.is_compatible(
+                    target_iter_sizes,
+                    (ir.same_reorder(order)(sn._sizes[0]), sn._sizes[1]),
+                ):
+                    return False
+            orders.append(order)
 
         # Measure each node's memory access before mutating any loops, so the
         # coalescing guard below can compare against the un-reindexed kernels.
@@ -9232,8 +9246,10 @@ class Scheduler:
         # fusion within the same can_fuse() call.
         rollback_snapshot = _LoopStateSnapshot.create((pw_node,))
 
-        for sn in snodes:
-            sn.apply_loop_reindexing([red_numel, red_rnumel])
+        for sn, order in zip(snodes, orders, strict=True):
+            if order != tuple(range(len(order))):
+                sn.apply_new_loop_order(order)
+            sn.apply_loop_reindexing(target_iter_sizes)
 
         if isinstance(pw_node, FusedSchedulerNode):
             pw_node.group = snodes[0].group
@@ -9273,6 +9289,39 @@ class Scheduler:
                 refresh_group_node_dependencies(pw_node)
 
         return True
+
+    @staticmethod
+    def _reduction_output_first_order(
+        reduction_outputs: OrderedSet[str], sn: SchedulerNode, red_numel: sympy.Expr
+    ) -> tuple[int, ...] | None:
+        """
+        Loop order that iterates in the memory order of the node's read of the
+        reduction output, with the dims it broadcasts over innermost. None when
+        the read is ambiguous or the addressed dims do not span red_numel.
+        """
+        reads = [
+            dep
+            for dep in sn.read_writes.reads
+            if isinstance(dep, MemoryDep) and dep.name in reduction_outputs
+        ]
+        loop_vars = sn.read_writes.range_vars
+        if (
+            len(reads) != 1
+            or reads[0].is_indirect()
+            or loop_vars is None
+            or len(loop_vars) != len(sn._sizes[0])
+        ):
+            return None
+        strides = V.graph.sizevars.stride_hints(reads[0].index, loop_vars)
+        order = sorted(
+            range(len(strides)), key=lambda i: (strides[i] == 0, -strides[i])
+        )
+        addressed = [i for i in order if strides[i] != 0]
+        if not V.graph.sizevars.statically_known_equals(
+            sympy_product(sn._sizes[0][i] for i in addressed), red_numel
+        ):
+            return None
+        return tuple(order)
 
     def unfusable_node(self, node: BaseSchedulerNode) -> bool:
         """
