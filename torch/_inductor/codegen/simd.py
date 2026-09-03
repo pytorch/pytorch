@@ -4693,42 +4693,6 @@ class SIMDScheduling(BaseScheduling):
             len(subkernel_nodes),
             [len(p) for p in partitions],
         )
-
-        # Scalar online-softmax accumulators are only generated for standalone
-        # kernels, so emit eligible reductions on their own instead of giving
-        # up the scalar path by combining them.
-        def uses_scalar_online_softmax(pn: BaseSchedulerNode) -> bool:
-            node_info = node_schedule_map[pn]
-            features = node_info.features
-            if node_info.is_persistent_reduction or not features.is_reduction():
-                return False
-            device = pn.get_device()
-            cooperative_reduction = (
-                device is not None
-                and features.strict_reduction_rblock() is None
-                and V.choices.should_use_cooperative_reduction(
-                    device, features.numel, features.reduction_numel
-                )
-            )
-            return not cooperative_reduction and features.can_use_scalar_online_softmax(
-                node_info.tiling, node_info.tiling_scores
-            )
-
-        split_partitions: list[list[BaseSchedulerNode]] = []
-        for node_group in partitions:
-            combinable: list[BaseSchedulerNode] = []
-            for pn in node_group:
-                if uses_scalar_online_softmax(pn):
-                    if combinable:
-                        split_partitions.append(combinable)
-                        combinable = []
-                    split_partitions.append([pn])
-                else:
-                    combinable.append(pn)
-            if combinable:
-                split_partitions.append(combinable)
-        partitions = split_partitions
-
         kernel_code_list = []
         for node_group in partitions:
             if len(node_group) == 0:

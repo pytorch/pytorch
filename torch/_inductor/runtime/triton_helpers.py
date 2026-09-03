@@ -413,28 +413,16 @@ def online_softmax_reduce_scalar_combine(
     strict_signed_zero: tl.constexpr,
 ):
     """
-    Fold a block of values (rhs, with rhs_sum implicitly 1) into a per-row
-    (max, sum) state that has already been reduced along `dim`. Compared to
-    online_softmax_combine this keeps only one max/sum per output row live.
+    Reduce a block of values along `dim` and fold it into a per-row (max, sum)
+    state, so only one max/sum per output row stays live across the loop.
     """
-    rhs = tl.where(rhs_mask, rhs, float("-inf"))
-    if strict_signed_zero:
-        out_max = _maximum_reduce(lhs_max, max2_strict(rhs, dim))
-    else:
-        out_max = maximum(lhs_max, max2(rhs, dim))
-    lhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
+    rhs = tl.where(rhs_mask, rhs, float("-inf")).to(lhs_max.dtype)
+    rhs_max, rhs_sum = online_softmax_reduce(
+        rhs, tl.where(rhs_mask, 1.0, 0.0), dim, use_fast_math, strict_signed_zero
     )
-    out_max_keepdim = tl.expand_dims(out_max, dim)
-    rhs_scale = tl.where(
-        out_max_keepdim == float("-inf"),
-        1.0,
-        exp(rhs - out_max_keepdim, use_fast_math),
+    return online_softmax_combine_with_sum(
+        lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math, strict_signed_zero
     )
-    # The -inf guard above gives masked lanes scale 1 when the row is all -inf.
-    rhs_scale = tl.where(rhs_mask, rhs_scale, 0.0)
-    out_sum = lhs_sum * lhs_scale + tl.sum(rhs_scale, dim)
-    return out_max, out_sum
 
 
 @triton.jit

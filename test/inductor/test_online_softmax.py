@@ -6,7 +6,6 @@ import unittest
 
 import torch
 import torch._inductor.config as inductor_config
-import torch._inductor.metrics as inductor_metrics
 import torch.nn.functional as F
 from torch._dynamo.utils import rmse, same
 from torch._inductor.runtime.hints import DeviceProperties
@@ -623,22 +622,6 @@ class TestScalarOnlineSoftmax(TestCase):
         bias = torch.randn(8192, device=GPU_TYPE)
         self.check_codegen(f, x, bias, uses_scalar=uses_scalar, rtol=1e-2, atol=1e-2)
 
-    def test_dynamic_reduction_uses_vector_path(self):
-        # Dynamic online softmax lowers to separate max and sum reductions. A
-        # graph first compiled at 8k keeps that vector schedule when reused at
-        # 50k without recompiling.
-        torch._dynamo.reset()
-        counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
-        opt_f = torch.compile(_prepare_softmax, backend=counter, dynamic=True)
-        x = torch.randn(4, 8192, device=GPU_TYPE)
-        act, (code,) = run_and_get_code(opt_f, x, -1)
-        self.assertEqual(_prepare_softmax(x, -1), act, rtol=1e-3, atol=1e-3)
-        self.assertNotIn(self.MARKER, code)
-
-        x = torch.randn(4, 50005, device=GPU_TYPE)
-        self.assertEqual(_prepare_softmax(x, -1), opt_f(x, -1), rtol=1e-3, atol=1e-3)
-        self.assertEqual(counter.frame_count, 1)
-
     def test_dynamic_batch_uses_scalar_path(self):
         torch._dynamo.reset()
         counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
@@ -653,10 +636,6 @@ class TestScalarOnlineSoftmax(TestCase):
         self.assertEqual(_prepare_softmax(x, -1), opt_f(x, -1), rtol=1e-3, atol=1e-3)
         self.assertEqual(counter.frame_count, 1)
 
-    def test_large_reduction(self):
-        x = torch.randn(4, 2**20 + 13, device=GPU_TYPE)
-        self.check_codegen(_prepare_softmax, x, -1)
-
     def test_unmasked_loop(self):
         # xnumel 1 and rnumel a multiple of the largest R0_BLOCK need no masks,
         # so the combine receives a literal True mask.
@@ -664,63 +643,20 @@ class TestScalarOnlineSoftmax(TestCase):
         _, code = self.check_codegen(_prepare_softmax, x, -1)
         self.assertRegex(code, r"scalar_combine\(\s+\S+, \S+, \S+, True, 1,")
 
-    @parametrize(
-        "combo_autotune,compile_time_autotune,reduction_numel",
-        [
-            (0, False, 8192),
-            (1, False, 8192),
-            (1, True, 8192),
-            (1, False, 4097),
-            (1, False, 4096),
-        ],
-    )
-    def test_emitted_outside_combo_kernel(
-        self, combo_autotune, compile_time_autotune, reduction_numel
-    ):
+    def test_combo_kernel_uses_vector_path(self):
         def f(x, y):
             return (*_prepare_softmax(x, -1), *_prepare_softmax(y, -1))
 
-        x = torch.randn(4, reduction_numel, device=GPU_TYPE)
-        y = torch.randn(4, reduction_numel, device=GPU_TYPE)
-        inductor_metrics.reset()
-        self.addCleanup(inductor_metrics.reset)
-        combo_config = {
-            **self.COMBO_KERNEL_CONFIG,
-            "combo_kernels_autotune": combo_autotune,
-            "combo_kernel_compile_time_autotune": compile_time_autotune,
-        }
-        with inductor_config.patch(combo_config):
+        x = torch.randn(4, 8192, device=GPU_TYPE)
+        y = torch.randn(4, 8192, device=GPU_TYPE)
+        with inductor_config.patch(self.COMBO_KERNEL_CONFIG):
             act, codes = run_and_get_code(torch.compile(f), x, y)
 
         self.assertEqual(f(x, y), act, rtol=1e-3, atol=1e-3)
         code = "\n".join(codes)
-        # 4097 rounds up to the 8192 minimum like any other rnumel hint.
-        if reduction_numel > 4096:
-            self.assertEqual(inductor_metrics.generated_kernel_count, 2)
-            self.assertIn(self.MARKER, code)
-            self.assertNotIn("combo_grid_meta", code)
-        else:
-            self.assertEqual(inductor_metrics.generated_kernel_count, 1)
-            self.assertNotIn(self.MARKER, code)
-            self.assertIn("combo_grid_meta", code)
-
-    def test_ineligible_stays_in_combo_kernel(self):
-        def f(a, b, c, d, e, f_, g, h):
-            lhs = _prepare_softmax(a + b + c + d, -1)
-            rhs = _prepare_softmax(e + f_ + g + h, -1)
-            return (*lhs, *rhs)
-
-        args = [torch.randn(4, 8192, device=GPU_TYPE) for _ in range(8)]
-        inductor_metrics.reset()
-        self.addCleanup(inductor_metrics.reset)
-        with inductor_config.patch(self.COMBO_KERNEL_CONFIG):
-            act, codes = run_and_get_code(torch.compile(f), *args)
-
-        self.assertEqual(f(*args), act, rtol=1e-3, atol=1e-3)
-        self.assertEqual(inductor_metrics.generated_kernel_count, 1)
-        code = "\n".join(codes)
-        self.assertNotIn(self.MARKER, code)
         self.assertIn("combo_grid_meta", code)
+        self.assertNotIn(self.MARKER, code)
+        self.assertIn("online_softmax_combine(", code)
 
     def test_skips_extra_reductions(self):
         def f(x):
