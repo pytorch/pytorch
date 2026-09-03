@@ -115,6 +115,10 @@ C10_XPU_API void releasePool(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);
 
+C10_XPU_API void setNoSplit(
+    c10::DeviceIndex device,
+    c10::MempoolId_t mempool_id);
+
 C10_XPU_API int getPoolUseCount(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);

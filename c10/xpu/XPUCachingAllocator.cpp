@@ -545,6 +545,9 @@ class DeviceCachingAllocator {
   ska::flat_hash_map<MempoolId_t, PrivatePool*, MempoolIdHash>
       graph_pools_freeable;
 
+  // tracks which pools should not split a segment.
+  ska::flat_hash_set<MempoolId_t, MempoolIdHash> no_split_pools;
+
   // Blocks freed during XPU graph capture whose stream_uses are non-empty.
   // Deferred because querying event status are illegal during graph recording.
   // The owning graph pool is handled in endAllocateToPool; any remaining
@@ -1225,6 +1228,9 @@ class DeviceCachingAllocator {
   }
 
   bool should_split(const Block* block, size_t size) {
+    if (no_split_pools.count(block->pool->owner_MempoolId())) {
+      return false;
+    }
     size_t remaining = block->size - size;
     if (block->pool->is_small ||
         AcceleratorAllocatorConfig::use_expandable_segments()) {
@@ -1835,6 +1841,13 @@ class DeviceCachingAllocator {
     create_or_incref_pool(mempool_id, allocator);
   }
 
+  void setNoSplit(MempoolId_t mempool_id) {
+    // Choose if this pool should not split a segment. Also cleared by
+    // releasePool.
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    no_split_pools.insert(mempool_id);
+  }
+
   int getPoolUseCount(MempoolId_t mempool_id) {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     auto it = graph_pools.find(mempool_id);
@@ -1964,6 +1977,7 @@ class DeviceCachingAllocator {
     if (uc == 0) {
       bool inserted = graph_pools_freeable.insert({mempool_id, pp}).second;
       TORCH_INTERNAL_ASSERT(inserted);
+      no_split_pools.erase(mempool_id);
     }
   }
 };
@@ -2333,6 +2347,11 @@ class NativeCachingAllocator : public XPUAllocator {
     device_allocators[device]->releasePool(std::move(mempool_id));
   }
 
+  void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+    assertValidDevice(device);
+    device_allocators[device]->setNoSplit(mempool_id);
+  }
+
   int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
     assertValidDevice(device);
     return device_allocators[device]->getPoolUseCount(std::move(mempool_id));
@@ -2429,6 +2448,10 @@ void markCaptureEnd(c10::DeviceIndex device) {
 
 void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.releasePool(device, mempool_id);
+}
+
+void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  return native_allocator.setNoSplit(device, mempool_id);
 }
 
 int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
