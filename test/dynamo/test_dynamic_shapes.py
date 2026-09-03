@@ -4,7 +4,7 @@ import warnings
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.fx.experimental import _config as fx_config
-from torch.testing._internal.common_utils import slowTest, TEST_Z3
+from torch.testing._internal.common_utils import periodic, slowTest, TEST_Z3
 
 
 try:
@@ -94,6 +94,10 @@ DynamicShapesExportTests.test_retracibility_dict_container_inp_out_dynamic_shape
 )
 DynamicShapesExportTests.test_retracibility_nested_list_out_dynamic_shapes = slowTest(  # noqa: F821
     DynamicShapesExportTests.test_retracibility_nested_list_out_dynamic_shapes  # noqa: F821
+)
+
+DynamicShapesMiscTests.test_torch_size_tensor_index_scalar_constant_dynamic_shapes = periodic(  # noqa: F821
+    DynamicShapesMiscTests.test_torch_size_tensor_index_scalar_constant_dynamic_shapes  # noqa: F821
 )
 
 if __name__ == "__main__":
