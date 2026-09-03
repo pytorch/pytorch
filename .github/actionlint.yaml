@@ -69,6 +69,7 @@ self-hosted-runner:
     - linux.rocm.gpu.mi300.4
     # gfx950 runners
     - linux.rocm.gpu.gfx950.1
+    - linux.rocm.gpu.gfx950.2
     - linux.rocm.gpu.gfx950.4
     # Org wise AWS `mac2.metal` runners (2020 Mac mini hardware powered by Apple silicon M1 processors)
     - macos-m1-stable
