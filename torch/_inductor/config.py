@@ -2269,6 +2269,12 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
+    # Experimental Blackwell decompose-K subgraph with divisor-free aligned K
+    # partitions. Kept opt-in until complete-plan coverage is broader.
+    enable_blackwell_decompose_k = (
+        os.environ.get("TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K", "0") == "1"
+    )
+
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.

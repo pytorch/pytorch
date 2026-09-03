@@ -1,36 +1,29 @@
 {{def_kernel("A", "B")}}
-    BATCH = {{size("A", 0)}}
-    M = {{size("A", 1)}}
-    N = {{size("B", 2)}}
-    K = {{size("A", 2)}}
+    BATCH = BATCH_SIZE
+    M = LOGICAL_M
+    N = LOGICAL_N
+    K = DESCRIPTOR_K
     batch = (tl.program_id(1) + tl.program_id(2) * tl.num_programs(1)).to(tl.int32)
     if batch >= BATCH or M * N == 0:
         return
 
-    stride_ab = {{stride("A", 0)}}
-    stride_bb = {{stride("B", 0)}}
+    a_base = A + batch * A_BATCH_STRIDE
+    b_base = B + batch * B_BATCH_STRIDE
+    k_base = batch * K_BATCH_OFFSET
 
-    stride_am = {{stride("A", 1)}}
-    stride_ak = {{stride("A", 2)}}
-    stride_bk = {{stride("B", 1)}}
-    stride_bn = {{stride("B", 2)}}
-
-    a_base = A + batch * stride_ab
-    b_base = B + batch * stride_bb
-
-    # A logical rank-3 BMM is represented by one rank-2 descriptor per batch.
-    # This supports arbitrary/zero batch strides and keeps the descriptor-load
-    # shape compatible with today's rank-2 Transform2CTALoads implementation.
+    # Map each logical batch onto rank-2 descriptors over the physical inputs.
+    # Ordinary BMM advances the descriptor bases, while logically padded or
+    # ragged batches can retain the physical bounds and advance the K offset.
     a_desc = triton.language.make_tensor_descriptor(
         base=a_base,
         shape=[M, K] if A_ROW_MAJOR else [K, M],
-        strides=[stride_am, 1] if A_ROW_MAJOR else [stride_ak, 1],
+        strides=[A_M_STRIDE, 1] if A_ROW_MAJOR else [A_K_STRIDE, 1],
         block_shape=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
     )
     b_desc = triton.language.make_tensor_descriptor(
         base=b_base,
         shape=[K, N] if B_ROW_MAJOR else [N, K],
-        strides=[stride_bk, 1] if B_ROW_MAJOR else [stride_bn, 1],
+        strides=[B_K_STRIDE, 1] if B_ROW_MAJOR else [B_N_STRIDE, 1],
         block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
     )
 
@@ -42,7 +35,6 @@
     grid_n = tl.cdiv(N, BLOCK_N)
     num_tiles = grid_m * grid_n
     num_pid_in_group = GROUP_M * grid_n
-    k_tiles = tl.cdiv(K, BLOCK_K)
     tile_id_c = start_pid - NUM_SMS
 
     {%- if USE_META_WS %}
@@ -70,8 +62,8 @@
         offs_am = (pid_m * BLOCK_M).to(tl.int32)
         offs_bn = (pid_n * BLOCK_N).to(tl.int32)
         accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
-        for ki in range(k_tiles):
-            offs_k = (ki * BLOCK_K).to(tl.int32)
+        for ki in range(K_TILES):
+            offs_k = (k_base + ki * BLOCK_K).to(tl.int32)
             a = a_desc.load(
                 [offs_am, offs_k] if A_ROW_MAJOR else [offs_k, offs_am],
             )
@@ -97,8 +89,9 @@
         for i in tl.static_range(EPILOGUE_SUBTILE):
             offs_cn_i = offs_cn + i * (BLOCK_N // EPILOGUE_SUBTILE)
             {%- if FLATTEN_OUTPUT %}
+            output_row = batch * OUTPUT_BATCH_ROWS + offs_cm
             {{store_output(
-                ("batch * M + offs_cm", "offs_cn_i"),
+                ("output_row", "offs_cn_i"),
                 "subtiles[i]",
                 indent_width=12,
                 val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE"),
