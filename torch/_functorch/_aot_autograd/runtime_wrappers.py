@@ -541,9 +541,12 @@ class _FirstInvocationContext:
 # are the readable reference implementations for the codegen'd _runtime_wrapper
 # generated in _create_runtime_wrapper(). They are not called on the hot path;
 # the codegen inlines their logic with all branches resolved at compile time.
+# _AutogradForwardEpilogue.finalize is the same kind of twin for the codegen'd
+# _codegen_finalize that _AOTDispatchAutogradFunctionFactory.build installs over
+# it.
 #
 # WARNING: Any semantic change to the runtime wrapper must be reflected in both
-# the reference methods here and the codegen in _create_runtime_wrapper().
+# the reference methods and their codegen.
 @dataclass
 class _RuntimeCompiledFnInvoker:
     compiled_fn: Callable[..., Any]
@@ -2729,13 +2732,11 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
             marked_positions.setdefault(id(x), []).append(i)
     if not marked_positions:
         return
-    marked_set = set(marked)
     collide: set[int] = set()
     for j, o in enumerate(raw_returns):
-        if j not in marked_set:
-            hits = marked_positions.get(id(o))
-            if hits is not None:
-                collide.update(hits)
+        hits = marked_positions.get(id(o))
+        if hits is not None and j not in hits:
+            collide.update(hits)
     for i in collide:
         raw_returns[i] = raw_returns[i].detach()
 
@@ -2744,6 +2745,11 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
 class _AutogradForwardEpilogue:
     metadata: ViewAndMutationMeta
 
+    # WARNING: this is a reference implementation; the hot path uses the
+    # codegen'd _codegen_finalize that _AOTDispatchAutogradFunctionFactory.build
+    # installs in its place (the raw-returns transform is specialized on the
+    # metadata). Keep both in sync.
+    # See Note [RuntimeWrapper codegen specification methods]
     def finalize(self, ctx: Any, fw_outs: Sequence[Any]) -> tuple[Any, ...]:
         num_outputs = self.metadata.num_outputs
         num_outputs_aliased = self.metadata.num_outputs_aliased
