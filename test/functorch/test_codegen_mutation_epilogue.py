@@ -4,9 +4,11 @@
 Tests for codegen'ing the mutation epilogue in _create_runtime_wrapper.
 
 The codegen'd mutation epilogue emits one of as_strided_(), copy_(),
-or detach().copy_() per mutated input, with the branch resolved at codegen
-time from each input's mutation metadata (mutates_metadata, mutates_data,
-is_leaf).
+detach().copy_() or _replay_input_mutation() per mutated input, with the
+branch resolved at codegen time from each input's mutation metadata
+(mutates_metadata, mutates_data, mutations_hidden_from_autograd,
+mutations_under_no_grad_or_inference_mode, is_leaf), in that order: a leaf
+only gets detach().copy_() for a mutation autograd tracked.
 
 Tests that exercise data-only mutations use torch.compile (dynamo handles
 metadata mutations in-graph, so only data mutations reach the epilogue).
@@ -20,8 +22,10 @@ trace_structured.
 
 import logging
 from contextlib import contextmanager
+from unittest.mock import patch
 
 import torch
+import torch._functorch._aot_autograd.collect_metadata_analysis as collect_metadata_analysis
 import torch._functorch.config
 from functorch.compile import nop
 from torch._functorch.aot_autograd import aot_function
@@ -61,8 +65,9 @@ class TestCodegenMutationEpilogue(TestCase):
 
     def test_single_data_mutation(self):
         """
-        Single input data mutation via mul_. Codegen should emit a direct
-        copy_() for this input.
+        Single input data mutation via mul_, visible to autograd. Codegen
+        should emit a tracked copy_() for this input; only a mutation recorded
+        as hidden from autograd goes through _replay_input_mutation().
         """
         with self._capture_codegen_source("mutation_epilogue") as captured:
 
@@ -86,11 +91,162 @@ class TestCodegenMutationEpilogue(TestCase):
             1,
             "Expected mutation_epilogue codegen artifact to be emitted",
         )
-        self.assertIn("copy_", captured[0])
+        self.assertIn("orig_inputs[0].copy_(updated_inputs[0])", captured[0])
+        self.assertNotIn("_replay_input_mutation", captured[0])
+
+    @skipIfTorchDynamo(
+        "aot_function uses FX tracing which conflicts with dynamo wrapping"
+    )
+    def test_hidden_data_mutation(self):
+        """
+        Data mutation recorded as hidden from autograd (only a triton kernel
+        write produces one, so the flag is patched in). Codegen should emit
+        _replay_input_mutation(), which writes under no_grad with the version
+        counter preserved, instead of a tracked copy_(). Uses aot_function
+        directly because torch.compile keeps hidden mutations in the graph.
+        """
+        with (
+            self._capture_codegen_source("mutation_epilogue") as captured,
+            patch.object(
+                collect_metadata_analysis,
+                "are_all_mutations_hidden_from_autograd",
+                lambda t: True,
+            ),
+        ):
+
+            def f(a):
+                a.mul_(2)
+                return a + 1
+
+            a = torch.randn(4, requires_grad=True).add(0)
+            a_ref = a.detach().clone()
+            grad_fn, version = a.grad_fn, a._version
+            out = aot_function(f, nop)(a)
+
+        self.assertEqual(a.detach(), a_ref * 2)
+        self.assertEqual(out, a_ref * 2 + 1)
+        self.assertIs(a.grad_fn, grad_fn)
+        self.assertEqual(a._version, version)
+
+        self.assertEqual(len(captured), 1)
+        self.assertIn(
+            "_replay_input_mutation(orig_inputs[0], updated_inputs[0])", captured[0]
+        )
+        self.assertNotIn(".copy_(", captured[0])
+
+    @skipIfTorchDynamo(
+        "aot_function uses FX tracing which conflicts with dynamo wrapping"
+    )
+    def test_hidden_leaf_data_mutation(self):
+        """
+        Hidden mutation recorded on a requires-grad leaf (a triton kernel
+        writing a parameter under no_grad). The leaf must not short-circuit to
+        detach().copy_(), which bumps the version counter eager never bumped:
+        codegen should emit _replay_input_mutation() exactly as for a non-leaf.
+        """
+        with (
+            self._capture_codegen_source("mutation_epilogue") as captured,
+            patch.object(
+                collect_metadata_analysis,
+                "are_all_mutations_hidden_from_autograd",
+                lambda t: True,
+            ),
+        ):
+
+            def f(a):
+                with torch.no_grad():
+                    a.mul_(2)
+                return a + 1
+
+            a = torch.randn(4, requires_grad=True)
+            a_ref = a.detach().clone()
+            version = a._version
+            out = aot_function(f, nop)(a)
+
+        self.assertEqual(a.detach(), a_ref * 2)
+        self.assertEqual(out, a_ref * 2 + 1)
+        self.assertTrue(a.is_leaf)
+        self.assertIsNone(a.grad_fn)
+        self.assertEqual(a._version, version)
+
+        self.assertEqual(len(captured), 1)
+        self.assertIn(
+            "_replay_input_mutation(orig_inputs[0], updated_inputs[0])", captured[0]
+        )
+        self.assertNotIn(".copy_(", captured[0])
+
+    @skipIfTorchDynamo(
+        "aot_function uses FX tracing which conflicts with dynamo wrapping"
+    )
+    def test_leaf_mutation_recorded_under_no_grad(self):
+        """
+        Requires-grad leaf mutated under no_grad (not on a detached view, so the
+        mutation is recorded under_no_grad rather than tracked). Codegen should
+        emit copy_() under no_grad, which bumps the version counter as eager
+        did, rather than the tracked-leaf detach().copy_().
+        """
+        with self._capture_codegen_source("mutation_epilogue") as captured:
+
+            def f(a):
+                with torch.no_grad():
+                    a.mul_(2)
+                return a + 1
+
+            a = torch.randn(4, requires_grad=True)
+            a_ref = a.detach().clone()
+            version = a._version
+            out = aot_function(f, nop)(a)
+
+        self.assertEqual(a.detach(), a_ref * 2)
+        self.assertEqual(out, a_ref * 2 + 1)
+        self.assertTrue(a.is_leaf)
+        self.assertEqual(a._version, version + 1)
+
+        self.assertEqual(len(captured), 1)
+        self.assertIn(
+            "with torch.no_grad(): orig_inputs[0].copy_(updated_inputs[0])",
+            captured[0],
+        )
+        self.assertNotIn("detach()", captured[0])
+        self.assertNotIn("_replay_input_mutation", captured[0])
+
+    @skipIfTorchDynamo(
+        "aot_function uses FX tracing which conflicts with dynamo wrapping"
+    )
+    def test_non_leaf_mutation_under_no_grad(self):
+        """
+        Non-leaf tensor mutated under no_grad. Codegen should emit copy_()
+        under no_grad, which bumps the version counter like eager did but
+        leaves the tensor's grad_fn alone. Uses aot_function directly because
+        torch.compile keeps no_grad mutations in the graph.
+        """
+        with self._capture_codegen_source("mutation_epilogue") as captured:
+
+            def f(a):
+                with torch.no_grad():
+                    a.mul_(2)
+                return a + 1
+
+            a = torch.randn(4, requires_grad=True).add(0)
+            a_ref = a.detach().clone()
+            grad_fn, version = a.grad_fn, a._version
+            out = aot_function(f, nop)(a)
+
+        self.assertEqual(a.detach(), a_ref * 2)
+        self.assertEqual(out, a_ref * 2 + 1)
+        self.assertIs(a.grad_fn, grad_fn)
+        self.assertEqual(a._version, version + 1)
+
+        self.assertEqual(len(captured), 1)
+        self.assertIn(
+            "with torch.no_grad(): orig_inputs[0].copy_(updated_inputs[0])",
+            captured[0],
+        )
+        self.assertNotIn("_replay_input_mutation", captured[0])
 
     def test_multiple_data_mutations(self):
         """
-        Multiple inputs mutated. Codegen should emit a copy_() per mutated
+        Multiple inputs mutated. Codegen should emit one copy_() per mutated
         input, with non-mutated inputs skipped entirely.
         """
         with self._capture_codegen_source("mutation_epilogue") as captured:
@@ -118,7 +274,8 @@ class TestCodegenMutationEpilogue(TestCase):
             1,
             "Expected mutation_epilogue codegen artifact to be emitted",
         )
-        self.assertIn("copy_", captured[0])
+        self.assertEqual(captured[0].count(".copy_("), 2)
+        self.assertNotIn("_replay_input_mutation", captured[0])
 
     def test_leaf_mutation_under_no_grad(self):
         """
