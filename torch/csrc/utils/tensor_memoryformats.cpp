@@ -1,6 +1,5 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
-#include <c10/core/MemoryFormat.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/MemoryFormat.h>
 
@@ -17,9 +16,7 @@ std::array<PyObject*, static_cast<int>(at::MemoryFormat::NumOptions)>
 PyObject* getTHPMemoryFormat(at::MemoryFormat memory_format) {
   auto py_memory_format =
       memory_format_registry[static_cast<int>(memory_format)];
-  if (!py_memory_format) {
-    throw std::invalid_argument("unsupported memory_format");
-  }
+  TORCH_CHECK_VALUE(py_memory_format, "unsupported memory_format");
   return py_memory_format;
 }
 

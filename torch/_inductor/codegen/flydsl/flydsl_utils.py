@@ -9,6 +9,7 @@ from torch.backends import cuda as _cuda
 
 log = logging.getLogger(__name__)
 _pathfinder_find_spec = PathFinder.find_spec
+# FlyDSL 0.3.x ``@fx.struct`` values must expose ``__cache_signature__()``.
 _FLYDSL_SUPPORTED_RELEASE = (0, 3)
 
 
