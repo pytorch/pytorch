@@ -1191,9 +1191,6 @@ class AutogradFunctionVariable(VariableTracker):
                 # type: ignore[attr-defined]
                 if vt.requires_grad is not False:
                     requires_grad = True
-            if isinstance(vt, variables.NNModuleVariable):
-                if vt.is_training(tx):
-                    requires_grad = True
 
         VariableTracker.visit(visit, (args, kwargs))
 
@@ -1815,17 +1812,6 @@ class GetAttrVariable(VariableTracker):
                 hasattr(self.obj.fn_cls.apply, name)
             )
         return super().call_obj_hasattr(tx, name)
-
-    def const_getattr(self, tx: "InstructionTranslatorBase", name: str) -> Any:
-        if not isinstance(self.obj, variables.NNModuleVariable):
-            raise NotImplementedError
-        step1 = tx.output.get_submodule(self.obj.module_key)
-        if self.name not in step1.__dict__:
-            raise NotImplementedError
-        step2 = inspect.getattr_static(step1, self.name)
-        if name not in step2.__dict__:
-            raise NotImplementedError
-        return inspect.getattr_static(step2, name)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)

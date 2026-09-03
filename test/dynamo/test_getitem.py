@@ -467,7 +467,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))
 
-    # --- NNModuleVariable (ModuleList) ---
+    # --- ModuleList __getitem__ ---
 
     def test_nn_module_list_int_index(self):
         class Model(torch.nn.Module):
@@ -485,7 +485,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(model, backend="eager", fullgraph=True)
         self.assertEqual(model(x), compiled(x))
 
-    # --- NNModuleVariable (ModuleDict) ---
+    # --- ModuleDict __getitem__ ---
 
     def test_nn_module_dict_str_key(self):
         class Model(torch.nn.Module):
@@ -501,7 +501,7 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(model, backend="eager", fullgraph=True)
         self.assertEqual(model(x), compiled(x))
 
-    # --- NNModuleVariable (Sequential) ---
+    # --- Sequential __getitem__ ---
 
     def test_nn_sequential_int_index(self):
         class Model(torch.nn.Module):

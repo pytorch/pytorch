@@ -1363,8 +1363,8 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, object | None]:
         if hasattr(resolved_call, "__self__"):
             resolved_call = resolved_call.__func__
 
-        # Mirrored from NNModuleVariable.call_function:
-        # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/variables/nn_module.py#L1035
+        # Mirrors the hook-freedom check dynamo's module tracing relies on
+        # before it will skip tracing into a module's forward hooks.
         if (
             len(mod._forward_pre_hooks) == 0
             and len(mod._forward_hooks) == 0

@@ -43,10 +43,12 @@ from .bytecode_transformation import (
 if TYPE_CHECKING:
     from .codegen import PyCodegen
 
-# It shouldn't be supported to construct an NNModuleVariable inside an FSDP module,
-# so those cases are omitted intentionally
+# It shouldn't be supported to construct a specialized nn.Module VT inside an
+# FSDP module, so those cases are omitted intentionally
 
-# represents nn.Modules tracked with NNModuleVariable (specialized is implicit in the variable name)
+# represents nn.Modules tracked with the (now-removed) specialized NNModuleVariable.
+# Nothing constructs NNModuleSource anymore; the GuardSource enum values and
+# transition tables below are kept as-is pending a follow-up guard-system cleanup.
 _GUARD_SOURCE_SPECIALIZED_NN_MODULE = {
     GuardSource.LOCAL: GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
     GuardSource.GLOBAL: GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
@@ -67,7 +69,8 @@ _GUARD_SOURCE_UNSPECIALIZED_NN_MODULE = {
     GuardSource.GLOBAL: GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
     GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
     GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
-    # this happens for an UnspecializedNNModule submodule on a NNModuleVariable
+    # this happened for an UnspecializedNNModule submodule on the (now-removed)
+    # specialized NNModuleVariable; kept for the transition table's own consistency
     GuardSource.LOCAL_SPECIALIZED_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
     GuardSource.GLOBAL_SPECIALIZED_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
     # Just to ensure that guard_source() works

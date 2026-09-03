@@ -2079,7 +2079,7 @@ def generic_issubclass(
 # directly must handle _UnhandledDescriptorError at every step (2, 4,
 # and 7), not just for unrecognized descriptor types.
 #
-# VTs with custom tp_getattro (TensorVariable, NNModuleVariable,
+# VTs with custom tp_getattro (TensorVariable, UnspecializedNNModuleVariable,
 # UserDefinedClassVariable, SuperVariable) override tp_getattro_impl.
 
 _NO_DEFAULT = object()

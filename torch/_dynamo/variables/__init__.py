@@ -3,7 +3,7 @@ This package implements variable tracking and symbolic execution capabilities fo
 which are essential for converting Python code into FX graphs. It provides a comprehensive
 set of variable types that handle different Python constructs during tracing.
 
-Each variable type (like BuiltinVariable, TensorVariable, NNModuleVariable, etc.) is responsible
+Each variable type (like BuiltinVariable, TensorVariable, UnspecializedNNModuleVariable, etc.) is responsible
 for tracking and symbolically executing operations on specific Python objects. This enables
 Dynamo to:
 - Track the flow of values through Python code
@@ -160,7 +160,6 @@ from .misc import (
 )
 from .nn_module import (
     FSDPManagedNNModuleVariable,
-    NNModuleVariable,
     UnspecializedBuiltinNNModuleVariable,
     UnspecializedNNModuleVariable,
 )
@@ -265,7 +264,6 @@ __all__ = [
     "NamedTupleVariable",
     "NestedUserFunctionVariable",
     "NewGlobalVariable",
-    "NNModuleVariable",
     "NumpyNdarrayVariable",
     "NumpyVariable",
     "OptimizerVariable",

@@ -3191,7 +3191,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             if not isinstance(
                 combine_fn_var,
                 (
-                    variables.nn_module.NNModuleVariable,
                     variables.nn_module.UnspecializedNNModuleVariable,
                     variables.FunctoolsPartialVariable,
                 ),
@@ -3206,11 +3205,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ],
                 )
             return isinstance(
-                combine_fn_var,
-                (
-                    variables.nn_module.NNModuleVariable,
-                    variables.nn_module.UnspecializedNNModuleVariable,
-                ),
+                combine_fn_var, variables.nn_module.UnspecializedNNModuleVariable
             )
 
         def arg_extractor(
@@ -3699,10 +3694,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
                 hints=[],
             )
         lowered_module, lowered_node = None, None
-        if isinstance(args[0], variables.NNModuleVariable):
-            lowered_module = tx.output.get_submodule(args[0].module_key)
-            lowered_node = make_attr(tx, args[0].module_key)
-        elif isinstance(args[0], variables.UnspecializedNNModuleVariable):
+        if isinstance(args[0], variables.UnspecializedNNModuleVariable):
             # This nn module is special sa delegated by executorch. Just
             # install it as a attr in the graph.
             lowered_module = args[0].value

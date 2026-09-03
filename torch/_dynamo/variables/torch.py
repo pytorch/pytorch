@@ -33,7 +33,7 @@ import math
 import re
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext
-from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeIs
 
 import torch._C
@@ -4056,12 +4056,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             convert_modules_to_states,
         )
 
-        from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+        from .nn_module import UnspecializedNNModuleVariable
 
         def is_module_variable(
             var: VariableTracker,
-        ) -> TypeIs[Union["NNModuleVariable", "UnspecializedNNModuleVariable"]]:
-            return isinstance(var, (NNModuleVariable, UnspecializedNNModuleVariable))
+        ) -> TypeIs["UnspecializedNNModuleVariable"]:
+            return isinstance(var, UnspecializedNNModuleVariable)
 
         flat_args_var, tree_spec_var = unpack_iterable(
             tx,

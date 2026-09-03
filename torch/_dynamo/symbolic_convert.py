@@ -197,7 +197,7 @@ from .variables.misc import (
     TracebackVariable,
     UnknownVariable,
 )
-from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .variables.nn_module import UnspecializedNNModuleVariable
 from .variables.object_protocol import (
     generic_delitem,
     generic_getattr,
@@ -955,13 +955,6 @@ def generic_jump(
                 self.jump(inst)
         elif value.is_tensor() and self.should_compile_partial_graph():
             jump_graph_break(self, inst, value)
-        elif isinstance(value, NNModuleVariable):
-            # Equivalent of "self.nn_module is not None"
-            mod = self.output.get_submodule(value.module_key)
-            if truth_fn(mod):
-                if push:
-                    self.push(value)
-                self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
             result = generic_is_true(self, value)  # type: ignore[arg-type]
             if result.is_python_constant():
@@ -6215,13 +6208,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     should_check = False
 
             if should_check:
-                if isinstance(arg0, NNModuleVariable):
-                    module = parent.output.get_submodule(arg0.module_key)
-                    if isinstance(module, torch.fx.GraphModule):
-                        code_context.get_context(module.forward.__code__)[
-                            "orig_graphmodule"
-                        ] = weakref.ref(module)
-                elif isinstance(arg0, UnspecializedNNModuleVariable):
+                if isinstance(arg0, UnspecializedNNModuleVariable):
                     module = arg0.value
                     if isinstance(module, torch.fx.GraphModule):
                         code_context.get_context(module.forward.__code__)[
