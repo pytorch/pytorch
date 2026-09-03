@@ -251,17 +251,25 @@ class GuardProvenance(enum.Enum):
     ``GLOBAL``
         Rooted in the Python module environment: a binding looked up in a
         module's globals dict at guard-check time (whoever installed it), or an
-        imported module looked up through ``__import__``. The one category a
-        consumer may drop wholesale under an environment-invariant contract.
+        imported module looked up through ``__import__``. Everything reached
+        through that binding is classified with it, including values a call on
+        it produces at guard-check time (a ``ContextVar``'s ``.get()``, a
+        ``threading.local`` attribute), so the environment-invariant contract
+        under which a consumer drops GLOBAL guards wholesale must hold for
+        per-thread and per-context state reachable from module globals too.
     ``AMBIENT``
         Rooted at interpreter- or process-wide state that Dynamo reads through
         its own accessors rather than through a globals lookup from the traced
-        frame. This covers both process-wide configuration (deterministic
-        algorithms) and per-thread or per-call context (the current stream,
-        grad mode, the default device and the other torch-function modes,
-        the functorch mode stack, saved-tensor hooks, forward-AD level) that
-        selects a different correct graph at the call site. It is therefore
-        not uniformly droppable; a consumer must decide per guard type.
+        frame. This covers both process-wide configuration (the GLOBAL_STATE
+        guard: deterministic algorithms, TF32 and reduced-precision reduction
+        settings, thread count, default dtype, plus the thread-local autocast
+        state and FSDP training state) and per-thread or per-call context (the
+        current stream, grad mode, the default device and the other
+        torch-function modes, the functorch mode stack, saved-tensor hooks,
+        forward-AD level) that selects a different correct graph at the call
+        site. It is therefore not droppable as a category; a consumer that
+        drops any of these must justify it per guard type or verify the guard
+        against its own examples.
     ``SYNTHETIC``
         Tracing-internal roots that are not part of the Python environment
         (synthetic and temp locals, ephemeral sources, materialized constants,

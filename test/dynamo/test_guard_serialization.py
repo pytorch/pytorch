@@ -943,10 +943,45 @@ class TestGuardSerialization(TestGuardSerializationBase):
             PackageError, "CLASS_MATCH guard cannot be serialized."
         ) as cm:
             self._test_serialization("CLASS_MATCH", fn, x)
-        # The derived-guard-type branch must carry the typed attributes so
+        # The direct unsupported-type arm must carry the typed attributes so
         # consumers can inspect which guard failed without matching the message.
         self.assertIsInstance(cm.exception, torch._dynamo.exc.GuardSerializationError)
         self.assertEqual(cm.exception.guard_type, "CLASS_MATCH")
+
+    def test_serialize_guards_derived_unsupported_type_raises_typed(self):
+        # No live guard reaches the derived-type arm today (guards that derive
+        # an unsupported check are themselves unsupported), so pin it directly
+        # with a stub guard.
+        from torch._dynamo.guards import CheckFunctionManager
+
+        guard = types.SimpleNamespace(
+            create_fn_name=lambda: "DICT_KEYS",
+            guard_types=["DICT_KEYS", "ID_MATCH"],
+            _unserializable=False,
+            name="L['d']",
+        )
+        with self.assertRaises(torch._dynamo.exc.GuardSerializationError) as cm:
+            CheckFunctionManager.serialize_guards(None, None, [guard], None)
+        self.assertEqual(cm.exception.guard_type, "ID_MATCH")
+        self.assertEqual(cm.exception.guard_name, "L['d']")
+
+    def test_sequence_length_local_type_raises_typed(self):
+        # SEQUENCE_LENGTH runs TYPE_MATCH on its own guard, so a local-scope
+        # sequence type marks the SEQUENCE_LENGTH guard unserializable; with the
+        # sibling TYPE_MATCH guard filtered out it must still raise the typed
+        # error rather than a bare PackageError from the pickler.
+        class LocalList(list):
+            pass
+
+        def fn(x, lst):
+            return x + len(lst)
+
+        x = torch.randn(3)
+        with self.assertRaises(torch._dynamo.exc.GuardSerializationError) as cm:
+            self._test_serialization("SEQUENCE_LENGTH", fn, x, LocalList([1, 2]))
+        self.assertEqual(cm.exception.guard_type, "SEQUENCE_LENGTH")
+        self.assertEqual(cm.exception.guard_name, "L['lst']")
+        self.assertIn("LocalList", str(cm.exception))
 
     def test_closure_match(self):
         def fn(x):
