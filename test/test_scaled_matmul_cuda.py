@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     random_matrix_with_scaled_reduction_dim,
     run_tests,
     runOnRocmArch,
+    skipIfNoCuteDSL,
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_CUDA,
@@ -2845,6 +2846,620 @@ class TestFP8Matmul(TestCase):
         expected = fn(a, b, scale_a, scale_b, offs)
         actual = torch.compile(fn, fullgraph=True)(a, b, scale_a, scale_b, offs)
         self.assertEqual(actual, expected)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipCUDAIf(not IS_SM90, "DeepSeek style (1x128, 128x128) grouped scaling requires SM90 (Hopper)")
+    @skipIfNoCuteDSL
+    @parametrize("out_overload", [False, True])
+    @parametrize(
+        "lhs_block,rhs_block,group_sizes,K,N,expected_config",
+        [
+            (1, 1, (128,), 256, 128, (64, 64, 1)),
+            (1, 128, (128,), 256, 128, (64, 64, 1)),
+            (128, 1, (128,), 256, 128, (64, 64, 1)),
+            (1, 1, (128, 256), 384, 256, (64, 64, 1)),
+            (1, 128, (128, 256), 384, 256, (64, 64, 1)),
+            (128, 1, (128, 256), 384, 256, (64, 64, 1)),
+            (1, 1, (1024,), 256, 2048, (128, 128, 1)),
+            (1, 128, (1024,), 256, 2048, (128, 128, 1)),
+            (128, 1, (1024,), 256, 2048, (128, 128, 1)),
+            (1, 1, (4,), 256, 2048, (64, 64, 2)),
+            (1, 128, (4,), 256, 2048, (64, 64, 2)),
+            (1, 1, (132, 128), 256, 144, (64, 64, 1)),
+            (1, 128, (132, 128), 256, 256, (64, 64, 1)),
+            (1, 1, (32768,), 256, 256, (128, 128, 2)),
+            (1, 128, (32768,), 256, 256, (128, 128, 2)),
+        ],
+    )
+    def test_scaled_grouped_mm_deepseek_blockwise_numerics(
+        self,
+        out_overload,
+        lhs_block,
+        rhs_block,
+        group_sizes,
+        K,
+        N,
+        expected_config,
+        device,
+    ):
+        """Covers the three DeepSeek recipes and production kernel variants."""
+        from torch._native import registry
+        from torch._native.ops.scaled_grouped_mm.hopper_config import (
+            select_kernel_config,
+        )
+
+        self.assertIn("_scaled_grouped_mm_v2", registry.get_dsl_operations("cutedsl"))
+
+        torch.manual_seed(42)
+        total_m = sum(group_sizes)
+        num_sms = torch.cuda.get_device_properties(device).multi_processor_count
+        config = select_kernel_config(total_m, N, K, len(group_sizes), num_sms)
+        self.assertEqual(
+            (config.tile_m, config.tile_n, config.cluster_n), expected_config
+        )
+        offs = torch.tensor(
+            list(itertools.accumulate(group_sizes)), device=device, dtype=torch.int32
+        )
+        lhs_recipe = ScalingType.BlockWise1x128 if lhs_block == 1 else ScalingType.BlockWise128x128
+        rhs_recipe = ScalingType.BlockWise1x128 if rhs_block == 1 else ScalingType.BlockWise128x128
+
+        a = torch.randn(total_m, K, device=device, dtype=torch.bfloat16)
+        a_fp8, a_scale_quant = tensor_to_scale_block(a, e4m3_type, lhs_block, 128)
+        a_scale = a_scale_quant.reciprocal()
+        if lhs_block == 1:
+            a_scale = a_scale.t().contiguous().t()
+        else:
+            a_scale, _ = _pad_128x128_scales(a_scale)
+            a_scale = a_scale.t()
+
+        b_fp8_groups, b_scale_op_groups = [], []
+        out_ref = torch.empty(total_m, N, device=device, dtype=torch.bfloat16)
+        start = 0
+        for end in offs.tolist():
+            b_i = torch.randn(N, K, device=device, dtype=torch.bfloat16)
+            b_fp8_i, b_scale_nat_quant_i = tensor_to_scale_block(b_i, e4m3_type, rhs_block, 128)
+            b_scale_nat_i = b_scale_nat_quant_i.reciprocal()
+            if rhs_block == 1:
+                b_scale_op_i = b_scale_nat_i.t().contiguous().t()
+                b_scale_ref_i = b_scale_op_i
+            else:
+                b_scale_op_i, _ = _pad_128x128_scales(b_scale_nat_i)
+                b_scale_op_i = b_scale_op_i.t()
+                b_scale_ref_i = b_scale_op_i
+            b_fp8_groups.append(b_fp8_i)
+            b_scale_op_groups.append(b_scale_op_i)
+
+            if lhs_block == 1:
+                a_scale_ref_i = a_scale[start:end, :].t().contiguous().t()
+            else:
+                a_scale_ref_i = a_scale[:, start // 128 : end // 128]
+            out_ref[start:end, :] = scaled_mm_wrap(
+                a_fp8[start:end, :], b_fp8_i.t(),
+                scale_a=a_scale_ref_i, scale_recipe_a=lhs_recipe,
+                scale_b=b_scale_ref_i, scale_recipe_b=rhs_recipe,
+                out_dtype=torch.bfloat16,
+            )
+            start = end
+
+        mat2 = torch.stack(b_fp8_groups, dim=0).transpose(-2, -1)  # [G, K, N]
+        if rhs_block == 1:
+            scale_b = torch.empty_strided(
+                (len(group_sizes), N, K // 128),
+                (N * (K // 128), 1, N),
+                device=device,
+                dtype=torch.float32,
+            )
+        else:
+            l4 = round_up(K // 128, 4)
+            scale_b = torch.empty_strided(
+                (len(group_sizes), l4, N // 128),
+                (l4 * (N // 128), 1, l4),
+                device=device,
+                dtype=torch.float32,
+            )
+        for i, b_scale_op_i in enumerate(b_scale_op_groups):
+            scale_b[i].copy_(b_scale_op_i)
+
+        kwargs = dict(
+            offs=offs, out_dtype=torch.bfloat16,
+        )
+        if out_overload:
+            out = torch.empty(total_m, N, device=device, dtype=torch.bfloat16)
+            actual = scaled_grouped_mm_wrap(
+                a_fp8, mat2, [a_scale], [scale_b],
+                [lhs_recipe], [rhs_recipe], out=out, **kwargs,
+            )
+        else:
+            actual = scaled_grouped_mm_wrap(
+                a_fp8, mat2, a_scale, scale_b,
+                lhs_recipe, rhs_recipe, **kwargs,
+            )
+
+        self.assertEqual(actual, out_ref, atol=6e-1, rtol=7e-2)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipCUDAIf(not IS_SM90, "DeepSeek style grouped scaling requires SM90 (Hopper)")
+    @skipIfNoCuteDSL
+    @parametrize("out_overload", [False, True])
+    @parametrize(
+        "lhs_block,rhs_block,group_ks,M,N",
+        [
+            (1, 128, (256, 256), 128, 256),
+            (1, 1, (256, 256), 128, 256),
+            (128, 1, (256, 256), 128, 256),
+            (1, 128, (128, 256, 512), 256, 128),
+            (1, 128, (256,), 64, 256),
+            (1, 128, (256, 0, 256), 128, 256),
+        ],
+    )
+    def test_scaled_grouped_mm_deepseek_blockwise_2d_2d(
+        self, out_overload, lhs_block, rhs_block, group_ks, M, N, device
+    ):
+        """offs splits K: A is (M, K), B is (K, N), out is (G, M, N)."""
+        from torch._native import registry
+
+        self.assertIn("_scaled_grouped_mm_v2", registry.get_dsl_operations("cutedsl"))
+
+        torch.manual_seed(42)
+        K = sum(group_ks)
+        G = len(group_ks)
+        offs = torch.tensor(
+            list(itertools.accumulate(group_ks)), device=device, dtype=torch.int32
+        )
+        lhs_recipe = ScalingType.BlockWise1x128 if lhs_block == 1 else ScalingType.BlockWise128x128
+        rhs_recipe = ScalingType.BlockWise1x128 if rhs_block == 1 else ScalingType.BlockWise128x128
+
+        a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+        a_fp8, a_scale_quant = tensor_to_scale_block(a, e4m3_type, lhs_block, 128)
+        a_scale_nat = a_scale_quant.reciprocal()
+        b = torch.randn(N, K, device=device, dtype=torch.bfloat16)
+        b_fp8, b_scale_quant = tensor_to_scale_block(b, e4m3_type, rhs_block, 128)
+        b_scale_nat = b_scale_quant.reciprocal()
+
+        def _op_layout(nat, block):
+            if block == 1:
+                return nat.t().contiguous().t()
+            # A (1, kb) slice counts as contiguous whatever its strides,
+            # so pad/contiguous can no-op.
+            kb = nat.shape[-1]
+            padded = torch.zeros(
+                nat.shape[0], round_up(kb, 4), device=nat.device, dtype=nat.dtype
+            )
+            padded[:, :kb] = nat
+            return padded.t()
+
+        a_scale = _op_layout(a_scale_nat, lhs_block)
+        scale_b = _op_layout(b_scale_nat, rhs_block)
+        mat2 = b_fp8.t()
+
+        # An empty group contributes no tokens, so its dW slice stays zero.
+        out_ref = torch.zeros(G, M, N, device=device, dtype=torch.bfloat16)
+        start = 0
+        for g, end in enumerate(offs.tolist()):
+            if end == start:
+                continue
+            kb0, kb1 = start // 128, end // 128
+            a_ref = _op_layout(a_scale_nat[:, kb0:kb1], lhs_block)
+            b_ref = _op_layout(b_scale_nat[:, kb0:kb1], rhs_block)
+            out_ref[g] = scaled_mm_wrap(
+                a_fp8[:, start:end], b_fp8[:, start:end].t(),
+                scale_a=a_ref, scale_recipe_a=lhs_recipe,
+                scale_b=b_ref, scale_recipe_b=rhs_recipe,
+                out_dtype=torch.bfloat16,
+            )
+            start = end
+
+        kwargs = {"offs": offs, "out_dtype": torch.bfloat16}
+        if out_overload:
+            padded_n = round_up(N, 8)
+            out = torch.empty_strided(
+                (G, M, N), (M * padded_n, padded_n, 1),
+                device=device, dtype=torch.bfloat16,
+            )
+            actual = scaled_grouped_mm_wrap(
+                a_fp8, mat2, [a_scale], [scale_b],
+                [lhs_recipe], [rhs_recipe], out=out, **kwargs,
+            )
+        else:
+            actual = scaled_grouped_mm_wrap(
+                a_fp8, mat2, a_scale, scale_b,
+                lhs_recipe, rhs_recipe, **kwargs,
+            )
+
+        self.assertEqual(actual, out_ref, atol=6e-1, rtol=7e-2)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipCUDAIf(not IS_SM90, "DeepSeek style grouped scaling requires SM90 (Hopper)")
+    @skipIfNoCuteDSL
+    @parametrize("out_overload", [False, True])
+    @parametrize(
+        "lhs_block,rhs_block,B,M,N,K",
+        [
+            (1, 128, 2, 128, 256, 256),
+            (1, 1, 2, 128, 256, 256),
+            (128, 1, 2, 128, 256, 256),
+            (1, 128, 5, 256, 128, 512),
+            (1, 128, 1, 64, 256, 256),
+        ],
+    )
+    def test_scaled_grouped_mm_deepseek_blockwise_3d_3d(
+        self, out_overload, lhs_block, rhs_block, B, M, N, K, device
+    ):
+        """No offs: A is (B, M, K), B is (B, K, N), out is (B, M, N)."""
+        from torch._native import registry
+
+        self.assertIn("_scaled_grouped_mm_v2", registry.get_dsl_operations("cutedsl"))
+
+        torch.manual_seed(42)
+        lhs_recipe = ScalingType.BlockWise1x128 if lhs_block == 1 else ScalingType.BlockWise128x128
+        rhs_recipe = ScalingType.BlockWise1x128 if rhs_block == 1 else ScalingType.BlockWise128x128
+
+        def _op_layout(nat, block):
+            if block == 1:
+                return nat.t().contiguous().t()
+            kb = nat.shape[-1]
+            padded = torch.zeros(
+                nat.shape[0], round_up(kb, 4), device=nat.device, dtype=nat.dtype
+            )
+            padded[:, :kb] = nat
+            return padded.t()
+
+        def _stack_op(scales):
+            # Each op-layout scale is (d0, d1) with strides (1, d0); the batched
+            # form keeps that per batch, which torch.stack would not.
+            d0, d1 = scales[0].shape
+            out = torch.empty_strided(
+                (len(scales), d0, d1), (d0 * d1, 1, d0),
+                device=scales[0].device, dtype=scales[0].dtype,
+            )
+            for i, sc in enumerate(scales):
+                out[i].copy_(sc)
+            return out
+
+        a_fp8_l, a_scale_l, b_fp8_l, b_scale_l = [], [], [], []
+        out_ref = torch.empty(B, M, N, device=device, dtype=torch.bfloat16)
+        for i in range(B):
+            a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+            a_fp8_i, a_q = tensor_to_scale_block(a, e4m3_type, lhs_block, 128)
+            a_s = _op_layout(a_q.reciprocal(), lhs_block)
+            b = torch.randn(N, K, device=device, dtype=torch.bfloat16)
+            b_fp8_i, b_q = tensor_to_scale_block(b, e4m3_type, rhs_block, 128)
+            b_s = _op_layout(b_q.reciprocal(), rhs_block)
+            out_ref[i] = scaled_mm_wrap(
+                a_fp8_i, b_fp8_i.t(),
+                scale_a=a_s, scale_recipe_a=lhs_recipe,
+                scale_b=b_s, scale_recipe_b=rhs_recipe,
+                out_dtype=torch.bfloat16,
+            )
+            a_fp8_l.append(a_fp8_i)
+            a_scale_l.append(a_s)
+            b_fp8_l.append(b_fp8_i)
+            b_scale_l.append(b_s)
+
+        mat_a = torch.stack(a_fp8_l, dim=0)
+        mat2 = torch.stack(b_fp8_l, dim=0).transpose(-2, -1)
+        a_scale = _stack_op(a_scale_l)
+        scale_b = _stack_op(b_scale_l)
+
+        kwargs = {"out_dtype": torch.bfloat16}
+        if out_overload:
+            padded_n = round_up(N, 8)
+            out = torch.empty_strided(
+                (B, M, N), (M * padded_n, padded_n, 1),
+                device=device, dtype=torch.bfloat16,
+            )
+            actual = scaled_grouped_mm_wrap(
+                mat_a, mat2, [a_scale], [scale_b],
+                [lhs_recipe], [rhs_recipe], out=out, **kwargs,
+            )
+        else:
+            actual = scaled_grouped_mm_wrap(
+                mat_a, mat2, a_scale, scale_b,
+                lhs_recipe, rhs_recipe, **kwargs,
+            )
+
+        self.assertEqual(actual, out_ref, atol=6e-1, rtol=7e-2)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipCUDAIf(not IS_SM90, "DeepSeek style grouped scaling requires SM90 (Hopper)")
+    @skipIfNoCuteDSL
+    @parametrize("out_overload", [False, True])
+    @parametrize(
+        "lhs_block,rhs_block,G,M,N,K",
+        [
+            (1, 128, 2, 128, 256, 256),
+            (1, 1, 2, 128, 256, 256),
+            (128, 1, 2, 128, 256, 256),
+            (1, 1, 3, 256, 384, 512),
+            (1, 128, 1, 64, 256, 256),
+        ],
+    )
+    def test_scaled_grouped_mm_deepseek_blockwise_3d_2d(
+        self, out_overload, lhs_block, rhs_block, G, M, N, K, device
+    ):
+        """offs splits N: A is (G, M, K), B is (K, N), out is (M, N)."""
+        from torch._native import registry
+
+        self.assertIn("_scaled_grouped_mm_v2", registry.get_dsl_operations("cutedsl"))
+
+        torch.manual_seed(42)
+        lhs_recipe = ScalingType.BlockWise1x128 if lhs_block == 1 else ScalingType.BlockWise128x128
+        rhs_recipe = ScalingType.BlockWise1x128 if rhs_block == 1 else ScalingType.BlockWise128x128
+
+        def _op_layout(nat, block):
+            if block == 1:
+                return nat.t().contiguous().t()
+            kb = nat.shape[-1]
+            padded = torch.zeros(
+                nat.shape[0], round_up(kb, 4), device=nat.device, dtype=nat.dtype
+            )
+            padded[:, :kb] = nat
+            return padded.t()
+
+        def _stack_op(scales):
+            d0, d1 = scales[0].shape
+            out = torch.empty_strided(
+                (len(scales), d0, d1), (d0 * d1, 1, d0),
+                device=scales[0].device, dtype=scales[0].dtype,
+            )
+            for i, sc in enumerate(scales):
+                out[i].copy_(sc)
+            return out
+
+        # Column counts per group: 128-aligned so either B recipe is expressible.
+        cols = [N // G] * G
+        cols[-1] += N - sum(cols)
+        cols = [round_up(c, 128) for c in cols[:-1]]
+        cols.append(N - sum(cols))
+        self.assertTrue(all(c > 0 for c in cols), f"bad split {cols} for N={N}")
+        offs = torch.tensor(
+            list(itertools.accumulate(cols)), device=device, dtype=torch.int32
+        )
+
+        b = torch.randn(N, K, device=device, dtype=torch.bfloat16)
+        b_fp8, b_q = tensor_to_scale_block(b, e4m3_type, rhs_block, 128)
+        scale_b = _op_layout(b_q.reciprocal(), rhs_block)
+
+        a_fp8_l, a_scale_l = [], []
+        out_ref = torch.empty(M, N, device=device, dtype=torch.bfloat16)
+        start = 0
+        for i, end in enumerate(itertools.accumulate(cols)):
+            a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+            a_fp8_i, a_q = tensor_to_scale_block(a, e4m3_type, lhs_block, 128)
+            a_s = _op_layout(a_q.reciprocal(), lhs_block)
+            rows = slice(start, end) if rhs_block == 1 else slice(start // 128, end // 128)
+            out_ref[:, start:end] = scaled_mm_wrap(
+                a_fp8_i, b_fp8[start:end].t(),
+                scale_a=a_s, scale_recipe_a=lhs_recipe,
+                scale_b=_op_layout(b_q.reciprocal()[rows], rhs_block),
+                scale_recipe_b=rhs_recipe,
+                out_dtype=torch.bfloat16,
+            )
+            a_fp8_l.append(a_fp8_i)
+            a_scale_l.append(a_s)
+            start = end
+
+        mat_a = torch.stack(a_fp8_l, dim=0)
+        mat2 = b_fp8.t()
+        a_scale = _stack_op(a_scale_l)
+
+        kwargs = {"out_dtype": torch.bfloat16, "offs": offs}
+        if out_overload:
+            padded_n = round_up(N, 8)
+            out = torch.empty_strided(
+                (M, N), (padded_n, 1), device=device, dtype=torch.bfloat16
+            )
+            actual = scaled_grouped_mm_wrap(
+                mat_a, mat2, [a_scale], [scale_b],
+                [lhs_recipe], [rhs_recipe], out=out, **kwargs,
+            )
+        else:
+            actual = scaled_grouped_mm_wrap(
+                mat_a, mat2, a_scale, scale_b,
+                lhs_recipe, rhs_recipe, **kwargs,
+            )
+
+        self.assertEqual(actual, out_ref, atol=6e-1, rtol=7e-2)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipCUDAIf(not IS_SM90, "DeepSeek grouped eligibility requires SM90")
+    @skipIfNoCuteDSL
+    def test_scaled_grouped_mm_deepseek_eligibility(self, device):
+        from torch._native.ops.scaled_grouped_mm.cutedsl_impl import _cond, _out_cond
+
+        M, K, N, G = 128, 256, 128, 1
+        a = torch.empty((M, K), device=device, dtype=e4m3_type)
+        b = torch.empty_strided(
+            (G, K, N), (K * N, 1, K), device=device, dtype=e4m3_type
+        )
+        scale_a = torch.empty_strided(
+            (M, K // 128), (1, M), device=device, dtype=torch.float32
+        )
+        scale_b = torch.empty_strided(
+            (G, N, K // 128),
+            (N * (K // 128), 1, N),
+            device=device,
+            dtype=torch.float32,
+        )
+        offs = torch.tensor([M], device=device, dtype=torch.int32)
+        recipe = ScalingType.BlockWise1x128.value
+        swizzle = SwizzleType.NO_SWIZZLE.value
+
+        def eligible(a=a, b=b, scale_a=scale_a, scale_b=scale_b, offs=offs):
+            return _cond(
+                a,
+                b,
+                [scale_a],
+                [recipe],
+                [swizzle],
+                [scale_b],
+                [recipe],
+                [swizzle],
+                offs=offs,
+                out_dtype=torch.bfloat16,
+            )
+
+        def misaligned_like(t):
+            storage = torch.empty(
+                t.numel() + 16, device=t.device, dtype=t.dtype
+            )
+            return storage.as_strided(t.shape, t.stride(), storage_offset=1)
+
+        self.assertTrue(eligible())
+        self.assertFalse(eligible(a=misaligned_like(a)))
+        self.assertFalse(eligible(b=misaligned_like(b)))
+        self.assertFalse(eligible(scale_a=misaligned_like(scale_a)))
+        self.assertFalse(eligible(scale_b=misaligned_like(scale_b)))
+        self.assertFalse(eligible(offs=torch.tensor([M], dtype=torch.int32)))
+        strided_offs = torch.tensor([M, 0], device=device, dtype=torch.int32)[::2]
+        self.assertFalse(eligible(offs=strided_offs))
+
+        out = torch.empty((M, N), device=device, dtype=torch.bfloat16)
+        self.assertTrue(
+            _out_cond(
+                a,
+                b,
+                [scale_a],
+                [recipe],
+                [swizzle],
+                [scale_b],
+                [recipe],
+                [swizzle],
+                offs=offs,
+                out_dtype=torch.bfloat16,
+                out=out,
+            )
+        )
+        self.assertFalse(
+            _out_cond(
+                a,
+                b,
+                [scale_a],
+                [recipe],
+                [swizzle],
+                [scale_b],
+                [recipe],
+                [swizzle],
+                offs=offs,
+                out_dtype=torch.bfloat16,
+                out=misaligned_like(out),
+            )
+        )
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipCUDAIf(not IS_SM90, "DeepSeek grouped metadata requires SM90")
+    @skipIfNoCuteDSL
+    @parametrize("lhs_block", [1, 128])
+    @parametrize(
+        "tile_m,tile_n", [(64, 64), (64, 128), (128, 64), (128, 128)]
+    )
+    def test_scaled_grouped_mm_deepseek_group_metadata(
+        self, lhs_block, tile_m, tile_n, device
+    ):
+        from torch._native.ops.scaled_grouped_mm.hopper_config import (
+            HopperDeepSeekConfig,
+        )
+        from torch._native.ops.scaled_grouped_mm.group_meta import (
+            build_group_metadata,
+        )
+
+        group_sizes = (128, 256, 384)
+        total_m, K, N = sum(group_sizes), 256, 256
+        G = len(group_sizes)
+        offs = torch.tensor(
+            list(itertools.accumulate(group_sizes)), device=device, dtype=torch.int32
+        )
+        a = torch.empty((total_m, K), device=device, dtype=e4m3_type)
+        b = torch.empty_strided(
+            (G, K, N), (K * N, 1, K), device=device, dtype=e4m3_type
+        )
+        out = torch.empty_strided(
+            (total_m, N),
+            (round_up(N, 8), 1),
+            device=device,
+            dtype=torch.bfloat16,
+        )
+        if lhs_block == 1:
+            recipe_a = ScalingType.BlockWise1x128.value
+            scale_a = torch.empty_strided(
+                (total_m, K // 128), (1, total_m), device=device
+            )
+        else:
+            recipe_a = ScalingType.BlockWise128x128.value
+            scale_a = torch.empty_strided(
+                (round_up(K // 128, 4), total_m // 128),
+                (1, round_up(K // 128, 4)),
+                device=device,
+            )
+        scale_b = torch.empty_strided(
+            (G, N, K // 128), (N * (K // 128), 1, N), device=device
+        )
+
+        config = HopperDeepSeekConfig(tile_m, tile_n, 1, 1)
+        metadata = build_group_metadata(
+            a, b, scale_a, scale_b, recipe_a, offs, out, config=config
+        )
+        mnkl, ptrs_abc, ptrs_scale, tile_offsets, total_tiles = metadata
+        starts = torch.tensor(
+            (0, *offs[:-1].tolist()), device=device, dtype=torch.int64
+        )
+        sizes = torch.tensor(group_sizes, device=device, dtype=torch.int32)
+        expected_mnkl = torch.stack(
+            (
+                sizes,
+                torch.full((G,), N, device=device, dtype=torch.int32),
+                torch.full((G,), K, device=device, dtype=torch.int32),
+                torch.ones((G,), device=device, dtype=torch.int32),
+            ),
+            dim=1,
+        )
+        self.assertEqual(mnkl, expected_mnkl)
+
+        elem_ab, elem_c = a.element_size(), out.element_size()
+        expected_abc = torch.stack(
+            (
+                a.data_ptr() + starts * a.stride(0) * elem_ab,
+                b.data_ptr()
+                + torch.arange(G, device=device) * b.stride(0) * elem_ab,
+                out.data_ptr() + starts * out.stride(0) * elem_c,
+            ),
+            dim=1,
+        )
+        self.assertEqual(ptrs_abc, expected_abc)
+
+        elem_scale = scale_a.element_size()
+        if lhs_block == 1:
+            scale_a_starts = starts * scale_a.stride(0)
+        else:
+            scale_a_starts = (starts // 128) * scale_a.stride(1)
+        expected_scale = torch.stack(
+            (
+                scale_a.data_ptr() + scale_a_starts * elem_scale,
+                scale_b.data_ptr()
+                + torch.arange(G, device=device) * scale_b.stride(0) * elem_scale,
+            ),
+            dim=1,
+        )
+        self.assertEqual(ptrs_scale, expected_scale)
+        expected_offsets = [0]
+        for group, group_m in enumerate(group_sizes):
+            tiles_m = round_up(group_m, tile_m) // tile_m
+            tiles_n = round_up(N, tile_n) // tile_n
+            expected_offsets.append(expected_offsets[-1] + tiles_m * tiles_n)
+        expected_offsets_t = torch.tensor(
+            expected_offsets, device=device, dtype=torch.int32
+        )
+        self.assertEqual(tile_offsets, expected_offsets_t)
+        self.assertEqual(
+            total_tiles,
+            torch.tensor([expected_offsets[-1]], device=device, dtype=torch.int32),
+        )
 
 
 instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True)
