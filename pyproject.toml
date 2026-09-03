@@ -408,6 +408,7 @@ Forum = "https://discuss.pytorch.org"
 optree = ["optree>=0.13.0"]
 opt-einsum = ["opt-einsum>=3.3"]
 pyyaml = ["pyyaml"]
+nccl4py = ["nccl4py==0.3.1"]
 
 # Linter tools #################################################################
 
