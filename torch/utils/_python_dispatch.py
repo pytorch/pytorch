@@ -540,7 +540,7 @@ class TraceableWrapperSubclass(Protocol):
 TensorWithFlatten = TraceableWrapperSubclass
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _has_traceable_wrapper_subclass_protocol(cls: type) -> bool:
     # Class lookup so instance __getattr__ cannot fake the flatten protocol.
     # hasattr (not getattr_static) so Dynamo can trace nn.Module._apply.
