@@ -437,6 +437,9 @@ def aot_compile_fullgraph(
             )
 
         if check_fn.guards_state is None:
+            # Defensive: build_guards above runs with strict_error=True, so a
+            # serialization failure raises there directly (no swallowed cause to
+            # chain to); reaching here means guards_state came back None anyway.
             raise AssertionError("guards_state must not be None")
 
         source_info = SourceInfo(inlined_sources=set())

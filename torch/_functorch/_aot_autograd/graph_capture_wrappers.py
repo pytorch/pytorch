@@ -363,7 +363,7 @@ def create_joint(
         needed_outs: list[Tensor] = []
         needed_tangents: list[Tensor] = []
         for out, tangent in zip(outs_to_grad, tangents):
-            if isinstance(out, Tensor) and out.requires_grad:
+            if isinstance(out, Tensor) and out.requires_grad and tangent is not None:
                 # A bit sketchy, but fixes e.g. test_aot_autograd_exhaustive_matmul_cpu_float32
                 # The issue is that we are sensitive to decomps that don't accurately maintain
                 # their output's _base.shape compared to eager mode, and this helps mitigate a bit.
