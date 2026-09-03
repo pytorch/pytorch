@@ -1181,7 +1181,7 @@ at::Tensor _weight_int4pack_mm_cuda(
   auto C_final = at::empty(
       {m, n}, at::TensorOptions().dtype(at::kBFloat16).device(A.device()));
 
-#if defined(USE_ROCM) || defined(CUDA_VERSION)
+#if defined(USE_ROCM) || (defined(CUDA_VERSION) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
   auto stream = at::cuda::getCurrentCUDAStream();
 #define RUN_GEMM(WARPS, K_TILES_PER_WARP, Q_GROUP_SIZE, REDUCE_TYPE) \
   do {                                                               \
@@ -1351,7 +1351,7 @@ at::Tensor _convert_weight_to_int4pack_cuda(
       {nTilesTensor, kSuperTiles, 32, innerKTiles / 2},
       at::TensorOptions().dtype(at::kInt).device(in.device()));
 
-#if defined(USE_ROCM) || (defined(CUDA_VERSION) && CUDA_VERSION >= 12000)
+#if defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
   auto stream = at::cuda::getCurrentCUDAStream();
   dim3 grid(kSuperTiles, nTiles);
 
