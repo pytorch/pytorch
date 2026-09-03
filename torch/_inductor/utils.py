@@ -2889,6 +2889,7 @@ def get_k_splits(
         return pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
 
     legacy_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
+    needs_bounded_ranking = len(valid_divisors) > k_splits_limit
 
     # On Blackwell the partial BMM can use a 2CTA kernel.  Ranking solely by
     # K-part alignment can then badly over-split a skinny GEMM: once there are
@@ -2908,16 +2909,37 @@ def get_k_splits(
         and (not isinstance(n, sympy.Expr) or n.is_number)
     ):
         m_hint, n_hint = int(m), int(n)
+        output_tiles = ((m_hint + 63) // 64) * ((n_hint + 63) // 64)
+        output_ctas_per_split = output_tiles * ctas_per_tile
+
+        # Reject exact divisors that cannot fill one physical output-CTA wave
+        # before ranking them.  Divisibility by itself does not make a split a
+        # useful autotuning candidate (for example, split=2 on a skinny
+        # semiprime K).  Do not impose a Kpart upper-cost cutoff here: useful
+        # vendor BMM plans have a much broader Kpart range than a single
+        # K-dominance threshold predicts.  Workspace and the bounded ranking
+        # below control excessive splitting.
+        min_occupancy_split = max(
+            2,
+            math.ceil(num_sms / output_ctas_per_split),
+        )
+        valid_divisors = [
+            split
+            for split in valid_divisors
+            if split >= min_occupancy_split
+        ]
         if max_workspace_bytes is not None:
             valid_divisors = [
                 split
                 for split in valid_divisors
                 if split * m_hint * n_hint * 4 <= max_workspace_bytes
             ]
-        if len(valid_divisors) <= k_splits_limit:
+        # Filtering must not accidentally expand the tuning set.  If the
+        # unfiltered set required ranking, keep ranking even when the occupancy
+        # cutoff leaves ten or fewer candidates.
+        if not needs_bounded_ranking:
             return valid_divisors
 
-        output_tiles = ((m_hint + 63) // 64) * ((n_hint + 63) // 64)
         wave_targets = [
             max(
                 2.0,
@@ -2964,6 +2986,7 @@ def get_k_splits(
             )
             occupancy_splits.append(aligned_fallback)
         best_splits = list(dict.fromkeys(occupancy_splits))
+        return best_splits[:k_splits_limit]
     else:
         best_splits = legacy_splits
 
