@@ -816,8 +816,18 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   Vectorized<T> acos() const {
     return mapSleef(Sleef_acosf4_u10, Sleef_acosd2_u10);
   }
+  Vectorized<T> acosh() const {
+    if constexpr (std::is_same_v<T, float>) {
+      return mapOrdinary(std::acosh);
+    } else {
+      return mapSleef(Sleef_acoshf4_u10, Sleef_acoshd2_u10);
+    }
+  }
   Vectorized<T> asin() const {
     return mapSleef(Sleef_asinf4_u10, Sleef_asind2_u10);
+  }
+  Vectorized<T> asinh() const {
+    return mapSleef(Sleef_asinhf4_u10, Sleef_asinhd2_u10);
   }
   Vectorized<T> atan() const {
     return mapSleef(Sleef_atanf4_u10, Sleef_atand2_u10);
@@ -2201,7 +2211,6 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
     // acos(x) = pi/2 - asin(x)
     return Vectorized<T>(vinner_type(pi_half<underline_type>())) - asin();
   }
-
   Vectorized<T> sin() const {
     return mapOrdinary(std::sin);
   }
