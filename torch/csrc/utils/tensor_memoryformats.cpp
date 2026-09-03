@@ -1,6 +1,5 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
-#include <c10/core/MemoryFormat.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/MemoryFormat.h>
 

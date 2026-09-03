@@ -1009,7 +1009,19 @@ This class does not support ``__members__`` property.)");
             }
             return py::cast(preMulSupplement->tensor_factor);
           },
-          R"(The factor of the PREMUL_SUM ReduceOp.)");
+          R"(The factor of the PREMUL_SUM ReduceOp.)")
+      .def(
+          "boxed",
+          [](const ::c10d::ReduceOp& self) {
+            return torch::jit::toPyObject(
+                c10::IValue(c10::make_intrusive<::c10d::ReduceOp>(self)));
+          })
+      .def_static("unbox", [](py::object obj) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.c10d.ReduceOp");
+        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+        return *ivalue.toCustomClass<::c10d::ReduceOp>();
+      });
 
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
@@ -2157,9 +2169,8 @@ Example::
 
             std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
-              if (worldSize.value() == 0) {
-                throw py::value_error("TCPStore world size cannot be 0");
-              }
+              TORCH_CHECK_VALUE(
+                  worldSize.value() != 0, "TCPStore world size cannot be 0");
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
@@ -2222,9 +2233,7 @@ Arguments:
       .def(
           py::init([](const std::string& prefix,
                       c10::intrusive_ptr<::c10d::Store> store) {
-            if (!store) {
-              throw py::value_error("store argument cannot be None");
-            }
+            TORCH_CHECK_VALUE(store, "store argument cannot be None");
             return new ::c10d::PrefixStore(prefix, std::move(store));
           }),
           py::arg("prefix"),
@@ -3766,8 +3775,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               return ::c10d::ProcessGroupGloo::createDeviceForInterface(
                   interface, lazyInit);
             }
-            throw std::invalid_argument(
-                "Specify either `hostname` or `interface` argument.");
+            TORCH_CHECK_VALUE(
+                false, "Specify either `hostname` or `interface` argument.");
           },
           py::arg("hostname") = "",
           py::arg("interface") = "",
@@ -4681,6 +4690,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       .def_readwrite(
           "error_on_collective",
           &::c10d::FakeProcessGroup::Options::error_on_collective)
+      .def_readwrite(
+          "simulate_uniform_ranks",
+          &::c10d::FakeProcessGroup::Options::simulate_uniform_ranks)
       .def(
           "__copy__",
           [](const ::c10d::FakeProcessGroup::Options& self) {
@@ -4696,6 +4708,13 @@ such as `dist.all_reduce(tensor, async_op=True)`.
   fakeProcessGroup
       .def_static(
           "_create_internal",
+          [](int rank, int size) {
+            return ::c10d::FakeProcessGroup::_create_internal(rank, size);
+          },
+          py::arg("rank"),
+          py::arg("world_size"))
+      .def_static(
+          "_create_internal",
           [](int rank,
              int size,
              c10::intrusive_ptr<::c10d::FakeProcessGroup::Options> options) {
@@ -4704,8 +4723,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           },
           py::arg("rank"),
           py::arg("world_size"),
-          py::arg("options") =
-              c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
+          py::arg("options"))
       .def_property_readonly("options", &::c10d::FakeProcessGroup::getOptions);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
