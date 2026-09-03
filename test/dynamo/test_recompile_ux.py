@@ -1,7 +1,11 @@
 # Owner(s): ["module: dynamo"]
+import faulthandler
+import gc
 import operator
 import queue
 import sys
+import tempfile
+import textwrap
 import threading
 import unittest
 import weakref
@@ -13,6 +17,7 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._logging
+from torch._C._dynamo.eval_frame import _clear_cache_entries_for_region
 from torch._dynamo.eval_frame import (
     _get_cache_entries_for_region,
     _get_total_cache_entry_count,
@@ -22,6 +27,7 @@ from torch._dynamo.types import FrameAction, FrameExecStrategy
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    TestCase,
 )
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
@@ -547,6 +553,154 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             raised.append(errors.get_nowait())
         self.assertEqual(raised, [])
 
+    def test_reset_code_racing_lookup_does_not_destroy_the_cache_state(self):
+        """reset_code can run while other threads are parked on the same
+        ExtraState's cache lock -- the lock releases the GIL while it waits --
+        so destroying the state there deletes the very mutex the waiter is
+        blocked on. reset_code must empty the state in place instead. This
+        drives resets against concurrent lookups and the recompiles they
+        force; every call must either serve the cache or recompile cleanly,
+        and the emptied state must serve fresh compiles like a new one.
+        Stress test; not a deterministic reproduction.
+        """
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        opt = torch.compile(f, backend="eager", dynamic=False)
+        args = [torch.randn(n) for n in (3, 4)]
+        for arg in args:
+            opt(arg)
+
+        errors = queue.SimpleQueue()
+        stop = threading.Event()
+
+        def caller():
+            try:
+                while not stop.is_set():
+                    for arg in args:
+                        opt(arg)
+            except BaseException as e:
+                errors.put(e)
+
+        def resetter():
+            try:
+                for _ in range(30):
+                    # The public reset path: it holds compile_lock, so it
+                    # races the LOOKUPS here (which take no compile lock) but
+                    # not an in-flight compile's cache-entry snapshot.
+                    torch._dynamo.eval_frame.remove_from_cache(f.__code__)
+            except BaseException as e:
+                errors.put(e)
+            finally:
+                stop.set()
+
+        threads = [threading.Thread(target=caller, daemon=True) for _ in range(4)]
+        threads.append(threading.Thread(target=resetter, daemon=True))
+        prior_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        finally:
+            sys.setswitchinterval(prior_interval)
+        raised = []
+        while not errors.empty():
+            raised.append(errors.get_nowait())
+        self.assertEqual(raised, [])
+        self.assertEqual(opt(args[0]), f(args[0]))
+
+    def test_concurrent_install_and_reset_against_lookups(self):
+        """Eight threads look f up while two install and reset precompile
+        entries on its code object. lookup() walks precompile_entries under
+        the cache lock and runs their guards -- Python, so the GIL can drop --
+        while an installer takes the same lock to append to or splice the
+        list being walked; without the lock that is a use-after-free. A wedge
+        in the locking cannot fail an assertion, so faulthandler dumps every
+        thread's stack and exits at the deadline instead of letting the
+        harness time out silently. Stress test; not a deterministic
+        reproduction, and it passes on the lock-free parent as well: it
+        guards the locking against regressions.
+        """
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _debug_get_precompile_entries,
+            _load_precompile_entry,
+            _reset_precompile_entries_for_owner,
+        )
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        opt = torch.compile(f, backend="eager", dynamic=False)
+        args = [torch.randn(n) for n in (3, 4)]
+        expected = [f(arg) for arg in args]
+        for arg in args:
+            opt(arg)
+        # Each installer re-installs the compiled variants' own guard managers
+        # and code as precompile entries, so a hit serves the same graph.
+        installables = [
+            (e.guard_manager, e.code) for e in _debug_get_cache_entry_list(code)
+        ]
+        self.assertEqual(len(installables), 2)
+
+        errors = queue.SimpleQueue()
+        stop = threading.Event()
+        owners = [object(), object()]
+
+        def caller():
+            try:
+                while not stop.is_set():
+                    for arg, want in zip(args, expected):
+                        self.assertEqual(opt(arg), want)
+            except BaseException as e:
+                errors.put(e)
+
+        def installer(owner):
+            try:
+                for _ in range(300):
+                    for guard_manager, dynamo_code in installables:
+                        _load_precompile_entry(
+                            code, guard_manager, dynamo_code, -1, owner
+                        )
+                    _reset_precompile_entries_for_owner(code, -1, owner)
+            except BaseException as e:
+                errors.put(e)
+
+        callers = [threading.Thread(target=caller, daemon=True) for _ in range(8)]
+        installers = [
+            threading.Thread(target=installer, args=(owner,), daemon=True)
+            for owner in owners
+        ]
+        prior_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        # A real fd: under pytest's capture sys.stderr has no fileno.
+        faulthandler.dump_traceback_later(120, exit=True, file=sys.__stderr__)
+        try:
+            for thread in callers + installers:
+                thread.start()
+            for thread in installers:
+                thread.join()
+            stop.set()
+            for thread in callers:
+                thread.join()
+        finally:
+            faulthandler.cancel_dump_traceback_later()
+            sys.setswitchinterval(prior_interval)
+        raised = []
+        while not errors.empty():
+            raised.append(errors.get_nowait())
+        self.assertEqual(raised, [])
+        # A reset that arrived while a lookup held the lock was parked; the
+        # entry reader applies whatever is still parked, and nothing survives.
+        for owner in owners:
+            _reset_precompile_entries_for_owner(code, -1, owner)
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
+        self.assertEqual(opt(args[0]), expected[0])
+
     def test_isolate_recompiles_id_is_thread_local(self):
         """The current region is a property of the call in flight, so it is
         per thread: a worker spawned from inside a region reads the default
@@ -576,6 +730,302 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             set_eval_frame_isolate_recompiles_id(prior)
         self.assertEqual(seen, [-1, 9])
         self.assertEqual(get_eval_frame_isolate_recompiles_id(), -1)
+
+    def test_reset_code_from_python_run_by_lookup_is_safe(self):
+        """lookup() holds the recursive cache lock across guard evaluation
+        and backend comparison, both of which run Python -- which can call
+        torch._dynamo back in on the SAME thread. reset_code arriving there
+        used to free the very list nodes the interrupted lookup was walking
+        (a same-thread use-after-free); it must instead land as if it ran
+        just after that lookup."""
+        from torch._C._dynamo.eval_frame import reset_code
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        resets = []
+
+        class ResettingBackend:
+            def __call__(self, gm, example_inputs):
+                return gm.forward
+
+            def __eq__(self, other):
+                if isinstance(other, ResettingBackend):
+                    resets.append(True)
+                    reset_code(code)
+                    return True
+                return NotImplemented
+
+            def __hash__(self):
+                return 0
+
+        x = torch.randn(8)
+        first, second = ResettingBackend(), ResettingBackend()
+        opt1 = torch._dynamo.optimize(backend=first, dynamic=False)(f)
+        self.assertEqual(opt1(x), f(x))
+        self.assertEqual(_get_total_cache_entry_count(code), 1)
+        # A second-but-equal backend makes lookup compare it against the
+        # saved one, and that __eq__ resets this very code object mid-lookup.
+        opt2 = torch._dynamo.optimize(backend=second, dynamic=False)(f)
+        self.assertEqual(opt2(x), f(x))
+        self.assertGreater(len(resets), 0)
+        # The parked reset lands at the next cache operation: the stale entry
+        # is gone and this call compiles fresh.
+        self.assertEqual(opt2(x), f(x))
+        self.assertEqual(_get_total_cache_entry_count(code), 1)
+
+    def test_invalidation_racing_a_held_cache_lock_parks_and_drains(self):
+        """invalidate() reached from weakref.finalize must never block on
+        cache_mutex (GC can fire it while ANOTHER state's lock is held; two
+        threads doing that against each other's states deadlock ABBA-style).
+        This pins the contended path itself: the very call finalize runs,
+        arriving while a lookup holds the lock, must return promptly
+        (parked), and the parked invalidation must be applied by a later
+        lock holder rather than serve forever."""
+        from torch._dynamo.guards import DeletedGuardManagerWrapper
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        in_eq = threading.Event()
+        release_eq = threading.Event()
+
+        class BlockingBackend:
+            def __call__(self, gm, example_inputs):
+                return gm.forward
+
+            def __eq__(self, other):
+                if isinstance(other, BlockingBackend):
+                    in_eq.set()
+                    release_eq.wait(timeout=120)
+                    return True
+                return NotImplemented
+
+            def __hash__(self):
+                return 0
+
+        first, second = BlockingBackend(), BlockingBackend()
+        x = torch.randn(8)
+        opt1 = torch._dynamo.optimize(backend=first, dynamic=False)(f)
+        self.assertEqual(opt1(x), f(x))
+        wrapper = _get_cache_entries_for_region(code, -1)[0].guard_manager
+
+        errors = queue.SimpleQueue()
+
+        def caller():
+            try:
+                opt2 = torch._dynamo.optimize(backend=second, dynamic=False)(f)
+                opt2(x)
+            except BaseException as e:
+                errors.put(e)
+
+        thread = threading.Thread(target=caller, daemon=True)
+        thread.start()
+        try:
+            self.assertTrue(in_eq.wait(timeout=120))
+            # The caller thread is inside lookup, holding the cache lock.
+            # This is exactly what a guarded object's weakref.finalize runs;
+            # it must park rather than block behind that lock.
+            invalidator_done = threading.Event()
+
+            def invalidator():
+                wrapper.extra_state.invalidate(
+                    DeletedGuardManagerWrapper("test object"),
+                    wrapper,
+                )
+                invalidator_done.set()
+
+            inv_thread = threading.Thread(target=invalidator, daemon=True)
+            inv_thread.start()
+            self.assertTrue(invalidator_done.wait(timeout=60))
+        finally:
+            release_eq.set()
+        thread.join(timeout=120)
+        self.assertFalse(thread.is_alive())
+        raised = []
+        while not errors.empty():
+            raised.append(errors.get_nowait())
+        self.assertEqual(raised, [])
+        # A later lock holder drains the parked request: the entry reports
+        # itself invalidated and a fresh compile serves the next call.
+        self.assertEqual(opt1(x), f(x))
+        entries = _get_cache_entries_for_region(code, -1)
+        self.assertTrue(any(e.trace_annotation == "Invalidated" for e in entries))
+
+    def _install_eager_package(self, fn, region):
+        # A DiskDynamoStore round trip is the only way to get a package whose
+        # install() loads precompile entries for fn.__code__.
+        from torch._dynamo.package import CompilePackage, DiskDynamoStore
+
+        store = DiskDynamoStore()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = tmp.name
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(backend="eager", package=package)(fn)(torch.randn(8))
+        for backend_id, backend in package.cached_backends.items():
+            store.record_eager_backend(backend_id, backend)
+        store.save_package(package, path)
+        torch._dynamo.reset()
+        package, backends = store.load_package(fn, path)
+        package.install(backends, isolate_recompiles_id=region)
+        return package, backends
+
+    def test_reinstall_survives_an_eviction_parked_by_uninstall(self):
+        # uninstall() from Python run BY an in-flight lookup (here a backend
+        # __eq__) cannot splice the list that lookup is walking, so its owner
+        # eviction is parked. A reinstall that reused the same owner token
+        # then lost its fresh entries to that parked eviction at the next
+        # depth-zero lock holder; each install now mints its own token.
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        region = 7
+        package, backends = self._install_eager_package(f, region)
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+        hook = []
+
+        class Backend:
+            def __call__(self, gm, example_inputs):
+                return gm.forward
+
+            def __hash__(self):
+                return 0
+
+            def __eq__(self, other):
+                if isinstance(other, Backend):
+                    if hook:
+                        hook.pop()()
+                    return True
+                return NotImplemented
+
+        x = torch.randn(8)
+        torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x)
+
+        def reinstall():
+            package.uninstall()
+            package.install(backends, isolate_recompiles_id=region)
+
+        hook.append(reinstall)
+        torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x)
+        # The parked eviction has been applied by now; the reinstall's entries
+        # must have survived it.
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+        package.uninstall()
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
+
+    def test_region_clear_from_inside_a_lookup_is_parked(self):
+        # _clear_cache_entries_for_region run by a backend __eq__ inside
+        # lookup() used to splice and destroy the very list lookup was
+        # walking (a use-after-free that segfaulted); it now parks like
+        # reset_code does, and the next depth-zero holder applies it.
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        hook = []
+        compiles = []
+
+        class Backend:
+            def __call__(self, gm, example_inputs):
+                compiles.append(gm)
+                return gm.forward
+
+            def __hash__(self):
+                return 0
+
+            def __eq__(self, other):
+                if isinstance(other, Backend):
+                    if hook:
+                        hook.pop()()
+                    return True
+                return NotImplemented
+
+        x = torch.randn(8)
+        opt1 = torch._dynamo.optimize(
+            backend=Backend(), dynamic=False, isolate_recompiles=True
+        )(f)
+        self.assertEqual(opt1(x), f(x))
+        region = opt1._isolate_recompiles_id
+        self.assertEqual(len(_get_cache_entries_for_region(code, region)), 1)
+        ctx = torch._dynamo.optimize(
+            backend=Backend(), dynamic=False, isolate_recompiles=True
+        )
+        ctx._isolate_recompiles_id = region
+
+        seen = []
+
+        def clear():
+            for _ in range(3):
+                _clear_cache_entries_for_region(code, region)
+            # Recorded, not asserted: an exception raised inside a backend
+            # __eq__ is swallowed by the lookup as a mismatch.
+            seen.append(len(_get_cache_entries_for_region(code, region)))
+
+        hook.append(clear)
+        self.assertEqual(ctx(f)(x), f(x))
+        # Still walked by the interrupted lookup, so nothing was gone yet.
+        self.assertEqual(seen, [1])
+        # The guard-evaluating lookup that follows the fast-path hit applied
+        # the parked clear, then missed and recompiled into the region.
+        self.assertEqual(len(compiles), 2)
+        self.assertEqual(len(_get_cache_entries_for_region(code, region)), 1)
+
+    def test_precompile_reset_from_inside_a_lookup_is_parked(self):
+        # Same hazard for _reset_precompile_entries: run by a backend __eq__
+        # inside lookup() it now parks, and the next depth-zero holder (the
+        # precompile-entry reader here) applies it.
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_precompile_entries,
+            _reset_precompile_entries,
+        )
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        # Kept alive: a dead package's finalizer would uninstall the entries.
+        package, _ = self._install_eager_package(f, 7)
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+        hook = []
+
+        class Backend:
+            def __call__(self, gm, example_inputs):
+                return gm.forward
+
+            def __hash__(self):
+                return 0
+
+            def __eq__(self, other):
+                if isinstance(other, Backend):
+                    if hook:
+                        hook.pop()()
+                    return True
+                return NotImplemented
+
+        x = torch.randn(8)
+        torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x)
+
+        seen = []
+
+        def reset():
+            _reset_precompile_entries(code)
+            # Recorded, not asserted; see test_region_clear_from_inside_a_lookup.
+            seen.append(len(_debug_get_precompile_entries(code)))
+
+        hook.append(reset)
+        self.assertEqual(
+            torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x), f(x)
+        )
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
+        # The parked reset left the entry in place until the lookup finished.
+        self.assertEqual(seen, [1])
+        package.uninstall()
 
     @torch._dynamo.config.patch(
         recompile_limit=1,
@@ -1704,7 +2154,6 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         """When an isolated compile wrapper is GC'd, orphaned cache entries
         remain. A new torch.compile gets a fresh region and compiles
         independently. reset() clears everything including orphans."""
-        import gc
 
         cnt = torch._dynamo.testing.CompileCounter()
 
@@ -1732,6 +2181,72 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(self._num_cache_entries(f), 0)
 
     # ===== Debug / introspection =====
+
+    def test_cache_key_lookup_is_off_until_a_cache_key_backend_exists(self):
+        # get_backend walks the callback chain on every intercepted frame, and
+        # looking for _torchdynamo_cache_key there is a MISS at every level for
+        # anyone who never precompiles -- a raising attribute lookup per level
+        # per frame, measured at ~1 us on a steady-state compiled call. The
+        # lookup is therefore gated on a flag that only a backend carrying such
+        # a key turns on. Nothing else in the tree sets that attribute, so the
+        # gate is invisible; this pins that the switch exists and is one-way.
+        # The gate is process-global and one-way, and anything that imports the
+        # precompile backend flips it, so the OFF half can only be observed in a
+        # fresh interpreter. Two wrappers over ONE shared backend are the
+        # discriminator: with the gate off get_backend follows
+        # _torchdynamo_orig_backend to that shared object and both compilations
+        # share one cache identity; with it on, their distinct cache keys are
+        # two identities.
+        script = textwrap.dedent(
+            """
+            import torch
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_cache_entry_list,
+                _enable_precompile_cache_keys,
+            )
+
+            def fn(x):
+                return x.sin()
+
+            class Backend:
+                # The shape _PrecompileBackend has, minus the __init__ that
+                # would flip the gate before the OFF half is measured.
+                def __init__(self, inner):
+                    self._torchdynamo_orig_backend = inner
+                    self._torchdynamo_cache_key = object()
+
+                def __call__(self, gm, inputs):
+                    return self._torchdynamo_orig_backend(gm, inputs)
+
+            inner = torch._dynamo.lookup_backend("eager")
+
+            def entries(same_key):
+                torch._dynamo.reset()
+                x = torch.randn(4)
+                a, b = Backend(inner), Backend(inner)
+                if same_key:
+                    b._torchdynamo_cache_key = a._torchdynamo_cache_key
+                # optimize(), not compile(backend=), because compile() wraps the
+                # backend in a _TorchCompileWrapper that is not in the chain
+                # get_backend walks.
+                torch._dynamo.optimize(a)(fn)(x)
+                torch._dynamo.optimize(b)(fn)(x)
+                return len(_debug_get_cache_entry_list(fn.__code__))
+
+            print("off", entries(False))
+            _enable_precompile_cache_keys()
+            _enable_precompile_cache_keys()  # idempotent
+            print("on", entries(False))
+            print("on_same_key", entries(True))
+            """
+        )
+        stdout, stderr = TestCase.run_process_no_exception(script)
+        out = stdout.decode()
+        self.assertIn("off 1", out, stderr.decode())
+        self.assertIn("on 2", out, stderr.decode())
+        # The key IS the identity, so two backends sharing one key still share
+        # one cache entry -- the gate must not simply split every backend.
+        self.assertIn("on_same_key 1", out, stderr.decode())
 
     def test_has_precompile_entries_is_region_exact(self):
         """_has_precompile_entries answers for one region only. lookup() never
@@ -1769,6 +2284,47 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         finally:
             _reset_precompile_entries_for_region(code, 7)
         self.assertFalse(_has_precompile_entries(code, 7))
+
+    def test_precompile_entries_are_removed_by_owner_not_by_region(self):
+        """Several packages may legitimately hold entries for one code object in
+        one region -- a library frame two loaded models both reach -- and lookup
+        picks between them by evaluating guards. Teardown must therefore remove
+        what one installer put there and leave the neighbour's alone; clearing
+        the whole region evicts a live artifact that, because lookup is
+        region-exact, nothing else can serve."""
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _debug_get_precompile_entries,
+            _load_precompile_entry,
+            _reset_precompile_entries_for_owner,
+            _reset_precompile_entries_for_region,
+        )
+
+        def f(x):
+            return x.sin()
+
+        torch.compile(f, backend="eager", dynamic=False)(torch.randn(3))
+        code = f.__code__
+        guard_manager = _debug_get_cache_entry_list(code)[0].guard_manager
+
+        first, second = object(), object()
+        _load_precompile_entry(code, guard_manager, code, -1, first)
+        _load_precompile_entry(code, guard_manager, code, -1, second)
+        try:
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 2)
+            _reset_precompile_entries_for_owner(code, -1, first)
+            # The neighbour survives.
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+            # Removing an owner that holds nothing here is a no-op.
+            _reset_precompile_entries_for_owner(code, -1, first)
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+            # Same owner, different region: also a no-op.
+            _reset_precompile_entries_for_owner(code, 7, second)
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+            _reset_precompile_entries_for_owner(code, -1, second)
+            self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
+        finally:
+            _reset_precompile_entries_for_region(code, -1)
 
     # ===== Exec strategy / region API =====
 
