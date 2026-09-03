@@ -612,11 +612,17 @@ def _clear_cache_entries_for_region(
     code: types.CodeType | Callable[..., Any],
     isolate_recompiles_id: int,
 ) -> None:
+    from .convert_frame import compile_lock
+
     if callable(code):
         code = code.__code__
-    torch._C._dynamo.eval_frame._clear_cache_entries_for_region(
-        code, isolate_recompiles_id
-    )
+    # Under compile_lock, like remove_from_cache(): an in-flight compile holds
+    # a raw CacheEntry* into this region across a GIL-released backend compile,
+    # and freeing the region's entries underneath it would dangle that pointer.
+    with compile_lock:
+        torch._C._dynamo.eval_frame._clear_cache_entries_for_region(
+            code, isolate_recompiles_id
+        )
 
 
 def _get_total_cache_entry_count(
