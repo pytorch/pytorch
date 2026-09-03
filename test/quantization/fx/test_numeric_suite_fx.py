@@ -40,7 +40,11 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     TwoLayerLinearModel
 )
-from torch.testing._internal.common_utils import raise_on_run_directly, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+)
 from torch.ao.quantization.quantization_mappings import (
     get_default_static_quant_module_mappings,
     get_default_dynamic_quant_module_mappings,
@@ -313,6 +317,7 @@ def get_all_quant_patterns():
     return all_quant_patterns
 
 class TestFXGraphMatcher(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfNoFBGEMM
     def test_simple_mod(self):
@@ -795,6 +800,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
 
 class TestFXGraphMatcherModels(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfTorchDynamo("too slow")
     @skipIfNoFBGEMM
@@ -992,6 +998,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
 
 
 class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfNoFBGEMM
     def test_extract_weights_mod_ptq(self):
@@ -2049,6 +2056,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
 
 class TestFXNumericSuiteCoreAPIsDevice(FXNumericSuiteQuantizationTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
     def test_extract_weights_gpu(self, device):
@@ -2100,6 +2108,8 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
     """
     Tests the "n shadows" workflow.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _test_impl(self, m, example_input, qconfig_mappings):
         backend_config = get_native_backend_config()
@@ -2777,6 +2787,8 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """
     Tests numeric suite core APIs on non-toy models.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfNoFBGEMM
     def test_compare_weights_conv(self):
