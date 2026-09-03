@@ -1347,15 +1347,28 @@ class FSDPParam:
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
 
 
+_FREED_MSG = (
+    "Accessed the data pointer of a tensor whose storage was freed by FSDP "
+    "(resharded). This is typically caused by holding a reference to an "
+    "unsharded parameter or all-gather output across a reshard, and will "
+    "become an error in a future release. Access it inside forward/backward "
+    "or after calling unshard()."
+)
+
+
 def alloc_storage(tensor: torch.Tensor) -> None:
     size = tensor.numel() * tensor.itemsize
     if (storage := tensor.untyped_storage()).size() != size:
+        torch._C._clear_storage_data_ptr_access_error_msg(storage._cdata)
         storage.resize_(size)
 
 
 def free_storage(tensor: torch.Tensor) -> None:
     if (storage := tensor.untyped_storage()).size() != 0:
         storage.resize_(0)
+        # Instrumentation: accesses to the freed (null) data pointer warn so we
+        # can find them before turning this into an error
+        torch._C._set_storage_data_ptr_access_warn_msg(storage._cdata, _FREED_MSG)
 
 
 # NOTE: These bypass `nn.Module.__setattr__` checks, which incur non-trivial
