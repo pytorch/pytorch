@@ -70,7 +70,7 @@ from .ir import (
     MultiOutputLayout,
     NoneLayout,
 )
-from .loop_body import LoopBody
+from .loop_body import LoopBody, MASKED_EXPANSION_BANNED_OPS
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.hints import DeviceProperties, ReductionHint
 from .runtime.runtime_utils import green_text, is_power_of_2, red_text
@@ -2534,6 +2534,9 @@ class BaseSchedulerNode:
         typing.cast(Any, self.get_tiling).clear_cache(self)
         self.read_write_deps.clear_cache(self)
         self.read_size_by_name.clear_cache(self)
+        typing.cast(Any, self.get_read_write_buffers_sizes).clear_cache(self)
+        typing.cast(Any, self.get_read_buffer_sizes).clear_cache(self)
+        typing.cast(Any, self.get_write_buffer_sizes).clear_cache(self)
 
     @cache_on_self
     def get_coalesce_analysis(self) -> CoalesceVarAnalysis | None:
@@ -3645,23 +3648,51 @@ class SchedulerNode(BaseSchedulerNode):
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
     ) -> None:
+        self._expand_dimension_for_pointwise_node(
+            dimension, new_range, mask_stores=False
+        )
+
+    def expand_dimension_for_pointwise_node_with_masked_stores(
+        self, dimension: int, new_range: int
+    ) -> None:
+        self._expand_dimension_for_pointwise_node(
+            dimension, new_range, mask_stores=True
+        )
+
+    def _expand_dimension_for_pointwise_node(
+        self, dimension: int, new_range: int, *, mask_stores: bool
+    ) -> None:
         if not isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)):
             raise AssertionError(
                 "expected self.node to be a ComputedBuffer or TemplateBuffer"
             )
 
         self._before_loop_state_mutation()
-        self._body = self._body.expand_dimension_for_pointwise_node(
-            dimension, new_range
-        )
+        if mask_stores:
+            self._body = (
+                self._body.expand_dimension_for_pointwise_node_with_masked_stores(
+                    dimension, new_range
+                )
+            )
+        else:
+            self._body = self._body.expand_dimension_for_pointwise_node(
+                dimension, new_range
+            )
         self._sizes = self._body.sizes
 
         device = self.node.get_device_or_error()
         group_fn = self.scheduler.get_backend(device).group_fn
         self.group = (device, group_fn(self._sizes))
 
-        # Need normalize the prefix name to facilitate finding common dependencies
-        self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
+        if mask_stores:
+            # Match _compute_attrs: the expanded consumer must compare equal,
+            # dep for dep, with the un-normalized deps of the reduction it is
+            # about to fuse with, otherwise can_fuse sees no shared data.
+            normalize = not config.loop_ordering_after_fusion or not is_gpu(device.type)
+        else:
+            # Need normalize the prefix name to facilitate finding common dependencies
+            normalize = True
+        self.refresh_dependencies(normalize=normalize, need_clear_tiling_cache=True)
 
     def merge_loops(self) -> None:
         self._body = self._body.merge_loops()
@@ -6633,6 +6664,17 @@ class Scheduler:
                     break
 
             if (
+                config.loop_reindexing_after_fusion
+                and config.masked_expansion_max_ratio > 0
+                and not config.benchmark_fusion
+            ):
+                fused_nodes = OrderedSet(nodes)
+                if self._fuse_near_sized_reduction_epilogues(fused_nodes):
+                    nodes = self.topological_sort_schedule(
+                        sorted(fused_nodes, key=lambda node: node.min_order)
+                    )
+
+            if (
                 config.loop_ordering_after_fusion
                 or config.loop_index_inversion_in_fusion
             ):
@@ -9277,6 +9319,124 @@ class Scheduler:
                 refresh_group_node_dependencies(pw_node)
 
         return True
+
+    def _try_masked_reindex_reduction_consumer(
+        self,
+        reduction: BaseSchedulerNode,
+        consumer: SchedulerNode,
+    ) -> bool:
+        """Expand one pointwise consumer to a near-sized reduction's range."""
+        why = WhyNoFuse(reduction, consumer)
+        if (
+            not isinstance(reduction, (SchedulerNode, FusedSchedulerNode))
+            or isinstance(
+                reduction,
+                (FusedMixOrderReductions, FusedNestedReductions, FusedStagedReduction),
+            )
+            or reduction.is_template()
+            or reduction.is_foreach()
+            or consumer.has_aliasing_or_mutation()
+            or not isinstance(consumer.node, ComputedBuffer)
+            or not isinstance(consumer.node.data, Pointwise)
+            or not isinstance(consumer._body, LoopBody)
+            or not V.graph.has_feature(
+                consumer.get_device(), BackendFeature.MASKED_STORE
+            )
+        ):
+            why("masked expansion: unsupported node kinds")
+            return False
+
+        if any(consumer._body.has_op(op) for op in MASKED_EXPANSION_BANNED_OPS) or any(
+            isinstance(dep, MemoryDep) and dep.mode is not None
+            for dep in consumer.read_writes.writes
+        ):
+            why("masked expansion: consumer has ops whose writes cannot be masked")
+            return False
+
+        # Legality, proved without guards: the consumer loops must end in the
+        # reduced dim as a proper prefix of the reduction's range.
+        sizevars = V.graph.sizevars
+        _, (red_numel, red_rnumel) = reduction.group
+        iter_sizes = tuple(consumer._sizes[0])
+        if not (
+            iter_sizes
+            and sizevars.statically_known_equals(
+                sympy_product(iter_sizes[:-1]), red_numel
+            )
+            and sizevars.statically_known_lt(iter_sizes[-1], red_rnumel)
+        ):
+            why(
+                "masked expansion: consumer loops %s are not a prefix of %s",
+                iter_sizes,
+                (red_numel, red_rnumel),
+            )
+            return False
+
+        # Profitability on size hints like other fusion heuristics: the code is
+        # correct for any runtime size, only the wasted tail grows if the hint
+        # is off. can_fuse applies the usual shared-memory threshold afterwards.
+        pw_rnumel_hint = sizevars.optimization_hint(iter_sizes[-1], fallback=0)
+        red_rnumel_hint = sizevars.optimization_hint(red_rnumel, fallback=0)
+        if not pw_rnumel_hint or red_rnumel_hint > pw_rnumel_hint * (
+            1 + config.masked_expansion_max_ratio
+        ):
+            why(
+                "masked expansion: %d -> %d exceeds masked_expansion_max_ratio",
+                pw_rnumel_hint,
+                red_rnumel_hint,
+            )
+            return False
+
+        consumer.expand_dimension_for_pointwise_node_with_masked_stores(
+            len(iter_sizes) - 1, red_rnumel
+        )
+        return True
+
+    def _fuse_near_sized_reduction_epilogues(
+        self, fused_nodes: OrderedSet[BaseSchedulerNode]
+    ) -> bool:
+        did_fuse = False
+        candidates: list[tuple[BaseSchedulerNode, BaseSchedulerNode]] = []
+        for reduction in fused_nodes:
+            if not reduction.is_reduction():
+                continue
+            reduction_nodes = OrderedSet(reduction.get_nodes())
+            users = OrderedSet(
+                use.node
+                for output in reduction.get_outputs()
+                for use in output.users
+                if not use.is_weak
+                and isinstance(use.node, SchedulerNode)
+                and use.node not in reduction_nodes
+            )
+            if len(users) == 1:
+                candidates.append((reduction, users.pop()))
+
+        candidates.sort(key=self.score_fusion_key, reverse=True)
+        for reduction, consumer in candidates:
+            if (
+                reduction not in fused_nodes
+                or consumer not in fused_nodes
+                or self.will_fusion_create_cycle(reduction, consumer)
+            ):
+                continue
+            snapshot = _LoopStateSnapshot.create((consumer,))
+            fused = False
+            try:
+                if not self._try_masked_reindex_reduction_consumer(
+                    reduction,
+                    typing.cast(SchedulerNode, consumer),
+                ):
+                    continue
+                if not self.can_fuse(reduction, consumer, can_reorder=True):
+                    continue
+                self.fuse_two_nodes(reduction, consumer, fused_nodes)
+                fused = True
+                did_fuse = True
+            finally:
+                if not fused:
+                    snapshot.restore()
+        return did_fuse
 
     def unfusable_node(self, node: BaseSchedulerNode) -> bool:
         """

@@ -113,6 +113,17 @@ def get_max_tiles(default: int = 2) -> int:
     return max_tiles if max_tiles is not None else default
 
 
+def _numel_equals(a: sympy.Expr | int, b: sympy.Expr | int) -> bool:
+    """Structural equality first; for symbolic sizes fall back to a sizevars
+    proof so an expanded numel such as 64*s0*s1 + 64*s0 matches 64*s0*(s1 + 1)."""
+    if a == b:
+        return True
+    a, b = sympy.sympify(a), sympy.sympify(b)
+    if not (a.free_symbols or b.free_symbols):
+        return False
+    return V.graph.sizevars.statically_known_equals(a, b)
+
+
 @dataclasses.dataclass
 class IterationRanges:
     """
@@ -2801,7 +2812,7 @@ class SIMDScheduling(BaseScheduling):
                     f"got {rnumel1} and {rnumel2}"
                 )
             ordinary_fusion = False
-            if numel1 == numel2 * rnumel2:
+            if _numel_equals(numel1, numel2 * rnumel2):
                 ordinary_fusion = all(
                     SIMDKernel.is_compatible((numel2, rnumel2), n.get_ranges())
                     for n in node1.get_nodes()
@@ -3007,13 +3018,20 @@ class SIMDScheduling(BaseScheduling):
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
-            return (node_numel == numel and node_rnumel == rnumel) or (
-                node_numel == numel * rnumel and node_rnumel == 1
+            return (
+                _numel_equals(node_numel, numel) and _numel_equals(node_rnumel, rnumel)
+            ) or (
+                _numel_equals(node_numel, numel * rnumel)
+                and _numel_equals(node_rnumel, 1)
             )
 
         def fits_outside_reduction(n):
             _, (node_numel, node_rnumel) = n.group
-            return node_numel == numel and node_rnumel == 1 and rnumel != 1
+            return (
+                _numel_equals(node_numel, numel)
+                and _numel_equals(node_rnumel, 1)
+                and rnumel != 1
+            )
 
         def expect_improved_memory_usage(n):
             for read in n.read_writes.reads:
