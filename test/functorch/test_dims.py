@@ -57,6 +57,40 @@ def triu(A):
 
 
 class TestBase(TestCase):
+    def setUp(self):
+        super().setUp()
+        gc.disable()
+        gc.collect()
+        self.interesting = set()
+        for o in gc.get_objects():
+            if isinstance(o, (torch.Tensor, Dim, Tensor, DimList)):
+                self.interesting.add(id(o))
+
+    def tearDown(self):
+        interesting = []
+        for o in gc.get_objects():
+            if (
+                isinstance(o, (torch.Tensor, Dim, Tensor, DimList))
+                and id(o) not in self.interesting
+            ):
+                interesting.append(o)
+
+        #  nolevels = _n_levels_in_use() == 0
+        if len(interesting) != 0:
+            import refcycle
+
+            refcycle.garbage().export_image("garbage.pdf")
+        gc.collect()
+        # assert nolevels, f"cleanup failed? {_n_levels_in_use()}"
+        self.assertEqual(
+            len(interesting),
+            0,
+            (
+                lambda msg: f"{msg}\nextra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:"
+                f"{[type(t) for t in interesting]}"
+            ),
+        )
+
     def attn(
         self,
         batch_size=1,
@@ -183,40 +217,6 @@ class TestBase(TestCase):
 @skipIfTorchDynamo("Bad interaction")
 class TestMin(TestBase):
     hw_classification = HardwareClassification.GENERIC
-
-    def setUp(self):
-        super().setUp()
-        gc.disable()
-        gc.collect()
-        self.interesting = set()
-        for o in gc.get_objects():
-            if isinstance(o, (torch.Tensor, Dim, Tensor, DimList)):
-                self.interesting.add(id(o))
-
-    def tearDown(self):
-        interesting = []
-        for o in gc.get_objects():
-            if (
-                isinstance(o, (torch.Tensor, Dim, Tensor, DimList))
-                and id(o) not in self.interesting
-            ):
-                interesting.append(o)
-
-        #  nolevels = _n_levels_in_use() == 0
-        if len(interesting) != 0:
-            import refcycle
-
-            refcycle.garbage().export_image("garbage.pdf")
-        gc.collect()
-        # assert nolevels, f"cleanup failed? {_n_levels_in_use()}"
-        self.assertEqual(
-            len(interesting),
-            0,
-            (
-                lambda msg: f"{msg}\nextra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:"
-                f"{[type(t) for t in interesting]}"
-            ),
-        )
 
     def test_manual_stuff(self):
         A_ = torch.rand(3, 4)
