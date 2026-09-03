@@ -14467,9 +14467,6 @@ op_db: list[OpInfo] = [
     OpInfo('lu',
            op=torch.lu,
            dtypes=floating_and_complex_types(),
-           # complex64 backward needs solve_triangular, which is float32-only on
-           # MPS, so only the float forward+backward runs there.
-           backward_dtypesIfMPS=floating_types(),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
@@ -14495,8 +14492,6 @@ op_db: list[OpInfo] = [
     OpInfo('lu_solve',
            op=torch.lu_solve,
            dtypes=floating_and_complex_types(),
-           # complex64 backward needs solve_triangular, which is float32-only on MPS.
-           backward_dtypesIfMPS=floating_types(),
            supports_forward_ad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
