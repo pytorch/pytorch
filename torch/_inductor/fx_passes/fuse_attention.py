@@ -954,6 +954,72 @@ def _is_supported_scale(scale) -> bool:
     return isinstance(scale, (float, int, torch.SymInt))
 
 
+_matmul_like_ops = frozenset(
+    {
+        torch.ops.aten.bmm.default,
+        torch.ops.aten.mm.default,
+        torch.ops.aten.matmul.default,
+    }
+)
+_reshape_like_ops = frozenset(
+    {
+        torch.ops.aten.view.default,
+        torch.ops.aten.reshape.default,
+        torch.ops.aten.transpose.int,
+        torch.ops.aten.permute.default,
+        torch.ops.aten.contiguous.default,
+        torch.ops.aten.expand.default,
+        torch.ops.aten.clone.default,
+        torch.ops.aten.div.Tensor,
+        torch.ops.aten.mul.Tensor,
+    }
+)
+
+
+def _is_matmul_derived(node) -> bool:
+    """Return True if ``node`` is a reshaping/permutation of a matmul output.
+
+    The masked SDPA patterns add a broadcastable attention mask to the matmul
+    scores. When the add operands are commuted (``attn_mask + scores`` instead of
+    ``scores + attn_mask``), this lets us identify the scores operand and hence
+    the mask operand regardless of position.
+    """
+    seen = set()
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        if id(n) in seen:
+            continue
+        seen.add(id(n))
+        target = getattr(n, "target", None)
+        if target in _matmul_like_ops:
+            return True
+        if target in _reshape_like_ops and n.args and isinstance(
+            n.args[0], torch.fx.Node
+        ):
+            stack.append(n.args[0])
+    return False
+
+
+def _get_attn_mask_node(add_mask_node):
+    """Return the attention-mask operand of a masked-add node.
+
+    ``add_mask_node`` matches ``aten.add.Tensor`` whose two operands are the
+    matmul scores and the (broadcastable) attention mask. The operands may
+    appear in either order because the add is commutative.
+    """
+    if len(add_mask_node[0].args) != 2:
+        return None
+    op0, op1 = add_mask_node[0].args
+    # The scores operand is the matmul-derived one; the mask is the other.
+    if isinstance(op0, torch.fx.Node) and _is_matmul_derived(op0):
+        return op1
+    if isinstance(op1, torch.fx.Node) and _is_matmul_derived(op1):
+        return op0
+    # Fall back to the original assumption (mask is the second operand).
+    return op1
+
+
 def _sfdp_params_check(match):
     if not all(k in match.kwargs for k in ("query", "key", "value")):
         raise AssertionError("expected query, key, value in match.kwargs")
@@ -980,9 +1046,8 @@ def _sfdp_params_check(match):
     add_mask_node = filter_nodes(match.nodes, aten.add.Tensor)
     # Has attn_mask add.
     if len(add_mask_node) > 0:
-        attn_mask_node = add_mask_node[0].args[1]
-        # attn_mask_node may be a float/int number.
-        if not hasattr(attn_mask_node, "meta"):
+        attn_mask_node = _get_attn_mask_node(add_mask_node)
+        if attn_mask_node is None or not hasattr(attn_mask_node, "meta"):
             return False
         attn_mask = attn_mask_node.meta["val"]  # type: ignore[union-attr]
         # Make sure attn_mask.dtype == query.dtype or attn_mask.dtype == torch.bool
