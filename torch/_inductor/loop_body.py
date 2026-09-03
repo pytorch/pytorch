@@ -870,8 +870,8 @@ class CaptureIndexing(WrapperHandler):
         # Proxies are iterable, but some methods expect tuples/lists
         return tuple(result[i] for i in range(len(value_proxy)))
 
-    def sort(self, dtypes, values, stable, descending):
-        result = self._inner.sort(dtypes, values, stable, descending)
+    def sort(self, dtypes, values, stable, descending, top_k=None):
+        result = self._inner.sort(dtypes, values, stable, descending, top_k=top_k)
         # Proxies are iterable, but some methods expect tuples/lists
         return tuple(result[i] for i in range(len(values)))
 

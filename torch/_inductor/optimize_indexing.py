@@ -272,6 +272,7 @@ class _ValueUseRules:
         values: tuple[Any, ...],
         stable: bool,
         descending: bool,
+        top_k: int | None = None,
     ) -> _ValueUseRule:
         return _ValueUseRule(value_sinks=(values,))
 
