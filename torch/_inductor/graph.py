@@ -1923,6 +1923,24 @@ class GraphLowering(torch.fx.Interpreter):
             return None
         return custom["mempool"], custom["mempool_device"]
 
+    @staticmethod
+    def _mempool_is_cudagraph_managed(node_mempool: tuple[int, int]) -> bool:
+        """True if a user MemPool has been registered with cudagraph_trees.
+
+        ``node_mempool`` is ``(user_object_index, device)``. A registered pool is
+        managed (tracked/checkpointed) by cudagraph_trees like the private capture
+        pool, so cudagraph capture need not be disabled for it.
+        """
+        mempool_index, mempool_device = node_mempool
+        try:
+            from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+            from torch._inductor.cudagraph_trees import is_registered_external
+
+            pool = get_external_object_by_index(mempool_index)
+            return is_registered_external(mempool_device, pool.id)
+        except Exception:
+            return False
+
     def _realize_inputs_at_context_boundaries(self, n: torch.fx.Node) -> None:
         """Realize IR inputs that are in a different stream or mempool context.
 
@@ -1998,10 +2016,16 @@ class GraphLowering(torch.fx.Interpreter):
             origins |= gather_origins(args, kwargs)
             self._realize_inputs_at_context_boundaries(n)
         node_mempool = self._get_node_mempool(n)
-        if node_mempool is not None and self.disable_cudagraphs_reason is None:
-            # User MemPool regions must route allocations to the explicit pool.
-            # CUDA graphs use a private capture pool, so capture would violate
-            # that routing and trip cudagraph memory-pool assertions.
+        if (
+            node_mempool is not None
+            and self.disable_cudagraphs_reason is None
+            and not self._mempool_is_cudagraph_managed(node_mempool)
+        ):
+            # A user MemPool routes allocations to an explicit pool rather than the
+            # cudagraph private capture pool. Unless that pool is registered with
+            # cudagraph_trees (which then manages/checkpoints it like the private
+            # pool), capture would violate that routing and trip cudagraph
+            # memory-pool assertions.
             self.disable_cudagraphs_reason = (
                 "user CUDA MemPool contexts are not compatible with CUDA graphs"
             )
