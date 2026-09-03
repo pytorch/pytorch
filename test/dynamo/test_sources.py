@@ -178,10 +178,15 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
     def test_provenance_classifies_by_root(self):
         from torch._dynamo.source import (
             BackwardStateSource,
+            ContextVarGetSource,
+            CurrentStreamSource,
             GlobalStateSource,
             GlobalWeakRefSource,
+            ImportSource,
+            LocalCellSource,
             NumpyTensorSource,
             ShapeEnvSource,
+            TorchFunctionModeStackSource,
             TupleIteratorGetItemSource,
             TypeSource,
         )
@@ -210,6 +215,23 @@ class GuardProvenanceTests(torch._dynamo.test_case.TestCase):
         # an environment-drop policy must never see them as droppable GLOBAL.
         self.assertEqual(
             GlobalWeakRefSource("__optimizer_1").provenance, GuardProvenance.INPUT
+        )
+        # ImportSource is GLOBAL even though is_global() is False for it (that
+        # predicate is true only for chains rooted at exactly GlobalSource).
+        self.assertEqual(ImportSource("torch").provenance, GuardProvenance.GLOBAL)
+        self.assertEqual(LocalCellSource("c").provenance, GuardProvenance.INPUT)
+        self.assertEqual(
+            CurrentStreamSource(torch.device("cpu")).provenance,
+            GuardProvenance.AMBIENT,
+        )
+        self.assertEqual(
+            TorchFunctionModeStackSource(0).provenance, GuardProvenance.AMBIENT
+        )
+        # Values read through a global at check time stay GLOBAL: the
+        # environment-invariant contract must cover them (see the enum docs).
+        self.assertEqual(
+            ContextVarGetSource(GlobalSource("cv")).provenance,
+            GuardProvenance.GLOBAL,
         )
 
     def test_unclassified_root_fails_closed(self):
