@@ -521,7 +521,7 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
   m_active_bytes.decrease(buffer_block->size);
   if (buffer_block->event) {
     // returns the MPSEvent back to MPSEventPool
-    buffer_block->event.reset(nullptr);
+    buffer_block->event.reset();
   }
   buffer_block->in_use = false;
   HeapBlock* heap = buffer_block->heap;
@@ -687,7 +687,7 @@ bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
         buffer_block->event = m_event_pool->acquireEvent(false, nullptr);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer_block->event);
       }
-      buffer_block->event->record(/*needsLock*/ false);
+      buffer_block->event->get()->record(/*needsLock*/ false);
       recordedEvent = true;
     }
   }
@@ -713,7 +713,7 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
   for (const auto& buffer_block : buffer_blocks) {
     // check for retain count again as the previous wait might have released the buffer
     if (buffer_block->retainCount() > 1) {
-      bool waitedOnCPU = buffer_block->event->synchronize();
+      bool waitedOnCPU = buffer_block->event->get()->synchronize();
       if (waitedOnCPU) {
         // after waiting, it's a good time to free some pending inactive buffers
         freeInactiveBuffers();
