@@ -12,6 +12,7 @@ and help Dynamo make better specialization decisions.
 from __future__ import annotations
 
 import base64
+import contextlib
 import copy
 import dataclasses
 import enum
@@ -22,6 +23,7 @@ import pickle
 import re
 import zlib
 from collections import defaultdict
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, TypeVar
 from typing_extensions import override, Self
 
@@ -47,6 +49,7 @@ from torch.utils._ordered_set import OrderedSet
 
 if TYPE_CHECKING:
     import types
+    from collections.abc import Iterator
 
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
@@ -197,8 +200,31 @@ class CodeState:
 
 _INIT_CODE_STATE: defaultdict[CodeId, CodeState] | None = None
 _CODE_STATE: defaultdict[CodeId, CodeState] | None = None
+_CODE_STATE_OVERRIDE: ContextVar[defaultdict[CodeId, CodeState] | None] = ContextVar(
+    "dynamo_pgo_code_state_override", default=None
+)
 _LOGGED_DYNAMIC_ALLOWLIST: bool = False
 _KNOWN_DYNAMIC_SOURCES: set[str] = set()
+
+
+def _new_code_state() -> defaultdict[CodeId, CodeState]:
+    return defaultdict(CodeState)
+
+
+@contextlib.contextmanager
+def _use_code_state(
+    code_state: defaultdict[CodeId, CodeState],
+) -> Iterator[None]:
+    # While the override is set, get_code_state() also skips its cache-fetch and
+    # tlparse bookkeeping, so overridden compiles leave no PGO trace artifacts.
+    # ContextVars do not propagate to newly spawned threads: every compile that
+    # should see the override must run on the thread that entered this context
+    # (precompile capture is synchronous under its compile lock today).
+    token = _CODE_STATE_OVERRIDE.set(code_state)
+    try:
+        yield
+    finally:
+        _CODE_STATE_OVERRIDE.reset(token)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -938,6 +964,8 @@ def get_extra_remote_code_state(cache_key: str) -> None:
 
 def get_code_state() -> defaultdict[CodeId, CodeState]:
     global _CODE_STATE, _INIT_CODE_STATE
+    if (override := _CODE_STATE_OVERRIDE.get()) is not None:
+        return override
     if _CODE_STATE is not None:
         return _CODE_STATE
 
@@ -972,6 +1000,13 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
 
 
 def put_code_state() -> None:
+    if _CODE_STATE_OVERRIDE.get() is not None:
+        # Symmetric with get_code_state: an overridden (capture-session)
+        # compile must not rewrite the process-global profile to the local /
+        # remote caches or emit PGO trace artifacts.
+        log.info("put_code_state: code state overridden, will not write")
+        return
+
     if _CODE_STATE is None:
         log.info("put_code_state: never initialized, will not write")
         return

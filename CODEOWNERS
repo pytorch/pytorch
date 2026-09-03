@@ -1139,6 +1139,7 @@
 # /test/inductor/
 # /test/inductor_expected_failures/
 # /test/inductor_skips/
+# /test/precompile_test_helpers.py
 # /test/test_precompile.py
 # /test/test_triton_utils.py
 /torch/_higher_order_ops/flex_attention.py @drisspg
