@@ -199,6 +199,29 @@ class TestPrivateuse1DeviceInterface(TestCase):
             with self.assertRaises(NotImplementedError):
                 get_interface_for_device("fakebackend")
 
+    def test_direct_registration_not_clobbered_by_hook(self):
+        """When a backend has already registered its interface directly via
+        register_interface_for_device, the lazy hook should NOT overwrite it
+        during init_device_reg()."""
+        DirectInterface = self._make_dummy_interface()
+        HookInterface = self._make_dummy_interface()
+
+        self._reset_device_reg()
+        # Simulate direct registration (as openreg does at import time)
+        from torch._dynamo.device_interface import register_interface_for_device
+
+        register_interface_for_device("fakebackend", DirectInterface)
+        p1, p2, p3 = self._setup_fakebackend(
+            get_device_interface_fn=lambda: HookInterface,
+            device_count_fn=lambda: 1,
+        )
+        with p1, p2, p3:
+            # init_device_reg() should skip the hook because the backend
+            # is already registered
+            result = get_interface_for_device("fakebackend")
+            self.assertIs(result, DirectInterface)
+            self.assertIsNot(result, HookInterface)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
