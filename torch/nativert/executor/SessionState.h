@@ -13,7 +13,7 @@ class SessionState {
  public:
   explicit SessionState(
       ExecutionFrame& frame,
-      const c10::FastMap<const Node*, uint32_t>& producers = {})
+      const c10::FastMap<const Node*, uint32_t>& producers)
       : producers_(producers.begin(), producers.end()), frame_(frame) {}
 
   C10_ALWAYS_INLINE void wait() {
@@ -47,7 +47,7 @@ class SessionState {
   }
 
  private:
-  std::atomic_uint32_t workOutstanding_;
+  std::atomic_uint32_t workOutstanding_{0};
   c10::FastMap<const Node*, std::atomic_uint32_t> producers_;
 
   ExecutionFrame& frame_;
