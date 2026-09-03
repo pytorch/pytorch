@@ -693,9 +693,9 @@ class TestPatternMatcher(TestCase):
         # The mm kernel should use ATen (because we set max_autotune_gemm_backends = ATEN).
         # Its name should contain `aten.bmm` since this is the original aten op where the bmm came from.
 
-        FileCheck().check("extern_kernels.mm(").check_not(
-            "extern_kernels.bmm("
-        ).run(code)
+        FileCheck().check("extern_kernels.mm(").check_not("extern_kernels.bmm(").run(
+            code
+        )
 
         a_multi = torch.randn(3, 16, 8, device=device)
         b_multi = torch.randn(3, 8, 32, device=device)
@@ -894,7 +894,12 @@ class TestPatternMatcher(TestCase):
         ],
     )
     def test_pointless_convert(
-        self, device, input_dtype, intermediate_dtype, emulate_precision_casts, expected_calls
+        self,
+        device,
+        input_dtype,
+        intermediate_dtype,
+        emulate_precision_casts,
+        expected_calls,
     ):
         def fn(x):
             x = torch.ops.prims.convert_element_type.default(x, intermediate_dtype)
@@ -3541,8 +3546,7 @@ class TestPatternMatcherLogging(LoggingTestCase):
         N = 10
         temperature = 0.8
         row = (
-            torch.arange(1, N + 1, dtype=torch.float, device=device).log()
-            * temperature
+            torch.arange(1, N + 1, dtype=torch.float, device=device).log() * temperature
         )
         expected_distribution = []
         tot_val = N * (N + 1) / 2
@@ -3811,6 +3815,7 @@ class TestPatternMatcherLoggingGeneric(LoggingTestCase):
             ]
             self.assertNotIn(torch.ops._test_pm.original_op.default, op_targets)
             self.assertIn(torch.ops._test_pm.replacement_op.default, op_targets)
+
 
 instantiate_device_type_tests(
     TestPatternMatcher, globals(), except_for="cpu", allow_xpu=True
