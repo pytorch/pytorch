@@ -2950,7 +2950,12 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             should_log_inputs=False)
 
 
-instantiate_device_type_tests(TestFXNumericSuiteCoreAPIsDevice, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestFXNumericSuiteCoreAPIsDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True
+)
 
 
 if __name__ == "__main__":
