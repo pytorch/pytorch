@@ -150,7 +150,7 @@ def can_reach_amplified_node(
     graph: Graph, amplifier_node: Node, is_fwd: bool
 ) -> dict[Node, bool]:
     """
-    A amplified node means a node with the same numel as `amplifier_node`
+    An amplified node means a node with the same numel as `amplifier_node`
     """
     filter_obj: dict[Node, bool] = {}
     nodelist = reversed(graph.nodes) if is_fwd else graph.nodes

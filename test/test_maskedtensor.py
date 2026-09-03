@@ -2,11 +2,12 @@
 
 import torch
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     TestCase,
-    run_tests,
+    instantiate_parametrized_tests,
     make_tensor,
     parametrize,
-    instantiate_parametrized_tests,
+    run_tests,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -116,6 +117,8 @@ def _fix_fn_name(fn_name):
 
 
 class TestBasics(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_invalid_tensor_inputs(self, device):
         data = torch.randn((3, 4), device=device)
         mask = _create_random_mask((3, 4), device=device)
@@ -426,6 +429,8 @@ class TestBasics(TestCase):
         self.assertEqual(now_contiguous_mt.is_contiguous(), True)
 
 class TestUnary(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _get_test_data(self, fn_name):
         data = torch.randn(10, 10)
         mask = torch.rand(10, 10) > 0.5
@@ -489,6 +494,8 @@ class TestUnary(TestCase):
         _compare_mt_t(mt_result, t_result)
 
 class TestBinary(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _get_test_data(self, fn_name):
         fn_name = _fix_fn_name(fn_name)
         data0 = torch.randn(10, 10)
@@ -565,6 +572,8 @@ class TestBinary(TestCase):
                 raise AssertionError(f"unexpected error message: {e}") from None
 
 class TestReductions(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_max_not_implemented(self):
         d = torch.tensor([[0, 1, 2], [3, 4, 5.0]])
         m = torch.tensor([[True, False, False], [False, True, False]])
@@ -886,6 +895,8 @@ MASKEDTENSOR_FLOAT_TYPES = {
 }
 
 class TestOperators(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _convert_mt_args(self, args, mask, layout):
         return [
             masked_tensor(
@@ -1000,10 +1011,9 @@ class TestOperators(TestCase):
         self._test_reduction_equality(device, dtype, op, layout)
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
+instantiate_device_type_tests(TestOperators, globals())
 
-instantiate_device_type_tests(TestBasics, globals(), only_for=only_for)
+instantiate_device_type_tests(TestBasics, globals())
 instantiate_parametrized_tests(TestUnary)
 instantiate_parametrized_tests(TestBinary)
 instantiate_parametrized_tests(TestReductions)
