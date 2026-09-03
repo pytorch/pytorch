@@ -1499,6 +1499,12 @@ if(NOT INTERN_BUILD_MOBILE)
       if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=pass-failed ")
+        # third_party/cutlass is included as a plain (non-SYSTEM) include dir
+        # for torch_cuda (caffe2/CMakeLists.txt), so -Wunused-function fires on
+        # cutlass header-only helpers (e.g. cutlassGetStatusString, cute's
+        # prefetch) that a given translation unit's CUDA-version-gated
+        # instantiation path happens not to reference.
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=unused-function ")
       endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")

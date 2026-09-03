@@ -283,6 +283,17 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   fi
   pip_install_whl "$(echo dist/*.whl)"
 
+  # Torch should be importable and that's about it; also a regression test for
+  # https://github.com/pytorch/pytorch/issues/164297. Checking here means a
+  # broken build fails with the loader's own message instead of several steps
+  # later inside an add-on package's setup.py. Run from / so the source
+  # checkout does not shadow the installed torch.
+  if ! (cd /; python -c "import torch; print(torch.__config__.show(), torch.randn(5) + 1.7)"); then
+    echo "ERROR: the freshly built torch does not import; ldd -r output follows"
+    ldd -r "$(python -c "import sysconfig,os;print(os.path.join(sysconfig.get_paths()['purelib'],'torch','lib','libtorch_python.so'))")" || true
+    exit 1
+  fi
+
   # Smoke-test tools/build_with_debinfo.py against the real build tree: it must
   # still emit a debug-rebuild plan with a -g compile and the libtorch_python
   # relink. This guards against build-system changes (e.g. a new
@@ -294,12 +305,6 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     echo "${debinfo_plan}"
     grep -qE ' -g( |$)' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no -g debug compile flag"; exit 1; }
     grep -q 'libtorch_python' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no libtorch_python link command"; exit 1; }
-  fi
-
-  if [[ "$BUILD_ENVIRONMENT" == *full-debug* ]]; then
-    # Regression test for https://github.com/pytorch/pytorch/issues/164297
-    # Torch should be importable and that's about it
-    pushd /; python -c "import torch;print(torch.__config__.show(), torch.randn(5) + 1.7)"; popd
   fi
 
   if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *vision* ]]; then

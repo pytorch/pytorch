@@ -183,8 +183,11 @@ function install_torchvision() {
   local commit
   commit=$(get_pinned_commit vision)
   orig_preload=${LD_PRELOAD}
-  if [ -n "${LD_PRELOAD}" ]; then
-    # Silence dlerror to work-around glibc ASAN bug, see https://sourceware.org/bugzilla/show_bug.cgi?id=27653#c9
+  # Silence dlerror to work-around glibc ASAN bug, see https://sourceware.org/bugzilla/show_bug.cgi?id=27653#c9
+  # Only under ASAN: the shim makes every failed dlopen raise a message-less
+  # ImportError, so applying it to e.g. the jemalloc LD_PRELOAD that all CUDA
+  # builds set would hide the reason a broken torch fails to import.
+  if [[ "${LD_PRELOAD}" == *asan* ]]; then
     echo 'char* dlerror(void) { return "";}'|gcc -fpic -shared -o "${HOME}/dlerror.so" -x c -
     LD_PRELOAD=${orig_preload}:${HOME}/dlerror.so
   fi
@@ -196,9 +199,7 @@ function install_torchvision() {
   fi
   retry pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
 
-  if [ -n "${LD_PRELOAD}" ]; then
-    LD_PRELOAD=${orig_preload}
-  fi
+  LD_PRELOAD=${orig_preload}
 }
 
 function install_fbgemm() {
