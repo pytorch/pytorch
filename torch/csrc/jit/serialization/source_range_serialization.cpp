@@ -73,13 +73,16 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
 
     TORCH_CHECK(
         (uint64_t)fnameIndex < text_table_.size(),
-        "Text table index is out of range")
+        "Filename table index ", fnameIndex, " out of range [0, ", text_table_.size(), ")")
     filename = *text_table_[fnameIndex];
 
     std::vector<std::string_view> pieces;
     std::vector<std::shared_ptr<std::string>> strs;
 
     for (int64_t i : textIndex) {
+      TORCH_CHECK(
+          (uint64_t)i < text_table_.size(),
+          "Text table index ", i, " out of range [0, ", text_table_.size(), ")")
       pieces.emplace_back(*text_table_[i]);
       strs.emplace_back(text_table_[i]);
     }
