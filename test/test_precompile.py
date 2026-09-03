@@ -923,6 +923,33 @@ def _serialized_guard_names(code):
     return " ".join(names)
 
 
+def _precompile_defaulted_helper(model, x, scale):
+    # A nested frame no name in the entry reaches, which is what puts the
+    # capture into the installed serving mode.
+    torch._dynamo.graph_break()
+    return model(x).sum() * scale
+
+
+def _precompile_defaulted_entry(model, x, scale=3.0):
+    """An entry with a default, which a code object does not carry."""
+    return _precompile_defaulted_helper(model, x, scale)
+
+
+# A user global the rendered inductor source shadows with a name of its own.
+BACKEND = 5.0
+
+
+def _precompile_shadowed_global_entry(t):
+    return t * BACKEND
+
+
+_DRIFT_MODULE = None
+
+
+def _precompile_drift_entry(x):
+    return _DRIFT_MODULE.scaled(x).sum()
+
+
 # precompile drives make_fx internally, which cannot symbolically trace a
 # dynamo-optimized function; the whole suite is therefore incompatible with
 # PYTORCH_TEST_WITH_DYNAMO (dynamo_wrapped CI), so skip it there.
@@ -2485,9 +2512,9 @@ class TestPrecompile(TestCase):
         original_serve = handle._serve
         serves = []
 
-        def counting_serve(fn):
+        def counting_serve(fn, **kwargs):
             serves.append(threading.current_thread().name)
-            return original_serve(fn)
+            return original_serve(fn, **kwargs)
 
         handle._serve = counting_serve
         barrier = threading.Barrier(2)
@@ -5318,6 +5345,332 @@ class TestPrecompile(TestCase):
             self.assertEqual(loaded(two, x), _precompile_dict_len(two, x))
             with self.assertRaisesRegex(RuntimeError, "no captured variant"):
                 loaded(four, x)
+
+    def test_precompile_artifact_write_leaves_the_previous_pair_on_failure(self):
+        # The two halves only load together -- the cache carries a sha256 of
+        # exactly the python_code it was emitted with -- so truncating them in
+        # place puts a new artifact next to a stale cache for as long as the
+        # write takes. An accumulating capture rewrites on every call and sells
+        # exactly that crash as the thing it protects against.
+        import builtins
+
+        from torch._precompile import _write_artifact
+
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "a.py")
+            cache_path = os.path.join(d, "a.cache")
+            _write_artifact(artifact_path, cache_path, "GOOD = 1\n", b"goodcache")
+
+            real_open = builtins.open
+            seen = []
+
+            def flaky(path, *args, **kwargs):
+                if str(path).endswith(".tmp"):
+                    seen.append(path)
+                    if len(seen) == 2:
+                        raise OSError("disk full")
+                return real_open(path, *args, **kwargs)
+
+            with mock.patch.object(builtins, "open", flaky):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    _write_artifact(artifact_path, cache_path, "NEW = 2\n", b"newcache")
+            with open(artifact_path) as f:
+                self.assertEqual(f.read(), "GOOD = 1\n")
+            with open(cache_path, "rb") as f:
+                self.assertEqual(f.read(), b"goodcache")
+            self.assertEqual([f for f in os.listdir(d) if f.endswith(".tmp")], [])
+
+    def test_precompile_artifact_write_honours_the_umask(self):
+        # mkstemp creates its file 0600 and the rename carried that onto the
+        # artifact, so nobody else on a shared directory could read it. The
+        # pair has to land with the mode a plain open() gives under the umask.
+        import stat
+
+        from torch._precompile import _write_artifact
+
+        umask = os.umask(0)
+        os.umask(umask)
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "a.py")
+            cache_path = os.path.join(d, "a.cache")
+            _write_artifact(artifact_path, cache_path, "X = 1\n", b"cache")
+            for path in (artifact_path, cache_path):
+                self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o666 & ~umask)
+            self.assertEqual([f for f in os.listdir(d) if f.endswith(".tmp")], [])
+
+    def test_precompile_artifact_write_restores_the_previous_pair_on_rename_failure(
+        self,
+    ):
+        # An OSError on the second rename left the new .py beside the old
+        # cache: a pair load refuses on code_hash, for as long as it takes a
+        # later call to succeed. The previous artifact is moved aside first
+        # and put back, so the named files stay the last good pair.
+        from torch._precompile import _write_artifact
+
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "a.py")
+            cache_path = os.path.join(d, "a.cache")
+            _write_artifact(artifact_path, cache_path, "GOOD = 1\n", b"goodcache")
+            real_replace = os.replace
+
+            def flaky(src, dst):
+                if dst == cache_path:
+                    raise OSError("cache rename failed")
+                return real_replace(src, dst)
+
+            with mock.patch.object(os, "replace", flaky):
+                with self.assertRaisesRegex(OSError, "cache rename failed"):
+                    _write_artifact(artifact_path, cache_path, "NEW = 2\n", b"newcache")
+            with open(artifact_path) as f:
+                self.assertEqual(f.read(), "GOOD = 1\n")
+            with open(cache_path, "rb") as f:
+                self.assertEqual(f.read(), b"goodcache")
+            self.assertEqual(sorted(os.listdir(d)), ["a.cache", "a.py"])
+        # A first write whose cache target cannot be renamed over (a directory)
+        # leaves no half artifact behind either.
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "a.py")
+            cache_dir = os.path.join(d, "a.cache")
+            os.mkdir(cache_dir)
+            with self.assertRaises(OSError):
+                _write_artifact(artifact_path, cache_dir, "NEW = 2\n", b"newcache")
+            self.assertEqual(os.listdir(d), ["a.cache"])
+
+    def test_precompile_installed_entry_keeps_its_defaults(self):
+        # An installed artifact rebuilds its entry from a code object, which
+        # carries neither defaults nor closure values. Without them a defaulted
+        # parameter is simply absent at the served call, so the guard written
+        # against it has nothing to bind and every variant misses.
+        from torch._precompile import _parse_artifact_metadata
+
+        model = _PrecompileBreakingModule().eval()
+        x = torch.randn(3, 8)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_defaulted_entry,
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+                require_no_risky_drops=False,
+                example_inputs=[(model, x)],
+            )
+        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            # Called WITHOUT scale, so the served frame only has it if the
+            # artifact carried the default.
+            self.assertEqual(loaded(model, x), _precompile_defaulted_entry(model, x))
+
+    def test_precompile_user_global_wins_over_the_artifacts_own(self):
+        # The rendered backend source is exec'd into the artifact module and
+        # brings its own names with it. Binding the frames to that live dict let
+        # those shadow a user global of the same name -- which their guards were
+        # written against -- so every variant missed.
+        x = torch.randn(4)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_shadowed_global_entry,
+                tracer="dynamo",
+                backend="eager",
+                require_no_risky_drops=False,
+                example_inputs=[(x,)],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_shadowed_global_entry(x))
+
+    def test_precompile_serving_does_not_mutate_the_artifact(self):
+        # CompilePackage appends to the entry's per-code records, so a
+        # serve-time recompile used to write its new backend id back into the
+        # artifact. The next install then resolved that id against the
+        # artifact's backends, which never had it. The first install consumes a
+        # prepared copy, so the corruption only surfaced on the third.
+        model = _PrecompileBreakingModule().eval()
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_attr_entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, torch.randn(3, 8))],
+            )
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        # A new shape each round misses every captured variant, which is what
+        # makes the install recompile and mutate.
+        for rows in (3, 4, 5, 6):
+            with _maybe_scoped(loaded), torch.no_grad():
+                x = torch.randn(rows, 8)
+                self.assertEqual(loaded(model, x), _precompile_attr_entry(model, x))
+
+    def test_installed_artifact_unload_takes_back_only_its_own_keys(self):
+        # Backend keys are per-capture uuids, so only another handle on this
+        # artifact can legitimately hold them; a foreign object filed under one
+        # stands in for that here. unload() takes back only what this install
+        # put there: neither a key already filed nor one re-filed while
+        # installed. And two loads of one artifact share every key, so the
+        # second install must not take over the first one's entries, with
+        # nothing of either left once both have unloaded.
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+
+        code, cache = torch.compiler.precompile(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+            example_inputs=[(torch.randn(4),)],
+        )
+        x = torch.randn(4)
+        expected = _precompile_unreachable_helper_caller(x)
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        keys = list(loaded._compiled._backend_keys)
+        self.assertGreater(len(keys), 1)
+        for key in keys:
+            PrecompileContext.take_artifact(key)
+        theirs = EagerCacheArtifact(key=keys[0], content="theirs")
+
+        def only_theirs_remains():
+            # Their object is what remains, not the install's own backend.
+            kept = PrecompileContext.serialize_artifact_by_key(keys[0])
+            self.assertEqual(kept.content, "theirs")
+            for key in keys[1:]:
+                self.assertIsNone(PrecompileContext.serialize_artifact_by_key(key))
+            PrecompileContext.take_artifact(keys[0])
+
+        PrecompileContext.record_artifact(theirs)
+        with torch.no_grad(), loaded:
+            self.assertEqual(loaded(x), expected)
+            for key in keys:
+                self.assertIsNotNone(PrecompileContext.serialize_artifact_by_key(key))
+        only_theirs_remains()
+        with torch.no_grad(), loaded:
+            self.assertEqual(loaded(x), expected)
+            PrecompileContext.record_artifact(theirs)
+        only_theirs_remains()
+
+        a = torch.compiler.precompile.load(code, cache)
+        b = torch.compiler.precompile.load(code, cache)
+        self.addCleanup(a.unload)
+        self.addCleanup(b.unload)
+        with torch.no_grad():
+            a.__enter__()
+            filed = [PrecompileContext.serialize_artifact_by_key(k) for k in keys]
+            b.__enter__()
+            self.assertEqual(b(x), expected)
+            for key, artifact in zip(keys, filed):
+                self.assertIs(
+                    PrecompileContext.serialize_artifact_by_key(key), artifact
+                )
+            b.__exit__(None, None, None)
+            for key, artifact in zip(keys, filed):
+                self.assertIs(
+                    PrecompileContext.serialize_artifact_by_key(key), artifact
+                )
+            self.assertEqual(a(x), expected)
+            a.__exit__(None, None, None)
+        for key in keys:
+            self.assertIsNone(PrecompileContext.serialize_artifact_by_key(key))
+
+    @parametrize("mode", ["standalone", "installed"])
+    def test_artifact_refuses_a_foreign_torch_build(self, mode):
+        # A dynamo artifact carries Dynamo internals in its opaque blobs, so it
+        # is locked to the build that made it. The standalone driver emitted
+        # TORCH_VERSION and read it with nothing; the installed driver unpickles
+        # the same internals and did not check at all. Either way a cross-build
+        # artifact failed wherever its blob happened to break first, and the
+        # docs promise the version/build locks are catchable as PrecompileError.
+        from torch._precompile import _parse_artifact_metadata
+
+        model = _PrecompileBreakingModule().eval()
+        entry, args = (
+            (_precompile_single_graph, (torch.randn(4),))
+            if mode == "standalone"
+            else (_precompile_attr_entry, (model, torch.randn(3, 8)))
+        )
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[args],
+            )
+        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], mode)
+        torch._dynamo.reset()
+        with (
+            mock.patch.object(torch, "__version__", "0.0.0+notreal"),
+            self.assertRaisesRegex(PrecompileError, "produced by torch"),
+        ):
+            torch.compiler.precompile.load(code, cache)
+
+    def test_standalone_artifact_refuses_drifted_inlined_source(self):
+        # A standalone artifact builds no CompilePackage, so it never ran the
+        # inlined-source check the installed mode gets for free -- and an
+        # artifact whose inlined helper has since changed does not fail, it
+        # answers with the OLD number.
+        import importlib.util
+
+        def import_from_path(name, path):
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+            return module
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            original = os.path.join(tmp_dir, "orig.py")
+            modified = os.path.join(tmp_dir, "modified.py")
+            with open(original, "w") as f:
+                f.write("def scaled(x):\n    return x * 3.0\n")
+            with open(modified, "w") as f:
+                f.write("def scaled(x):\n    return x * 5.0\n")
+            global _DRIFT_MODULE
+            self.addCleanup(sys.modules.pop, "torch.test_precompile_drift", None)
+            self.addCleanup(globals().__setitem__, "_DRIFT_MODULE", None)
+            _DRIFT_MODULE = import_from_path("torch.test_precompile_drift", original)
+            entry = _precompile_drift_entry
+            x = torch.ones(4)
+            with torch.no_grad():
+                code, cache = torch.compiler.precompile(
+                    entry,
+                    backend="eager",
+                    dynamic=False,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                    example_inputs=[(x,)],
+                )
+            from torch._precompile import _parse_artifact_metadata
+
+            self.assertEqual(
+                _parse_artifact_metadata(code)["SERVING_MODE"], "standalone"
+            )
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load(code, cache)
+            with _maybe_scoped(loaded), torch.no_grad():
+                self.assertEqual(loaded(x), entry(x))
+
+            _DRIFT_MODULE = import_from_path("torch.test_precompile_drift", modified)
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                PrecompileError, "source code changes detected"
+            ):
+                torch.compiler.precompile.load(code, cache)
+
+            # A serving host WITHOUT the module (its code is baked into the
+            # captured graphs) makes drift unverifiable, not detected: the
+            # check must skip rather than surface a raw ModuleNotFoundError
+            # on an artifact that serves identically -- the CAPTURED answer,
+            # x * 3, not the modified module's.
+            del sys.modules["torch.test_precompile_drift"]
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load(code, cache)
+            with _maybe_scoped(loaded), torch.no_grad():
+                self.assertEqual(loaded(x), (x * 3.0).sum())
 
 
 def _graph_devices_literal(code: str) -> str:

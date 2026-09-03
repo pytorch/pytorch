@@ -319,10 +319,12 @@ import hashlib
 import inspect
 import io
 import logging
+import os
 import pickle
 import sys
 import threading
 import types
+import uuid
 import warnings
 from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType
@@ -476,7 +478,7 @@ class _InstalledArtifact:
 
     def __init__(
         self,
-        serve: Callable[[Callable[..., object]], Any],
+        serve: Callable[..., Any],
         entry_factory: Callable[[], Callable[..., object]],
         *,
         check_fn: Callable[[Callable[..., object]], None] | None = None,
@@ -486,10 +488,18 @@ class _InstalledArtifact:
         self._entry_factory = entry_factory
         # Refuses a load(fn=...) target the artifact was not captured from.
         self._check_fn = check_fn
-        # PrecompileContext keys serve() records; unload() takes them back out.
+        # PrecompileContext keys serve() records; unload() takes back the ones
+        # this install added, by identity (see _ensure).
         self._backend_keys = backend_keys
+        self._recorded: dict[str, Any] = {}
         self._fn: Callable[..., object] | None = None
         self._inner: Any = None
+        self._prepared: Any = None
+        # unload() retires the handle for good. Without this flag a call after
+        # unload would silently re-run _serve() -- re-mutating process-global
+        # code objects with no paired unload, exactly the attributable-install
+        # contract this class exists to keep -- and a call racing unload()
+        # could reinstall before unload() returned.
         self._unloaded = False
         # Installing mutates process-global code objects, so racing first calls
         # must not both install.
@@ -511,6 +521,24 @@ class _InstalledArtifact:
                     raise PrecompileError(str(e)) from e
             self._fn = fn
 
+    def _prepare(self, package_blob: str) -> None:
+        """Build what serving needs, at load rather than at the first call."""
+        import base64
+
+        from torch._dynamo.precompile_package import prepare_cache_entry
+
+        # Exactly the resolution _ensure performs, or this prepares a different
+        # entry frame than the install will use.
+        fn = self._entry_factory() if self._fn is None else self._fn
+        try:
+            self._prepared = prepare_cache_entry(
+                fn, pickle.loads(base64.b64decode(package_blob))
+            )
+        except PrecompileError:
+            raise
+        except Exception as e:
+            raise PrecompileError(str(e)) from e
+
     def _ensure(self) -> Any:
         inner = self._inner
         if inner is None:
@@ -522,8 +550,26 @@ class _InstalledArtifact:
                         "new handle."
                     )
                 if self._inner is None:
+                    from torch._dynamo.precompile_context import PrecompileContext
+
                     fn = self._entry_factory() if self._fn is None else self._fn
-                    self._inner = self._serve(fn)
+                    # Backend keys are per-capture uuids, so only another handle
+                    # on this very artifact (or the same entry loaded through
+                    # DynamoStore) can already hold them, with identical content.
+                    # _serve records only absent keys; remember which those were
+                    # so unload takes back exactly what this install added.
+                    present = {
+                        k
+                        for k in self._backend_keys
+                        if PrecompileContext.serialize_artifact_by_key(k) is not None
+                    }
+                    self._inner = self._serve(fn, prepared=self._prepared)
+                    self._prepared = None
+                    self._recorded = {
+                        k: PrecompileContext.serialize_artifact_by_key(k)
+                        for k in self._backend_keys
+                        if k not in present
+                    }
                 inner = self._inner
         return inner
 
@@ -549,8 +595,12 @@ class _InstalledArtifact:
             inner, self._inner = self._inner, None
         if inner is not None:
             inner.unload()
-            for key in self._backend_keys:
-                PrecompileContext.take_artifact(key)
+            recorded, self._recorded = self._recorded, {}
+            for key, artifact in recorded.items():
+                # Only the object this install filed: a same-key artifact filed
+                # since (an ambient run on the same graph) is not ours to take.
+                if PrecompileContext.serialize_artifact_by_key(key) is artifact:
+                    PrecompileContext.take_artifact(key)
 
 
 class PrecompileSession:
@@ -1894,8 +1944,8 @@ def _build_multigraph_python_source(
         parts.append("# " + "=" * 70)
         parts.append(f"_PACKAGE = {_b64(package_entry)!r}")
         parts.append("")
-        parts.append("# The entry's defaults and closure values; see the standalone")
-        parts.append("# note above -- the installed driver rebuilds an entry too.")
+        parts.append("# The entry's default arguments; see the standalone note")
+        parts.append("# above -- the installed driver rebuilds an entry too.")
         parts.append(f"_ENTRY_BINDING = {_b64(entry_binding or {})!r}")
         parts.append("")
         parts.append("# " + "=" * 70)
@@ -1906,8 +1956,21 @@ def _build_multigraph_python_source(
 
     parts.append('SERVING_MODE = "standalone"')
     parts.append("")
-    parts.append("# The entry's defaults and closure values: a code object carries")
-    parts.append("# neither, and the driver rebuilds the entry from one.")
+    parts.append("# Every function Dynamo INLINED into a captured graph, so the driver")
+    parts.append("# can tell that the source it is about to trust still says what it")
+    parts.append("# said at capture. The installed mode gets this from CompilePackage;")
+    parts.append(
+        "# a standalone artifact builds no package, so it carries the records."
+    )
+    parts.append("# __main__ is skipped: it names the LOADER's script on another")
+    parts.append("# machine, which is exactly what a portable artifact is for.")
+    parts.append(
+        f"INLINED_SOURCES = "
+        f"{sorted((s.module, s.firstlineno, s.lastlineno, s.checksum) for s in entry.source_info.inlined_sources if s.module != '__main__')!r}"
+    )
+    parts.append("")
+    parts.append("# The entry's default arguments: a code object carries none,")
+    parts.append("# and the driver rebuilds the entry from one.")
     parts.append(f"_ENTRY_BINDING = {_b64(entry_binding or {})!r}")
     parts.append("")
     parts.append("# " + "=" * 70)
@@ -2141,20 +2204,56 @@ def _reject_unreachable_frames(frames: list[dict[str, Any]], entry: Any) -> None
 
 
 def _entry_binding(fn: object) -> dict[str, Any]:
-    """The parts of the entry callable a code object does not carry.
+    """The default arguments an entry's code object does not carry.
 
-    The artifact rebuilds its entry from that entry's code object, and a code
-    object holds neither default arguments nor closure cell VALUES. Without them
-    a defaulted parameter is simply absent at the served call -- which the guard
-    check then cannot bind, so every variant misses -- and a closure entry cannot
-    be constructed at all. Carry them alongside the code.
+    The artifact rebuilds its entry from that entry's code object, which holds
+    no default arguments. Without them a defaulted parameter is simply absent at
+    the served call -- which the guard check then cannot bind, so every variant
+    misses. Closure cells are not carried: an entry that closes over free
+    variables is refused before we reach here (a rebuilt cell is a new object
+    that Dynamo's identity guard would miss), so a valid entry has none.
     """
-    closure = getattr(fn, "__closure__", None)
     return {
         "defaults": getattr(fn, "__defaults__", None),
         "kwdefaults": getattr(fn, "__kwdefaults__", None),
-        "closure": tuple(c.cell_contents for c in closure) if closure else None,
     }
+
+
+def _reject_uninstallable_entry_defaults(fn: object) -> None:
+    """Refuse an entry whose default arguments cannot be carried in the artifact.
+
+    The artifact rebuilds the entry from its code object and re-attaches the
+    entry's defaults, pickled into the source. A tensor default would bake a
+    weight in (precompile embeds none), and any unpicklable default would fail
+    only at write time, after the capture has already run. Refuse both up front.
+    """
+    from torch._dynamo.precompile_package import _entry_fn_of
+
+    try:
+        entry = _entry_fn_of(fn)
+    except TypeError:
+        # Not a plain function or nn.Module entry (e.g. a partial): it carries
+        # no defaults to check, and the capture path rejects it with its own
+        # message (see _capture_session).
+        return
+    name = getattr(entry, "__name__", repr(entry))
+    defaults = list(getattr(entry, "__defaults__", None) or ())
+    defaults += list((getattr(entry, "__kwdefaults__", None) or {}).values())
+    for value in defaults:
+        if isinstance(value, torch.Tensor):
+            raise PrecompileError(
+                f"precompile cannot capture {name!r}: it has a tensor default "
+                f"argument, which the artifact would bake in as a weight. "
+                f"precompile embeds no weights -- pass the tensor as an argument."
+            )
+        try:
+            pickle.dumps(value)
+        except Exception as e:
+            raise PrecompileError(
+                f"precompile cannot capture {name!r}: its default argument "
+                f"{value!r} cannot be pickled into the artifact ({e}). Give the "
+                f"parameter a picklable default, or pass the value as an argument."
+            ) from e
 
 
 def _build_multigraph_artifact(
@@ -2552,6 +2651,154 @@ def _capture_session(fn, **kwargs):
         raise PrecompileError(str(e)) from e
 
 
+def _artifact_paths(
+    artifact_path: str | os.PathLike[str] | None,
+    cache_path: str | os.PathLike[str] | None,
+    *,
+    who: str,
+    neither: str,
+) -> tuple[str | os.PathLike[str], str | os.PathLike[str]] | None:
+    """Validate the on-disk form's path pair, or ``None`` if it was not requested.
+
+    The two files only load as a matched pair -- the cache carries a sha256 of
+    exactly the python_code bytes it was emitted with -- so accepting one path
+    without the other would name half an artifact that can never be loaded.
+    """
+    if (artifact_path is None) != (cache_path is None):
+        given, missing = (
+            ("artifact_path", "cache_path")
+            if artifact_path is not None
+            else ("cache_path", "artifact_path")
+        )
+        raise ValueError(
+            f"{who} got {given} without {missing}. The artifact and its cache "
+            f"are a matched pair. {neither}"
+        )
+    if artifact_path is None or cache_path is None:
+        return None
+    if os.path.normcase(os.path.abspath(artifact_path)) == os.path.normcase(
+        os.path.abspath(cache_path)
+    ):
+        raise ValueError(
+            f"{who} got the same file for artifact_path and cache_path "
+            f"({os.fspath(artifact_path)!r}); the two halves are separate files."
+        )
+    return artifact_path, cache_path
+
+
+def _write_artifact(
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+    python_code: str,
+    cache: bytes,
+) -> None:
+    """Write the matched (python_code, cache) pair, creating parent directories.
+
+    Both halves are written beside their targets and renamed into place, rather
+    than truncated where they lie. The pair only loads together -- the cache
+    carries a sha256 of exactly the python_code it was emitted with -- so a
+    process that dies mid-write would otherwise leave a new artifact paired with
+    the previous cache, which refuses to load. An accumulating capture rewrites
+    on every call and its whole promise is that the files on disk are always a
+    working artifact, so at hundreds of megabytes that window is the failure it
+    is meant to protect against. Two renames are not one atomic step, so the
+    previous artifact is moved aside first and put back if the second rename
+    fails; only a crash in the gap between the renames leaves a mismatched
+    pair, which load refuses on the cache's sha256 rather than serving stale
+    code. The containing directory is fsync'd after, so a rename that returned
+    is durable.
+    """
+    written = []
+    try:
+        for path, payload in ((artifact_path, python_code), (cache_path, cache)):
+            parent = os.path.dirname(os.fspath(path))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            # A unique name per writer: two captures targeting one path must
+            # not share a scratch file, or one renames the other's half-written
+            # bytes into place. Beside the target, so the rename stays on one
+            # filesystem. A plain open rather than mkstemp: mkstemp creates the
+            # file 0600 and the rename carries that mode onto the artifact,
+            # which nobody else on a shared directory can then read; open()
+            # honours the umask.
+            tmp = f"{os.fspath(path)}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+            written.append((tmp, path))
+            mode, encoding = (
+                ("wb", None) if isinstance(payload, bytes) else ("w", "utf-8")
+            )
+            with open(tmp, mode, encoding=encoding) as f:
+                f.write(payload)  # type: ignore[arg-type]
+                f.flush()
+                os.fsync(f.fileno())
+    except BaseException:
+        for tmp, _ in written:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        raise
+    (artifact_tmp, _), (cache_tmp, _) = written
+    backup = f"{os.fspath(artifact_path)}.{os.getpid()}.{uuid.uuid4().hex}.bak"
+    previous = None
+    installed = False
+    try:
+        try:
+            os.replace(artifact_path, backup)
+            previous = backup
+        except FileNotFoundError:
+            pass
+        os.replace(artifact_tmp, artifact_path)
+        installed = True
+        os.replace(cache_tmp, cache_path)
+    except BaseException:
+        # Put the previous pair back, best effort, so the named files stay a
+        # loadable artifact; then drop every temp and re-raise.
+        undo = [(artifact_path, artifact_tmp)] if installed else []
+        if previous is not None:
+            undo.append((previous, artifact_path))
+        for src, dst in undo:
+            try:
+                os.replace(src, dst)
+            except OSError:
+                pass
+        for tmp, _ in written:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        raise
+    if previous is not None:
+        try:
+            os.unlink(previous)
+        except OSError:
+            pass
+    parents = {os.path.dirname(os.fspath(path)) or "." for _, path in written}
+    # Durably record the renames: without an fsync of the containing directory
+    # a crash just after os.replace returns can still lose the new directory
+    # entry and resurrect the previous artifact.
+    for parent in parents:
+        try:
+            fd = os.open(parent, os.O_RDONLY)
+        except OSError:
+            continue
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+
+def _read_artifact(
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+) -> tuple[str, bytes]:
+    """Read back a pair written by :func:`_write_artifact`."""
+    with open(artifact_path, encoding="utf-8") as f:
+        python_code = f.read()
+    with open(cache_path, "rb") as f:
+        cache = f.read()
+    return python_code, cache
+
+
 def _make_inlined_forward(python_code: str) -> Callable[..., object]:
     """Fallback: execute the self-contained python string (JITs kernels).
 
@@ -2934,6 +3181,7 @@ class _PrecompileApi:
         # the policy on the way out (PrecompileSession._apply_guard_policy)
         # rather than re-running: a second capture pass has side effects --
         # doubled gradients, state advanced past by mutations.
+        _reject_uninstallable_entry_defaults(fn)
         from torch.compiler._cache import CacheArtifactManager
 
         # The capture's compiles record into the process-global cache-artifact
@@ -3126,6 +3374,7 @@ class _PrecompileApi:
                 )
             if fn is not None:
                 forward._rebind(fn)
+            forward._prepare(cast(str, meta["_PACKAGE"]))
             return PrecompiledCallable(forward)
         if fn is not None:
             raise PrecompileError(

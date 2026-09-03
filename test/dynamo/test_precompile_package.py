@@ -17,6 +17,7 @@ import queue
 import re
 import sys
 import sysconfig
+import tempfile
 import textwrap
 import threading
 import types
@@ -265,6 +266,29 @@ def staged_with_builtin_calls(x, cfg):
     n = len(cfg)
     torch._dynamo.graph_break()
     return x.sum() * n * len(sorted(cfg))
+
+
+class _PackageDescriptorHolder:
+    """Code defined under descriptors, which getattr on the class hides."""
+
+    @property
+    def getter_only(self):
+        def inner(x):
+            return x + 1
+
+        return inner(2)
+
+    @functools.cached_property
+    def cached(self):
+        return 3
+
+    @property
+    def pair(self):
+        return 1
+
+    @pair.setter
+    def pair(self, v):
+        self._v = v
 
 
 def _precompile_house_op(t):
@@ -1345,7 +1369,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                     firstlineno=1,
                     lastlineno=3,
                     checksum="not-the-checksum-on-disk",
-                    content="",
                 )
             }
         )
@@ -3399,6 +3422,66 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             if not name.startswith("__import_") and name in installed
         )
         self.assertEqual(leftover, [])
+
+    def test_code_under_a_descriptor_resolves(self):
+        # getattr on the CLASS returns the descriptor, not the function inside
+        # it, so a frame defined under @property had no resolvable name and the
+        # whole frame silently fell back to eager. Real capture of a large model
+        # lost four frames to one such property.
+        import ast as _ast
+
+        holder = _PackageDescriptorHolder
+        nested = next(
+            c
+            for c in holder.getter_only.fget.__code__.co_consts
+            if isinstance(c, types.CodeType)
+        )
+        cases = {
+            "getter": holder.getter_only.fget.__code__,
+            "nested in getter": nested,
+            "cached_property": holder.cached.func.__code__,
+            "setter": holder.pair.fset.__code__,
+        }
+        for label, code in cases.items():
+            qualname, source = dynamo_package._get_code_source(code)
+            # Replay exactly what the loader does, so the path round-trips
+            # rather than merely being produced.
+            obj = sys.modules[holder.__module__]
+            for part in qualname.split("."):
+                obj = getattr(obj, part)
+            for part in source.split("."):
+                if not part:
+                    continue
+                if part.endswith("]"):
+                    at = part.rfind("[")
+                    obj = getattr(obj, part[:at])[_ast.literal_eval(part[at + 1 : -1])]
+                else:
+                    obj = getattr(obj, part)
+            self.assertIs(obj, code, f"{label}: {qualname!r} + {source!r}")
+
+    def test_stale_module_memo_is_revalidated(self):
+        # The filename -> module memo caches a hit outright, and its ABA check
+        # on len(sys.modules) cannot see a plain delete. Handing back the dead
+        # name made add_code raise KeyError on it.
+        name = "_precompile_stale_memo_probe"
+        source = "def probe(t):\n    return t + 1\n"
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, name + ".py")
+            with open(path, "w") as f:
+                f.write(source)
+            sys.path.insert(0, d)
+            try:
+                module = importlib.import_module(name)
+                scan = dynamo_package._scan_sys_modules_for_file
+                self.assertEqual(scan(module.__file__), name)
+                del sys.modules[name]
+                self.assertIsNone(scan(module.__file__))
+                # No KeyError: an unresolvable module contributes no source.
+                info = dynamo_package.SourceInfo(inlined_sources=set())
+                info.add_code(module.probe.__code__)
+            finally:
+                sys.path.remove(d)
+                sys.modules.pop(name, None)
 
 
 if __name__ == "__main__":
