@@ -366,6 +366,9 @@ struct Symbolizer {
       return;
     }
     has_pending_results_ = true;
+    // placeholder so repeated addresses in this batch are not re-queried
+    // before the pending results have been read back
+    frame_map_[addr] = Frame{"??", "??", 0};
     auto& entry = getOrCreate(maybe_library->first);
     entry.queried.push_back(addr);
     auto libaddress = maybe_library->second - 1;

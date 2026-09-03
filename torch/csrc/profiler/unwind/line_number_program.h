@@ -25,8 +25,8 @@ struct LineNumberProgram {
     program_end_ = (char*)L.loc() + length_;
     auto version = L.read<uint16_t>();
     UNWIND_CHECK(
-        version == 5 || version == 4,
-        "expected version 4 or 5 but found {}",
+        version >= 2 && version <= 5,
+        "expected version 2-5 but found {}",
         version);
     if (version == 5) {
       auto address_size = L.read<uint8_t>();
@@ -40,7 +40,8 @@ struct LineNumberProgram {
     program_ = L;
     program_.skip(int64_t(header_length_));
     minimum_instruction_length_ = L.read<uint8_t>();
-    maximum_operations_per_instruction_ = L.read<uint8_t>();
+    // maximum_operations_per_instruction was added in DWARF 4
+    maximum_operations_per_instruction_ = version >= 4 ? L.read<uint8_t>() : 1;
     default_is_stmt_ = L.read<uint8_t>();
     line_base_ = L.read<int8_t>();
     line_range_ = L.read<uint8_t>();
@@ -53,9 +54,8 @@ struct LineNumberProgram {
     // fmt::print("{:x} {:x} {} {} {} {} {}\n", offset_, header_length_,
     // minimum_instruction_length_, maximum_operations_per_instruction_,
     // line_base_, line_range_, opcode_base_);
-    uint8_t directory_entry_format_count = L.read<uint8_t>();
-
     if (version == 5) {
+      uint8_t directory_entry_format_count = L.read<uint8_t>();
       struct Member {
         uint64_t content_type;
         uint64_t form;
@@ -141,8 +141,8 @@ struct LineNumberProgram {
         maximum_operations_per_instruction_ == 1,
         "maximum_operations_per_instruction_ must be 1");
     UNWIND_CHECK(
-        minimum_instruction_length_ == 1,
-        "minimum_instruction_length_ must be 1");
+        minimum_instruction_length_ != 0,
+        "minimum_instruction_length_ must be non-zero");
     readProgram();
   }
   struct Entry {
@@ -220,7 +220,7 @@ struct LineNumberProgram {
       uint8_t op = program_.read<uint8_t>();
       if (op >= opcode_base_) {
         auto op2 = int64_t(op - opcode_base_);
-        address_ += op2 / line_range_;
+        address_ += minimum_instruction_length_ * (op2 / line_range_);
         entry_.line += line_base_ + (op2 % line_range_);
         PRINT_INST(
             "address += {}, line += {}\n",
@@ -261,7 +261,7 @@ struct LineNumberProgram {
           } break;
           case DW_LNS_advance_pc: {
             PRINT_INST("advance pc\n");
-            address_ += program_.readULEB128();
+            address_ += minimum_instruction_length_ * program_.readULEB128();
           } break;
           case DW_LNS_advance_line: {
             entry_.line += program_.readSLEB128();
@@ -274,7 +274,8 @@ struct LineNumberProgram {
           } break;
           case DW_LNS_const_add_pc: {
             PRINT_INST("const add pc\n");
-            address_ += (255 - opcode_base_) / line_range_;
+            address_ += minimum_instruction_length_ *
+                ((255 - opcode_base_) / line_range_);
           } break;
           case DW_LNS_fixed_advance_pc: {
             PRINT_INST("fixed advance pc\n");
