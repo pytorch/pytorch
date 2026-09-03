@@ -62,6 +62,13 @@ void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_
   const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
   if (mode_stack_len > 0) {
     RECORD_FUNCTION("PythonDispatchMode", torch::jit::last(*stack, num_arguments));
+    // A user TorchDispatchMode can call the underlying op again while handling the
+    // current one (for example, a pass-through mode calls func(*args, **kwargs)).
+    // If we allow RecordFunction callbacks to stay active here, the nested op will be
+    // profiled as a second operator event even though the kernel timing is only
+    // generated once. We still want the explicit mode event, but suppress the re-entrant
+    // profiler record for the underlying call.
+    at::DisableRecordFunctionGuard no_record_function;
     const auto& cur_torch_dispatch_mode_state = c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
     cur_torch_dispatch_mode_state->pyinterpreter()->dispatch(op, stack);
     return;

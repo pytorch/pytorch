@@ -179,6 +179,28 @@ class TestRecordFunction(TestCase):
             "PythonDispatchMode record function not found in profiler events",
         )
 
+    def test_python_dispatch_mode_does_not_double_count_ops(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class PassThrough(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return func(*args, **kwargs)
+
+        x = torch.randn(4)
+        with _profile() as prof:
+            with enable_python_dispatcher():
+                with PassThrough():
+                    for _ in range(3):
+                        torch.sin(x)
+
+        count = 0
+        for e in prof.function_events:
+            if e.name == "aten::sin":
+                count += 1
+        self.assertEqual(count, 3, prof.function_events)
+
     def test_python_subclass_record_function(self):
         class TestTensorSubclass(torch.Tensor):
             @staticmethod
