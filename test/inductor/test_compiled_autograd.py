@@ -4491,6 +4491,82 @@ class CompiledAutograd1(torch.nn.Module):
         finally:
             dist.destroy_process_group()
 
+    @unittest.skipIf(
+        not HAS_DTENSOR,
+        "DTensor/FakePG requires distributed build",
+    )
+    @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
+    def test_dtensor_unused_output_fallback(self):
+        # The sharding-prop cache is keyed by mesh equality, so an earlier test's
+        # hash-equal DeviceMesh (from a destroyed process group) would leak into
+        # this test's output specs and corrupt the traced joint graph.
+        from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+
+        _clear_sharding_prop_cache()
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        try:
+            mesh = DeviceMesh("cpu", torch.arange(2))
+
+            @torch.compile(backend="aot_eager", fullgraph=True)
+            def fn(x, y):
+                return x.sin(), y.std()
+
+            def run():
+                x = DTensor.from_local(
+                    torch.randn(4), mesh, [Shard(0)], run_check=False
+                ).requires_grad_()
+                y = DTensor.from_local(
+                    torch.randn(4), mesh, [Shard(0)], run_check=False
+                ).requires_grad_()
+                fn(x, y)[0].sum().backward()
+                self.assertIsInstance(x.grad, DTensor)
+                # Masking to None requires the output to be PROVABLY zero;
+                # across the subclass boundary the walker cannot prove it, so
+                # the conservative fallback always materializes a zero grad.
+                self.assertIsInstance(y.grad, DTensor)
+                self.assertEqual(y.grad.full_tensor(), torch.zeros(8))
+
+            run()
+            torch._dynamo.reset()
+            with compiled_autograd._enable(make_compiler_fn(backend="aot_eager")):
+                run()
+        finally:
+            dist.destroy_process_group()
+
+    def test_prune_unused_outputs_default_off(self):
+        # aot_autograd_prune_unused_outputs is opt-in: under the default
+        # config, a partial backward over a multi-output compiled function
+        # must not invoke the undefined-grad specialization machinery, and
+        # set_materialize_grads stays at its default, so the unused output's
+        # tangent is materialized as zeros and its input sees a zero grad.
+        from torch._functorch._aot_autograd import graph_compile
+
+        def fn(x, y):
+            return x.sin(), y.cos()
+
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        def run():
+            x = torch.randn(4, requires_grad=True)
+            y = torch.randn(4, requires_grad=True)
+            compiled(x, y)[0].sum().backward()
+            ex = x.detach().clone().requires_grad_()
+            ey = y.detach().clone().requires_grad_()
+            fn(ex, ey)[0].sum().backward()
+            self.assertEqual(x.grad, ex.grad)
+            self.assertIsNone(ey.grad)
+            self.assertEqual(y.grad, torch.zeros_like(y))
+
+        with mock.patch.object(
+            graph_compile,
+            "_retrace_backward_for_undefined_grad_outputs",
+            side_effect=AssertionError("specialization machinery must stay opt-in"),
+        ):
+            run()
+            with compiled_autograd._enable(make_compiler_fn(backend="aot_eager")):
+                run()
+
     def test_anomaly_mode_already_nan(self):
         def fn():
             with torch.autograd.detect_anomaly():
