@@ -26,14 +26,12 @@ K_SPLIT = 8
 def blackwell_decompose_k_partial(
     a: torch.Tensor, b: torch.Tensor, two_ctas: bool
 ) -> torch.Tensor:
-    del two_ctas
     m, k = a.shape
     n = b.shape[1]
     m_pad = math.ceil(m / 128) * 128
-    k_part = math.ceil(math.ceil(k / K_SPLIT) / 128) * 128
-    out = torch.zeros(
-        (K_SPLIT, m_pad, n), device=a.device, dtype=torch.float32
-    )
+    block_k = 64 if two_ctas else 128
+    k_part = math.ceil(math.ceil(k / K_SPLIT) / block_k) * block_k
+    out = torch.zeros((K_SPLIT, m_pad, n), device=a.device, dtype=torch.float32)
     for split in range(K_SPLIT):
         begin = split * k_part
         end = min(begin + k_part, k)
@@ -48,9 +46,7 @@ def blackwell_decompose_k_partial(
 def _(a: torch.Tensor, b: torch.Tensor, two_ctas: bool) -> torch.Tensor:
     del two_ctas
     m_pad = math.ceil(a.shape[0] / 128) * 128
-    return a.new_empty(
-        (K_SPLIT * m_pad, b.shape[1]), dtype=torch.float32
-    )
+    return a.new_empty((K_SPLIT * m_pad, b.shape[1]), dtype=torch.float32)
 
 
 @unittest.skipUnless(
@@ -108,19 +104,22 @@ class TestBlackwellDecomposeKPartial(TestCase):
                 **{"triton.enable_template_tma_store": True},
             ),
         ):
-            actual, codes = run_and_get_code(
-                torch.compile(fn, fullgraph=True), a, b
-            )
+            actual, codes = run_and_get_code(torch.compile(fn, fullgraph=True), a, b)
 
         expected = a @ b
         torch.testing.assert_close(actual, expected, atol=16.0, rtol=1e-1)
         self.assertIn("make_tensor_descriptor", codes[0])
+        self.assertIn("make_tensor_descriptor(out_ptr0, shape=[2048, 128]", codes[0])
+        self.assertIn("BATCH_SIZE : tl.constexpr = 8", codes[0])
+        self.assertIn("DESCRIPTOR_K : tl.constexpr = 8193", codes[0])
+        k_part = math.ceil(math.ceil(k / K_SPLIT) / partial_config.block_k)
+        k_part *= partial_config.block_k
+        self.assertIn(f"K_BATCH_OFFSET : tl.constexpr = {k_part}", codes[0])
         self.assertIn(
-            "make_tensor_descriptor(out_ptr0, shape=[2048, 128]", codes[0]
+            f"K_TILES : tl.constexpr = {k_part // partial_config.block_k}", codes[0]
         )
-        self.assertEqual(
-            "TWO_CTAS : tl.constexpr = True" in codes[0], two_ctas
-        )
+        self.assertNotIn("DECOMPOSE_K", codes[0])
+        self.assertEqual("TWO_CTAS : tl.constexpr = True" in codes[0], two_ctas)
 
     def test_1cta(self):
         self._run(False)

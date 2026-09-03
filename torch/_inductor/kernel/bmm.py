@@ -69,7 +69,14 @@ bmm_template = TritonTemplate(
 
 
 @SymbolicGridFn
-def blackwell_bmm_grid(b, m, n, meta, *, cdiv, max, min):
+def blackwell_bmm_grid(*args, cdiv, max, min):
+    # The BMM template supports both [B, M, N] and flattened [B * M, N]
+    # outputs.  Read the logical problem from its compile-time mapping instead
+    # of inferring it from the output layout passed before ``meta``.
+    meta = args[-1]
+    b = meta["BATCH_SIZE"]
+    m = meta["LOGICAL_M"]
+    n = meta["LOGICAL_N"]
     grid_m = cdiv(m, meta["BLOCK_M"])
     if meta["TWO_CTAS"]:
         grid_m = cdiv(grid_m, 2) * 2
@@ -146,6 +153,7 @@ def can_use_blackwell_bmm_template(mat1, mat2, layout) -> bool:
     from ..codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 
     return is_datacenter_blackwell_arch()
+
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
