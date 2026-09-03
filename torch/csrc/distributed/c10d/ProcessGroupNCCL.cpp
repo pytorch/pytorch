@@ -5,14 +5,11 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <sstream>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
 
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGraph.h>
-#include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
@@ -992,10 +989,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       (dist_debug_level_ >= DebugLevel::Detail);
   enableTiming_.store(
       getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug);
-  if (getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false)) {
-    TORCH_WARN_ONCE(
-        "TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated.");
-  }
   showSerializationWarning_ =
       getCvarBool(TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING, true);
 
@@ -3682,7 +3675,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   }
 
   // Record end after ncclGroupEnd
-  // TODO(eqy): is this still necessary if avoidRecordStreams_ is set?
   work->ncclEndEvent_->record(ncclStream);
 
   if (enqueue) {
@@ -4139,8 +4131,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     PreProcess pre,
     PostProcess post,
     const char* profilingTitle) {
-  // avoidRecordStreams_ note:
-  // send, recv, and irecv should be ok with avoidRecordStreams,
+  // stashing note:
+  // send, recv, and irecv should be ok with stashing,
   // However, for isend, I don't think the API requires the user
   // to wait() on the returned handle, so ProcessGroupNCCL can't know
   // when it's safe to release the input back to the allocator,
@@ -4635,7 +4627,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  // avoidRecordStreams_ note: collective() will stash tensors.
+  // stashing note: collective() will stash tensors.
   return allreduce_impl(tensor, "nccl:all_reduce", opts);
 }
 
@@ -4668,7 +4660,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  // avoidRecordStreams_ note: collective() will stash tensors.
+  // stashing note: collective() will stash tensors.
   return collectiveCoalesced(
       tensors,
       tensors,
@@ -4725,7 +4717,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
   const auto root = opts.rootRank + opts.rootTensor;
   bool nanCheck = (root == rank_);
 
-  // avoidRecordStreams_ note: collective() will stash tensors.
+  // stashing note: collective() will stash tensors.
   return collective(
       tensor,
       tensor,
@@ -4820,7 +4812,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  // avoidRecordStreams_ note: collective() will stash tensors.
+  // stashing note: collective() will stash tensors.
   return collective(
       tensor,
       tensor,
@@ -4944,7 +4936,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
         },
         [](at::cuda::CUDAStream& ncclStream,
            c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
-          // avoidRecordStreams_ note: We actually don't need to stash anything
+          // stashing note: We actually don't need to stash anything
           // here.
           //  - inputTensors is stashed onto work->stashed_for_allocator_safety_
           //    in collective().
@@ -5183,7 +5175,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  // avoidRecordStreams_ note: collective() will stash inputs and outputs.
+  // stashing note: collective() will stash inputs and outputs.
   // Note 2: for asyncOp = false, we don't want to record streams because we
   // know that the NCCL stream will join back to the "current" stream right
   // after this op. So we might just as well keep the stream ownership of the
@@ -5412,7 +5404,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
         this->getSize(), // worldSize
         opts.asyncOp); // is asynchronized op
 
-    // avoidRecordStreams_ note: collective() will stash inputTensors and
+    // stashing note: collective() will stash inputTensors and
     // outputTensors.
     return collective(
         inputTensor,
@@ -5448,7 +5440,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_to_all_single(
         this->getSize(), // worldSize
         opts.asyncOp); // is asynchronized op
 
-    // avoidRecordStreams_ note: collective() will stash inputTensors and
+    // stashing note: collective() will stash inputTensors and
     // outputTensors.
     return collective(
         inputTensor,
@@ -5717,7 +5709,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  // avoidRecordStreams_ note: collective() will stash inputTensors and
+  // stashing note: collective() will stash inputTensors and
   // outputs, which == outputTensors[0] on the root rank where it matters.
 
   auto inputs = std::vector<at::Tensor>{inputTensor};
@@ -5883,7 +5875,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  // avoidRecordStreams_ note: collective() will stash outputTensors and
+  // stashing note: collective() will stash outputTensors and
   // inputs, which == inputTensors[0] on the root rank where it matters.
   const auto root = opts.rootRank;
   bool nanCheck = (rank_ == root);
@@ -5954,7 +5946,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::all_gather_single(
       this->getSize(), // worldSize
       opts.asyncOp); // is asynchronized op
 
-  // avoidRecordStreams_ note: collective() will stash inputs and outputs.
+  // stashing note: collective() will stash inputs and outputs.
   // Note 2: for asyncOp = false, we don't want to record streams because we
   // know that the NCCL stream will join back to the "current" stream right
   // after this op. So we might just as well keep the stream ownership of the

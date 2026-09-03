@@ -1855,12 +1855,16 @@ def _legacy_load(
                 deserialized_objects[root_key] = typed_storage
             else:
                 typed_storage = deserialized_objects[root_key]
-                if typed_storage._data_ptr() == 0:
-                    typed_storage = torch.storage.TypedStorage(
-                        device=typed_storage._untyped_storage.device,
-                        dtype=dtype,
-                        _internal=True,
-                    )
+                if typed_storage.dtype != dtype:
+                    untyped_storage = typed_storage._untyped_storage
+                    if untyped_storage.nbytes() == nbytes:
+                        typed_storage = torch.storage.TypedStorage(
+                            wrap_storage=untyped_storage, dtype=dtype, _internal=True
+                        )
+                    else:
+                        typed_storage = torch.storage.TypedStorage(
+                            device=untyped_storage.device, dtype=dtype, _internal=True
+                        )
 
             if view_metadata is not None:
                 view_key, offset, view_size = view_metadata
@@ -2094,9 +2098,10 @@ def _load(
             )
             local_header_offset = current_offset
 
-        # This is only actually needed for storages that have typed_storage._data_ptr() == 0
-        # after being read. Otherwise persistent_load would never "re-call" load_tensor
-        # for a given key.
+        # load_tensor is normally called at most once per key, but a record with no
+        # data can be referenced under dtypes that disagree on its byte length, and
+        # those references each get their own storage. Memoize so the repeat call
+        # does not recompute the offset from a current_offset that has moved on.
         offsets[name] = storage_offset
 
         # Increment current_offset to offset where next zipfile header starts
@@ -2175,9 +2180,6 @@ def _load(
             _internal=True,
         )
 
-        if typed_storage._data_ptr() != 0:
-            loaded_storages[key] = typed_storage
-
         return typed_storage
 
     def persistent_load(saved_id):
@@ -2198,13 +2200,29 @@ def _load(
         else:
             dtype = storage_type.dtype
 
-        if key in loaded_storages:
-            typed_storage = loaded_storages[key]
-        else:
-            nbytes = numel * torch._utils._element_size(dtype)
+        nbytes = numel * torch._utils._element_size(dtype)
+        typed_storage = loaded_storages.get(key)
+
+        if typed_storage is None:
             typed_storage = load_tensor(
                 dtype, nbytes, key, _maybe_decode_ascii(location)
             )
+            loaded_storages[key] = typed_storage
+        elif typed_storage.dtype != dtype:
+            # _save only allows one dtype per record for storages that have data, so
+            # this is a record with none: an empty storage, or one saved from meta.
+            untyped_storage = typed_storage._untyped_storage
+            if untyped_storage.nbytes() == nbytes:
+                typed_storage = torch.storage.TypedStorage(
+                    wrap_storage=untyped_storage, dtype=dtype, _internal=True
+                )
+            else:
+                # The references disagree on how long the record is, so no single
+                # storage can serve both. Give this one its own and keep the cached
+                # storage for whoever asked first.
+                typed_storage = load_tensor(
+                    dtype, nbytes, key, _maybe_decode_ascii(location)
+                )
 
         return typed_storage
 

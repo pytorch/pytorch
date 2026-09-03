@@ -49,6 +49,34 @@
   } while (0)
 // clang-format on
 
+// Warns instead of throwing, for cleanup paths that must keep unwinding. The
+// leading context says which step failed, since a bare driver error string does
+// not identify the call it came from.
+#define C10_CUDA_DRIVER_CHECK_WARN(EXPR, ...)                              \
+  do {                                                                     \
+    c10::cuda::CUDAErrorLogCapture __cuda_error_log;                       \
+    CUresult __err = EXPR;                                                 \
+    if (__err != CUDA_SUCCESS) {                                           \
+      const auto __cuda_error_log_message =                                \
+          __cuda_error_log.get_error_log_suffix();                         \
+      const char* err_str;                                                 \
+      CUresult get_error_str_err [[maybe_unused]] =                        \
+          c10::cuda::DriverAPI::get()->cuGetErrorString_(__err, &err_str); \
+      if (get_error_str_err != CUDA_SUCCESS) {                             \
+        TORCH_WARN(                                                        \
+            __VA_ARGS__,                                                   \
+            ": CUDA driver error: unknown error",                          \
+            __cuda_error_log_message);                                     \
+      } else {                                                             \
+        TORCH_WARN(                                                        \
+            __VA_ARGS__,                                                   \
+            ": CUDA driver error: ",                                       \
+            err_str,                                                       \
+            __cuda_error_log_message);                                     \
+      }                                                                    \
+    }                                                                      \
+  } while (0)
+
 #define C10_CUDA_DRIVER_CHECK_GOTO(EXPR, NEXT)                                \
   do {                                                                        \
     c10::cuda::CUDAErrorLogCapture __cuda_error_log;                          \
