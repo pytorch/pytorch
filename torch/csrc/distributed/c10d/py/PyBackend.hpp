@@ -220,6 +220,27 @@ class PyBackend : public Backend {
     return Backend::endCoalescing();
   }
 
+  void startTimeEstimate() override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function override = pybind11::get_override(
+        static_cast<const Backend*>(this), "_start_time_estimate");
+    if (override) {
+      override();
+      return;
+    }
+    return Backend::startTimeEstimate();
+  }
+
+  float endTimeEstimate() override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function override = pybind11::get_override(
+        static_cast<const Backend*>(this), "_end_time_estimate");
+    if (override) {
+      return override().cast<float>();
+    }
+    return Backend::endTimeEstimate();
+  }
+
   // -- Methods returning non-Work intrusive_ptr --
 
   c10::intrusive_ptr<Backend> shrink(
@@ -354,7 +375,7 @@ class PyBackend : public Backend {
 
   bool supportsTimeEstimation() const override {
     return getPropertyOverride(
-        "supports_time_estimate", Backend::supportsTimeEstimation());
+        "_supports_time_estimate", Backend::supportsTimeEstimation());
   }
 
   bool supportsShrinking() const override {
