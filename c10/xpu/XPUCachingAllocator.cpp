@@ -18,11 +18,17 @@
 #if __has_include(<sycl/ext/oneapi/experimental/ipc_memory.hpp>)
 #include <sycl/ext/oneapi/experimental/ipc_memory.hpp>
 #define C10_XPU_HAS_SYCL_IPC_MEMORY 1
+#if __has_include(<sycl/ext/oneapi/experimental/detail/ipc_common.hpp>)
+#define C10_XPU_HAS_SYCL_IPC_MEMORY_V2 1
+#else
+#define C10_XPU_HAS_SYCL_IPC_MEMORY_V2 0
+#endif
 #endif
 #endif
 
 #if !defined(C10_XPU_HAS_SYCL_IPC_MEMORY)
 #define C10_XPU_HAS_SYCL_IPC_MEMORY 0
+#define C10_XPU_HAS_SYCL_IPC_MEMORY_V2 0
 #endif
 
 namespace c10::xpu::XPUCachingAllocator {
@@ -1862,10 +1868,16 @@ namespace xpu_ipc {
 
 #if C10_XPU_HAS_SYCL_IPC_MEMORY
 
+#if C10_XPU_HAS_SYCL_IPC_MEMORY_V2
+namespace sycl_ipc_memory = sycl::ext::oneapi::experimental::ipc::memory;
+#else
+namespace sycl_ipc_memory = sycl::ext::oneapi::experimental::ipc_memory;
+#endif
+
 using SyclIpcExportHandle =
-    sycl::ext::oneapi::experimental::ipc_memory::handle;
+  sycl_ipc_memory::handle;
 using SyclIpcHandle =
-    sycl::ext::oneapi::experimental::ipc_memory::handle_data_t;
+  sycl_ipc_memory::handle_data_t;
 
 constexpr char kXpuShareableHandleMagic[] = "XPUIPC";
 constexpr uint8_t kXpuShareableHandleVersion = 1;
@@ -1969,7 +1981,7 @@ class ExportedIpcHandle final {
 
   ~ExportedIpcHandle() {
     try {
-      sycl::ext::oneapi::experimental::ipc_memory::put(handle_, context_);
+      sycl_ipc_memory::put(handle_, context_);
     } catch (const std::exception& e) {
       TORCH_WARN("XPU IPC put failed: ", e.what());
     }
@@ -1997,7 +2009,7 @@ class ExportedIpcHandleCache : public std::enable_shared_from_this<ExportedIpcHa
     }
 
     auto created = std::make_shared<ExportedIpcHandle>(
-        sycl::ext::oneapi::experimental::ipc_memory::get(base_ptr, context),
+      sycl_ipc_memory::get(base_ptr, context),
         context);
     return publish(key, std::move(created));
   }
@@ -2101,7 +2113,7 @@ class IpcMemoryCache : public std::enable_shared_from_this<IpcMemoryCache> {
     sycl::device dev = current_queue.get_device();
 
     auto open_once = [&]() {
-      void* p = sycl::ext::oneapi::experimental::ipc_memory::open(
+      void* p = sycl_ipc_memory::open(
           handle_data, *context, dev);
       TORCH_CHECK(p != nullptr, "Failed to open XPU IPC handle");
       return OpenedIpcMapping{p, context};
@@ -2177,7 +2189,7 @@ class IpcMemoryCache : public std::enable_shared_from_this<IpcMemoryCache> {
       const char* error_prefix) {
     try {
       c10::DeviceGuard guard(c10::Device(c10::kXPU, device));
-      sycl::ext::oneapi::experimental::ipc_memory::close(ptr, context);
+      sycl_ipc_memory::close(ptr, context);
     } catch (const std::exception& e) {
       TORCH_WARN(error_prefix, e.what());
     }
@@ -2492,7 +2504,7 @@ class NativeCachingAllocator : public XPUAllocator {
     TORCH_CHECK(
         false,
         "XPU IPC sharing is unavailable because this build toolchain does not "
-        "provide sycl::ext::oneapi::experimental::ipc_memory.");
+        "provide SYCL IPC memory API support.");
 #endif
   }
 
@@ -2516,7 +2528,7 @@ class NativeCachingAllocator : public XPUAllocator {
     TORCH_CHECK(
         false,
         "XPU IPC sharing is unavailable because this build toolchain does not "
-        "provide sycl::ext::oneapi::experimental::ipc_memory.");
+        "provide SYCL IPC memory API support.");
 #endif
   }
 };
