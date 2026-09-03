@@ -60,7 +60,10 @@ from torch._inductor.heuristics.template.triton import (
     XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
-from torch._inductor.kernel.bmm import blackwell_ws_persistent_tma_bmm_template
+from torch._inductor.kernel.bmm import (
+    blackwell_ws_persistent_tma_bmm_template,
+    BlackwellBMMConfig,
+)
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.lowering import lowerings
@@ -317,29 +320,17 @@ class TestMaxAutotune(TestCase):
                 )
 
         class Test2CTABlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
+            bmm_configs = (BlackwellBMMConfig(128, 128, 64, 4, 8, two_ctas=True),)
+
             def _get_template_configs_impl(self, kernel_inputs, op_name):
                 for template_config in super()._get_template_configs_impl(
                     kernel_inputs, op_name
                 ):
-                    if (
-                        template_config["BLOCK_M"] == 128
-                        and template_config["BLOCK_N"] == 128
-                    ):
-                        yield {
-                            **template_config,
-                            "BLOCK_K": 64,
-                            "num_stages": 4,
-                            "num_warps": 8,
-                            "EPILOGUE_SUBTILE": 1,
-                            "USE_META_WS": True,
-                            "FLATTEN": False,
-                            "DATA_PARTITION_FACTOR": 1,
-                            "TWO_CTAS": True,
-                            "ctas_per_cga": (2, 1, 1),
-                            "FLATTEN_OUTPUT": True,
-                            "tma_store": True,
-                        }
-                        return
+                    yield {
+                        **template_config,
+                        "FLATTEN_OUTPUT": True,
+                        "tma_store": True,
+                    }
 
         def lowering(a_node, b_node):
             choices = V.choices.get_template_configs(
