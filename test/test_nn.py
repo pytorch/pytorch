@@ -22,6 +22,7 @@ from unittest import mock, SkipTest
 
 import torch
 from torch import inf, nan
+from torch._subclasses.fake_tensor import FakeTensorMode
 import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
@@ -35,7 +36,7 @@ from torch.nn import Buffer, Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
 from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, run_tests, TestCase, \
-    skipIfNoLapack, skipIfRocm, skipIfRocmVersionLessThan, getRocmVersion, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, TEST_MULTIACCELERATOR, \
+    skipIfNoLapack, skipIfRocm, skipIfRocmVersionLessThan, getRocmVersion, TEST_MPS, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, TEST_MULTIACCELERATOR, \
     download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, \
     IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
@@ -4326,8 +4327,19 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, "expected input to have non-empty spatial dimensions"):
             F.grid_sample(torch.empty(1, 1, 0, 2), grid, align_corners=False)
 
-        with self.assertRaisesRegex(RuntimeError, "bicubic interpolation only supports 4D input"):
-            F.grid_sample(torch.empty(1, 1, 2, 2, 2), torch.empty(1, 1, 1, 1, 3), mode='bicubic')
+        if TEST_MPS:
+            # a backend whose 5-D sampler implements bilinear and nearest only refuses bicubic
+            with self.assertRaisesRegex(RuntimeError, "Unsupported Bicubic interpolation"):
+                F.grid_sample(torch.empty(1, 1, 2, 2, 2, device='mps'),
+                              torch.empty(1, 1, 1, 1, 3, device='mps'), mode='bicubic')
+
+        # The same call has to be refused in a trace, where the meta kernel answers rather
+        # than the backend, hence the other message. A fake tensor gets there with no MPS
+        # present, so this runs everywhere.
+        with FakeTensorMode():
+            with self.assertRaisesRegex(RuntimeError, "bicubic interpolation with 5D input"):
+                F.grid_sample(torch.empty(1, 1, 2, 2, 2, device='mps'),
+                              torch.empty(1, 1, 1, 1, 3, device='mps'), mode='bicubic')
 
         if TEST_CUDA:
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
@@ -4900,7 +4912,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             W = random.randint(3, IW + 2)
             test_shape(0, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners)
 
-        for mode in ('bilinear', 'nearest'):
+        for mode in ('bilinear', 'nearest', 'bicubic'):
             for padding_mode in ('zeros', 'border', 'reflection'):
                 for align_corners in (True, False):
                     # do gradcheck
@@ -10920,7 +10932,12 @@ class TestNNDeviceType(NNTestCase):
             sum(i * s for i, s in zip(large_view.size(), large_view.stride())) >= 2 ** 31,
             msg="View must use 64-bit indexing")
         for mode, padding_mode, align_corners in itertools.product(
-                ('nearest', 'bilinear'), ('zeros', 'border', 'reflection'), (True, False)):
+                ('nearest', 'bilinear', 'bicubic'), ('zeros', 'border', 'reflection'), (True, False)):
+            # Neither MPS nor XPU has a 5-D bicubic sampler. XPU never reaches this today,
+            # since instantiate_device_type_tests below passes allow_xpu=False, and its eager
+            # refusal cannot be tested in tree at all: the kernel lives in torch-xpu-ops.
+            if mode == 'bicubic' and torch.device(device).type in ('mps', 'xpu'):
+                continue
             a = F.grid_sample(
                 small_image, coords, mode=mode,
                 padding_mode=padding_mode, align_corners=align_corners)
@@ -10941,8 +10958,6 @@ class TestNNDeviceType(NNTestCase):
     def test_grid_sample_half_precision(self):
         def helper(shape_in, shape_out, align_corners):
             for mode in ('bilinear', 'nearest', 'bicubic'):
-                if len(shape_in) != 4 and mode == 'bicubic':
-                    continue
                 data = torch.randn(shape_in, device='cuda', dtype=torch.half)
                 grid = torch.rand(shape_out, device='cuda', dtype=torch.half) * 2.0 - 1.0
 
@@ -10961,8 +10976,6 @@ class TestNNDeviceType(NNTestCase):
     def test_grid_sample_bfloat16_precision(self):
         def helper(shape_in, shape_out, align_corners):
             for mode in ('bilinear', 'nearest', 'bicubic'):
-                if len(shape_in) != 4 and mode == 'bicubic':
-                    continue
                 data = torch.randn(shape_in, device='cuda', dtype=torch.bfloat16)
                 grid = torch.rand(shape_out, device='cuda', dtype=torch.bfloat16) * 2.0 - 1.0
 
@@ -11761,6 +11774,125 @@ class TestNNDeviceType(NNTestCase):
             out1 = model(inp1)
             out2 = model(inp2)
             self.assertTrue(torch.equal(out1, out2))
+
+    @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
+    @parametrize_test("align_corners", [True, False])
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double, torch.float)
+    def test_grid_sample_3d_bicubic_matches_2d(self, device, dtype, padding_mode, align_corners):
+        # A volume that does not vary along z is sampled by the same separable kernel the 4-D
+        # sampler applies, since the four cubic weights of the z axis sum to one.
+        image = torch.randn(2, 3, 7, 8, device=device, dtype=dtype)
+        volume = image.unsqueeze(2).expand(2, 3, 5, 7, 8).contiguous()
+        grid_2d = torch.randn(2, 4, 6, 2, device=device, dtype=dtype).clamp(-1.2, 1.2)
+        # a z away from a voxel centre gives the four z taps a real weight each, and one
+        # that far inside a 5-deep axis keeps every tap in bounds, so no padding drops one
+        grid_3d = torch.cat([grid_2d, torch.full_like(grid_2d[..., :1], 0.1)], dim=-1).unsqueeze(1)
+        out_2d = F.grid_sample(image, grid_2d, mode='bicubic',
+                               padding_mode=padding_mode, align_corners=align_corners)
+        out_3d = F.grid_sample(volume, grid_3d, mode='bicubic',
+                               padding_mode=padding_mode, align_corners=align_corners)
+        # 5-D sums the 64 taps flat in the accumulate type where 4-D nests two cubic_interp1d
+        # stages in the scalar type, so single precision needs a tolerance
+        tolerance = {} if dtype == torch.double else {"atol": 1e-4, "rtol": 1e-4}
+        self.assertEqual(out_3d.squeeze(2), out_2d, **tolerance)
+
+    @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
+    @parametrize_test("wrt", ["input", "grid"])
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    def test_grid_sample_3d_bicubic_one_sided_grad(self, device, dtype, wrt, padding_mode):
+        # The double backward builds the tap gather and the coefficient derivatives only for
+        # the outputs asked of it, and the OpInfo samples ask for both at once.
+        volume = torch.randn(1, 2, 4, 5, 5, device=device, dtype=dtype)
+        # Two bands. The first stays far enough inside that every tap is in bounds. The
+        # second sits STABLY outside, around -1.5 in source units: a dropped tap is only a
+        # step for gradcheck when the perturbation crosses the boundary, and there the tap
+        # set is locally constant, so the dropped-tap arithmetic is differenced for real,
+        # with this single-sided mask.
+        inside = torch.rand(1, 2, 3, 3, 3, device=device, dtype=dtype) * 0.5 - 0.25
+        outside = torch.rand(1, 2, 3, 3, 3, device=device, dtype=dtype) * 0.04 - 1.42
+        grid = torch.cat([inside, outside], dim=1)
+
+        def fn(t):
+            args = (t, grid) if wrt == "input" else (volume, t)
+            return F.grid_sample(*args, mode='bicubic', padding_mode=padding_mode, align_corners=False)
+
+        wrt_tensor = (volume if wrt == "input" else grid).clone().requires_grad_(True)
+        gradgradcheck(fn, (wrt_tensor,))
+
+    @parametrize_test("padding_mode", ["zeros", "border", "reflection"])
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    def test_grid_sample_3d_bicubic_non_finite(self, device, dtype, padding_mode):
+        # A tap the padding drops contributes a zero value and keeps its coefficient, which is
+        # what get_value_bounded does in 4-D. So a coordinate or a voxel that is not finite has
+        # to reach the same answer at both ranks: neither the dropped tap's own value nor the
+        # voxel it would otherwise alias may enter the sum.
+        image = torch.randn(1, 1, 5, 5, device=device, dtype=dtype)
+        image[0, 0, 0, 0] = float('inf')
+        volume = image.unsqueeze(2).expand(1, 1, 5, 5, 5).contiguous()
+        for coordinate in (float('nan'), float('inf'), -float('inf'), 50.0):
+            grid_2d = torch.full((1, 1, 2, 2), coordinate, device=device, dtype=dtype)
+            grid_2d[0, 0, 1] = 0.1  # a sane sample beside the bad one
+            grid_3d = torch.cat(
+                [grid_2d, torch.full_like(grid_2d[..., :1], 0.1)], dim=-1).unsqueeze(1)
+            out_2d = F.grid_sample(image, grid_2d, mode='bicubic',
+                                   padding_mode=padding_mode, align_corners=False)
+            out_3d = F.grid_sample(volume, grid_3d, mode='bicubic',
+                                   padding_mode=padding_mode, align_corners=False)
+            self.assertEqual(out_3d.squeeze(2), out_2d)
+
+    @parametrize_test("mode", ["bilinear", "bicubic"])
+    @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    def test_grid_sample_double_backward_drops_masked_taps(self, device, dtype, mode):
+        # A dropped tap is gathered from the voxel it clamps onto and its cotangent is
+        # scattered there, so both need where(): multiplying after the gather turns an
+        # aliased Inf into NaN. Poisoning plane 0, where dropped taps clamp, and asking
+        # for the same gradients with a finite value there is what says it never enters.
+        def second_order(dim, plane_value, cotangent):
+            # squared, so the mixed second difference is not zero: on a ramp the grid
+            # gradient below vanishes and the equality has nothing to compare
+            ramp = torch.arange(1., 43. if dim == 2 else 211., device=device, dtype=dtype)
+            input = (ramp * ramp).reshape((1, 1, 6, 7) if dim == 2 else (1, 1, 5, 6, 7))
+            if dim == 2:
+                input[0, 0, 0, :] = plane_value
+                # one sample an axis fully outside, one well inside and off the voxel
+                # centre, where the cubic takes its general branch
+                grid = torch.tensor([[[[0.1, -2.0], [0.1, 0.3]]]], device=device, dtype=dtype)
+            else:
+                input[0, 0, :, 0, :] = plane_value
+                grid = torch.tensor([[[[[0.1, -2.0, 0.1], [0.1, 0.3, 0.1]]]]],
+                                    device=device, dtype=dtype)
+            input.requires_grad_()
+            grid.requires_grad_()
+            out = F.grid_sample(input, grid, mode=mode, padding_mode='zeros',
+                                align_corners=False)
+            grad_output = torch.ones_like(out)
+            grad_output.view(-1)[0] = cotangent  # carried by the dropped taps alone
+            d_grid = torch.autograd.grad(out, grid, grad_outputs=grad_output,
+                                         create_graph=True)[0]
+            # a finite seed, so only the masking may put a non-finite number in
+            return torch.autograd.grad(d_grid.sum(), [input, grid])
+
+        for dim in (2, 3):
+            reference = second_order(dim, 1.0, 1.0)
+            for bad in (float('inf'), -float('inf'), float('nan')):
+                # the voxel a dropped tap aliases reaches neither gradient
+                for got, expected in zip(second_order(dim, bad, 1.0), reference):
+                    self.assertTrue(bool(got.isfinite().all()))
+                    self.assertEqual(got, expected)
+                # nor does the cotangent it carries reach the scattered one. The grid
+                # gradient is exempt: it already holds what the first-order kernel makes
+                # of a non-finite cotangent on a dropped sample, which predates this.
+                d_input = second_order(dim, 1.0, bad)[0]
+                self.assertTrue(bool(d_input.isfinite().all()))
+                self.assertEqual(d_input, reference[0])
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)

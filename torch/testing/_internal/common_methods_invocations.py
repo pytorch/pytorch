@@ -8899,7 +8899,7 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
 
     for dim in (2, 3):
 
-        modes_ = (*modes, "bicubic") if dim == 2 else modes
+        modes_ = (*modes, "bicubic")
 
         for mode, padding_mode, align_corners in itertools.product(modes_, padding_modes, align_cornerss):
             yield SampleInput(
@@ -22022,7 +22022,45 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         sample_inputs_func=sample_inputs_grid_sample,
         reference_inputs_func=reference_inputs_grid_sample,
         supports_gradgrad=True,
-        gradcheck_nondet_tol=1e-15),
+        gradcheck_nondet_tol=1e-15,
+        skips=(
+            # Only CPU and CUDA sample 5-D bicubic; mps and xpu refuse it in eager, so the
+            # 5-D bicubic samples fail every test that runs the op on all of them. The
+            # xfails are strict: each flips to a failure once a backend gains the mode.
+            # test_dtypes stays unmarked on purpose: a raising sample only makes a dtype
+            # "partially supported", which is a printed warning, so it keeps passing there
+            # (vacuously, on those two backends). test_out_warning stays unmarked because
+            # the supports_out=False path returns inside its first iteration, and the
+            # first sample is 4-D bilinear.
+            # TODO: drop these when mps / xpu implement 5-D bicubic.
+            # MPS TestConsistency carries its own entry in common_mps.py.
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
+                         "test_noncontiguous_samples", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
+                         "test_noncontiguous_samples", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
+                         "test_variant_consistency_eager", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
+                         "test_variant_consistency_eager", device_type="xpu"),
+            # The remaining classes are not instantiated on mps at all.
+            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
+                         "test_operator", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
+                         "test_backward", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
+                         "test_view_replay", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestMathBits",
+                         "test_neg_view", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestFakeTensor",
+                         "test_fake_crossref_backward_no_amp", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestFakeTensor",
+                         "test_fake_crossref_backward_amp", device_type="xpu"),
+            # float64 is claimed on xpu, so the gradient suites reach the samples there.
+            DecorateInfo(unittest.expectedFailure, "TestBwdGradients",
+                         "test_fn_grad", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestBwdGradients",
+                         "test_fn_gradgrad", device_type="xpu"),
+        )),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
         "grid_sampler_2d",

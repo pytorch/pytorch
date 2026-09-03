@@ -8172,7 +8172,7 @@ static Tensor gs_gather2d_multi(
                     .reshape({N, C, out_H, out_W, K});
   if (zeros_oob) {
     auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
-    result = result * mask.unsqueeze(1).to(result.dtype());
+    result = at::where(mask.unsqueeze(1), result, 0);
   }
   return result;
 }
@@ -8195,7 +8195,7 @@ static Tensor gs_scatter2d_multi(
   auto weighted = values.unsqueeze(-1) * weights.unsqueeze(1);
   if (zeros_oob) {
     auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
-    weighted = weighted * mask.unsqueeze(1).to(weighted.dtype());
+    weighted = at::where(mask.unsqueeze(1), weighted, 0);
   }
   return at::zeros({N, C, H * W}, values.options())
       .scatter_add(2, flat, weighted.reshape({N, C, out_H * out_W * K}))
@@ -8222,7 +8222,7 @@ static Tensor gs_gather2d_bc_multi(
                     .reshape({N, C, out_H, out_W, K});
   if (padding_mode == GridSamplerPadding::Zeros) {
     auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
-    result = result * mask.unsqueeze(1).to(result.dtype());
+    result = at::where(mask.unsqueeze(1), result, 0);
   }
   return result;
 }
@@ -8248,11 +8248,75 @@ static Tensor gs_scatter2d_bc_multi(
   auto weighted = values.unsqueeze(-1) * weights.unsqueeze(1);
   if (padding_mode == GridSamplerPadding::Zeros) {
     auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
-    weighted = weighted * mask.unsqueeze(1).to(weighted.dtype());
+    weighted = at::where(mask.unsqueeze(1), weighted, 0);
   }
   return at::zeros({N, C, H * W}, values.options())
       .scatter_add(2, flat, weighted.reshape({N, C, out_H * out_W * K}))
       .reshape({N, C, H, W});
+}
+
+// Multi-tap bounded gather for bicubic 3D: d/h/w_idx [N, Do, Ho, Wo, K] -> [N,
+// C, Do, Ho, Wo, K]. The padding maps every tap, as it does in the kernel,
+// instead of the caller having mapped the coordinate once.
+static Tensor gs_gather3d_bc_multi(
+    const Tensor& input,
+    const Tensor& d_idx,
+    const Tensor& h_idx,
+    const Tensor& w_idx,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+  auto N = input.size(0), C = input.size(1);
+  auto D = input.size(2), H = input.size(3), W = input.size(4);
+  auto out_D = d_idx.size(1), out_H = d_idx.size(2), out_W = d_idx.size(3),
+       K = d_idx.size(4);
+  auto flat = ((gs_bound_coord(d_idx, D, padding_mode, align_corners) * H +
+                gs_bound_coord(h_idx, H, padding_mode, align_corners)) *
+                   W +
+               gs_bound_coord(w_idx, W, padding_mode, align_corners))
+                  .reshape({N, 1, out_D * out_H * out_W * K})
+                  .expand({N, C, out_D * out_H * out_W * K});
+  auto result = input.reshape({N, C, D * H * W})
+                    .gather(2, flat)
+                    .reshape({N, C, out_D, out_H, out_W, K});
+  if (padding_mode == GridSamplerPadding::Zeros) {
+    auto mask = (d_idx >= 0) & (d_idx < D) & (h_idx >= 0) & (h_idx < H) &
+        (w_idx >= 0) & (w_idx < W);
+    result = at::where(mask.unsqueeze(1), result, 0);
+  }
+  return result;
+}
+
+// Multi-tap bounded scatter for bicubic 3D: values [N,C,Do,Ho,Wo], weights
+// [N,Do,Ho,Wo,K] -> [N,C,D,H,W]
+static Tensor gs_scatter3d_bc_multi(
+    const Tensor& values,
+    const Tensor& weights,
+    const Tensor& d_idx,
+    const Tensor& h_idx,
+    const Tensor& w_idx,
+    int64_t D,
+    int64_t H,
+    int64_t W,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+  auto N = values.size(0), C = values.size(1);
+  auto out_D = values.size(2), out_H = values.size(3), out_W = values.size(4);
+  auto K = d_idx.size(4);
+  auto flat = ((gs_bound_coord(d_idx, D, padding_mode, align_corners) * H +
+                gs_bound_coord(h_idx, H, padding_mode, align_corners)) *
+                   W +
+               gs_bound_coord(w_idx, W, padding_mode, align_corners))
+                  .reshape({N, 1, out_D * out_H * out_W * K})
+                  .expand({N, C, out_D * out_H * out_W * K});
+  auto weighted = values.unsqueeze(-1) * weights.unsqueeze(1);
+  if (padding_mode == GridSamplerPadding::Zeros) {
+    auto mask = (d_idx >= 0) & (d_idx < D) & (h_idx >= 0) & (h_idx < H) &
+        (w_idx >= 0) & (w_idx < W);
+    weighted = at::where(mask.unsqueeze(1), weighted, 0);
+  }
+  return at::zeros({N, C, D * H * W}, values.options())
+      .scatter_add(2, flat, weighted.reshape({N, C, out_D * out_H * out_W * K}))
+      .reshape({N, C, D, H, W});
 }
 
 // Multi-tap gather for 3D: d_idx/h_idx/w_idx [N, Do, Ho, Wo, K] → [N, C, Do,
@@ -8277,7 +8341,7 @@ static Tensor gs_gather3d_multi(
   if (zeros_oob) {
     auto mask = (d_idx >= 0) & (d_idx < D) & (h_idx >= 0) & (h_idx < H) &
         (w_idx >= 0) & (w_idx < W);
-    result = result * mask.unsqueeze(1).to(result.dtype());
+    result = at::where(mask.unsqueeze(1), result, 0);
   }
   return result;
 }
@@ -8305,7 +8369,7 @@ static Tensor gs_scatter3d_multi(
   if (zeros_oob) {
     auto mask = (d_idx >= 0) & (d_idx < D) & (h_idx >= 0) & (h_idx < H) &
         (w_idx >= 0) & (w_idx < W);
-    weighted = weighted * mask.unsqueeze(1).to(weighted.dtype());
+    weighted = at::where(mask.unsqueeze(1), weighted, 0);
   }
   return at::zeros({N, C, D * H * W}, values.options())
       .scatter_add(2, flat, weighted.reshape({N, C, out_D * out_H * out_W * K}))
@@ -8602,6 +8666,174 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
   if (!ggGrid.defined() || interpolation == GridSamplerInterpolation::Nearest) {
     return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
   }
+
+  if (interpolation == GridSamplerInterpolation::Bicubic) {
+    // As in 2D: the bicubic backward differentiates the UNNORMALIZED coordinate
+    // and applies the padding tap by tap, so the multiplier is the unnormalize
+    // scale alone. gs_compute_coords would zero it at a border and lose a
+    // sensitivity the kernel still has.
+    auto D = input.size(2), H = input.size(3), W = input.size(4);
+    auto x_scale = static_cast<double>(align_corners ? W - 1 : W) / 2.0;
+    auto y_scale = static_cast<double>(align_corners ? H - 1 : H) / 2.0;
+    auto z_scale = static_cast<double>(align_corners ? D - 1 : D) / 2.0;
+    auto raw = [&](int64_t axis, double scale) {
+      auto coord = (grid.select(-1, axis) + 1) * scale;
+      return align_corners ? coord : coord - 0.5;
+    };
+    auto x_raw = raw(0, x_scale), y_raw = raw(1, y_scale),
+         z_raw = raw(2, z_scale);
+    auto x0 = at::floor(x_raw).to(at::kLong);
+    auto y0 = at::floor(y_raw).to(at::kLong);
+    auto z0 = at::floor(z_raw).to(at::kLong);
+    auto fx = x_raw - x0.to(x_raw.dtype());
+    auto fy = y_raw - y0.to(y_raw.dtype());
+    auto fz = z_raw - z0.to(z_raw.dtype());
+    auto ggG_x = ggGrid.select(-1, 0) * x_scale;
+    auto ggG_y = ggGrid.select(-1, 1) * y_scale;
+    auto ggG_z = ggGrid.select(-1, 2) * z_scale;
+
+    // Keys' coefficients and their first two derivatives in the fractional
+    // offset, for the four taps at {-1, 0, 1, 2} from the base voxel.
+    constexpr double A = -0.75;
+    auto coeffs = [](const Tensor& t) {
+      auto t1 = t + 1.0, t2 = 1.0 - t, t3 = 2.0 - t;
+      auto c = at::stack(
+          {(((A * t1) - (5 * A)) * t1 + (8 * A)) * t1 - (4 * A),
+           (((A + 2) * t) - (A + 3)) * t.square() + 1,
+           (((A + 2) * t2) - (A + 3)) * t2.square() + 1,
+           (((A * t3) - (5 * A)) * t3 + (8 * A)) * t3 - (4 * A)},
+          -1);
+      auto dc = at::stack(
+          {(((3 * A) * t1) - (10 * A)) * t1 + (8 * A),
+           (((3 * (A + 2)) * t) - (2 * (A + 3))) * t,
+           -((((3 * (A + 2)) * t2) - (2 * (A + 3))) * t2),
+           (((-3 * A) * t3) + (10 * A)) * t3 - (8 * A)},
+          -1);
+      return std::make_pair(std::move(c), std::move(dc));
+    };
+    // only the ggGrid half needs the second derivative, so it is built there
+    auto second = [](const Tensor& t) {
+      auto t1 = t + 1.0, t2 = 1.0 - t, t3 = 2.0 - t;
+      return at::stack(
+          {((6 * A) * t1) - (10 * A),
+           ((6 * (A + 2)) * t) - (2 * (A + 3)),
+           ((6 * (A + 2)) * t2) - (2 * (A + 3)),
+           ((6 * A) * t3) - (10 * A)},
+          -1);
+    };
+    auto [cx, dcx] = coeffs(fx);
+    auto [cy, dcy] = coeffs(fy);
+    auto [cz, dcz] = coeffs(fz);
+
+    // Walk the 64 taps four at a time, one (z, y) pair per step. Materialising
+    // them together would hold three [N, Do, Ho, Wo, 64] index tensors and a
+    // gather of the same width times the channels, which is gigabytes at a
+    // realistic volume size.
+    auto offs = at::arange(-1, 3, x0.options());
+    auto x_idx = x0.unsqueeze(-1) + offs;
+
+    Tensor d2cx, d2cy, d2cz, dx2, dy2, dz2, dxdy, dxdz, dydz;
+    if (output_mask[2]) {
+      d2cx = second(fx);
+      d2cy = second(fy);
+      d2cz = second(fz);
+    }
+
+    for (const auto kz : c10::irange(4)) {
+      for (const auto jy : c10::irange(4)) {
+        auto y_idx = (y0 + (jy - 1)).unsqueeze(-1).expand_as(x_idx);
+        auto z_idx = (z0 + (kz - 1)).unsqueeze(-1).expand_as(x_idx);
+        // d_input needs the weights and grad_output, not the input values
+        Tensor taps;
+        if (output_mask[0] || output_mask[2]) {
+          taps = gs_gather3d_bc_multi(
+              input, z_idx, y_idx, x_idx, padding_mode_enum, align_corners);
+        }
+
+        auto cy_j = cy.select(-1, jy), dcy_j = dcy.select(-1, jy);
+        auto cz_k = cz.select(-1, kz), dcz_k = dcz.select(-1, kz);
+        auto weight = [](const Tensor& along_x, const Tensor& other) {
+          return along_x * other.unsqueeze(-1);
+        };
+
+        Tensor B_dx, B_dy, B_dz;
+        if (output_mask[0] || output_mask[1]) {
+          B_dx = weight(dcx, cy_j * cz_k);
+          B_dy = weight(cx, dcy_j * cz_k);
+          B_dz = weight(cx, cy_j * dcz_k);
+        }
+
+        if (output_mask[0]) {
+          auto contrib = gs_accum_sumprod_k(taps, B_dx) * ggG_x.unsqueeze(1);
+          contrib.addcmul_(gs_accum_sumprod_k(taps, B_dy), ggG_y.unsqueeze(1));
+          contrib.addcmul_(gs_accum_sumprod_k(taps, B_dz), ggG_z.unsqueeze(1));
+          // out of place: vmap refuses an in-place accumulation whose
+          // destination is not batched while the chunk's contribution is
+          d_grad_output = d_grad_output.defined() ? d_grad_output + contrib
+                                                  : std::move(contrib);
+        }
+
+        if (output_mask[1]) {
+          auto w_in = ggG_x.unsqueeze(-1) * B_dx;
+          w_in.addcmul_(ggG_y.unsqueeze(-1), B_dy);
+          w_in.addcmul_(ggG_z.unsqueeze(-1), B_dz);
+          auto contrib = gs_scatter3d_bc_multi(
+              grad_output,
+              w_in,
+              z_idx,
+              y_idx,
+              x_idx,
+              D,
+              H,
+              W,
+              padding_mode_enum,
+              align_corners);
+          d_input = d_input.defined() ? d_input + contrib : std::move(contrib);
+        }
+
+        // The second derivatives of the sampled value in the coordinate, which
+        // for a separable cubic is the symmetric 3x3 of the taps weighted by
+        // two derivative factors.
+        if (output_mask[2]) {
+          auto tap_dot = (grad_output.unsqueeze(-1) * taps).sum(1);
+          auto dot = [&](const Tensor& along_x, const Tensor& other) {
+            return (tap_dot * weight(along_x, other)).sum(-1);
+          };
+          auto accumulate = [](Tensor& total, Tensor part) {
+            total = total.defined() ? total + part : std::move(part);
+          };
+          accumulate(dx2, dot(d2cx, cy_j * cz_k));
+          accumulate(dy2, dot(cx, d2cy.select(-1, jy) * cz_k));
+          accumulate(dz2, dot(cx, cy_j * d2cz.select(-1, kz)));
+          accumulate(dxdy, dot(dcx, dcy_j * cz_k));
+          accumulate(dxdz, dot(dcx, cy_j * dcz_k));
+          accumulate(dydz, dot(cx, dcy_j * dcz_k));
+        }
+      }
+    }
+
+    if (output_mask[2]) {
+      auto row = [&](const Tensor& to_x,
+                     const Tensor& to_y,
+                     const Tensor& to_z,
+                     double scale) {
+        auto value = ggG_x * to_x;
+        value.addcmul_(ggG_y, to_y);
+        value.addcmul_(ggG_z, to_z);
+        return value.mul_(scale);
+      };
+      auto ggrid_d_grid = at::stack(
+          {row(dx2, dxdy, dxdz, x_scale),
+           row(dxdy, dy2, dydz, y_scale),
+           row(dxdz, dydz, dz2, z_scale)},
+          -1);
+      d_grid =
+          d_grid.defined() ? d_grid + ggrid_d_grid : std::move(ggrid_d_grid);
+    }
+
+    return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
+  }
+
   TORCH_CHECK_NOT_IMPLEMENTED(
       interpolation == GridSamplerInterpolation::Bilinear,
       "grid_sampler_3d double backward not implemented for interpolation_mode=",
