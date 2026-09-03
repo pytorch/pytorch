@@ -8,6 +8,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 from unittest.mock import patch
 
 import torch
@@ -17,6 +18,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+from torch._dynamo.exc import PackageError
 from torch._dynamo.package import (
     _current_cpu_codegen_target,
     _rename_globals,
@@ -208,6 +210,37 @@ class TestPackage(torch._inductor.test_case.TestCase):
             resaved = CompilePackage(fn, entry).cache_entry()
         self.assertFalse(resaved.requires_native_backend_compatibility)
         self.assertIsNone(resaved.system_info.cpu_codegen_target)
+
+    def test_codegen_drift_refuses_serialization_not_introspection(self):
+        # A drifted package can never be serialized, but building a
+        # cache_entry() for introspection (summary(), backend enumeration,
+        # session teardown) must keep working -- a refusal there would erupt
+        # out of __exit__ and mask the in-flight capture exception.
+        def fn(x):
+            return x + 1
+
+        graph = torch.fx.Graph()
+        graph.placeholder("x").meta["example_value"] = torch.ones(2)
+        base = SystemInfo.current(cpu_codegen=False)
+        target = ("x86_64", "avx2", 256, None)
+        first = dataclasses.replace(base, cpu_codegen_target=target)
+        package = CompilePackage(fn)
+        with (
+            mock.patch.object(SystemInfo, "current", return_value=first),
+            mock.patch(
+                "torch._dynamo.package._current_cpu_codegen_target",
+                return_value=("x86_64", "avx512", 256, None),
+            ),
+            self.assertLogs("torch._dynamo.package", level="WARNING") as logs,
+        ):
+            package.update_device_type(graph)
+            package.update_device_type(graph)
+        self.assertIn("CPU codegen target changed during capture", logs.output[0])
+        self.assertIsNotNone(package.cache_entry())
+        with self.assertRaisesRegex(PackageError, "cannot be serialized"):
+            package.refuse_unserializable()
+        with self.assertRaisesRegex(PackageError, "cannot be serialized"):
+            DynamoCache.record_package(package)
 
     def test_guarded_code_records_backend_ids_from_bytecode(self):
         def fn(x):
@@ -636,8 +669,6 @@ def add(x, y):
         # Regression test for https://github.com/pytorch/pytorch/issues/190664.
         # package.install() must register target_code in input_codes so that
         # torch._dynamo.reset() clears precompile entries on the installed code.
-        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -714,6 +745,24 @@ def add(x, y):
             with self.assertRaisesRegex(RuntimeError, "Detected recompile"):
                 compiled(x)
         self.assertEqual(compiled(x), expected)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_saving_does_not_bypass_the_live_entry(self):
+        # from_cache_entry marks a code whose backend it cannot find as bypassed
+        # on the entry it is handed. Saving must work on a copy: the live entry
+        # keeps serving this process, and a save that came up short on a
+        # backend must not flip it to bypassed.
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn)(x), fn(x))  # noqa: UNSPECIFIED_BACKEND
+        ((key, live),) = PrecompileContext._dynamo_cache_entries.items()
+        self.assertTrue(live.codes[0].backend_ids)
+        PrecompileContext._backend_artifacts_by_key.clear()
+        saved, _ = PrecompileContext.create_cache_entries()
+        self.assertTrue(saved[key].dynamo.codes[0].bypassed)
+        self.assertFalse(live.codes[0].bypassed)
 
     def test_abandoned_package_uninstalls_on_gc(self):
         # Without the finalizer, each load+install of one artifact would leave
@@ -878,6 +927,57 @@ def add(x, y):
         pkg.uninstall()
         self.assertIs(module_dict[name], sentinel)
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+    def test_system_info_is_read_once_per_package(self):
+        # SystemInfo.current probes the accelerator and the C++ toolchain, and
+        # update_device_type runs on every compile under caching_precompile.
+        def fn(x):
+            return x + 1
+
+        graph = torch.fx.Graph()
+        graph.placeholder("x").meta["example_value"] = torch.ones(2)
+        package = CompilePackage(fn)
+        with mock.patch.object(
+            SystemInfo, "current", wraps=SystemInfo.current
+        ) as current:
+            for _ in range(3):
+                package.update_device_type(graph)
+        self.assertEqual(current.call_count, 1)
+        self.assertIsNone(package._cpu_codegen_target_drift)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_unrecordable_package_warns_and_still_compiles(self):
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        with (
+            mock.patch.object(
+                DynamoCache, "record_package", side_effect=PackageError("drifted")
+            ),
+            self.assertLogs("torch._dynamo.convert_frame", level="WARNING") as logs,
+        ):
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+        self.assertTrue(
+            any("Not recording compile package: drifted" in m for m in logs.output)
+        )
+
+    def test_explicit_capture_is_not_inferred_from_the_serialization_filter(self):
+        # The serialization filter and the capture mode are independent: a
+        # package can carry a filter without being an explicit capture, and be
+        # an explicit capture without one.
+        def fn(x):
+            return x + 1
+
+        def keep_all(entries):
+            return [True] * len(entries)
+
+        filtered = CompilePackage(fn, serialization_guard_filter_fn=keep_all)
+        self.assertFalse(filtered.explicit_capture)
+        self.assertIs(filtered.serialization_guard_filter_fn, keep_all)
+        explicit = CompilePackage(fn, explicit_capture=True)
+        self.assertTrue(explicit.explicit_capture)
+        self.assertIsNone(explicit.serialization_guard_filter_fn)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @parametrize("isolate_recompiles", (False, True))

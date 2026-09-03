@@ -151,6 +151,32 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 _next_isolate_recompiles_id = itertools.count()
+_explicit_compile_regions: dict[int, weakref.ReferenceType[object]] = {}
+_explicit_compile_regions_lock = threading.Lock()
+
+
+def _register_explicit_compile_region(region_id: int, owner: object) -> None:
+    with _explicit_compile_regions_lock:
+        _explicit_compile_regions[region_id] = weakref.ref(owner)
+
+
+def _unregister_explicit_compile_region(region_id: int) -> None:
+    with _explicit_compile_regions_lock:
+        _explicit_compile_regions.pop(region_id, None)
+
+
+def _get_explicit_compile_regions() -> tuple[int, ...]:
+    with _explicit_compile_regions_lock:
+        live = []
+        dead = []
+        for region_id, owner in _explicit_compile_regions.items():
+            if owner() is None:
+                dead.append(region_id)
+            else:
+                live.append(region_id)
+        for region_id in dead:
+            del _explicit_compile_regions[region_id]
+        return tuple(live)
 
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
