@@ -245,7 +245,9 @@ jobs:
     across iterations. libtorch_cpu/libtorch_cuda are Python-ABI-free; only
     libtorch_python + _C are recompiled per interpreter via the cmake.py cache
     invalidation. -#}
-{%- set unified_job_names = [] %}
+{#- Carries each group's build job name, so the test and upload jobs below can
+    each depend on just their own group. -#}
+{%- set unified_upload_groups = [] %}
 {%- for g in ns.groups %}
   {%- set group = g['configs'] %}
   {%- set arch_type = g['arch_type'] %}
@@ -262,7 +264,10 @@ jobs:
       E.g. "manywheel-py3_10-cuda-aarch64-12_6" -> "-cuda-aarch64-12_6". -#}
   {%- set py_dotless = first['python_version'] | replace('.', '_') %}
   {%- set build_name_suffix = first['build_name'] | replace('manywheel-py' ~ py_dotless, '') %}
-  {%- set _ = unified_job_names.append(job_name) %}
+  {%- set _ = unified_upload_groups.append({
+        'job_name': job_name,
+        'test_name': job_name | replace('-build', '-test'),
+        'configs': group}) %}
 
   !{{ job_name }}:
     name: !{{ job_name }}
@@ -376,21 +381,39 @@ jobs:
 {%- endif %}
 
 {%- if test_standard_configs %}
-{# manywheel-test depends only on the builds it actually consumes: the unified
-   cpu/cuda jobs, plus manywheel-build only when that matrix builds a standard
-   (non-ROCm/XPU) config such as cpu-s390x. ROCm/XPU are tested by
-   manywheel-test-rocm / manywheel-test-xpu, so a ROCm/XPU build failure must not
-   skip the cpu/cuda tests. #}
-  manywheel-test:
+{#- One test job per arch group, matching the build jobs, so each group runs
+    build -> test -> upload independently. A single shared test job would make
+    every group's upload wait on the slowest group's tests, since `needs` is
+    evaluated per job rather than per matrix leg.
+
+    ROCm/XPU already have their own test jobs below. -#}
+{%- set standard_test_jobs = [] %}
+{%- for u in unified_upload_groups %}
+  {%- set _ = standard_test_jobs.append({
+        'name': u['test_name'],
+        'needs': [u['job_name']],
+        'configs': u['configs']}) %}
+{%- endfor %}
+{%- if matrix_standard_configs %}
+  {#- Standard configs built by the manywheel-build matrix (e.g. cpu-s390x)
+      keep the manywheel-test name. -#}
+  {%- set _ = standard_test_jobs.append({
+        'name': 'manywheel-test',
+        'needs': ['manywheel-build'],
+        'configs': matrix_standard_configs}) %}
+{%- endif %}
+{%- for test_job in standard_test_jobs %}
+
+  !{{ test_job['name'] }}:
     name: ${{ matrix.build_name }}-test
     if: !{{ owner_if }}
-    needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}{%- if matrix_standard_configs %}, manywheel-build{%- endif %}{%- for n in unified_job_names %}, !{{ n }}{%- endfor %}]
+    needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}, !{{ test_job['needs'] | join(', ') }}]
     uses: ./.github/workflows/_binary-test-linux.yml
     strategy:
       fail-fast: false
       matrix:
         include:
-        {%- for config in test_standard_configs %}
+        {%- for config in test_job['configs'] %}
           {%- if "aarch64" in build_environment %}
           {%- set _runs_on = "l-arm64g3-16-62" %}
           {%- elif "s390x" in build_environment %}
@@ -427,6 +450,7 @@ jobs:
       ALPINE_IMAGE: "!{{ alpine_image }}"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+{%- endfor %}
 {%- endif %}
 
 {%- if rocm_configs %}
@@ -496,20 +520,56 @@ jobs:
 {%- endif %}
 
 {%- if branches == "nightly" and build_configs %}
+{#- One upload job per arch group rather than a single job over every config.
+    `needs` is evaluated per job, not per matrix leg, so a single upload job
+    cannot start until the slowest group in the whole workflow has finished --
+    an XPU test waiting hours on a scarce runner held up the CPU and CUDA
+    wheels behind it. Split by group, each set of wheels publishes as soon as
+    its own build and test are done.
 
-  manywheel-upload:
+    The groups below partition build_configs exactly: unified groups (cpu /
+    cuda per version), the standard configs built by the manywheel-build matrix
+    (e.g. cpu-s390x), then rocm and xpu. -#}
+{%- set upload_jobs = [] %}
+{%- for u in unified_upload_groups %}
+  {%- set _ = upload_jobs.append({
+        'name': u['job_name'] | replace('-build', '-upload'),
+        'needs': [u['job_name']] + ([u['test_name']] if test_standard_configs else []),
+        'configs': u['configs']}) %}
+{%- endfor %}
+{%- if matrix_standard_configs %}
+  {%- set _ = upload_jobs.append({
+        'name': 'manywheel-upload',
+        'needs': ['manywheel-build'] + (['manywheel-test'] if test_standard_configs else []),
+        'configs': matrix_standard_configs}) %}
+{%- endif %}
+{%- if rocm_configs %}
+  {%- set _ = upload_jobs.append({
+        'name': 'manywheel-rocm-upload',
+        'needs': ['manywheel-build', 'manywheel-test-rocm'],
+        'configs': rocm_configs}) %}
+{%- endif %}
+{%- if xpu_configs %}
+  {%- set _ = upload_jobs.append({
+        'name': 'manywheel-xpu-upload',
+        'needs': ['manywheel-build', 'manywheel-test-xpu'],
+        'configs': xpu_configs}) %}
+{%- endif %}
+{%- for job in upload_jobs %}
+
+  !{{ job['name'] }}:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: !{{ owner_if }}
     permissions:
       id-token: write
       contents: read
-    needs: [{%- if pin_docker_image %}get-docker-tag, {% endif %}{%- if matrix_build_configs %}manywheel-build, {% endif %}{%- for n in unified_job_names %}!{{ n }}, {% endfor %}manywheel-test{%- if rocm_configs %}, manywheel-test-rocm{%- endif %}{%- if xpu_configs %}, manywheel-test-xpu{%- endif %}]
+    needs: [{%- if pin_docker_image %}get-docker-tag, {% endif %}!{{ job['needs'] | join(', ') }}]
     uses: ./.github/workflows/_binary-upload.yml
     strategy:
       fail-fast: false
       matrix:
         include:
-        {%- for config in build_configs %}
+        {%- for config in job['configs'] %}
           - desired_python: "!{{ config['python_version'] }}"
             desired_cuda: "!{{ config['desired_cuda'] }}"
             gpu_arch_version: "!{{ config['gpu_arch_version'] | default('') }}"
@@ -533,13 +593,14 @@ jobs:
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+{%- endfor %}
 {%- endif %}
 
 {%- if libtorch_extraction_configs %}
 
   libtorch-extract:
     name: ${{ matrix.build_name }}-extract
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: !{{ owner_if }}
     needs: [manywheel-build]
     runs-on: "mt-l-x86iavx512-16-128"
     container:
@@ -608,7 +669,7 @@ jobs:
 
   libtorch-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: !{{ owner_if }}
     permissions:
       id-token: write
       contents: read
