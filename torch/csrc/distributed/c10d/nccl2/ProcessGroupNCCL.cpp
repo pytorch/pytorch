@@ -856,7 +856,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
   TracingGuard tracingGuard(
       name_,
       comm_size_,
-      "batch_op_issue",
+      "batch_isend_irecv",
       rank_,
       sequence_number_,
       input_tensors,
@@ -867,7 +867,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
   auto work = createWork(stream, timeout, input_tensors);
 
   // Record start event before NCCL operations
-  work->recordStart("batch_op_issue");
+  work->recordStart("batch_isend_irecv");
 
   // Start NCCL group for batched operations
   NCCL_CHECK(

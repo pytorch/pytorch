@@ -1431,17 +1431,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // hand over these tensors to WorkNCCL's stash when coalescing is ended.
   TensorShelf coalescedTensors_;
 
-  // Batch P2P profiler metadata accumulated between startCoalescing() and
-  // endCoalescing(). Send tensors are inputs and recv tensors are outputs.
-  std::vector<at::Tensor> coalescedP2PInputTensors_;
-  std::vector<at::Tensor> coalescedP2POutputTensors_;
-  std::vector<int64_t> coalescedP2PInputSplitSizes_;
-  std::vector<int64_t> coalescedP2POutputSplitSizes_;
-  int64_t coalescedP2PNumelIn_{0};
-  int64_t coalescedP2PNumelOut_{0};
-  std::optional<at::ScalarType> coalescedP2PDtype_;
-  bool coalescedP2PProfilingActive_{false};
-
   // Some ops may have completed, but user still hasn't called `work.wait()`.
   // When watchdog detects this, it transfers the TensorShelf from `work` to
   // this `shelves` structure. Next time we execute ProcessGroupNCCL's methods

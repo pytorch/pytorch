@@ -3612,14 +3612,6 @@ void ProcessGroupNCCL::startCoalescing() {
   coalescedDevice_.set_index(-1);
   coalescedComm_ = nullptr;
   coalescedTensors_.clear();
-  coalescedP2PInputTensors_.clear();
-  coalescedP2POutputTensors_.clear();
-  coalescedP2PInputSplitSizes_.clear();
-  coalescedP2POutputSplitSizes_.clear();
-  coalescedP2PNumelIn_ = 0;
-  coalescedP2PNumelOut_ = 0;
-  coalescedP2PDtype_.reset();
-  coalescedP2PProfilingActive_ = at::hasCallbacks();
   coalescing_state_ |= CoalActive;
   groupStart();
 }
@@ -3631,14 +3623,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
     // There is no actual work being coalesced, return here
     groupEnd();
     coalescing_state_ = 0;
-    coalescedP2PInputTensors_.clear();
-    coalescedP2POutputTensors_.clear();
-    coalescedP2PInputSplitSizes_.clear();
-    coalescedP2POutputSplitSizes_.clear();
-    coalescedP2PNumelIn_ = 0;
-    coalescedP2PNumelOut_ = 0;
-    coalescedP2PDtype_.reset();
-    coalescedP2PProfilingActive_ = false;
     return nullptr;
   }
   TORCH_CHECK(
@@ -3684,36 +3668,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
     work->ncclStartEvent_->record(ncclStream);
   }
 
-  auto endGroup = [&]() {
-    if (useNonblocking()) {
-      groupEndNonblocking(comm);
-    } else {
-      groupEnd();
-    }
-  };
-
-  const bool isP2POnlyCoalescing =
-      (coalescing_state_ & CoalP2P) && !(coalescing_state_ & CoalColl);
-  if (isP2POnlyCoalescing && coalescedP2PProfilingActive_) {
-    RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
-        std::make_tuple(static_cast<int64_t>(seqP2P_), true),
-        std::make_tuple(pg_uid_, pg_desc_),
-        coalescedP2PInputTensors_,
-        coalescedP2POutputTensors_,
-        rank_,
-        "batch_isend_irecv",
-        coalescedP2PNumelIn_,
-        coalescedP2PNumelOut_,
-        coalescedP2PDtype_.value_or(at::ScalarType::Undefined),
-        coalescedP2PInputSplitSizes_,
-        coalescedP2POutputSplitSizes_,
-        globalRankStart_,
-        globalRankStride_,
-        this->getSize(),
-        true);
-    endGroup();
+  if (useNonblocking()) {
+    groupEndNonblocking(comm);
   } else {
-    endGroup();
+    groupEnd();
   }
 
   // Record end after ncclGroupEnd
@@ -3751,14 +3709,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   coalescing_state_ = 0;
   coalescedComm_ = nullptr;
   coalescedTensors_.clear();
-  coalescedP2PInputTensors_.clear();
-  coalescedP2POutputTensors_.clear();
-  coalescedP2PInputSplitSizes_.clear();
-  coalescedP2POutputSplitSizes_.clear();
-  coalescedP2PNumelIn_ = 0;
-  coalescedP2PNumelOut_ = 0;
-  coalescedP2PDtype_.reset();
-  coalescedP2PProfilingActive_ = false;
   // If in async mode, return work; otherwise, kernel is enqueued on current
   // stream, no need to return work
   return coalescedAsync_ ? work : nullptr;
@@ -4298,26 +4248,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     }
     // For now, P2P ops are always put on internal stream
     coalescedAsync_ = true;
-
-    if (coalescedP2PProfilingActive_) {
-      if (!coalescedP2PDtype_.has_value()) {
-        coalescedP2PDtype_ = tensor.scalar_type();
-      } else if (*coalescedP2PDtype_ != tensor.scalar_type()) {
-        // ParamCommsDebugInfo has one dtype field. Keep mixed-dtype batches
-        // valid and mark their aggregate dtype as unknown.
-        coalescedP2PDtype_ = at::ScalarType::Undefined;
-      }
-      if (opType == OpType::SEND) {
-        coalescedP2PInputTensors_.push_back(tensor);
-        coalescedP2PInputSplitSizes_.push_back(tensor.numel());
-        coalescedP2PNumelIn_ += tensor.numel();
-      } else {
-        TORCH_INTERNAL_ASSERT(opType == OpType::RECV);
-        coalescedP2POutputTensors_.push_back(tensor);
-        coalescedP2POutputSplitSizes_.push_back(tensor.numel());
-        coalescedP2PNumelOut_ += tensor.numel();
-      }
-    }
   }
 
   // Used many times below, so we stash the unordered_map lookup
