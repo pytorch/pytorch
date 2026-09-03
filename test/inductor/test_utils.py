@@ -1,14 +1,25 @@
 # Owner(s): ["module: inductor"]
 
+import builtins
 import importlib.util
+import os
+import sys
+import tempfile
+import types
 import unittest
 from collections.abc import Callable, Iterator
+from pathlib import Path
+from unittest import mock
 
 from sympy import I, Max, Min, Symbol, sympify
 
 import torch
+from torch._dynamo import device_interface as di
+from torch._dynamo.device_interface import DeviceInterface
+from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
+from torch._inductor import config as inductor_config, utils as inductor_utils
 from torch._inductor.compile_fx import _get_subgraph_names
 from torch._inductor.fx_utils import (
     _is_fake_tensor_same,
@@ -17,7 +28,17 @@ from torch._inductor.fx_utils import (
     FakeTensorUpdater,
     get_fake,
 )
-from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
+from torch._inductor.utils import (
+    _gpu_types,
+    device_need_guard,
+    get_device_tflops,
+    get_gpu_type,
+    is_gpu,
+    load_template,
+    python_subprocess_env,
+    sympy_str,
+    sympy_subs,
+)
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
@@ -30,10 +51,27 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
+from torch.utils import _triton as triton_utils
 from torch.utils._sympy.functions import Identity
 
 
 class TestUtils(TestCase):
+    def test_python_subprocess_env_prioritizes_loaded_torch(self):
+        torch_package_root = os.path.dirname(
+            os.path.dirname(os.path.abspath(torch.__file__))
+        )
+        with tempfile.TemporaryDirectory() as shadow_path:
+            with mock.patch.object(sys, "path", [shadow_path, *sys.path]):
+                env = python_subprocess_env()
+        self.assertEqual(env["PYTHONPATH"].split(os.pathsep)[0], torch_package_root)
+
+    def test_python_subprocess_env_respects_override(self):
+        with mock.patch.dict(
+            os.environ, {"TORCH_CUSTOM_PYTHONPATH": "custom_python_path"}
+        ):
+            env = python_subprocess_env()
+        self.assertEqual(env["PYTHONPATH"], "custom_python_path")
+
     def test_zip_schema(self):
         def foo(x: torch.Tensor) -> None:
             pass
@@ -234,20 +272,24 @@ class TestUtils(TestCase):
             for t, t2, args, kwargs in trues:
                 fx_node_1, fx_node_2 = create_fx_node(t, t2, args, kwargs)
                 self.assertTrue(
-                    countable_fx(fx_node_1), f"Expected true {t}: {fx_node_1}"
+                    countable_fx(fx_node_1),
+                    lambda msg: f"{msg}\nExpected true {t}: {fx_node_1}",
                 )
                 self.assertTrue(
-                    countable_fx(fx_node_2), f"Expected true {t}: {fx_node_2}"
+                    countable_fx(fx_node_2),
+                    lambda msg: f"{msg}\nExpected true {t}: {fx_node_2}",
                 )
                 self.assertNotEqual(count_flops_fx(fx_node_1), None)
                 self.assertNotEqual(count_flops_fx(fx_node_2), None)
             for f, f2, args, kwargs in falses:
                 fx_node_1, fx_node_2 = create_fx_node(f, f2, args, kwargs)
                 self.assertFalse(
-                    countable_fx(fx_node_1), f"Expected false {f}: {fx_node_1}"
+                    countable_fx(fx_node_1),
+                    lambda msg: f"{msg}\nExpected false {f}: {fx_node_1}",
                 )
                 self.assertFalse(
-                    countable_fx(fx_node_2), f"Expected false {f}: {fx_node_2}"
+                    countable_fx(fx_node_2),
+                    lambda msg: f"{msg}\nExpected false {f}: {fx_node_2}",
                 )
 
     def test_flops_fx_higher_order_op(self):
@@ -310,6 +352,38 @@ class TestUtils(TestCase):
 
 
 instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
+
+
+class TestLoadTemplate(TestCase):
+    def test_load_template_uses_utf8(self):
+        # load_template must decode templates as UTF-8 regardless of the ambient
+        # locale. On a host whose default encoding is ascii, reading a template
+        # that contains a non-ascii byte otherwise raises UnicodeDecodeError,
+        # producing a host-dependent (flaky) compile failure.
+        real_open = builtins.open
+
+        def ascii_default_open(*args, **kwargs):
+            # Emulate an ascii-locale host: open() with no explicit encoding
+            # decodes as ascii (open's 4th positional arg is encoding).
+            if kwargs.get("encoding") is None and (len(args) < 4 or args[3] is None):
+                kwargs["encoding"] = "ascii"
+            return real_open(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "t.py.jinja").write_text("# unicode \u2014\n", encoding="utf-8")
+            with mock.patch("builtins.open", ascii_default_open):
+                content = load_template("t", Path(d))
+        self.assertIn("\u2014", content)
+
+    def test_load_template_invalid_utf8_names_the_file(self):
+        # A template that is genuinely not valid UTF-8 (e.g. saved in a non-UTF-8
+        # codepage) must raise an error that names the offending file, not an
+        # opaque UnicodeDecodeError that hides which template is bad.
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "bad.py.jinja").write_bytes(b"# not utf-8: \x97\n")
+            with self.assertRaises(ValueError) as cm:
+                load_template("bad", Path(d))
+        self.assertIn("bad.py.jinja", str(cm.exception))
 
 
 class TestRuntimeEstimation(TestCase):
@@ -431,6 +505,44 @@ class TestFakeTensorUpdater(TestCase):
             )
 
         yield from ((graph, n) for n in graph.graph.nodes if n.op == "call_function")
+
+    @staticmethod
+    def _make_inductor_lowering_function(
+        *,
+        output_metadata_ignores_input_storage: bool = False,
+        output_metadata_is_input: int | str | None = None,
+        output_metadata_fn: Callable[..., object] | None = None,
+    ) -> Callable[[torch.Tensor], torch.Tensor]:
+        def lowering_fn(x: torch.Tensor) -> torch.Tensor:
+            raise AssertionError("lowering_fn should not run under FakeTensorUpdater")
+
+        lowering_fn._inductor_lowering_function = True  # type: ignore[attr-defined]
+        lowering_fn._inductor_lowering_output_metadata_ignores_input_storage = (  # type: ignore[attr-defined]
+            output_metadata_ignores_input_storage
+        )
+        lowering_fn._inductor_lowering_output_metadata_is_input = (  # type: ignore[attr-defined]
+            output_metadata_is_input
+        )
+        lowering_fn._inductor_lowering_output_metadata_fn = output_metadata_fn  # type: ignore[attr-defined]
+        return lowering_fn
+
+    @classmethod
+    def _build_graph_with_inductor_lowering_node(
+        cls,
+    ) -> tuple[
+        torch.fx.GraphModule,
+        torch.fx.Node,
+        torch.fx.Node,
+        torch.fx.Node,
+        torch.fx.Node,
+    ]:
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(cls._make_inductor_lowering_function(), (neg,))
+        graph.output(lowered)
+        return torch.fx.GraphModule({}, graph), x, y, neg, lowered
 
     def _add_delete_nodes_test(self, graph: torch.fx.GraphModule) -> None:
         updater = FakeTensorUpdater(graph)
@@ -664,6 +776,718 @@ class TestFakeTensorUpdater(TestCase):
         # If recursion is broken, we'll get a recursion error here.
         self.assertTrue(_is_fake_tensor_same(l, l, {}))
         self.assertFalse(_is_fake_tensor_same(l, m, {}))
+
+    def test_unchanged_inductor_lowering_node_is_ignored(self):
+        gm, x, y, neg, lowered = self._build_graph_with_inductor_lowering_node()
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 0)
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_changed_node_back_to_previous_hash_updates_metadata(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        graph.output(neg)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+
+            updater = FakeTensorUpdater(gm)
+            neg.args = (y,)
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+            self.assertEqual(num_updated, 1)
+            self.assertEqual(tuple(neg.meta["val"].shape), (4, 5))
+
+            neg.args = (x,)
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 1)
+        self.assertEqual(tuple(neg.meta["val"].shape), (2, 3))
+
+    def test_new_inductor_lowering_node_with_metadata_is_ignored(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        neg = graph.call_function(aten.neg.default, (x,))
+        output = graph.output(neg)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+
+            updater = FakeTensorUpdater(gm)
+            with graph.inserting_before(output):
+                lowered = graph.call_function(
+                    self._make_inductor_lowering_function(), (neg,)
+                )
+            lowered.meta["val"] = neg.meta["val"]
+            output.args = (lowered,)
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 0)
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_marked_inductor_lowering_node_ignores_storage_only_dependency_change(
+        self,
+    ):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=True
+            ),
+            (neg,),
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            neg.args = (y,)
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 1)
+        self.assertEqual(tuple(neg.meta["val"].shape), (2, 3))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_marked_inductor_lowering_node_ignores_storage_only_kwarg_change(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=True
+            ),
+            (),
+            {"other": neg},
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            neg.args = (y,)
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 1)
+        self.assertEqual(tuple(neg.meta["val"].shape), (2, 3))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_pass_through_inductor_lowering_node_updates_from_input_metadata(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=True,
+                output_metadata_is_input="input_",
+            ),
+            (),
+            {"input_": neg},
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            neg.args = (y,)
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 2)
+        self.assertEqual(tuple(neg.meta["val"].shape), (4, 5))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (4, 5))
+
+    def test_inductor_lowering_node_metadata_fn_updates_direct_arg_change(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_fn=lambda input_, shape: aten.reshape.default(
+                    input_, shape
+                )
+            ),
+            (x, (6,)),
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            lowered.meta["val"] = aten.reshape.default(x.meta["val"], (6,))
+
+            updater = FakeTensorUpdater(gm)
+            lowered.args = (y, (20,))
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 1)
+        self.assertEqual(tuple(lowered.meta["val"].shape), (20,))
+
+    def test_inductor_lowering_node_metadata_fn_preserves_view_aliasing(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=False,
+                output_metadata_fn=lambda input_, shape: aten.reshape.default(
+                    input_, shape
+                ),
+            ),
+            (x, (6,)),
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            lowered.meta["val"] = aten.reshape.default(x.meta["val"], (6,))
+
+            updater = FakeTensorUpdater(gm)
+            lowered.args = (y, (6,))
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 1)
+        self.assertEqual(tuple(lowered.meta["val"].shape), (6,))
+        self.assertEqual(
+            lowered.meta["val"].untyped_storage()._cdata,
+            y.meta["val"].untyped_storage()._cdata,
+        )
+
+    def test_pass_through_inductor_lowering_node_rejects_missing_input_metadata(
+        self,
+    ):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=True,
+                output_metadata_is_input="input_",
+            ),
+            (),
+            {"input_": neg},
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            del x.meta["val"]
+            lowered.kwargs = {"input_": x}
+
+            with self.assertRaisesRegex(RuntimeError, "metadata is unavailable"):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_unmarked_inductor_lowering_node_rejects_storage_only_dependency_change(
+        self,
+    ):
+        gm, x, y, neg, lowered = self._build_graph_with_inductor_lowering_node()
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            neg.args = (y,)
+
+            with self.assertRaisesRegex(RuntimeError, "changed dependency"):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+    def test_marked_inductor_lowering_node_rejects_dtype_dependency_change(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(
+                output_metadata_ignores_input_storage=True
+            ),
+            (neg,),
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3, dtype=torch.float32))
+            y.meta["val"] = mode.from_tensor(torch.randn(2, 3, dtype=torch.float64))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            neg.args = (y,)
+
+            with self.assertRaisesRegex(RuntimeError, "changed dependency"):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+    def test_new_inductor_lowering_node_with_changed_dependency_raises(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        output = graph.output(neg)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+
+            updater = FakeTensorUpdater(gm)
+            with graph.inserting_before(output):
+                lowered = graph.call_function(
+                    self._make_inductor_lowering_function(), (neg,)
+                )
+            lowered.meta["val"] = neg.meta["val"]
+            output.args = (lowered,)
+            neg.args = (y,)
+
+            with self.assertRaisesRegex(RuntimeError, "changed dependency"):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+        self.assertEqual(tuple(neg.meta["val"].shape), (4, 5))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_new_inductor_lowering_node_without_metadata_raises(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        neg = graph.call_function(aten.neg.default, (x,))
+        output = graph.output(neg)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+
+            updater = FakeTensorUpdater(gm)
+            with graph.inserting_before(output):
+                lowered = graph.call_function(
+                    self._make_inductor_lowering_function(), (neg,)
+                )
+            output.args = (lowered,)
+
+            with self.assertRaisesRegex(RuntimeError, "already carry fake metadata"):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+    def test_changed_inductor_lowering_node_raises_before_stale_metadata(self):
+        gm, x, y, neg, lowered = self._build_graph_with_inductor_lowering_node()
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            with gm.graph.inserting_before(lowered):
+                neg_replacement = gm.graph.call_function(aten.neg.default, (y,))
+            lowered.args = (neg_replacement,)
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "_inductor_lowering_function nodes",
+            ):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
+        self.assertEqual(tuple(neg_replacement.meta["val"].shape), (4, 5))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+
+# Stand-in for any exception that is not TritonUnavailableError and must not
+# escape has_triton() for a sub-capable device. (The real GPUTooOldForTriton
+# is a RuntimeError subclass; this one deliberately is not, so an escape
+# cannot be mistaken for anything has_triton() legitimately catches.)
+class _GPUTooOldForTriton(Exception):
+    pass
+
+
+def _make_triton_interface(*, available=True, capable=True, raise_exc=None):
+    class _FakeInterface(DeviceInterface):
+        @staticmethod
+        def is_available() -> bool:
+            return available
+
+        @staticmethod
+        def is_triton_capable(device=None) -> bool:
+            return capable
+
+        @classmethod
+        def raise_if_triton_unavailable(cls, device=None) -> None:
+            if raise_exc is not None:
+                raise raise_exc
+
+    return _FakeInterface
+
+
+class TestHasTriton(TestCase):
+    def tearDown(self):
+        triton_utils.has_triton.cache_clear()
+        super().tearDown()
+
+    def _run(
+        self,
+        registered,
+        *,
+        has_package=True,
+        detection_disabled=False,
+        include_cpu=False,
+    ):
+        with (
+            mock.patch.object(
+                triton_utils, "has_triton_package", return_value=has_package
+            ),
+            inductor_config.patch(triton_disable_device_detection=detection_disabled),
+            mock.patch(
+                "torch._dynamo.device_interface.get_registered_device_interfaces",
+                return_value=registered,
+            ),
+        ):
+            triton_utils.has_triton.cache_clear()
+            # Exercise the public default when CPU is not requested.
+            if include_cpu:
+                return triton_utils.has_triton(include_cpu=True)
+            return triton_utils.has_triton()
+
+    def test_no_triton_package(self):
+        result = self._run([("fake", _make_triton_interface())], has_package=False)
+        self.assertFalse(result)
+
+    def test_detection_disabled(self):
+        result = self._run(
+            [("fake", _make_triton_interface())], detection_disabled=True
+        )
+        self.assertFalse(result)
+
+    def test_capable_available_backend_built(self):
+        self.assertTrue(self._run([("fake", _make_triton_interface())]))
+
+    def test_device_not_available(self):
+        self.assertFalse(self._run([("fake", _make_triton_interface(available=False))]))
+
+    def test_device_not_triton_capable(self):
+        self.assertFalse(self._run([("fake", _make_triton_interface(capable=False))]))
+
+    def test_backend_missing_is_swallowed(self):
+        iface = _make_triton_interface(
+            raise_exc=TritonUnavailableError("backend not built")
+        )
+        self.assertFalse(self._run([("fake", iface)]))
+
+    def test_unexpected_runtime_error_propagates(self):
+        # A generic RuntimeError is NOT the "no triton backend" signal, so it
+        # must surface instead of being silently treated as "no triton".
+        iface = _make_triton_interface(raise_exc=RuntimeError("something else broke"))
+        with self.assertRaisesRegex(RuntimeError, "something else broke"):
+            self._run([("fake", iface)])
+
+    def test_indexed_device_name_skipped(self):
+        # "fake:0" is available+capable but must be skipped as an indexed alias.
+        self.assertFalse(self._run([("fake:0", _make_triton_interface())]))
+
+    def test_cpu_ignored_by_default_and_included_when_requested(self):
+        registered = [("cpu", _make_triton_interface())]
+        self.assertFalse(self._run(registered))
+        self.assertTrue(self._run(registered, include_cpu=True))
+
+    def test_first_working_device_wins(self):
+        registered = [
+            ("bad", _make_triton_interface(capable=False)),
+            ("good", _make_triton_interface()),
+        ]
+        self.assertTrue(self._run(registered))
+
+    def test_capability_gate_precedes_backend_probe(self):
+        # A sub-capable device whose backend probe would throw a NON-RuntimeError.
+        # The capability gate must short-circuit before the probe is ever called;
+        # if the ordering regresses, _GPUTooOldForTriton escapes instead of False.
+        iface = _make_triton_interface(capable=False, raise_exc=_GPUTooOldForTriton())
+        self.assertFalse(self._run([("fake", iface)]))
+
+
+class _GpuWithStream(DeviceInterface):
+    class Stream:  # overrides the base sentinel Stream -> exposes_streams() True
+        pass
+
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+
+class _GpuNoStream(DeviceInterface):
+    # deliberately does NOT define Stream: inherits the base sentinel (mps-like)
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+
+class _GpuUnavailable(DeviceInterface):
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+    @staticmethod
+    def is_available() -> bool:
+        return False
+
+
+class _NonGpu(DeviceInterface):
+    # is_gpu() NOT overridden: inherits the base default of False
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+
+class _GpuOnlyClassified(DeviceInterface):
+    # Overrides nothing but is_gpu(): a partially-implemented out-of-tree
+    # interface whose other base-class methods (is_available, device_count,
+    # ...) raise NotImplementedError. Registry-driven consumers must treat
+    # it as unavailable rather than propagate the error.
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+
+class TestDeviceClassification(TestCase):
+    def setUp(self):
+        super().setUp()
+        self._registered = []
+        get_gpu_type.cache_clear()
+
+    def tearDown(self):
+        # GPU_TYPES is an import-time snapshot and never refreshes, so tests
+        # patch it rather than mutate it; only get_gpu_type() caches at all.
+        for name in self._registered:
+            di.device_interfaces.pop(name, None)
+        get_gpu_type.cache_clear()
+        super().tearDown()
+
+    def _register(self, name, iface):
+        di.register_interface_for_device(name, iface)
+        self._registered.append(name)
+
+    # ---- is_gpu() default on the base class ----
+    def test_base_is_gpu_defaults_false(self):
+        self.assertFalse(DeviceInterface.is_gpu())
+        self.assertFalse(_NonGpu.is_gpu())
+        self.assertTrue(_GpuWithStream.is_gpu())
+
+    # ---- exposes_streams(): sentinel comparison, NOT None ----
+    def test_exposes_streams_true_when_stream_overridden(self):
+        self.assertTrue(_GpuWithStream.exposes_streams())
+
+    def test_exposes_streams_false_via_base_sentinel_not_none(self):
+        # _GpuNoStream.Stream IS the base sentinel (same object, not None).
+        # exposes_streams() must compare against the sentinel, not None;
+        # otherwise this card would be wrongly reported as stream-capable.
+        self.assertIs(_GpuNoStream.Stream, DeviceInterface.Stream)
+        self.assertIsNotNone(_GpuNoStream.Stream)
+        self.assertFalse(_GpuNoStream.exposes_streams())
+
+    # ---- is_gpu(device) ----
+    def test_is_gpu_none_returns_false(self):
+        self.assertFalse(is_gpu(None))
+
+    def test_is_gpu_unregistered_returns_false(self):
+        self.assertFalse(is_gpu("definitely_not_a_device"))
+
+    def test_is_gpu_registered(self):
+        self._register("fakegpu", _GpuWithStream)
+        self._register("fakecpu", _NonGpu)
+        # GPU_TYPES snapshots at inductor import; patch it with a fresh scan
+        # so is_gpu() sees the fixtures.
+        with mock.patch.object(inductor_utils, "GPU_TYPES", _gpu_types()):
+            self.assertTrue(is_gpu("fakegpu"))
+            self.assertFalse(is_gpu("fakecpu"))
+
+    # ---- device_need_guard(device) ----
+    def test_device_need_guard(self):
+        self._register("fakegpu", _GpuWithStream)
+        self._register("fakemps", _GpuNoStream)
+        self._register("fakecpu", _NonGpu)
+        with mock.patch.object(inductor_utils, "GPU_TYPES", _gpu_types()):
+            self.assertTrue(device_need_guard("fakegpu"))
+            self.assertFalse(device_need_guard("fakemps"))  # gpu but no stream
+            self.assertFalse(device_need_guard("fakecpu"))
+            self.assertFalse(device_need_guard("definitely_not_a_device"))
+
+    # ---- _gpu_types() ----
+    def test_gpu_types_filters_indexed_and_non_gpu(self):
+        self._register("fakegpu", _GpuWithStream)
+        self._register("fakegpu:0", _GpuWithStream)
+        self._register("fakecpu", _NonGpu)
+        result = _gpu_types()
+        self.assertIn("fakegpu", result)
+        self.assertNotIn("fakegpu:0", result)
+        self.assertNotIn("fakecpu", result)
+
+    def test_gpu_types_is_an_import_time_snapshot(self):
+        # GPU_TYPES is scanned exactly once, when inductor is imported;
+        # registering afterwards is documented as unsupported and must not be
+        # reflected (see register_interface_for_device).
+        first = get_gpu_type()
+        self._register("acc", _GpuWithStream)
+        self.assertIn("acc", _gpu_types())  # a fresh scan does see it
+        self.assertNotIn("acc", inductor_utils.GPU_TYPES)  # the snapshot does not
+        self.assertFalse(is_gpu("acc"))
+        # Clear the cache so this re-evaluates over the frozen snapshot rather
+        # than trivially hitting functools.cache.
+        get_gpu_type.cache_clear()
+        self.assertEqual(get_gpu_type(), first)
+
+    def test_gpu_types_consumer_resolves_out_of_tree_via_registry(self):
+        # A third-party PrivateUse1 backend (here "acc") registers a GPU-class
+        # DeviceInterface but exposes no torch.acc submodule, so GPU_TYPES
+        # consumers must resolve through the registry, not getattr(torch, name).
+        # Drive the real consumers so reverting their fixes fails this test.
+        import torch._inductor.fx_passes.freezing_patterns as freezing_patterns
+        from torch._inductor.fx_passes.freezing_patterns import _addmm_pattern_device
+        from torch.testing._internal.inductor_utils import _is_multigpu
+
+        self._register("acc", _GpuWithStream)
+        self.assertFalse(hasattr(torch, "acc"))
+        self.assertIn("acc", _gpu_types())  # the registry scan resolves it
+        # Each consumer module holds its own binding of the GPU_TYPES snapshot,
+        # so patch the consumer's binding directly.
+        with mock.patch.object(freezing_patterns, "GPU_TYPES", ["acc"]):
+            self.assertEqual(_addmm_pattern_device(), "acc")
+        # The fake interface has no device_count: must be False, not raise.
+        self.assertFalse(_is_multigpu("acc"))
+
+    def test_is_multigpu_tolerates_unimplemented_is_available(self):
+        from torch.testing._internal.inductor_utils import _is_multigpu
+
+        # is_available() itself is unimplemented (base raises): _is_multigpu
+        # feeds HAS_MULTIGPU at module import, so it must return False, not
+        # raise (or importing the test-support module dies).
+        self._register("fakeraw", _GpuOnlyClassified)
+        self.assertFalse(_is_multigpu("fakeraw"))
+
+    # ---- get_gpu_type() ----
+    def test_get_gpu_type_single_available(self):
+        self._register("fakegpu", _GpuWithStream)
+        with mock.patch.object(inductor_utils, "GPU_TYPES", ["fakegpu"]):
+            self.assertEqual(get_gpu_type(), "fakegpu")
+
+    def test_get_gpu_type_none_available_falls_back_to_cuda(self):
+        # No available GPU type: falls back to "cuda" before ever consulting
+        # the current accelerator.
+        self._register("fakegpu", _GpuUnavailable)
+        with mock.patch.object(inductor_utils, "GPU_TYPES", ["fakegpu"]):
+            self.assertEqual(get_gpu_type(), "cuda")
+
+    def test_get_gpu_type_multiple_disambiguates_without_assert(self):
+        # Old code asserted len(avail) <= 1; this test would crash there.
+        # New code uses current_accelerator() to disambiguate instead.
+        self._register("fakegpu", _GpuWithStream)
+        self._register("fakegpu2", _GpuWithStream)
+        acc = types.SimpleNamespace(type="fakegpu2")
+        with (
+            mock.patch.object(inductor_utils, "GPU_TYPES", ["fakegpu", "fakegpu2"]),
+            mock.patch("torch.accelerator.current_accelerator", return_value=acc),
+        ):
+            self.assertEqual(get_gpu_type(), "fakegpu2")
+
+    def test_get_gpu_type_skips_unimplemented_is_available(self):
+        # A partially-implemented interface must be skipped, not crash the
+        # availability scan.
+        self._register("fakeraw", _GpuOnlyClassified)
+        with mock.patch.object(inductor_utils, "GPU_TYPES", ["fakeraw"]):
+            self.assertEqual(get_gpu_type(), "cuda")
+
+    def test_get_gpu_type_stable_fallback_when_accelerator_disagrees(self):
+        # >1 available and current_accelerator() names none of them: the pick
+        # must be stable (sorted), not positional registry order.
+        self._register("fakegpu", _GpuWithStream)
+        self._register("fakegpu2", _GpuWithStream)
+        acc = types.SimpleNamespace(type="unrelated")
+        with (
+            mock.patch.object(inductor_utils, "GPU_TYPES", ["fakegpu2", "fakegpu"]),
+            mock.patch("torch.accelerator.current_accelerator", return_value=acc),
+        ):
+            with self.assertLogs("torch._inductor.utils", level="WARNING"):
+                self.assertEqual(get_gpu_type(), "fakegpu")
+
+    def test_in_tree_gpu_types_unchanged(self):
+        # The registry scan replaces a hardcoded GPU_TYPES literal, so pin the
+        # in-tree result: dropping an is_gpu() override would otherwise shift
+        # the classification silently, with no test in the repo failing.
+        known = {"cuda", "xpu", "mtia", "mps", "cpu", "tpu"}
+        self.assertEqual(set(_gpu_types()) & known, {"cuda", "xpu", "mtia", "mps"})
+        # MPS is GPU-class but exposes no Stream, so it takes no stream guard.
+        self.assertFalse(device_need_guard("mps"))
+        self.assertFalse(is_gpu("cpu"))
+        self.assertFalse(is_gpu("cuda:0"))
 
 
 if __name__ == "__main__":

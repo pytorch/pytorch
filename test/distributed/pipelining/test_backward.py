@@ -14,7 +14,11 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipXPUIf,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 d_hid = 512
@@ -125,8 +129,7 @@ class StageBackwardTests(TestCase):
         self.assertEqual(dinputs[0], None)
         torch.testing.assert_close(x.grad, ref_x.grad)
         torch.testing.assert_close(dinputs[1], ref_x.grad)
-
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
+        
     def test_stage_backward_weight(self, device):
         # MLP as a stage module
         mod = MLPModule(d_hid).to(device)
@@ -345,10 +348,7 @@ class StageBackwardTests(TestCase):
             torch.testing.assert_close(p.grad, ref_p.grad)
 
 
-devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(
-    StageBackwardTests, globals(), only_for=devices, allow_xpu=True
-)
+instantiate_device_type_tests(StageBackwardTests, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

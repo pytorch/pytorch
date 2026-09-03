@@ -577,6 +577,42 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm_backward(
   return shapes;
 }
 
+std::vector<torch::lazy::Shape> compute_shape_native_group_norm(
+    const at::Tensor& input,
+    const ::std::optional<at::Tensor>& weight,
+    const ::std::optional<at::Tensor>& bias,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    double eps) {
+  return {
+      {input.scalar_type(), input.sizes().vec()},
+      {input.scalar_type(), {N, group}},
+      {input.scalar_type(), {N, group}}};
+}
+
+std::vector<torch::lazy::Shape> compute_shape_native_group_norm_backward(
+    const at::Tensor& grad_out,
+    const at::Tensor& input,
+    const at::Tensor& mean,
+    const at::Tensor& rstd,
+    const ::std::optional<at::Tensor>& weight,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    ::std::array<bool, 3> output_mask) {
+  auto param_type{
+      weight && weight->defined() ? weight->scalar_type()
+                                  : input.scalar_type()};
+  return {
+      {input.scalar_type(),
+       output_mask[0] ? input.sizes().vec() : c10::IntArrayRef{}},
+      {param_type, output_mask[1] ? c10::IntArrayRef{C} : c10::IntArrayRef{}},
+      {param_type, output_mask[2] ? c10::IntArrayRef{C} : c10::IntArrayRef{}}};
+}
+
 std::vector<Shape> compute_shape_native_layer_norm(
     const at::Tensor& input,
     at::IntArrayRef normalized_shape,

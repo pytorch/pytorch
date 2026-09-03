@@ -2,7 +2,7 @@ import collections
 import warnings
 
 import torch
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -16,7 +16,7 @@ def _end_ptr(tensor: torch.Tensor) -> int:
 
 class TensorProperties:
     def __init__(self, tensor: torch.Tensor):
-        self.is_fake = isinstance(tensor, FakeTensor)
+        self.is_fake = is_fake_tensor(tensor)
         self.is_contiguous = tensor.is_contiguous()
         self.storage_ptr = None
         self.storage_size = None

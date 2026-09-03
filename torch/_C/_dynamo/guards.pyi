@@ -1,6 +1,6 @@
 import enum
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TypeAlias
 
 import torch
@@ -24,6 +24,8 @@ class GuardDebugInfo:
     result: bool
     num_guards_executed: int
     user_stack: traceback.StackSummary | None
+
+class LocalState: ...
 
 class GuardManager:
     def check(self, value: Any) -> bool: ...
@@ -197,6 +199,7 @@ class GuardManager:
     def is_tag_safe_root(self) -> bool: ...
     def has_no_accessors(self) -> bool: ...
     def has_object_aliasing_guard(self) -> bool: ...
+    def has_unoptimized_relational_guard(self) -> bool: ...
     def get_type_of_guarded_value(self) -> type: ...
     def type_dict_manager(
         self,
@@ -363,11 +366,13 @@ class GuardManager:
     ) -> None: ...
     def add_float_is_nan_guard(
         self,
+        value: float,
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
     def add_complex_is_nan_guard(
         self,
+        value: complex,
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
@@ -407,6 +412,8 @@ class RootGuardManager(GuardManager):
         self, clone_filter_fn: Callable[[GuardManager], bool]
     ) -> RootGuardManager: ...
     def attach_compile_id(self, compile_id: str) -> None: ...
+    def get_local_state(self) -> LocalState: ...
+    def set_local_state(self, local_state: LocalState) -> None: ...
 
 class DictGuardManager(GuardManager):
     def get_key_manager(
@@ -492,6 +499,12 @@ def assert_size_stride(
     item: torch.Tensor,
     size: torch.types._size,
     stride: torch.types._size,
+    op_name: str | None = None,
+) -> None: ...
+def assert_size_stride_grouped(
+    items: Sequence[torch.Tensor],
+    sizes: Sequence[torch.types._size],
+    strides: Sequence[torch.types._size],
     op_name: str | None = None,
 ) -> None: ...
 def assert_alignment(

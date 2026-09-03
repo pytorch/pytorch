@@ -12,13 +12,17 @@ import torch
 import torch._guards
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
+from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
+from torch._inductor.fx_utils import get_node_storage
 from torch._inductor.utils import get_gpu_type
+from torch._library.utils import zip_schema
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     guard_or_true,
     statically_known_true,
+    sym_eq,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
@@ -93,7 +97,9 @@ def remove_no_ops(
     zeros: OrderedSet[torch.fx.Node],
     ones: OrderedSet[torch.fx.Node],
 ):
-    """Remove identity arithmetic operations: (+ 0, - 0, * 1, / 1)."""
+    """
+    Removes operations that are essentially no-ops e.g. (+ 0, - 0, * 1, / 1)
+    """
     with torch.utils._python_dispatch._disable_current_modes():
         graph = gm.graph
 
@@ -101,7 +107,14 @@ def remove_no_ops(
             if any(not isinstance(t, torch.Tensor) for t in (t1, t2)):
                 return False
             for field in fields:
-                if getattr(t1, field) != getattr(t2, field):
+                v1 = getattr(t1, field)
+                v2 = getattr(t2, field)
+                if field == "shape":
+                    # Shapes may contain unbacked SymInts; tuple `!=` would
+                    # force a guard. Conservatively treat unknown as "not equal".
+                    if not guard_or_false(sym_eq(v1, v2)):
+                        return False
+                elif v1 != v2:
                     return False
             return True
 
@@ -117,6 +130,9 @@ def remove_no_ops(
                             return True
             return False
 
+        def isScalarValue(arg):
+            return isinstance(arg, (int, float))
+
         def replace_no_op(node, replace_input_index):
             replacement = node.args[replace_input_index]
 
@@ -124,7 +140,10 @@ def remove_no_ops(
             # non-Tensor inputs even for ops with only Tensor inputs.
             # TODO - decompose/type promote to avoid this
             if not all(isinstance(arg, torch.fx.Node) for arg in node.args):
-                return
+                if all(isScalarValue(arg) for arg in node.args) or not isinstance(
+                    replacement, torch.fx.Node
+                ):
+                    return
 
             # https://github.com/pytorch/pytorch/issues/174187
             # Don't replace if the replacement value is mutated in-place.
@@ -152,34 +171,61 @@ def remove_no_ops(
             graph.erase_node(node)
 
         for node in graph.find_nodes(op="call_function", target=aten.add.Tensor):
-            # TODO handle Tensor-Scalar adds, it's a different schema
             if len(node.args) == 2:
                 if (
-                    not any(e in zeros for e in node.args)
+                    not any(
+                        e in zeros or (isScalarValue(e) and e == 0) for e in node.args
+                    )
                     or node.kwargs.get("alpha", 1) != 1
                 ):
                     continue
 
-                replace_index = 1 if node.args[0] in zeros else 0
+                replace_index = (
+                    1
+                    if node.args[0] in zeros
+                    or (isScalarValue(node.args[0]) and node.args[0] == 0)
+                    else 0
+                )
+                replacement = node.args[replace_index]
+                if isinstance(replacement, torch.fx.Node):
+                    val = replacement.meta.get("val")
+                    if isinstance(val, torch.Tensor) and val.is_conj():
+                        continue
                 replace_no_op(node, replace_index)
 
         for node in graph.find_nodes(op="call_function", target=aten.sub.Tensor):
             if len(node.args) == 2:
-                if node.args[1] not in zeros or node.kwargs.get("alpha", 1) != 1:
+                if (
+                    not (
+                        node.args[1] in zeros
+                        or (isScalarValue(node.args[1]) and node.args[1] == 0)
+                    )
+                    or node.kwargs.get("alpha", 1) != 1
+                ):
                     continue
 
                 replace_no_op(node, 0)
 
         for node in graph.find_nodes(op="call_function", target=aten.mul.Tensor):
             if len(node.args) == 2:
-                if not any(e in ones for e in node.args):
+                if not any(
+                    e in ones or (isScalarValue(e) and e == 1) for e in node.args
+                ):
                     continue
 
-                replace_input_index = 1 if node.args[0] in ones else 0
+                replace_input_index = (
+                    1
+                    if node.args[0] in ones
+                    or (isScalarValue(node.args[0]) and node.args[0] == 1)
+                    else 0
+                )
                 replace_no_op(node, replace_input_index)
 
         for node in graph.find_nodes(op="call_function", target=aten.div.Tensor):
-            if len(node.args) == 2 and node.args[1] in ones:
+            if len(node.args) == 2 and (
+                node.args[1] in ones
+                or (isScalarValue(node.args[1]) and node.args[1] == 1)
+            ):
                 replace_no_op(node, 0)
 
         # meta tensors returned from the graph have no data and can be replaced with empty_strided
@@ -255,6 +301,11 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
                 break
             for unused in unused_views:
                 views.pop(unused)
+                if unused.op == "placeholder":
+                    # Placeholders are graph inputs; erasing one would silently
+                    # shrink the compiled function's arity while callers keep
+                    # passing the original argument count.
+                    continue
                 graph.erase_node(unused)
 
 
@@ -268,6 +319,7 @@ class UniformValueConstantFolder(ConstantFolder):
         super().__init__(gm, skip_constructors)
         self.node_storages_ptrs: dict[torch.fx.Node, int] = {}
         self.constant_data_ptrs: dict[torch.fx.Node, StorageWeakRef] = {}
+        self.mutated_storages = self._collect_mutated_storages()
         # we may constant fold a tensor which in the graph has a sym size
         # see: [constant folding refining of symints]
         self.node_replacements_shapes: dict[torch.fx.Node, list[int]] = {}
@@ -319,10 +371,17 @@ class UniformValueConstantFolder(ConstantFolder):
             if not isinstance(tensor_val, torch.Tensor):
                 continue
 
-            def is_zero_int(arg: Any) -> bool:
+            def is_zero_int(arg: object) -> bool:
                 return isinstance(arg, int) and arg == 0
 
             if not any(is_zero_int(a) for a in op.args):
+                continue
+
+            # x * 0 is only uniformly 0 for integer/bool dtypes. For floating
+            # point (and complex) dtypes nan * 0 == nan and (+/-inf) * 0 == nan,
+            # so folding x * 0 -> 0 would incorrectly drop NaN/Inf when x is not
+            # known to be finite.
+            if tensor_val.dtype.is_floating_point or tensor_val.dtype.is_complex:
                 continue
 
             t = torch.full(
@@ -333,6 +392,41 @@ class UniformValueConstantFolder(ConstantFolder):
                 pin_memory=False,
             )
             self.add_node_replacement(op, t)
+
+    def _collect_mutated_storages(self) -> OrderedSet[int]:
+        mutated_storages: OrderedSet[int] = OrderedSet()
+
+        def add_mutated_storage(arg: torch.fx.Node) -> None:
+            storage = get_node_storage(arg)
+            if storage is not None:
+                mutated_storages.add(storage)
+
+        graph = typing.cast(torch.fx.Graph, self.module.graph)
+        for op, target in graph._find_nodes_lookup_table.table:
+            if (
+                op != "call_function"
+                or not isinstance(target, torch._ops.OpOverload)
+                or not target._schema.is_mutable
+            ):
+                continue
+
+            for node in graph.find_nodes(op=op, target=target, sort=False):
+                for schema_arg, arg in zip_schema(
+                    target._schema, node.args, node.kwargs
+                ):
+                    if (
+                        schema_arg.alias_info is None
+                        or not schema_arg.alias_info.is_write
+                    ):
+                        continue
+
+                    pytree.tree_map_only(torch.fx.Node, add_mutated_storage, arg)
+
+        return mutated_storages
+
+    def _aliases_mutated_storage(self, node: torch.fx.Node) -> bool:
+        storage = get_node_storage(node)
+        return storage is not None and storage in self.mutated_storages
 
     def _support_dynamic_shape(self):
         return True
@@ -359,6 +453,11 @@ class UniformValueConstantFolder(ConstantFolder):
         # 3. for pointwise ops, run node to get the substitute value
         # 4. deal with some special ops
         # otherwise, stop deduce value and return unknown value
+
+        # Values read from a mutated storage must remain runtime reads. Folding
+        # them would make later calls reuse the compile-time value.
+        if self._aliases_mutated_storage(node):
+            return self.unknown_value
 
         # TODO: cat, more indexing
         # TODO - do on cpu to avoid syncs
@@ -935,6 +1034,9 @@ def pointless_permute_pair(match: Match, arg, perm1, perm2):
 )
 def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
     """Convert bmm to mm when batch size is 1"""
+    # See Note [Preserving FlexGEMM body GEMMs].
+    if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
+        return
 
     def repl(a, b):
         return torch.mm(a.squeeze(0), b.squeeze(0)).unsqueeze(0)

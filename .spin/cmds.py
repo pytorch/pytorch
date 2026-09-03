@@ -11,6 +11,13 @@ import click
 import spin
 
 
+# tomllib is built in on Python 3.11+, and spin depends on tomli for older versions.
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
+
+
 CWD = Path(__file__).absolute().parent.parent
 sys.path.insert(0, str(CWD))  # this only affects the current process
 from tools.clean import clean as _clean
@@ -144,7 +151,10 @@ VERY_FAST_LINTERS = {
     "C10_NODISCARD",
     "C10_UNUSED",
     "CALL_ONCE",
+    "CMAKE_INSTALL_PREFIX_ROOT",
     "CMAKE_MINIMUM_REQUIRED",
+    "CMAKE_PLATLIB_DESTINATION",
+    "CODEOWNERS_TAXONOMY",
     "CONTEXT_DECORATOR",
     "COPYRIGHT",
     "CUBINCLUDE",
@@ -154,6 +164,7 @@ VERY_FAST_LINTERS = {
     "HEADER_ONLY_LINTER",
     "IMPORT_LINTER",
     "INCLUDE",
+    "ISINSTANCE_FAKE_TENSOR",
     "LINTRUNNER_VERSION",
     "MERGE_CONFLICTLESS_CSV",
     "META_NO_CREATE_UNBACKED",
@@ -174,6 +185,7 @@ VERY_FAST_LINTERS = {
     "TESTOWNERS",
     "TYPEIGNORE",
     "TYPENOSKIP",
+    "UNSPECIFIED_BACKEND",
     "WORKFLOWSYNC",
 }
 
@@ -200,6 +212,7 @@ SLOW_LINTERS = {
     "CLANGFORMAT",
     "CLANGTIDY",
     "CODESPELL",
+    "CPYTHON_DIFF_SYNC",
     "FLAKE8",
     "GB_REGISTRY",
     "GENERATED_SHIMS_VERSION",
@@ -233,6 +246,31 @@ LINTRUNNER_BASE_CMD = [
 ]
 
 
+def _check_linter_python_versions():
+    invalid_linters = []
+
+    with Path(".lintrunner.toml").open("rb") as config_file:
+        config = tomllib.load(config_file)
+    for linter in config["linter"]:
+        command = linter.get("command", [])
+        if command[:2] != ["uv", "run"] or "--script" not in command:
+            continue
+        try:
+            python_index = command.index("--python")
+        except ValueError:
+            python_index = -1
+        if python_index == -1 or command[python_index + 1 : python_index + 2] != [
+            "3.10"
+        ]:
+            invalid_linters.append(linter["code"])
+
+    if invalid_linters:
+        raise click.ClickException(
+            "Linters using `uv run --script` must specify `--python 3.10`: "
+            + ", ".join(invalid_linters)
+        )
+
+
 @click.command()
 def setup_lint():
     """Set up lintrunner with current CI version."""
@@ -241,6 +279,7 @@ def setup_lint():
 
 
 def _check_linters():
+    _check_linter_python_versions()
     cmd = LINTRUNNER_BASE_CMD + ["list"]
     ret = spin.util.run(cmd, output=False, stderr=subprocess.PIPE)
     linters = {l.strip() for l in ret.stdout.decode().strip().split("\n")[1:]}
@@ -404,12 +443,15 @@ def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
         lintrunner_args=lintrunner_args,
         return_json_output=write_json_output,
     )
+    # Slow linters default to changed files only so a bare `spin lint` stays
+    # fast locally, but must honor an explicit --all-files (e.g. trunk CI) so
+    # they continuously check the whole tree rather than just the merge-base diff.
     lint_found_changed, json_output_changed = _run_lintrunner(
         changed_files_linters,
         take=take,
         skip=skip,
         apply_patches=apply_patches,
-        all_files=False,
+        all_files=has_all_files,
         lintrunner_args=lintrunner_args,
         return_json_output=write_json_output,
     )
@@ -517,6 +559,46 @@ def docs(make_args):
         )
     cmd = ["make", *(make_args or ("html",))]
     spin.util.run(cmd, cwd="docs")
+
+
+def _pip_install_cmd(editable):
+    """Build the pip install command, preferring uv when available."""
+    if shutil.which("uv"):
+        cmd = ["uv", "pip", "install"]
+    else:
+        cmd = [sys.executable, "-m", "pip", "install"]
+    if editable:
+        cmd += ["-e"]
+    return cmd + [".", "-v", "--no-build-isolation"]
+
+
+@click.command()
+def develop():
+    """Build PyTorch (editable install).
+
+    Runs an editable pip install using uv when available, falling back to
+    regular pip.  Build configuration comes from the environment, e.g.
+    `BUILD_CONFIG spin develop`.  The build stages are documented at the top of
+    CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
+    """
+    spin.util.run(_pip_install_cmd(editable=True))
+
+
+# Alias so `spin editable` also works.
+editable = click.command(name="editable")(develop.callback)
+editable.help = develop.help
+
+
+@click.command()
+def install():
+    """Install PyTorch (non-editable).
+
+    Runs a regular pip install using uv when available, falling back to
+    regular pip.  Build configuration comes from the environment, e.g.
+    `BUILD_CONFIG spin install`.  The build stages are documented at the top of
+    CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
+    """
+    spin.util.run(_pip_install_cmd(editable=False))
 
 
 PYREFLY_LINTER_SCRIPT = CWD / "tools" / "linter" / "adapters" / "pyrefly_linter.py"

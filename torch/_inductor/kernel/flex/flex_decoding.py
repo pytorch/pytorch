@@ -23,6 +23,7 @@ from ...utils import can_use_tma
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
+    can_skip_boundary_checks,
     create_indices_fake,
     create_num_blocks_fake_generator,
     freeze_irnodes,
@@ -70,10 +71,19 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
     """
     force_flex = kernel_options.get("FORCE_USE_FLEX_ATTENTION", False)
 
-    short_query_length = V.graph.sizevars.evaluate_expr(
+    # Decode eligibility is an optimization choice, not a user-visible contract,
+    # so every predicate below uses guard_or_false (case 2 of Note [guard_or_]:
+    # the program behaves equivalently whether we pick decode or the general
+    # kernel). guard_or_false returns the real result when ShapeEnv can prove or
+    # guard it, and conservatively returns False for an unprovable unbacked size.
+    # We deliberately do NOT use torch._check here: failing to prove eligibility
+    # must fall back to the general FlexAttention kernel, never impose a runtime
+    # constraint on the user's shapes. We also do NOT use guard_or_true: an
+    # unknown predicate should disable decode, not silently enable it.
+    short_query_length = V.graph.sizevars.guard_or_false(
         sympy.Lt(query.get_size()[-2], 128)
     )
-    non_zero_length = V.graph.sizevars.evaluate_expr(sympy.Gt(query.get_size()[-2], 0))
+    non_zero_length = V.graph.sizevars.guard_or_false(sympy.Gt(query.get_size()[-2], 0))
     static_batch = isinstance(query.get_size()[0], (int, sympy.Integer))
     static_num_heads = isinstance(query.get_size()[1], (int, sympy.Integer))
     if enable_gqa:
@@ -81,11 +91,11 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
         # same kv head are handled by the same block. So it's hard to support different
         # kv num blocks for grouped query heads. We just fall back to main flex_attention
         # kernel where each query head is handled by a separate block.
-        valid_block_mask_num_heads = V.graph.sizevars.evaluate_expr(
+        valid_block_mask_num_heads = V.graph.sizevars.guard_or_false(
             sympy.Eq(kv_indices.get_size()[1], 1)
         )
     else:
-        valid_block_mask_num_heads = V.graph.sizevars.evaluate_expr(
+        valid_block_mask_num_heads = V.graph.sizevars.guard_or_false(
             sympy.Or(
                 sympy.Eq(kv_indices.get_size()[1], 1),
                 sympy.Eq(kv_indices.get_size()[1], query.get_size()[1]),
@@ -211,12 +221,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
         for k, v in kernel_options.items()
     }
 
-    seq_q_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_q, 128), 0)
-    )
-    seq_kv_divisible = V.graph.sizevars.statically_known_true(
-        sympy.Eq(Mod(seq_len_kv, 128), 0)
-    )
+    seq_q_divisible = can_skip_boundary_checks(seq_len_q, SPARSE_Q_BLOCK_SIZE)
+    seq_kv_divisible = can_skip_boundary_checks(seq_len_kv, SPARSE_KV_BLOCK_SIZE)
     if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
     else:
@@ -342,9 +348,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
 
     original_kernel_options = kernel_options.copy()
-    # Note, we don't need to pass in the captured buffers explicitly
-    # because they're implicitly added by the score_mod function
-    # We do need to explicitly pass it in for autotuning though.
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
@@ -431,29 +434,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
             SPARSE_KV_BLOCK_SIZE,
         )
 
-    filtered_score_mod_buffers = [
-        buf for buf in score_mod_other_buffers if not isinstance(buf, sympy.Expr)
-    ]
-    filtered_mask_mod_buffers = [
-        buf for buf in mask_mod_other_buffers if not isinstance(buf, sympy.Expr)
-    ]
-
-    inputs_for_flex_decoding = (
-        [
-            query,
-            key,
-            value,
-            buf_M,
-            buf_L,
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-        ]
-        + filtered_score_mod_buffers
-        + filtered_mask_mod_buffers
-    )
-
     input_gen_fns = {
         5: create_num_blocks_fake_generator(kv_indices),
         6: create_indices_fake,
@@ -464,7 +444,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
     buf_ACC, _ = autotune_select_algorithm(
         "flex_decoding",
         choices,
-        inputs_for_flex_decoding,
+        # Use generated inputs because codegen can inline capture producers.
+        list(choices[0].input_nodes) if choices else [],
         layout_acc,
         input_gen_fns=input_gen_fns,
     )

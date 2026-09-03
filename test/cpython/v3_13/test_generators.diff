@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_generators.py b/test/cpython/v3_13/test_generators.py
-index 515fe7407f1..a48da0914b9 100644
+index 515fe7407f1d80e50523964cfc8822c1f9d9e587..1b82c7ebdd916c2ce6bbd8845d14761aa56c6e1b 100644
 --- a/test/cpython/v3_13/test_generators.py
 +++ b/test/cpython/v3_13/test_generators.py
 @@ -1,3 +1,56 @@
@@ -164,6 +164,24 @@ index 515fe7407f1..a48da0914b9 100644
      def test_generator_gi_yieldfrom(self):
          def a():
              self.assertEqual(inspect.getgeneratorstate(gen_b), inspect.GEN_RUNNING)
+@@ -2230,7 +2306,7 @@ Solution 2
+ """
+ 
+ weakref_tests = """\
+-Generators are weakly referencable:
++Generators are weakly referenceable:
+ 
+ >>> import weakref
+ >>> def gen():
+@@ -2241,7 +2317,7 @@ Generators are weakly referencable:
+ True
+ >>> p = weakref.proxy(gen)
+ 
+-Generator-iterators are weakly referencable as well:
++Generator-iterators are weakly referenceable as well:
+ 
+ >>> gi = gen()
+ >>> wr = weakref.ref(gi)
 @@ -2669,21 +2745,27 @@ test_generators just happened to be the test that drew these out.
  
  """

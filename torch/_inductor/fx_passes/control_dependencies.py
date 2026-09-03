@@ -24,14 +24,20 @@ class ControlDeps(HigherOrderOperator):
     """
     Higher-order operator that enforces ordering by making dependencies explicit.
 
-    Schema: control_deps(additional_deps, target, *args, **kwargs) -> result
+    Schema: control_deps(additional_deps, subgraph, *args, **kwargs) -> result
     where:
     - additional_deps: tuple of tensors that must be computed before this op
+      (ordering-only, not a real data use)
     - subgraph: GraphModule containing the exact operation to execute
-    - args/kwargs: arguments for the target function
+    - *args: pass-through arguments forwarded to the subgraph
 
-    This ensures all tensors in additional_deps are computed before the target
-    executes, creating explicit scheduling dependencies.
+    Semantics:
+    - All tensors in additional_deps are computed before the subgraph executes.
+    - Pass-through args (inputs returned unchanged by the subgraph) are
+      versioned: future readers are ordered after all subgraph operations
+      via a rename chain (OrderingOutput).  This ensures that consumers of
+      a pass-through value cannot be scheduled before the subgraph's sync
+      ops (e.g. wait_event) complete.
     """
 
     def __init__(self) -> None:
@@ -197,6 +203,14 @@ def preserve_node_ordering(
         ordered_node.meta = original_meta
         # this will be constrained on the target node in subgraph if it exists
         ordered_node.meta.pop("eager_input_vals", None)
+        # The wrapped operation retains its fallback metadata in the subgraph.
+        # The control_deps HOP itself must use its dedicated lowering because
+        # FallbackKernel cannot handle its Subgraph argument.
+        ordered_node.meta.pop("should_fallback", None)
+        custom_meta = ordered_node.meta.get("custom")
+        if isinstance(custom_meta, dict) and "fallback_to_eager" in custom_meta:
+            ordered_node.meta["custom"] = custom_meta.copy()
+            ordered_node.meta["custom"].pop("fallback_to_eager")
 
         # Replace all uses of the original node with the ordered version
         dependent_node.replace_all_uses_with(ordered_node)

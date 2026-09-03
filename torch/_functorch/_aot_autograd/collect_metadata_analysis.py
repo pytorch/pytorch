@@ -19,7 +19,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_custom_class
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
@@ -45,10 +45,12 @@ from .functional_utils import (
     from_fun,
     has_data_mutation,
     has_metadata_mutation,
+    has_same_metadata,
     MetadataKey,
     to_fun,
     ViewMetaSequence,
     was_inductor_storage_resized,
+    was_shallow_copy_data,
 )
 from .schemas import (
     InputAliasInfo,
@@ -190,7 +192,7 @@ def run_functionalized_fw_and_collect_metadata(
     def inner(*flat_args: Any) -> ViewAndMutationMeta:
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         if not all(
-            isinstance(a, tuple(KNOWN_TYPES)) or is_opaque_type(type(a))
+            isinstance(a, tuple(KNOWN_TYPES)) or is_custom_class(type(a))
             for a in flat_args
         ):
             raise AssertionError("all flat_args must be KNOWN_TYPES or opaque types")
@@ -208,7 +210,10 @@ def run_functionalized_fw_and_collect_metadata(
 
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
-        mode = FunctionalTensorMode(_allow_token_discovery=True)
+        mode = FunctionalTensorMode(
+            _allow_token_discovery=True,
+            _keep_input_mutations=keep_input_mutations,
+        )
         suppress_pending = contextlib.nullcontext()
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
@@ -279,6 +284,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_metadata=mutates_metadata,
                     mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                     mutates_storage_metadata=mutates_storage_metadata,
+                    mutation_is_shallow_copy_data=was_shallow_copy_data(f_arg),
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
@@ -628,6 +634,34 @@ from a multi-output view call"
                 existing_out_idx = out_tensor_ids[id(out_alias)]
                 output_type = OutputType.alias_of_intermediate_base_is_user_output
                 base_idx = existing_out_idx
+            elif (
+                o._base is not None
+                and not is_traceable_wrapper_subclass(o)
+                and has_same_metadata(o, o._base)
+                and id(o._base) in out_tensor_ids
+            ):
+                # o is a no-op view of another user output, but not
+                # differentiable, so none of the branches above fired. Left as
+                # non_alias, the backend is free to collapse the view and return
+                # one object for both outputs while eager returns two; an eager
+                # resize_() on the alias across a graph break then corrupts the
+                # base. Regenerate the view at runtime instead.
+                # See https://github.com/pytorch/pytorch/issues/191449
+                #
+                # Two shapes of this bug are knowingly still broken here and are
+                # tracked in #191449, which stays open for them: t.detach() leaves ._base as None so
+                # it never reaches this arm, and traceable wrapper subclasses
+                # are excluded because their view_meta_sequence is not captured
+                # and the as_strided fallback in gen_alias_from_base is not
+                # supported by e.g. DTensor. For both, the issue's own repro
+                # still returns a base of shape (12,) where eager gives (1,).
+                #
+                # o._base.requires_grad would imply o.requires_grad
+                # (DifferentiableViewMeta), which the branch above already
+                # handles, so o._base is never a saved intermediate base and
+                # this index is always in user-output space.
+                output_type = OutputType.alias_of_intermediate_base_is_user_output
+                base_idx = out_tensor_ids[id(o._base)]
             else:
                 output_type = OutputType.non_alias
                 base_idx = None

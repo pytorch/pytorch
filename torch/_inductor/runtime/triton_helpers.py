@@ -3,9 +3,9 @@
 import math as pymath
 import warnings
 from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, TypeVar
-
-from torch.utils._ordered_set import OrderedSet
 
 from .triton_compat import (
     _log2,
@@ -20,6 +20,20 @@ from .triton_compat import (
 
 _T = TypeVar("_T")
 _LOG_2_E: tl.constexpr = tl.constexpr(pymath.log2(pymath.e))
+_skip_gpu_driver_setup: ContextVar[bool] = ContextVar(
+    "_skip_gpu_driver_setup", default=False
+)
+
+
+@contextmanager
+def skip_gpu_driver_setup():
+    # Scoped no-op for set_driver_to_gpu(). ContextVar keeps nested/thread-local
+    # uses isolated.
+    token = _skip_gpu_driver_setup.set(True)
+    try:
+        yield
+    finally:
+        _skip_gpu_driver_setup.reset(token)
 
 
 def set_driver_to_cpu():
@@ -54,6 +68,9 @@ def _is_backend_active(name, backend):
 
 
 def set_driver_to_gpu():
+    if _skip_gpu_driver_setup.get():
+        return
+
     driver = triton.runtime.driver
     for name, backend in triton.backends.backends.items():
         if _is_backend_active(name, backend) and name != "cpu":
@@ -84,7 +101,7 @@ def get_backend_options():
     return get_backend_options_for_target(target)
 
 
-def _is_concrete_backend_option_value(value: Any) -> bool:
+def _is_concrete_backend_option_value(value: object) -> bool:
     import sympy
 
     import torch
@@ -100,7 +117,7 @@ def _is_concrete_backend_option_value(value: Any) -> bool:
         ),
     ):
         return False
-    if isinstance(value, (tuple, list, OrderedSet, frozenset)):
+    if isinstance(value, (tuple, list)):
         return all(_is_concrete_backend_option_value(item) for item in value)
     if isinstance(value, dict):
         return all(
@@ -113,7 +130,7 @@ def _is_concrete_backend_option_value(value: Any) -> bool:
 
 def try_filter_backend_options_for_target(target, options, kernel_arg_names=()):
     parsed_options = get_backend_options_for_target(target)
-    kernel_arg_names = OrderedSet(kernel_arg_names)
+    kernel_arg_names = tuple(kernel_arg_names)
     filtered_options = {
         name: value for name, value in options.items() if name in parsed_options
     }
@@ -219,19 +236,44 @@ def prod(input, axis):
 
 
 @triton.jit
+def prod_inner_tree(input, axis, reduction_ordering: tl.constexpr):
+    # Strict-numerics only. Emitted solely on the strict path, which is gated
+    # behind has_triton_reduction_ordering(), so Triton builds lacking the
+    # keyword never compile this helper -- keeping default `prod` portable.
+    return tl.reduce(
+        input, axis, _prod_accumulate, reduction_ordering=reduction_ordering
+    )
+
+
+@triton.jit
 def minimum(a, b):
-    mask = a < b
-    if is_floating(a):
-        mask |= a != a
-    return tl.where(mask, a, b)
+    return tl.minimum(a, b, propagate_nan=tl.PropagateNan.ALL)
 
 
 @triton.jit
 def maximum(a, b):
-    mask = a > b
+    return tl.maximum(a, b, propagate_nan=tl.PropagateNan.ALL)
+
+
+@triton.jit
+def _minimum_reduce(a, b):
+    value = minimum(a, b)
     if is_floating(a):
-        mask |= a != a
-    return tl.where(mask, a, b)
+        value = tl.where(a == b, b, value)
+    return value
+
+
+@triton.jit
+def _maximum_reduce(a, b):
+    value = maximum(a, b)
+    if is_floating(a):
+        value = tl.where(a == b, b, value)
+    return value
+
+
+@triton.jit
+def fmaximum(a, b):
+    return tl.maximum(a, b)
 
 
 @triton.jit
@@ -242,6 +284,21 @@ def min2(a, dim):
 @triton.jit
 def max2(a, dim):
     return tl.reduce(a, dim, maximum)
+
+
+@triton.jit
+def min2_strict(a, dim):
+    return tl.reduce(a, dim, _minimum_reduce)
+
+
+@triton.jit
+def max2_strict(a, dim):
+    return tl.reduce(a, dim, _maximum_reduce)
+
+
+@triton.jit
+def fmax2(a, dim):
+    return tl.reduce(a, dim, fmaximum)
 
 
 @triton.jit
@@ -295,8 +352,17 @@ def exp(x, use_fast_math: tl.constexpr):
 
 
 @triton.jit
-def online_softmax_reduce(lhs_max, lhs_sum, dim, use_fast_math: tl.constexpr):
-    out_max = max2(lhs_max, dim)
+def online_softmax_reduce(
+    lhs_max,
+    lhs_sum,
+    dim,
+    use_fast_math: tl.constexpr,
+    strict_signed_zero: tl.constexpr,
+):
+    if strict_signed_zero:
+        out_max = max2_strict(lhs_max, dim)
+    else:
+        out_max = max2(lhs_max, dim)
     out_max_keepdim = tl.expand_dims(out_max, dim)
     delta = tl.where(out_max_keepdim == float("-inf"), 0, lhs_max - out_max_keepdim)
     out_sum = tl.sum(lhs_sum * exp(delta, use_fast_math), dim)
@@ -304,14 +370,23 @@ def online_softmax_reduce(lhs_max, lhs_sum, dim, use_fast_math: tl.constexpr):
 
 
 @triton.jit
-def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexpr):
+def online_softmax_combine(
+    lhs_max,
+    lhs_sum,
+    rhs_max,
+    use_fast_math: tl.constexpr,
+    strict_signed_zero: tl.constexpr,
+):
     """
     When we do combine, we assume lhs is the accumulator and rhs is the next
     block of data.
     Then rhs_sum is always 1. With that assumption, we can save some registers
     and computation.
     """
-    out_max = maximum(lhs_max, rhs_max)
+    if strict_signed_zero:
+        out_max = _maximum_reduce(lhs_max, rhs_max)
+    else:
+        out_max = maximum(lhs_max, rhs_max)
 
     lhs_scale = tl.where(
         out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
@@ -329,9 +404,17 @@ def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexp
 
 @triton.jit
 def online_softmax_combine_with_sum(
-    lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math: tl.constexpr
+    lhs_max,
+    lhs_sum,
+    rhs_max,
+    rhs_sum,
+    use_fast_math: tl.constexpr,
+    strict_signed_zero: tl.constexpr,
 ):
-    out_max = maximum(lhs_max, rhs_max)
+    if strict_signed_zero:
+        out_max = _maximum_reduce(lhs_max, rhs_max)
+    else:
+        out_max = maximum(lhs_max, rhs_max)
 
     lhs_scale = tl.where(
         out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
@@ -709,14 +792,43 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
 
 @triton.jit
 def frexp(x):
-    # TODO(isuruf): use inline_asm_elementwise here
-    zero = x == 0
-    not_finite = libdevice.isinf(x).to(tl.int1) | libdevice.isnan(x).to(tl.int1)
-    special = zero | not_finite
-    safe_x = tl.where(special, 1.0, x)
-    y = libdevice.ilogb(safe_x) + 1
-    exponent = tl.where(special, 0, y)
-    mantissa = tl.where(zero, 0, tl.where(not_finite, x, libdevice.ldexp(safe_x, -y)))
+    # Decompose the IEEE-754 bit pattern with integer ops rather than calling
+    # libdevice.ilogb/ldexp: CUDA compiles libdevice with FTZ, which flushes
+    # float32 subnormals to zero and would return a mantissa of 0 for subnormal
+    # inputs, and the float path also loses the sign of -0.0.
+    if x.dtype == tl.float64:
+        MBITS: tl.constexpr = 52
+        EMASK: tl.constexpr = 0x7FF
+        BIAS: tl.constexpr = 1023
+    elif x.dtype == tl.float32:
+        MBITS: tl.constexpr = 23
+        EMASK: tl.constexpr = 0xFF
+        BIAS: tl.constexpr = 127
+    elif x.dtype == tl.bfloat16:
+        MBITS: tl.constexpr = 7
+        EMASK: tl.constexpr = 0xFF
+        BIAS: tl.constexpr = 127
+    else:
+        tl.static_assert(x.dtype == tl.float16)
+        MBITS: tl.constexpr = 10
+        EMASK: tl.constexpr = 0x1F
+        BIAS: tl.constexpr = 15
+    FMASK: tl.constexpr = (1 << MBITS) - 1
+    idtype = tl.core.get_int_dtype(bitwidth=x.dtype.primitive_bitwidth, signed=True)
+    bits = x.to(idtype, bitcast=True)
+    exp_field = (bits >> MBITS) & EMASK
+    frac = bits & FMASK
+    # Normalize subnormals by converting the fraction to float (exact, since
+    # it fits in the mantissa), then reuse the normal-number path on that.
+    is_sub = (exp_field == 0) & (frac != 0)
+    norm_bits = frac.to(x.dtype).to(idtype, bitcast=True)
+    src_bits = tl.where(is_sub, (bits & ~FMASK) | (norm_bits & FMASK), bits)
+    src_exp = tl.where(is_sub, (norm_bits >> MBITS) - (BIAS - 1 + MBITS), exp_field)
+    mantissa_bits = (src_bits & ~(EMASK << MBITS)) | ((BIAS - 1) << MBITS)
+    # frexp(+-0) = (+-0, 0), frexp(+-inf) = (+-inf, 0), frexp(nan) = (nan, 0)
+    special = (exp_field == EMASK) | ((exp_field == 0) & (frac == 0))
+    mantissa = tl.where(special, x, mantissa_bits.to(x.dtype, bitcast=True))
+    exponent = tl.where(special, 0, src_exp - (BIAS - 1)).to(tl.int32)
     return mantissa, exponent
 
 
@@ -944,7 +1056,7 @@ def constexpr_next_power_of_2(
     n: tl.constexpr, *, _builder: object = None
 ) -> tl.constexpr:
     """
-    A version triton.next_power_of_two that can be used within a kernel on constants.
+    A version of triton.next_power_of_two that can be used within a kernel on constants.
     """
     if not isinstance(n, tl.constexpr):
         raise AssertionError(f"Expected tl.constexpr, got {type(n)}")

@@ -834,6 +834,24 @@ def optim_error_inputs_func_asgd(device, dtype):
                 error_type=ValueError,
                 error_regex="Invalid weight_decay value: -0.5",
             ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, lambd=-0.5),
+                    desc="lambd should > 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid lambd value: -0.5",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, alpha=-0.5),
+                    desc="alpha should > 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid alpha value: -0.5",
+            ),
         ]
     return error_inputs
 
@@ -852,6 +870,16 @@ def optim_inputs_func_lbfgs(device, dtype=None):
             params=None,
             kwargs={"line_search_fn": "strong_wolfe"},
             desc="strong_wolfe",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"maximize": True},
+            desc="maximize",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"maximize": True, "line_search_fn": "strong_wolfe"},
+            desc="maximize_strong_wolfe",
         ),
     ]
 
@@ -890,6 +918,16 @@ def optim_inputs_func_muon(device, dtype=None):
             },
             desc="passing alternative ns_coefficients",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={"adjust_lr_fn": "match_rms_adamw"},
+            desc="match_rms_adamw lr adjustment",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"adjust_lr_fn": "spectral_unclamped"},
+            desc="spectral_unclamped lr adjustment",
+        ),
     ]
 
 
@@ -916,7 +954,7 @@ def optim_error_inputs_func_muon(device, dtype):
             OptimizerInput(
                 params=[param],
                 kwargs={"adjust_lr_fn": "arbitrary"},
-                desc="only support `original` and `match_rms_adamw`",
+                desc="unsupported adjust_lr_fn",
             ),
             error_type=ValueError,
             error_regex="Adjust learning rate function arbitrary is not supported",

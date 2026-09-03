@@ -395,7 +395,7 @@ class UvTcpServer : public UvTcpSocket {
 
 class WriterPayload : public c10::intrusive_ptr_target {
   static c10::intrusive_ptr<WriterPayload> reclaim(uv_write_t* request) {
-    /* This method returns a intrusive_ptr that does not increase the refcount.
+    /* This method returns an intrusive_ptr that does not increase the refcount.
      */
     auto h = static_cast<WriterPayload*>(
         uv_req_get_data(reinterpret_cast<uv_req_t*>(request)));

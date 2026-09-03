@@ -76,7 +76,6 @@ C10_DIAGNOSTIC_POP()
 
 #include <torch/csrc/jit/jit_log.h>
 
-#include <concepts>
 #include <memory>
 
 using namespace torch::jit::tensorexpr;
@@ -115,6 +114,16 @@ struct TypedPointer {
   llvm::Type* type = nullptr;
   llvm::Value* addr = nullptr;
 };
+#endif
+
+#if LLVM_VERSION_MAJOR > 23
+llvm::PointerType* llvm_pointer_to(llvm::Type* ty, unsigned addrspace = 0) {
+  return llvm::PointerType::get(ty->getContext(), addrspace);
+}
+#else
+llvm::PointerType* llvm_pointer_to(llvm::Type* ty, unsigned addrspace = 0) {
+  return ty->getPointerTo(addrspace);
+}
 #endif
 
 llvm::CmpInst::Predicate llvm_comparison_predicate(
@@ -616,7 +625,7 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
 }
 
 llvm::Type* LLVMCodeGenImpl::dtypeToLLVMPtr(Dtype dtype) {
-  return dtypeToLLVM(dtype)->getPointerTo();
+  return llvm_pointer_to(dtypeToLLVM(dtype));
 }
 
 void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
@@ -1084,13 +1093,17 @@ void LLVMCodeGenImpl::visit(const CompareSelectPtr& v) {
   value_ = v->bias() == kUnbiased ? genUnbiased() : genBiased();
 }
 
-template <std::integral T>
-llvm::Value* getFromType(llvm::Type* type, T value) {
+template <typename T>
+std::enable_if_t<std::is_integral_v<T>, llvm::Value*> getFromType(
+    llvm::Type* type,
+    T value) {
   return llvm::ConstantInt::get(type, value, std::is_signed_v<T>);
 }
 
-template <std::floating_point T>
-llvm::Value* getFromType(llvm::Type* type, T value) {
+template <typename T>
+std::enable_if_t<std::is_floating_point_v<T>, llvm::Value*> getFromType(
+    llvm::Type* type,
+    T value) {
   return llvm::ConstantFP::get(type, value);
 }
 
@@ -1294,10 +1307,10 @@ void LLVMCodeGenImpl::visit(const VarPtr& v) {
 llvm::Value* LLVMCodeGenImpl::varToValue(VarPtr v) {
   // It is possible for v to be in both varToVal_ and varToArgs.
   // In that case, varToVal_ takes precedence.
-  if (varToVal_.count(v)) {
-    return varToVal_.at(v);
-  } else if (varToArg_.count(v)) {
-    auto idx = varToArg_.at(v);
+  if (auto it = varToVal_.find(v); it != varToVal_.end()) {
+    return it->second;
+  } else if (auto it = varToArg_.find(v); it != varToArg_.end()) {
+    auto idx = it->second;
     auto arg = fn_->arg_begin() + idx;
     return arg;
   }
@@ -1471,8 +1484,7 @@ void LLVMCodeGenImpl::visit(const LoadPtr& v) {
           first_idx);
 #endif
 
-      auto vaddr = irb_.CreateBitOrPointerCast(
-          addr, llvm::PointerType::get(loadType, 0));
+      auto vaddr = irb_.CreateBitOrPointerCast(addr, llvm_pointer_to(loadType));
 #if LLVM_VERSION_MAJOR >= 12
       value_ = irb_.CreateAlignedLoad(loadType, vaddr, llvm::MaybeAlign(4));
 #else
@@ -1854,8 +1866,8 @@ void LLVMCodeGenImpl::visit(const StorePtr& v) {
           first_idx);
 #endif
 
-      auto vaddr = irb_.CreateBitOrPointerCast(
-          addr, llvm::PointerType::get(val->getType(), 0));
+      auto vaddr =
+          irb_.CreateBitOrPointerCast(addr, llvm_pointer_to(val->getType()));
 
 #if LLVM_VERSION_MAJOR >= 13
       irb_.CreateAlignedStore(val, vaddr, llvm::MaybeAlign(4));
@@ -1970,7 +1982,7 @@ static bool wantSleef(const std::string& name) {
       "fabsf",
       "floorf",
   };
-  return !noSleef.contains(name);
+  return noSleef.find(name) == noSleef.end();
 }
 
 LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(

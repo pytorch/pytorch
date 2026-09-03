@@ -1,4 +1,5 @@
 import argparse
+import calendar
 import json
 import os
 import re
@@ -25,12 +26,16 @@ def parse_older_than(s):
         month = today.month - n
         year = today.year + (month - 1) // 12
         month = (month - 1) % 12 + 1
-        day = min(
-            today.day, [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
-        )
+        day = min(today.day, calendar.monthrange(year, month)[1])
         return date(year, month, day)
     elif unit == "year":
-        return date(today.year - n, today.month, min(today.day, 28))
+        year = today.year - n
+        # Clamp to the real length of the target month, same as the month branch:
+        # a hardcoded 28 wrongly shortens 30/31-day months (e.g. going back a
+        # year from 03-31 would yield 03-28 instead of 03-31), while still
+        # handling the leap day landing in a non-leap February.
+        day = min(today.day, calendar.monthrange(year, today.month)[1])
+        return date(year, today.month, day)
 
 
 def gh_issue_list(search, label, limit):

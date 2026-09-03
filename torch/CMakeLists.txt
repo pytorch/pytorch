@@ -175,6 +175,13 @@ if(USE_ROCM)
     if(NOT WIN32)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
     endif()
+    if(USE_HIPSPARSELT)
+        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_HIPSPARSELT)
+    endif()
+    if(USE_CUFILE)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES hip::hipfile)
+        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUFILE)
+    endif()
 endif()
 
 if(USE_XPU)
@@ -195,7 +202,7 @@ if(USE_CUDNN OR USE_ROCM)
     endif()
 endif()
 
-if(USE_CUSPARSELT)
+if(USE_CUSPARSELT OR USE_HIPSPARSELT)
     list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/cuda/shared/cusparselt.cpp)
 endif()
 
@@ -297,6 +304,7 @@ endif()
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 torch_compile_options(torch_python)  # see cmake/public/utils.cmake
+torch_optimize_layout_if_enabled(torch_python)
 if(APPLE)
   target_compile_options(torch_python PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=default>)
@@ -318,8 +326,8 @@ if(USE_NUMPY)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
 endif()
 
-if(USE_CUFILE AND NOT USE_ROCM)
-  target_compile_definitions(torch_python PRIVATE USE_CUFILE)
+if(BUILD_LAZY_TS_BACKEND)
+  target_compile_definitions(torch_python PRIVATE BUILD_LAZY_TS_BACKEND)
 endif()
 
 if(HAVE_SOVERSION)
@@ -430,7 +438,7 @@ if(BUILD_ONEDNN_GRAPH)
 endif()
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "RelWithAssert")
-   # Workaround numerous decret-without-a-gil warnings from JIT
+   # Workaround numerous decref-without-a-gil warnings from JIT
    # see https://github.com/pytorch/pytorch/issues/130073
    target_compile_definitions(torch_python PRIVATE "-DPYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF")
 endif()
@@ -459,44 +467,57 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
       C_VISIBILITY_PRESET "default"
     )
   endif()
-  # Install at the install prefix root, which maps to torch/ in the wheel
-  # via wheel.install-dir = "torch". The import library (Windows _C.lib) goes
-  # alongside the other import libs in torch/lib/, matching the layout that
-  # setup.py used before _C moved to CMake.
-  install(TARGETS _C
-    RUNTIME DESTINATION "."
-    LIBRARY DESTINATION "."
-    ARCHIVE DESTINATION "lib"
-  )
+  # The extension module belongs to the Python package.
+  if(SKBUILD)
+    install(TARGETS _C
+      RUNTIME DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
+      LIBRARY DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
+    )
+  endif()
 
   # ---[ NCCL EP extension (torch._nccl_ep)
   # Optional standalone extension holding the NCCL EP bindings, imported lazily
   # by torch/distributed/_token_switch.py so libtorch_cuda never references
-  # ncclEp*. It statically links libnccl_ep.a (from the same submodule build as
-  # torch's NCCL), so the extension is self-contained: its nccl* references bind
-  # to torch_cuda's embedded NCCL, and there is no runtime libnccl_ep.so or
-  # nccl4py dependency. The runtime JIT headers come from the submodule build
-  # dir, baked in below.
+  # ncclEp*. How it links libnccl_ep follows how torch links NCCL:
+  #  - USE_SYSTEM_NCCL=OFF: __caffe2_nccl_ep is libnccl_ep.a, statically linked
+  #    here -- self-contained (nccl* bind to torch_cuda's embedded NCCL; JIT
+  #    headers baked from the submodule build dir; no nccl4py).
+  #  - USE_SYSTEM_NCCL=ON: __caffe2_nccl_ep is libnccl_ep.so, NEEDED-linked here
+  #    and resolved from the nccl4py wheel at runtime (RPATH to nccl/ep/lib; JIT
+  #    headers also from nccl4py, so nothing is baked).
   if(USE_NCCL_EP)
     Python_add_library(_nccl_ep MODULE WITH_SOABI
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu"
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep_pybind.cpp")
-    target_compile_definitions(_nccl_ep PRIVATE USE_NCCL_EP USE_C10D_NCCL
-      # Default NCCL_EP_HOME / NCCL_HOME for nccl-ep's runtime JIT; the extension
-      # sets these at import (without overriding a user-provided value).
-      "NCCL_EP_JIT_HOME=\"${NCCL_EP_JIT_HOME}\"")
+    target_compile_definitions(_nccl_ep PRIVATE USE_NCCL_EP USE_C10D_NCCL USE_NCCL)
     # torch_python: pybind + Tensor/ProcessGroup casters; torch_cuda:
-    # ProcessGroupNCCL::getCommPtr, getNcclDataType, CUDA stream, embedded NCCL;
-    # __caffe2_nccl_ep: libnccl_ep.a (static) + nccl_ep headers.
+    # NCCL communicator registry, getNcclDataType, CUDA stream, embedded NCCL;
+    # __caffe2_nccl_ep: libnccl_ep (static .a or shared .so) + nccl_ep headers.
     target_link_libraries(_nccl_ep PRIVATE
       torch_python torch_cuda __caffe2_nccl_ep pybind::pybind11)
     set_target_properties(_nccl_ep PROPERTIES
-      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
-      INSTALL_RPATH "${_rpath_portable_origin}/lib")
+      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch")
+    if(USE_SYSTEM_NCCL)
+      # Dynamic: resolve nccl4py's libnccl_ep.so (site-packages/nccl/ep/lib, one
+      # dir up from torch/ via $ORIGIN/..) at import.
+      set_target_properties(_nccl_ep PROPERTIES
+        INSTALL_RPATH "${_rpath_portable_origin}/lib;${_rpath_portable_origin}/../nccl/ep/lib")
+    else()
+      # Static: only torch's own libs needed; bake the in-tree JIT header dir so
+      # the extension self-configures NCCL_EP_HOME / NCCL_HOME at import.
+      target_compile_definitions(_nccl_ep PRIVATE
+        "NCCL_EP_JIT_HOME=\"${NCCL_EP_JIT_HOME}\"")
+      set_target_properties(_nccl_ep PROPERTIES
+        INSTALL_RPATH "${_rpath_portable_origin}/lib")
+    endif()
     if(NOT WIN32)
       set_target_properties(_nccl_ep PROPERTIES C_VISIBILITY_PRESET "default")
     endif()
-    install(TARGETS _nccl_ep RUNTIME DESTINATION "." LIBRARY DESTINATION ".")
+    if(SKBUILD)
+      install(TARGETS _nccl_ep
+        RUNTIME DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
+        LIBRARY DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
+    endif()
   endif()
 endif()
 
@@ -527,7 +548,19 @@ add_custom_target(
 add_dependencies(torch_python gen_torch_version)
 # version.py is gitignored (generated), so scikit-build-core won't include it
 # via Python package collection. Install it explicitly via cmake instead.
-install(FILES "${TORCH_SRC_DIR}/version.py" DESTINATION ".")
+if(SKBUILD)
+  install(FILES "${TORCH_SRC_DIR}/version.py"
+          DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
+endif()
+
+# _rocm_init.py is gitignored (injected by ROCm build scripts to bootstrap
+# torch/__init__.py). See https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md
+# scikit-build-core won't include it via Python package collection. Install it
+# explicitly via cmake instead.
+if(SKBUILD AND USE_ROCM AND EXISTS "${TORCH_SRC_DIR}/_rocm_init.py")
+  install(FILES "${TORCH_SRC_DIR}/_rocm_init.py"
+          DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
+endif()
 
 # Skip building this library under MacOS, since it is currently failing to build on Mac
 # Github issue #61930

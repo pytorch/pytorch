@@ -102,6 +102,22 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
     const char* device_str,
     const char* cubin_dir);
 
+// Creates an AOTInductor model container with externally-provided weights.
+// No weights are loaded from the .so: the provided constants are used directly
+// (zero-copy of tensor storage, user retains ownership). Constant folding runs
+// at creation time so the container is ready for inference immediately.
+// Constants are passed as a flat array of ABI-stable
+// AOTInductorConstantMapEntry (name -> AtenTensorHandle) rather than
+// AOTInductorConstantMapHandle, which is not ABI stable across the DSO
+// boundary.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerCreateWithExternalConstants(
+    AOTInductorModelContainerHandle* container_handle,
+    size_t num_models,
+    const char* device_str,
+    const char* cubin_dir,
+    const AOTInductorConstantMapEntry* constant_entries,
+    size_t num_constant_entries);
+
 // Deletes the AOTInductor model container.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerDelete(
     AOTInductorModelContainerHandle container_handle);
@@ -207,8 +223,10 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerExtractConstantsMapEntries(
     size_t* num_entries,
     bool use_inactive);
 
-// Setup the constant buffer in model container with provided ConstantMap.
-// The ConstantMap is user managed, and the user would retain ownership.
+// Setup the constant buffer in model container with a user-managed ConstantMap.
+// The caller retains ownership of the provided handles. The container retains
+// shallow handles to the same tensor storage without copying its data until an
+// entry is replaced or the container is deleted.
 AOTI_API AOTIRuntimeError
 AOTInductorModelContainerUpdateUserManagedConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
@@ -348,7 +366,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelRun(
     AtenTensorHandle* output_handles);
 
 // Replace AOTInductorModel's constant map. Note it doesn't handle concurrency
-// so be sure to handle ordering if AOTInductorModelRun is ran concurrently.
+// so be sure to handle ordering if AOTInductorModelRun is run concurrently.
 AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle);
@@ -366,6 +384,11 @@ AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMapV2(
 AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantsBlobSize(
     AOTInductorModelContainerHandle container_handle,
     uint64_t* ret_size);
+
+// Returns whether the container's model invoked load_constants().
+AOTI_API AOTIRuntimeError AOTInductorModelContainerDidCallLoadConstants(
+    AOTInductorModelContainerHandle container_handle,
+    bool* did_call_load_constants);
 
 // Load weights from a single blob in weight_blob_ptr
 AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(

@@ -22,8 +22,12 @@ import torch
 import torch.utils.data.datapipes as dp
 from torch import multiprocessing as mp
 from torch._utils import ExceptionWrapper
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_CI,
     IS_JETSON,
     IS_LINUX,
@@ -100,14 +104,19 @@ TEST_CUDA_IPC = (
     #    and not TEST_WITH_ROCM
 )  # https://github.com/pytorch/pytorch/issues/90940
 
-TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
+# pin_memory requires an accelerator with a pinned memory allocator.
+# MPS reports as available but does not support pin_memory (see
+# https://github.com/pytorch/pytorch/issues/86060), so exclude it.
+TEST_PIN_MEMORY = torch.accelerator.is_available() and not (
+    (acc := torch.accelerator.current_accelerator()) is not None and acc.type == "mps"
+)
 
 # We want to use `spawn` if able because some of our tests check that the
 # data loader terminates gracefully. To prevent hanging in the testing
 # process, such data loaders are run in a separate subprocess.
 #
 # We also want to test the `pin_memory=True` configuration, thus `spawn` is
-# required to launch such processes and they initialize the CUDA context.
+# required to launch such processes and they initialize the accelerator context.
 #
 # Mixing different start method is a recipe for disaster (e.g., using a fork
 # `mp.Event` with a spawn `mp.Process` segfaults). So we set this globally
@@ -162,6 +171,8 @@ def _sparse_coo_collate(b):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestDatasetRandomSplit(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_lengths_must_equal_dataset_size(self):
         with self.assertRaises(ValueError):
             random_split([1, 2, 3, 4], [1, 2])
@@ -391,6 +402,8 @@ class CountingIterableDataset(IterableDataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestTensorDataset(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_len(self):
         source = TensorDataset(torch.randn(15, 10, 2, 3, 4, 5), torch.randperm(15))
         self.assertEqual(len(source), 15)
@@ -445,6 +458,8 @@ class TestTensorDataset(TestCase):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestStackDataset(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_empty(self):
         with self.assertRaisesRegex(
             ValueError, "At least one dataset should be passed"
@@ -585,6 +600,8 @@ class TestStackDataset(TestCase):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestConcatDataset(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_concat_two_singletons(self):
         result = ConcatDataset([[0], [1]])
         self.assertEqual(2, len(result))
@@ -1217,6 +1234,8 @@ def filter_len(row):
     "DataLoader tests hang in ASAN, see: https://github.com/pytorch/pytorch/issues/66223",
 )
 class TestDataLoader(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.data = torch.randn(100, 2, 3, 5)
@@ -1385,11 +1404,11 @@ except RuntimeError as e:
                 num_workers=num_workers,
                 batch_size=None,
                 sampler=sampler,
-                pin_memory=TEST_CUDA,
+                pin_memory=TEST_PIN_MEMORY,
             )
             self.assertFalse(dl._auto_collation)
             samples = list(dl)
-            self.assertEqual(samples[0].is_pinned(), TEST_CUDA)
+            self.assertEqual(samples[0].is_pinned(), TEST_PIN_MEMORY)
             self.assertEqual(set(torch.cat(samples, 0).tolist()), set(range(n)))
 
     def test_growing_dataset(self):
@@ -1400,32 +1419,12 @@ except RuntimeError as e:
         self.assertEqual(len(dataloader_seq), 5)
         self.assertEqual(len(dataloader_shuffle), 5)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_sequential_pin_memory(self):
         loader = self._get_data_loader(self.dataset, batch_size=2, pin_memory=True)
         for input, target in loader:
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
-
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    def test_multiple_dataloaders(self):
-        for multiprocessing_context in supported_multiprocessing_contexts:
-            loader1_it = iter(self._get_data_loader(self.dataset, num_workers=1))
-            loader2_it = iter(
-                self._get_data_loader(
-                    self.dataset,
-                    num_workers=2,
-                    multiprocessing_context=multiprocessing_context,
-                )
-            )
-            next(loader1_it)
-            next(loader1_it)
-            next(loader2_it)
-            next(loader2_it)
-            next(loader1_it)
-            next(loader2_it)
-            del loader1_it
-            del loader2_it
 
     @skipIfXpu
     @unittest.skipIf(IS_S390X, "Unexpectedly succeeds on s390x")
@@ -1479,10 +1478,10 @@ except RuntimeError as e:
             p.terminate()
 
     def test_timeout(self):
-        if TEST_CUDA:
-            # This test runs in a subprocess, which can only initialize CUDA with spawn.
-            # _test_timeout_pin_memory with pin_memory=True initializes CUDA when the iterator is
-            # constructed.
+        if TEST_PIN_MEMORY:
+            # This test runs in a subprocess, which can only initialize the
+            # accelerator with spawn. _test_timeout_pin_memory with pin_memory=True
+            # initializes the accelerator when the iterator is constructed.
             targets = (_test_timeout, _test_timeout_pin_memory)
         else:
             targets = (_test_timeout,)
@@ -1898,105 +1897,6 @@ except RuntimeError as e:
         ):
             list(iter(ChainDataset([dataset1, self.dataset])))
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    def test_multiprocessing_contexts(self):
-        reference = [
-            torch.arange(3),
-            torch.arange(3, 6),
-            torch.arange(6, 9),
-            torch.arange(9, 11),
-        ]
-        counting_ds_n = 11
-        dl_common_args = dict(num_workers=3, batch_size=3, pin_memory=(not TEST_CUDA))
-        for ctx in supported_multiprocessing_contexts:
-            # windows and jetson devices don't support sharing cuda tensor; ROCm does not yet fully support IPC
-            if (
-                ctx in ["spawn", "forkserver"]
-                and TEST_CUDA
-                and not IS_WINDOWS
-                and not IS_JETSON
-            ):
-                ds_cls = CUDACountingDataset
-            else:
-                ds_cls = CountingDataset
-            self.assertEqual(
-                reference,
-                list(
-                    self._get_data_loader(
-                        ds_cls(counting_ds_n),
-                        multiprocessing_context=ctx,
-                        **dl_common_args,
-                    )
-                ),
-            )
-            if ctx is not None:
-                # test ctx object
-                ctx = mp.get_context(ctx)
-                self.assertEqual(
-                    reference,
-                    list(
-                        self._get_data_loader(
-                            ds_cls(counting_ds_n),
-                            multiprocessing_context=ctx,
-                            **dl_common_args,
-                        )
-                    ),
-                )
-
-    def _test_multiprocessing_iterdatapipe(self, with_dill):
-        # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
-        # and used with multiprocess DataLoader
-
-        reference = [
-            torch.as_tensor([[2, 3, 4, 5]], dtype=torch.int64),
-            torch.as_tensor([[2, 3, 4, 5]], dtype=torch.int64),
-        ]
-        datapipe: IterDataPipe = IterableWrapper([[1, 2, 3, 4], [1, 2, 3, 4, 5, 6]])
-        datapipe = datapipe.map(row_processor)
-        datapipe = (
-            datapipe.filter(lambda row: len(row) == 4)
-            if with_dill
-            else datapipe.filter(filter_len)
-        )
-
-        dl_common_args = dict(
-            num_workers=2, batch_size=2, shuffle=True, pin_memory=(not TEST_CUDA)
-        )
-        for ctx in supported_multiprocessing_contexts:
-            self.assertEqual(
-                reference,
-                [
-                    t.type(torch.int64)
-                    for t in self._get_data_loader(
-                        datapipe, multiprocessing_context=ctx, **dl_common_args
-                    )
-                ],
-            )
-            if ctx is not None:
-                # test ctx object
-                ctx = mp.get_context(ctx)
-                self.assertEqual(
-                    reference,
-                    [
-                        t.type(torch.int64)
-                        for t in self._get_data_loader(
-                            datapipe, multiprocessing_context=ctx, **dl_common_args
-                        )
-                    ],
-                )
-
-    @skipIfNoNumpy
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    def test_multiprocessing_iterdatapipe(self):
-        self._test_multiprocessing_iterdatapipe(with_dill=False)
-
-    @unittest.expectedFailure
-    @skipIfNoNumpy
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    @skipIfNoDill
-    def test_multiprocessing_iterdatapipe_with_dill(self):
-        self._test_multiprocessing_iterdatapipe(with_dill=True)
-
     def test_worker_seed(self):
         num_workers = 6
         batch_size = 1
@@ -2411,7 +2311,7 @@ except RuntimeError as e:
         self._test_batch_sampler(num_workers=4)
         self._test_batch_sampler(num_workers=4, multiprocessing_context="spawn")
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_shuffle_pin_memory(self):
         loader = self._get_data_loader(
             self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True
@@ -2623,7 +2523,7 @@ except RuntimeError as e:
     @unittest.skipIf(IS_WINDOWS, "FIXME: stuck test")
     def test_partial_workers(self):
         r"""Check that workers exit even if the iterator is not exhausted."""
-        if TEST_CUDA:
+        if TEST_PIN_MEMORY:
             pin_memory_configs = (True, False)
         else:
             pin_memory_configs = (False,)
@@ -2673,10 +2573,11 @@ except RuntimeError as e:
             # not be called before process end. It is important to see that the
             # processes still exit in both cases.
 
-            if pin_memory and (not TEST_CUDA or IS_WINDOWS):
-                # This test runs in a subprocess, which can only initialize CUDA with spawn.
-                # DataLoader with pin_memory=True initializes CUDA when its iterator is constructed.
-                # For windows, pin_memory sometimes causes CUDA oom.
+            if pin_memory and (not TEST_PIN_MEMORY or IS_WINDOWS):
+                # This test runs in a subprocess, which can only initialize the
+                # accelerator with spawn. DataLoader with pin_memory=True initializes
+                # the accelerator when its iterator is constructed.
+                # For windows, pin_memory sometimes causes OOM.
                 continue
 
             # `exit_method` controls the way the loader process ends.
@@ -3061,7 +2962,9 @@ except RuntimeError as e:
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
 
-class TestDataLoaderDeviceType(TestCase):
+class TestDataLoaderDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize(
         "context",
         [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
@@ -3080,7 +2983,7 @@ class TestDataLoaderDeviceType(TestCase):
         ]
 
         pin_memory_settings = [False]
-        if device == "cpu" and torch.cuda.is_available():
+        if device == "cpu" and TEST_PIN_MEMORY:
             pin_memory_settings.append(True)
 
         for pin_memory in pin_memory_settings:
@@ -3126,7 +3029,7 @@ class TestDataLoaderDeviceType(TestCase):
         dataset = [torch.randn(5, 5).to_sparse().to(device) for _ in range(10)]
 
         pin_memory_settings = [False]
-        if device == "cpu" and torch.cuda.is_available():
+        if device == "cpu" and TEST_PIN_MEMORY:
             pin_memory_settings.append(True)
 
         for pin_memory in pin_memory_settings:
@@ -3142,11 +3045,22 @@ class TestDataLoaderDeviceType(TestCase):
             for i, batch in enumerate(loader):
                 self.assertEqual(batch[0], dataset[i])
 
+    @onlyAccelerator
+    def test_pin_memory_for_device(self, device):
+        # pin_memory pins to the current accelerator automatically;
+        # @onlyAccelerator ensures this runs only when one is present.
+        dataset = [torch.randn(3, 5) for _ in range(10)]
+        loader = DataLoader(dataset, batch_size=2, pin_memory=True)
+        for batch in loader:
+            self.assertTrue(batch[0].is_pinned())
+
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
     r"""
     Verify the behavior of a certain ``DataPipes`` with ``DataLoader``
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_shuffler_iterdatapipe(self):
         r"""
@@ -3219,11 +3133,13 @@ class StringDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestStringDataLoader(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.dataset = StringDataset()
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_shuffle_pin_memory(self):
         loader = DataLoader(
             self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True
@@ -3250,6 +3166,8 @@ class DictDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestDictDataLoader(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.dataset = DictDataset()
@@ -3287,33 +3205,54 @@ class TestDictDataLoader(TestCase):
                 self.assertEqual(n[0], idx)
                 self.assertEqual(n[1], idx + 1)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(TEST_PIN_MEMORY, "test requires no accelerator")
+    def test_pin_memory_no_accelerator(self):
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
+        for sample in loader:
+            self.assertFalse(sample["a_tensor"].is_pinned())
+            self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
+
+
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)",
+)
+class TestDictDataLoaderDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        self.dataset = DictDataset()
+
+    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
         for sample in loader:
             self.assertTrue(sample["a_tensor"].is_pinned())
             self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
 
-    @skipIfXpu
-    @unittest.skipIf(TEST_CUDA, "Test for when CUDA is not available")
-    def test_pin_memory_no_cuda(self):
-        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
-        for sample in loader:
-            self.assertFalse(sample["a_tensor"].is_pinned())
-            self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_pin_memory_device(self):
-        loader = DataLoader(
-            self.dataset, batch_size=2, pin_memory=True, pin_memory_device="cuda"
-        )
-        for sample in loader:
-            self.assertTrue(sample["a_tensor"].is_pinned())
-            self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
+        # pin_memory_device is deprecated; verify the deprecation warning fires
+        # and that pin_memory still works via the current accelerator.
+        acc_type = torch.accelerator.current_accelerator().type
+        with self.assertWarnsRegex(UserWarning, "pin_memory_device is deprecated"):
+            loader = DataLoader(
+                self.dataset,
+                batch_size=2,
+                pin_memory=True,
+                pin_memory_device=acc_type,
+            )
+            for sample in loader:
+                self.assertTrue(sample["a_tensor"].is_pinned())
+                self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_pin_memory_with_only_device(self):
-        loader = DataLoader(self.dataset, batch_size=2, pin_memory_device="cuda")
+        # pin_memory_device alone (without pin_memory=True) should not pin tensors.
+        acc_type = torch.accelerator.current_accelerator().type
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory_device=acc_type)
         for sample in loader:
             self.assertFalse(sample["a_tensor"].is_pinned())
             self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
@@ -3344,6 +3283,8 @@ class DummyDataset(torch.utils.data.Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestDataLoaderPersistentWorkers(TestDataLoader):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.persistent_workers = True
@@ -3392,7 +3333,7 @@ except RuntimeError as e:
             ]
         )
 
-    @unittest.skipIf(not TEST_CUDA, "pin_memory requires CUDA")
+    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_persistent_workers_pin_memory_atexit_registered_once(self):
         import atexit
         import weakref
@@ -3434,7 +3375,7 @@ except RuntimeError as e:
             1,
         )
 
-    @unittest.skipIf(not TEST_CUDA, "pin_memory requires CUDA")
+    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_persistent_workers_pin_memory_atexit_uses_iterator_shutdown(self):
         import weakref
 
@@ -3465,7 +3406,7 @@ except RuntimeError as e:
 
     @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
     @unittest.skipIf(not IS_LINUX, "fd counting is only reliable on Linux")
-    @unittest.skipIf(not TEST_CUDA, "pin_memory requires CUDA")
+    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_persistent_workers_pin_memory_fd_does_not_grow_linearly(self):
         proc = psutil.Process()
 
@@ -3499,7 +3440,7 @@ except RuntimeError as e:
     def test_dataset_not_reset(self):
         dataset = DummyDataset()
         pin_memory_configs = [False]
-        if TEST_CUDA:
+        if TEST_PIN_MEMORY:
             pin_memory_configs.append(True)
         for pin_memory in pin_memory_configs:
             dataloader = self._get_data_loader(
@@ -3559,6 +3500,160 @@ if __name__ == '__main__':
         )
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)",
+)
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "DataLoader tests hang in ASAN, see: https://github.com/pytorch/pytorch/issues/66223",
+)
+class TestDataLoaderCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        super().setUp()
+        self.data = torch.randn(100, 2, 3, 5)
+        self.labels = torch.randperm(50).repeat(2)
+        self.dataset = TensorDataset(self.data, self.labels)
+        self.persistent_workers = False
+
+    def _get_data_loader(self, dataset, **kwargs):
+        persistent_workers = kwargs.get("persistent_workers", self.persistent_workers)
+        if persistent_workers and kwargs.get("num_workers", 0) == 0:
+            persistent_workers = False
+        kwargs["persistent_workers"] = persistent_workers
+        return DataLoader(dataset, **kwargs)
+
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_multiple_dataloaders(self):
+        for multiprocessing_context in supported_multiprocessing_contexts:
+            loader1_it = iter(self._get_data_loader(self.dataset, num_workers=1))
+            loader2_it = iter(
+                self._get_data_loader(
+                    self.dataset,
+                    num_workers=2,
+                    multiprocessing_context=multiprocessing_context,
+                )
+            )
+            next(loader1_it)
+            next(loader1_it)
+            next(loader2_it)
+            next(loader2_it)
+            next(loader1_it)
+            next(loader2_it)
+            del loader1_it
+            del loader2_it
+
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_multiprocessing_contexts(self):
+        reference = [
+            torch.arange(3),
+            torch.arange(3, 6),
+            torch.arange(6, 9),
+            torch.arange(9, 11),
+        ]
+        counting_ds_n = 11
+        dl_common_args = dict(num_workers=3, batch_size=3, pin_memory=False)
+        for ctx in supported_multiprocessing_contexts:
+            # windows and jetson devices don't support sharing cuda tensor; ROCm does not yet fully support IPC
+            if (
+                ctx in ["spawn", "forkserver"]
+                and TEST_CUDA
+                and not IS_WINDOWS
+                and not IS_JETSON
+            ):
+                ds_cls = CUDACountingDataset
+            else:
+                ds_cls = CountingDataset
+            self.assertEqual(
+                reference,
+                list(
+                    self._get_data_loader(
+                        ds_cls(counting_ds_n),
+                        multiprocessing_context=ctx,
+                        **dl_common_args,
+                    )
+                ),
+            )
+            if ctx is not None:
+                # test ctx object
+                ctx = mp.get_context(ctx)
+                self.assertEqual(
+                    reference,
+                    list(
+                        self._get_data_loader(
+                            ds_cls(counting_ds_n),
+                            multiprocessing_context=ctx,
+                            **dl_common_args,
+                        )
+                    ),
+                )
+
+    def _test_multiprocessing_iterdatapipe(self, with_dill):
+        # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
+        # and used with multiprocess DataLoader
+
+        reference = [
+            torch.as_tensor([[2, 3, 4, 5]], dtype=torch.int64),
+            torch.as_tensor([[2, 3, 4, 5]], dtype=torch.int64),
+        ]
+        datapipe: IterDataPipe = IterableWrapper([[1, 2, 3, 4], [1, 2, 3, 4, 5, 6]])
+        datapipe = datapipe.map(row_processor)
+        datapipe = (
+            datapipe.filter(lambda row: len(row) == 4)
+            if with_dill
+            else datapipe.filter(filter_len)
+        )
+
+        dl_common_args = dict(
+            num_workers=2, batch_size=2, shuffle=True, pin_memory=False
+        )
+        for ctx in supported_multiprocessing_contexts:
+            self.assertEqual(
+                reference,
+                [
+                    t.type(torch.int64)
+                    for t in self._get_data_loader(
+                        datapipe, multiprocessing_context=ctx, **dl_common_args
+                    )
+                ],
+            )
+            if ctx is not None:
+                # test ctx object
+                ctx = mp.get_context(ctx)
+                self.assertEqual(
+                    reference,
+                    [
+                        t.type(torch.int64)
+                        for t in self._get_data_loader(
+                            datapipe, multiprocessing_context=ctx, **dl_common_args
+                        )
+                    ],
+                )
+
+    @skipIfNoNumpy
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_multiprocessing_iterdatapipe(self):
+        self._test_multiprocessing_iterdatapipe(with_dill=False)
+
+    @unittest.expectedFailure
+    @skipIfNoNumpy
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @skipIfNoDill
+    def test_multiprocessing_iterdatapipe_with_dill(self):
+        self._test_multiprocessing_iterdatapipe(with_dill=True)
+
+
+class TestDataLoaderCUDAPersistentWorkers(TestDataLoaderCUDA):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        super().setUp()
+        self.persistent_workers = True
+
+
 class NamedTupleDataset(Dataset):
     from collections import namedtuple
 
@@ -3582,24 +3677,26 @@ class NamedTupleDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestNamedTupleDataLoader(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.dataset = NamedTupleDataset()
 
     def test_dataloader_with_namedtuple(self):
         # auto-collation
-        loader = DataLoader(self.dataset, batch_size=2, pin_memory=TEST_CUDA)
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory=TEST_PIN_MEMORY)
         for batch in loader:
             self.assertIsInstance(batch, NamedTupleDataset.Batch)
-            self.assertEqual(batch.random_tensor.is_pinned(), TEST_CUDA)
+            self.assertEqual(batch.random_tensor.is_pinned(), TEST_PIN_MEMORY)
             self.assertIsInstance(batch.data, NamedTupleDataset.Data)
             self.assertIsInstance(batch.data.positive, torch.Tensor)
-            self.assertEqual(batch.data.positive.is_pinned(), TEST_CUDA)
+            self.assertEqual(batch.data.positive.is_pinned(), TEST_PIN_MEMORY)
         # no auto-collation
-        loader = DataLoader(self.dataset, batch_size=None, pin_memory=TEST_CUDA)
+        loader = DataLoader(self.dataset, batch_size=None, pin_memory=TEST_PIN_MEMORY)
         for batch in loader:
             self.assertIsInstance(batch, NamedTupleDataset.Batch)
-            self.assertEqual(batch.random_tensor.is_pinned(), TEST_CUDA)
+            self.assertEqual(batch.random_tensor.is_pinned(), TEST_PIN_MEMORY)
             self.assertIsInstance(batch.data, NamedTupleDataset.Data)
             self.assertNotIsInstance(batch.data.positive, torch.Tensor)
 
@@ -3651,13 +3748,15 @@ def collate_into_packed_sequence_batch_first(batch):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestCustomPinFn(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         self.dataset = TensorDataset(inps, tgts)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_custom_batch_pin(self):
         test_cases = [
             (collate_wrapper, self_module.SimpleCustomBatch),
@@ -3675,7 +3774,7 @@ class TestCustomPinFn(TestCase):
                 self.assertIsInstance(sample, elem_cls)
                 self.assertTrue(sample.is_pinned())
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
     def test_custom_batch_pin_worker(self):
         test_cases = [
             (collate_wrapper, self_module.SimpleCustomBatch),
@@ -3719,6 +3818,8 @@ class TestWorkerQueueDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestIndividualWorkerQueue(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.dataset = TestWorkerQueueDataset(list(range(128)))
@@ -3778,6 +3879,8 @@ def _worker_set_affinity_init(worker_id):
     not hasattr(os, "sched_setaffinity"), "os.sched_setaffinity is not available"
 )
 class TestSetAffinity(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_set_affinity_in_worker_init(self):
         # Query the current affinity mask to avoid setting a disallowed one
         old_affinity = os.sched_getaffinity(0)
@@ -3813,6 +3916,8 @@ class ConvDataset(Dataset):
 
 @unittest.skipIf(IS_WINDOWS, "Needs fork")
 class TestConvAfterFork(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Tests crash reported in https://github.com/pytorch/pytorch/issues/53565
     def test_conv_after_fork(self):
         loader = DataLoader(ConvDataset(), num_workers=1)
@@ -3862,6 +3967,8 @@ class TestSlowIterableDataset(IterableDataset):
 
 
 class TestOutOfOrderDataLoader(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_in_order_index_ds(self):
         dataset = TestSlowIndexDataset(end=10, slow_index=0)
 
@@ -3940,7 +4047,7 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertEqual(expected_data, data)
 
 
-instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
+instantiate_device_type_tests(TestDataLoaderDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
