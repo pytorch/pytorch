@@ -148,9 +148,11 @@ releases without a deprecation cycle.
        capture. It applies only to ``tracer="make_fx"``; the dynamo tracer lowers through
        the backend instead and rejects it.
    :param guard_filter_fn: Multi-graph serialization filter; returns one boolean per guard
-       entry. Live capture retains all guards so later examples trigger their recompiles.
-       Risky dropped guards are rejected by default when saving, and every
-       custom-filter drop counts as risky.
+       entry. It composes with the default filter (which drops only the identity guards
+       that cannot be serialized), so it can drop more guards, never fewer. Live capture
+       retains all guards so later examples trigger their recompiles. Risky dropped
+       guards are rejected by default when saving, and every drop a custom filter adds
+       beyond the default's counts as risky.
    :param recompile_limit: Maximum multi-graph variants captured per frame; defaults to 256
        and overrides a lower ambient accumulated-recompile limit for this capture.
    :param dynamic: Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
@@ -191,7 +193,10 @@ releases without a deprecation cycle.
            example_inputs=[(example_a,), (example_b,)],
        )
        compiled = torch.compiler.precompile.load(python_code, cache)
-       with compiled, torch.no_grad():
+       # staged() breaks only within its own frame, so this artifact is
+       # STANDALONE: a plain callable (an installing artifact -- one whose
+       # capture holds frames the entry cannot reach -- supports `with`).
+       with torch.no_grad():
            out = compiled(example_a)
 ```
 
@@ -223,14 +228,16 @@ releases without a deprecation cycle.
        call. A standalone artifact rejects ``fn=`` with ``PrecompileError``.
    :returns: A runnable callable with the same calling convention as the captured ``fn``.
        Arguments are matched positionally at both capture and load time; keyword-argument
-       calling conventions are not supported. A dynamo artifact whose capture graph-broke
-       or recompiled serves by INSTALLING onto the captured code objects: the returned
+       calling conventions are not supported. A dynamo artifact with captured frames the
+       entry bytecode cannot reach on its own -- for example a graph break inside a child
+       module's frame -- serves by INSTALLING onto the captured code objects: the returned
        callable mutates process state on first call (or on ``__enter__``) and supports
-       ``with`` / ``unload()`` to take that back out. An artifact that captured a single
-       whole graph is standalone: it installs nothing, and its ``with`` / ``unload()``
-       are no-ops. Both expose the same surface, and ``installed`` (``True`` for the
-       installing shape, ``False`` for standalone) tells them apart. Which one you get
-       is a property of the capture, not a load-time choice.
+       ``with`` / ``unload()`` to take that back out. An artifact whose frames are all
+       reachable from the entry -- including one that graph-broke or recompiled only
+       within the entry frame -- is standalone: it installs nothing, and its ``with`` /
+       ``unload()`` are no-ops. Both expose the same surface, and ``installed`` (``True``
+       for the installing shape, ``False`` for standalone) tells them apart. Which one
+       you get is a property of the capture, not a load-time choice.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
        fails to parse or is missing its calling-convention metadata), if ``cache`` is
        paired with a different ``python_code`` (mismatched ``backend`` tag, ``tracer``

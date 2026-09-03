@@ -41,6 +41,7 @@ import collections
 import contextlib
 import contextvars
 import copy
+import dataclasses
 import functools
 import hashlib
 import importlib.machinery
@@ -181,6 +182,33 @@ def _optimize_isolated(
     if not isinstance(optimize_ctx, OptimizeContext):
         raise PackageError("torch.compiler.precompile requires Dynamo to be enabled")
     return optimize_ctx
+
+
+def _compose_with_default(
+    user: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
+) -> Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]:
+    """AND a caller's filter with the default rather than replacing it.
+
+    ``default_guard_filter_fn`` is not a default in the "sensible starting point"
+    sense -- it is what drops the identity guards that CANNOT be serialized at
+    all. Replacing it means a caller who wanted to drop three of their own guards
+    silently re-admits every unserializable one, and the failure surfaces as
+    "ID_MATCH guard cannot be serialized" in frames that have nothing to do with
+    their filter. A custom filter can only ever want to drop MORE, so composing
+    is the only reading that makes sense.
+    """
+
+    def composed(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+        base = default_guard_filter_fn(entries)
+        chosen = user(entries)
+        if len(chosen) != len(entries):
+            raise ValueError(
+                f"guard_filter_fn returned {len(chosen)} decisions for "
+                f"{len(entries)} guards; it must return one per entry."
+            )
+        return [bool(a) and bool(b) for a, b in zip(base, chosen)]
+
+    return composed
 
 
 def default_guard_filter_fn(
@@ -706,8 +734,8 @@ class _PrecompileBackend:
             inner, "backend_ctx_ctor", contextlib.nullcontext
         )
         # Rendering a subgraph as source needs the graph, which only exists
-        # here. Kept for the REAL capture only: the guard probe throws its
-        # graphs away, and rendering is a second full lowering.
+        # here. Kept only where something will render it (see the caller):
+        # retaining deepcopies every compiled graph for the session.
         self._keep_graphs = keep_graphs
         self.graphs: dict[str, tuple[torch.fx.GraphModule, list[Any]]] = {}
 
@@ -838,6 +866,76 @@ def _object_identity(value: object) -> str:
     return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
 
 
+# Guards that pin an input's SHAPE or VALUE, and are never policy-dropped even
+# when they held identically across every captured variant. Dropping a guard is
+# licensed by "it discriminated nothing", but with a single example nothing CAN
+# discriminate, and what silently disappears is the check that the runtime tensor
+# looks like the captured one at all -- so an out-of-domain shape reaches a kernel
+# specialized for a different one, which crashes on inductor and can quietly
+# miscompute on eager. Shape is the axis a caller is most likely to vary and least
+# likely to expect to be unchecked, so it is always serialized.
+_SHAPE_BEARING_GUARD_TYPES = frozenset(
+    {
+        "TENSOR_MATCH",
+        "SEQUENCE_LENGTH",
+        # Value-equality guards belong here for the same reason and are the
+        # half that bites hardest: they pin a Python value the graph
+        # specialized on -- an int or bool argument, `module.training`, an
+        # `.item()` result, `mask=None`. Dropped, the artifact serves the
+        # captured branch for every other value, with correct-looking numerics
+        # and nothing in the header to say so. Shapes at least crash inside a
+        # kernel; these do not.
+        "CONSTANT_MATCH",
+        "EQUALS_MATCH",
+        "DUPLICATE_INPUT",
+        # And the one that pins whether an attribute is THERE. hasattr is a
+        # branch like any other, so dropping it serves the captured side to a
+        # caller on the other one -- the same silent wrong answer as a dropped
+        # CONSTANT_MATCH. Reachable on the DEFAULT gates, because a
+        # single-variant capture makes every slot look invariant and the drop
+        # is not classed risky.
+        "HASATTR",
+        # And the guard that pins an input's KIND. Dropped, a graph traced for
+        # one class is served to another and returns the first one's answer,
+        # silently -- there is no shape to crash on. Upstream depends on this
+        # specifically: an AsyncCollectiveTensor's tensor-class guards are
+        # deliberately removed so an ACT-traced graph can be reused for the
+        # resolved tensor, and the observation sites reinstall exactly this
+        # guard to keep that sound. FAKE_SCRIPT_TYPE_MATCH is the same pin for
+        # a reference-type opaque object (type(unwrapped) is T).
+        "TYPE_MATCH",
+        "FAKE_SCRIPT_TYPE_MATCH",
+        # And the default-device pin: the graph specialized on
+        # utils_device.CURRENT_DEVICE, so a capture under the default None
+        # served under torch.set_default_device("cuda") returns CPU tensors
+        # with no refusal.
+        "DEFAULT_DEVICE",
+        # And every guard that pins a Python fact about a value or a container's
+        # contents: whether a key is in a dict or a set, which keys a dict has,
+        # whether an attribute is absent from an instance __dict__, how long a
+        # tuple iterator is, where a range/count iterator stands, whether a
+        # value is None or a given bool. Each one is a branch the graph
+        # specialized on, so a drop serves the captured branch to the other
+        # side, silently -- and a module-owned dict (self.opts = {}) is
+        # environment-rooted, which is exactly where the policy used to drop it.
+        "BOOL_MATCH",
+        "CONSTANT_SUBCLASS_MATCH",
+        "COUNT_ITERATOR_MATCH",
+        "DICT_CONTAINS",
+        "DICT_KEYS_MATCH",
+        "DICT_NOT_CONTAINS",
+        "MAPPING_KEYS_CHECK",
+        "NONE_MATCH",
+        "NOT_NONE_MATCH",
+        "NOT_PRESENT_IN_GENERIC_DICT",
+        "RANGE_ITERATOR_MATCH",
+        "SET_CONTAINS",
+        "SET_NOT_CONTAINS",
+        "TUPLE_ITERATOR_LEN",
+    }
+)
+
+
 # Guards whose C++ leaf compares something no fingerprint here models: subclass
 # metadata, a DTensor placement, an opaque object's guard values, a raw
 # DispatchKeySet, or process-wide state carried entirely in the leaf. Calling
@@ -846,15 +944,63 @@ def _object_identity(value: object) -> str:
 # undetermined, which is the honest answer and cannot mislead.
 _UNMODELLED_GUARD_TYPES = frozenset(
     {
-        "DETERMINISTIC_ALGORITHMS",
         "DISPATCH_KEY_SET_MATCH",
         "DTENSOR_SPEC_MATCH",
+        # Its builder is a no-op like GRAD_MODE's, but GlobalStateGuard does not
+        # snapshot FSDP training state and the state is per param group, so
+        # nothing here can model or vouch for it.
         "FSDP_TRAINING_STATE",
         "GLOBAL_STATE",
         "OPAQUE_OBJ_GUARD_FN_MATCH",
         "SHAPE_ENV",
         "TENSOR_SUBCLASS_METADATA_MATCH",
         "TORCH_FUNCTION_STATE",
+    }
+)
+
+
+# Guard types whose GuardBuilder method is `pass`: the guard is a marker, and
+# the check it names is made by GLOBAL_STATE's leaf. Nothing about them is
+# serialized or dropped, so they never appear in a dropped-guard report --
+# listing GRAD_MODE as "a precondition nothing checks" would be false, since
+# GlobalStateGuard checks it on every call. Their facts ARE compared, from the
+# same process state GlobalStateGuard snapshots (see _value_fingerprint).
+_NOOP_GUARD_TYPES = frozenset({"DETERMINISTIC_ALGORITHMS", "GRAD_MODE"})
+
+
+# The ONLY guard types the invariance policy may drop, and only when proven
+# invariant across every captured variant: identity guards (which the default
+# filter drops anyway, as unserializable) and process-wide compiler state. The
+# four sets form a total, disjoint classification of GuardBuilder's
+# guard-producing methods, pinned by
+# test_precompile.test_guard_policy_classification_is_total: a guard type in
+# none of them -- i.e. any type added to GuardBuilder after this list -- is
+# KEPT unconditionally until someone classifies it here, so a new value-pinning
+# guard can never become silently droppable by default.
+_INVARIANT_DROPPABLE_GUARD_TYPES = frozenset(
+    {
+        "AUTOGRAD_SAVED_TENSORS_HOOKS",
+        "BUILTIN_MATCH",
+        "CLASS_MATCH",
+        "CLOSURE_MATCH",
+        # COW_TENSOR_MATCH pins a folded torch._C._is_cow_tensor branch, so by
+        # value it reads like the shape-bearing membership guards -- but unlike
+        # them it is an unserializable lambda guard, so the DEFAULT filter drops
+        # it before the policy runs and _is_risky_drop flags that drop, refusing
+        # at the default gates. It lives here rather than in the shape-bearing
+        # set because the policy keeping it would be futile (it can never be
+        # serialized) and because, unlike a dropped membership guard, its loss
+        # is never silent.
+        "COW_TENSOR_MATCH",
+        "DICT_VERSION",
+        "DUAL_LEVEL",
+        "EMPTY_NN_MODULE_HOOKS_DICT",
+        "FUNCTION_MATCH",
+        "FUNCTORCH_STACK_MATCH",
+        "ID_MATCH",
+        "MODULE_MATCH",
+        "NN_MODULE",
+        "WEAKREF_ALIVE",
     }
 )
 
@@ -923,6 +1069,10 @@ def _value_fingerprint(entry: GuardFilterEntry) -> str:
         # one frame that differ only in grad mode render identically and land
         # in the intersection. The filter runs in the traced frame's own state.
         return f"grad_enabled={torch.is_grad_enabled()}"
+    if entry.guard_type == "DETERMINISTIC_ALGORITHMS":
+        # Same as GRAD_MODE: the two fields GlobalStateGuard snapshots for it.
+        warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        return f"deterministic={torch.are_deterministic_algorithms_enabled()}, warn_only={warn_only}"
     if not entry.has_value:
         return ""
     value = entry.value
@@ -1032,6 +1182,7 @@ def _summarize(
     entry: _DynamoCacheEntry,
     dropped: set[tuple[str, str]],
     kept: set[tuple[str, str]],
+    policy_dropped: set[tuple[str, str]],
     risky: set[tuple[str, str]],
     truncated: frozenset[str],
     uncovered: frozenset[str],
@@ -1051,6 +1202,7 @@ def _summarize(
         dropped_guards=tuple(sorted(dropped)),
         kept_guards=tuple(sorted(kept)),
         risky_dropped_guards=tuple(sorted(risky)),
+        policy_dropped_guards=tuple(sorted(policy_dropped)),
         capture_errors=tuple(capture_errors),
     )
 
@@ -1072,9 +1224,9 @@ class PrecompileSession:
         dynamic: bool | None = None,
         example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
         invariants: str | None = None,
-        keep_only: frozenset[tuple[str, str]] | None = None,
         training: bool = False,
         keep_graphs: bool = False,
+        prune_invariant_guards: bool = False,
     ) -> None:
         # Not `example_inputs or ()`: truth-testing the caller's object turns the
         # likeliest mistake -- passing the tensors themselves instead of a
@@ -1100,10 +1252,10 @@ class PrecompileSession:
         self._fn = fn
         self._backend = backend
         self._custom_guard_filter = guard_filter_fn is not None
-        # The guard slots that DID vary across the capture; every other slot is
-        # dropped. None means serialize everything serializable, which only the
-        # internal capture entry point uses -- precompile() always passes a set.
-        self._keep_only: frozenset[tuple[str, str]] | None = keep_only
+        # Drop, on exit, every guard slot whose value was identical in every
+        # variant of every frame. Off by default: the capture session API
+        # serializes everything serializable, and precompile() turns it on.
+        self._prune_invariant_guards = prune_invariant_guards
         # A training capture traces with grad on and lowers the backward
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
@@ -1122,7 +1274,9 @@ class PrecompileSession:
         self._guard_sets: dict[tuple[str, str, int], list[frozenset[_GuardFact]]] = {}
         self._undetermined: dict[tuple[str, str, int], set[_GuardFact]] = {}
         self._guard_filter_fn = self._recording_filter(
-            default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
+            default_guard_filter_fn
+            if guard_filter_fn is None
+            else _compose_with_default(guard_filter_fn)
         )
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
@@ -1329,6 +1483,9 @@ class PrecompileSession:
                     with self._state:
                         self._state.notify_all()
         self._recorded_exception_keys.clear()
+        # Before the report, so that it describes the artifact actually written.
+        if self._prune_invariant_guards and exc[0] is None:
+            self._apply_guard_policy()
         if self._invariants_path is None:
             return
         if exc[0] is None:
@@ -1344,6 +1501,108 @@ class PrecompileSession:
                 getattr(exc[0], "__name__", exc[0]),
                 self._invariants_path,
             )
+
+    def _apply_guard_policy(self) -> None:
+        """
+        Drop every guard slot whose fact was identical in every variant of every
+        frame. Such a slot discriminates nothing, and most of an artifact's
+        guards are of that kind: on a 62-frame ranking model, 738 of 1207 slots.
+
+        Which slots those are is only knowable once every variant exists, but
+        guards are serialized per compilation, as each one is produced. So the
+        policy is applied afterwards, by re-serializing each frame's guards from
+        the pickle the capture already made. The pickle rather than the live
+        guards: it IS the value snapshot taken at compile time, and a guarded
+        attribute that the model mutates has moved on since.
+        """
+        from torch._dynamo.guards import CheckFunctionManager
+        from torch._dynamo.output_graph import OutputGraphCommon
+        from torch._dynamo.package import load_guards_state, SerializedCode
+
+        keep_only = varying_guard_slots(self._guard_sets)
+        dropped: set[tuple[str, str]] = set()
+
+        def survives(guard_type: str, name: str) -> bool:
+            # Fail closed: only an explicitly droppable type can be dropped.
+            # Shape-bearing types stay because dropping a value/shape pin
+            # silently widens the artifact's domain; unmodelled types stay
+            # because they never enter _guard_sets, so they were never shown
+            # to be constant -- only never analyzed (SHAPE_ENV is the one that
+            # matters: it carries symbolic shape constraints no TENSOR_MATCH
+            # repeats); and a type in NO set is one GuardBuilder grew after
+            # the classification, kept until someone triages it.
+            return (
+                guard_type not in _INVARIANT_DROPPABLE_GUARD_TYPES
+                or (guard_type, _normalize(name)) in keep_only
+            )
+
+        def policy(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+            decisions = []
+            for entry in entries:
+                keep = survives(entry.guard_type, entry.name)
+                if not keep:
+                    dropped.add((entry.guard_type, entry.name))
+                decisions.append(keep)
+            return decisions
+
+        for code_entry in self._package.code_entries():
+            # A bypassed frame has no guards to re-serialize.
+            f_code = None
+            for guarded in code_entry.guarded_codes:
+                if f_code is None:
+                    f_code = SerializedCode.to_code_object(code_entry.python_code)
+                try:
+                    # Inside the try: unpickling the capture's own guard state
+                    # can fail too, and that must surface as the same
+                    # PackageError as a re-serialization failure, not escape
+                    # raw out of artifact()/__exit__.
+                    loaded = load_guards_state(guarded.guards_state)
+                    pruned = CheckFunctionManager(
+                        f_code,
+                        OutputGraphCommon(loaded.output_graph),
+                        shape_code_parts=loaded.shape_code_parts,
+                        runtime_global_scope=None,
+                        guard_build_local_state=loaded.local_state,
+                        save_guards=True,
+                        explicit_capture=True,
+                        # The pickle holds only guards that already survived the
+                        # default and user filters, so the policy is the whole
+                        # filter here; and a failure is an internal bug, not
+                        # something to bypass silently.
+                        serialization_guard_filter_fn=policy,
+                        strict_error=True,
+                    ).guards_state
+                    if pruned is None:
+                        raise AssertionError("save_guards produced no guards_state")
+                except Exception as e:
+                    raise PackageError(
+                        f"precompile: could not re-serialize the guards of "
+                        f"{code_entry.python_code.co_name} while dropping "
+                        f"invariant ones: {type(e).__name__}: {e}"
+                    ) from e
+                guarded.guards_state = pruned
+
+        self._policy_dropped_guards |= dropped
+        # Not "risky": the policy is the caller stating that the environment is
+        # fixed and every variation is in the inputs, so a slot that never
+        # varied is out of the artifact's declared domain rather than an
+        # unchecked hazard.
+        self._kept_guards -= dropped
+        # Re-mark the dropped facts rather than deleting them: the invariants
+        # report written from _guard_sets promises that a dropped line is "a
+        # precondition NOTHING checks", and a policy-dropped slot is exactly
+        # that -- omitting it would show an auditor a validity domain far wider
+        # than the artifact's true one.
+        for key, variants in self._guard_sets.items():
+            self._guard_sets[key] = [
+                frozenset(
+                    f
+                    if not f.enforced or survives(f.guard_type, f.source)
+                    else dataclasses.replace(f, enforced=False)
+                    for f in facts
+                )
+                for facts in variants
+            ]
 
     def _recording_filter(
         self,
@@ -1363,49 +1622,32 @@ class PrecompileSession:
 
         def filter_fn(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
             decisions = inner(entries)
+            # A custom filter composes with the default, so the identity drops
+            # the default makes anyway are judged as they always are; only a
+            # drop the custom filter ADDED is risky by construction, because
+            # nothing here can say what the caller gave up.
+            default_kept = (
+                default_guard_filter_fn(entries)
+                if self._custom_guard_filter
+                else decisions
+            )
             namespaces = _module_namespaces(entries)
-            # A slot whose fact was identical in every variant of every frame
-            # discriminates nothing, so it is not serialized. Recorded apart
-            # from the ordinary drops, which are "could not be serialized";
-            # these could, and were not wanted.
-            policy_dropped: set[int] = set()
-            if self._keep_only is not None:
-                for i, entry in enumerate(entries):
-                    # An unmodelled guard never enters _guard_sets, so it was
-                    # never shown to be constant -- only never analyzed. This
-                    # policy drops what it PROVED invariant, so these stay.
-                    # SHAPE_ENV is the one that matters: it carries symbolic
-                    # shape constraints that no TENSOR_MATCH repeats.
-                    if entry.guard_type in _UNMODELLED_GUARD_TYPES:
-                        continue
-                    if (
-                        decisions[i]
-                        and (
-                            entry.guard_type,
-                            _normalize(entry.name),
-                        )
-                        not in self._keep_only
-                    ):
-                        policy_dropped.add(i)
-                decisions = [
-                    keep and i not in policy_dropped for i, keep in enumerate(decisions)
-                ]
+            # A no-op type's check is GLOBAL_STATE's leaf, made whatever the
+            # filter said about the marker: it is dropped only with GLOBAL_STATE.
+            global_state_kept = any(
+                keep and e.guard_type == "GLOBAL_STATE"
+                for keep, e in zip(decisions, entries)
+            )
             facts: set[_GuardFact] = set()
             undetermined: set[_GuardFact] = set()
-            for i, (keep, entry) in enumerate(zip(decisions, entries)):
+            for keep, by_default, entry in zip(decisions, default_kept, entries):
                 slot = (entry.guard_type, entry.name)
-                if i in policy_dropped:
-                    # Not "risky": the policy is the caller stating that the
-                    # environment is fixed and every variation is in the inputs,
-                    # so a slot that never varied is out of the artifact's
-                    # declared domain rather than an unchecked hazard.
-                    self._policy_dropped_guards.add(slot)
-                    continue
-                target = self._kept_guards if keep else self._dropped_guards
+                enforced = keep or (
+                    entry.guard_type in _NOOP_GUARD_TYPES and global_state_kept
+                )
+                target = self._kept_guards if enforced else self._dropped_guards
                 target.add(slot)
-                if not keep and (
-                    self._custom_guard_filter or _is_risky_drop(entry, namespaces)
-                ):
+                if not enforced and (by_default or _is_risky_drop(entry, namespaces)):
                     self._risky_dropped_guards.add(slot)
                 unmodelled = entry.guard_type in _UNMODELLED_GUARD_TYPES
                 fact = _GuardFact(
@@ -1413,7 +1655,7 @@ class PrecompileSession:
                     source=_normalize(entry.name),
                     code=_render_code(entry.code),
                     value="" if unmodelled else _value_fingerprint(entry),
-                    enforced=keep,
+                    enforced=enforced,
                 )
                 fact = pool.setdefault(fact, fact)
                 # Never compared, so never claimed to hold: see
@@ -1445,13 +1687,15 @@ class PrecompileSession:
         uninformative -- exercise more than one variant for the diff to mean
         anything.
 
-        GLOBAL_STATE, TORCH_FUNCTION_STATE and DETERMINISTIC_ALGORITHMS carry
-        no value of their own, so nothing here can say whether two variants
-        agreed on, say, autocast. They are listed as UNDETERMINED rather than
-        compared -- see _UNMODELLED_GUARD_TYPES, and note that calling them
-        equal is precisely how the report would assert a precondition that does
-        not hold. GRAD_MODE is fingerprinted instead, because the capture path
-        itself produces that split and the fingerprint can model it.
+        GLOBAL_STATE, TORCH_FUNCTION_STATE and FSDP_TRAINING_STATE carry no
+        value of their own, so nothing here can say whether two variants agreed
+        on, say, autocast. They are listed as UNDETERMINED rather than compared
+        -- see _UNMODELLED_GUARD_TYPES, and note that calling them equal is
+        precisely how the report would assert a precondition that does not
+        hold. GRAD_MODE and DETERMINISTIC_ALGORITHMS are fingerprinted instead
+        from the process state GlobalStateGuard snapshots, because the capture
+        path itself produces the grad-mode split and the fingerprint can model
+        it.
         """
         out = []
         for (name, filename, lineno), sets in sorted(self._guard_sets.items()):
@@ -1576,16 +1820,13 @@ class PrecompileSession:
             self._package.cache_entry(),
             self._dropped_guards,
             self._kept_guards,
+            self._policy_dropped_guards,
             risky,
             self._package.truncated_frames,
             self._package.uncovered_frames,
             self._capture_errors,
             self._guard_sets,
         )
-
-    def guard_sets(self) -> dict[tuple[str, str, int], list[frozenset[_GuardFact]]]:
-        """One guard-fact set per compilation, keyed by frame."""
-        return dict(self._guard_sets)
 
     def _gated_summary(
         self,
@@ -1656,6 +1897,14 @@ class PrecompileSession:
                     "execution, so the callable must actually be run inside the "
                     "capture block. A call Dynamo could not turn into guarded code "
                     "is reported separately as an uncovered frame."
+                )
+            if summary.backend_graphs == 0:
+                raise PackageError(
+                    "Precompilation compiled no graph: every captured frame was "
+                    "empty, so the artifact carries no compiled compute. This is "
+                    "what a callable whose whole body sits behind "
+                    "torch._dynamo.disable looks like. Pass require_complete=False "
+                    "to write the guards-only artifact anyway."
                 )
             if summary.truncated:
                 raise PackageError(
@@ -2137,9 +2386,9 @@ def precompile_capture(
     dynamic: bool | None = None,
     example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
     invariants: str | None = None,
-    keep_only: frozenset[tuple[str, str]] | None = None,
     training: bool = False,
     keep_graphs: bool = False,
+    prune_invariant_guards: bool = False,
 ) -> PrecompileSession:
     r"""Begin capturing ``fn`` into a multi-graph artifact.
 
@@ -2160,8 +2409,10 @@ def precompile_capture(
     Runtime guards remain intact during capture. ``guard_filter_fn`` applies
     only to the serialized guard state, so every supplied example observes the
     same recompilation behavior as ordinary ``torch.compile``. ``save()`` refuses
-    the risky subset by default rather than every drop, and every guard a custom
-    filter drops counts as risky.
+    the risky subset by default rather than every drop, and a drop a custom
+    filter adds beyond the default's counts as risky. ``prune_invariant_guards``
+    additionally drops, on exit, the droppable guard slots that held identically
+    in every captured variant (see ``PrecompileSession._apply_guard_policy``).
     """
     return PrecompileSession(
         fn,
@@ -2171,9 +2422,9 @@ def precompile_capture(
         dynamic=dynamic,
         example_inputs=example_inputs,
         invariants=invariants,
-        keep_only=keep_only,
         training=training,
         keep_graphs=keep_graphs,
+        prune_invariant_guards=prune_invariant_guards,
     )
 
 

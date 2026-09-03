@@ -16,6 +16,7 @@ import functools
 import hashlib
 import importlib
 import inspect
+import io
 import itertools
 import json
 import logging
@@ -165,6 +166,28 @@ class SerializedCode:
         return types.CodeType(
             *kwargs.values(),
         )
+
+
+class _Missing:
+    def __init__(self, reason: str | None = None) -> None:
+        self._reason = reason
+
+    def __repr__(self) -> str:
+        return f"_Missing({self._reason})"
+
+    def __str__(self) -> str:
+        return f"_Missing({self._reason})"
+
+    # Sometimes _Missing object is used as the callable with functools.partial,
+    # so we add a dummy __call__ here to bypass TypeError from partial().
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return _Missing()
+
+
+# The persistent id GuardsStatePickler.persistent_id emits for a pruned value
+# the C pickler never routes through reducer_override; _GuardsStateUnpickler
+# turns it back into _Missing. Any other persistent id in a guards state is a bug.
+_PRUNED_VALUE_PID = "missing values"
 
 
 class FunctionPicklerBase(pickle.Pickler):
@@ -319,6 +342,13 @@ class _GuardedCodeCacheEntry:
     dynamo_code: SerializedCode
 
 
+class _GuardsStateUnpickler(pickle.Unpickler):
+    def persistent_load(self, pid: Any) -> Any:
+        if pid != _PRUNED_VALUE_PID:
+            raise pickle.UnpicklingError(f"unknown guards state persistent id {pid!r}")
+        return _Missing(pid)
+
+
 def load_guards_state(guards_state: bytes) -> Any:
     try:
         import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
@@ -327,7 +357,7 @@ def load_guards_state(guards_state: bytes) -> Any:
     except ImportError:
         ctx = nullcontext()  # type: ignore[assignment]
     with ctx:
-        return pickle.loads(guards_state)
+        return _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
 
 
 def load_guard_manager(
@@ -494,6 +524,9 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
+    # Why Dynamo gave up on this frame. Known at the bypass site and otherwise
+    # only reachable via tlparse, which leaves a refusal downstream guessing.
+    bypass_reason: str | None = None
 
 
 def _resume_global_renames(
@@ -1481,7 +1514,7 @@ class CompilePackage:
         """
         return (*self._codes, *self._installed_precompile_codes)
 
-    def bypass_current_entry(self) -> None:
+    def bypass_current_entry(self, reason: str | None = None) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
@@ -1489,6 +1522,7 @@ class CompilePackage:
         # would only be serialized for nothing.
         self._current_entry.backend_ids.clear()
         self._current_entry.guarded_codes.clear()
+        self._current_entry.bypass_reason = reason
 
     def add_resume_function(
         self,
@@ -1999,6 +2033,12 @@ class CompilePackage:
         )
         # Not at interpreter exit: module dicts and the frame cache are torn down.
         self._uninstall_finalizer.atexit = False
+
+    def code_entries(self) -> Iterable["_DynamoCodeCacheEntry"]:
+        """The per-frame entries, for a caller that edits them before they are
+        packaged. Unlike cache_entry(), this does not require a complete
+        capture."""
+        return self._codes.values()
 
     def refuse_unserializable(self) -> None:
         """Raise PackageError if this package can never be serialized -- its

@@ -1842,6 +1842,14 @@ def _build_multigraph_python_source(
         f"RISKY_DROPPED_GUARDS = {[list(g) for g in summary.risky_dropped_guards]!r}"
     )
     parts.append("")
+    parts.append("# Guards that COULD be serialized and were not, because they held")
+    parts.append("# identically in every captured variant so they discriminated")
+    parts.append("# nothing. Not checked at serve time either: a call outside the")
+    parts.append("# captured domain along one of these is served, not refused.")
+    parts.append(
+        f"POLICY_DROPPED_GUARDS = {[list(g) for g in summary.policy_dropped_guards]!r}"
+    )
+    parts.append("")
     parts.append("# Values pinned to exactly what capture saw; any other value misses.")
     parts.append(f"WONT_GENERALIZE = {tuple(summary.wont_generalize)!r}")
     parts.append("")
@@ -2035,6 +2043,30 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
     if not entry_frames:
         return
     if not any(f["variants"] for f in entry_frames):
+        # The entry frame having no variants has two very different causes, and
+        # guessing the wrong one sends the caller restructuring code that was
+        # never the problem. If Dynamo BYPASSED the frame, it recorded why --
+        # say that, because the thin-wrapper advice below is then simply wrong.
+        # Only the ENTRY's own bypassed codes count (matched by the same
+        # heuristic that picked entry_frames): an unrelated bypassed helper
+        # frame must not relabel a thin-wrapper entry as a bypass.
+        entry_name = str(entry.fn_name).rsplit(".", 1)[-1]
+        bypassed = [
+            code
+            for code in entry.codes
+            if code.bypassed
+            and code.bypass_reason
+            and not code.install_to_global
+            and SerializedCode.to_code_object(code.python_code).co_name == entry_name
+        ]
+        if bypassed:
+            reasons = ", ".join(sorted({str(c.bypass_reason) for c in bypassed}))
+            raise PrecompileError(
+                f"precompile captured no dispatchable graph for {entry.fn_name!r}: "
+                f"{len(bypassed)} entry frame(s) were BYPASSED during capture, so "
+                f"their guards were never written. Reason: {reasons}. Fix that "
+                f"rather than restructuring the captured callable."
+            )
         # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
         # frame (external_utils.wrap_inline's `inner`) rather than the module:
         # every graph lands there, closing over the module, and the entry frame
@@ -2898,33 +2930,18 @@ class _PrecompileApi:
                 "decompositions apply only to tracer='make_fx'; the dynamo "
                 "tracer lowers through the backend instead."
             )
-        # Serialize only the guards that discriminate between captured variants
-        # (see Note [precompile programming model]). Which ones do is knowable
-        # only once every variant exists, and guards are serialized as each
-        # compilation is produced, so a throwaway probe pass learns the set and
-        # a second pass keeps only those. Each session starts from a fresh PGO
-        # state, so the passes agree.
-        from torch._dynamo.precompile_package import varying_guard_slots
-
-        probe = _capture_session(
-            fn,
-            backend=backend,
-            guard_filter_fn=guard_filter_fn,
-            recompile_limit=recompile_limit,
-            dynamic=dynamic,
-            example_inputs=example_inputs,
-            training=bool(training),
-        )
-        # The probe raises whatever the real capture would, first; translate it.
-        from torch._dynamo.exc import PackageError as _PackageError
-
-        try:
-            with probe:
-                pass
-        except _PackageError as e:
-            raise PrecompileError(str(e)) from e
-        keep_only = varying_guard_slots(probe.guard_sets())
-        torch._dynamo.reset()
+        # Serialize only the guards that DISCRIMINATE -- differed across the
+        # captured variants, or only some variants carry -- and drop the
+        # invariant rest. This rests on precompile's contract (environment
+        # identical at capture and runtime, all variation from inputs), so an
+        # invariant guard is either pinned by that contract or an input
+        # dimension the examples did not vary; the cost is that an
+        # out-of-domain call is served rather than refused. Which guards
+        # discriminate is only knowable once every variant exists, but guards
+        # are serialized per compilation as produced, so capture once and apply
+        # the policy on the way out (PrecompileSession._apply_guard_policy)
+        # rather than re-running: a second capture pass has side effects --
+        # doubled gradients, state advanced past by mutations.
         session = PrecompileSession(
             _capture_session(
                 fn,
@@ -2934,11 +2951,11 @@ class _PrecompileApi:
                 dynamic=dynamic,
                 example_inputs=example_inputs,
                 invariants=invariants,
-                keep_only=keep_only,
                 training=bool(training),
                 # Only what rendered_backends renders: an eager "backend" is an
                 # fx graph with no source to emit.
                 keep_graphs=backend != "eager",
+                prune_invariant_guards=True,
             )
         )
         with session:

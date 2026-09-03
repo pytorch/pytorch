@@ -842,6 +842,14 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
         self.assertEqual(ref.check(inputs), loaded.check(inputs))
 
 
+class _HolderWithGenerators:
+    def __init__(self):
+        self.its = [(i for i in range(3))]
+        self.opts = {"k": (i for i in range(3))}
+        self.empty = ()
+        self.cfg = {"a": 1}
+
+
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # Pickler-level: these drive GuardsStatePickler directly rather than
     # through a capture, so none of TestGuardSerialization's setup applies.
@@ -2689,6 +2697,22 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # Round-trip through pickle should work even with init=False fields
         restored = pickle.loads(pickle.dumps(source))
         self.assertEqual(source, restored)
+
+    def test_prunes_an_unguarded_builtin_container_holding_a_generator(self):
+        # The C pickler saves an exact list/dict/tuple by type and never consults
+        # reducer_override, so pruning via missing_values alone left
+        # "cannot pickle 'generator' object". persistent_id is the hook that sees them.
+        h = _HolderWithGenerators()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(h): h, id(h.cfg): h.cfg}, {}, {}, buf).dump(
+            {"obj": h, "shared": ()}
+        )
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())
+        self.assertIsInstance(out["obj"].its, _Missing)
+        self.assertIsInstance(out["obj"].opts, _Missing)
+        self.assertEqual(out["obj"].cfg, {"a": 1})
+        self.assertEqual(out["obj"].empty, ())
+        self.assertEqual(out["shared"], ())
 
 
 class SimpleModule(torch.nn.Module):
