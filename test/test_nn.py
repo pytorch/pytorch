@@ -13670,6 +13670,38 @@ if __name__ == '__main__':
         self.assertEqual(gI[0, 1, -1], -0.1875)
 
     @onlyCUDA
+    @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
+    def test_spatial_softmax_forward_non_innermost(self, device, dtype):
+        # Softmax over a non-last dim (inner_size != 1) goes to
+        # cunn_SpatialSoftMaxForward rather than the inner_size == 1 kernel. Once
+        # inner_size is large the launch config hands that kernel blockDim.x == 1,
+        # which selects a branch that walks the whole softmax dim in a single
+        # thread and normalises without any cross-thread reduction. Nothing else
+        # covers that branch, so pin it against two independent references: the
+        # same op with the softmax dim transposed to innermost (which dispatches
+        # to a different kernel), and a CPU float64 oracle.
+        rtol, atol = torch.testing._comparison.get_tolerances(dtype, rtol=None, atol=None)
+        # The float64 oracle is exact, so the whole gap to it is the reduced
+        # precision round trip, and the result is rounded more than once (exp,
+        # then the normalisation). One eps of headroom is not enough for the
+        # half types; the same-dtype cross-kernel check below stays at the
+        # default tolerance and is what actually discriminates the branch.
+        ortol, oatol = (4 * rtol, 4 * atol) if dtype in (torch.float16, torch.bfloat16) else (rtol, atol)
+        for shape, dim in (((1024, 4096), 0), ((33, 4097), 0),
+                           ((8, 64, 128, 128), 1), ((5, 9, 17), 1),
+                           ((2, 3, 5, 7), 2)):
+            x64 = torch.randn(*shape, dtype=torch.float64)
+            x = x64.to(device=device, dtype=dtype)
+            for op in (F.softmax, F.log_softmax):
+                out = op(x, dim=dim)
+                ref = op(x.transpose(dim, -1).contiguous(), dim=-1).transpose(dim, -1)
+                self.assertEqual(out, ref, rtol=rtol, atol=atol)
+                self.assertEqual(out.to(torch.float64), op(x64, dim=dim), rtol=ortol, atol=oatol)
+            # the normalisation itself: slices must still sum to 1
+            summed = F.softmax(x, dim=dim).to(torch.float64).sum(dim=dim)
+            self.assertEqual(summed, torch.ones_like(summed), rtol=ortol, atol=oatol)
+
+    @onlyCUDA
     @largeTensorTest("24GB", "cuda")
     def test_avg_pool3d_backward_64bit_indexing(self, device):
         # The overlapping-window avg_pool3d backward path scatters gradients
