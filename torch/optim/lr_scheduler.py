@@ -298,7 +298,7 @@ class LRScheduler:
         if kwargs and _accepts_kwargs(self._update_lr):
             self._update_lr(epoch, **kwargs)
         else:
-            self._update_lr(epoch)
+            self._update_lr(epoch)  # For backwards compatibility
 
     def _update_lr(self, epoch: int | None = None, **kwargs: Any) -> None:
         with _enable_get_lr_call(self):
@@ -307,7 +307,7 @@ class LRScheduler:
                 if kwargs and _accepts_kwargs(self.get_lr):
                     values = self.get_lr(**kwargs)
                 else:
-                    values = self.get_lr()
+                    values = self.get_lr()  # For backwards compatibility
             else:
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
@@ -316,7 +316,7 @@ class LRScheduler:
                     if kwargs and _accepts_kwargs(self.get_lr):
                         values = self.get_lr(**kwargs)
                     else:
-                        values = self.get_lr()
+                        values = self.get_lr()  # For backwards compatibility
 
         for param_group, lr in zip(self.optimizer.param_groups, values, strict=True):
             _update_param_group_val(param_group, "lr", lr)
@@ -1239,12 +1239,12 @@ class SequentialLR(LRScheduler):
             if kwargs and _accepts_kwargs(scheduler._update_lr):
                 scheduler._update_lr(0, **kwargs)
             else:
-                scheduler._update_lr(0)
+                scheduler._update_lr(0)  # For backwards compatibility
         else:
             if self._schedulers_accept_kwargs[idx]:
                 scheduler.step(**kwargs)
             else:
-                scheduler.step()
+                scheduler.step()  # For backwards compatibility
 
         self._last_lr = scheduler.get_last_lr()
 
@@ -1619,7 +1619,7 @@ class ChainedScheduler(LRScheduler):
             if accepts_kwargs:
                 scheduler.step(**kwargs)
             else:
-                scheduler.step()
+                scheduler.step()  # For backwards compatibility
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
     @override
