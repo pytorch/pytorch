@@ -1,5 +1,3 @@
-#pragma once
-
 #if !defined(C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H)
 #error \
     "torch/headeronly/util/complex_math.h is not meant to be individually included. Include torch/headeronly/util/complex.h instead."
