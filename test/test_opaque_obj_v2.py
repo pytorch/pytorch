@@ -4394,7 +4394,7 @@ class fn(torch.nn.Module):
         )
 
 
-instantiate_device_type_tests(TestOpaqueGenerator, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestOpaqueGeneratorDevice, globals(), allow_xpu=True)
 
 
 class TestOpaqueGeneratorCUDA(TestCase):
