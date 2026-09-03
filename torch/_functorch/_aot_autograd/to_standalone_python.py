@@ -1193,8 +1193,9 @@ class _CompileToPythonState:
     def _finalize(self, tangent_masks: Sequence[int]) -> tuple[str, bytes | None]:
         from torch.compiler._cache import CacheArtifactManager
 
-        canonical = {self.canonical_mask(mask) for mask in tangent_masks}
-        masks = sorted(canonical) if canonical else [0]
+        # Mask 0 (a full backward) is always served, whatever the captures ran.
+        canonical = {0, *(self.canonical_mask(mask) for mask in tangent_masks)}
+        masks = sorted(canonical)
         for mask in masks:
             if mask not in self._observed_variants:
                 self._compile_mask(mask)
@@ -1920,6 +1921,12 @@ def _compile_to_python_with_state(
             functorch_config.patch(
                 enable_autograd_cache=False,
                 enable_remote_autograd_cache=False,
+                # The emitted training glue bakes the undefined-tangent
+                # specialization on (see _AOT_PRUNE_UNUSED_OUTPUTS below), so
+                # capture under it too: that records the autograd trace info
+                # the exact retrace needs, without which every partial-mask
+                # variant silently fell back to structural pruning.
+                aot_autograd_prune_unused_outputs=grad_enabled,
             ),
             capture_generated_sources(captured),
             _rw.capture_aot_dispatch_autograd_specs(specs),

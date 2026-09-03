@@ -867,21 +867,12 @@ def _load_cached_autotuning(
                 # pyrefly: ignore [missing-attribute]
                 first.extra_options = extra_options
                 return first
-            if any(
-                _json_config_value(val) != val
-                for cfg in matching_configs
-                # pyrefly: ignore [missing-attribute]
-                for val in cfg.kwargs.values()
-            ):
-                # Distinct candidates that serialize identically (MODE=Mode.A
-                # vs MODE=1 under Enum unwrapping): reconstruction below would
-                # arbitrarily bake the raw JSON value even when the winner was
-                # the Enum member, so re-autotune. IntEnum/str-mixin members
-                # ==-match their unwrapped values and are not degraded.
-                return None
-            # Subset-kwarg matches and int/float or bool/int splits with
-            # JSON-stable values fall through to reconstruction from the cached
-            # value, which keeps the type the winner was saved with.
+            # Distinct candidates that serialize alike (subset kwargs, an
+            # int/float or bool/int split, MODE=Mode.A vs MODE=1) fall through
+            # to reconstruction from the cached value, which keeps the type the
+            # winner was saved with; _restore_degraded_kwargs recovers any
+            # tuple/Enum kwarg the candidates agree on and re-autotunes when
+            # they disagree (the Enum-vs-raw case).
     if not _restore_degraded_kwargs(best_config, configs):
         # A kwarg that degrades under the JSON round-trip (tuple -> list, plain
         # Enum -> raw value) has no candidate value that serializes to the

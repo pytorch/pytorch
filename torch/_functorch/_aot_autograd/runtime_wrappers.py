@@ -4720,13 +4720,23 @@ class _AutogradBackwardCompiler:
         # and with the list empty the clear could never re-fire, so every later
         # retained backward would trip the donated-buffer check. Serve the
         # result to this call only and let the next backward recompile. The
-        # cache entry pickles the live fw_metadata (now with bw_donated_idxs
-        # cleared), which a loading process would pair with this
-        # donation-compiled backward, so it is gated the same way.
+        # cache entry is gated the same way, and pickles a copy of fw_metadata
+        # fixed at the donated snapshot this backward was compiled with: the
+        # save runs after the lock is released, when a retain_graph backward
+        # may already have cleared the live bw_donated_idxs, and a loading
+        # process derives the entry's donation status from what was pickled.
+        saved_metadata = None
         with self._prepare_lock:
             publish = not donated or (
                 list(self.fw_metadata.bw_donated_idxs or []) == donated_snapshot
             )
+            # Only the base backward is cached: a first backward served by a
+            # specialized variant leaves the entry unsaved until a full
+            # backward compiles the base (the variants are per-mask
+            # derivations the cache does not model).
+            if publish and not specialization_key and self.try_save_cache_entry:
+                saved_metadata = copy.copy(self.fw_metadata)
+                saved_metadata.bw_donated_idxs = list(donated_snapshot)
             if publish and specialization_key:
                 if kept_arg_indices is None:
                     raise AssertionError("kept_arg_indices must not be None")
@@ -4741,13 +4751,11 @@ class _AutogradBackwardCompiler:
                 )
             elif publish:
                 self.compiled_bw = _CompiledBackward(compiled_bw, donated)
-        # Only the base backward is cached: a first backward served by a
-        # specialized variant leaves the entry unsaved until a full backward
-        # compiles the base (the variants are per-mask derivations the cache
-        # does not model).
-        if publish and self.try_save_cache_entry is not None and not specialization_key:
+        if saved_metadata is not None:
+            if self.try_save_cache_entry is None:
+                raise AssertionError("try_save_cache_entry vanished under the lock")
             self.try_save_cache_entry(
-                compiled_bw, bw_module, self.fw_metadata, self.aot_config
+                compiled_bw, bw_module, saved_metadata, self.aot_config
             )
         if specialization_key:
             if kept_arg_indices is None:
@@ -5099,10 +5107,13 @@ def _codegen_compiled_forward(
         args="ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_",
         artifact_name="compiled_function_forward",
     )
-    buf.bind(torch=torch, BackwardState=BackwardState)
+    buf.bind(torch=torch)
 
     with buf.indent():
         if backward_state_indices:
+            # Bound only when referenced: a standalone artifact emits every
+            # bound global as an import, and this one is a private path.
+            buf.bind(BackwardState=BackwardState)
             idx = backward_state_indices[0]
             buf.writeline(f"_bw_state = args[{idx}]")
             buf.writeline("if not isinstance(_bw_state, BackwardState):")

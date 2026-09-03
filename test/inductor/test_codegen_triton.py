@@ -2876,6 +2876,42 @@ def helper(x):
                 self.assertIs(future.result(timeout=5), sentinel_kernel)
         task.exception.assert_called_once_with(timeout=5)
 
+    def test_autotune_cache_multi_match_with_degraded_kwarg_restores(self):
+        # Several matching candidates plus a tuple kwarg constant across them
+        # (a superset cache against subset-kwarg candidates, or an int/float
+        # split) must reconstruct with the tuple restored, not re-autotune on
+        # every warm start; only a genuine Enum-vs-raw disagreement declines.
+        from types import SimpleNamespace
+
+        from torch._inductor.runtime import autotune_cache
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        class Mode(Enum):
+            A = 1
+
+        def cfg(**kwargs):
+            return SimpleNamespace(kwargs=kwargs, num_warps=4, num_stages=2)
+
+        def load(cached, configs):
+            best = dict(cached, num_warps=4, num_stages=2, configs_hash="h")
+            with patch.object(
+                autotune_cache,
+                "_reconstruct_triton_config",
+                side_effect=lambda best_config, extra: dict(best_config),
+            ):
+                return _load_cached_autotuning(best, "h", configs, {})
+
+        superset = [cfg(BLOCK=64, SHAPE=(2, 3)), cfg(BLOCK=64, SPLIT=2, SHAPE=(2, 3))]
+        loaded = load({"BLOCK": 64, "SPLIT": 2, "SHAPE": [2, 3]}, superset)
+        self.assertEqual(loaded["SHAPE"], (2, 3))
+        self.assertIs(type(loaded["SHAPE"]), tuple)
+        split = [cfg(S=1, SHAPE=(2, 3)), cfg(S=1.0, SHAPE=(2, 3))]
+        loaded = load({"S": 1, "SHAPE": [2, 3]}, split)
+        self.assertIs(type(loaded["S"]), int)
+        self.assertIs(type(loaded["SHAPE"]), tuple)
+        ambiguous = [cfg(MODE=Mode.A, BLOCK=8), cfg(MODE=1, BLOCK=8)]
+        self.assertIsNone(load({"MODE": 1, "BLOCK": 8}, ambiguous))
+
     def test_autotune_cache_match_keeps_cached_type_regardless_of_order(self):
         # Candidates that differ only in an int/float or bool/int kwarg (which
         # compare == and serialize alike) are not interchangeable: the load

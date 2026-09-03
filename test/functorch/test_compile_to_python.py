@@ -351,7 +351,10 @@ class TestAOTCompileToPython(TestCase):
         self.assertIn(0b10, state._observed_variants)
 
         source, final_cache = state.finalize(tuple(masks))
-        self.assertIn("2: (_inner_call_bw_0", source)
+        # Mask 0 (a full backward) is always served alongside the observed
+        # mask; the capture-time default variant is gone after finalize.
+        self.assertIn("0: (_inner_call_bw_0", source)
+        self.assertIn("2: (_inner_call_bw_1", source)
         self.assertIn("_AOT_DEFAULT_BACKWARD_VARIANT = None", source)
         self.assertIn("KeptTangentInfo", source)
         loaded = load_from_python(source, final_cache)
@@ -602,7 +605,13 @@ class TestAOTCompileToPython(TestCase):
         from torch.testing._internal.two_tensor import TwoTensor
 
         surface = {"torch._functorch._aot_autograd.standalone_runtime"}
-        pattern = r"(?:from|import) (torch\._functorch\S*)"
+        # Every private path an artifact could otherwise reach AOTAutograd
+        # internals through: the package itself, the FunctionalTensor raw_type
+        # and SymIntEqByExpr metadata baked into output metadata, and the
+        # BackwardState helper.
+        pattern = (
+            r"(?:from|import) (torch\.(?:_functorch|_subclasses|fx\.experimental)\S*)"
+        )
         source, _cache = self._training_artifact()
         self.assertEqual(set(re.findall(pattern, source)), surface)
         # Subclass tangents route through the subclass prologue/epilogue
