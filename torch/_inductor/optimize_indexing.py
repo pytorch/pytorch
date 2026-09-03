@@ -115,7 +115,7 @@ def try_to_reduce_precision(
     # we reduce the precision here, e.g. add(int64, int64) one of the args can be reduced to
     # int32 without changing the output precision of the node. this case hasn't shown up
     for dominated in dominated_nodes([node], skip_filter):
-        if dominated.target in ["store", "masked_store", "output"]:
+        if dominated.target in ["store", "output"]:
             continue
 
         if isinstance(dominated.target, str) and "set_indirect" in dominated.target:
@@ -243,14 +243,12 @@ def range_implied_indices(loop_body: LoopBody, node: torch.fx.Node) -> OrderedSe
     """
     Indexing names of ``loop_body`` that are a single iteration var ``v``
     whose range bound ``v < var_ranges[v]`` is implied by the predicate of
-    ``node``, a ``masked_subblock`` call or a ``masked_store``: the predicate
-    is a conjunction of ``v < bound`` terms with a statically known
-    ``0 <= bound <= var_ranges[v]``. Codegen may drop the range mask of such a
-    var inside the masked region since the predicate already excludes the
-    out-of-range lanes.
+    ``node``, a ``masked_subblock`` call: the predicate is a conjunction of
+    ``v < bound`` terms with a statically known ``0 <= bound <= var_ranges[v]``.
+    Codegen may drop the range mask of such a var inside the masked region
+    since the predicate already excludes the out-of-range lanes.
     """
-    predicate = node.args[4] if node.target == "masked_store" else node.args[0]
-    return _range_implied_indices(loop_body, predicate)
+    return _range_implied_indices(loop_body, node.args[0])
 
 
 @dataclass(frozen=True)
@@ -309,18 +307,6 @@ class _ValueUseRules:
         return _ValueUseRule(
             value_sinks=(value,),
             indexing_inputs=(index,),
-        )
-
-    def masked_store(
-        self,
-        name: str,
-        index: sympy.Expr,
-        value: Any,
-        mask: Any,
-    ) -> _ValueUseRule:
-        return _ValueUseRule(
-            value_sinks=(value,),
-            indexing_inputs=(index, mask),
         )
 
     def store_reduction(

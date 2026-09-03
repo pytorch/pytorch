@@ -652,22 +652,6 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     ) -> None:
         self._writes.add(MemoryDep(name, *self.canonicalize(index), mode=mode))
 
-    def masked_store(
-        self,
-        name: str,
-        index: sympy.Expr,
-        value: str,
-        mask: str,
-    ) -> None:
-        # Recorded as a full write over the *expanded* domain, so the dep can
-        # describe offsets past the buffer's numel and claims the masked-off
-        # elements are written. That over-approximation is the safe direction
-        # for ordering (no WAR/WAW edge is lost) but not for initialization, so
-        # SchedulerNode.can_inplace refuses to reuse a buffer written this way
-        # -- otherwise the untouched region would silently keep the input's
-        # values. Byte estimates derived from this dep are upper bounds.
-        self.store(name, index, value)
-
     def store_reduction(self, name: str, index: sympy.Expr, value: str) -> None:
         self.store(name, index, f"store_reduction({value})")
 

@@ -362,15 +362,6 @@ class DtypePropagationOpsHandler:
         return None
 
     @staticmethod
-    def masked_store(
-        name: str,
-        index,
-        value: DTypeArg,
-        mask: DTypeArg,
-    ) -> None:
-        return None
-
-    @staticmethod
     def partial_accumulate(
         name: str,
         reduction_type: str,

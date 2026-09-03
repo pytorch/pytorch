@@ -497,13 +497,6 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         index_str = self._broadcast_index(index, f"{value}.shape")
         return f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
 
-    def masked_store(
-        self, name: str, index: sympy.Expr, value: CSEVariable, mask: CSEVariable
-    ) -> None:
-        raise AssertionError(
-            "masked_store is not supported for inner stores in modifications"
-        )
-
     def _add_kernel_input(self, name: str) -> str:
         return self.kernel.args.input(name)
 
@@ -1299,11 +1292,6 @@ class TritonTemplateKernel(TritonKernel):
 
             class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
                 name = "StoreOutputSubstitution"
-
-                def masked_store(self, name, index, value, mask):
-                    raise NotImplementedError(
-                        "prologue fusion does not support masked_store"
-                    )
 
                 def store(
                     self,
@@ -2445,11 +2433,6 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
                 V.kernel.store_buffer_names.add(name)
                 V.kernel.cse.store_cache[name] = value
                 V.kernel.compute.writeline(f"{result_var} = {value}")
-
-            def masked_store(self, name, index, value, mask):
-                raise NotImplementedError(
-                    "subgraph capture does not support masked_store"
-                )
 
         self._make_independent_subgraph(
             subgraph_name,
