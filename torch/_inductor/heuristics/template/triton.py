@@ -19,7 +19,11 @@ from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
 from ...autows_utils import meta_ws_enabled
-from ...kernel.bmm import bmm_template
+from ...kernel.bmm import (
+    BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS,
+    blackwell_ws_persistent_tma_bmm_template,
+    bmm_template,
+)
 from ...kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
     get_scaling_options,
@@ -44,6 +48,7 @@ from ...utils import (
     using_rocm_rdna3,
 )
 from ...virtualized import V
+from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .triton_addmm import AddMMConfigMixin
 
@@ -3075,6 +3080,79 @@ class ScaledBlackwellTMAConfigMixin(
 )
 class CUDAMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
     """Standard MM template heuristic for CUDA"""
+
+
+@register_template_heuristic(
+    blackwell_ws_persistent_tma_bmm_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+    op_name="bmm",
+)
+class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
+    """Bounded configs for the Blackwell persistent-TMA BMM template."""
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        use_meta_ws = meta_ws_enabled()
+        for candidate in BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS:
+            yield {
+                "BLOCK_M": candidate.block_m,
+                "BLOCK_N": candidate.block_n,
+                "BLOCK_K": candidate.block_k,
+                "GROUP_M": 8,
+                "num_stages": candidate.num_stages,
+                "num_warps": candidate.num_warps,
+                "EPILOGUE_SUBTILE": candidate.epilogue_subtile,
+                "USE_META_WS": use_meta_ws,
+                "WARP_SPECIALIZE": True,
+                "FLATTEN": not use_meta_ws,
+                "DATA_PARTITION_FACTOR": candidate.data_partition_factor,
+                "SEPARATE_EPILOGUE_STORE": candidate.separate_epilogue_store,
+                "TWO_CTAS": False,
+            }
+
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> dict[str, Any]:
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(
+                f"{self.__class__.__name__} requires MMKernelInputs"
+            )
+        mat1, mat2 = kernel_inputs.mat1mat2()
+        if len(mat1.get_size()) != 3 or len(mat2.get_size()) != 3:
+            raise NotImplementedError("Blackwell BMM requires rank-3 operands")
+        batch, m, k = map(int, mat1.get_size())
+        batch_b, k_b, _ = map(int, mat2.get_size())
+        if batch != batch_b or k != k_b:
+            raise NotImplementedError(
+                "Blackwell BMM does not broadcast logical batches"
+            )
+        a_row_major = mat1.get_stride()[2] == 1
+        a_col_major = mat1.get_stride()[1] == 1
+        b_row_major = mat2.get_stride()[2] == 1
+        b_col_major = mat2.get_stride()[1] == 1
+        if not (a_row_major or a_col_major) or not (
+            b_row_major or b_col_major
+        ):
+            raise NotImplementedError(
+                "Blackwell BMM requires one contiguous matrix dimension"
+            )
+        return {
+            "NUM_SMS": get_num_sms(),
+            "A_ROW_MAJOR": a_row_major,
+            "B_ROW_MAJOR": b_row_major,
+            "ALLOW_TF32": False,
+            "FLATTEN_OUTPUT": False,
+            "DECOMPOSE_K": False,
+            "K_SPLIT": 1,
+            "M_PAD": m,
+            "tma_store": False,
+        }
 
 
 @register_template_heuristic(
