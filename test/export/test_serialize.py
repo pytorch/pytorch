@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.triton_utils import requires_gpu, requires_gpu_and_triton
 
 
 if HAS_GPU:
@@ -24,12 +24,6 @@ if HAS_GPU:
     import triton.language as tl
 
     from torch.library import wrap_triton
-    from torch.utils._triton import has_triton
-else:
-
-    def has_triton():
-        return False
-
 
 import torch
 import torch._dynamo as torchdynamo
@@ -59,11 +53,13 @@ from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
+    requires_accelerator,
     run_tests,
     TemporaryFileName,
     TestCase,
@@ -104,6 +100,8 @@ def get_filtered_export_db_tests():
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_export_with_extension_op_serialization(self):
         class TestModule(torch.nn.Module):
             def forward(self, x):
@@ -678,9 +676,7 @@ def forward(self, x):
             serialized.exported_program.range_constraints[symint.name].max_val, 3
         )
 
-    @unittest.skipIf(
-        not torch.cuda.is_available() or not has_triton(), "requires cuda and triton"
-    )
+    @requires_gpu_and_triton
     def test_triton_hop(self) -> None:
         @triton.jit
         def add_kernel(
@@ -735,7 +731,7 @@ def forward(self, x):
             def forward(self, x, y):
                 return custom_add_autotune(x, y)
 
-        device = "cuda"
+        device = GPU_TYPE
 
         for m in [MyModel().to(device), MyModelAutotune().to(device)]:
             args = (torch.randn(3, device=device), torch.randn(3, device=device))
@@ -833,9 +829,7 @@ def forward(self, x):
                     serialized.example_inputs,
                 )
 
-    @unittest.skipIf(
-        not torch.cuda.is_available() or not has_triton(), "requires cuda and triton"
-    )
+    @requires_gpu_and_triton
     def test_triton_constexpr_matching(self) -> None:
         """Test that constexpr values are properly matched during serialization.
 
@@ -878,7 +872,7 @@ def forward(self, x):
             def forward(self, x):
                 return custom_op(x)
 
-        device = "cuda"
+        device = GPU_TYPE
         m = Model().to(device)
         args = (torch.randn(1024, device=device),)
 
@@ -1191,12 +1185,8 @@ def forward(self, x):
         self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
 
 
-@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
-@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
-class TestDeserialize(TestCase):
-    def setUp(self):
-        super().setUp()
-        init_torchbind_implementations()
+class _CheckGraphMixin:
+    """Serialize/deserialize round-trip checks shared by the deserialization tests."""
 
     def _check_graph_nodes(self, gm1, gm2, _check_meta=True):
         # TODO: The _check_meta flag bypasses checking for
@@ -1359,6 +1349,16 @@ class TestDeserialize(TestCase):
             _check_graph(pre_dispatch=False)
         else:
             _check_graph(pre_dispatch=False)
+
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestDeserialize(_CheckGraphMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        init_torchbind_implementations()
 
     def test_deserialize_fake_tensor_constant_with_symbolic_size(self) -> None:
         class Foo(torch.nn.Module):
@@ -2020,7 +2020,7 @@ def forward(self, x):
         f = Module()
         self.check_graph(f, (torch.tensor([1, 1]),))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
+    @requires_accelerator
     def test_device(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -2034,8 +2034,9 @@ def forward(self, x):
                 mul = relu * 0.5
                 return mul
 
-        inp = torch.randn((1, 3, 224, 224), dtype=torch.float).to("cuda")
-        model = MyModule().eval().cuda()
+        device = torch.accelerator.current_accelerator().type
+        inp = torch.randn((1, 3, 224, 224), dtype=torch.float).to(device)
+        model = MyModule().eval().to(device)
         self.check_graph(model, (inp,))
 
     def test_custom_obj_tuple_out(self):
@@ -2190,6 +2191,8 @@ instantiate_parametrized_tests(TestDeserialize)
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSchemaVersioning(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_error(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2217,6 +2220,8 @@ unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_fn_with_kw
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSaveLoad(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_save_buffer(self):
         inp = (torch.tensor([0.1, 0.1]),)
 
@@ -2483,8 +2488,8 @@ class TestSaveLoad(TestCase):
         loaded_ep = load(buffer)
         self.assertEqual(m(*inp), loaded_ep.module()(*inp))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
-    def test_save_load_cuda_tensor(self) -> None:
+    @requires_accelerator
+    def test_save_load_accelerator_tensor(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2493,8 +2498,9 @@ class TestSaveLoad(TestCase):
             def forward(self, x):
                 return self.linear(x)
 
-        m = M().cuda()
-        inp = (torch.randn(1, 64, device="cuda"),)
+        device = torch.accelerator.current_accelerator().type
+        m = M().to(device)
+        inp = (torch.randn(1, 64, device=device),)
         ep = torch.export.export(m, inp)
         buffer = io.BytesIO()
         save(ep, buffer)
@@ -2503,7 +2509,7 @@ class TestSaveLoad(TestCase):
         loaded_sd = loaded_ep.state_dict
         for name, param in loaded_sd.items():
             self.assertEqual(
-                param.device.type, "cuda", lambda msg: f"{msg}\n{name} not on cuda"
+                param.device.type, device, lambda msg: f"{msg}\n{name} not on {device}"
             )
         self.assertEqual(m(*inp), loaded_ep.module()(*inp))
 
@@ -2563,6 +2569,8 @@ class TestSaveLoad(TestCase):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeCustomClass(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -2840,6 +2848,8 @@ def forward(self, x):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestPredispatchSerialization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_predispatch_jvp_serialize_roundtrip(self):
         """Test that JVP predispatch wrapper functions survive serialization round-trip."""
         from torch._functorch.predispatch import (
