@@ -118,13 +118,6 @@ class TestTensorIteratorBuild(TestCase):
         self.assertEqual(with_flag.ndim, 2)
         self.assertEqual(with_flag.numel, 12)
 
-    def test_mixed_dtype_rejected_without_promotion(self):
-        # check_all_same_dtype is on by default. Mixed dtypes should fail.
-        a = torch.zeros(3, dtype=torch.float32)
-        b = torch.zeros(3, dtype=torch.float64)
-        with self.assertRaises(RuntimeError):
-            TensorIterator(outputs=[None], const_inputs=[a, b])
-
     def test_declare_static_dtype_and_device(self):
         a = torch.zeros(3, dtype=torch.float32)
         out = torch.empty(3, dtype=torch.float64)
@@ -147,6 +140,13 @@ class TestTensorIteratorBuild(TestCase):
             static_device=torch.device("cpu"),
         )
         self.assertEqual(it.device(0).type, "cpu")
+
+    def test_mixed_dtype_rejected_without_promotion(self):
+        # check_all_same_dtype is on by default. Mixed dtypes should fail.
+        a = torch.zeros(3, dtype=torch.float32)
+        b = torch.zeros(3, dtype=torch.float64)
+        with self.assertRaises(RuntimeError):
+            TensorIterator(outputs=[None], const_inputs=[a, b])
 
 class TestTensorIterator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
