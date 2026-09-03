@@ -11,9 +11,7 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     requires_nccl_version,
@@ -457,7 +455,9 @@ class TestCommunicationHooks(FSDPTest):
         )
 
 
-instantiate_device_type_tests(TestCommunicationHooks, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestCommunicationHooks, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
