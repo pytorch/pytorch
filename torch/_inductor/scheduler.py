@@ -3683,6 +3683,34 @@ class FusedStagedReduction(FusedSchedulerNode):
     """A fused reduction group that requires staged SIMD codegen."""
 
 
+class FusedOuterReductionPlans(FusedSchedulerNode):
+    """One logical reduction represented by one-pass and structural plans.
+
+    ``partial_node`` and ``final_node`` retain the existing two-kernel IR.  The
+    backend additionally reconstructs the original one-pass reduction from the
+    metadata on ``partial_reduction`` and benchmarks the two complete plans.
+    This node is deliberately formed after ordinary fusion, and is not itself
+    eligible for further fusion while the bounded plan selector is experimental.
+    """
+
+    def __init__(
+        self,
+        partial_node: BaseSchedulerNode,
+        final_nodes: list[BaseSchedulerNode],
+        partial_reductions: list[SchedulerNode],
+        final_reductions: list[SchedulerNode],
+    ) -> None:
+        self.partial_node = partial_node
+        self.final_nodes = final_nodes
+        self.partial_reductions = partial_reductions
+        self.final_reductions = final_reductions
+        super().__init__(
+            partial_node.scheduler,
+            list(partial_node.get_nodes())
+            + [leaf for owner in final_nodes for leaf in owner.get_nodes()],
+        )
+
+
 class FusedNestedReductions(FusedStagedReduction):
     """
     Fused node for two dependent reductions over the same logical elements.
@@ -5018,6 +5046,8 @@ class Scheduler:
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
 
+        self.create_outer_reduction_plan_nodes()
+
         if any(
             isinstance(node, FusedExternTritonKernelSchedulerNode)
             for node in self.nodes
@@ -6046,6 +6076,138 @@ class Scheduler:
                 node.unpack() if isinstance(node, GroupedSchedulerNode) else [node]
             )
         self.nodes = new_nodes
+
+    def create_outer_reduction_plan_nodes(self) -> None:
+        """Group one eligible partial+final reduction into a bounded plan choice.
+
+        The structural heuristic has already selected exactly one split.  This
+        pass does not add split/config candidates; it only preserves the current
+        two-kernel plan alongside its original one-pass form.  Keep the initial
+        implementation to standalone reductions so both choices have exactly
+        the same externally visible output and no hidden fused epilogues.
+        """
+        if (
+            not config.triton.autotune_experimental_large_output_outer_reductions
+            or V.graph.cpp_wrapper
+            or V.graph.aot_mode
+        ):
+            return
+
+        replacements: list[
+            tuple[
+                BaseSchedulerNode,
+                list[BaseSchedulerNode],
+                FusedOuterReductionPlans,
+            ]
+        ] = []
+        claimed = OrderedSet[BaseSchedulerNode]()
+        for partial_owner in self.nodes:
+            if partial_owner in claimed:
+                continue
+            partial_candidates = [
+                sn
+                for sn in partial_owner.get_nodes()
+                if isinstance(sn, SchedulerNode)
+                and isinstance(sn.node, ir.ComputedBuffer)
+                and sn.node._whole_plan_outer_reduction
+            ]
+            if not partial_candidates or len(partial_candidates) != len(
+                partial_owner.get_nodes()
+            ):
+                continue
+            final_owners = OrderedSet[BaseSchedulerNode]()
+            final_by_partial: list[SchedulerNode] = []
+            valid = True
+            for partial in partial_candidates:
+                outputs = partial.get_outputs()
+                if len(outputs) != 1:
+                    valid = False
+                    break
+                users = [
+                    user.node
+                    for user in outputs[0].users
+                    if not user.is_weak and isinstance(user.node, BaseSchedulerNode)
+                ]
+                if len(users) != 1:
+                    valid = False
+                    break
+                final = users[0]
+                final_owner = self.get_fused_node(final)
+                final_owners.add(final_owner)
+                if not (
+                    isinstance(final, SchedulerNode)
+                    and isinstance(final.node, ir.ComputedBuffer)
+                    and isinstance(final.node.data, ir.Reduction)
+                    and any(
+                        dep.name == outputs[0].get_name()
+                        for dep in final.read_writes.reads
+                    )
+                ):
+                    valid = False
+                    break
+                final_by_partial.append(final)
+            if not valid or not final_owners:
+                continue
+            if partial_owner in final_owners or any(
+                owner in claimed for owner in final_owners
+            ):
+                continue
+            if any(
+                {
+                    final
+                    for final in final_by_partial
+                    if self.get_fused_node(final) is owner
+                }
+                != set(owner.get_nodes())
+                for owner in final_owners
+            ):
+                continue
+            if any(
+                self.get_node_stream(partial_owner) != self.get_node_stream(owner)
+                for owner in final_owners
+            ):
+                continue
+            if any(
+                self.node_to_mempool.get(partial_owner)
+                != self.node_to_mempool.get(owner)
+                for owner in final_owners
+            ):
+                continue
+
+            grouped = FusedOuterReductionPlans(
+                partial_owner,
+                list(final_owners),
+                partial_candidates,
+                final_by_partial,
+            )
+            replacements.append((partial_owner, list(final_owners), grouped))
+            claimed.add(partial_owner)
+            claimed.update(final_owners)
+
+        if not replacements:
+            return
+
+        replacement_by_node = {
+            old: grouped
+            for partial, finals, grouped in replacements
+            for old in (partial, *finals)
+        }
+        emitted = OrderedSet[FusedOuterReductionPlans]()
+        new_nodes: list[BaseSchedulerNode] = []
+        for node in self.nodes:
+            grouped = replacement_by_node.get(node)
+            if grouped is None:
+                new_nodes.append(node)
+            elif grouped not in emitted:
+                new_nodes.append(grouped)
+                emitted.add(grouped)
+        self.nodes = self.topological_sort_schedule(new_nodes)
+
+        for partial, _finals, grouped in replacements:
+            for leaf in grouped.get_nodes():
+                self.name_to_fused_node[leaf.get_name()] = grouped
+            self.node_to_stream[grouped] = self.get_node_stream(partial)
+            self.node_to_mempool[grouped] = self.node_to_mempool.get(partial)
 
     def benchmark_fused_nodes(
         self, nodes: Sequence[BaseSchedulerNode]
@@ -11206,6 +11368,9 @@ class Scheduler:
             elif isinstance(node, FusedStagedReduction):
                 # pyrefly: ignore [unbound-name]
                 self.get_backend(device).codegen_staged_reduction(node)
+            elif isinstance(node, FusedOuterReductionPlans):
+                # pyrefly: ignore [unbound-name]
+                self.get_backend(device).codegen_outer_reduction_plans(node)
             elif isinstance(node, FusedMixOrderReductions):
                 # pyrefly: ignore [unbound-name]
                 self.get_backend(device).codegen_mix_order_reduction(node)
@@ -11593,6 +11758,9 @@ class BaseScheduling:  # noqa: docstring_linter
         raise NotImplementedError
 
     def codegen_staged_reduction(self, node: FusedStagedReduction) -> None:
+        raise NotImplementedError
+
+    def codegen_outer_reduction_plans(self, node: FusedOuterReductionPlans) -> None:
         raise NotImplementedError
 
     def codegen_sync(self) -> None:
