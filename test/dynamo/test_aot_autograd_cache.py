@@ -10,6 +10,7 @@ import os
 import pickle
 import random
 import shutil
+import sys
 import unittest
 from collections.abc import Sequence
 from typing import Literal
@@ -67,6 +68,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
     TEST_XPU,
+    xfailIf,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
@@ -4065,6 +4067,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(c1, c3)
             self.assertEqual(c1, c4)
 
+    # dill doesn't support 3.15 yet
+    @xfailIf(sys.version_info >= (3, 15))
     def test_dill_serialization_with_inner_functions(self):
         """
         Test that with dill, we can now serialize graphs that contain inner functions
