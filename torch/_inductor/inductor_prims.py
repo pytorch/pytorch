@@ -56,6 +56,53 @@ def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     return new_tensor
 
 
+# Sibling to flex_gemm::to_blocked (cuBLAS 128x4). Both pad, but to_blocked only
+# zero-fills trailing tiles; here a logical_row_chunk expands into a larger
+# physical_row_chunk, so padding is interior and takes a caller-supplied value.
+def eager_to_padded_blocked(
+    values: Tensor,
+    logical_row_chunk: int,
+    physical_row_chunk: int,
+    row_inner: int,
+    col_inner: int,
+    padding_value,
+) -> Tensor:
+    rows, cols = values.shape
+    col_chunk = 2 * col_inner
+    padded_rows = -(-rows // logical_row_chunk) * physical_row_chunk
+    padded_cols = -(-cols // col_chunk) * col_chunk
+    logical_rows = torch.arange(rows, device=values.device)[:, None]
+    logical_cols = torch.arange(cols, device=values.device)[None, :]
+    physical_rows = (
+        logical_rows // logical_row_chunk * physical_row_chunk
+        + logical_rows % logical_row_chunk
+    )
+    row_outer = physical_rows // (2 * row_inner)
+    row_inner_index = physical_rows % (2 * row_inner)
+    col_outer = logical_cols // col_chunk
+    col_inner_index = logical_cols % col_chunk
+    destination_offsets = (
+        (
+            (
+                (row_outer * (padded_cols // col_chunk) + col_outer) * col_inner
+                + col_inner_index % col_inner
+            )
+            * row_inner
+            + row_inner_index % row_inner
+        )
+        * 2
+        + col_inner_index // col_inner
+    ) * 2 + row_inner_index // row_inner
+    result = torch.full(
+        (padded_rows * padded_cols,),
+        padding_value,
+        dtype=values.dtype,
+        device=values.device,
+    )
+    result[destination_offsets.reshape(-1)] = values.reshape(-1)
+    return result
+
+
 def eager_prepare_softmax(x: Tensor, dim: int) -> tuple[Tensor, Tensor]:
     amax = torch.amax(x, dim, keepdim=True)
     return amax, torch.sum(torch.exp(x - amax), dim, keepdim=True)
@@ -196,6 +243,11 @@ force_stride_order = make_prim(
     "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
     eager_force_stride,
     doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
+)
+to_padded_blocked = make_prim(
+    "inductor_to_padded_blocked(Tensor values, int logical_row_chunk, int physical_row_chunk, int row_inner, int col_inner, Scalar padding_value) -> Tensor",
+    eager_to_padded_blocked,
+    doc="Convert a 2D tensor to a padded blocked layout, interleaving rows and columns two ways",
 )
 _unsafe_index_put_ = make_prim(
     "_unsafe_index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",
