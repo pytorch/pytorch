@@ -1264,6 +1264,44 @@ class TestSerialization(TestCase, SerializationMixin):
                 loaded_p = torch.load(f, weights_only=True)
                 self.assertEqual(loaded_p, p)
 
+    # SECURITY: This prevents malformed pickles from exposing uninitialized
+    # pybind11 objects. Do not remove this regression test.
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "torch.distributed not available"
+    )
+    def test_weights_only_newobj_requires_build(self):
+        from torch.distributed.tensor import Shard
+
+        malformed_pickle = (
+            pickle.PROTO
+            + b"\x02"
+            + pickle.GLOBAL
+            + Shard.__module__.encode()
+            + b"\n"
+            + Shard.__name__.encode()
+            + b"\n"
+            + pickle.EMPTY_TUPLE
+            + pickle.NEWOBJ
+            + pickle.STOP
+        )
+
+        checkpoint = io.BytesIO()
+        with zipfile.ZipFile(checkpoint, "w") as archive:
+            archive.writestr("archive/data.pkl", malformed_pickle)
+            archive.writestr("archive/version", "3\n")
+            archive.writestr("archive/byteorder", sys.byteorder)
+        checkpoint.seek(0)
+
+        with self.assertRaisesRegex(
+            pickle.UnpicklingError, "pickle data is likely corrupt or malicious"
+        ):
+            torch.load(checkpoint, weights_only=True)
+
+        buffer = io.BytesIO()
+        torch.save(Shard(2), buffer)
+        buffer.seek(0)
+        self.assertEqual(torch.load(buffer, weights_only=True), Shard(2))
+
     def test_weights_only_safe_globals_build(self):
         counter = 0
 
