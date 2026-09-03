@@ -26,6 +26,80 @@ def _make_zeros(shape, dtype, device, when=True):
     )
 
 
+def _corrected_target(
+    target: torch.Tensor,
+    ignore_index: int,
+    num_classes: int,
+    is_prob_target: bool = False,
+) -> torch.Tensor:
+    """``target`` with out-of-range ``ignore_index`` entries replaced by 0.
+
+    An out-of-range ``ignore_index`` (the default is -100) would take
+    ``index_select`` / ``index_add_`` out of bounds, so those rows are pointed
+    at class 0 and neutralised by the per-row weight instead -- see
+    :func:`_neg_weight_target`, which zeroes exactly the same rows.
+
+    Module level, like :func:`_check_batch_chunked_grad_flags`, so an
+    implementation of the chunked op that does not run the chunk loop -- a
+    backend override, say -- computes the same targets by construction rather
+    than by reimplementation.
+    """
+    if is_prob_target:
+        # ignore_index does not apply to probability targets.
+        return target
+    if ignore_index < 0 or ignore_index >= num_classes:
+        return torch.where(target == ignore_index, 0, target)
+    return target
+
+
+def _neg_weight_target(
+    corrected_target: torch.Tensor,
+    mask: torch.Tensor,
+    weight: torch.Tensor | None,
+    dtype: torch.dtype,
+    reduction: str,
+    loss_grad_output: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Per-row gradient weight: ``-(weight[target] if weight else 1) / d`` on
+    unmasked rows, 0 on masked ones, with ``d`` the sum of unmasked weights for
+    ``"mean"`` and 1 for ``"sum"``.
+
+    ``mask`` marks the ignored rows (``target == ignore_index`` on the
+    *original* target) and ``corrected_target`` is :func:`_corrected_target`'s
+    result. The sign is negative because the chunk loop consumes it as the
+    scale of ``onehot - softmax``; a caller wanting ``softmax - onehot`` negates
+    the result.
+
+    Freshly allocated, so the caller may mutate it in place.
+    """
+    if weight is None:
+        neg_weight_target = (~mask).to(dtype)
+    elif corrected_target.numel() > weight.numel():
+        neg_weight_target = torch.where(
+            mask, 0, weight.to(dtype).index_select(0, corrected_target)
+        )
+    else:
+        neg_weight_target = torch.where(
+            mask, 0, weight.index_select(0, corrected_target).to(dtype)
+        )
+    if reduction == "mean":
+        d = neg_weight_target.sum()
+        neg_weight_target.div_(torch.where(d == 0, torch.nan, -d))
+    elif reduction == "sum":
+        neg_weight_target.neg_()
+    else:  # "none"
+        # Forward (loss_grad_output is None) intentionally leaves the bare
+        # +W[T] unsigned: the loss-only branch needs the positive per-row loss
+        # weight. Only the backward (upstream grad set) negates and folds in
+        # grad_output[n] for the VJP -- do NOT add a .neg_() here to mirror the
+        # "sum" case.
+        if loss_grad_output is not None:
+            neg_weight_target.neg_().mul_(
+                loss_grad_output.to(neg_weight_target.dtype)
+            )
+    return neg_weight_target
+
+
 def _linear_cross_entropy_batch_chunked_setup_context(ctx, inputs, output):
     (
         *_,
@@ -251,50 +325,20 @@ class _ChunkContext:
 
     @cached_property
     def corrected_target(self) -> torch.Tensor:
-        # Replace out-of-range ignore_index values with 0 lazily so
-        # downstream index_select / index_add_ stay in bounds.
-        if self.is_prob_target:
-            # ignore_index does not apply to probability targets.
-            return self.target
-        if self.ignore_index < 0 or self.ignore_index >= self.num_classes:
-            return torch.where(self._mask, 0, self.target)
-        return self.target
+        return _corrected_target(
+            self.target, self.ignore_index, self.num_classes, self.is_prob_target
+        )
 
     @cached_property
     def neg_weight_target(self) -> torch.Tensor:
-        # Per-row weighting: -(weight[target] if weight else 1) / d on
-        # unmasked positions, 0 on masked positions. d = sum of unmasked
-        # weights for "mean", 1 for "sum".
-        mask = self._mask
-        target = self.corrected_target
-        weight = self.weight
-        weight_chunk_dtype = self.weight_chunk_dtype
-        if weight is None:
-            neg_weight_target = (~mask).to(weight_chunk_dtype)
-        elif target.numel() > weight.numel():
-            neg_weight_target = torch.where(
-                mask, 0, weight.to(weight_chunk_dtype).index_select(0, target)
-            )
-        else:
-            neg_weight_target = torch.where(
-                mask, 0, weight.index_select(0, target).to(weight_chunk_dtype)
-            )
-        if self.reduction == "mean":
-            d = neg_weight_target.sum()
-            neg_weight_target.div_(torch.where(d == 0, torch.nan, -d))
-        elif self.reduction == "sum":
-            neg_weight_target.neg_()
-        else:  # "none"
-            # Forward (loss_grad_output is None) intentionally leaves the
-            # bare +W[T] unsigned: the loss-only branch needs the positive
-            # per-row loss weight. Only the backward (upstream grad set)
-            # negates and folds in grad_output[n] for the VJP -- do NOT add
-            # a .neg_() here to mirror the "sum" case.
-            if self.loss_grad_output is not None:
-                neg_weight_target.neg_().mul_(
-                    self.loss_grad_output.to(neg_weight_target.dtype)
-                )
-        return neg_weight_target
+        return _neg_weight_target(
+            self.corrected_target,
+            self._mask,
+            self.weight,
+            self.weight_chunk_dtype,
+            self.reduction,
+            self.loss_grad_output,
+        )
 
     @cached_property
     def linear_weight_cast(self) -> torch.Tensor:
@@ -470,11 +514,7 @@ class _ChunkContext:
             raise NotImplementedError(
                 f"linear_cross_entropy does not support {reduction=}"
             )
-        if linear_bias is not None and linear_bias.shape != linear_weight.shape[:-1]:
-            raise RuntimeError(
-                "linear_cross_entropy: expected linear_bias shape "
-                f"{tuple(linear_weight.shape[:-1])}, got {tuple(linear_bias.shape)}."
-            )
+        _check_linear_bias_shape(linear_weight, linear_bias)
 
         device = input.device
         dtype = input.dtype
@@ -486,13 +526,7 @@ class _ChunkContext:
         is_cuda = device.type == "cuda"
         is_mps = device.type == "mps"
 
-        if dtype != acc_dtype and not (
-            dtype in {torch.float16, torch.bfloat16} and acc_dtype == torch.float32
-        ):
-            raise RuntimeError(
-                "linear_cross_entropy supports float32 acc_dtype with"
-                f" float16/bfloat16 inputs, but got {acc_dtype} acc_dtype and {dtype} inputs."
-            )
+        _check_acc_dtype_compatible(dtype, acc_dtype)
         use_acc_dtype = dtype != acc_dtype
 
         # Internal dtype layout shared by the memory-like policy. ``compact``'s
@@ -831,11 +865,7 @@ def _linear_cross_entropy_batch_chunked_accumulator(
     not dispatch.
     """
     # Direct callers must resolve "auto" / None via _adjust first.
-    if acc_policy == "auto" or acc_dtype is None:
-        raise RuntimeError(
-            f"unresolved acc_policy={acc_policy!r} or acc_dtype={acc_dtype!r};"
-            " use F.linear_cross_entropy."
-        )
+    _check_resolved_acc(acc_policy, acc_dtype)
     ctx = _ChunkContext.build(
         input,
         linear_weight,
@@ -1099,6 +1129,43 @@ def _linear_cross_entropy_batch_chunked_accumulator(
         grad_linear_weight,
         grad_linear_bias,
     )
+
+
+def _check_resolved_acc(acc_policy: str, acc_dtype: torch.dtype | None) -> None:
+    """``acc_policy`` / ``acc_dtype`` must already be concrete.
+
+    ``"auto"`` and ``None`` are resolved by
+    :meth:`LinearCrossEntropyOptions._adjust` against a specific call site, so
+    an implementation that sees them was reached by a caller that skipped that
+    resolution.
+    """
+    if acc_policy == "auto" or acc_dtype is None:
+        raise RuntimeError(
+            f"unresolved acc_policy={acc_policy!r} or acc_dtype={acc_dtype!r};"
+            " use F.linear_cross_entropy."
+        )
+
+
+def _check_linear_bias_shape(
+    linear_weight: torch.Tensor, linear_bias: torch.Tensor | None
+) -> None:
+    """``linear_bias`` must match the class dimensions of ``linear_weight``."""
+    if linear_bias is not None and linear_bias.shape != linear_weight.shape[:-1]:
+        raise RuntimeError(
+            "linear_cross_entropy: expected linear_bias shape "
+            f"{tuple(linear_weight.shape[:-1])}, got {tuple(linear_bias.shape)}."
+        )
+
+
+def _check_acc_dtype_compatible(dtype: torch.dtype, acc_dtype: torch.dtype) -> None:
+    """The only widening the chunked path implements is fp16/bf16 into fp32."""
+    if dtype != acc_dtype and not (
+        dtype in {torch.float16, torch.bfloat16} and acc_dtype == torch.float32
+    ):
+        raise RuntimeError(
+            "linear_cross_entropy supports float32 acc_dtype with"
+            f" float16/bfloat16 inputs, but got {acc_dtype} acc_dtype and {dtype} inputs."
+        )
 
 
 def _check_batch_chunked_grad_flags(
