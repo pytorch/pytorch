@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
@@ -2990,6 +2991,9 @@ class TestOptimRenewed(TestCase):
                     msg=(f"dtype={dtype}, differentiable={differentiable}"),
                 )
 
+    @skipIfTorchDynamo(
+        "compiled_autograd does not support undefined-grad probes in gradcheck"
+    )
     def test_diff_gradcheck_radam(self, device):
         """Gradcheck on RAdam differentiable path, covering the rectified LR computation."""
         state = {
