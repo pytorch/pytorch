@@ -4220,6 +4220,9 @@ def _is_interned_singleton(value: Any) -> bool:
     )
 
 
+# Every hook the pickle protocol consults. Compared by IDENTITY against object's
+# own slot: object grew a default __getstate__ in 3.11, so presence alone would
+# flag every class on those interpreters.
 _PICKLE_PROTOCOL_HOOKS = (
     "__reduce__",
     "__reduce_ex__",
@@ -4241,11 +4244,25 @@ def _builds_its_own_pickle(cls: type) -> bool:
     of merely losing an attribute nobody guards. The same holds for a
     __setstate__ that reads a pruned field out of the default state, and for a
     __getnewargs__ that feeds one to a validating __new__.
+
+    Not, however, for the __getnewargs__ a tuple carries: tuple's own and the
+    one collections.namedtuple generates return the ITEMS, which live outside
+    __dict__ and so are never pruned. A namedtuple subclass with __dict__
+    extras is pruned like any other user object. The generated one is a fresh
+    function per namedtuple class, so it is known by where it was defined.
     """
-    return any(
-        getattr(cls, name, None) is not getattr(object, name, None)
-        for name in _PICKLE_PROTOCOL_HOOKS
-    )
+    for name in _PICKLE_PROTOCOL_HOOKS:
+        hook = getattr(cls, name, None)
+        if hook is getattr(object, name, None) or hook is getattr(tuple, name, None):
+            continue
+        if (
+            name == "__getnewargs__"
+            and issubclass(cls, tuple)
+            and getattr(hook, "__module__", None) == "collections"
+        ):
+            continue
+        return True
+    return False
 
 
 class GuardsStatePickler(pickle.Pickler):
@@ -5209,11 +5226,11 @@ class CheckFunctionManager:
             # inspection build that runs AFTER the runtime one hands the filter
             # -- and therefore _GuardFact.code and the committed invariants
             # report -- each guard's code parts two or three times over. Build
-            # the entries first whenever anything is going to want them, which
-            # for a serialization-only filter is not otherwise until later.
-            if guard_filter_fn is not None or (
-                save_guards and serialization_guard_filter_fn is not None
-            ):
+            # the entries first whenever the RUNTIME build is going to need
+            # them. A serialization-only filter does not: with no runtime
+            # filter the runtime build sees every guard, so it IS the
+            # inspection build and its builder answers the same questions.
+            if guard_filter_fn is not None:
                 build_filter_entries()
 
             runtime_guards = (
@@ -5228,6 +5245,14 @@ class CheckFunctionManager:
                 runtime_save_guards,
                 guard_filter_fn=guard_filter_fn,
             )
+            if (
+                filter_entries is None
+                and save_guards
+                and serialization_guard_filter_fn is not None
+            ):
+                filter_entries = [
+                    make_guard_filter_entry(guard, builder) for guard in all_guards
+                ]
 
             serialized_guards = runtime_guards
             serialization_builder = builder
@@ -5936,8 +5961,6 @@ def strip_local_scope(s: str) -> str:
 
     This is to generate user friendly recompilation messages.
     """
-    import re
-
     pattern = r"L\[\s*['\"](.*?)['\"]\s*\]"
     return re.sub(pattern, r"\1", s)
 

@@ -150,8 +150,11 @@ def reset() -> None:
 
     log = logging.getLogger(__name__)
     log.info("torch._dynamo.reset")
+    from .package import reset_live_packages
+
     with convert_frame.compile_lock:
         reset_code_caches()
+        reset_live_packages()
         convert_frame.input_codes.clear()
         reset_code_state()
         convert_frame.output_codes.clear()
