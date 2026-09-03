@@ -18,9 +18,9 @@ mkdir -p ${PACKAGE_DIR} ${PACKAGE_OUTPUT}/linux-64 ${PACKAGE_BUILD} ${PACKAGE_RE
 
 # Fetch magma sources and verify checksum
 pushd ${PACKAGE_DIR}
-curl -LO http://icl.utk.edu/projectsfiles/magma/downloads/magma-${MAGMA_VERSION}.tar.gz
-tar zxf magma-${MAGMA_VERSION}.tar.gz
-sha256sum --check < ${PACKAGE_FILES}/magma-${MAGMA_VERSION}.sha256
+curl -fLO https://icl.utk.edu/projectsfiles/magma/downloads/magma-${MAGMA_VERSION}.tar.gz
+sha256sum --check < "${PACKAGE_FILES}/magma-${MAGMA_VERSION}.sha256"
+tar zxf "magma-${MAGMA_VERSION}.tar.gz"
 popd
 
 # Apply patches and build
