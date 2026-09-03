@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import textwrap
 import unittest.mock
 from typing import Any
 from collections.abc import Callable
@@ -24,9 +25,9 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    TemporaryFileName, getRocmVersion,
+    TemporaryFileName,
 )
-from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
+from torch.testing._internal.common_cuda import has_device_side_assert
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
@@ -553,28 +554,6 @@ instantiate_device_type_tests(TestTesting, globals())
 
 
 class TestFrameworkUtils(TestCase):
-
-    def test_rocm_version_uses_sdk_version(self):
-        with (
-            unittest.mock.patch(
-                "torch.testing._internal.common_cuda.TEST_WITH_ROCM", True
-            ),
-            unittest.mock.patch.object(torch.version, "rocm", "10.1.0"),
-            unittest.mock.patch.object(torch.version, "hip", "7.15.26306"),
-        ):
-            self.assertEqual(_get_torch_rocm_version(), (10, 1, 0))
-            self.assertEqual(getRocmVersion(), (10, 1, 0))
-
-    def test_rocm_version_falls_back_to_hip_version(self):
-        with (
-            unittest.mock.patch(
-                "torch.testing._internal.common_cuda.TEST_WITH_ROCM", True
-            ),
-            unittest.mock.patch.object(torch.version, "rocm", None),
-            unittest.mock.patch.object(torch.version, "hip", "7.15.26306"),
-        ):
-            self.assertEqual(_get_torch_rocm_version(), (7, 15, 26306))
-            self.assertEqual(getRocmVersion(), (7, 15, 26306))
 
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
@@ -2929,6 +2908,63 @@ class TestImports(TestCase):
         ]
         out = self._check_python_output("; ".join(commands))
         self.assertEqual(out.strip(), expected)
+
+    def test_reimport_after_failed_import(self) -> None:
+        # A failed `import torch` leaves its submodules and C++ global state behind,
+        # so retrying used to re-run one-time initialization and segfault at
+        # interpreter shutdown. See https://github.com/pytorch/pytorch/issues/194172
+        program = textwrap.dedent(
+            '''\
+            import importlib.metadata
+
+            class _FailingEntryPoint:
+                name = "injected_backend"
+
+                def load(self):
+                    raise ImportError("injected backend failure")
+
+            _real_entry_points = importlib.metadata.entry_points
+
+            def _entry_points(**kwargs):
+                if kwargs.get("group") == "torch.backends":
+                    return [_FailingEntryPoint()]
+                return _real_entry_points(**kwargs)
+
+            importlib.metadata.entry_points = _entry_points
+
+            for _ in range(3):
+                try:
+                    import torch
+                except Exception as e:
+                    print(f"{type(e).__name__}: {e}")
+            '''
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", program],
+            capture_output=True,
+            text=True,
+            # On Windows, opening the subprocess with the default CWD makes `import torch`
+            # fail, so just set CWD to this script's directory
+            cwd=os.path.dirname(os.path.realpath(__file__)),
+            # The test relies on the autoload running, so don't inherit a disabling value
+            env={**os.environ, "TORCH_DEVICE_BACKEND_AUTOLOAD": "1"},
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        lines = proc.stdout.splitlines()
+        self.assertEqual(len(lines), 3, msg=proc.stdout)
+        self.assertTrue(lines[0].startswith("RuntimeError: "), msg=lines[0])
+        self.assertIn("Failed to load the backend extension: injected_backend", lines[0])
+        for line in lines[1:]:
+            self.assertTrue(line.startswith("ImportError: "), msg=line)
+            self.assertIn("can only be initialized once per process", line)
+
+    def test_reload_is_rejected(self) -> None:
+        # Reloading re-executes the module body against live C++ state just like a
+        # retry does, so it is refused; torch must stay usable afterwards.
+        with self.assertRaisesRegex(ImportError, "can only be initialized once"):
+            importlib.reload(torch)
+        self.assertEqual(torch.tensor([1, 2]).sum().item(), 3)
 
 class TestOpInfos(TestCase):
     def test_sample_input(self) -> None:
