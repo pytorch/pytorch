@@ -1965,6 +1965,22 @@ def _compile(
 
         if package is not None:
             if check_fn.guards_state is None:
+                if check_fn.guards_serialization_failure is not None:
+                    # The non-strict CheckFunctionManager swallowed the
+                    # serialization failure and marked the package entry
+                    # bypassed. A frame whose guards cannot be serialized has
+                    # always been a hard failure here (formerly a bare
+                    # AssertionError); continuing without the package would
+                    # need every package consumer to tolerate a missing entry,
+                    # so re-raise it typed (chained to the specific-guard
+                    # cause) for consumers to handle without matching text.
+                    raise exc.PackageError(
+                        "Failed to serialize guards for this compiled code; it "
+                        "cannot be saved to the package. See the chained cause "
+                        "for the specific guard that could not be serialized."
+                    ) from check_fn.guards_serialization_failure
+                # No recorded failure: a None guards_state here is an internal
+                # invariant violation, not a user-facing serialization error.
                 raise AssertionError("check_fn.guards_state must not be None")
             package.add_guarded_code(check_fn.guards_state, out_code)
             package.add_inlined_source(output.tracing_context.traced_code)

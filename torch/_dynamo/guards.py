@@ -39,7 +39,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, cast, NamedTuple, NoReturn, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 from typing_extensions import LiteralString, TypeAliasType, TypeVar
 from weakref import ReferenceType
 
@@ -1024,11 +1024,13 @@ def get_key_index_source(source: Any, index: Any) -> str:
     return f"list(dict.keys({source}))[{index}]"
 
 
-def raise_local_type_error(obj: object) -> NoReturn:
-    raise TypeError(
-        f"Type {type(obj)} for object {obj} cannot be saved "
-        + "into torch.compile() package since it's defined in local scope. "
-        + "Please define the class at global scope (top level of a module)."
+def _local_scope_serialization_message(obj: object) -> str:
+    # Shared by the reducer_override backstop and the TYPE_MATCH/BUILTIN_MATCH
+    # pre-check so the actionable text lives in one place.
+    return (
+        f"Type {type(obj)} for object {obj} cannot be saved into "
+        "torch.compile() package since it's defined in local scope. "
+        "Please define the class at global scope (top level of a module)."
     )
 
 
@@ -4432,7 +4434,12 @@ class GuardsStatePickler(pickle.Pickler):
             return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
 
         elif isinstance(obj, torch.SymInt):
-            raise RuntimeError(f"Cannot serialize SymInt {obj} (node: {obj.node})")
+            # A typed serialization failure like every other unserializable
+            # value: pickle propagates reducer exceptions unchanged, so this
+            # reaches CheckFunctionManager's PackageError handling directly.
+            raise torch._dynamo.exc.PackageError(
+                f"Cannot serialize SymInt {obj} (node: {obj.node})"
+            )
 
         elif isinstance(obj, types.MappingProxyType):
             return type(self)._unpickle_mapping_proxy, (obj.copy(),)
@@ -4504,10 +4511,10 @@ class GuardsStatePickler(pickle.Pickler):
             return type(self)._unpickle_sdp_backend, (obj.name,)
 
         if type(obj).__qualname__ != type(obj).__name__ and not isinstance(obj, tuple):
+            # No guard identity is available this deep in pickling, so this
+            # stays a plain PackageError rather than a GuardSerializationError.
             raise torch._dynamo.exc.PackageError(
-                f"Type {type(obj)} for object {obj} cannot be saved "
-                + "into torch.compile() package since it's defined in local scope. "
-                + "Please define the class at global scope (top level of a module)."
+                _local_scope_serialization_message(obj)
             )
 
         if (
@@ -4602,7 +4609,18 @@ def pickle_guards_state(
 
     try:
         pickler.dump(state)
-    except AttributeError as e:
+    except (AttributeError, pickle.PicklingError, TypeError) as e:
+        # Any failure to pickle the guard state means these guards cannot be
+        # serialized, so surface it as the typed PackageError uniformly rather
+        # than branching on the exception's message text: pickle spells an
+        # unserializable value as TypeError("cannot pickle '...'"), PicklingError,
+        # or AttributeError depending on the value and the reducer, and matching
+        # a CPython-internal substring silently regressed to InternalTorchDynamoError
+        # whenever the wording drifted. A reducer that has already classified a
+        # value raises PackageError itself, which passes through untouched. A
+        # bug inside a reducer that raises one of these is still diagnosable:
+        # it is preserved as __cause__ (and, on the non-strict path, its
+        # formatted traceback is attached as a note before frames are released).
         raise torch._dynamo.exc.PackageError(str(e)) from e
     return buf.getvalue()
 
@@ -4797,6 +4815,10 @@ class CheckFunctionManager:
             CompileEventLogger.increment_toplevel("guard_latency_us", int(latency))
 
         self.guards_state: bytes | None = None
+        # Typed record of why guards_state is None: the swallowed PackageError
+        # (a GuardSerializationError names the exact guard). Consumers must
+        # chain or inspect this instead of matching message text.
+        self.guards_serialization_failure: exc.PackageError | None = None
         if save_guards:
             from torch._dynamo.output_graph import OutputGraphCommon
 
@@ -4811,9 +4833,37 @@ class CheckFunctionManager:
             except exc.PackageError as e:
                 if torch._dynamo.config.strict_precompile or strict_error:
                     raise e
+                # Format the traceback BEFORE stripping it from the stored
+                # exception chain: a live __traceback__ pins the guard-build
+                # frames (builder, output_graph, the user scopes they hold) on
+                # this long-lived object, defeating the cleanup below (see the
+                # NB comment there).
+                formatted_traceback = traceback.format_exc().split("\n")
+                # Walk __cause__ only: every link raised here is chained with
+                # `raise ... from`, so that covers the whole chain we own,
+                # while __context__ may point at an unrelated exception the
+                # caller is handling, whose traceback is not ours to drop.
+                # CPython only breaks cycles for __context__, not for an
+                # explicit `raise ... from`, so guard against a cyclic chain.
+                seen_links: set[int] = set()
+                link: BaseException | None = e
+                while link is not None and id(link) not in seen_links:
+                    seen_links.add(id(link))
+                    link.__traceback__ = None
+                    link = link.__cause__
+                # Keep the frames' text (not the frames) on the exception so a
+                # reducer bug stays diagnosable from the error convert_frame
+                # raises, not only from the tlparse bypass artifact.
+                add_note = getattr(e, "add_note", None)  # Python 3.11+
+                if add_note is not None:
+                    add_note(
+                        "Guard serialization traceback:\n"
+                        + "\n".join(formatted_traceback)
+                    )
+                self.guards_serialization_failure = e
                 self.output_graph.bypass_package(
                     f"Guard evaluation failed: {str(e)}",
-                    traceback=traceback.format_exc().split("\n"),
+                    traceback=formatted_traceback,
                 )
 
         # TODO: don't do the string rep, do something more structured here
@@ -4853,20 +4903,30 @@ class CheckFunctionManager:
         for guard in sorted_guards:
             guard_type = guard.create_fn_name()
             derived_guard_types = tuple(guard.guard_types) if guard.guard_types else ()
-            # BUILTIN_MATCH calls TYPE_MATCH sometimes, so we need to check both for
-            # a chance that the guard is unserializable
-            if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH"):
-                if guard._unserializable:
-                    # Only call builder.get again if we know we're going to throw
-                    obj = builder.get(guard)
-                    raise_local_type_error(obj)
-            elif (
-                guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-            ):
-                raise torch._dynamo.exc.PackageError(
-                    f"{guard_type} guard cannot be serialized."
+            if guard._unserializable:
+                # Set by TYPE_MATCH on a local-scope type (also reached through
+                # BUILTIN_MATCH, SEQUENCE_LENGTH and export TENSOR_MATCH, which
+                # call TYPE_MATCH on the same guard) and by
+                # FAKE_SCRIPT_TYPE_MATCH, so test the flag, not the guard's own
+                # type. Only call builder.get again if we know we're going to
+                # throw. FAKE_SCRIPT_TYPE_MATCH judged the wrapped real object's
+                # type, so name that type, not the FakeScriptObject wrapper.
+                obj = builder.get(guard)
+                if isinstance(obj, FakeScriptObject):
+                    obj = obj.real_obj
+                raise torch._dynamo.exc.GuardSerializationError(
+                    guard_type,
+                    guard.name,
+                    detail=_local_scope_serialization_message(obj),
                 )
-            elif failed := next(
+            if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH", "FAKE_SCRIPT_TYPE_MATCH"):
+                # BUILTIN_MATCH derives an ID_MATCH on the builtins-dict entry,
+                # which does serialize (the dict is rebuilt at load), so these
+                # are exempt from the derived-type check below.
+                continue
+            if guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES:
+                raise torch._dynamo.exc.GuardSerializationError(guard_type, guard.name)
+            if failed := next(
                 (
                     i
                     for i in derived_guard_types
@@ -4875,9 +4935,7 @@ class CheckFunctionManager:
                 None,
             ):
                 # Just raise the first failed guard name
-                raise torch._dynamo.exc.PackageError(
-                    f"{failed} guard cannot be serialized."
-                )
+                raise torch._dynamo.exc.GuardSerializationError(failed, guard.name)
 
         builtins_dict_name = output_graph.name_of_builtins_dict_key_in_fglobals or ""
         used_global_vars = set()

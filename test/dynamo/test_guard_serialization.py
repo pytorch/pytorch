@@ -104,6 +104,16 @@ class MyClassNotSerializable:
         return x + 1
 
 
+class RaisesPicklingErrorOnReduce:
+    def __reduce_ex__(self, protocol):
+        raise pickle.PicklingError("reducer refused")
+
+
+class RaisesAttributeErrorOnReduce:
+    def __reduce_ex__(self, protocol):
+        raise AttributeError("reducer refused")
+
+
 class Inputs:
     def __init__(self, x, unused):
         self.x = x
@@ -316,6 +326,16 @@ class CustomConstantType(torch._custom_class_base.CustomClassBase):
 
 
 torch._library.opaque_object.register_custom_class(CustomConstantType, typ="constant")
+
+
+class SymbolicOpaqueBase(torch._custom_class_base.CustomClassBase):
+    # Registered as a symbolic opaque type: Dynamo guards values of this type
+    # (and FakeScriptObject wrappers around them) with FAKE_SCRIPT_TYPE_MATCH.
+    def __init__(self, a):
+        self.a = a
+
+
+torch._library.opaque_object.register_custom_class(SymbolicOpaqueBase, typ="symbolic")
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
@@ -554,9 +574,12 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return m(x)
 
         with self.assertRaisesRegex(
-            TypeError, "Please define the class at global scope"
-        ):
+            PackageError, "Please define the class at global scope"
+        ) as cm:
             self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
+        self.assertIsInstance(cm.exception, torch._dynamo.exc.GuardSerializationError)
+        self.assertEqual(cm.exception.guard_type, "TYPE_MATCH")
+        self.assertEqual(cm.exception.guard_name, "L['m']")
 
         m = GlobalModule()
         ref, loaded = self._test_serialization("TYPE_MATCH", fn, m, torch.randn(3))
@@ -596,6 +619,87 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 check_leaf_guards(child_mgr)
 
         check_leaf_guards(ref.root)
+
+    def test_strict_unpicklable_guard_value_raises_typed(self):
+        # Strict-path counterpart of
+        # test_nonstrict_unpicklable_guard_state_failure_is_typed: an
+        # unpicklable guarded value (thread lock) must raise PackageError
+        # directly from the underlying "cannot pickle" TypeError, exercising
+        # the pickle-dump catch that reclassifies any pickling failure
+        # (TypeError, PicklingError, AttributeError) as a typed PackageError.
+        import threading
+
+        def fn(x, lk):
+            # Reference lk's type (installs a TYPE_MATCH guard on the lock, so
+            # the lock value lands in the guard tree) without a data-dependent
+            # branch that would graph-break this simplified harness.
+            return x + len(type(lk).__name__)
+
+        with self.assertRaisesRegex(PackageError, "_thread.lock") as cm:
+            self._test_serialization("TYPE_MATCH", fn, torch.randn(3), threading.Lock())
+        self.assertIsInstance(cm.exception.__cause__, TypeError)
+
+    def test_fake_script_type_match_local_type_raises_typed(self):
+        # FAKE_SCRIPT_TYPE_MATCH marks itself unserializable for a local-scope
+        # opaque type just as TYPE_MATCH does, and the typed error must name
+        # the user's type -- also when the guarded source resolved to the
+        # FakeScriptObject wrapper the guard type exists for.
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        class LocalOpaque(SymbolicOpaqueBase):
+            pass
+
+        def fn(x, o):
+            return x + len(type(o).__name__)
+
+        for value in (
+            LocalOpaque(1),
+            FakeScriptObject(LocalOpaque(1), "LocalOpaque", LocalOpaque(1)),
+        ):
+            with self.assertRaisesRegex(PackageError, "LocalOpaque") as cm:
+                self._test_serialization(
+                    "FAKE_SCRIPT_TYPE_MATCH", fn, torch.randn(3), value
+                )
+            self.assertIsInstance(
+                cm.exception, torch._dynamo.exc.GuardSerializationError
+            )
+            self.assertEqual(cm.exception.guard_type, "FAKE_SCRIPT_TYPE_MATCH")
+            self.assertNotIn("FakeScriptObject", str(cm.exception))
+
+    def test_symint_guard_value_raises_typed(self):
+        # The SymInt reducer arm raises the typed PackageError directly (pickle
+        # propagates reducer exceptions unchanged), not a RuntimeError that would
+        # escape the non-strict swallow as InternalTorchDynamoError.
+        import io
+
+        from torch._dynamo.guards import GuardsStatePickler
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        symint = shape_env.create_symintnode(
+            shape_env.create_symbol(3, LocalSource("x")), hint=3
+        )
+        with self.assertRaisesRegex(PackageError, "Cannot serialize SymInt"):
+            GuardsStatePickler({}, {}, {}, io.BytesIO()).dump(symint)
+
+    def _check_reducer_error_arm(self, value, exc_type):
+        # The other two arms of the pickle-dump catch: a value whose reducer
+        # raises PicklingError or AttributeError must also surface as the typed
+        # PackageError chained to the original exception.
+        def fn(x, v):
+            return x + len(type(v).__name__)
+
+        with self.assertRaisesRegex(PackageError, "reducer refused") as cm:
+            self._test_serialization("TYPE_MATCH", fn, torch.randn(3), value)
+        self.assertIsInstance(cm.exception.__cause__, exc_type)
+
+    def test_strict_pickling_error_guard_value_raises_typed(self):
+        self._check_reducer_error_arm(
+            RaisesPicklingErrorOnReduce(), pickle.PicklingError
+        )
+
+    def test_strict_attribute_error_guard_value_raises_typed(self):
+        self._check_reducer_error_arm(RaisesAttributeErrorOnReduce(), AttributeError)
 
     def test_tensor_subclass_metadata_match(self):
         class LocalSubclass(torch.Tensor):
@@ -837,8 +941,47 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # support that in serialization
         with self.assertRaisesRegex(
             PackageError, "CLASS_MATCH guard cannot be serialized."
-        ):
+        ) as cm:
             self._test_serialization("CLASS_MATCH", fn, x)
+        # The direct unsupported-type arm must carry the typed attributes so
+        # consumers can inspect which guard failed without matching the message.
+        self.assertIsInstance(cm.exception, torch._dynamo.exc.GuardSerializationError)
+        self.assertEqual(cm.exception.guard_type, "CLASS_MATCH")
+
+    def test_serialize_guards_derived_unsupported_type_raises_typed(self):
+        # No live guard reaches the derived-type arm today (guards that derive
+        # an unsupported check are themselves unsupported), so pin it directly
+        # with a stub guard.
+        from torch._dynamo.guards import CheckFunctionManager
+
+        guard = types.SimpleNamespace(
+            create_fn_name=lambda: "DICT_KEYS",
+            guard_types=["DICT_KEYS", "ID_MATCH"],
+            _unserializable=False,
+            name="L['d']",
+        )
+        with self.assertRaises(torch._dynamo.exc.GuardSerializationError) as cm:
+            CheckFunctionManager.serialize_guards(None, None, [guard], None)
+        self.assertEqual(cm.exception.guard_type, "ID_MATCH")
+        self.assertEqual(cm.exception.guard_name, "L['d']")
+
+    def test_sequence_length_local_type_raises_typed(self):
+        # SEQUENCE_LENGTH runs TYPE_MATCH on its own guard, so a local-scope
+        # sequence type marks the SEQUENCE_LENGTH guard unserializable; with the
+        # sibling TYPE_MATCH guard filtered out it must still raise the typed
+        # error rather than a bare PackageError from the pickler.
+        class LocalList(list):
+            pass
+
+        def fn(x, lst):
+            return x + len(lst)
+
+        x = torch.randn(3)
+        with self.assertRaises(torch._dynamo.exc.GuardSerializationError) as cm:
+            self._test_serialization("SEQUENCE_LENGTH", fn, x, LocalList([1, 2]))
+        self.assertEqual(cm.exception.guard_type, "SEQUENCE_LENGTH")
+        self.assertEqual(cm.exception.guard_name, "L['lst']")
+        self.assertIn("LocalList", str(cm.exception))
 
     def test_closure_match(self):
         def fn(x):
@@ -851,8 +994,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # support that in serialization
         with self.assertRaisesRegex(
             PackageError, "CLOSURE_MATCH guard cannot be serialized."
-        ):
+        ) as cm:
             self._test_serialization("CLOSURE_MATCH", fn, x)
+        self.assertIsInstance(cm.exception, torch._dynamo.exc.GuardSerializationError)
+        self.assertEqual(cm.exception.guard_type, "CLOSURE_MATCH")
 
     def test_sequence_length(self):
         # tuple input installs a SEQUENCE_LENGTH guard
@@ -1079,8 +1224,94 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         with self.assertRaisesRegex(
             PackageError, "ID_MATCH guard cannot be serialized."
-        ):
+        ) as cm:
             self._test_serialization("ID_MATCH", fn, torch.randn(3))
+        # The typed error names the failing guard; consumers must not have to
+        # parse the message.
+        self.assertIsInstance(cm.exception, torch._dynamo.exc.GuardSerializationError)
+        self.assertEqual(cm.exception.guard_type, "ID_MATCH")
+        self.assertEqual(cm.exception.guard_name, "L['x']")
+
+    def _nonstrict_serialization_cause(self, fn, *args):
+        # Compile fn on the non-strict package path so the CheckFunctionManager
+        # swallows the serialization failure, run it, and return the cause that
+        # convert_frame's typed PackageError chains to.
+        torch._dynamo.reset()
+        package = CompilePackage(fn)
+        compiled = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        try:
+            with self.assertRaisesRegex(
+                PackageError, "Failed to serialize guards"
+            ) as cm:
+                compiled(*args)
+            return cm.exception.__cause__
+        finally:
+            torch._dynamo.reset()
+
+    @torch._dynamo.config.patch({"strict_precompile": False})
+    def test_nonstrict_package_serialization_failure_is_typed(self):
+        # On the non-strict package path the CheckFunctionManager swallows the
+        # serialization failure; convert_frame must then raise a typed
+        # PackageError CHAINED to the specific GuardSerializationError, not a
+        # bare AssertionError consumers can only string-match.
+        def fn(x):
+            return x + id(x)
+
+        cause = self._nonstrict_serialization_cause(fn, torch.randn(3))
+        self.assertIsInstance(cause, torch._dynamo.exc.GuardSerializationError)
+        self.assertEqual(cause.guard_type, "ID_MATCH")
+        self.assertEqual(cause.guard_name, "L['x']")
+        # The stored exception must be traceback-stripped: a live __traceback__
+        # pins the guard-build frames (GuardBuilder with the user scopes,
+        # OutputGraph) on the long-lived CheckFunctionManager, leaking them
+        # once per suppressed failure.
+        self.assertIsNone(cause.__traceback__)
+
+    @torch._dynamo.config.patch({"strict_precompile": False})
+    def test_nonstrict_local_type_serialization_failure_is_typed(self):
+        # The unserializable TYPE_MATCH branch (local-scope class) must raise
+        # the same typed GuardSerializationError as its siblings, not a bare
+        # TypeError that skips the non-strict swallow and reaches consumers as
+        # InternalTorchDynamoError.
+        class Local:
+            attr = 1
+
+        def fn(x, o):
+            return x + o.attr
+
+        cause = self._nonstrict_serialization_cause(fn, torch.randn(3), Local())
+        self.assertIsInstance(cause, torch._dynamo.exc.GuardSerializationError)
+        self.assertEqual(cause.guard_type, "TYPE_MATCH")
+        self.assertEqual(cause.guard_name, "L['o']")
+        self.assertIn("defined in local scope", str(cause))
+
+    @torch._dynamo.config.patch({"strict_precompile": False})
+    def test_nonstrict_unpicklable_guard_state_failure_is_typed(self):
+        # Pickling failures other than AttributeError (e.g. TypeError from an
+        # unpicklable guarded value) must also surface as the typed PackageError
+        # chain instead of escaping the non-strict swallow. The pickle path
+        # raises PackageError FROM the original TypeError, which the chain must
+        # preserve (traceback-stripped).
+        import threading
+
+        def fn(x, lk):
+            if lk.locked():
+                return x + 1
+            return x + 2
+
+        cause = self._nonstrict_serialization_cause(
+            fn, torch.randn(3), threading.Lock()
+        )
+        self.assertIsInstance(cause, torch._dynamo.exc.PackageError)
+        self.assertIsInstance(cause.__cause__, TypeError)
+        # Both links are stripped: the leaf TypeError is the one holding the
+        # pickle/reducer frames that would pin the GuardBuilder.
+        self.assertIsNone(cause.__traceback__)
+        self.assertIsNone(cause.__cause__.__traceback__)
+        if sys.version_info >= (3, 11):
+            self.assertTrue(
+                any("Guard serialization traceback" in n for n in cause.__notes__)
+            )
 
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_id_match_with_config(self):
