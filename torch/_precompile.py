@@ -205,6 +205,7 @@ it.
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import inspect
 import io
@@ -231,6 +232,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.compiler._precompile_types import PrecompileSummary
 
 
 # ``precompile`` and ``PrecompileError`` are exposed under the compiler namespace as
@@ -308,6 +310,79 @@ class PrecompiledRunnable:
 
     def unload(self) -> None:
         """Remove whatever this loaded artifact installed; a no-op when it installed nothing."""
+
+
+class PrecompileSession:
+    r"""Execution-driven multi-graph capture session (internal).
+
+    :func:`precompile` drives one of these itself for ``tracer="dynamo"`` -- entering it,
+    running the example calls, and returning the finished ``(python_code, cache)`` -- so
+    callers never receive one.
+    """
+
+    def __init__(self, session: Any) -> None:
+        self._session = session
+
+    def _call(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
+        from torch._dynamo.exc import PackageError, RecompileError
+
+        try:
+            return method(*args, **kwargs)
+        except (PackageError, RecompileError) as e:
+            raise PrecompileError(str(e)) from e
+
+    def __enter__(self) -> Callable[..., object]:
+        compiled = self._call(self._session.__enter__)
+
+        def call(*args: object, **kwargs: object) -> object:
+            return self._call(compiled, *args, **kwargs)
+
+        return call
+
+    def __exit__(self, *exc: object) -> None:
+        self._call(self._session.__exit__, *exc)
+
+    def summary(self) -> PrecompileSummary:
+        r"""summary() -> PrecompileSummary
+
+        Return observed capture coverage, recompilation, failure, and guard information.
+
+        ``complete`` covers only calls that ran during capture; it cannot account for an
+        unexecuted path through the callable.
+        """
+        return self._call(self._session.summary)
+
+    def artifact(
+        self,
+        *,
+        require_complete: bool = True,
+        require_no_risky_drops: bool = True,
+        require_no_dropped_guards: bool = False,
+    ) -> tuple[str, bytes]:
+        r"""artifact(*, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False) -> tuple[str, bytes]
+
+        Render the capture as ``(python_code, cache)``, the same pair the
+        :func:`torch.compiler.precompile` returns, and
+        reload it with :func:`torch.compiler.precompile.load`.
+
+        ``python_code`` is a self-contained module exposing ``forward``; it is
+        the single source of truth for the calling convention. A multi-graph
+        capture has no single readable graph, so the guard trees and the
+        transformed bytecode sit in clearly labelled OPAQUE sections, with the
+        frame names, per-frame variant counts, dropped guards and pinned values
+        emitted beside them as readable literals.
+
+        The gates are the ``require_*`` keywords of :func:`torch.compiler.precompile`:
+        ``require_complete`` refuses a capture whose summary is not complete,
+        ``require_no_risky_drops`` refuses one that dropped a guard whose loss could
+        change the answer, and ``require_no_dropped_guards`` refuses any dropped guard.
+        """
+        return self._call(
+            self._session.artifact,
+            require_complete=require_complete,
+            require_no_risky_drops=require_no_risky_drops,
+            require_no_dropped_guards=require_no_dropped_guards,
+        )
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:
@@ -2124,6 +2199,26 @@ class PrecompiledModule(PrecompiledRunnable):
             buf,
         )
         return buf.getvalue()
+
+
+def _capture_session(fn, **kwargs):
+    """Start an internal multi-graph capture, mapping package errors to ours.
+
+    precompile() drives the capture itself -- there is no public session -- so
+    this exists to keep the error translation in one place.
+    """
+    from torch._dynamo.exc import PackageError
+    from torch._dynamo.precompile_package import precompile_capture
+
+    if isinstance(fn, functools.partial):
+        raise PrecompileError(
+            "precompile cannot capture a partial. Pass the underlying function "
+            "and give its bound arguments as example arguments."
+        )
+    try:
+        return precompile_capture(fn, **kwargs)
+    except PackageError as e:
+        raise PrecompileError(str(e)) from e
 
 
 def _make_inlined_forward(python_code: str) -> Callable[..., object]:
