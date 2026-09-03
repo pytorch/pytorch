@@ -124,6 +124,29 @@ class TestBlackwellDecomposeKPartial(TestCase):
     def test_2cta(self):
         self._run(True)
 
+    def test_tuned_mm_choice_smoke(self):
+        m, k, n = 256, 8193, 128
+        a_storage = torch.randn(k, m, device="cuda", dtype=torch.bfloat16)
+        a = a_storage.T
+        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+
+        with config.patch(
+            max_autotune_gemm=True,
+            max_autotune_gemm_backends="ATEN,TRITON",
+            compile_threads=1,
+            assume_aligned_inputs=True,
+            **{
+                "triton.enable_template_tma_store": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_blackwell_decompose_k_partial": True,
+                "triton.num_decompose_k_splits": 4,
+                "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
+            },
+        ):
+            actual = torch.compile(lambda x, y: x @ y, fullgraph=True)(a, b)
+
+        torch.testing.assert_close(actual, a @ b, atol=16.0, rtol=1e-1)
+
     def test_complete_plan_direct(self):
         m, k, n = 256, 8193, 128
         a_storage = torch.randn(k, m, device="cuda", dtype=torch.bfloat16)
