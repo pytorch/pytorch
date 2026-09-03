@@ -3096,24 +3096,6 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         kernel_inputs: KernelInputs,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
-        for candidate in BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS:
-            yield {
-                "BLOCK_M": candidate.block_m,
-                "BLOCK_N": candidate.block_n,
-                "BLOCK_K": candidate.block_k,
-                "GROUP_M": 8,
-                "num_stages": candidate.num_stages,
-                "num_warps": candidate.num_warps,
-                "EPILOGUE_SUBTILE": candidate.epilogue_subtile,
-                "WARP_SPECIALIZE": True,
-                "FLATTEN": True,
-            }
-
-    def get_extra_kwargs(
-        self,
-        kernel_inputs: KernelInputs,
-        op_name: str,
-    ) -> dict[str, Any]:
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(
                 f"{self.__class__.__name__} requires MMKernelInputs"
@@ -3123,7 +3105,7 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         if len(mat1.get_size()) != 3 or len(mat2.get_size()) != 3:
             raise NotImplementedError("Blackwell BMM requires rank-3 operands")
 
-        batch, m, k = map(int, mat1.get_size())
+        batch, _, k = map(int, mat1.get_size())
         batch_b, k_b, _ = map(int, mat2.get_size())
         if batch != batch_b or k != k_b:
             raise NotImplementedError(
@@ -3143,13 +3125,32 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
                 "Blackwell BMM requires one contiguous matrix dimension"
             )
 
-        return {
+        tma_options = {
             "NUM_SMS": get_num_sms(),
             "A_ROW_MAJOR": a_row_major,
             "B_ROW_MAJOR": b_row_major,
-            "ALLOW_TF32": False,
             "tma_store": False,
         }
+        for candidate in BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS:
+            yield {
+                "BLOCK_M": candidate.block_m,
+                "BLOCK_N": candidate.block_n,
+                "BLOCK_K": candidate.block_k,
+                "GROUP_M": 8,
+                "num_stages": candidate.num_stages,
+                "num_warps": candidate.num_warps,
+                "EPILOGUE_SUBTILE": candidate.epilogue_subtile,
+                "WARP_SPECIALIZE": True,
+                "FLATTEN": True,
+                **tma_options,
+            }
+
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> dict[str, Any]:
+        return {"ALLOW_TF32": False}
 
 
 @register_template_heuristic(

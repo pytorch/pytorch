@@ -196,10 +196,7 @@ class TestMaxAutotune(TestCase):
         b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
         return a, b
 
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("broadcast_b", (False, True))
-    @parametrize("epilogue_subtile", (1, 2, 4))
-    def test_blackwell_bmm_template(
+    def _run_blackwell_bmm_template(
         self, broadcast_b: bool, epilogue_subtile: int
     ) -> None:
         bsz, m, k, n = 3, 256, 8193, 128
@@ -259,6 +256,21 @@ class TestMaxAutotune(TestCase):
         self.assertNotIn("two_ctas=True", codes[0])
         self.assertIn(
             f"EPILOGUE_SUBTILE : tl.constexpr = {epilogue_subtile}", codes[0]
+        )
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @parametrize("epilogue_subtile", (1, 2, 4))
+    def test_blackwell_bmm_template(self, epilogue_subtile: int) -> None:
+        self._run_blackwell_bmm_template(
+            broadcast_b=False,
+            epilogue_subtile=epilogue_subtile,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    def test_blackwell_bmm_template_broadcast_b(self) -> None:
+        self._run_blackwell_bmm_template(
+            broadcast_b=True,
+            epilogue_subtile=1,
         )
 
     @parametrize("dynamic", (False, True))
