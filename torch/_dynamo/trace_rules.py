@@ -530,6 +530,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._batch_norm_impl_index",
         "torch._C._accelerator_getAccelerator",
         "torch._C._accelerator_getDeviceIndex",
+        "torch._C._accelerator__utils_getDeviceIndex",
         "torch._C._accelerator_getStream",
         "torch._C._accelerator_getAllocatorSettings",
         "torch._C._accelerator_setAllocatorSettings",
