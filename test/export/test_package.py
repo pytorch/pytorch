@@ -97,6 +97,55 @@ class TestPackage(TestCase):
         self.assertEqual(len(package.methods["fn"].overloads), 3)
 
 
+class TestAOTIPackageStreamAffinity(TestCase):
+    def test_aoti_load_package_forwards_stream_affinity_options(self):
+        compiled_model = object()
+        with mock.patch(
+            "torch._inductor.package.load_package", return_value=compiled_model
+        ) as load_package_mock:
+            result = torch._inductor.aoti_load_package(
+                "model.pt2",
+                run_single_threaded=False,
+                device_index=2,
+                num_runners=4,
+                use_stream_affinity=True,
+            )
+
+        self.assertIs(result, compiled_model)
+        load_package_mock.assert_called_once_with(
+            "model.pt2",
+            run_single_threaded=False,
+            num_runners=4,
+            device_index=2,
+            use_stream_affinity=True,
+        )
+
+    def test_load_aoti_forwards_stream_affinity_to_cpp_loader(self):
+        loader_type = mock.MagicMock()
+        loader_type.load_metadata_from_package.return_value = {
+            "AOTI_DEVICE_KEY": "cuda"
+        }
+        loader = loader_type.return_value
+
+        with (
+            mock.patch.object(torch._C._aoti, "AOTIModelPackageLoader", loader_type),
+            mock.patch(
+                "torch._inductor.codecache.get_device_information", return_value={}
+            ),
+        ):
+            compiled_model = _load_aoti(
+                "model.pt2",
+                "model",
+                False,
+                4,
+                2,
+                use_stream_affinity=True,
+            )
+
+        self.assertIs(compiled_model.loader, loader)
+        loader_type.assert_called_once_with("model.pt2", "model", False, 4, 2, True)
+
+
 class TestAOTIPackageDeviceValidation(TestCase):
     def test_aoti_load_uses_cpp_device_validation_before_device_info(self):
         class FakeAOTIModelPackageLoader:

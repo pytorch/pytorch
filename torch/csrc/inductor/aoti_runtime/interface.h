@@ -17,6 +17,9 @@ the import case.
 #define AOTI_API __attribute__((__visibility__("default")))
 #endif
 
+inline constexpr int64_t AOTI_STREAM_AFFINITY_DISABLED = -2;
+inline constexpr int64_t AOTI_STREAM_AFFINITY_UNBOUND = -1;
+
 extern "C" {
 struct AOTInductorModelOpaque;
 using AOTInductorModelHandle = AOTInductorModelOpaque*;
@@ -117,6 +120,23 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerCreateWithExternalConstants(
     const char* cubin_dir,
     const AOTInductorConstantMapEntry* constant_entries,
     size_t num_constant_entries);
+
+// Enables or disables stable device-stream-to-model assignment. This may only
+// be reconfigured while all model instances are idle. A null stream handle
+// continues to use the default model-pool scheduling policy.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerSetUseStreamAffinity(
+    AOTInductorModelContainerHandle container_handle,
+    bool use_stream_affinity);
+
+// Returns the model index currently bound to a stream,
+// AOTI_STREAM_AFFINITY_UNBOUND when no binding exists, or
+// AOTI_STREAM_AFFINITY_DISABLED when affinity is disabled. This is intended for
+// diagnostics and testing of affinity policies.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerGetStreamAffinityModelIndexForTesting(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorStreamHandle stream_handle,
+    int64_t* model_index);
 
 // Deletes the AOTInductor model container.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerDelete(

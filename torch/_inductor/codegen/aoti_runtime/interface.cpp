@@ -198,6 +198,32 @@ AOTIRuntimeError AOTInductorModelContainerCreateWithExternalConstants(
   return AOTI_RUNTIME_SUCCESS;
 })
 
+AOTIRuntimeError AOTInductorModelContainerSetUseStreamAffinity(
+    AOTInductorModelContainerHandle container_handle,
+    bool use_stream_affinity) AOTI_RUNTIME_TRY({
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  container->set_use_stream_affinity(use_stream_affinity);
+  return AOTI_RUNTIME_SUCCESS;
+})
+
+AOTIRuntimeError AOTInductorModelContainerGetStreamAffinityModelIndexForTesting(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorStreamHandle stream_handle,
+    int64_t* model_index) AOTI_RUNTIME_TRY({
+  if (model_index == nullptr) {
+    return AOTI_RUNTIME_FAILURE;
+  }
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  auto stream =
+      reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
+  *model_index = container->get_stream_affinity_model_index(stream);
+  return AOTI_RUNTIME_SUCCESS;
+})
+
 AOTIRuntimeError AOTInductorModelContainerDelete(
     AOTInductorModelContainerHandle container_handle) AOTI_RUNTIME_TRY({
   auto* container =

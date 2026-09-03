@@ -272,6 +272,32 @@ class TestAOTInductorPackage(TestCase):
 
             self.assertEqual(actual, expected)
 
+    def test_load_package_with_stream_affinity(self):
+        if self.device == "cpu":
+            self.skipTest("stream affinity requires an accelerator")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = Model().to(self.device)
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        expected = model(*example_inputs)
+        ep = torch.export.export(model, example_inputs, strict=True)
+        package_path = torch._inductor.aoti_compile_and_package(
+            ep,
+            inductor_configs={
+                "aot_inductor.package_cpp_only": self.package_cpp_only,
+            },
+        )
+        loaded = torch._inductor.aoti_load_package(
+            package_path,
+            num_runners=2,
+            use_stream_affinity=True,
+        )
+
+        self.assertEqual(loaded(*example_inputs), expected)
+
     def test_load_package_from_directory(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
