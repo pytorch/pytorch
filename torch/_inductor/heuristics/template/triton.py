@@ -3122,25 +3122,31 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             raise AssertionError(
                 f"{self.__class__.__name__} requires MMKernelInputs"
             )
+
         mat1, mat2 = kernel_inputs.mat1mat2()
         if len(mat1.get_size()) != 3 or len(mat2.get_size()) != 3:
             raise NotImplementedError("Blackwell BMM requires rank-3 operands")
+
         batch, m, k = map(int, mat1.get_size())
         batch_b, k_b, _ = map(int, mat2.get_size())
         if batch != batch_b or k != k_b:
             raise NotImplementedError(
                 "Blackwell BMM does not broadcast logical batches"
             )
+
         a_row_major = mat1.get_stride()[2] == 1
         a_col_major = mat1.get_stride()[1] == 1
+
         b_row_major = mat2.get_stride()[2] == 1
         b_col_major = mat2.get_stride()[1] == 1
+
         if not (a_row_major or a_col_major) or not (
             b_row_major or b_col_major
         ):
             raise NotImplementedError(
                 "Blackwell BMM requires one contiguous matrix dimension"
             )
+
         return {
             "NUM_SMS": get_num_sms(),
             "A_ROW_MAJOR": a_row_major,
