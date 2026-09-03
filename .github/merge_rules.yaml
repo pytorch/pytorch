@@ -517,6 +517,7 @@
   - '**XPU**'
   - '**sycl**'
   - '**SYCL**'
+  - torch/_C/__init__.pyi.in
   approved_by:
   - EikanWang
   - jgong5
@@ -534,7 +535,6 @@
   approved_by:
   - lolpack
   - maggiemoss
-  - ndmitchell
   - kinto0
   mandatory_checks_name:
   - EasyCLA
@@ -577,7 +577,6 @@
   - atalman
   - blaine-rister
   - bobrenjc93
-  - BoyuanFeng
   - choijon5
   - ColinPeppler
   - d4l3k
@@ -589,8 +588,8 @@
   - egienvalue
   - fegin
   - frgossen
-  - fxdawnn
   - georgehong
+  - han3101
   - haoyuz
   - htyu
   - huydhn
@@ -608,7 +607,6 @@
   - liangel-02
   - Microve
   - mlazos
-  - NicolasHug
   - njriasan
   - oulgen
   - pianpwk
@@ -616,18 +614,28 @@
   - sanketpurandare
   - scotts
   - seemethere
+  - sevenEng
   - SherlockNoMad
   - slayton58
   - soulitzer
   - tushar00jain
+  - vkuzo
   - warrendeng
   - wconstab
   - weifengpy
   - williamwen42
-  - xmfan
   - ydwu4
   - yushangdi
-  - zpcore
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: Greenlight Review Bot
+  patterns:
+  - '*'
+  approved_by:
+  - pytorchgreenlight
   mandatory_checks_name:
   - EasyCLA
   - Lint
