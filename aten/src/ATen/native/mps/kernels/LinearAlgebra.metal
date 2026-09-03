@@ -2600,11 +2600,10 @@ kernel void luApplyPivotsRHS(
 INSTANTIATE_LU_APPLY_PIVOTS_RHS(float)
 INSTANTIATE_LU_APPLY_PIVOTS_RHS(float2)
 
-// Small-matrix LU (luInvSmall / luSolveSmall): one thread per matrix (per
-// right-hand-side column for the solve), the whole matrix lives in registers,
-// zero-padded to NMAX for the solve. Every array index must stay a
-// compile-time constant after unrolling, so row swaps scan for r == p instead
-// of indexing a[p] directly.
+// Small-matrix inverse (luInvSmall): one thread per matrix, the matrix and
+// its inverse live in registers. Every array index must stay a compile-time
+// constant after unrolling, so row swaps scan for r == p instead of indexing
+// a[p] directly.
 template <short N>
 kernel void luInvSmall(
     device const float* A [[buffer(0)]],
@@ -2724,129 +2723,15 @@ INSTANTIATE_LU_INV_SMALL(5)
 INSTANTIATE_LU_INV_SMALL(6)
 INSTANTIATE_LU_INV_SMALL(7)
 INSTANTIATE_LU_INV_SMALL(8)
-static_assert(kLUSmallInvMax == 8, "update luInvSmall instantiations");
-
-template <typename T>
-inline T luSmallElem(
-    device const T* LU,
-    long i,
-    long j,
-    long rs,
-    long cs,
-    bool adjoint) {
-  const T v = LU[i * rs + j * cs];
-  return adjoint ? c10::metal::conj(v) : v;
-}
-
-template <typename T, short NMAX>
-kernel void luSolveSmall(
-    device const T* LU [[buffer(0)]],
-    device const int* pivots [[buffer(1)]],
-    device T* X [[buffer(2)]],
-    constant LUSmallSolveParams<>& params [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  const uint b = tid / params.k;
-  const uint col = tid - b * params.k;
-  const uint n = params.n;
-  const bool adjoint = params.adjoint;
-  const long rs = params.LU_rstride;
-  const long cs = params.LU_cstride;
-  device const T* Lb = LU + long(b) * params.LU_bstride;
-  device const int* pv = pivots + ulong(b) * n;
-  device T* Xb = X + long(b) * params.X_bstride + long(col) * params.X_cstride;
-
-  T x[NMAX];
-#pragma unroll
-  for (short i = 0; i < NMAX; i++) {
-    x[i] = (uint(i) < n) ? Xb[long(i) * params.X_rstride] : T(0.0f);
-  }
-  if (!adjoint) {
-#pragma unroll
-    for (short s = 0; s < NMAX; s++) {
-      if (uint(s) < n) {
-        const int p = pv[s] - 1;
-#pragma unroll
-        for (short r = 0; r < NMAX; r++) {
-          if (r > s && r == p) {
-            const T t = x[s];
-            x[s] = x[r];
-            x[r] = t;
-          }
-        }
-      }
-    }
-  }
-#pragma unroll
-  for (short c = 0; c < NMAX; c++) {
-    if (uint(c) < n) {
-      if (adjoint) {
-        x[c] = c10::metal::div(x[c], luSmallElem(Lb, c, c, rs, cs, adjoint));
-      }
-#pragma unroll
-      for (short i = 0; i < NMAX; i++) {
-        if (i > c && uint(i) < n) {
-          const T l = luSmallElem(Lb, i, c, rs, cs, adjoint);
-          x[i] = c10::metal::fma(-l, x[c], x[i]);
-        }
-      }
-    }
-  }
-#pragma unroll
-  for (short c = NMAX - 1; c >= 0; c--) {
-    if (uint(c) < n) {
-      if (!adjoint) {
-        x[c] = c10::metal::div(x[c], luSmallElem(Lb, c, c, rs, cs, adjoint));
-      }
-#pragma unroll
-      for (short i = 0; i < NMAX; i++) {
-        if (i < c) {
-          const T u = luSmallElem(Lb, i, c, rs, cs, adjoint);
-          x[i] = c10::metal::fma(-u, x[c], x[i]);
-        }
-      }
-    }
-  }
-  if (adjoint) {
-#pragma unroll
-    for (short s = NMAX - 1; s >= 0; s--) {
-      if (uint(s) < n) {
-        const int p = pv[s] - 1;
-#pragma unroll
-        for (short r = 0; r < NMAX; r++) {
-          if (r > s && r == p) {
-            const T t = x[s];
-            x[s] = x[r];
-            x[r] = t;
-          }
-        }
-      }
-    }
-  }
-#pragma unroll
-  for (short i = 0; i < NMAX; i++) {
-    if (uint(i) < n) {
-      Xb[long(i) * params.X_rstride] = x[i];
-    }
-  }
-}
-
-#define INSTANTIATE_LU_SOLVE_SMALL(T, NMAX)                \
-  template [[host_name("luSolveSmall_" #T "_" #NMAX)]]     \
-  kernel void luSolveSmall<T, NMAX>(                       \
-      device const T* LU [[buffer(0)]],                    \
-      device const int* pivots [[buffer(1)]],              \
-      device T* X [[buffer(2)]],                           \
-      constant LUSmallSolveParams<>& params [[buffer(3)]], \
-      uint tid [[thread_position_in_grid]]);
-
-// NMAX buckets picked by lu_solve_small_encode
-INSTANTIATE_LU_SOLVE_SMALL(float, 4)
-INSTANTIATE_LU_SOLVE_SMALL(float, 8)
-INSTANTIATE_LU_SOLVE_SMALL(float, 16)
-INSTANTIATE_LU_SOLVE_SMALL(float2, 4)
-INSTANTIATE_LU_SOLVE_SMALL(float2, 8)
-INSTANTIATE_LU_SOLVE_SMALL(float2, 16)
-static_assert(kLUSmallSolveMax == 16, "update luSolveSmall instantiations");
+INSTANTIATE_LU_INV_SMALL(9)
+INSTANTIATE_LU_INV_SMALL(10)
+INSTANTIATE_LU_INV_SMALL(11)
+INSTANTIATE_LU_INV_SMALL(12)
+INSTANTIATE_LU_INV_SMALL(13)
+INSTANTIATE_LU_INV_SMALL(14)
+INSTANTIATE_LU_INV_SMALL(15)
+INSTANTIATE_LU_INV_SMALL(16)
+static_assert(kLUSmallInvMax == 16, "update luInvSmall instantiations");
 
 kernel void applyPivots(
     device float* P [[buffer(0)]],

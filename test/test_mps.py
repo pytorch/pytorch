@@ -2827,8 +2827,8 @@ class TestMPS(TestCaseMPS):
                 X_mps_t = torch.linalg.solve(A_mps.mT, b_mps, left=left)
                 self.assertEqual(X_cpu_t, X_mps_t)
 
-        # even/odd matrix sizes plus both sides of the lu_solve n <= 16 register-kernel cutoff
-        matrix_sizes = [1, 2, 3, 4, 16, 17]
+        # test with different even/odd matrix sizes
+        matrix_sizes = [1, 2, 3, 4]
         # even/odd batch sizes
         batch_sizes = [1, 2, 4]
 
@@ -9201,9 +9201,10 @@ class TestMPS(TestCaseMPS):
         helper(2)
         helper(6)
         helper(3)
-        # both sides of the n <= 8 register-kernel cutoff
         helper(8)
-        helper(9)
+        # both sides of the n <= 16 register-kernel cutoff
+        helper(16)
+        helper(17)
         helper(1025, atol=1e-4)
 
     # Test tril

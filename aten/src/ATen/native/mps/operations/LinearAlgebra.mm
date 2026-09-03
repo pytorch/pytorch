@@ -62,7 +62,6 @@
 #include <c10/util/TypeCast.h>
 #include <c10/util/env.h>
 #include <algorithm>
-#include <bit>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -1050,37 +1049,6 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
   }
 }
 
-static void lu_solve_small_encode(const Tensor& LU,
-                                  const Tensor& pivots,
-                                  const Tensor& B,
-                                  int64_t Bnum,
-                                  int64_t n,
-                                  int64_t k,
-                                  bool adjoint) {
-  const auto X = B.view({Bnum, n, k});
-  const auto threads = c10::checked_convert<uint32_t>(Bnum * k, "uint32_t");
-  const LUSmallSolveParams<> params{.LU_bstride = LU.stride(0),
-                                    .LU_rstride = adjoint ? LU.stride(2) : LU.stride(1),
-                                    .LU_cstride = adjoint ? LU.stride(1) : LU.stride(2),
-                                    .X_bstride = X.stride(0),
-                                    .X_rstride = X.stride(1),
-                                    .X_cstride = X.stride(2),
-                                    .n = static_cast<uint32_t>(n),
-                                    .k = static_cast<uint32_t>(k),
-                                    .adjoint = adjoint};
-  const auto nmax = std::bit_ceil(static_cast<uint32_t>(std::max<int64_t>(n, 4)));
-  auto pso = lib.getPipelineStateForFunc(fmt::format("luSolveSmall_{}_{}", mps::scalarToMetalTypeString(B), nmax));
-  auto stream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      auto enc = stream->commandEncoder();
-      [enc setComputePipelineState:pso];
-      mtl_setArgs(enc, LU, pivots, X, params);
-      mtl_dispatch1DJob(enc, pso, threads);
-    }
-  });
-}
-
 static void mps_lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
   using namespace mps;
   TORCH_CHECK(LU.scalar_type() == kFloat || LU.scalar_type() == kComplexFloat,
@@ -1104,10 +1072,6 @@ static void mps_lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Te
   auto piv_shape = batch;
   piv_shape.push_back(n);
   auto piv_b = pivots.expand(piv_shape).contiguous().reshape({Bnum, n});
-  if (n <= kLUSmallSolveMax) {
-    lu_solve_small_encode(LU.expand(with_mat(n, n)).reshape({Bnum, n, n}), piv_b, B, Bnum, n, k, adjoint);
-    return;
-  }
 
   auto W = at::empty({Bnum, n, n + k}, LU.options());
   auto factor = adjoint ? LU.expand(with_mat(n, n)).mH() : LU.expand(with_mat(n, n));
