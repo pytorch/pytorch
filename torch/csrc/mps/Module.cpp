@@ -592,7 +592,7 @@ void initModule(PyObject* module) {
   // properly waits for every recorded stream
   m.def("_mps_allocator_waitForEvents", [](const std::vector<int64_t>& ptrs) {
     auto* allocator = at::mps::getIMPSAllocator();
-    TORCH_CHECK(allocator, "MPS allocator is not available");
+    TORCH_INTERNAL_ASSERT(allocator, "MPS allocator is not available");
     std::vector<const void*> buffers;
     buffers.reserve(ptrs.size());
     for (const auto ptr : ptrs) {

@@ -485,10 +485,8 @@ void CuptiMetadataStore::put_external(
     return; // no id to key it by (caller resolves which collective)
   }
   std::lock_guard<std::mutex> guard(mutex_);
-  auto it = by_external_.find(external_id);
-  if (it == by_external_.end()) {
-    by_external_.emplace(external_id, std::move(blob));
-  } else {
+  auto [it, inserted] = by_external_.try_emplace(external_id, std::move(blob));
+  if (!inserted) {
     // Recursive merge so several producers can each contribute fields (incl.
     // nested objects) for one op; on a leaf conflict, the later put wins.
     it->second.update(blob, /*merge_objects=*/true);
