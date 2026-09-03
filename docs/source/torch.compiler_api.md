@@ -151,9 +151,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        capture. It applies only to ``tracer="make_fx"``; the dynamo tracer lowers through
        the backend instead and rejects it.
    :param guard_filter_fn: Multi-graph serialization filter; returns one boolean per guard
-       entry. Live capture retains all guards so later examples trigger their recompiles.
-       Risky dropped guards are rejected by default when saving, and every
-       custom-filter drop counts as risky.
+       entry, composed (AND) with the default that drops the guards which cannot be
+       serialized, so a custom filter can only drop more. Live capture retains all guards
+       so later examples trigger their recompiles. Risky dropped guards are rejected by
+       default when saving, and every custom-filter drop counts as risky.
    :param recompile_limit: Maximum multi-graph variants captured per frame; ``None``
        means 256, which overrides a lower ambient accumulated-recompile limit for this
        capture. Applies only to ``tracer="dynamo"``.
@@ -238,13 +239,18 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        :class:`torch.compiler.PrecompiledCallable`, which additionally has ``unload()``
        and ``serve_time_compiles()`` and installs on entering or on the first call. A
        ``dynamo`` artifact of either type accepts keyword arguments; a ``make_fx`` one is
-       positional-only.
+       positional-only. Either kind has a ``cache_status`` attribute: ``"applied"`` when the
+       cache matched ``python_code`` and primed the kernel caches, else ``"incompatible"``,
+       ``"unreadable"`` or ``"prime_failed"`` saying why it was not
+       (see :attr:`torch.compiler.PrecompiledCallable.cache_status`); anything but
+       ``"applied"`` JITs at serve time where the cache would have primed.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
        fails to parse or is missing its calling-convention metadata), if ``cache`` is
        paired with a different ``python_code`` (mismatched ``backend`` tag, ``tracer``
        tag, or ``code_hash``), if a ``dynamo`` artifact was produced under another Python
-       or torch version or its inlined sources have changed, or if a runtime call
-       violates the precompile contract.
+       or torch version or its inlined sources have changed (torch's own modules included,
+       in both serving modes: the version string does not see an edit to an editable
+       install), or if a runtime call violates the precompile contract.
 
 .. autoclass:: torch.compiler.ExampleInput
 

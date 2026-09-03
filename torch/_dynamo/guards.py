@@ -21,6 +21,7 @@ import ast
 import builtins
 import collections
 import contextlib
+import copyreg
 import dataclasses
 import enum
 import functools
@@ -4521,7 +4522,12 @@ def _builds_its_own_pickle(cls: type) -> bool:
     __dict__ and so are never pruned. A namedtuple subclass with __dict__
     extras is pruned like any other user object. The generated one is a fresh
     function per namedtuple class, so it is known by where it was defined.
+
+    A reducer registered with copyreg.pickle decides the arguments the same way
+    from outside the class, so the dispatch table counts too.
     """
+    if copyreg.dispatch_table.get(cls) is not None:
+        return True
     for name in _PICKLE_PROTOCOL_HOOKS:
         hook = getattr(cls, name, None)
         if hook is getattr(object, name, None) or hook is getattr(tuple, name, None):
