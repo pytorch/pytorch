@@ -1092,7 +1092,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         if kwargs["hf_llm"]:
             # If it's an llm, we want to optimize model.forward, and use
             # the generate function
-            model.forward = torch._dynamo.run(model)
+            model.forward = torch._dynamo.run(model.forward)
             frozen_model_iter_fn = model_iter_fn
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
@@ -3048,7 +3048,7 @@ class BenchmarkRunner:
                 if getattr(self, "hf_llm", False):
                     # If it's an llm, we want to optimize model.forward, and use
                     # the generate function
-                    model = optimize_ctx(model)
+                    model.forward = optimize_ctx(model.forward)
                     optimized_model_iter_fn = self.model_iter_fn
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
