@@ -167,8 +167,8 @@ LR_SCHEDULER_TO_KWARGS = {
     },
     ConstantLR: {"factor": 0.001},
     LinearLR: {},
-    ReduceLROnPlateau: {"factor": 0.99, "patience": 1},
     PlateauLR: {"factor": 0.99, "patience": 0},
+    ReduceLROnPlateau: {"factor": 0.99, "patience": 1},
     PolynomialLR: {},
 }
 
@@ -365,13 +365,7 @@ except (unittest.SkipTest, ImportError) as e:
 
 
 def call_scheduler(scheduler):
-    if isinstance(
-        scheduler,
-        (torch.optim.lr_scheduler.PlateauLR, torch.optim.lr_scheduler.ReduceLROnPlateau),
-    ):
-        scheduler.step(metrics=1.0)
-    else:
-        scheduler.step()
+    scheduler.step(metrics=1.0)
 
 
 def compile_opt(opt_compiled, closure=None, fullgraph=True):
