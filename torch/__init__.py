@@ -44,6 +44,16 @@ from typing_extensions import (
 )
 
 
+# Re-executing this file (retrying a failed import, or `reload`) would corrupt the C++ global state the first run set up.
+if getattr(sys, "_torch_import_started", False):
+    raise ImportError(
+        "`torch` can only be initialized once per process, so this module cannot "
+        "be imported again: neither via `importlib.reload(torch)`, nor by "
+        "re-importing after a failed `import torch`."
+    )
+sys._torch_import_started = True  # type: ignore[attr-defined]
+
+
 # As a bunch of torch.packages internally still have this check
 # we need to keep this. @todo: Remove tests that rely on this check as
 # they are likely stale.

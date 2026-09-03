@@ -214,7 +214,8 @@ DDPUsageLoggerType* GetDDPUsageLogger() {
 
 auto& EventSampledHandlerRegistry() {
   static auto& registry =
-      *new std::map<std::string, std::unique_ptr<EventSampledHandler>>();
+      *new std::
+          map<std::string, std::unique_ptr<EventSampledHandler>, std::less<>>();
   return registry;
 }
 
@@ -227,7 +228,7 @@ void InitEventSampledHandlers(
   static bool flag [[maybe_unused]] = [&]() {
     auto& registry = EventSampledHandlerRegistry();
     for (auto& [event, handler] : handlers) {
-      auto entry = registry.find(std::string{event});
+      auto entry = registry.find(event);
       if (entry == registry.end()) {
         entry = registry.emplace(event, nullptr).first;
       }
@@ -244,7 +245,7 @@ const std::unique_ptr<EventSampledHandler>& GetEventSampledHandler(
 
   // The getter can be executed from different threads.
   std::lock_guard<std::mutex> lock(guard);
-  auto entry = registry.find(std::string{event});
+  auto entry = registry.find(event);
   if (entry == registry.end()) {
     entry = registry.emplace(event, nullptr).first;
   }
