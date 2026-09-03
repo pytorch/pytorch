@@ -94,7 +94,8 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
     size_t num_models,
     const std::string& device_str,
     const std::string& cubin_dir,
-    const bool run_single_threaded) {
+    const bool run_single_threaded)
+    : run_single_threaded_(run_single_threaded) {
   if (run_single_threaded) {
     TORCH_CHECK(
         num_models == 1,
@@ -252,6 +253,78 @@ AOTIModelContainerRunner::~AOTIModelContainerRunner() {
   }
 }
 
+const char* AOTIModelContainerRunner::get_aoti_runtime_error() const {
+  const char* error = torch::aot_inductor::get_last_error();
+  if (error) {
+    return error;
+  }
+  if (get_last_error_func_ &&
+      get_last_error_func_(&error) == AOTI_RUNTIME_SUCCESS && error &&
+      error[0]) {
+    return error;
+  }
+  return nullptr;
+}
+
+void AOTIModelContainerRunner::set_use_stream_affinity(
+    bool use_stream_affinity) {
+  TORCH_CHECK(
+      !use_stream_affinity || !run_single_threaded_,
+      "use_stream_affinity cannot be enabled when run_single_threaded is true");
+  TORCH_CHECK(
+      model_so_ != nullptr,
+      "Stream affinity is unavailable for custom AOTI device runners");
+  decltype(&AOTInductorModelContainerSetUseStreamAffinity) set_affinity_func =
+      nullptr;
+  try {
+    set_affinity_func = reinterpret_cast<decltype(set_affinity_func)>(
+        model_so_->sym("AOTInductorModelContainerSetUseStreamAffinity"));
+  } catch (const at::DynamicLibraryError&) {
+    // Report the missing optional symbol below with upgrade guidance.
+  }
+  TORCH_CHECK(
+      set_affinity_func != nullptr,
+      "AOTInductorModelContainerSetUseStreamAffinity is unavailable. "
+      "Rebuild the model with the latest AOTInductor.");
+  torch::aot_inductor::set_last_error(nullptr);
+  const auto result = set_affinity_func(container_handle_, use_stream_affinity);
+  if (result != AOTI_RUNTIME_SUCCESS) {
+    if (const char* error = get_aoti_runtime_error()) {
+      TORCH_CHECK(false, error);
+    }
+    torch::headeronly::detail::throw_exception(
+        "set_affinity_func(...)", __FILE__, __LINE__);
+  }
+}
+
+int64_t AOTIModelContainerRunner::get_stream_affinity_model_index_for_testing(
+    void* stream_handle) {
+  TORCH_CHECK(
+      model_so_ != nullptr,
+      "Stream affinity diagnostics are unavailable for custom AOTI device "
+      "runners");
+  decltype(&AOTInductorModelContainerGetStreamAffinityModelIndexForTesting)
+      get_binding_func = nullptr;
+  try {
+    get_binding_func =
+        reinterpret_cast<decltype(get_binding_func)>(model_so_->sym(
+            "AOTInductorModelContainerGetStreamAffinityModelIndexForTesting"));
+  } catch (const at::DynamicLibraryError&) {
+    // Report the missing optional symbol below with upgrade guidance.
+  }
+  TORCH_CHECK(
+      get_binding_func != nullptr,
+      "AOTInductorModelContainerGetStreamAffinityModelIndexForTesting is "
+      "unavailable. "
+      "Rebuild the model with the latest AOTInductor.");
+  int64_t model_index = -1;
+  AOTI_RUNTIME_ERROR_CODE_CHECK(get_binding_func(
+      container_handle_,
+      reinterpret_cast<AOTInductorStreamHandle>(stream_handle),
+      &model_index));
+  return model_index;
+}
+
 std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
     std::vector<AtenTensorHandle>& input_handles,
     void* stream_handle) {
@@ -281,16 +354,8 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
       reinterpret_cast<AOTInductorStreamHandle>(stream_handle),
       proxy_executor_handle_);
   if (run_result != AOTI_RUNTIME_SUCCESS) {
-    const char* err = torch::aot_inductor::get_last_error();
-    if (err) {
-      TORCH_CHECK(false, err);
-    }
-    if (get_last_error_func_) {
-      const char* aoti_err = nullptr;
-      if (get_last_error_func_(&aoti_err) == AOTI_RUNTIME_SUCCESS && aoti_err &&
-          aoti_err[0]) {
-        TORCH_CHECK(false, aoti_err);
-      }
+    if (const char* error = get_aoti_runtime_error()) {
+      TORCH_CHECK(false, error);
     }
     torch::headeronly::detail::throw_exception(
         "run_func_(...)", __FILE__, __LINE__);

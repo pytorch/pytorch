@@ -1045,6 +1045,7 @@ def _load_aoti(
     run_single_threaded: bool,
     num_runners: int,
     device_idx: int,
+    use_stream_affinity: bool = False,
 ) -> AOTICompiledModel:
     loaded_metadata = torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(  # type: ignore[attr-defined]
         file, model_name
@@ -1057,6 +1058,7 @@ def _load_aoti(
             run_single_threaded,
             num_runners,
             device_idx,
+            use_stream_affinity,
         )
     )
 
@@ -1087,6 +1089,7 @@ def load_pt2(
     num_runners: int = 1,
     device_index: int = -1,
     load_weights_from_disk: bool = False,
+    use_stream_affinity: bool = False,
 ) -> PT2ArchiveContents:  # type: ignore[type-arg]
     """
     Loads all the artifacts previously saved with ``package_pt2``.
@@ -1108,6 +1111,10 @@ def load_pt2(
             to be loaded. By default, `device_index=-1` is used, which corresponds
             to the device `cuda` when using CUDA. Passing `device_index=1` would
             load the package to `cuda:1`, for example.
+
+        use_stream_affinity (bool): Whether each non-null device stream should
+            retain a stable model instance. This is intended for controlled
+            multi-stream benchmarking and can reduce host-side pipelining.
 
     Returns:
         A ``PT2ArchiveContents`` object which contains all the objects in the PT2.
@@ -1188,6 +1195,7 @@ def load_pt2(
                         run_single_threaded,
                         num_runners,
                         device_index,
+                        use_stream_affinity,
                     )
                     for model_name in aoti_model_names
                 }
@@ -1201,6 +1209,7 @@ def load_pt2(
                 run_single_threaded,
                 num_runners,
                 device_index,
+                use_stream_affinity,
             )
             for model_name in aoti_model_names
         }
