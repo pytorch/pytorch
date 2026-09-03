@@ -400,12 +400,27 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
                 if key in kwargs and isinstance(kwargs[key], Iterator):
                     self._frame_state.f_locals[key] = kwargs[key]
 
+        wanted = guard_type if isinstance(guard_type, tuple) else (guard_type,)
+
         def guard_filter_fn(guards):
-            ret = [
-                g.guard_type == guard_type or guard_type in g.derived_guard_types
-                for g in guards
-            ]
-            self.assertTrue(any(ret))
+            # Single pass: record which requested types each guard satisfies so
+            # we build the keep mask and the per-type coverage check together.
+            matched_types = set()
+            ret = []
+            for g in guards:
+                hits = {
+                    t for t in wanted if g.guard_type == t or t in g.derived_guard_types
+                }
+                matched_types |= hits
+                ret.append(bool(hits))
+            # Each requested type must match at least one guard: a test that
+            # names two types relies on both being emitted (e.g. the grad
+            # ordering tests need the dict's TYPE_MATCH to put it in the
+            # serialized scope), and a bare any(ret) would let one silently
+            # disappear.
+            missing = [t for t in wanted if t not in matched_types]
+            if missing:
+                raise AssertionError(f"no guard matched requested types {missing!r}")
             return ret
 
         ref_gm = None
@@ -522,6 +537,241 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": torch.randn(2, dtype=torch.float64)}, False
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
+
+    def test_tensor_match_populated_grad(self):
+        def f(x: torch.Tensor):
+            return x + 1
+
+        x = torch.randn(4, requires_grad=True)
+        (x * 2).sum().backward()
+        self.assertIsInstance(x.grad, torch.Tensor)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, x)
+        x_ok = torch.randn(4, requires_grad=True)
+        x_bad = torch.randn(5, requires_grad=True)
+        self._test_check_fn(ref, loaded, {"x": x_ok}, True)
+        self._test_check_fn(ref, loaded, {"x": x_bad}, False)
+
+    def test_tensor_grad_aliased_by_unguarded_local(self):
+        # p.grad is also a leaf of d, whose TYPE_MATCH guard never visits the
+        # dict values. With d first in f_locals, the grad is pickled (and
+        # memoized by pickle) as _Missing before p is reduced unless it is
+        # registered in guard_tree_values upfront.
+        def fn(d, p):
+            return p * 1 + len(d)
+
+        p = torch.randn(4, requires_grad=True)
+        (p * 2).sum().backward()
+        d = {"x": p.grad}
+        types_ = ("TENSOR_MATCH", "TYPE_MATCH")
+        ref, loaded = self._test_serialization(types_, fn, d, p)
+        p_new = torch.randn(4, requires_grad=True)
+        self._test_check_fn(ref, loaded, {"d": d, "p": p_new}, True)
+        p_bad = torch.randn(5, requires_grad=True)
+        self._test_check_fn(ref, loaded, {"d": d, "p": p_bad}, False)
+
+    def test_tensor_grad_aliased_by_unguarded_local_swapped(self):
+        # Same as above but with p pickled before d.
+        def fn(p, d):
+            return p * 1 + len(d)
+
+        p = torch.randn(4, requires_grad=True)
+        (p * 2).sum().backward()
+        d = {"x": p.grad}
+        types_ = ("TENSOR_MATCH", "TYPE_MATCH")
+        ref, loaded = self._test_serialization(types_, fn, p, d)
+        p_new = torch.randn(4, requires_grad=True)
+        self._test_check_fn(ref, loaded, {"d": d, "p": p_new}, True)
+        p_bad = torch.randn(5, requires_grad=True)
+        self._test_check_fn(ref, loaded, {"d": d, "p": p_bad}, False)
+
+    def test_subclass_inner_grad_aliased_by_unguarded_local(self):
+        # With only a TYPE_MATCH on the wrapper subclass (a filter dropped the
+        # TENSOR_MATCH that would guard the inner tensors), the inner tensors
+        # enter the guard tree only mid-dump. inner.grad is also a leaf of d,
+        # pickled before x is reduced, so the upfront walk must descend into the
+        # subclass's inners itself or the grad is memoized as _Missing first.
+        def fn(d, x):
+            return x * 1 + len(d)
+
+        inner = torch.randn(4, requires_grad=True)
+        (inner * 2).sum().backward()
+        x = SubclassWithMeta(inner, extra=2)
+        d = {"g": inner.grad}
+        ref, loaded = self._test_serialization("TYPE_MATCH", fn, d, x)
+        x_new = SubclassWithMeta(torch.randn(4, requires_grad=True), extra=2)
+        self._test_check_fn(ref, loaded, {"d": d, "x": x_new}, True)
+        from torch._dynamo.package import load_guards_state
+
+        loaded_x = load_guards_state(
+            self._cached_guards_state
+        ).output_graph.local_scope["x"]
+        self.assertEqual(loaded_x.a.grad.shape, inner.grad.shape)
+
+    def test_subclass_outer_requires_grad_round_trips(self):
+        # __tensor_unflatten__ derives requires_grad from the inner tensor, so a
+        # leaf subclass whose inner does not require grad used to load with
+        # requires_grad=False and its TENSOR_MATCH guard rejected the very input
+        # it was built from.
+        def f(x):
+            return x + 1
+
+        x = SubclassWithMeta(torch.randn(3), extra=2).requires_grad_(True)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        x_no_grad = SubclassWithMeta(torch.randn(3), extra=2)
+        self._test_check_fn(ref, loaded, {"x": x_no_grad}, False)
+        from torch._dynamo.package import load_guards_state
+
+        loaded_x = load_guards_state(
+            self._cached_guards_state
+        ).output_graph.local_scope["x"]
+        self.assertTrue(loaded_x.requires_grad)
+
+    def test_grad_metadata_guard_round_trips(self):
+        # Reading x.grad installs a guard on the grad tensor (via GradSource),
+        # which also registers the grad in the guard tree, so this passes with
+        # or without the upfront grad registration; it covers the GradSource
+        # guard itself. A grad's shape/dtype is owner-locked (the .grad setter
+        # rejects mismatches), so the independent axis is presence: the loaded
+        # guard must accept a candidate that has a matching grad and reject one
+        # with no grad.
+        def f(x):
+            return x.grad + 1
+
+        x = torch.randn(4, requires_grad=True)
+        (x * 2).sum().backward()
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, x)
+
+        x_ok = torch.randn(4, requires_grad=True)
+        (x_ok * 2).sum().backward()
+        self._test_check_fn(ref, loaded, {"x": x_ok}, True)
+
+        x_no_grad = torch.randn(4, requires_grad=True)
+        self._test_check_fn(ref, loaded, {"x": x_no_grad}, False)
+
+    def test_subclass_grad_metadata_guard_round_trips(self):
+        # The wrapper-subclass reduce path used to return before the grad was
+        # registered, so only inner tensors' grads round-tripped and the outer
+        # subclass came back with .grad None; rebuilding the guard on x.grad
+        # against the loaded state then failed with an AttributeError on that
+        # None. Mirror test_grad_metadata_guard_round_trips on a subclass input.
+        def f(x):
+            return x.grad + 1
+
+        x = SubclassWithMeta(torch.randn(4, requires_grad=True), extra=2)
+        (x * 2).sum().backward()
+        self.assertIsInstance(x.grad, SubclassWithMeta)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, x)
+
+        x_ok = SubclassWithMeta(torch.randn(4, requires_grad=True), extra=2)
+        (x_ok * 2).sum().backward()
+        self._test_check_fn(ref, loaded, {"x": x_ok}, True)
+
+        x_no_grad = SubclassWithMeta(torch.randn(4, requires_grad=True), extra=2)
+        self._test_check_fn(ref, loaded, {"x": x_no_grad}, False)
+
+    def test_none_grad_reference_tensor_round_trips(self):
+        # A requires_grad leaf with no grad yet must serialize with grad=None
+        # (not a fabricated tensor) so the loaded guard matches the reference.
+        def f(x):
+            return x + 1
+
+        x = torch.randn(4, requires_grad=True)
+        self.assertIsNone(x.grad)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, x)
+        self._test_check_fn(
+            ref, loaded, {"x": torch.randn(4, requires_grad=True)}, True
+        )
+        self._test_check_fn(
+            ref, loaded, {"x": torch.randn(5, requires_grad=True)}, False
+        )
+
+    def test_sparse_grad_serializes_as_none(self):
+        # A non-strided grad (sparse COO, e.g. from nn.Embedding(sparse=True))
+        # loses its layout in the meta round-trip. Dynamo cannot trace a sparse
+        # grad, so no guard ever inspects one; the guard on the owner must still
+        # serialize (carrying grad=None) and accept the same candidates as the
+        # in-process guard.
+        def f(x):
+            return x + 1
+
+        x = torch.randn(4, requires_grad=True)
+        x.grad = torch.randn(4).to_sparse()
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, x)
+        sparse_ok = torch.randn(4, requires_grad=True)
+        sparse_ok.grad = torch.randn(4).to_sparse()
+        dense_ok = torch.randn(4, requires_grad=True)
+        dense_ok.grad = torch.randn(4)
+        for candidate in (sparse_ok, dense_ok, torch.randn(4, requires_grad=True)):
+            self._test_check_fn(ref, loaded, {"x": candidate}, True)
+        self._test_check_fn(
+            ref, loaded, {"x": torch.randn(5, requires_grad=True)}, False
+        )
+        # Pin the serialized form itself: the owner's grad is None, not a dense
+        # stand-in that happens to pass the checks above.
+        from torch._dynamo.package import load_guards_state
+
+        loaded_x = load_guards_state(
+            self._cached_guards_state
+        ).output_graph.local_scope["x"]
+        self.assertIsNone(loaded_x.grad)
+
+    def test_non_leaf_assigned_grad_round_trips(self):
+        # A non-leaf can hold a manually assigned .grad (no retains_grad); a
+        # guard reading it (GradSource -> TYPE_MATCH on L['y'].grad) must be
+        # rebuilt against the grad, not against None, or the loaded guard
+        # rejects every valid candidate. This is the case a leaf/retains_grad
+        # gate on the .grad read got wrong.
+        def f(y):
+            return y.grad.data + 1
+
+        def make():
+            y = torch.randn(4, requires_grad=True) * 2
+            self.assertFalse(y.is_leaf)
+            y.grad = torch.ones(4)
+            return y
+
+        ref, loaded = self._test_serialization("TYPE_MATCH", f, make())
+        self._test_check_fn(ref, loaded, {"y": make()}, True)
+
+    def test_module_parameter_grad_round_trips(self):
+        # The common production shape: a module whose parameters carry grads
+        # from a previous step, guarded through AttrSource chains.
+        def fn(m, x):
+            return m.linear(x)
+
+        m = GlobalNestedModule()
+        m.linear(torch.randn(3, 10)).sum().backward()
+        self.assertIsNotNone(m.linear.weight.grad)
+        ref, loaded = self._test_serialization(
+            "TENSOR_MATCH", fn, m, torch.randn(3, 10)
+        )
+        self._test_check_fn(ref, loaded, {"m": m, "x": torch.randn(3, 10)}, True)
+        m_fresh = GlobalNestedModule()
+        self._test_check_fn(ref, loaded, {"m": m_fresh, "x": torch.randn(3, 10)}, True)
+        self._test_check_fn(ref, loaded, {"m": m, "x": torch.randn(3, 11)}, False)
+
+    def test_grad_of_grad_round_trips(self):
+        # create_graph=True gives x.grad its own autograd history; the guard on
+        # x.grad (GradSource) checks requires_grad, so the serialized grad must
+        # carry it: accept a candidate whose grad was also built with
+        # create_graph, reject one whose grad is a plain leaf.
+        def f(x):
+            return x.grad + 1
+
+        def with_graph_grad():
+            t = torch.randn(4, requires_grad=True)
+            (t * t).sum().backward(create_graph=True)
+            return t
+
+        x = with_graph_grad()
+        self.assertTrue(x.grad.requires_grad)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, x)
+        self._test_check_fn(ref, loaded, {"x": with_graph_grad()}, True)
+        plain = torch.randn(4, requires_grad=True)
+        (plain * plain).sum().backward()
+        self.assertFalse(plain.grad.requires_grad)
+        self._test_check_fn(ref, loaded, {"x": plain}, False)
 
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):
