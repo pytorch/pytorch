@@ -285,7 +285,7 @@ releases without a deprecation cycle.
    torch.compiler.PrecompiledRunnable)`` holds for both.
 
 .. autoclass:: torch.compiler.PrecompiledCallable
-   :members: unload
+   :members: unload, serve_time_compiles
 
    Returned by :func:`precompile.load` for an artifact that serves by installing,
    and used as a callable or context manager; it is not constructed directly.

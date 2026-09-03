@@ -3483,6 +3483,52 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 sys.path.remove(d)
                 sys.modules.pop(name, None)
 
+    def test_risky_drop_warning_leads_with_the_shape_bearing_ones(self):
+        # A flat cut is dominated by whichever guard type is most numerous. On a
+        # real capture that meant one SEQUENCE_LENGTH and three CONSTANT_MATCHes
+        # -- the only drops that can change what shape the graph computes --
+        # were invisible behind 392 CLOSURE_MATCHes on function identities.
+        risky = (
+            [("CLOSURE_MATCH", f"c{i}") for i in range(392)]
+            + [("ID_MATCH", f"i{i}") for i in range(81)]
+            + [("SEQUENCE_LENGTH", "impl.__defaults__")]
+            + [("CONSTANT_MATCH", "impl.__defaults__[4]")]
+            + [("TYPE_MATCH", "L['pg'].group_name")]
+        )
+        with self.assertLogs("torch._dynamo.precompile_package", "WARNING") as cm:
+            dynamo_package_lint._warn_risky_drops(risky)
+        message = "\n".join(cm.output)
+
+        self.assertIn("476 dropped guard(s)", message)
+        self.assertIn("COULD BEAR ON SHAPE (3)", message)
+        # Each shape-bearing name survives the truncation, and each is named
+        # ahead of the bulk that used to crowd it out.
+        for name in ("impl.__defaults__", "impl.__defaults__[4]", "group_name"):
+            self.assertIn(name, message)
+            self.assertLess(message.index(name), message.index("CLOSURE_MATCH"))
+        self.assertIn("CLOSURE_MATCH x392", message)
+
+    def test_unserializable_backend_says_so_rather_than_reporting_a_gap(self):
+        # A session takes any backend Dynamo resolves -- tests register their
+        # own -- so the refusal belongs at artifact(), not at construction. But
+        # the generic "recorded 0 of N compiled backend(s)" reads as a defect in
+        # the model, when the real answer is that this backend records nothing.
+        # aot_eager is the one people reach for, since it is how you isolate
+        # AOTAutograd.
+        session = precompile_capture(
+            _precompile_scale, backend="aot_eager", dynamic=False
+        )
+        with session as compiled:
+            compiled(torch.randn(2))
+        with self.assertRaisesRegex(Exception, "does not produce anything") as ctx:
+            session.artifact(require_complete=False, require_no_risky_drops=False)
+        message = str(ctx.exception)
+        self.assertIn("aot_eager", message)
+        self.assertIn("'inductor' or 'eager'", message)
+        # The grad-mode and backward advice the generic message carries would be
+        # a wrong lead here.
+        self.assertNotIn("training=True", message)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

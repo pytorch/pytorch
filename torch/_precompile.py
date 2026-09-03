@@ -466,6 +466,15 @@ class PrecompiledCallable(PrecompiledRunnable):
         """
         self._call(self._compiled.unload)
 
+    def serve_time_compiles(self) -> int:
+        """Graphs this artifact compiled while SERVING, rather than serving.
+
+        An installed artifact answers a guard miss by compiling, so a climbing
+        count means it is covering less of the workload than the capture
+        measured. Zero is the number to gate a job on.
+        """
+        return self._compiled.serve_time_compiles()
+
 
 class _InstalledArtifact:
     """Handle for a multi-graph artifact that serves by installing.
@@ -586,6 +595,10 @@ class _InstalledArtifact:
 
     def __exit__(self, *exc: object) -> None:
         self.unload()
+
+    def serve_time_compiles(self) -> int:
+        inner = self._inner
+        return inner.serve_time_compiles() if inner is not None else 0
 
     def unload(self) -> None:
         from torch._dynamo.precompile_context import PrecompileContext
@@ -1780,16 +1793,32 @@ _MULTIGRAPH_GENERATED_HEADER = """\
 #     exec(open("this_file.py").read(), ns)
 #     out = ns["forward"](model, my_input)      # same args as the captured callable
 #
-# Nothing is installed onto your code objects and no frame evaluator is involved, so
-# loading this mutates no global state. The flip side is that there is no compiler
-# behind it: a call no captured variant covers RAISES rather than compiling a new one.
-#
 # Sections below are labelled. What is OPAQUE is base64 of pickled Dynamo state --
 # the guard trees and the transformed bytecode -- because those have no readable
 # source form. The compiled subgraphs DO have one and are emitted as source; only a
 # subgraph the backend could not render (an eager fx graph, a training graph) falls
 # back to the blob. Everything else is meant to be read and reviewed.
 """
+
+
+# What the artifact does to the process, which differs by serving mode and was
+# previously described only for the standalone one -- in a banner emitted on both.
+_SERVING_NOTES = {
+    "standalone": """\
+# Nothing is installed onto your code objects and no frame evaluator is involved, so
+# loading this mutates no global state. The flip side is that there is no compiler
+# behind it: a call no captured variant covers RAISES rather than compiling a new one.
+""",
+    "installed": """\
+# This artifact SERVES BY INSTALLING onto the live code objects, so loading and then
+# entering it mutates global state, which unload() and __exit__ take back out. And
+# there IS a compiler behind it: a call no captured variant covers is compiled fresh
+# at serve time rather than refused. That is what makes a graph-breaking model
+# servable at all, but it means the artifact can quietly serve less and less of
+# itself -- watch for the "serving compiled a NEW graph" warning, or read
+# serve_time_compiles() on the loaded object.
+""",
+}
 
 
 def _b64(payload: object) -> str:
@@ -1860,7 +1889,7 @@ def _build_multigraph_python_source(
     from torch._dynamo.package import SerializedCode
 
     frames = _multigraph_frames(entry)
-    parts = [_MULTIGRAPH_GENERATED_HEADER, ""]
+    parts = [_MULTIGRAPH_GENERATED_HEADER, _SERVING_NOTES[serving_mode], ""]
     parts.append("# " + "=" * 70)
     parts.append("# 1. What was captured (readable)")
     parts.append("# " + "=" * 70)
@@ -2120,16 +2149,17 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
     from torch._dynamo.package import SerializedCode
 
     entry_frames = [f for f in frames if f["is_entry"]]
-    if not entry_frames:
-        return
-    if not any(f["variants"] for f in entry_frames):
-        # The entry frame having no variants has two very different causes, and
+    if not entry_frames or not any(f["variants"] for f in entry_frames):
+        # A missing or variant-less entry frame has very different causes, and
         # guessing the wrong one sends the caller restructuring code that was
-        # never the problem. If Dynamo BYPASSED the frame, it recorded why --
-        # say that, because the thin-wrapper advice below is then simply wrong.
-        # Only the ENTRY's own bypassed codes count (matched by the same
-        # heuristic that picked entry_frames): an unrelated bypassed helper
-        # frame must not relabel a thin-wrapper entry as a bypass.
+        # never the problem. If Dynamo BYPASSED the entry frame, it recorded
+        # why -- and _multigraph_frames DROPS bypassed codes entirely, so the
+        # bypassed-entry case arrives here as "no entry frame at all", not as
+        # an entry with no variants. Say the recorded reason, because the
+        # thin-wrapper advice below is then simply wrong. Only the ENTRY's own
+        # bypassed codes count (matched by the same heuristic that picks entry
+        # frames): an unrelated bypassed helper frame must not relabel a
+        # thin-wrapper entry as a bypass.
         entry_name = str(entry.fn_name).rsplit(".", 1)[-1]
         bypassed = [
             code
@@ -2147,6 +2177,10 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
                 f"their guards were never written. Reason: {reasons}. Fix that "
                 f"rather than restructuring the captured callable."
             )
+        if not entry_frames:
+            # Not bypassed and not compiled at all: nothing here can say why,
+            # and both diagnostics below would be guesses.
+            return
         # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
         # frame (external_utils.wrap_inline's `inner`) rather than the module:
         # every graph lands there, closing over the module, and the entry frame

@@ -1000,6 +1000,42 @@ def _precompile_mixed_keyability(model, x):
     return _precompile_unkeyable(y).cos()
 
 
+class _PrecompileFusedMatmul(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, w):
+        ctx.save_for_backward(x, w)
+        return x @ w
+
+    @staticmethod
+    def backward(ctx, grad):
+        x, w = ctx.saved_tensors
+        return grad @ w.t(), x.t() @ grad
+
+
+# A module-level alias of .apply, the shape that guards on the class identity.
+_precompile_fused_matmul = _PrecompileFusedMatmul.apply
+
+
+class _PrecompileCallsAliasedApply(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.randn(8, 8))
+
+    def forward(self, x):
+        return _precompile_fused_matmul(x, self.w).relu()
+
+
+class _PrecompileCallsCustomOp(torch.nn.Module):
+    """The same math as _PrecompileCallsAliasedApply, as a registered op."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.randn(8, 8))
+
+    def forward(self, x):
+        return torch.ops.mlprecompile.fused_matmul(x, self.w).relu()
+
+
 # precompile drives make_fx internally, which cannot symbolically trace a
 # dynamo-optimized function; the whole suite is therefore incompatible with
 # PYTORCH_TEST_WITH_DYNAMO (dynamo_wrapped CI), so skip it there.
@@ -3331,19 +3367,30 @@ class TestPrecompile(TestCase):
                 python_code=SerializedCode.from_code_object(fn.__code__),
             )
 
-        frames = [{"is_entry": True, "variants": []}]
         entry = types.SimpleNamespace(
             fn_name="fwd_loss_bwd", codes=[bypassed_code(fwd_loss_bwd)]
         )
+        # The state a bypassed ENTRY actually arrives in: _multigraph_frames
+        # DROPS bypassed codes, so there is no entry frame at all -- the
+        # diagnostic must fire from the empty list, not from a variant-less
+        # entry frame it would never see.
         with self.assertRaisesRegex(PrecompileError, "were BYPASSED during capture"):
-            _reject_uninstallable_entry(frames, entry)
+            _reject_uninstallable_entry([], entry)
         with self.assertRaisesRegex(PrecompileError, "cannot pickle 'generator'"):
+            _reject_uninstallable_entry([], entry)
+        # An entry frame that compiled but produced no variants, with a
+        # bypassed sibling code of the same name, reports the bypass too.
+        frames = [{"is_entry": True, "variants": []}]
+        with self.assertRaisesRegex(PrecompileError, "were BYPASSED during capture"):
             _reject_uninstallable_entry(frames, entry)
         foreign = types.SimpleNamespace(
             fn_name="fwd_loss_bwd", codes=[bypassed_code(helper)]
         )
         with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
             _reject_uninstallable_entry(frames, foreign)
+        # No entry frame and only a FOREIGN bypassed code: neither diagnostic
+        # applies, so neither may fire as a guess.
+        _reject_uninstallable_entry([], foreign)
         with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
             _reject_uninstallable_entry(
                 frames, types.SimpleNamespace(fn_name="step", codes=[])
@@ -5854,6 +5901,109 @@ class TestPrecompile(TestCase):
         loaded = torch.compiler.precompile.load(code, cache)
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertEqual(loaded(model, x), want)
+
+    def test_installed_artifact_reports_what_it_compiles_at_serve(self):
+        # An installed artifact answers a guard miss by COMPILING, not by
+        # refusing -- a frame reachable only through the frame evaluator has no
+        # other way to run. That is deliberate, but it was invisible: the
+        # generated banner claimed the opposite, and isolate_recompiles gives
+        # the artifact a private cache identity so TORCH_LOGS=recompiles prints
+        # nothing. An artifact quietly serving less of itself looked exactly
+        # like one that was serving. And the module class is the same for every
+        # graph a model produces, so a capture that recompiled nine graphs said
+        # "GraphModule" nine times: each warning has to be traceable to one
+        # graph, including the continuations in a resume chain.
+        from torch._precompile import _parse_artifact_metadata
+
+        model = _PrecompileBreakingModule().eval()
+        captured, uncovered = torch.randn(3, 8), torch.randn(5, 8)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_attr_entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+                example_inputs=[(model, captured)],
+            )
+        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
+        # The banner has to describe the mode it was emitted for.
+        self.assertNotIn("Nothing is installed onto your code objects", code)
+        self.assertIn("compiled fresh", code)
+
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            loaded(model, captured)
+            self.assertEqual(loaded.serve_time_compiles(), 0)
+            with self.assertLogs("torch._dynamo.precompile_package", "WARNING") as cm:
+                loaded(model, uncovered)
+            self.assertGreater(loaded.serve_time_compiles(), 0)
+
+        warnings = [m for m in cm.output if "serving compiled a NEW graph" in m]
+        self.assertTrue(warnings)
+        for message in warnings:
+            self.assertIn("compile id ", message)
+            self.assertIn("backend id ", message)
+            self.assertIn("first traced at ", message)
+        # Distinct per graph, which is the whole point.
+        self.assertEqual(len(set(warnings)), len(warnings))
+
+    def test_missing_backend_error_reports_the_recorded_split(self):
+        # One missing id is fatal, so the message has to say how many of the
+        # capture actually landed. Reading "their compiled backends were never
+        # recorded" off a capture that recorded 41 of 56 sends the reader after
+        # a total failure that did not happen.
+        from torch._dynamo.precompile_package import _missing_backends_message
+
+        message = _missing_backends_message(56, [f"b{i}" for i in range(15)])
+        self.assertIn("recorded 41 of 56", message)
+        self.assertIn("15 graph(s)", message)
+        self.assertNotIn("never recorded", message)
+        # Long lists get truncated rather than pasting 15 opaque ids.
+        self.assertIn("... (7 more)", message)
+        self.assertNotIn("b8", message)
+        # The cache no longer gates recording, so it must not be the headline.
+        self.assertIn("training=True", message)
+
+        one = _missing_backends_message(2, ["b0"])
+        self.assertIn("recorded 1 of 2", one)
+        self.assertNotIn("more)", one)
+
+    def test_custom_op_captures_where_an_aliased_autograd_function_cannot(self):
+        # An autograd.Function reached through a module-level alias of .apply
+        # guards on the identity of the class and its two staticmethods.
+        # CLASS_MATCH and CLOSURE_MATCH cannot be serialized -- there is no
+        # portable spelling of "this exact object" -- so they are dropped, and
+        # an alias is a config-selected slot, so the drop is risky. Registering
+        # the same math as a custom op replaces all three with an operator
+        # looked up by qualified name, which serializes.
+        x = torch.randn(8, 8, requires_grad=True)
+        with self.assertRaisesRegex(PrecompileError, "can affect dispatch"):
+            torch.compiler.precompile(
+                _PrecompileCallsAliasedApply(),
+                backend="eager",
+                tracer="dynamo",
+                training=True,
+                example_inputs=[(x,)],
+            )
+
+        torch._dynamo.reset()
+        with torch.library._scoped_library("mlprecompile", "FRAGMENT") as lib:
+            lib.define("fused_matmul(Tensor x, Tensor w) -> Tensor")
+            lib.impl("fused_matmul", torch.mm, "CompositeExplicitAutograd")
+            lib.impl("fused_matmul", torch.mm, "Meta")
+            model = _PrecompileCallsCustomOp()
+            code, cache = torch.compiler.precompile(
+                model,
+                backend="eager",
+                tracer="dynamo",
+                example_inputs=[(x,)],
+            )
+            torch._dynamo.reset()
+            loaded = torch.compiler.precompile.load(code, cache)
+            with torch.no_grad():
+                self.assertEqual(loaded(model, x), model(x))
 
 
 def _graph_devices_literal(code: str) -> str:
