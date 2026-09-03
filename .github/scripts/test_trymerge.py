@@ -44,6 +44,8 @@ from trymerge import (
     get_topmost_docker_pr,
     gh_get_team_members,
     GitHubPR,
+    IGNORABLE_FAILED_CHECKS_THESHOLD,
+    is_ai_not_related,
     is_authorized_without_greenlight,
     is_bot_initiated_codev_merge,
     is_docker_affecting_files,
@@ -2458,6 +2460,159 @@ class TestGreenlightGuardWiring(TestCase):
         self.assertEqual(
             mock_check.call_args.kwargs["ignore_current_checks"], ["some-check"]
         )
+
+
+class TestAdvisorNotRelated(TestCase):
+    """The AI CI Advisor's `not_related` verdict as a non-blocking classification.
+
+    Dr.CI owns the verdict/confidence/freshness predicates, so these cover what
+    trymerge itself decides: how a check is matched to the bucket, and how many
+    gates one merge may skip on that basis.
+    """
+
+    @staticmethod
+    def _check(name: str, job_id: int | None) -> JobCheckState:
+        return JobCheckState(
+            name, "https://example.com", "FAILURE", None, job_id, "", ""
+        )
+
+    def test_matches_on_job_id(self) -> None:
+        drci = {"AI_NOT_RELATED": [{"id": 42, "name": "some job"}]}
+        self.assertTrue(is_ai_not_related(self._check("some job", 42), drci))
+
+    def test_does_not_fall_back_to_the_name(self) -> None:
+        """A name match with a different job id is a different execution."""
+        drci = {"AI_NOT_RELATED": [{"id": 42, "name": "some job"}]}
+        self.assertFalse(is_ai_not_related(self._check("some job", 43), drci))
+
+    def test_a_check_with_no_job_id_never_matches(self) -> None:
+        drci = {"AI_NOT_RELATED": [{"id": 42, "name": "Lint"}]}
+        self.assertFalse(is_ai_not_related(self._check("Lint", None), drci))
+
+    def test_absent_category_is_the_off_state(self) -> None:
+        self.assertFalse(is_ai_not_related(self._check("some job", 42), {}))
+        self.assertFalse(is_ai_not_related(self._check("some job", 42), None))
+
+    def _categorize(self, count: int):  # type: ignore[no-untyped-def]
+        checks = {
+            f"job {i}": JobCheckState(
+                f"job {i}", "", "FAILURE", "AI_NOT_RELATED", i, "", ""
+            )
+            for i in range(count)
+        }
+        return categorize_checks(checks, list(checks.keys()))
+
+    def test_cleared_checks_do_not_block(self) -> None:
+        _, failed, ignorable = self._categorize(IGNORABLE_FAILED_CHECKS_THESHOLD)
+        self.assertEqual(failed, [])
+        self.assertEqual(
+            len(ignorable["AI_NOT_RELATED"]), IGNORABLE_FAILED_CHECKS_THESHOLD
+        )
+
+    def test_too_many_at_once_reads_as_an_outage_and_blocks(self) -> None:
+        over = IGNORABLE_FAILED_CHECKS_THESHOLD + 1
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            _, failed, ignorable = self._categorize(over)
+        self.assertEqual(len(failed), over)
+        # Still reported under its own category so the merge record keeps them.
+        self.assertEqual(len(ignorable["AI_NOT_RELATED"]), over)
+        self.assertIn("usually means an outage", str(w[-1].message))
+
+    def test_the_cap_is_independent_of_the_flaky_budget(self) -> None:
+        """ok_failed_checks_threshold tunes flaky noise, not this gate."""
+        checks = {
+            f"job {i}": JobCheckState(
+                f"job {i}", "", "FAILURE", "AI_NOT_RELATED", i, "", ""
+            )
+            for i in range(IGNORABLE_FAILED_CHECKS_THESHOLD)
+        }
+        _, failed, _ = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=0
+        )
+        self.assertEqual(failed, [])
+
+    def test_a_cleared_check_is_classified_through_get_classifications(self) -> None:
+        """The happy path through the real entry point, not a hand-built state.
+
+        The sibling tests either call the matcher directly or construct
+        JobCheckState with the classification already set, so none of them
+        notices if the `get_classifications` branch stops firing.
+        """
+        checks = {"job": self._check("job", 7)}
+        drci = {"AI_NOT_RELATED": [{"id": 7, "name": "job"}]}
+        with mock.patch("trymerge.get_drci_classifications", return_value=drci):
+            classified = get_classifications(1, "pytorch", checks, [])
+        self.assertEqual(classified["job"].classification, "AI_NOT_RELATED")
+
+    def test_ignore_current_wins_over_being_cleared(self) -> None:
+        """An explicit --ignore-current must not be counted against the cap.
+
+        merge() builds the ignore list from raw conclusions with no
+        classification step, so a cleared failure lands in it too. Claiming it
+        for AI_NOT_RELATED would put the author's explicit decision under the
+        classifier's budget.
+        """
+        checks = {"job": self._check("job", 7)}
+        drci = {"AI_NOT_RELATED": [{"id": 7, "name": "job"}]}
+        with mock.patch("trymerge.get_drci_classifications", return_value=drci):
+            classified = get_classifications(1, "pytorch", checks, ["job"])
+        self.assertEqual(classified["job"].classification, "IGNORE_CURRENT_CHECK")
+
+    def test_a_merge_i_over_the_cap_is_not_refused(self) -> None:
+        """The regression the guard above prevents, at the boundary that bites.
+
+        More cleared failures than the cap, all named by --ignore-current:
+        without the guard every one classifies AI_NOT_RELATED, the cap trips,
+        and a `merge -i` that succeeds today is refused.
+        """
+        over = IGNORABLE_FAILED_CHECKS_THESHOLD + 1
+        names = [f"job {i}" for i in range(over)]
+        # Job ids from 1: `is_ai_not_related` requires a truthy id, so a job
+        # numbered 0 silently never matches and the count lands one under the
+        # cap -- which passes this test with the guard removed.
+        ids = list(range(1, over + 1))
+        checks = {n: self._check(n, i) for n, i in zip(names, ids)}
+        drci = {"AI_NOT_RELATED": [{"id": i, "name": n} for n, i in zip(names, ids)]}
+        with mock.patch("trymerge.get_drci_classifications", return_value=drci):
+            classified = get_classifications(1, "pytorch", checks, names)
+        _, failed, _ = categorize_checks(classified, names)
+        self.assertEqual(failed, [])
+
+    def test_a_non_object_check_summary_is_no_classifications(self) -> None:
+        """`null`/list/scalar decode fine; popping them must not end the merge."""
+        for raw in ("null", "[]", "0", "false", '""'):
+            with self.subTest(summary=raw):
+                checks = {
+                    DRCI_CHECKRUN_NAME: JobCheckState(
+                        DRCI_CHECKRUN_NAME, "", "SUCCESS", None, 1, "", raw
+                    ),
+                    "job": self._check("job", 7),
+                }
+                with mock.patch("trymerge.get_drci_classifications", return_value={}):
+                    classified = get_classifications(1, "pytorch", checks, [])
+                self.assertIsNone(classified["job"].classification)
+
+    def test_a_stale_check_summary_never_clears_a_gate(self) -> None:
+        """The summary lags: Dr.CI skips rewriting it when the comment is unchanged."""
+        summary = json.dumps(
+            {
+                "AI_NOT_RELATED": [{"id": 7, "name": "job"}],
+                "FLAKY": [{"id": 9, "name": "flaky job"}],
+            }
+        )
+        checks = {
+            DRCI_CHECKRUN_NAME: JobCheckState(
+                DRCI_CHECKRUN_NAME, "", "NEUTRAL", None, None, "", summary
+            ),
+            "job": self._check("job", 7),
+            "flaky job": self._check("flaky job", 9),
+        }
+        with mock.patch("trymerge.get_drci_classifications", return_value={}):
+            classified = get_classifications(1, "pytorch", checks, [])
+        # The AI category is dropped from the fallback; FLAKY still applies.
+        self.assertIsNone(classified["job"].classification)
+        self.assertEqual(classified["flaky job"].classification, "FLAKY")
 
 
 if __name__ == "__main__":
