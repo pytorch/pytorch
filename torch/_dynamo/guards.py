@@ -75,7 +75,12 @@ from torch._C._dynamo.guards import (
     TypeGuardAccessor,
     TypeMROGuardAccessor,
 )
-from torch._dynamo.package import FunctionPicklerBase, SerializedCode
+from torch._dynamo.package import (
+    _Missing,
+    _PRUNED_VALUE_PID,
+    FunctionPicklerBase,
+    SerializedCode,
+)
 from torch._dynamo.source import (
     get_global_source_name,
     get_local_source_name,
@@ -4122,22 +4127,6 @@ class GuardsState:
     local_state: Any | None = None
 
 
-class _Missing:
-    def __init__(self, reason: str | None = None) -> None:
-        self._reason = reason
-
-    def __repr__(self) -> str:
-        return f"_Missing({self._reason})"
-
-    def __str__(self) -> str:
-        return f"_Missing({self._reason})"
-
-    # Sometimes _Missing object is used as the callable with functools.partial,
-    # so we add a dummy __call__ here to bypass TypeError from partial().
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return _Missing()
-
-
 @functools.cache
 def _get_unsupported_types() -> tuple[type, ...]:
     # We only do ID_MATCH on C objects which is already banned from guards serialization.
@@ -4172,6 +4161,10 @@ def _is_interned_singleton(value: Any) -> bool:
     immutable, trivially picklable, and a handful of bytes. So skip them rather
     than make identity carry a distinction it cannot.
     """
+    if isinstance(value, (tuple, frozenset)) and not value:
+        # () is one object process-wide; persistent_id would otherwise turn
+        # every empty tuple in the state into the sentinel.
+        return True
     return isinstance(
         value,
         (
@@ -4351,22 +4344,11 @@ class GuardsStatePickler(FunctionPicklerBase):
     # fail forever with no load error.
 
     def _keep(self, value: object) -> bool:
-        """Whether a value a reconstructed function holds has to be carried.
-
-        Matching is by identity, which for an interned value (True, None, a small
-        int, a short str) can coincide with an unrelated guarded one and keep it.
-        That is harmless: such values are trivially picklable, and a kept value is
-        always the real one.
-        """
+        """Identity match; an interned value that collides is kept, harmlessly."""
         return id(value) in self.guard_tree_values
 
     def _missing(self, reason: str) -> _Missing:
-        """One shared sentinel per reason within this pickle.
-
-        A snapshot prunes a whole module dict, so a fresh instance per pruned
-        value bloats the payload with thousands of identical sentinels.
-        Nothing compares sentinels by identity, so sharing is safe.
-        """
+        """One sentinel per reason; a snapshot prunes a whole module dict."""
         if reason not in self._missing_cache:
             self._missing_cache[reason] = _Missing(reason)
         return self._missing_cache[reason]
@@ -4375,14 +4357,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         return value if self._keep(value) else self._missing(reason)
 
     def _globals_snapshot(self, f_globals: dict[str, Any]) -> dict[str, Any]:
-        """The pruned module scope, built once per module dict in this pickle.
-
-        Reused so that pickle memoizes it: every function reconstructed from one
-        module otherwise carries its own copy of the whole scope, and the payload
-        grows with their product.
-        """
+        """Built once per module dict so pickle memoizes it across functions."""
         snapshot = self._globals_snapshots.get(id(f_globals))
         if snapshot is None:
+            # A sentinel __builtins__ is harmless: FunctionType({}, ...) binds
+            # builtins from the interpreter (CPython >= 3.10) before this applies.
             snapshot = {
                 name: self._prune(value, "unguarded function global")
                 for name, value in f_globals.items()
@@ -4443,6 +4422,19 @@ class GuardsStatePickler(FunctionPicklerBase):
             attributes=attributes,
             globals_snapshot=snapshot,
         )
+
+    # The C pickler saves an exact builtin container by type, before it ever
+    # consults reducer_override, so a pruned ``self.its = [generator]`` was
+    # still walked and still failed. persistent_id is asked about every object
+    # first, so it is the one hook that can substitute those. Everything else
+    # in missing_values stays on the reducer_override path.
+    _PRUNED_CONTAINER_TYPES = (list, dict, tuple, set, frozenset, bytearray)
+
+    # pyrefly: ignore [bad-override]
+    def persistent_id(self, obj: Any) -> str | None:
+        if id(obj) in self.missing_values and type(obj) in self._PRUNED_CONTAINER_TYPES:
+            return _PRUNED_VALUE_PID
+        return None
 
     # pyrefly: ignore [bad-override]
     def reducer_override(
@@ -4697,6 +4689,10 @@ class GuardsStatePickler(FunctionPicklerBase):
         replaced by the _Missing sentinel, which is what keeps an unpicklable
         bystander (a generator, a live iterator, a C handle) from taking the
         frame down with it.
+
+        This applies to every guarded user object, not only nn.Module: a class
+        whose __setstate__ or __reduce__ reads a pruned attribute sees _Missing
+        at load.
         """
         for attr in vars(obj).values():
             if isinstance(attr, (torch.Tensor, torch.nn.Module)):
@@ -4789,7 +4785,9 @@ def _offending_value_path(
         # already raising.
         while queue:
             path, value = queue.popleft()
-            if id(value) in seen or len(seen) > 200000:
+            if len(seen) > 200000:
+                break
+            if id(value) in seen:
                 continue
             seen.add(id(value))
             if value is target:
@@ -4882,6 +4880,9 @@ def pickle_guards_state(
         state.output_graph.guard_on_key_order = set()
         state.output_graph.global_scope = {}
 
+    # Anything dump raises means a guarded value cannot be serialized, which is
+    # a bypass (an error under strict_precompile), never a compiler crash. A
+    # PackageError raised inside reducer_override already carries its message.
     try:
         pickler.dump(state)
     except torch._dynamo.exc.PackageError:
@@ -4920,16 +4921,17 @@ class CheckFunctionManager:
         guard_fail_fn: Callable[[GuardFail], None] | None = None,
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
         | None = None,
-        serialization_guard_filter_fn: Callable[
-            [Sequence[GuardFilterEntry]], Sequence[bool]
-        ]
-        | None = None,
-        explicit_capture: bool = False,
         shape_code_parts: ShapeCodeParts | None = None,
         runtime_global_scope: dict[str, Any] | None = None,
         save_guards: bool = False,
         strict_error: bool = False,
         guard_build_local_state: Any | None = None,
+        *,
+        serialization_guard_filter_fn: Callable[
+            [Sequence[GuardFilterEntry]], Sequence[bool]
+        ]
+        | None = None,
+        explicit_capture: bool = False,
     ) -> None:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -5083,7 +5085,10 @@ class CheckFunctionManager:
                 # not reach is replaced by a placeholder. Dropping a guard must
                 # not drop the VALUE it named, because the rest of the state
                 # still refers to it -- a pruned tensor comes back with no
-                # dtype. So prune against the unfiltered tree.
+                # dtype. So prune against the unfiltered tree. Known limitation:
+                # missing_values is keyed by id(), so one unguarded attribute
+                # holding e.g. torch.bfloat16 stands in for every reference to
+                # that dtype in the pickle; this merge masks that, not fixes it.
                 serialization_builder.guard_tree_values = {
                     **builder.guard_tree_values,
                     **serialization_builder.guard_tree_values,

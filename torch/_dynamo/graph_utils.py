@@ -81,16 +81,9 @@ def _detect_cycles(
 
 
 def _graph_device_types(graph: Graph | None) -> frozenset[str]:
-    """Every device type the graph's generated code targets.
-
-    A SCAN, not "the device of the first meta value": under dynamic shapes the
-    leading placeholder is a SymInt, which has no device, so reading one value
-    reported "cpu" for an all-accelerator graph -- and callers hang a toolchain
-    probe and a hard load-time rejection off that answer. Values carrying no
-    device (SymInt, int, None) contribute nothing rather than defaulting.
-
-    An empty result means the graph names no device at all, which for a graph
-    that emits no code is the honest answer and is not the same as "cpu".
+    """Every device type named by the graph's meta values, args, or device
+    conversions. Values with no device (SymInt, int, None) contribute nothing;
+    an empty result means the graph names no device, which is not "cpu".
     """
     if graph is None:
         return frozenset()

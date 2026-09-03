@@ -16,6 +16,7 @@ import functools
 import hashlib
 import importlib
 import inspect
+import io
 import itertools
 import json
 import logging
@@ -167,6 +168,28 @@ class SerializedCode:
         )
 
 
+class _Missing:
+    def __init__(self, reason: str | None = None) -> None:
+        self._reason = reason
+
+    def __repr__(self) -> str:
+        return f"_Missing({self._reason})"
+
+    def __str__(self) -> str:
+        return f"_Missing({self._reason})"
+
+    # Sometimes _Missing object is used as the callable with functools.partial,
+    # so we add a dummy __call__ here to bypass TypeError from partial().
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return _Missing()
+
+
+# The persistent id GuardsStatePickler.persistent_id emits for a pruned value
+# the C pickler never routes through reducer_override; _GuardsStateUnpickler
+# turns it back into _Missing. Any other persistent id in a guards state is a bug.
+_PRUNED_VALUE_PID = "missing values"
+
+
 class FunctionPicklerBase(pickle.Pickler):
     """Reducers shared by GuardsStatePickler and AOTCompilePickler.
 
@@ -176,13 +199,11 @@ class FunctionPicklerBase(pickle.Pickler):
     decides what a rebuilt function carries; this class fixes HOW it is rebuilt
     so a fix in one pickler cannot be missed in the other.
 
-    A cell carries its contents, and a function everything beyond what
-    FunctionType() needs, as pickle STATE rather than as reduce args. pickle
-    memoizes an object only after saving its reduce args, so a value that
-    reaches back to the object being reduced -- a wrapper closing over itself,
-    `wrapper.cache = wrapper`, two module-scope wrappers in each other's
-    globals -- would otherwise recurse until RecursionError. State is applied
-    after memoization, so such references resolve to the pickle already built.
+    Defaults, __dict__, and the globals snapshot travel as pickle STATE, applied
+    after memoization, so `wrapper.me = wrapper` and module-scope cycles end.
+    A closure cell is a reduce ARGUMENT: a function closing over itself is
+    reduced twice, and only the C pickler's recursive-object fallback in
+    save_reduce drops the outer copy, so the pure-Python pickler is unsupported.
     """
 
     @classmethod
@@ -227,20 +248,31 @@ class FunctionPicklerBase(pickle.Pickler):
         return fn
 
     @classmethod
-    def _unpickle_fn_from_module(cls, module: str, *args: Any) -> types.FunctionType:
-        # NB module is not reliably where the function LIVES -- functools.wraps
-        # copies __module__ from the wrapped function -- so this scope can belong
-        # to a different file. A pickler that guards __globals__ sends the
-        # snapshot variant instead.
+    def _unpickle_fn_from_module(
+        cls,
+        module: str,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        # functools.wraps copies __module__, so this scope can be a different
+        # file from the one the function lives in; a pickler that guards
+        # __globals__ sends the snapshot variant instead.
         f_globals = importlib.import_module(module).__dict__
-        return cls._build_function(f_globals, module, *args)
+        return cls._build_function(f_globals, module, code, qualname, name, closure)
 
     @classmethod
-    def _unpickle_fn_from_snapshot(cls, module: str, *args: Any) -> types.FunctionType:
+    def _unpickle_fn_from_snapshot(
+        cls,
+        module: str,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
         # The scope arrives as pickle STATE, through _apply_function_state.
-        # Deliberately no import_module fallback: importing a module only to
-        # discard its dict is a load-time failure mode this branch is free of.
-        return cls._build_function({}, module, *args)
+        return cls._build_function({}, module, code, qualname, name, closure)
 
     @staticmethod
     def _apply_function_state(fn: types.FunctionType, state: tuple[Any, ...]) -> None:
@@ -271,7 +303,7 @@ class FunctionPicklerBase(pickle.Pickler):
         # wrong when that does not resolve back to the same function; those
         # carry the function and self explicitly.
         func = method.__func__
-        inner = getattr(method.__self__, func.__name__)
+        inner = getattr(method.__self__, func.__name__, None)
         if inspect.ismethod(inner):
             inner = inner.__func__
         if func is inner:
@@ -310,6 +342,13 @@ class _GuardedCodeCacheEntry:
     dynamo_code: SerializedCode
 
 
+class _GuardsStateUnpickler(pickle.Unpickler):
+    def persistent_load(self, pid: Any) -> Any:
+        if pid != _PRUNED_VALUE_PID:
+            raise pickle.UnpicklingError(f"unknown guards state persistent id {pid!r}")
+        return _Missing(pid)
+
+
 def load_guards_state(guards_state: bytes) -> Any:
     try:
         import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
@@ -318,7 +357,7 @@ def load_guards_state(guards_state: bytes) -> Any:
     except ImportError:
         ctx = nullcontext()  # type: ignore[assignment]
     with ctx:
-        return pickle.loads(guards_state)
+        return _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
 
 
 def load_guard_manager(
@@ -689,18 +728,15 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     return toplevel.__qualname__, code_source.strip(".")
 
 
-_CpuCodegenTarget = tuple[str, str, str | None, str, int | None, str | None]
+_CpuCodegenTarget = tuple[str, str, int | None, str | None]
 
 
 def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
-    """The vector-width inputs inductor bakes into generated CPU code.
+    """(machine, vec_isa, simdlen, march): what inductor bakes into CPU code.
 
-    ``pick_vec_isa`` dry-compiles a probe with the C++ toolchain: seconds on a
-    cold inductor cache, and a hard ``InvalidCxxCompiler`` where there is no
-    compiler at all. Callers must ask for it only when the artifact can hold CPU
-    native code, and a host that cannot build any records None -- it can neither
-    have produced nor be about to run an inductor CPU kernel, so there is no
-    baked vector width to protect.
+    ``pick_vec_isa`` dry-compiles a probe with the C++ toolchain, so call this
+    only when the artifact can hold native CPU code. A host with no usable
+    compiler records None: it can neither produce nor run an inductor CPU kernel.
     """
     from torch._inductor import config as inductor_config
     from torch._inductor.cpu_vec_isa import pick_vec_isa
@@ -717,8 +753,6 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
 
     return (
         platform.machine(),
-        torch.backends.cpu.get_cpu_capability(),
-        os.environ.get("ATEN_CPU_CAPABILITY"),
         vec_isa,
         inductor_config.cpp.simdlen,
         inductor_config.cpp.march,
@@ -770,9 +804,8 @@ class SystemInfo:
     def current(cls, *, cpu_codegen: bool = True) -> "SystemInfo":
         """Create a SystemInfo instance with current system information.
 
-        ``cpu_codegen=False`` skips the toolchain probe behind
-        ``cpu_codegen_target``; everything else in here costs microseconds. Pass
-        it only where the result cannot reach a comparison that reads the field.
+        ``cpu_codegen=False`` skips the C++ toolchain probe behind
+        ``cpu_codegen_target``.
         """
         from torch.utils._triton import get_triton_version
 
@@ -815,12 +848,8 @@ class SystemInfo:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
             )
-        # None means the artifact predates this field, not "no vector ISA".
-        # Only a build with a stable torch_version reaches here with None at
-        # all -- a dev build embeds the git hash, so the torch_version check
-        # just above fires first -- but for a release build it is every artifact already on
-        # disk, rejected over a target they never recorded. New artifacts always
-        # carry a tuple, so the skip does not widen over time.
+        # A cached None means the artifact predates this field, not "no vector
+        # ISA"; for a release build that is every artifact already on disk.
         if (
             check_codegen
             and device_type == "cpu"
@@ -878,10 +907,8 @@ class _DynamoCacheEntry:
     source_info: SourceInfo
     device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
-    # Every device the capture targeted. device_type keeps the single
-    # collapsed value (an accelerator wins) for BC, but a mixed
-    # cpu+accelerator capture still holds native CPU code, so compatibility
-    # must see the full set. None on artifacts predating the field.
+    # device_type keeps the collapsed accelerator-wins value for BC; a mixed
+    # cpu+accelerator capture still holds native CPU code, so keep the full set.
     device_types: frozenset[str] | None = None
     requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
@@ -893,15 +920,8 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
-        # getattr: an artifact pickled before device_types existed lacks it.
-        device_types = getattr(self, "device_types", None) or frozenset(
-            (self.device_type,)
-        )
-        check_codegen = getattr(self, "requires_native_backend_compatibility", True)
-        # Determining the codegen target runs the C++ toolchain -- seconds on a
-        # cold inductor cache, and a re-raised InvalidCxxCompiler on a host with
-        # no compiler at all -- so only pay for it when this artifact actually
-        # records one to compare against.
+        device_types = self.device_types or frozenset((self.device_type,))
+        check_codegen = self.requires_native_backend_compatibility
         current_system_info = SystemInfo.current(
             cpu_codegen=(
                 check_codegen
@@ -909,9 +929,7 @@ class _DynamoCacheEntry:
                 and self.system_info.cpu_codegen_target is not None
             )
         )
-        # Sorted so "cpu" is checked first: the codegen-target mismatch is the
-        # more specific refusal and must not be masked by a GPU-availability
-        # error from a later device in set order.
+        # cpu first, so a codegen-target refusal is not masked by a GPU error.
         for device_type in sorted(device_types):
             self.system_info.check_compatibility(
                 current_system_info,
@@ -927,9 +945,7 @@ class _DynamoCacheEntry:
             "fn_name": self.fn_name,
             "fn_first_lineno": self.fn_first_lineno,
             "device_type": self.device_type,
-            "device_types": sorted(
-                getattr(self, "device_types", None) or frozenset((self.device_type,))
-            ),
+            "device_types": sorted(self.device_types or frozenset((self.device_type,))),
             "backend_ids": list(self.backend_ids),
         }
 
@@ -968,7 +984,9 @@ class PrecompileCacheEntry:
         cache_entry: _DynamoCacheEntry, backends: dict[_BackendId, Any]
     ) -> Optional["PrecompileCacheEntry"]:
         backend_content: dict[_BackendId, Any] = {}
-
+        # Non-mutating: the entry handed in may be the live one still serving
+        # this process, so a code whose backend is missing is bypassed on a copy.
+        codes: list[_DynamoCodeCacheEntry] = []
         for code in cache_entry.codes:
             for backend_id in code.backend_ids:
                 if backend_id not in backends:
@@ -988,12 +1006,13 @@ class PrecompileCacheEntry:
                         payload_fn=lambda: debug_str,
                         expect_trace_id=False,
                     )
-                    code.bypassed = True
+                    code = dataclasses.replace(code, bypassed=True)
                     break
-                else:
-                    backend_content[backend_id] = backends[backend_id]
+                backend_content[backend_id] = backends[backend_id]
+            codes.append(code)
 
-        return PrecompileCacheEntry(dynamo=cache_entry, backends=backend_content)
+        dynamo = dataclasses.replace(cache_entry, codes=codes)
+        return PrecompileCacheEntry(dynamo=dynamo, backends=backend_content)
 
 
 def _hash_source(source: str) -> str:
@@ -1053,8 +1072,8 @@ def _compile_frame_context(
 # cleanup. The finalize callback can fire from GC at an arbitrary allocation --
 # including under _INSTALLER_REGISTRY_LOCK on this very thread -- so it must
 # never BLOCK on that lock; states it cannot clean immediately are parked here
-# and drained by the next install()/uninstall(). deque.append is atomic, so
-# parking itself needs no lock.
+# and drained by the next install()/uninstall()/_claim_global(). deque.append is
+# atomic, so parking itself needs no lock.
 _DEAD_PACKAGE_GLOBALS: deque[dict[types.ModuleType, list[_InstalledGlobal]]] = deque()
 
 
@@ -1136,9 +1155,9 @@ class CompilePackage:
         fn: Callable[..., Any] | None,
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
+        *,
         serialization_guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]]
         | None = None,
-        *,
         explicit_capture: bool = False,
         requires_native_backend_compatibility: bool = True,
     ) -> None:
@@ -1263,15 +1282,11 @@ class CompilePackage:
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
-            # Restore the complete device coverage and compile-time system
-            # requirements recorded by the artifact. Written last so a failed
-            # load cannot leak them into a cold-cache fallback on this object.
-            self._device_types = set(
-                getattr(dynamo, "device_types", None) or (dynamo.device_type,)
-            )
+            # Written last so a failed load cannot leak into a cold-cache fallback.
+            self._device_types = set(dynamo.device_types or (dynamo.device_type,))
             self._system_info = dynamo.system_info
-            self._requires_native_backend_compatibility = getattr(
-                dynamo, "requires_native_backend_compatibility", True
+            self._requires_native_backend_compatibility = (
+                dynamo.requires_native_backend_compatibility
             )
         else:
             module_name = (
@@ -1405,21 +1420,14 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        # Every device the graph names, not just one: a variant that compiles to
-        # nothing (an exercised branch with no tensor op, which this package
-        # records as a guarded empty variant rather than skipping) names none
-        # and must contribute none, and a graph whose leading placeholder is a
-        # SymInt must not be read as "cpu". Getting either wrong makes a
-        # pure-accelerator capture bake a cpu_codegen_target it has no native
-        # code for, and then refuse to load on a host with a different vector
-        # ISA or no C++ compiler at all.
+        # An empty variant contributes no device, and a SymInt-first graph is not
+        # "cpu": either misread bakes a cpu_codegen_target into a pure-accelerator
+        # capture, which then refuses to load on a host with a different ISA.
         device_types = _graph_device_types(graph)
         if not device_types:
             return
-        # cpu_codegen_target only guards CPU native code and computing it runs
-        # the C++ toolchain, so a capture that never emits any must not pay for
-        # it. A cpu graph arriving after an accelerator-only prefix backfills the
-        # field, so the artifact still records what it was captured against.
+        # Computing cpu_codegen_target runs the C++ toolchain, so only a capture
+        # that emits CPU native code pays for it; a later cpu graph backfills it.
         needs_cpu_codegen = (
             self._requires_native_backend_compatibility and "cpu" in device_types
         )
@@ -1432,13 +1440,9 @@ class CompilePackage:
                     self._system_info, cpu_codegen_target=current.cpu_codegen_target
                 )
             elif self._system_info.cpu_codegen_target != current.cpu_codegen_target:
-                # Never fail the COMPILE over this: the ambient
-                # caching_precompile path runs through here on every user
-                # torch.compile. The mixed-target package is unserviceable, so
-                # refuse_unserializable() refuses it at serialization
-                # boundaries -- and only there: introspection and teardown
-                # still work -- with the ambient recorder downgrading that
-                # refusal to a skipped save.
+                # Never fail the compile: the ambient caching_precompile path
+                # runs through here. refuse_unserializable() refuses the
+                # mixed-target package at serialization boundaries instead.
                 if self._cpu_codegen_target_drift is None:
                     self._cpu_codegen_target_drift = (
                         "CPU codegen target changed during capture: "
@@ -1453,6 +1457,11 @@ class CompilePackage:
 
     def has_current_entry(self) -> bool:
         return self._current_entry is not None
+
+    def current_entry(self) -> _DynamoCodeCacheEntry:
+        if self._current_entry is None:
+            raise AssertionError("_current_entry is not set in current_entry")
+        return self._current_entry
 
     def mark_current_entry_truncated(self) -> None:
         """
@@ -1576,6 +1585,7 @@ class CompilePackage:
         self._claim_global(module, name, value)
 
     def _claim_global(self, module: types.ModuleType, name: str, value: Any) -> None:
+        _cleanup_dead_package_globals(blocking=True)
         self._installed_globals.setdefault(module, []).append(
             _InstalledGlobal(name, value)
         )
@@ -2021,6 +2031,8 @@ class CompilePackage:
             self._installed_precompile_region_id,
             self._install_owner,
         )
+        # Not at interpreter exit: module dicts and the frame cache are torn down.
+        self._uninstall_finalizer.atexit = False
 
     def code_entries(self) -> Iterable["_DynamoCodeCacheEntry"]:
         """The per-frame entries, for a caller that edits them before they are
@@ -2335,7 +2347,7 @@ class DiskDynamoCache(DiskDynamoStore):
         return None
 
     def load_and_install_package(
-        self, fn: Callable[..., Any], isolate_recompiles_id: int = -1
+        self, fn: Callable[..., Any], *, isolate_recompiles_id: int = -1
     ) -> CompilePackage | None:
         """
         Load directly into a package and install backends.

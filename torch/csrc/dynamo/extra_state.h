@@ -154,7 +154,7 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   ExtraState(PyCodeObject* orig_code_arg);
   std::list<CacheEntry>& cache_entry_list(int64_t isolate_recompiles_id);
   bool has_any_cache_entries() const;
-  bool has_relevant_entries(int64_t isolate_recompiles_id) const;
+  bool has_relevant_entries(int64_t isolate_recompiles_id);
   void move_to_front(CacheEntry* cache_entry, std::list<CacheEntry>& entries);
   void move_to_back(CacheEntry* cache_entry);
   // live_guard_manager is the wrapper that OWNS cache_entry (CacheEntry's own
@@ -164,11 +164,13 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
       CacheEntry* cache_entry,
       py::object deleted_guard_manager,
       py::object live_guard_manager);
-  // The identity-search body of invalidate. Caller must hold cache_mutex.
+  // The identity-search body of invalidate. Caller must hold cache_mutex at
+  // cache_python_depth zero: this relinks the entry's list.
   void invalidate_locked(
       const py::object& deleted_guard_manager,
       const py::object& live_guard_manager);
-  // Apply invalidations parked while cache_mutex was contended. Caller must
+  // Apply invalidations parked while cache_mutex was contended. No-op unless
+  // cache_python_depth is zero, as for apply_pending_evictions. Caller must
   // hold cache_mutex (and must NOT hold pending_invalidation_mutex).
   void drain_pending_invalidations();
   // Park an eviction for the next depth-zero cache_mutex holder.
@@ -353,12 +355,15 @@ PyObject* lookup_optional(py::handle handle, PyObject* name);
 // Lookup the cache held by extra_state. Only called from C++ (the frame
 // evaluator), so it lives outside the extern "C" block: trace_annotation is
 // copied out under the cache lock into the caller's std::string, because the
-// entry that owns the original may be destroyed as soon as this returns.
+// entry that owns the original may be destroyed as soon as this returns. The
+// code object is handed back as a NEW reference for the same reason: the entry
+// that owns it can be evicted the moment the cache lock drops.
 // Ownership contract
 // args
 //  - extra_state: Borrowed
 // return:
-//   - Py_None or PyCodeObject: Borrowed reference.
+//   - Py_None or PyCodeObject: New reference; caller owns. nullptr on a guard
+//     error.
 void lookup(
     ExtraState* extra_state,
     FrameLocalsMapping* f_locals,
@@ -370,7 +375,8 @@ void lookup(
 
 // Try to resolve a cache lookup without materializing frame locals or running
 // guard managers. Returns true when the lookup is complete (hit or miss), and
-// false when the caller must fall back to lookup().
+// false when the caller must fall back to lookup(). On true, *maybe_cached_code
+// is a NEW reference the caller owns (as for lookup()); on false, untouched.
 bool try_lookup_without_guard_eval(
     ExtraState* extra_state,
     PyObject* backend,
@@ -385,6 +391,9 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj);
 // Returns the list of CacheEntry for a given isolate_recompiles_id bucket.
 // Warning: returns references whose lifetimes are controlled by C++
 py::list _get_cache_entries_for_region(
+    const py::handle& code_obj,
+    int64_t isolate_recompiles_id);
+size_t _get_cache_entry_count_for_region(
     const py::handle& code_obj,
     int64_t isolate_recompiles_id);
 void _clear_cache_entries_for_region(
