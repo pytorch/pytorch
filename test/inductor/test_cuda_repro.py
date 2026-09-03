@@ -2990,7 +2990,22 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
     @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
-    @parametrize("k, width", [(2, 33), (3, 65), (6, 17), (8, 65), (16, 17), (16, 16)])
+    @parametrize(
+        "k, width",
+        [
+            (2, 33),
+            (3, 65),
+            (6, 17),
+            (8, 65),
+            (16, 17),
+            (16, 16),
+            (2, 512),
+            (52, 256),
+            (4, 4096),
+            (64, 1000),
+            (2, 12000),
+        ],
+    )
     @parametrize("largest", [True, False])
     def test_topk_fusible_ir_dtypes_and_k(self, dtype, k, width, largest):
         def f(x):
@@ -3066,9 +3081,10 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     @parametrize(
         "name, shape, k, dim",
         [
-            ("k_too_large", (128, 33), 17, -1),
+            ("k_too_large", (128, 256), 129, -1),
+            ("too_much_work", (256, 4096), 32, -1),
             ("k_one", (128, 33), 1, -1),
-            ("wide_input", (128, 257), 4, -1),
+            ("wide_input", (128, 16385), 4, -1),
             ("non_last_dim", (33, 128), 4, 0),
         ],
         name_fn=lambda name, shape, k, dim: name,
