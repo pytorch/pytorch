@@ -197,9 +197,11 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.14
     CLANG_VERSION=21
     ;;
-  pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
+  pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3 | pytorch-linux-noble-rocm-n-py3.11)
     if [[ $tag =~ "jammy" ]]; then
       ANACONDA_PYTHON_VERSION=3.10
+    elif [[ $tag =~ "py3.11" ]]; then
+      ANACONDA_PYTHON_VERSION=3.11
     else
       ANACONDA_PYTHON_VERSION=3.12
     fi
