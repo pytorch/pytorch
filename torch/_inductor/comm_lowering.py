@@ -408,6 +408,11 @@ def register_comm_lowerings():
         ir._WaitKernel.create_wait(c10d.wait_tensor.default, inp)
         return inp
 
+    @register_comm_lowering(c10d.wait_tensors)
+    def _wait_tensors(inputs):
+        ir._WaitKernel.create_wait(c10d.wait_tensors.default, inputs)
+        return inputs
+
     @register_comm_lowering(c10d.isend)  # type: ignore[misc]
     def _isend(inp, dst, tag, group_name):
         inp = ir.ExternKernel.require_contiguous(inp)
