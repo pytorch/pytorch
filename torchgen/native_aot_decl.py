@@ -75,10 +75,34 @@ _OPTIONAL_FNS = {
     "cpp_covers": 0,
 }
 
+# Every sm spelling this tooling can parse and target. export checks an explicit
+# --arch against it before touching the disk, so a typo bails out naming the set
+# instead of matching no declaration and exporting nothing at exit 0. Deliberately
+# WIDER than EXPORTABLE_ARCHES below: an explicit --arch is how a hand run targets
+# something the release wheels do not.
+KNOWN_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a", "sm_103", "sm_103a")
+
+# Which of them the STANDARD build ships: the TORCH_CUDA_ARCH_LIST entries eligible
+# on the automatic export path, which an explicit --arch bypasses. Both spellings of
+# a capability are listed because they are distinct nvcc targets for the same
+# hardware -- "10.0a" (needed by tcgen05/wgmma) in b200-native-aot.yml, plain "10.0"
+# in the manywheel lists -- and omitting either silently exports nothing there. Each
+# entry also costs another full set of compiled kernels in every wheel naming it, and
+# makes the DSL runtimes mandatory on a builder with that GPU. sm_103 stays out: no
+# arch list we see names 10.3.
+EXPORTABLE_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a")
+if not set(EXPORTABLE_ARCHES) <= set(KNOWN_ARCHES):
+    raise AssertionError(
+        f"EXPORTABLE_ARCHES names arches this tooling cannot target: "
+        f"{sorted(set(EXPORTABLE_ARCHES) - set(KNOWN_ARCHES))}"
+    )
+
 # Default ARCHS: every current kernel requires sm90+ features (TMA,
 # clusters, cp.async.bulk); Blackwell variants included. Declarations
 # override to narrow (e.g. a Blackwell-only kernel pins ("sm_100a",)).
-_DEFAULT_ARCHS = ("sm_90", "sm_90a", "sm_100", "sm_100a", "sm_103", "sm_103a")
+# The same tuple as KNOWN_ARCHES today, named separately because "the tooling can
+# target this arch" is not "every declaration's kernels work on it".
+_DEFAULT_ARCHS = KNOWN_ARCHES
 
 _SM_RE = r"sm_\d+a?"
 
