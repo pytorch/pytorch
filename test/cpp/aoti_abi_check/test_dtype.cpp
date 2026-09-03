@@ -137,11 +137,11 @@ TEST(TestDtype, TestComplexFloat) {
 }
 
 TEST(TestDtype, TestComplexTranscendentals) {
-  using cf = torch::headeronly::complex<float>;
-  const cf value(1.0f, 0.5f);
+  using ho_complex_f = torch::headeronly::complex<float>;
+  const ho_complex_f value(1.0f, 0.5f);
   const std::complex<float> reference(1.0f, 0.5f);
 
-  const auto expect_near = [](const cf& actual,
+  const auto expect_near = [](const ho_complex_f& actual,
                               const std::complex<float>& expected) {
     EXPECT_NEAR(actual.real(), expected.real(), 1e-5f);
     EXPECT_NEAR(actual.imag(), expected.imag(), 1e-5f);

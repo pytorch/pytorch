@@ -709,18 +709,18 @@ constexpr T norm(const c10::complex<T>& z) {
 //   constexpr std::complex<double> conj( DoubleOrInteger z );
 //   constexpr std::complex<long double> conj( long double z );
 // These are not implemented
-// TODO(@zasdfgbnm): implement them as conj
+// TODO(@zasdfgbnm): implement them as c10::conj
 template <typename T>
 constexpr c10::complex<T> conj(const c10::complex<T>& z) {
   return c10::complex<T>(z.real(), -z.imag());
 }
 
 // Thrust does not have complex --> complex version of thrust::proj,
-// so this function is not implemented right now.
+// so this function is not implemented at c10 right now.
 // TODO(@zasdfgbnm): implement it by ourselves
 
-// There is no version of std::polar for this type, because std::polar always
-// returns std::complex. Use polar instead;
+// There is no c10 version of std::polar, because std::polar always
+// returns std::complex. Use c10::polar instead;
 
 } // namespace std
 
@@ -734,6 +734,6 @@ C10_CLANG_DIAGNOSTIC_POP()
 #undef C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H
 
 namespace c10 {
-using ::torch::headeronly::is_complex;
-using ::torch::headeronly::scalar_value_type;
+using torch::headeronly::is_complex;
+using torch::headeronly::scalar_value_type;
 } // namespace c10
