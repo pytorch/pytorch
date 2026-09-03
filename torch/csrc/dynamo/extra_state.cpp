@@ -97,11 +97,6 @@ std::list<CacheEntry>& ExtraState::cache_entry_list(
   return this->cache_entry_map[isolate_recompiles_id];
 }
 
-bool ExtraState::has_any_cache_entries() const {
-  CacheLock lock(this->cache_mutex);
-  return this->total_cache_entry_count > 0;
-}
-
 bool ExtraState::has_relevant_entries(int64_t isolate_recompiles_id) {
   // Reaped nodes die AFTER the lock releases (locals declared before it).
   std::list<PrecompileEntry> reaped_precompile;
@@ -254,14 +249,8 @@ void ExtraState::apply_pending_evictions(
 }
 
 void ExtraState::invalidate(
-    CacheEntry* cache_entry,
     py::object deleted_guard_manager,
     py::object live_guard_manager) {
-  // cache_entry arrives as a non-owning raw pointer, read off the guard
-  // manager before any lock was taken (CheckFunctionManager.invalidate);
-  // another thread can destroy it at any point, so it is never dereferenced
-  // -- the live entry is re-located by guard manager identity instead.
-  (void)cache_entry;
   // Sometimes setting the cache_entry->code to None causes the orig_code to be
   // freed. This calls destroy_extra_state, which deletes the extra_state and
   // all the cache_entries. This causes the `this` pointer to be a dangling
@@ -307,7 +296,9 @@ void ExtraState::clear_in_place() {
   std::unordered_map<int64_t, std::list<CacheEntry>> dead_cache_entries;
   std::vector<std::pair<py::object, py::object>> dead_pending;
   std::vector<PendingEviction> dead_evictions;
-  py::dict dead_frame_state;
+  // py::object, not py::dict: a py::dict local would allocate a dict that the
+  // move-assign below then frees under region_frame_state_mutex.
+  py::object dead_frame_state;
   std::unordered_map<int64_t, py::dict> dead_region_frame_state;
   {
     CacheLock lock(this->cache_mutex);
@@ -339,21 +330,24 @@ void ExtraState::clear_in_place() {
     dead_pending.swap(this->pending_invalidations);
     this->has_pending_invalidations.store(false, std::memory_order_release);
   }
-  // frame_state itself is only touched under the GIL (see
-  // extract_frame_state), which the caller holds. The fresh dict is built
-  // BEFORE the member moves: PyDict_New can trigger a gen-0 collection whose
-  // finalizers run arbitrary Python (or drop the GIL), and in that window
-  // extract_frame_state would Py_INCREF a moved-from null pointer.
+  // The fresh dict is built BEFORE the lock and BEFORE the member moves:
+  // PyDict_New can trigger a gen-0 collection whose finalizers run arbitrary
+  // Python (or drop the GIL), which under the plain mutex would deadlock and
+  // which must not observe a moved-from null frame_state. The move itself is
+  // under region_frame_state_mutex because extract_frame_state's read may run
+  // concurrently on a free-threaded build; nothing under the lock touches
+  // Python (the moves only shuffle pointers, and the old dict dies after).
   py::dict fresh_frame_state;
-  dead_frame_state = std::move(this->frame_state);
-  this->frame_state = std::move(fresh_frame_state);
   {
     std::lock_guard<std::mutex> lock(this->region_frame_state_mutex);
+    dead_frame_state = std::move(this->frame_state);
+    this->frame_state = std::move(fresh_frame_state);
     dead_region_frame_state.swap(this->region_frame_state_map);
   }
   {
     std::lock_guard<std::mutex> lock(this->strategy_mutex);
-    this->strategy = FrameExecStrategy{DEFAULT, DEFAULT};
+    this->strategy.store(
+        FrameExecStrategy{DEFAULT, DEFAULT}, std::memory_order_release);
     // A fresh token, NOT zero: zero is what get_exec_strategy_token returns
     // for a never-written state, so resetting to it would let a holder of
     // that pre-write token win compare_and_set after an intervening write
@@ -397,6 +391,9 @@ FrameState* extract_frame_state(
   }
   PyObject* frame_state = nullptr;
   if (isolate_recompiles_id < 0) {
+    // Same mutex as the region map below: clear_in_place moves this dict out
+    // under it, and this module runs without the GIL on free-threaded builds.
+    std::lock_guard<std::mutex> lock(extra_state->region_frame_state_mutex);
     frame_state = extra_state->frame_state.ptr();
     Py_INCREF(frame_state);
   } else {
@@ -425,22 +422,24 @@ FrameState* extract_frame_state(
 }
 
 FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state) {
-  std::lock_guard<std::mutex> lock(extra_state->strategy_mutex);
-  return extra_state->strategy;
+  return extra_state->strategy.load(std::memory_order_acquire);
 }
 
 uint64_t extra_state_get_exec_strategy_token(
     ExtraState* extra_state,
     FrameExecStrategy* strategy) {
+  // Under the mutex so the strategy and its generation are read as one write.
   std::lock_guard<std::mutex> lock(extra_state->strategy_mutex);
-  *strategy = extra_state->strategy;
+  *strategy = extra_state->strategy.load(std::memory_order_acquire);
   return extra_state->strategy_generation;
 }
 
+// Caller must hold strategy_mutex: writers serialize on it, and the
+// generation must move together with the strategy for compare_and_set.
 static void set_exec_strategy_unlocked(
     ExtraState* extra_state,
     FrameExecStrategy strategy) {
-  extra_state->strategy = strategy;
+  extra_state->strategy.store(strategy, std::memory_order_release);
   extra_state->strategy_generation = next_generation();
 }
 
@@ -456,7 +455,7 @@ uint64_t extra_state_set_exec_strategy_with_token(
     FrameExecStrategy strategy,
     FrameExecStrategy* prior_strategy) {
   std::lock_guard<std::mutex> lock(extra_state->strategy_mutex);
-  *prior_strategy = extra_state->strategy;
+  *prior_strategy = extra_state->strategy.load(std::memory_order_acquire);
   set_exec_strategy_unlocked(extra_state, strategy);
   return extra_state->strategy_generation;
 }
@@ -476,10 +475,12 @@ bool extra_state_compare_and_set_exec_strategy(
 FrameExecStrategy extra_state_get_region_exec_strategy(
     ExtraState* extra_state,
     int64_t isolate_recompiles_id) {
-  std::lock_guard<std::mutex> lock(extra_state->strategy_mutex);
+  // The default region is every frame that never entered an isolated compile,
+  // so this read is the per-frame hot path and takes no lock.
   if (isolate_recompiles_id < 0) {
-    return extra_state->strategy;
+    return extra_state->strategy.load(std::memory_order_acquire);
   }
+  std::lock_guard<std::mutex> lock(extra_state->strategy_mutex);
   auto it = extra_state->region_strategy_map.find(isolate_recompiles_id);
   if (it != extra_state->region_strategy_map.end()) {
     return it->second;
@@ -489,7 +490,8 @@ FrameExecStrategy extra_state_get_region_exec_strategy(
   // plumbing / TorchScript __init__ / etc.) but do NOT inherit
   // RUN_ONLY, which can only come from a prior non-isolated
   // recompile-limit hit and would otherwise poison every new region.
-  FrameExecStrategy global = extra_state->strategy;
+  FrameExecStrategy global =
+      extra_state->strategy.load(std::memory_order_acquire);
   FrameExecStrategy result{DEFAULT, DEFAULT};
   if (global.cur_action == FrameAction::SKIP) {
     result.cur_action = FrameAction::SKIP;
@@ -696,8 +698,12 @@ void lookup(
   for (int i = 0; i < num_ids && found == nullptr; i++) {
     auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
     if (it != extra_state->cache_entry_map.end()) {
+      // Bound BEFORE the guards run: their Python can re-enter this state and
+      // create_cache_entry into the map, and a rehash invalidates `it` but not
+      // a reference to its mapped list.
+      std::list<CacheEntry>& entries = it->second;
       found = lookup_in_list(
-          it->second,
+          entries,
           f_locals,
           backend,
           is_skip_guard_eval_unsafe,
@@ -707,7 +713,7 @@ void lookup(
         return;
       }
       if (found) {
-        found_list = &it->second;
+        found_list = &entries;
       }
     }
   }
@@ -769,12 +775,14 @@ bool try_lookup_without_guard_eval(
   for (int i = 0; i < num_ids && found == nullptr; i++) {
     auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
     if (it != extra_state->cache_entry_map.end()) {
+      // Same rule as lookup(): backend __eq__ can rehash the map under `it`.
+      std::list<CacheEntry>& entries = it->second;
       if (!try_lookup_without_guard_eval_in_list(
-              it->second, backend, is_skip_guard_eval_unsafe, &found)) {
+              entries, backend, is_skip_guard_eval_unsafe, &found)) {
         return false;
       }
       if (found) {
-        found_list = &it->second;
+        found_list = &entries;
       }
     }
   }

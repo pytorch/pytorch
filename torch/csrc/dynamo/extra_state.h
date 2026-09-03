@@ -87,7 +87,7 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // All cache entries live in this map — there is no separate default list.
   std::unordered_map<int64_t, std::list<CacheEntry>> cache_entry_map;
   // Total cache entries across all compile scopes (for O(1)
-  // has_any_cache_entries)
+  // _get_total_cache_entry_count)
   size_t total_cache_entry_count{0};
   mutable std::recursive_mutex cache_mutex;
   // Frame state to detect dynamic shape dims in the default compile scope.
@@ -95,12 +95,20 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // Isolated compile scopes must not teach the default scope which dimensions
   // to generalize.
   std::unordered_map<int64_t, py::dict> region_frame_state_map;
+  // Guards frame_state and region_frame_state_map alike: the module runs
+  // without the GIL on free-threaded builds, so the default dict's move in
+  // clear_in_place and its read in extract_frame_state need the same exclusion
+  // the region map already has.
   std::mutex region_frame_state_mutex;
   // Actions to apply to all frames with this code object (non-isolated).
-  // Read on every intercepted frame, so the mutex guarding it is per-ExtraState
-  // rather than process-wide: two threads running different functions must not
-  // serialize against each other here.
-  FrameExecStrategy strategy{DEFAULT, DEFAULT};
+  // Read on every intercepted frame, so the default-region read is a lock-free
+  // atomic load: an 8-byte trivially-copyable struct, lock-free on every
+  // platform PyTorch builds for (static_assert below). Written only under
+  // strategy_mutex, which also covers strategy_generation and
+  // region_strategy_map, so compare_and_set still moves strategy and
+  // generation together.
+  std::atomic<FrameExecStrategy> strategy{FrameExecStrategy{DEFAULT, DEFAULT}};
+  static_assert(std::atomic<FrameExecStrategy>::is_always_lock_free);
   std::mutex strategy_mutex;
   // Monotonic token for the last global strategy write. Tokens come from a
   // process-wide counter, so resetting a code object's ExtraState cannot make
@@ -153,15 +161,13 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
 
   ExtraState(PyCodeObject* orig_code_arg);
   std::list<CacheEntry>& cache_entry_list(int64_t isolate_recompiles_id);
-  bool has_any_cache_entries() const;
   bool has_relevant_entries(int64_t isolate_recompiles_id);
   void move_to_front(CacheEntry* cache_entry, std::list<CacheEntry>& entries);
   void move_to_back(CacheEntry* cache_entry);
-  // live_guard_manager is the wrapper that OWNS cache_entry (CacheEntry's own
-  // guard_manager). It is what establishes, under the lock, that the raw
-  // cache_entry read before the lock is still the entry it was.
+  // live_guard_manager is the wrapper that OWNS the entry to invalidate
+  // (CacheEntry's own guard_manager); the entry is re-located by its identity
+  // under the lock, never by an address read before the lock.
   void invalidate(
-      CacheEntry* cache_entry,
       py::object deleted_guard_manager,
       py::object live_guard_manager);
   // The identity-search body of invalidate. Caller must hold cache_mutex at
