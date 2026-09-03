@@ -2226,7 +2226,7 @@ class TestForeachMMDevice(_TestForeachMMHelper, TestCase):
         self._check(shapes, dtype, device)
 
 
-instantiate_device_type_tests(TestForeachMMDevice, globals())
+instantiate_device_type_tests(TestForeachMMDevice, globals(), allow_xpu=True)
 
 
 class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
