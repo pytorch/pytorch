@@ -218,7 +218,7 @@ class TestFSDPWrap(FSDPTestContinuous):
             nested=nested, device_init_mode=device_init_mode
         )
         if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-            wrapped_fsdp = wrapped_fsdp.to(device=device)
+            wrapped_fsdp = wrapped_fsdp.to(device=torch.device(device).type)
 
         wrapped_module_name = "lin1.1" if nested else "lin1"
         with self.assertRaisesRegex(
@@ -339,6 +339,7 @@ class TestFSDPWrap(FSDPTestContinuous):
             # they don't work together, expected
             return
 
+        device_type = torch.device(device).type
         move_to_device = device_init_mode == DEVICEInitMode.DEVICE_BEFORE
 
         class Nested(nn.Module):
@@ -374,7 +375,7 @@ class TestFSDPWrap(FSDPTestContinuous):
             forward_prefetch=forward_prefetch,
         )
         if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-            wrapped_model = wrapped_model.to(device=device)
+            wrapped_model = wrapped_model.to(device=device_type)
 
         modules_in_fsdp_graph_order = [
             wrapped_model.module.lin1,
@@ -393,7 +394,7 @@ class TestFSDPWrap(FSDPTestContinuous):
 
         # Run model a few times for sanity check.
         optim = torch.optim.SGD(wrapped_model.parameters(), lr=1e-2, momentum=0.9)
-        inp = torch.ones(1).to(device=device)
+        inp = torch.ones(1).to(device=device_type)
         for _ in range(6):
             optim.zero_grad()
             loss = wrapped_model(inp).sum()
@@ -481,7 +482,7 @@ class TestAutoWrap(TestCase):
         Test to ensure that if `always_wrap_policy` is
         passed into FSDP, all submodules are wrapped.
         """
-        seq = NestedSequentialModel.get_model(device=device)
+        seq = NestedSequentialModel.get_model(device=torch.device(device).type)
         model = FSDP(
             seq, process_group=self.process_group, auto_wrap_policy=always_wrap_policy
         )
@@ -777,9 +778,10 @@ class TestAutoWrap(TestCase):
         ):
             return
 
+        device_type = torch.device(device).type
         torch.accelerator.set_device_index(0)
         device_id = (
-            torch.device(device, torch.accelerator.current_device_index())
+            torch.device(device_type, torch.accelerator.current_device_index())
             if use_device_id
             else None
         )
@@ -791,7 +793,7 @@ class TestAutoWrap(TestCase):
         with tempfile.NamedTemporaryFile(delete=False) as f:
             file_name = f.name
             torch.distributed.init_process_group(
-                backend=torch.distributed.get_default_backend_for_device(device),
+                backend=torch.distributed.get_default_backend_for_device(device_type),
                 init_method=f"{FILE_SCHEMA}_{file_name}",
                 rank=0,
                 world_size=1,
@@ -802,7 +804,7 @@ class TestAutoWrap(TestCase):
         device_after_init = device_init_mode == DEVICEInitMode.DEVICE_AFTER
         try:
             sequential = NestedSequentialModel.get_model(
-                device=None if device_after_init else device
+                device=None if device_after_init else device_type
             )
             my_auto_wrap_policy = functools.partial(
                 size_based_auto_wrap_policy, min_num_params=40
@@ -815,8 +817,8 @@ class TestAutoWrap(TestCase):
             )
             NestedSequentialModel.verify_model(self, model)
             if device_after_init:
-                model = model.to(device=device)
-            input = torch.rand((1, 5), dtype=torch.float).to(device)
+                model = model.to(device=device_type)
+            input = torch.rand((1, 5), dtype=torch.float).to(device_type)
             output = model(input)
             loss = F.mse_loss(input, output)
             loss.backward()
@@ -922,10 +924,10 @@ class TestAutoWrap(TestCase):
                 lambda_wrap_policy_nonuniform,
             ],
         ):
-            self._test_frozen_params(device, use_orig_params, policy)
+            self._test_frozen_params(torch.device(device).type, use_orig_params, policy)
 
-    def _test_frozen_params(self, device, use_orig_params: bool, policy: _Policy):
-        model = LoraModel().to(device=device)
+    def _test_frozen_params(self, device_type, use_orig_params: bool, policy: _Policy):
+        model = LoraModel().to(device=device_type)
         msg = "layers.0.attn has both parameters with requires_grad=True and False. "
         if use_orig_params:
             msg += "We do not recommend wrapping such modules"
