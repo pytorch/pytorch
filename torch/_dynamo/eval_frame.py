@@ -980,12 +980,15 @@ class _TorchDynamoContext:
             return staticmethod(self(fn.__func__))
 
         if inspect.isclass(fn):
-            # User has wrapped the class with compile/disable decorator. Apply
-            # to __init__/__call__. Must run before the caching_precompile block
-            # below, which would otherwise access fn.__code__ on the class and
-            # raise AttributeError at decoration time.
+            # User has wrapped the class with a compile decorator. Apply to
+            # __call__. Must run before the caching_precompile block below,
+            # which would otherwise access fn.__code__ on the class and raise
+            # AttributeError at decoration time.
             cls_obj = fn
-            cls_obj.__call__ = self(cls_obj.__call__)
+            call = cls_obj.__call__
+            if config.caching_precompile and not hasattr(call, "__code__"):
+                call = external_utils.wrap_inline(call)
+            cls_obj.__call__ = self(call)
             if issubclass(cls_obj, torch.nn.Module):
                 # NN module variable tracker directly inlines the _call_impl.
                 cls_obj._call_impl = self(cls_obj._call_impl)

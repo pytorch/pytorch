@@ -28,6 +28,10 @@ def my_custom_function(x):
     return x + 1
 
 
+class CodelessCallPartial(functools.partial):
+    pass
+
+
 class DecoratorTests(PytreeRegisteringTestCase):
     def test_disallow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1506,6 +1510,9 @@ class DecoratorTests(PytreeRegisteringTestCase):
         expected = x.sin()
         self.assertEqual(Foo()(x), expected)
         self.assertEqual(cnt.frame_count, 1)
+
+        CompiledPartial = torch.compile(backend="eager")(CodelessCallPartial)
+        self.assertEqual(CompiledPartial(torch.sin)(x), expected)
 
     def test_class_methods(self):
         class A:
