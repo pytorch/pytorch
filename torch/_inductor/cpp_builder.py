@@ -886,10 +886,7 @@ class BuildOptionsBase:
         return self._preprocessing
 
     def save_flags_to_json(self, file: str) -> None:
-        # use_relative_path describes the environment doing a build, not a
-        # property of this one, so a loader always re-supplies it and it must
-        # not round-trip here (else BuildOptionsBase(**loaded, use_relative_path=x)
-        # collides on the key).
+        # use_relative_path is environment-supplied; see load_flags_from_json.
         attrs = {
             "compiler": self.get_compiler(),
             "definitions": self.get_definitions(),
@@ -905,6 +902,15 @@ class BuildOptionsBase:
 
         with open(file, "w") as f:
             json.dump(attrs, f)
+
+    @classmethod
+    def load_flags_from_json(
+        cls, file: str, use_relative_path: bool
+    ) -> "BuildOptionsBase":
+        with open(file) as f:
+            flags = json.load(f)
+        flags.pop("use_relative_path", None)  # written by torch <= 2.x
+        return cls(**flags, use_relative_path=use_relative_path)
 
 
 def _get_warning_all_cflag(warning_all: bool = True) -> list[str]:

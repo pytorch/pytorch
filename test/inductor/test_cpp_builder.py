@@ -59,13 +59,7 @@ class TestCppBuilder(TestCase):
         self.assertEqual(libraries, [])
         self.assertEqual(passthrough, [])
 
-
-class TestBuildFlagsRoundTrip(TestCase):
-    def test_saved_flags_omit_use_relative_path(self) -> None:
-        # use_relative_path describes the environment doing a build, not a
-        # recorded flag; a loader always re-supplies it, so it must never be
-        # among the saved keys or BuildOptionsBase(**loaded, use_relative_path=x)
-        # collides on the key.
+    def test_load_flags_from_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = os.path.join(tmp_dir, "flags.json")
             BuildOptionsBase(compiler="g++", use_relative_path=True).save_flags_to_json(
@@ -73,10 +67,18 @@ class TestBuildFlagsRoundTrip(TestCase):
             )
             with open(path) as f:
                 flags = json.load(f)
+            self.assertNotIn("use_relative_path", flags)
 
-        self.assertNotIn("use_relative_path", flags)
-        options = BuildOptionsBase(**flags, use_relative_path=False)
+            # Legacy on-disk JSON (torch <= 2.x) still has the key; must not collide.
+            flags["use_relative_path"] = True
+            with open(path, "w") as f:
+                json.dump(flags, f)
+
+            options = BuildOptionsBase.load_flags_from_json(
+                path, use_relative_path=False
+            )
         self.assertEqual(options.get_compiler(), "g++")
+        self.assertFalse(options.get_use_relative_path())
 
 
 if __name__ == "__main__":
