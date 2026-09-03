@@ -4347,6 +4347,38 @@ class TestCiAndCMakeWiring(unittest.TestCase):
                 self.assertIn(in_contributing, contributing)
 
 
+class TestStageTwoRefusesAnImportTimeRebuild(unittest.TestCase):
+    """scikit-build-core's editable.rebuild rebuilds torch on import."""
+
+    class ScikitBuildRedirectingFinder:
+        rebuild_flag = True
+
+    def test_the_installed_finder_is_read_for_the_rebuild_flag(self):
+        with mock.patch.object(
+            build_stage2.sys, "meta_path", [self.ScikitBuildRedirectingFinder()]
+        ):
+            self.assertIsNotNone(build_stage2._editable_rebuild_finder())
+            with self.assertRaisesRegex(RuntimeError, "editable.rebuild"):
+                build_stage2.main([])
+
+    def test_a_finder_without_the_flag_is_left_alone(self):
+        finder = self.ScikitBuildRedirectingFinder()
+        finder.rebuild_flag = False
+        with mock.patch.object(build_stage2.sys, "meta_path", [finder]):
+            self.assertIsNone(build_stage2._editable_rebuild_finder())
+
+    def test_the_opt_out_still_wins(self):
+        # Ordered like every other refusal: TORCH_NATIVE_AOT=0 exempts it.
+        with (
+            mock.patch.object(
+                build_stage2.sys, "meta_path", [self.ScikitBuildRedirectingFinder()]
+            ),
+            mock.patch.dict(os.environ, {"TORCH_NATIVE_AOT": "0"}),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(build_stage2.main([]), 0)
+
+
 class TestStageTwoArgvContract(unittest.TestCase):
     """What main() passes to its two children, and the invariant that ties them:
     a tree export creates must be one generation was told about."""
