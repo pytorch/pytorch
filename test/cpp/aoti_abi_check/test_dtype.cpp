@@ -141,8 +141,8 @@ TEST(TestDtype, TestComplexTranscendentals) {
   const cf value(1.0f, 0.5f);
   const std::complex<float> reference(1.0f, 0.5f);
 
-  const auto expect_near =
-      [](const cf& actual, const std::complex<float>& expected) {
+  const auto expect_near = [](const cf& actual,
+                              const std::complex<float>& expected) {
     EXPECT_NEAR(actual.real(), expected.real(), 1e-5f);
     EXPECT_NEAR(actual.imag(), expected.imag(), 1e-5f);
   };
