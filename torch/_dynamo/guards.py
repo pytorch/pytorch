@@ -4343,10 +4343,17 @@ def _rebuild_type_stand_in(cls: type, device: torch.device) -> Any:
     A Generator's or a Stream's state cannot be serialized, but a TYPE_MATCH
     needs the type alone, so the artifact carries type and device and builds a
     new object at load. For a stream this ALLOCATES a stream on that device at
-    load; for a CUDA device on a machine without CUDA the constructor raises,
-    so the load fails here rather than rebuilding a guard against a wrong type.
+    load; for a device this host lacks (no CUDA, an ordinal past its GPUs) the
+    constructor raises, so the load fails here -- as a PackageError naming the
+    type and device -- rather than rebuilding a guard against a wrong type.
     """
-    return cls(device=device)
+    try:
+        return cls(device=device)
+    except Exception as e:
+        raise torch._dynamo.exc.PackageError(
+            f"the artifact was captured with a {cls.__module__}.{cls.__qualname__} "
+            f"on {device} that this host cannot create: {e}"
+        ) from e
 
 
 # The sinks of every precompile capture currently recording, each receiving the
@@ -4414,10 +4421,8 @@ def _companion_attribute_guards(
 
 
 @contextlib.contextmanager
-def record_live_guard_leaves(
-    sink: set[tuple[str, str]] | None = None,
-) -> Generator[set[tuple[str, str]], None, None]:
-    leaves: set[tuple[str, str]] = set() if sink is None else sink
+def record_live_guard_leaves() -> Generator[set[tuple[str, str]], None, None]:
+    leaves: set[tuple[str, str]] = set()
     with _LIVE_LEAF_SINKS_LOCK:
         _LIVE_LEAF_SINKS.append(leaves)
     try:
@@ -4510,11 +4515,25 @@ def _builds_its_own_pickle(cls: type) -> bool:
     of merely losing an attribute nobody guards. The same holds for a
     __setstate__ that reads a pruned field out of the default state, and for a
     __getnewargs__ that feeds one to a validating __new__.
+
+    Not, however, for the __getnewargs__ a tuple carries: tuple's own and the
+    one collections.namedtuple generates return the ITEMS, which live outside
+    __dict__ and so are never pruned. A namedtuple subclass with __dict__
+    extras is pruned like any other user object. The generated one is a fresh
+    function per namedtuple class, so it is known by where it was defined.
     """
-    return any(
-        getattr(cls, name, None) is not getattr(object, name, None)
-        for name in _PICKLE_PROTOCOL_HOOKS
-    )
+    for name in _PICKLE_PROTOCOL_HOOKS:
+        hook = getattr(cls, name, None)
+        if hook is getattr(object, name, None) or hook is getattr(tuple, name, None):
+            continue
+        if (
+            name == "__getnewargs__"
+            and issubclass(cls, tuple)
+            and getattr(hook, "__module__", None) == "collections"
+        ):
+            continue
+        return True
+    return False
 
 
 class GuardsStatePickler(pickle.Pickler):
@@ -5427,7 +5446,7 @@ def _type_stand_in_values(
     reads: dict[int, set[str]] = {}
     for guard in guards:
         source: Source | None = guard.originating_source
-        if source is None or not guard.name:
+        if not guard.name:
             continue
         child: Source | None = None
         while source is not None:
@@ -6498,7 +6517,6 @@ def strip_local_scope(s: str) -> str:
 
     This is to generate user friendly recompilation messages.
     """
-
     pattern = r"L\[\s*['\"](.*?)['\"]\s*\]"
     return re.sub(pattern, r"\1", s)
 
