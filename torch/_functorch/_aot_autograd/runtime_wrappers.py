@@ -8,11 +8,11 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 
 import collections
 import contextlib
-import threading
 import copy
 import functools
 import itertools
 import pprint
+import threading
 import typing
 import warnings
 import weakref
@@ -3653,10 +3653,13 @@ def capture_autograd_compile_specs() -> Generator[
     try:
         yield out
     finally:
-        # Sinks holding equal contents compare equal; pop the innermost by identity.
-        popped = sinks.pop()
-        if popped is not out:
-            raise AssertionError("capture_autograd_compile_specs exited out of order")
+        # By identity, latest first: sinks holding equal contents compare
+        # EQUAL, and generator-driven contexts may exit out of order, so
+        # neither list.remove nor a LIFO pop closes the right one.
+        for i in range(len(sinks) - 1, -1, -1):
+            if sinks[i] is out:
+                del sinks[i]
+                break
 
 
 class AOTDispatchAutograd:
