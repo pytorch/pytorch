@@ -646,7 +646,8 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
     for param_group in optim.param_groups:
         for param in param_group[_PARAMS]:
             if param.requires_grad:
-                param.grad = torch.zeros_like(param)
+                # A param whose grad_dtype differs from its dtype rejects a mismatched grad.
+                param.grad = torch.zeros_like(param, dtype=param.grad_dtype)
 
     # Some optimizers will update parameters regardless of grads due to lr, so
     # make lr to zero when calling `step()`.
