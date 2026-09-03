@@ -512,25 +512,6 @@ def _wrap_unaryfunc(
     return func(self, tx)
 
 
-def _wrap_hashfunc(
-    self: VariableTracker,
-    tx: InstructionTranslatorBase,
-    func: Callable[..., tuple[int, bool]],
-    args: list[VariableTracker],
-    kwargs: dict[str, VariableTracker],
-) -> VariableTracker:
-    if kwargs:
-        raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 0:
-        raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
-    from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
-
-    h, is_fake = func(self, tx)
-    if is_fake:
-        return FakeIdVariable(h, kind=FakeValueKind.HASH)
-    return ConstantVariable.create(h)
-
-
 def _wrap_binaryfunc(
     self: VariableTracker,
     tx: InstructionTranslatorBase,
@@ -1100,13 +1081,7 @@ _SLOTDEFS: list[SlotDef] = [
     # SlotDef("__setattr__", ),
     # SlotDef("__delattr__", ),
     TPSLOT("__repr__", "tp_repr_impl", PyTypeSlots.TP_REPR, _wrap_unaryfunc),
-    # hash_impl returns (int, bool), not a VariableTracker like other impls.
-    TPSLOT(
-        "__hash__",
-        "hash_impl",
-        PyTypeSlots.TP_HASH,
-        _wrap_hashfunc,  # pyrefly: ignore[bad-argument-type]
-    ),
+    # TPSLOT("__hash__", "tp_hash_impl", PyTypeSlots.TP_HASH, _wrap_unaryfunc),
     TPSLOT("__call__", "call_function", PyTypeSlots.TP_CALL, wrap_call),
     TPSLOT("__str__", "tp_str_impl", PyTypeSlots.TP_STR, _wrap_unaryfunc),
     TPSLOT(
