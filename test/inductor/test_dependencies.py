@@ -239,6 +239,83 @@ class TestDependencies(InductorTestCase):
         # unequal due to different offset
         self.assertTrue(normalized_loop_order1 != normalized_loop_order2)
 
+    def test_masked_expansion_wraps_body_in_masked_region(self):
+        from torch._inductor.loop_body import LoopBody, MASKED_EXPANSION_BANNED_OPS
+
+        x = sympy_index_symbol("x")
+
+        def fn(index, rindex):
+            (i,) = index
+            edge = ops.lt(ops.index_expr(i, torch.int64), ops.constant(2, torch.int64))
+            other = ops.masked(edge, lambda: ops.load("other", i), 0.0)
+            ops.store("out", i, ops.add(ops.load("inp", i), other))
+
+        body = LoopBody(fn, ([x], []), {x: 4}, [x], [])
+        self.assertFalse(body.has_masked_stores())
+        expanded = body.expand_dimension_for_pointwise_node_with_masked_stores(0, 6)
+
+        self.assertEqual(expanded.sizes, ((6,), ()))
+        self.assertTrue(expanded.has_masked_stores())
+        self.assertFalse(
+            any(e.has(ModularIndexing) for e in expanded.indexing_exprs.values())
+        )
+        # The root block is one masked region predicated on the original
+        # range; the store and the nested mask sit inside it.
+        root = expanded.root_block.graph
+        self.assertEqual(len(root.find_nodes(op="call_method", target="store")), 0)
+        (region,) = [
+            n for n in root.nodes if n.op == "call_module" and n.target != "get_index"
+        ]
+        self.assertEqual(region.args[0].target, "lt")
+        # Expanding to the current range is a no-op.
+        self.assertIs(
+            body.expand_dimension_for_pointwise_node_with_masked_stores(0, 4), body
+        )
+        self.assertIn("indirect_indexing", MASKED_EXPANSION_BANNED_OPS)
+
+        def indirect(index, rindex):
+            (i,) = index
+            j = ops.indirect_indexing(ops.load("idx", i), 4)
+            ops.store("out", i, ops.load("inp", j))
+
+        bad = LoopBody(indirect, ([x], []), {x: 4}, [x], [])
+        with self.assertRaisesRegex(AssertionError, "indirect_indexing"):
+            bad.expand_dimension_for_pointwise_node_with_masked_stores(0, 6)
+
+    def test_masked_region_store_records_full_write(self):
+        from torch._inductor.dependencies import extract_read_writes
+
+        def fn(index):
+            (x,) = index
+            mask = ops.lt(ops.index_expr(x, torch.int32), ops.constant(48, torch.int32))
+            value = ops.constant(1.0, torch.float32)
+            ops.masked(mask, lambda: ops.store("out", x, value), 0.0)
+
+        rw = extract_read_writes(fn, [64])
+        writes = [dep for dep in rw.writes if isinstance(dep, MemoryDep)]
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0].name, "out")
+        # Recorded over the whole range although the mask excludes the tail;
+        # SchedulerNode.can_inplace compensates by refusing to reuse the input.
+        self.assertEqual(writes[0].get_numel(), 64)
+
+    def test_masked_stores_disable_inplace_reuse(self):
+        from torch._inductor.loop_body import LoopBody
+        from torch._inductor.scheduler import SchedulerNode
+
+        x = sympy_index_symbol("x")
+
+        def fn(index, rindex):
+            (i,) = index
+            ops.store("out", i, ops.load("inp", i))
+
+        body = LoopBody(fn, ([x], []), {x: 4}, [x], [])
+        node = object.__new__(SchedulerNode)
+        node._body = body.expand_dimension_for_pointwise_node_with_masked_stores(0, 6)
+        node.node = None
+        node.outputs = []
+        self.assertFalse(node.can_inplace(object()))
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
