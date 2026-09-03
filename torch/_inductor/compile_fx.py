@@ -2560,7 +2560,7 @@ def fw_compiler_freezing(
             opt_model,
             aot_example_inputs,
             static_input_idxs=static_input_idxs,
-            cudagraphs=compiler_config_extra.forward_cudagraphs,
+            cudagraphs=compiler_config_extra.cudagraphs,
             graph_id=compiler_config_extra.graph_id,
             is_inference=True,
             boxed_forward_device_index=compiler_config_extra.forward_device_index,
@@ -2715,7 +2715,7 @@ def cudagraph_annotation_context(
 
 @dataclass(frozen=True)
 class CompilerConfigExtra:
-    forward_cudagraphs: BoxedBool
+    cudagraphs: BoxedBool
     graph_id: int
     forward_device_index: BoxedDeviceIndex
     forward_is_cudagraph_partitioned: BoxedBool
@@ -2731,7 +2731,7 @@ def create_compiler_config_extra(
     # conditions (which are tested within the bowels of Inductor) may
     # force cudagraphs to be disabled.  This mutable box lets us retrieve
     # the final determination if cudagraphs actually can be used or not.
-    forward_cudagraphs = BoxedBool(config.triton.cudagraphs)
+    cudagraphs = BoxedBool(config.triton.cudagraphs)
 
     cudagraphs_bwd_override: bool | None = None
 
@@ -2744,7 +2744,7 @@ def create_compiler_config_extra(
         is not None
     ):
         if annotation.fwd is not None and annotation.fwd != config.triton.cudagraphs:
-            forward_cudagraphs = BoxedBool(annotation.fwd)
+            cudagraphs = BoxedBool(annotation.fwd)
             if annotation.fwd:
                 cudagraphs_log.info(
                     "enabling cudagraphs due to override_cudagraphs annotation"
@@ -2756,11 +2756,7 @@ def create_compiler_config_extra(
 
         # bwd override only matters when fwd enables cudagraphs but bwd
         # explicitly disables them.
-        if (
-            forward_cudagraphs.value
-            and annotation.bwd is not None
-            and not annotation.bwd
-        ):
+        if cudagraphs.value and annotation.bwd is not None and not annotation.bwd:
             cudagraphs_bwd_override = annotation.bwd
             log_cudagraph_skip_and_bump_counter(
                 "disabling cudagraphs for backward due to override_cudagraphs annotation"
@@ -2781,7 +2777,7 @@ def create_compiler_config_extra(
     forward_is_cudagraph_partitioned = BoxedBool(False)
 
     return CompilerConfigExtra(
-        forward_cudagraphs=forward_cudagraphs,
+        cudagraphs=cudagraphs,
         graph_id=graph_id,
         forward_device_index=forward_device_index,
         cudagraphs_bwd_override=cudagraphs_bwd_override,
@@ -2920,12 +2916,12 @@ def compile_fx_forward(
     # original strides
     _recursive_record_user_visible_output_idxs(gm)
 
-    with cudagraph_annotation_context(compiler_config_extra.forward_cudagraphs):
+    with cudagraph_annotation_context(compiler_config_extra.cudagraphs):
         result = inner_compile(
             gm,
             example_inputs,
             static_input_idxs=get_static_input_idxs(fixed),
-            cudagraphs=compiler_config_extra.forward_cudagraphs,
+            cudagraphs=compiler_config_extra.cudagraphs,
             graph_id=compiler_config_extra.graph_id,
             is_inference=is_inference,
             boxed_forward_device_index=compiler_config_extra.forward_device_index,
@@ -2974,7 +2970,7 @@ def compile_fx_backward(
         fixed = count_tangents(gm)
 
         # Check if cudagraphs should be overridden for backward via annotation
-        cudagraphs = compiler_config_extra.forward_cudagraphs
+        cudagraphs = compiler_config_extra.cudagraphs
         if compiler_config_extra.cudagraphs_bwd_override is not None:
             cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
 
