@@ -54,6 +54,29 @@ log = logging.getLogger(__name__)
 Width = int | IntInfinity
 
 
+_RANGE_BOUND_OPS = (
+    sympy.StrictLessThan,
+    sympy.LessThan,
+    sympy.StrictGreaterThan,
+    sympy.GreaterThan,
+)
+
+
+def is_range_bound(expr: sympy.Basic) -> bool:
+    """Whether expr bounds a quantity against a constant, e.g. "u0 >= 4".
+
+    Eq/Ne and relations with symbols on both sides are shape contracts, not
+    sampled ranges. Compound And/Or are not inspected.
+
+    Sound only because canonicalize_bool_expr sign-splits, leaving "u0 <= u1"
+    two-sided. Its docstring claims it moves every non-constant term to the
+    rhs, which would make this match contracts too; it does not do that.
+    """
+    return isinstance(expr, _RANGE_BOUND_OPS) and (
+        not expr.lhs.free_symbols or not expr.rhs.free_symbols
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class LaneContiguity:
     """How an index expression varies across lanes.
@@ -1610,9 +1633,6 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
 
     def store(self, name, index, value, mode=None):
         return self._inner.store(name, self._simplify(index), value, mode=mode)
-
-    def masked_store(self, name, index, value, mask):
-        return self._inner.masked_store(name, self._simplify(index), value, mask)
 
     def store_reduction(self, name, index, value):
         return self._inner.store_reduction(name, self._simplify(index), value)

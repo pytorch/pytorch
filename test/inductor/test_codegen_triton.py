@@ -1,11 +1,12 @@
 # Owner(s): ["module: inductor"]
 import ast
 import contextlib
+import dataclasses
 import unittest
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from enum import Enum, IntEnum
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import sympy
 
@@ -14,16 +15,13 @@ import torch._inductor.config as inductor_config
 from torch._inductor import ir
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen import triton_utils
-from torch._inductor.codegen.common import ArgName, CSEProxy, CSEVariable, SizeArg, TensorArg
+from torch._inductor.codegen.common import ArgName, CSEVariable, SizeArg, TensorArg
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
-from torch._inductor.codegen.simd import _PointwiseRemapHandler, IterationRangesRoot
+from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import (
-    _is_lossless_integer_cast,
-    _is_representable_integer,
     _materialize_trunc_to_float_expr,
     FixedTritonConfig,
-    FusedUserDefinedTritonKernel,
     get_triton_reduction_function,
     IndexingOptions,
     TritonCSEVariable,
@@ -37,15 +35,12 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
+    get_importable_constexpr_types,
     is_triton_fp8_dtype_supported,
     run_and_get_code,
     run_and_get_kernels,
 )
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -58,7 +53,32 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
 
 
-@instantiate_parametrized_tests
+try:
+    from triton_constexpr_configs import (
+        tl as TritonLanguageShadowConfig,
+        UserDefinedAttrsLikeConfig,
+        UserDefinedPydanticLikeConfig,
+        UserDefinedTritonKernelConfigMode,
+        UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelEnumConfig,
+        UserDefinedTritonKernelHiddenConfig,
+        UserDefinedTritonKernelNestedConfig,
+        UserDefinedTritonKernelNonInitConfig,
+    )
+except ImportError:
+    from test.inductor.triton_constexpr_configs import (
+        tl as TritonLanguageShadowConfig,
+        UserDefinedAttrsLikeConfig,
+        UserDefinedPydanticLikeConfig,
+        UserDefinedTritonKernelConfigMode,
+        UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelEnumConfig,
+        UserDefinedTritonKernelHiddenConfig,
+        UserDefinedTritonKernelNestedConfig,
+        UserDefinedTritonKernelNonInitConfig,
+    )
+
+
 class TestCodegenTriton(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -118,174 +138,6 @@ class TestCodegenTriton(InductorTestCase):
         self.assertTrue(torch.isnan(actual_max[2]).item())
         self.assertIn("tl.where", " ".join(code))
 
-    @parametrize(
-        "src_dtype,dst_dtype,expected",
-        [
-            (torch.int16, torch.int32, True),
-            (torch.uint8, torch.int16, True),
-            (torch.int32, torch.int16, False),
-            (torch.int16, torch.uint16, False),
-            (torch.uint16, torch.int16, False),
-            (torch.bool, torch.bool, True),
-            (torch.float32, torch.int64, False),
-        ],
-    )
-    def test_lossless_integer_cast(self, src_dtype, dst_dtype, expected):
-        self.assertEqual(_is_lossless_integer_cast(src_dtype, dst_dtype), expected)
-
-    @parametrize(
-        "value,dtype,expected",
-        [
-            (-1, torch.uint8, False),
-            (255, torch.uint8, True),
-            (256, torch.uint8, False),
-            (1, torch.bool, True),
-            (2, torch.bool, False),
-            (1, torch.float32, False),
-        ],
-    )
-    def test_representable_integer(self, value, dtype, expected):
-        self.assertEqual(_is_representable_integer(value, dtype), expected)
-
-    @parametrize(
-        "dtype,tracks_source",
-        [
-            (torch.uint8, False),
-            (torch.int32, True),
-            (torch.int64, True),
-            (torch.float32, False),
-        ],
-    )
-    def test_index_expr_source_tracking(self, dtype, tracks_source):
-        var = TritonCSEVariable("value", ValueRanges.unknown(), dtype, shape=())
-        source = sympy.Integer(1)
-
-        var.update_on_args("index_expr", (source,), {})
-
-        self.assertEqual(var.source_index, source if tracks_source else None)
-
-    @parametrize("dtype,tracks_source", [(torch.int32, False), (torch.int64, True)])
-    def test_value_expr_source_tracking(self, dtype, tracks_source):
-        source = sympy.Symbol("xindex")
-        var = TritonCSEVariable("value", ValueRanges.unknown(), dtype, shape=())
-        var.source_index = source
-        kernel = SimpleNamespace(
-            _index_dtype=torch.int64,
-            compute=Mock(),
-            cse=SimpleNamespace(generate=Mock(return_value=var)),
-        )
-
-        with (
-            V.set_kernel_handler(kernel),
-            patch.object(TritonKernelOverrides, "index_expr", return_value=var),
-        ):
-            result = TritonKernelOverrides.value_expr(source, dtype)
-
-        self.assertIs(result, var)
-        self.assertEqual(var.source_index, source if tracks_source else None)
-        self.assertEqual(kernel._index_dtype, torch.int64)
-
-    @parametrize("narrow_lhs", [True, False])
-    def test_unsafe_integer_metadata_does_not_imply_mask(self, narrow_lhs):
-        source = sympy.Symbol("xindex")
-        lhs = TritonCSEVariable("lhs", ValueRanges.unknown(), torch.int64, shape=())
-        lhs.source_index = source
-        rhs = TritonCSEVariable("rhs", ValueRanges.unknown(), torch.int64, shape=())
-
-        if narrow_lhs:
-            narrowed = TritonCSEVariable(
-                "narrowed", ValueRanges.unknown(), torch.uint8, shape=()
-            )
-            narrowed.update_on_args("to_dtype", (lhs,), {})
-            lhs = narrowed
-            rhs.update_on_args("constant", (100,), {})
-        else:
-            rhs = TritonCSEVariable("rhs", ValueRanges.unknown(), torch.uint8, shape=())
-            rhs.update_on_args("constant", (-1,), {})
-
-        result = TritonCSEVariable(
-            "result", ValueRanges.unknown(), torch.bool, shape=()
-        )
-        result.update_on_args("lt", (lhs, rhs), {})
-
-        self.assertEqual(len(result.implied_mask_vars), 0)
-
-    def test_integer_cast_metadata_propagation(self):
-        source_index = sympy.Symbol("xindex")
-        source = TritonCSEVariable(
-            "source", ValueRanges.unknown(), torch.int32, shape=()
-        )
-        source.source_index = source_index
-        source.scalar_value = 7
-
-        widened = TritonCSEVariable(
-            "widened", ValueRanges.unknown(), torch.int64, shape=()
-        )
-        widened.update_on_args("to_dtype", (source,), {})
-        narrowed = TritonCSEVariable(
-            "narrowed", ValueRanges.unknown(), torch.uint8, shape=()
-        )
-        narrowed.update_on_args("to_dtype", (source,), {})
-
-        self.assertEqual(widened.source_index, source_index)
-        self.assertEqual(widened.scalar_value, 7)
-        self.assertIsNone(narrowed.source_index)
-        self.assertIsNone(narrowed.scalar_value)
-
-    @parametrize("removed", [False, True])
-    def test_masked_store_updates_store_cache_without_destination_load(self, removed):
-        kernel = SimpleNamespace(
-            cse=SimpleNamespace(store_cache={}, invalidated_stores=set()),
-            current_node=None,
-            load=Mock(),
-            masked_store=Mock(),
-            must_keep_buffers=set(),
-            num_store=0,
-            record_op_trace=Mock(),
-            store_buffer_names=set(),
-        )
-        proxy = CSEProxy(kernel, Mock())
-        value = CSEVariable("value", ValueRanges.unknown(), torch.float32)
-        mask = CSEVariable("mask", ValueRanges.unknown(), torch.bool)
-
-        if removed:
-            self._graph.removed_buffers.add("buf0")
-        try:
-            proxy.masked_store("buf0", sympy.Integer(0), value, mask)
-        finally:
-            self._graph.removed_buffers.discard("buf0")
-
-        self.assertIs(proxy.load("buf0", sympy.Integer(0)), value)
-        kernel.load.assert_not_called()
-        if removed:
-            kernel.masked_store.assert_not_called()
-        else:
-            kernel.masked_store.assert_called_once_with(
-                "buf0", sympy.Integer(0), value, mask
-            )
-
-    def test_user_defined_triton_kernel_rejects_masked_store(self):
-        kernel = object.__new__(FusedUserDefinedTritonKernel)
-        value = CSEVariable("value", ValueRanges.unknown(), torch.float32)
-        mask = CSEVariable("mask", ValueRanges.unknown(), torch.bool)
-
-        with self.assertRaisesRegex(NotImplementedError, "user-defined Triton"):
-            kernel.masked_store("buf0", sympy.Integer(0), value, mask)
-
-    def test_pointwise_remap_handler_remaps_masked_store(self):
-        inner = Mock()
-        family = Mock()
-        remapped_index = sympy.Symbol("remapped_index")
-        family.remap_index.return_value = remapped_index
-        family.ensure_active.return_value = contextlib.nullcontext()
-        handler = _PointwiseRemapHandler(inner, Mock(), family=family)
-        value = CSEVariable("value", ValueRanges.unknown(), torch.float32)
-        mask = CSEVariable("mask", ValueRanges.unknown(), torch.bool)
-
-        handler.masked_store("buf0", sympy.Symbol("index"), value, mask)
-
-        inner.masked_store.assert_called_once_with("buf0", remapped_index, value, mask)
-
     def test_range_tree_entry_ownership_uses_root_identity(self):
         class AlternateR0Root(IterationRangesRoot):
             def block_size(self):
@@ -328,6 +180,122 @@ class TestCodegenTriton(InductorTestCase):
                 )
             finally:
                 kernel.range_trees = saved_range_trees
+
+    def test_importable_constexpr_types_nested_values(self):
+        type_specs = get_importable_constexpr_types(
+            [
+                {
+                    "cfg": UserDefinedTritonKernelNestedConfig(
+                        nested=UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+                    )
+                }
+            ]
+        )
+        self.assertEqual(
+            type_specs,
+            [
+                (
+                    UserDefinedTritonKernelConfigNamespace.__module__,
+                    "UserDefinedTritonKernelConfigNamespace.Nested",
+                    "UserDefinedTritonKernelConfigNamespace",
+                ),
+                (
+                    UserDefinedTritonKernelNestedConfig.__module__,
+                    "UserDefinedTritonKernelNestedConfig",
+                    "UserDefinedTritonKernelNestedConfig",
+                ),
+            ],
+        )
+
+    def test_importable_constexpr_types_sibling_nested_classes(self):
+        namespace = UserDefinedTritonKernelConfigNamespace
+        type_specs = get_importable_constexpr_types(
+            [namespace.Nested(offset=1), namespace.Sibling(offset=2)]
+        )
+        self.assertEqual(len(type_specs), 1)
+        self.assertEqual(type_specs[0].module, namespace.__module__)
+        self.assertEqual(type_specs[0].root_name, namespace.__name__)
+
+    def test_importable_constexpr_types_bare_nested_class_repr(self):
+        nested_type = UserDefinedTritonKernelConfigNamespace.BareNested
+        value = nested_type(offset=2)
+        with self.assertRaisesRegex(ImportError, "uses the bare name BareNested"):
+            get_importable_constexpr_types([value])
+
+    def test_importable_constexpr_types_skip_hidden_dataclass_field(self):
+        @dataclasses.dataclass
+        class LocalHiddenValue:
+            offset: int
+
+        type_specs = get_importable_constexpr_types(
+            [UserDefinedTritonKernelHiddenConfig(2, LocalHiddenValue(3))]
+        )
+        self.assertEqual(len(type_specs), 1)
+        self.assertEqual(
+            type_specs[0].qualname,
+            UserDefinedTritonKernelHiddenConfig.__qualname__,
+        )
+
+    def test_importable_constexpr_types_non_init_dataclass_field_error(self):
+        value = UserDefinedTritonKernelNonInitConfig(offset=2)
+        with self.assertRaisesRegex(
+            ImportError, "repr-visible field derived with init=False"
+        ):
+            get_importable_constexpr_types([value])
+
+    def test_importable_constexpr_types_skip_builtin_repr(self):
+        with patch("builtins.repr") as repr_mock:
+            self.assertEqual(get_importable_constexpr_types([{"values": [1, 2]}]), [])
+        repr_mock.assert_not_called()
+
+    def test_importable_constexpr_types_reserved_name_error(self):
+        with self.assertRaisesRegex(ImportError, "import name tl.*reserved"):
+            get_importable_constexpr_types([TritonLanguageShadowConfig(offset=2)])
+
+    def test_importable_constexpr_types_set(self):
+        namespace = UserDefinedTritonKernelConfigNamespace
+        type_specs = get_importable_constexpr_types(
+            [
+                {
+                    UserDefinedTritonKernelNestedConfig(namespace.Nested(offset=2)),
+                    UserDefinedTritonKernelHiddenConfig(3, "hidden"),
+                }
+            ]
+        )
+        root_names = [type_spec.root_name for type_spec in type_specs]
+        self.assertEqual(root_names, sorted(root_names))
+        self.assertEqual(
+            root_names,
+            [
+                "UserDefinedTritonKernelConfigNamespace",
+                "UserDefinedTritonKernelHiddenConfig",
+                "UserDefinedTritonKernelNestedConfig",
+            ],
+        )
+
+    def test_importable_constexpr_types_repr_protocols(self):
+        nested_type = UserDefinedTritonKernelConfigNamespace.Nested
+
+        @dataclasses.dataclass
+        class LocalHiddenValue:
+            offset: int
+
+        for config_type in (UserDefinedAttrsLikeConfig, UserDefinedPydanticLikeConfig):
+            type_specs = get_importable_constexpr_types(
+                [config_type(nested_type(offset=2), LocalHiddenValue(3))]
+            )
+            self.assertEqual(
+                [type_spec.qualname for type_spec in type_specs],
+                [config_type.__qualname__, nested_type.__qualname__],
+            )
+
+    def test_importable_constexpr_types_local_class_error(self):
+        @dataclasses.dataclass(frozen=True)
+        class LocalConfig:
+            offset: int
+
+        with self.assertRaisesRegex(ImportError, "not importable"):
+            get_importable_constexpr_types([LocalConfig(offset=2)])
 
     def test_escape_triton_kernel_source_for_wrapper(self):
         source = """\
@@ -1279,6 +1247,51 @@ def helper(x):
         HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
         "requires CPU or GPU Triton",
     )
+    def test_user_defined_triton_kernel_non_builtin_constexpr(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_constexpr_kernel(
+            x,
+            out,
+            n_elements,
+            cfg: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(x + offsets, mask=mask)
+            tl.store(out + offsets, values + cfg.nested.offset, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            add_constexpr_kernel[grid](
+                x,
+                out,
+                n_elements,
+                cfg=UserDefinedTritonKernelNestedConfig(
+                    nested=UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+                ),
+                BLOCK_SIZE=128,
+            )
+            return out
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(1024, device=device)
+        actual = torch.compile(fn)(x)
+        self.assertEqual(actual, x + 2)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        "requires CPU or GPU Triton",
+    )
     def test_user_defined_triton_kernel_python_float_arg_signature_matches_triton(self):
         import triton
         import triton.language as tl
@@ -1381,6 +1394,68 @@ def helper(x):
             INNER = Color.RED
 
         self.assertEqual(_sanitize_for_repr(Outer.INNER), "red")
+
+        config = UserDefinedTritonKernelEnumConfig(
+            UserDefinedTritonKernelConfigMode.FAST
+        )
+        self.assertEqual(len(get_importable_constexpr_types([config])), 1)
+        sanitized_config = _sanitize_for_repr(config)
+        self.assertIsInstance(sanitized_config, UserDefinedTritonKernelEnumConfig)
+        self.assertEqual(sanitized_config.mode, 1)
+        compile(repr(sanitized_config), "<sanitized-constexpr>", "eval")
+
+        for config_type in (UserDefinedAttrsLikeConfig, UserDefinedPydanticLikeConfig):
+            config = config_type(UserDefinedTritonKernelConfigMode.FAST, "hidden")
+            self.assertEqual(len(get_importable_constexpr_types([config])), 1)
+            sanitized_config = _sanitize_for_repr(config)
+            self.assertIsInstance(sanitized_config.nested, int)
+            compile(repr(sanitized_config), "<sanitized-constexpr>", "eval")
+
+            unchanged_config = config_type(1, "hidden")
+            self.assertIs(_sanitize_for_repr(unchanged_config), unchanged_config)
+
+        sanitized_set = _sanitize_for_repr({UserDefinedTritonKernelConfigMode.FAST})
+        self.assertIsInstance(next(iter(sanitized_set)), int)
+        unchanged_set = {1}
+        self.assertIs(_sanitize_for_repr(unchanged_set), unchanged_set)
+        sanitized_frozenset = _sanitize_for_repr(
+            frozenset({UserDefinedTritonKernelConfigMode.FAST})
+        )
+        self.assertIsInstance(next(iter(sanitized_frozenset)), int)
+
+        mapping = OrderedDict([("mode", UserDefinedTritonKernelConfigMode.FAST)])
+        sanitized_mapping = _sanitize_for_repr(mapping)
+        self.assertIsInstance(sanitized_mapping, OrderedDict)
+        self.assertIsInstance(sanitized_mapping["mode"], int)
+
+        unchanged_mapping = OrderedDict([("mode", 1)])
+        self.assertIs(_sanitize_for_repr(unchanged_mapping), unchanged_mapping)
+
+        class ComputedReprArgs:
+            @property
+            def computed(self):
+                return 1
+
+            def __repr_args__(self):
+                return (("computed", self.computed),)
+
+        computed = ComputedReprArgs()
+        self.assertIs(_sanitize_for_repr(computed), computed)
+
+        class PositionalReprArgs:
+            def __repr_args__(self):
+                return ((None, 1),)
+
+        positional = PositionalReprArgs()
+        self.assertIs(_sanitize_for_repr(positional), positional)
+
+        class LabelledMapping(dict):
+            def __init__(self, label, values):
+                super().__init__(values)
+                self.label = label
+
+        labelled_mapping = LabelledMapping("config", {"mode": 1})
+        self.assertIs(_sanitize_for_repr(labelled_mapping), labelled_mapping)
 
         # Non-enum passthrough
         self.assertEqual(_sanitize_for_repr(42), 42)

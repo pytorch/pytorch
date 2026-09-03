@@ -10,7 +10,6 @@
 
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
@@ -89,9 +88,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     : Backend(rank, size),
       device_(at::kCUDA),
       store_(std::move(store)),
-      event_cache_enabled_(
-          getCvarBool(::c10d::TORCH_NCCL_CUDA_EVENT_CACHE, true)),
-      timing_enabled_(getCvarBool(::c10d::TORCH_NCCL_ENABLE_TIMING, false)),
+      event_pool_(std::make_shared<NCCLEventPool>(
+          getCvarBool(::c10d::TORCH_NCCL_CUDA_EVENT_CACHE, true),
+          getCvarBool(::c10d::TORCH_NCCL_ENABLE_TIMING, false),
+          kDefaultMaxEventPoolSize)),
       async_error_handling_(static_cast<::c10d::ErrorHandlingMode>(getCvarInt(
           ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
           ::c10d::SkipCleanUp))),
@@ -245,7 +245,7 @@ bool ProcessGroupNCCL::hasCompletionHooks() {
 }
 
 void ProcessGroupNCCL::runCompletionHooks(
-    const ::c10d::Work* work,
+    uint64_t completion_key,
     std::optional<float> duration_ms) {
   // Snapshot rather than hold the lock across the hooks, and for a harder
   // reason than runAbortHooks has: a hook's owner unregisters with its own lock
@@ -260,7 +260,7 @@ void ProcessGroupNCCL::runCompletionHooks(
     }
   }
   ::c10d::CompletionHookArgs args;
-  args.work = work;
+  args.completionKey = completion_key;
   args.duration_ms = duration_ms;
   for (const auto& hook : hooks) {
     try {
@@ -449,6 +449,14 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce(
   return work;
 }
 
+c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_sparse(
+    std::vector<at::Tensor>& /* tensors */,
+    const ::c10d::AllreduceOptions& /* opts */) {
+  C10_THROW_ERROR(
+      Error,
+      "NCCL does not support all_reduce with sparse tensors. Please use dense tensors instead.");
+}
+
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const ::c10d::AllreduceCoalescedOptions& opts) {
@@ -591,6 +599,15 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_allgather_base(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ::c10d::AllgatherOptions& opts) {
+  if (inputBuffer.dtype() != outputBuffer.dtype()) {
+    C10_THROW_ERROR(
+        TypeError, "output tensor must have the same type as input tensor");
+  }
+  if (inputBuffer.numel() * getSize() != outputBuffer.numel()) {
+    C10_THROW_ERROR(
+        ValueError,
+        "output tensor size must be equal to world_size times input tensor size");
+  }
   ++sequence_number_;
   auto work = allGatherSingleImpl(
       outputBuffer, inputBuffer, opts.asyncOp, operationTimeout(opts.timeout));
@@ -602,22 +619,32 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ::c10d::GatherOptions& opts) {
+  static auto invalidArgument = [](const std::string& msg) {
+    C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::gather: " + msg);
+  };
+
+  assertRootRank(invalidArgument, opts.rootRank, getSize());
   TORCH_CHECK(inputTensors.size() == 1, "Only single input tensor supported");
+  std::vector<at::Tensor> outputs;
   if (getRank() == opts.rootRank) {
-    TORCH_CHECK(outputTensors.size() == 1, "Only single output list on root");
-  } else if (outputTensors.empty()) {
-    outputTensors.emplace_back();
+    assertGatherOutputTensorList(invalidArgument, outputTensors, getSize());
+    assertTypeAndSizesMatch(
+        invalidArgument,
+        outputTensors[0],
+        inputTensors[0].options(),
+        inputTensors[0].sizes());
+    outputs = outputTensors[0];
   } else {
-    TORCH_CHECK(outputTensors.size() == 1, "Only single output list");
+    assertEmptyOutputTensorList(invalidArgument, outputTensors);
   }
   ++sequence_number_;
   auto work = gatherImpl(
-      outputTensors.at(0),
+      outputs,
       inputTensors.at(0),
       static_cast<int>(opts.rootRank),
       opts.asyncOp,
       operationTimeout(opts.timeout));
-  work->setOutputs(outputTensors.at(0));
+  work->setOutputs(std::move(outputs));
   return work;
 }
 
@@ -662,17 +689,28 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ::c10d::ScatterOptions& opts) {
+  static auto invalidArgument = [](const std::string& msg) {
+    C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::scatter: " + msg);
+  };
+
+  assertRootRank(invalidArgument, opts.rootRank, getSize());
   TORCH_CHECK(outputTensors.size() == 1, "Only single output tensor supported");
+  std::vector<at::Tensor> inputs;
   if (getRank() == opts.rootRank) {
-    TORCH_CHECK(inputTensors.size() == 1, "Only single input list on root");
+    assertScatterInputTensorList(invalidArgument, inputTensors, getSize());
+    assertTypeAndSizesMatch(
+        invalidArgument,
+        inputTensors[0],
+        outputTensors[0].options(),
+        outputTensors[0].sizes());
+    inputs = inputTensors[0];
   } else {
-    inputTensors.clear();
-    inputTensors.emplace_back();
+    assertEmptyInputTensorList(invalidArgument, inputTensors);
   }
   ++sequence_number_;
   auto work = scatterImpl(
       outputTensors.at(0),
-      inputTensors.at(0),
+      inputs,
       static_cast<int>(opts.rootRank),
       opts.asyncOp,
       operationTimeout(opts.timeout));
@@ -728,6 +766,15 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_reduce_scatter_base(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ::c10d::ReduceScatterOptions& opts) {
+  if (inputBuffer.dtype() != outputBuffer.dtype()) {
+    C10_THROW_ERROR(
+        TypeError, "input tensor must be the same type as the output tensor.");
+  }
+  if (inputBuffer.numel() != outputBuffer.numel() * getSize()) {
+    C10_THROW_ERROR(
+        ValueError,
+        "input tensor must be the same size as output size times world size");
+  }
   ++sequence_number_;
   auto work = reduceScatterSingleImpl(
       outputBuffer,

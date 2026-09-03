@@ -53,6 +53,12 @@ ReductionType = Literal[
     "xor_sum",
     "online_softmax_reduce",
 ]
+registered_pointwise_ops: OrderedSet[str] = OrderedSet()
+
+
+def register_pointwise_op(name: str) -> None:
+    """Record a deterministic scalar operation that commutes with broadcasting."""
+    registered_pointwise_ops.add(name)
 
 
 def _arg_str(a: object) -> str:
@@ -253,29 +259,6 @@ class OpsHandler(Generic[T]):
         """
         Store 'value' to the memory location 'name' offset by 'expr'.  If
         specified, 'mode' can require the store to be an atomic addition.
-        """
-        raise NotImplementedError
-
-    def masked_store(
-        self,
-        name: str,
-        index: sympy.Expr,
-        value: T,
-        mask: T,
-    ) -> None:
-        """
-        Store 'value' to 'name' offset by 'index', but only where 'mask' is
-        true. Elements where 'mask' is false are left *unmodified*, so this op
-        only partially initializes the physical allocation.
-
-        This is an internal operation for scheduler-created domain expansion,
-        not a general conditional mutation. Mask-false coordinates must be
-        outside the logical output domain, and therefore unobservable. This lets
-        codegen forward 'value' to later fused computation without reading the
-        smaller destination at an expanded-tail index.
-
-        Unlike 'store' there is no 'mode' -- an atomic masked store is not
-        supported, so backends never need to combine a mask with atomic_add.
         """
         raise NotImplementedError
 
@@ -785,7 +768,15 @@ class OpsHandler(Generic[T]):
         is_pure: bool = True,
         pack: int = 1,
         input_dtypes: tuple[torch.dtype, ...] | None = None,
+        output_dtypes: tuple[torch.dtype, ...] | None = None,
+        output_index: int = 0,
     ) -> T:
+        """Emit one inline-asm output.
+
+        ``output_dtypes`` describes all outputs from the same asm invocation;
+        ``dtype`` and ``output_index`` select the output represented by this
+        pointwise IR node. Codegen may share the invocation across those nodes.
+        """
         raise NotImplementedError
 
     def output(self, *args: T) -> None:
@@ -1233,9 +1224,6 @@ class SimpleCSEHandler(WrapperHandler):
 
     def store(self, *args, **kwargs) -> None:
         raise NotImplementedError("store not implemented")
-
-    def masked_store(self, *args, **kwargs) -> None:
-        raise NotImplementedError("masked_store not implemented")
 
     def store_reduction(self, *args, **kwargs) -> None:
         raise NotImplementedError("store not implemented")

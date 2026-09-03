@@ -49,14 +49,6 @@ class PreservesZeros(SymPyOps, DefaultHandler):
             raise AssertionError("prologue should only have a single store")
         self.store_preserves_zeros = value.is_constant() and value.expr == 0
 
-    def masked_store(
-        self, name: str, index: sympy.Expr, value: TypedExpr, mask: TypedExpr
-    ) -> None:
-        # A masked store leaves the masked-off elements untouched, which is the
-        # opposite of proving a zero was written there. Prologues cannot contain
-        # one today, but answer conservatively rather than deferring to store().
-        self.store_preserves_zeros = False
-
     def indirect_indexing(self, *args: Any, **kwargs: Any) -> sympy.Expr:
         return construct_symbol(next(self.count), torch.int32)
 
@@ -110,12 +102,6 @@ class RecordLowPrecisionOps(DefaultHandler):
     @staticmethod
     def store(
         name: str, index: sympy.Expr, value: TypedExpr, mode: "StoreMode" = None
-    ) -> None:
-        pass
-
-    @staticmethod
-    def masked_store(
-        name: str, index: sympy.Expr, value: TypedExpr, mask: TypedExpr
     ) -> None:
         pass
 
