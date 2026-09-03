@@ -28,9 +28,7 @@ from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGI
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -1487,20 +1485,29 @@ instantiate_device_type_tests(
     TestFSDPUseOrigParamsMultipleParamGroups,
     globals(),
     except_for="cpu",
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestFSDPUseOrigParamsUnshardReshard, globals(), except_for="cpu"
+    TestFSDPUseOrigParamsUnshardReshard, globals(), except_for="cpu", allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestFSDPUseOrigParamsParamAccess, globals(), except_for="cpu"
+    TestFSDPUseOrigParamsParamAccess, globals(), except_for="cpu", allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestFSDPUseOrigParamsWriteback, globals(), except_for="cpu"
+    TestFSDPUseOrigParamsWriteback, globals(), except_for="cpu", allow_xpu=True
 )
-instantiate_device_type_tests(TestFSDPUseOrigParamsFQNs, globals(), except_for="cpu")
-instantiate_device_type_tests(TestFSDPUseOrigParamsNoSync, globals(), except_for="cpu")
-instantiate_device_type_tests(TestFSDPUseOrigParamsInit, globals(), except_for="cpu")
-instantiate_device_type_tests(TestMultiTensorApply, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestFSDPUseOrigParamsFQNs, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFSDPUseOrigParamsNoSync, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFSDPUseOrigParamsInit, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestMultiTensorApply, globals(), except_for="cpu", allow_xpu=True
+)
 instantiate_device_type_tests(TestMultiTensorApplyOnCPU, globals(), only_for="cpu")
 
 if __name__ == "__main__":
