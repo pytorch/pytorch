@@ -4,11 +4,11 @@ import unittest
 from unittest import mock
 
 import torch
-from torch._inductor import config, ir
+from torch._inductor import config
 from torch._inductor.kernel.decompose_k import (
-    append_blackwell_decompose_k_partial_choice,
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
     blackwell_decomposeK,
+    lower_blackwell_decompose_k_partial,
 )
 from torch._inductor.lowering import lowerings
 from torch._inductor.test_case import run_tests, TestCase
@@ -62,26 +62,23 @@ class TestBlackwellDecomposeKPartial(TestCase):
             if bool(two_ctas_arg) != two_ctas:
                 raise AssertionError("unexpected 2CTA specialization")
             m, _ = map(int, a.get_size())
-            n = int(b.get_size()[1])
             m_tiles = math.ceil(m / partial_config.block_m)
             if partial_config.two_ctas:
                 m_tiles = math.ceil(m_tiles / 2) * 2
             m_pad = m_tiles * partial_config.block_m
-            layout = ir.FixedLayout(
-                a.get_device(),
-                torch.float32,
-                [K_SPLIT * m_pad, n],
-                [n, 1],
+            k = int(a.get_size()[1])
+            k_part = (
+                math.ceil(math.ceil(k / K_SPLIT) / partial_config.block_k)
+                * partial_config.block_k
             )
-            choices = []
-            append_blackwell_decompose_k_partial_choice(
-                choices,
-                (a, b),
-                layout,
-                k_split=K_SPLIT,
-                config=partial_config,
+            return lower_blackwell_decompose_k_partial(
+                a,
+                b,
+                K_SPLIT,
+                config_index,
+                m_pad,
+                k_part,
             )
-            return choices[0].output_node()
 
         m, k, n = 256, 8193, 128
         a_storage = torch.randn(k, m, device="cuda", dtype=torch.bfloat16)
@@ -137,7 +134,6 @@ class TestBlackwellDecomposeKPartial(TestCase):
             **{
                 "triton.enable_template_tma_store": True,
                 "triton.enable_persistent_tma_matmul": True,
-                "triton.use_tensor_descriptor": True,
             },
         ):
             actual = torch.compile(
