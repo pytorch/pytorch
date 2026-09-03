@@ -395,11 +395,9 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              // NOLINTNEXTLINE(modernize-avoid-bind)
-              std::bind(
-                  &AttributePropagator::recordMutableAttrs,
-                  *this,
-                  std::placeholders::_1));
+              // TODO: Determine if passing `this` by copy is intentional
+              // github.com/pytorch/pytorch/pull/195598#issuecomment-5497079717
+              std::bind_front(&AttributePropagator::recordMutableAttrs, *this));
         }
       }
     }
@@ -440,14 +438,14 @@ class AttributePropagator {
       for (const auto i : c10::irange(elems.size())) {
         elems.set(i, overrideGradient(elems.extract(i)));
       }
-      attr = elems;
+      attr = std::move(elems);
     } else if (attr.isGenericDict()) {
       auto dict = std::move(attr).toGenericDict();
       for (const auto& pair : dict) {
         auto val = pair.value();
         val = overrideGradient(std::move(val));
       }
-      attr = dict;
+      attr = std::move(dict);
     } else if (attr.isObject() && !attr.toObjectRef().type()->is_module()) {
       auto obj_type = attr.type()->expect<ClassType>();
       auto obj_value = std::move(attr).toObject();
@@ -724,11 +722,10 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              // NOLINTNEXTLINE(modernize-avoid-bind)
-              std::bind(
-                  &AttributePropagator::propagateAttributes,
-                  *this,
-                  std::placeholders::_1));
+              // TODO: Determine if passing `this` by copy is intentional
+              // github.com/pytorch/pytorch/pull/195598#issuecomment-5497079717
+              std::bind_front(
+                  &AttributePropagator::propagateAttributes, *this));
         }
       }
     }
@@ -851,11 +848,10 @@ class AttributePropagator {
           applyToForkSubgraph(
               n,
               graph,
-              // NOLINTNEXTLINE(modernize-avoid-bind)
-              std::bind(
-                  &AttributePropagator::recordReferencedAttrs,
-                  *this,
-                  std::placeholders::_1));
+              // TODO: Determine if passing `this` by copy is intentional
+              // github.com/pytorch/pytorch/pull/195598#issuecomment-5497079717
+              std::bind_front(
+                  &AttributePropagator::recordReferencedAttrs, *this));
         }
       }
     }

@@ -931,11 +931,7 @@ def _sfdp_replacement_30(query, key, value, inv_scale):
 
 @functools.lru_cache(None)
 def _warn_tf32_disabled() -> None:
-    if (
-        torch.cuda.is_available()
-        and torch.backends.cuda.matmul.fp32_precision != "tf32"
-        and torch.cuda.get_device_capability() >= (8, 0)
-    ):
+    if torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0):
         perf_hint_log.info(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Skipping pattern matching to fused flash-attention. "
@@ -943,9 +939,27 @@ def _warn_tf32_disabled() -> None:
         )
 
 
+def _is_supported_scale(scale) -> bool:
+    # The matcher may bind the scale to a graph node, whose value lives in
+    # meta["val"]; a node carrying no "val" leaves the scale unknown, so we
+    # conservatively skip the fusion. The fused kernel takes a scalar scale, so
+    # a tensor scale is rejected here. SymFloat scales are tensorified into 0-d
+    # tensors before the joint graph passes run, so they arrive as tensors too;
+    # an untensorified one would land in the same conservative skip.
+    # TODO: the scalar behind a tensorified SymFloat scale (e.g. head_dim**0.5
+    # under dynamic shapes) could be recovered from the aten.scalar_tensor node
+    # to keep the fusion - tracked in #194444.
+    if isinstance(scale, torch.fx.Node):
+        scale = scale.meta.get("val")
+    return isinstance(scale, (float, int, torch.SymInt))
+
+
 def _sfdp_params_check(match):
     if not all(k in match.kwargs for k in ("query", "key", "value")):
         raise AssertionError("expected query, key, value in match.kwargs")
+    inv_scale = match.kwargs.get("inv_scale")
+    if inv_scale is not None and not _is_supported_scale(inv_scale):
+        return False
     query = match.kwargs["query"].meta["val"]
     key = match.kwargs["key"].meta["val"]
     value = match.kwargs["value"].meta["val"]
@@ -959,7 +973,8 @@ def _sfdp_params_check(match):
         and query.dtype == torch.float32
         and torch.backends.cuda.matmul.fp32_precision != "tf32"
     ):
-        _warn_tf32_disabled()
+        if torch.backends.cuda.matmul.fp32_precision != "bfx9":
+            _warn_tf32_disabled()
         return False
 
     add_mask_node = filter_nodes(match.nodes, aten.add.Tensor)
@@ -1014,9 +1029,7 @@ def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
         if scale_factor_op is not None:
             scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
             # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
-            scale_factor = scale_factor_node.args[1]
-            # make sure the scale_factor a float/int. SymInt?
-            if not isinstance(scale_factor, (float, int)):
+            if not _is_supported_scale(scale_factor_node.args[1]):
                 return False
         return _sfdp_params_check(match)
 
