@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+import unittest
 from functools import partial, wraps
 
 import torch
@@ -51,6 +52,13 @@ min_max_reduce_ops = [
     subtest(("min", dist.ReduceOp.MIN), name="min_obj"),
     subtest(("max", "max"), name="max_str"),
     subtest(("max", dist.ReduceOp.MAX), name="max_obj"),
+]
+
+# min/max tie backward sums the holder count in float32; bf16 exercises the
+# promotion round-trip that keeps the grad dtype.
+tie_dtypes = [
+    subtest(torch.float32, name="fp32"),
+    subtest(torch.bfloat16, name="bf16"),
 ]
 
 
@@ -389,33 +397,37 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         self.assertEqual(grad, expected_grad)
 
     @parametrize("device", devices)
+    @parametrize("dtype", tie_dtypes)
     @parametrize("reduce_op_name, reduce_op", min_max_reduce_ops)
-    def test_all_reduce_min_max_ties_backward(self, device, reduce_op_name, reduce_op):
+    def test_all_reduce_min_max_ties_backward(
+        self, device, dtype, reduce_op_name, reduce_op
+    ):
         """min/max backward splits grad evenly across tied extremum holders.
 
-        The lower half of the ranks hold the min and the upper half hold the
-        max, so the summed grad (world_size) is divided by the number of tied
-        ranks, matching ATen's evenly_distribute_backward.
+        Element i is held by ranks r with r + i < world_size, so the holder
+        count varies per element from world_size (all ranks tie) down to 1
+        (unique holder). The summed grad (world_size) is divided by the
+        per-element holder count, matching ATen's evenly_distribute_backward.
         """
-        shape = (3, 3)
         group_name = dist.group.WORLD.group_name
         rank = dist.get_rank()
-        half = self.world_size // 2
+        ws = self.world_size
 
-        value = 0.0 if rank < half else 1.0
-        input_tensor = torch.full(
-            shape, fill_value=value, requires_grad=True, device=device
-        )
+        # Example (ws=4): idx=[0,1,2,3]; element i is held by ranks r with
+        # r+i<4, so per-element counts=[4,3,2,1] (all ranks tie at i=0, unique
+        # at i=3). Rank 1 has holds=[T,T,T,F] -> grad=[4/4,4/3,4/2,0].
+        idx = torch.arange(ws, device=device)
+        holds = (rank + idx) < ws
+        extremum, other = (0.0, 1.0) if reduce_op_name == "min" else (1.0, 0.0)
+        input_tensor = torch.where(holds, extremum, other).to(dtype).requires_grad_()
+
         output = fcols.all_reduce(input_tensor, reduce_op, group=group_name)
         output.sum().backward()
 
-        # Grad G = world_size is split evenly across the extremum holders: the
-        # `half` low ranks for min, the `world_size - half` high ranks for max.
-        holds_extremum = (reduce_op_name == "min") == (rank < half)
-        num_holders = half if reduce_op_name == "min" else self.world_size - half
-        expected_val = self.world_size / num_holders if holds_extremum else 0.0
-        expected_grad = torch.full(shape, fill_value=expected_val, device=device)
+        count = (ws - idx).to(torch.float32)
+        expected_grad = torch.where(holds, ws / count, 0.0).to(dtype)
         self.assertEqual(input_tensor.grad, expected_grad)
+        self.assertEqual(input_tensor.grad.dtype, dtype)
 
     @parametrize("device", devices)
     @parametrize("gather_dim", [0, 1, 2])
@@ -621,36 +633,45 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             self.assertEqual(grad, expected_grad)
 
     @parametrize("device", devices)
+    @parametrize("dtype", tie_dtypes)
     @parametrize("reduce_op_name, reduce_op", min_max_reduce_ops)
     def test_all_reduce_coalesced_min_max_ties_backward(
-        self, device, reduce_op_name, reduce_op
+        self, device, dtype, reduce_op_name, reduce_op
     ):
         """all_reduce_coalesced min/max backward splits grad evenly across ties.
 
-        The lower half of the ranks hold the min and the upper half hold the
-        max, so each tensor's summed grad (world_size) is divided by the number
-        of tied ranks, matching ATen's evenly_distribute_backward.
+        As in the single-tensor case, element i (along the last dim) is held by
+        ranks r with r + i < world_size, so the holder count varies per element.
+        Each tensor's summed grad (world_size) is divided by the per-element
+        count, matching ATen's evenly_distribute_backward.
         """
-        shapes = [(3, 3), (2, 2)]
         group_name = dist.group.WORLD.group_name
         rank = dist.get_rank()
-        half = self.world_size // 2
+        ws = self.world_size
 
-        value = 0.0 if rank < half else 1.0
+        # Example (ws=4): idx=[0,1,2,3]; element i is held by ranks r with
+        # r+i<4, so per-element counts=[4,3,2,1] (all ranks tie at i=0, unique
+        # at i=3). Rank 1 has holds=[T,T,T,F] -> grad=[4/4,4/3,4/2,0].
+        idx = torch.arange(ws, device=device)
+        holds = (rank + idx) < ws
+        extremum, other = (0.0, 1.0) if reduce_op_name == "min" else (1.0, 0.0)
+        values = torch.where(holds, extremum, other).to(dtype)
+        count = (ws - idx).to(torch.float32)
+        expected = torch.where(holds, ws / count, 0.0).to(dtype)
+
+        # Differently-shaped tensors sharing the last-dim tie pattern, to check
+        # the counts are batched per tensor rather than as one scalar.
+        shapes = [(ws,), (2, ws)]
         input_tensors = [
-            torch.full(shape, fill_value=value, requires_grad=True, device=device)
-            for shape in shapes
+            values.expand(shape).contiguous().requires_grad_() for shape in shapes
         ]
         outputs = fcols.all_reduce_coalesced(input_tensors, reduce_op, group=group_name)
         loss = sum(output.sum() for output in outputs)
         loss.backward()
 
-        holds_extremum = (reduce_op_name == "min") == (rank < half)
-        num_holders = half if reduce_op_name == "min" else self.world_size - half
-        expected_val = self.world_size / num_holders if holds_extremum else 0.0
         for input_tensor in input_tensors:
-            expected_grad = torch.full_like(input_tensor, fill_value=expected_val)
-            self.assertEqual(input_tensor.grad, expected_grad)
+            self.assertEqual(input_tensor.grad, expected.expand_as(input_tensor))
+            self.assertEqual(input_tensor.grad.dtype, dtype)
 
     @parametrize("device", devices)
     def test_all_gather_into_tensor_coalesced_backward(self, device):
@@ -1010,13 +1031,21 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
     def test_all_reduce_min_max_ties_compile(self):
         """min/max backward splits grad evenly across tied holders under compile.
 
-        Every rank holds the same value, so all ranks tie for both min and max
-        and the summed grad (world_size) is divided by world_size, matching
-        ATen's evenly_distribute_backward.
+        Element i is held by ranks r with r + i < world_size, so the holder
+        count varies per element and the compiled backward must divide the
+        summed grad by the per-element count, matching eager.
         """
-        shape = (3, 3)
         group_name = dist.group.WORLD.group_name
+        ws = self.world_size
+        rank = self.rank
 
+        idx = torch.arange(ws, device=self.device)
+        holds = (rank + idx) < ws
+        count = (ws - idx).to(torch.float32)
+        expected_grad = torch.where(holds, ws / count, 0.0)
+
+        # Only the string form is traceable under fullgraph; a ReduceOp object
+        # graph-breaks in dynamo (the object form is covered by the eager tests).
         for reduce_op in ["min", "max"]:
             with self.subTest(reduce_op=reduce_op):
 
@@ -1025,16 +1054,60 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
                     output = fcols.all_reduce(tensor, reduce_op, group=group_name)
                     return output.sum()
 
-                input_tensor = torch.full(
-                    shape, fill_value=1.0, device=self.device, requires_grad=True
-                )
+                extremum, other = (0.0, 1.0) if reduce_op == "min" else (1.0, 0.0)
+                input_tensor = torch.where(holds, extremum, other).requires_grad_()
 
-                loss = compiled_fn(input_tensor)
-                loss.backward()
+                compiled_fn(input_tensor).backward()
 
                 self.assertIsNotNone(input_tensor.grad)
-                expected_grad = torch.full(shape, fill_value=1.0, device=self.device)
                 self.assertEqual(input_tensor.grad, expected_grad)
+
+    # Known-broken: under torch.compile the coalesced min/max backward returns
+    # all-zero grads (eager is correct). The AOT joint graph is right, but
+    # Inductor's lowering of the multi-output wait_tensors op mishandles waiting
+    # the forward's coalesced output again in the backward: unlike the
+    # single-tensor wait_tensor (which gets an alias inserted), the re-wait
+    # yields wrong data, so the `input == output` extremum mask is all-False.
+    # Fixing that lives in torch/_inductor comm lowering, out of scope here.
+    @unittest.expectedFailure
+    @with_comms
+    def test_all_reduce_coalesced_min_max_ties_compile(self):
+        """coalesced min/max backward splits grad evenly across ties under compile.
+
+        Mirrors the single-tensor compile test for all_reduce_coalesced, whose
+        schema and Inductor lowering this PR touches, so the coalesced min/max
+        backward is traced and lowered.
+        """
+        group_name = dist.group.WORLD.group_name
+        ws = self.world_size
+        rank = self.rank
+
+        idx = torch.arange(ws, device=self.device)
+        holds = (rank + idx) < ws
+        count = (ws - idx).to(torch.float32)
+        expected_grad = torch.where(holds, ws / count, 0.0)
+
+        # Only the string form is traceable under fullgraph; a ReduceOp object
+        # graph-breaks in dynamo (the object form is covered by the eager tests).
+        for reduce_op in ["min", "max"]:
+            with self.subTest(reduce_op=reduce_op):
+
+                @torch.compile(fullgraph=True)
+                def compiled_fn(a, b):
+                    outs = fcols.all_reduce_coalesced(
+                        [a, b], reduce_op, group=group_name
+                    )
+                    return outs[0].sum() + outs[1].sum()
+
+                extremum, other = (0.0, 1.0) if reduce_op == "min" else (1.0, 0.0)
+                values = torch.where(holds, extremum, other)
+                a = values.clone().requires_grad_()
+                b = values.clone().requires_grad_()
+
+                compiled_fn(a, b).backward()
+
+                self.assertEqual(a.grad, expected_grad)
+                self.assertEqual(b.grad, expected_grad)
 
     @with_comms
     def test_all_gather_tensor_compile(self):
