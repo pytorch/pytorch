@@ -2753,7 +2753,8 @@ Arguments:
                 std::optional<std::chrono::milliseconds> timeout) {
                 ::c10d::AllToAllOptions opts;
                 opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                return self->all_to_all_single(output, input, outputSplitSizes, inputSplitSizes, opts);
+                return self->all_to_all_single(
+                    output, input, outputSplitSizes, inputSplitSizes, opts);
               },
               py::arg("output"),
               py::arg("input"),
@@ -2814,9 +2815,9 @@ Arguments:
             "barrier",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                 std::optional<std::chrono::milliseconds> timeout) {
-                    ::c10d::BarrierOptions opts;
-                    opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                    return self->barrier(opts);
+                ::c10d::BarrierOptions opts;
+                opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
+                return self->barrier(opts);
                 },
                 py::arg("timeout") = std::nullopt,
                 py::call_guard<py::gil_scoped_release>(),
@@ -2890,10 +2891,9 @@ This API is experimental and subject to change.)")
                 if (!backend_obj.is_none()) {
                   backend =
                       backend_obj.cast<c10::intrusive_ptr<::c10d::Backend>>();
-                  auto* pyobj =
-                      torch::utils::PyObjectPreservation::get_or_init(
-                          **backend,
-                          [&]() { return Py_NewRef(backend_obj.ptr()); });
+                  auto* pyobj = torch::utils::PyObjectPreservation::get_or_init(
+                      **backend,
+                      [&]() { return Py_NewRef(backend_obj.ptr()); });
                   Py_DECREF(pyobj);
                 }
                 py::gil_scoped_release nogil{};
@@ -2938,8 +2938,9 @@ experimental and subject to breakage without warning.)")
                 // backend implementations and the latter cannot depend on
                 // python-related libs.
                 self->registerOnCompletionHook(
-                    [hookWrapper = ::c10d::PythonOnCompletionHook(std::move(
-                         hook))](const std::shared_ptr<::c10d::WorkInfo>& workInfo) {
+                    [hookWrapper =
+                         ::c10d::PythonOnCompletionHook(std::move(hook))](
+                        const std::shared_ptr<::c10d::WorkInfo>& workInfo) {
                       hookWrapper(workInfo);
                     });
               },
@@ -3080,12 +3081,13 @@ Arguments:
               &::c10d::ProcessGroup::unregisterPostHook,
               py::arg("hook_id"))
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
-            return torch::jit::toPyObject(c10::IValue(std::move(self)));
+                return torch::jit::toPyObject(c10::IValue(std::move(self)));
           })
           .def_static("unbox", [](py::object obj) {
-              auto typePtr = torch::getCustomClass("__torch__.torch.classes.c10d.ProcessGroup");
-              auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
-              return ivalue.toCustomClass<::c10d::ProcessGroup>();
+                auto typePtr = torch::getCustomClass(
+                    "__torch__.torch.classes.c10d.ProcessGroup");
+                auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+                return ivalue.toCustomClass<::c10d::ProcessGroup>();
           });
 
   // Thread local process group manipulation

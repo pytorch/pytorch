@@ -283,8 +283,7 @@ TEST(NCCLDevCommManagerTest, IdentitySafeUnregisterPreservesSuccessor) {
   ncclComm_t first_comm = nullptr;
   ncclComm_t successor_comm = nullptr;
   ASSERT_EQ(ncclCommInitRank(&first_comm, 1, first_id, 0), ncclSuccess);
-  ASSERT_EQ(
-      ncclCommInitRank(&successor_comm, 1, successor_id, 0), ncclSuccess);
+  ASSERT_EQ(ncclCommInitRank(&successor_comm, 1, successor_id, 0), ncclSuccess);
 
   const std::string group_name = "identity_safe_unregister";
   c10::Device device(c10::DeviceType::CUDA, 0);

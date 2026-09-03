@@ -1652,9 +1652,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         old_pg = c10d.distributed_c10d._get_default_group()
         pg_backend = old_pg._get_backend(self.device)
         expected_backend_type = (
-            c10d.ProcessGroupNCCL2
-            if backend_name == "nccl"
-            else c10d.ProcessGroupNCCL
+            c10d.ProcessGroupNCCL2 if backend_name == "nccl" else c10d.ProcessGroupNCCL
         )
         self.assertIsInstance(pg_backend, expected_backend_type)
         old_group_name = old_pg.group_name
@@ -1663,9 +1661,9 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         # communicator creation via device_id publishes the comm, while this
         # also confirms both ranks can use it before the lifecycle transition.
         c10d.all_reduce(torch.ones(1, device=self.device))
-        tensor = symm_mem.empty(
-            4096, dtype=torch.float32, device=self.device
-        ).fill_(self.rank)
+        tensor = symm_mem.empty(4096, dtype=torch.float32, device=self.device).fill_(
+            self.rank
+        )
         old_handle = symm_mem.rendezvous(tensor, group=old_group_name)
         torch.cuda.synchronize(self.device)
 
@@ -1688,9 +1686,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             successor_tensor = symm_mem.empty(
                 4096, dtype=torch.float32, device=self.device
             ).fill_(self.rank)
-            new_handle = symm_mem.rendezvous(
-                successor_tensor, group=new_pg.group_name
-            )
+            new_handle = symm_mem.rendezvous(successor_tensor, group=new_pg.group_name)
             torch.cuda.synchronize(self.device)
             c10d.barrier()
             peer = (self.rank + 1) % self.world_size
