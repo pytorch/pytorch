@@ -7,6 +7,7 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from torch._inductor.kernel.mm_common import load_kernel_template
+from torch.utils._triton import has_triton_stable_tma_api
 
 from .. import config as inductor_config, ir, lowering as L
 from ..kernel_inputs import MMKernelInputs
@@ -20,6 +21,7 @@ from ..select_algorithm import (
 )
 from ..utils import (
     _use_cutlass_for_op,
+    get_dtype_size,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_cpp_bmm_template,
@@ -114,6 +116,43 @@ BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
     BlackwellBMMConfig(128, 128, 128, 3, 8),
     BlackwellBMMConfig(128, 256, 64, 4, 8),
 )
+
+
+def _has_tma_aligned_batch_bases(node: ir.IRNode) -> bool:
+    batch = int(node.get_size()[0])
+    batch_stride = int(node.get_stride()[0])
+    return batch <= 1 or batch_stride * get_dtype_size(node.get_dtype()) % 16 == 0
+
+
+def can_use_blackwell_bmm_template(mat1, mat2, layout) -> bool:
+    if not (
+        inductor_config.triton.enable_blackwell_bmm_template
+        and inductor_config.triton.enable_persistent_tma_matmul
+        and has_triton_stable_tma_api()
+        and mat1.get_dtype() in (torch.float16, torch.bfloat16)
+        and mat1.get_dtype() == mat2.get_dtype() == layout.dtype
+    ):
+        return False
+    try:
+        tuple(
+            map(
+                int,
+                (
+                    *mat1.get_size(),
+                    *mat1.get_stride(),
+                    *mat2.get_size(),
+                    *mat2.get_stride(),
+                    *layout.size,
+                ),
+            )
+        )
+    except (TypeError, ValueError):
+        return False
+    if not all(_has_tma_aligned_batch_bases(node) for node in (mat1, mat2)):
+        return False
+    from ..codegen.cuda.cuda_env import is_datacenter_blackwell_arch
+
+    return is_datacenter_blackwell_arch()
 
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
@@ -281,6 +320,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
+
+    if can_use_blackwell_bmm_template(mat1, mat2, layout):
+        templates_to_use.append(blackwell_ws_persistent_tma_bmm_template)
 
     # Single unified call for all templates
     choices.extend(

@@ -368,6 +368,53 @@ class TestMaxAutotune(TestCase):
         self.assertIn("ctas_per_cga=(2, 1, 1)", codes[0])
         self.assertIn("make_tensor_descriptor(out_ptr0", codes[0])
 
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    def test_blackwell_bmm_template_choice(self) -> None:
+        bsz, m, k, n = 3, 256, 8193, 128
+        a_storage = torch.randn(bsz, k, m, device=GPU_TYPE, dtype=torch.bfloat16)
+        a = a_storage.transpose(1, 2)
+        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="ATEN,TRITON",
+            compile_threads=1,
+            **{
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_blackwell_bmm_template": True,
+            },
+        ):
+            actual = torch.compile(torch.bmm, fullgraph=True)(a, b)
+
+        torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    def test_blackwell_bmm_template_rejects_unaligned_batch_base(self) -> None:
+        bsz, m, k, n = 3, 128, 1025, 128
+        a = (
+            torch.randn(m, bsz * k, device=GPU_TYPE, dtype=torch.bfloat16)
+            .reshape(m, bsz, k)
+            .permute(1, 0, 2)
+        )
+        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="ATEN,TRITON",
+            compile_threads=1,
+            shape_padding=False,
+            **{
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_blackwell_bmm_template": True,
+            },
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(torch.bmm, fullgraph=True), a, b
+            )
+
+        torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
+        self.assertNotIn("triton_blackwell_bmm", codes[0])
+
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic, search_space):
