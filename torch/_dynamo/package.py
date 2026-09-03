@@ -123,8 +123,8 @@ class FunctionPicklerBase(pickle.Pickler):
     Defaults, __dict__, and the globals snapshot travel as pickle STATE, applied
     after memoization, so `wrapper.me = wrapper` and module-scope cycles end.
     A closure cell is a reduce ARGUMENT: a function closing over itself is
-    reduced twice, and only the C pickler's recursive-object fallback in
-    save_reduce drops the outer copy, so the pure-Python pickler is unsupported.
+    reduced twice, and save_reduce's recursive-object fallback (present in both
+    the C and the pure-Python pickler) drops the outer copy.
     """
 
     @classmethod
@@ -179,8 +179,14 @@ class FunctionPicklerBase(pickle.Pickler):
     ) -> types.FunctionType:
         # functools.wraps copies __module__, so this scope can be a different
         # file from the one the function lives in; a pickler that guards
-        # __globals__ sends the snapshot variant instead.
-        f_globals = importlib.import_module(module).__dict__
+        # __globals__ sends the snapshot variant instead. A module that only
+        # existed in sys.modules at save (exec-created, transformers_modules.*)
+        # gets an empty scope: a guard never calls the rebuilt function.
+        f_globals: dict[str, Any]
+        try:
+            f_globals = importlib.import_module(module).__dict__
+        except ImportError:
+            f_globals = {}
         return cls._build_function(f_globals, module, code, qualname, name, closure)
 
     @classmethod
@@ -972,8 +978,6 @@ class CompilePackage:
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_backend_id")
-        if self._current_entry.bypassed:
-            return
         if backend_id not in self._current_entry.backend_ids:
             self._current_entry.backend_ids.append(backend_id)
         if backend is not None:
