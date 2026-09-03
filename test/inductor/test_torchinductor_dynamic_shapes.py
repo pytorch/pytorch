@@ -1577,6 +1577,25 @@ class TestInductorDynamic(DynamicShapesTestCase):
             actual = compiled_f(x)
             self.assertEqual(actual, expected)
 
+    @parametrize("dynamic", [False, True])
+    def test_unsafe_index_put_no_bounds_check(self, device, dynamic):
+        # _unsafe_index_put's contract is that its indices are already in
+        # bounds, so it must not emit one. Decomposing it to the checked
+        # index_put reintroduces a check whenever interval analysis cannot
+        # relate the index range to a padded destination size.
+        def f(dst, src):
+            idx = torch.arange(src.shape[0], device=src.device)
+            return torch.ops.aten._unsafe_index_put.default(dst, [idx], src, False)
+
+        n = 300
+        src = torch.randn(n, device=device)
+        dst = torch.zeros((n + 127) // 128 * 128, device=device)
+
+        fn_c = torch.compile(f, dynamic=dynamic, fullgraph=True)
+        actual, code = run_and_get_code(fn_c, dst, src)
+        self.assertEqual(actual, f(dst, src))
+        FileCheck().check_not("index out of bounds").run("\n".join(code))
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 
