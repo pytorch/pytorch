@@ -125,8 +125,8 @@ class FunctionPicklerBase(pickle.Pickler):
     Defaults, __dict__, and the globals snapshot travel as pickle STATE, applied
     after memoization, so `wrapper.me = wrapper` and module-scope cycles end.
     A closure cell is a reduce ARGUMENT: a function closing over itself is
-    reduced twice, and only the C pickler's recursive-object fallback in
-    save_reduce drops the outer copy, so the pure-Python pickler is unsupported.
+    reduced twice, and save_reduce's recursive-object fallback (present in both
+    the C and the pure-Python pickler) drops the outer copy.
     """
 
     @classmethod
@@ -181,8 +181,14 @@ class FunctionPicklerBase(pickle.Pickler):
     ) -> types.FunctionType:
         # functools.wraps copies __module__, so this scope can be a different
         # file from the one the function lives in; a pickler that guards
-        # __globals__ sends the snapshot variant instead.
-        f_globals = importlib.import_module(module).__dict__
+        # __globals__ sends the snapshot variant instead. A module that only
+        # existed in sys.modules at save (exec-created, transformers_modules.*)
+        # gets an empty scope: a guard never calls the rebuilt function.
+        f_globals: dict[str, Any]
+        try:
+            f_globals = importlib.import_module(module).__dict__
+        except ImportError:
+            f_globals = {}
         return cls._build_function(f_globals, module, code, qualname, name, closure)
 
     @classmethod
@@ -586,14 +592,16 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
     """(machine, vec_isa, simdlen, march): what inductor bakes into CPU code.
 
     ``pick_vec_isa`` dry-compiles a probe with the C++ toolchain, so call this
-    only when the artifact can hold native CPU code. A host with no usable
-    compiler records None: it can neither produce nor run an inductor CPU kernel.
+    only when the artifact can hold native CPU code. None means the host has no
+    usable CPU codegen target: the probe raised, or it picked no valid vector
+    ISA (``pick_vec_isa`` never raises for a missing compiler; it returns
+    ``invalid_vec_isa``), so it can neither produce nor run a vectorized
+    inductor CPU kernel.
     """
-    from torch._inductor import config as inductor_config
-    from torch._inductor.cpu_vec_isa import pick_vec_isa
+    from torch._inductor import config as inductor_config, cpu_vec_isa
 
     try:
-        vec_isa = str(pick_vec_isa())
+        vec_isa = cpu_vec_isa.pick_vec_isa()
     except Exception:
         logger.warning(
             "Could not determine the CPU vector ISA, so no CPU codegen target "
@@ -601,13 +609,44 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
             exc_info=True,
         )
         return None
+    if isinstance(vec_isa, cpu_vec_isa.InvalidVecISA):
+        return None
 
     return (
         platform.machine(),
-        vec_isa,
+        str(vec_isa),
         inductor_config.cpp.simdlen,
         inductor_config.cpp.march,
     )
+
+
+def _cpu_codegen_target_problem(
+    cached: _CpuCodegenTarget, current: _CpuCodegenTarget | None
+) -> str | None:
+    """Why code built for ``cached`` cannot run on this host, or None.
+
+    Vector ISAs nest (an avx512 host runs avx2 code), so the artifact's ISA
+    only has to be one this host can build for; simdlen and march change the
+    emitted code and must match exactly.
+    """
+    if current is None:
+        return (
+            "This host has no usable CPU codegen target (no C++ toolchain or no "
+            "supported vector ISA), so it cannot run inductor CPU kernels."
+        )
+    from torch._inductor import cpu_vec_isa
+
+    machine, vec_isa, simdlen, march = cached
+    if machine != current[0]:
+        return f"The artifact was built for machine {machine!r}, this host is {current[0]!r}."
+    host_isas = sorted(str(isa) for isa in cpu_vec_isa.valid_vec_isa_list())
+    if vec_isa not in host_isas:
+        return f"The artifact needs vector ISA {vec_isa!r}; this host can build for {host_isas}."
+    if simdlen != current[2]:
+        return f"The artifact was built with simdlen={simdlen!r}, this host uses {current[2]!r}."
+    if march != current[3]:
+        return f"The artifact was built with march={march!r}, this host uses {current[3]!r}."
+    return None
 
 
 # Registered backends that generate no native code, so an artifact of theirs
@@ -705,20 +744,16 @@ class SystemInfo:
             check_codegen
             and device_type == "cpu"
             and self.cpu_codegen_target is not None
-            and self.cpu_codegen_target != other.cpu_codegen_target
         ):
-            # None on the current side means the probe could not run at all;
-            # None on the cached side is the "predates the field" case handled
-            # by the condition above and never reaches here.
-            hint = (
-                " The current target is unknown because no usable C++ compiler was found."
-                if other.cpu_codegen_target is None
-                else ""
+            problem = _cpu_codegen_target_problem(
+                self.cpu_codegen_target, other.cpu_codegen_target
             )
-            raise RuntimeError(
-                "Compile package was created with a different CPU codegen target: "
-                f"cached={self.cpu_codegen_target}, current={other.cpu_codegen_target}.{hint}"
-            )
+            if problem is not None:
+                raise RuntimeError(
+                    "Compile package was created for a CPU codegen target this host "
+                    f"cannot run: cached={self.cpu_codegen_target}, "
+                    f"current={other.cpu_codegen_target}. {problem}"
+                )
         if device_type in self.CHECK_GPUS:
             # Device EXISTENCE is not a native-code question: an artifact
             # holding cuda tensors cannot run without cuda whatever backend
@@ -1040,6 +1075,9 @@ class CompilePackage:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
             # Restored so a re-save keeps checking what the capture targeted.
             self._device_types = set(dynamo.device_types or (dynamo.device_type,))
+            self._requires_native_backend_compatibility = (
+                dynamo.requires_native_backend_compatibility
+            )
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
@@ -1187,8 +1225,6 @@ class CompilePackage:
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_backend_id")
-        if self._current_entry.bypassed:
-            return
         if backend_id not in self._current_entry.backend_ids:
             self._current_entry.backend_ids.append(backend_id)
         if backend is not None:
@@ -1231,9 +1267,12 @@ class CompilePackage:
         if self._uninstall_finalizer is not None:
             self._uninstall_finalizer.detach()
             self._uninstall_finalizer = None
-        for module, names in self._installed_globals.items():
-            for name in names:
-                module.__dict__.pop(name, None)
+        # Pop only what still holds OUR value: a user (or a later load of the
+        # same artifact) may have rebound the name since install().
+        for module, values_by_name in self._installed_globals.items():
+            for name, value in values_by_name.items():
+                if module.__dict__.get(name) is value:
+                    del module.__dict__[name]
 
         self._installed_globals = {}
 

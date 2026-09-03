@@ -4554,6 +4554,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif inspect.ismethod(obj):
             reduced = self._reduce_bound_method(obj)
             if reduced is not None:
+                if self._keep(obj):
+                    # A guard reads a method's attributes through __func__, so
+                    # the function it carries is guarded too, and an fqn
+                    # mismatch there is rebuilt rather than pruned.
+                    self.guard_tree_values[id(obj.__func__)] = obj.__func__
                 return reduced
 
         elif isinstance(obj, types.CellType):
@@ -4667,9 +4672,11 @@ def pickle_guards_state(
     # Anything dump raises means a guarded value cannot be serialized, which is
     # a bypass (an error under strict_precompile), never a compiler crash. A
     # PackageError raised inside reducer_override already carries its message.
+    # RecursionError is a cycle the reducers did not route through pickle state
+    # (see FunctionPicklerBase), which is a bug here and must stay loud.
     try:
         pickler.dump(state)
-    except torch._dynamo.exc.PackageError:
+    except (torch._dynamo.exc.PackageError, RecursionError):
         raise
     except Exception as e:
         raise torch._dynamo.exc.PackageError(str(e)) from e
@@ -5344,9 +5351,7 @@ class CheckFunctionManager:
             reason = f"Cache line invalidated because {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
 
-            extra_state.invalidate(
-                cache_entry, deleted_guard_manager, self.guard_manager
-            )
+            extra_state.invalidate(deleted_guard_manager, self.guard_manager)
             self.guard_manager = deleted_guard_manager
 
     def id_ref(self, obj: object, obj_str: str) -> int:
