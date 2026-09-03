@@ -54,6 +54,11 @@ class TorchtitanTestRunner(BaseRunner):
         with working_directory(self.work_directory):
             pip_install_packages(packages=["-e", "."])
             pip_install_packages(packages=["pytest", "pytest-cov"])
+            # Models like Qwen3.5 (e.g. qwen3_5_moe_fsdp+tp+ep) depend on
+            # flash-linear-attention ("fla"), which torchtitan's own CI image
+            # installs via this requirements file but the PyTorch CI image
+            # does not ship by default.
+            pip_install_packages(requirements=".ci/docker/requirements-vlm.txt")
 
     def run(self):
         self.prepare()
