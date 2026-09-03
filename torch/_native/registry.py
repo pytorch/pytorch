@@ -571,20 +571,23 @@ def deregister_op_overrides(
             )
 
 
-def get_dsl_operations(dsl_name: str) -> list[str]:
-    """Get list of operations registered by a specific DSL.
+def get_dsl_operations(dsl_name: str, lib_symbol: str = "aten") -> list[str]:
+    """Get list of operations registered by a specific DSL in one namespace.
 
     Args:
         dsl_name: Name of the DSL to query.
+        lib_symbol: Namespace to report on. One namespace per call: op symbols
+            are unique within a namespace but not across them, so merging
+            would produce a list whose entries cannot be resolved back to an
+            op.
 
     Returns:
-        Sorted list of operation names registered by the DSL. Bare op symbols,
-        collapsed across namespaces: an op registered under two namespaces
-        appears once, and the namespace it came from is not recoverable from
-        the result.
+        Sorted list of op symbols the DSL has registered on `lib_symbol`.
     """
     operations = set()
-    for (_, op_symbol, _), nodes in _graphs.items():
+    for (lib, op_symbol, _), nodes in _graphs.items():
+        if lib != lib_symbol:
+            continue
         for node in nodes:
             if node.dsl_name == dsl_name:
                 operations.add(op_symbol)
