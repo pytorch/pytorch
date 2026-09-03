@@ -33,9 +33,7 @@ from torch.distributed.fsdp.wrap import (
 )
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.modules.batchnorm import _BatchNorm
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     _move_to_device,
@@ -55,10 +53,6 @@ from torch.testing._internal.common_utils import (
     TEST_MULTIACCELERATOR,
     TestCase,
 )
-
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-backend = torch.distributed.get_default_backend_for_device(device_type)
 
 
 class BatchNormNet(nn.Module):
@@ -130,14 +124,14 @@ class WrapMethod(Enum):
 
 class NestedSequentialModel:
     @staticmethod
-    def get_model(device=True):
+    def get_model(device=None):
         sequential = nn.Sequential(
             nn.Linear(5, 5),
             nn.Linear(5, 5),
             nn.Sequential(nn.Linear(5, 5), nn.Linear(5, 5)),
         )
-        if device:
-            sequential = sequential.to(device=device_type)
+        if device is not None:
+            sequential = sequential.to(device=device)
         return sequential
 
     @staticmethod
@@ -224,7 +218,7 @@ class TestFSDPWrap(FSDPTestContinuous):
             nested=nested, device_init_mode=device_init_mode
         )
         if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-            wrapped_fsdp = wrapped_fsdp.to(device=device_type)
+            wrapped_fsdp = wrapped_fsdp.to(device=device)
 
         wrapped_module_name = "lin1.1" if nested else "lin1"
         with self.assertRaisesRegex(
@@ -380,7 +374,7 @@ class TestFSDPWrap(FSDPTestContinuous):
             forward_prefetch=forward_prefetch,
         )
         if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-            wrapped_model = wrapped_model.to(device=device_type)
+            wrapped_model = wrapped_model.to(device=device)
 
         modules_in_fsdp_graph_order = [
             wrapped_model.module.lin1,
@@ -399,7 +393,7 @@ class TestFSDPWrap(FSDPTestContinuous):
 
         # Run model a few times for sanity check.
         optim = torch.optim.SGD(wrapped_model.parameters(), lr=1e-2, momentum=0.9)
-        inp = torch.ones(1).to(device=device_type)
+        inp = torch.ones(1).to(device=device)
         for _ in range(6):
             optim.zero_grad()
             loss = wrapped_model(inp).sum()
@@ -487,7 +481,7 @@ class TestAutoWrap(TestCase):
         Test to ensure that if `always_wrap_policy` is
         passed into FSDP, all submodules are wrapped.
         """
-        seq = NestedSequentialModel.get_model(device=True)
+        seq = NestedSequentialModel.get_model(device=device)
         model = FSDP(
             seq, process_group=self.process_group, auto_wrap_policy=always_wrap_policy
         )
@@ -659,7 +653,7 @@ class TestAutoWrap(TestCase):
         Test to ensure with auto wrap, we wrap child modules correctly based on the min_num_params.
         ``nn.Linear(5, 5)`` does not exceed the bucket size, but combined they do.
         """
-        sequential = NestedSequentialModel.get_model(device=False)
+        sequential = NestedSequentialModel.get_model()
         my_auto_wrap_policy = functools.partial(
             size_based_auto_wrap_policy, min_num_params=40
         )
@@ -783,10 +777,9 @@ class TestAutoWrap(TestCase):
         ):
             return
 
-        device = torch.device(device_type)
         torch.accelerator.set_device_index(0)
         device_id = (
-            torch.device(device_type, torch.accelerator.current_device_index())
+            torch.device(device, torch.accelerator.current_device_index())
             if use_device_id
             else None
         )
@@ -798,7 +791,7 @@ class TestAutoWrap(TestCase):
         with tempfile.NamedTemporaryFile(delete=False) as f:
             file_name = f.name
             torch.distributed.init_process_group(
-                backend=backend,
+                backend=torch.distributed.get_default_backend_for_device(device),
                 init_method=f"{FILE_SCHEMA}_{file_name}",
                 rank=0,
                 world_size=1,
@@ -808,7 +801,9 @@ class TestAutoWrap(TestCase):
         # cases where full model cannot be loaded onto GPU, but their shards can.
         device_after_init = device_init_mode == DEVICEInitMode.DEVICE_AFTER
         try:
-            sequential = NestedSequentialModel.get_model(device=(not device_after_init))
+            sequential = NestedSequentialModel.get_model(
+                device=None if device_after_init else device
+            )
             my_auto_wrap_policy = functools.partial(
                 size_based_auto_wrap_policy, min_num_params=40
             )
@@ -820,7 +815,7 @@ class TestAutoWrap(TestCase):
             )
             NestedSequentialModel.verify_model(self, model)
             if device_after_init:
-                model = model.to(device=device_type)
+                model = model.to(device=device)
             input = torch.rand((1, 5), dtype=torch.float).to(device)
             output = model(input)
             loss = F.mse_loss(input, output)
@@ -838,7 +833,7 @@ class TestAutoWrap(TestCase):
     )
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
     def test_always_wrap_with_ignored_modules(self, device, wrap_method: WrapMethod):
-        sequential = NestedSequentialModel.get_model(device=False)
+        sequential = NestedSequentialModel.get_model()
         ignored_modules = [sequential[1], sequential[2][0]]
         fsdp_kwargs = {
             "process_group": self.process_group,
@@ -865,7 +860,7 @@ class TestAutoWrap(TestCase):
     )
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
     def test_auto_wrap_with_ignored_modules(self, device, wrap_method: WrapMethod):
-        sequential = NestedSequentialModel.get_model(device=False)
+        sequential = NestedSequentialModel.get_model()
         ignored_modules = [sequential[1], sequential[2][0]]
         my_auto_wrap_policy = functools.partial(
             size_based_auto_wrap_policy,
@@ -927,10 +922,10 @@ class TestAutoWrap(TestCase):
                 lambda_wrap_policy_nonuniform,
             ],
         ):
-            self._test_frozen_params(use_orig_params, policy)
+            self._test_frozen_params(device, use_orig_params, policy)
 
-    def _test_frozen_params(self, use_orig_params: bool, policy: _Policy):
-        model = LoraModel().to(device=device_type)
+    def _test_frozen_params(self, device, use_orig_params: bool, policy: _Policy):
+        model = LoraModel().to(device=device)
         msg = "layers.0.attn has both parameters with requires_grad=True and False. "
         if use_orig_params:
             msg += "We do not recommend wrapping such modules"
