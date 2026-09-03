@@ -1,33 +1,11 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/Logging.h>
 #include <c10/util/thread_name.h>
-#include <utility>
 #if !defined(__powerpc__) && !defined(__s390x__)
 #include <cpuinfo.h>
 #endif
 
-#if defined(__linux__)
-#include <sched.h>
-#endif
-
 namespace c10 {
-
-namespace {
-// Number of CPUs the current process is allowed to run on. On Linux this
-// respects the process' CPU affinity mask (i.e. a cpuset/taskset
-// restriction), which cpuinfo does not account for. Returns 0 if the limit
-// is unknown, in which case callers should ignore it.
-size_t get_cpuset_num_threads() {
-#if defined(__linux__)
-  cpu_set_t cpu_set;
-  CPU_ZERO(&cpu_set);
-  if (sched_getaffinity(0, sizeof(cpu_set), &cpu_set) == 0) {
-    return CPU_COUNT(&cpu_set);
-  }
-#endif
-  return 0;
-}
-} // namespace
 
 size_t TaskThreadPoolBase::defaultNumThreads() {
   size_t num_threads = 0;
@@ -38,26 +16,14 @@ size_t TaskThreadPoolBase::defaultNumThreads() {
     size_t num_cores = cpuinfo_get_cores_count();
     num_threads = cpuinfo_get_processors_count();
     if (num_cores > 0 && num_cores < num_threads) {
-      num_threads = num_cores;
+      return num_cores;
     }
     if (num_threads > 0) {
-      // cpuinfo reports the host topology and ignores any cpuset/affinity
-      // restriction on the current process, so clamp to the number of CPUs
-      // this process is actually allowed to run on.
-      size_t cpuset_threads = get_cpuset_num_threads();
-      if (cpuset_threads > 0 && cpuset_threads < num_threads) {
-        num_threads = cpuset_threads;
-      }
       return num_threads;
     }
   }
 #endif
   num_threads = std::thread::hardware_concurrency();
-  size_t cpuset_threads = get_cpuset_num_threads();
-  if (cpuset_threads > 0 &&
-      (num_threads == 0 || cpuset_threads < num_threads)) {
-    num_threads = cpuset_threads;
-  }
   if (num_threads == 0) {
     num_threads = 1;
   }
@@ -74,13 +40,13 @@ ThreadPool::ThreadPool(
       available_(threads_.size()),
       total_(threads_.size()),
       numa_node_id_(numa_node_id) {
-  for (auto& thread : threads_) {
-    thread = std::thread([this, init_thread]() {
+  for (std::size_t i = 0; i < threads_.size(); ++i) {
+    threads_[i] = std::thread([this, i, init_thread]() {
       c10::setThreadName("pt_thread_pool");
       if (init_thread) {
         init_thread();
       }
-      this->main_loop();
+      this->main_loop(i);
     });
   }
 }
@@ -88,7 +54,7 @@ ThreadPool::ThreadPool(
 ThreadPool::~ThreadPool() {
   // Set running flag to false then notify all threads.
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     running_ = false;
     condition_.notify_all();
   }
@@ -107,7 +73,7 @@ size_t ThreadPool::size() const {
 }
 
 size_t ThreadPool::numAvailable() const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   return available_;
 }
 
@@ -122,7 +88,7 @@ bool ThreadPool::inThreadPool() const {
 
 void ThreadPool::run(std::function<void()> func) {
   TORCH_CHECK(!threads_.empty(), "No threads to run a task");
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
 
   // Set task and signal condition variable so that a worker thread will
   // wake up and use the task.
@@ -136,7 +102,7 @@ void ThreadPool::waitWorkComplete() {
   completed_.wait(lock, [&]() { return complete_; });
 }
 
-void ThreadPool::main_loop() {
+void ThreadPool::main_loop(std::size_t index) {
   std::unique_lock<std::mutex> lock(mutex_);
   while (running_) {
     // Wait on condition variable while the task is empty and
@@ -153,7 +119,7 @@ void ThreadPool::main_loop() {
     // useful in the event that the function contains
     // shared_ptr arguments bound via bind.
     {
-      std::function<void()> task = std::move(tasks_.front());
+      task_element_t tasks = std::move(tasks_.front());
       tasks_.pop();
       // Decrement count, indicating thread is no longer available.
       --available_;
@@ -162,15 +128,20 @@ void ThreadPool::main_loop() {
 
       // Run the task.
       try {
-        task();
+        if (tasks.run_with_id) {
+          tasks.with_id(index);
+        } else {
+          tasks.no_id();
+        }
       } catch (const std::exception& e) {
         LOG(ERROR) << "Exception in thread pool task: " << e.what();
       } catch (...) {
         LOG(ERROR) << "Exception in thread pool task: unknown";
       }
 
-      // Destruct task before taking the lock. As a user-provided std::function,
-      // it can run arbitrary code during destruction, including code
+      // Destruct tasks before taking the lock.  As tasks
+      // are user provided std::function, they can run
+      // arbitrary code during destruction, including code
       // that can reentrantly call into ThreadPool (which would
       // cause a deadlock if we were holding the lock).
     }

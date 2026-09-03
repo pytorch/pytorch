@@ -50,7 +50,9 @@ py::handle type_caster<c10::SymInt>::cast(
     } else {
       // Wrap the C++ into Python
       auto inner = py::cast(si.toSymNode());
-      TORCH_CHECK_PYTHON(inner);
+      if (!inner) {
+        throw python_error();
+      }
       return torch::get_symint_class()(inner).release();
     }
   } else {

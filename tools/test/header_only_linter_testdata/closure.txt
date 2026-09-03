@@ -1,2 +1,0 @@
-# tools/test/header_only_linter_testdata/umbrella.h
-symDef

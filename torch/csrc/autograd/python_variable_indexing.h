@@ -29,7 +29,9 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
           "of slice. This is likely because of "
           "saved old models when the start/stop/step were larger.",
           1);
-      TORCH_CHECK_PYTHON(r == 0);
+      if (r != 0) {
+        throw python_error();
+      }
       return (Py_ssize_t)(c10::SymInt::min_representable_int());
     }
     return val;
@@ -42,7 +44,9 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
       step_sym = py::handle(r->step).cast<c10::SymInt>();
     } else {
       Py_ssize_t step = 0;
-      TORCH_CHECK_PYTHON(_PyEval_SliceIndex(r->step, &step));
+      if (!_PyEval_SliceIndex(r->step, &step)) {
+        throw python_error();
+      }
       if (step == 0) {
         PyErr_SetString(PyExc_ValueError, "slice step cannot be zero");
       }
@@ -58,7 +62,9 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
     start_sym = c10::SymInt(step_sym < 0 ? PY_SSIZE_T_MAX : 0);
   } else {
     Py_ssize_t start = 0;
-    TORCH_CHECK_PYTHON(_PyEval_SliceIndex(r->start, &start));
+    if (!_PyEval_SliceIndex(r->start, &start)) {
+      throw python_error();
+    }
     start = clip_val(start);
     start_sym = c10::SymInt(start);
   }
@@ -70,7 +76,9 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
         step_sym < 0 ? c10::SymInt::min_representable_int() : PY_SSIZE_T_MAX);
   } else {
     Py_ssize_t stop = 0;
-    TORCH_CHECK_PYTHON(_PyEval_SliceIndex(r->stop, &stop));
+    if (!_PyEval_SliceIndex(r->stop, &stop)) {
+      throw python_error();
+    }
     stop = clip_val(stop);
     stop_sym = c10::SymInt(stop);
   }

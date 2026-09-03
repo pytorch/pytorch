@@ -23,12 +23,14 @@ PyObject* THPSize_New(const torch::autograd::Variable& var) {
     return THPSize_NewFromSizes(var.dim(), sizes.data());
   }
   auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, var.dim()));
-  TORCH_CHECK_PYTHON(self);
+  if (!self)
+    throw python_error();
 
   for (const auto i : c10::irange(var.dim())) {
     PyObject* py_size_tensor =
         THPVariable_Wrap(torch::jit::tracer::getSizeOf(var, i));
-    TORCH_CHECK_PYTHON(py_size_tensor);
+    if (!py_size_tensor)
+      throw python_error();
     PyTuple_SET_ITEM(self.get(), i, py_size_tensor);
   }
 
@@ -37,7 +39,8 @@ PyObject* THPSize_New(const torch::autograd::Variable& var) {
 
 PyObject* THPSize_NewFromSizes(int64_t dim, const int64_t* sizes) {
   auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, dim));
-  TORCH_CHECK_PYTHON(self);
+  if (!self)
+    throw python_error();
   THPUtils_packInt64Array(self, dim, sizes);
   return self.release();
 }
@@ -47,7 +50,8 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
 
   auto ret = THPObjectPtr(THPSizeType.tp_alloc(
       &THPSizeType, static_cast<Py_ssize_t>(sym_sizes.size())));
-  TORCH_CHECK_PYTHON(ret);
+  if (!ret)
+    throw python_error();
 
   for (auto i : c10::irange(sym_sizes.size())) {
     auto si = sym_sizes[i];
@@ -59,7 +63,8 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
           !torch::jit::tracer::isTracing(),
           "JIT Tracing of SymInts isn't supported");
       auto py_symint = py::cast(si).release().ptr();
-      TORCH_CHECK_PYTHON(py_symint);
+      if (!py_symint)
+        throw python_error();
       PyTuple_SET_ITEM(ret.get(), i, py_symint);
     } else {
       // Otherwise, we know that it is an actual integer value.
@@ -67,7 +72,8 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
       if (torch::jit::tracer::isTracing()) {
         PyObject* py_size_tensor = THPVariable_Wrap(
             torch::jit::tracer::getSizeOf(self_, static_cast<int64_t>(i)));
-        TORCH_CHECK_PYTHON(py_size_tensor);
+        if (!py_size_tensor)
+          throw python_error();
         PyTuple_SET_ITEM(ret.get(), i, py_size_tensor);
       } else {
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -108,7 +114,9 @@ static PyObject* THPSize_pynew(
       if (number && THPUtils_checkLong(number.get())) {
         Py_INCREF(number.get());
         auto status = PyTuple_SetItem(self, i, number.get());
-        TORCH_CHECK_PYTHON(status == 0);
+        if (status != 0) {
+          throw python_error();
+        }
         continue;
       }
       return PyErr_Format(
@@ -248,14 +256,16 @@ static PyObject* THPSize_reduce(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPSize*>(_self);
   auto ret = THPObjectPtr{PyTuple_New(2)};
-  TORCH_CHECK_PYTHON(ret);
+  if (!ret)
+    throw python_error();
 
   auto obj = reinterpret_cast<PyObject*>(&THPSizeType);
   Py_INCREF(&THPSizeType);
   PyTuple_SET_ITEM(ret.get(), 0, obj);
 
   THPObjectPtr t(PyTuple_New(PyTuple_Size(_self)));
-  TORCH_CHECK_PYTHON(t);
+  if (!t)
+    throw python_error();
   for (Py_ssize_t i = 0; i < PyTuple_Size(_self); ++i) {
     auto d = PyTuple_GET_ITEM(self, i);
     Py_INCREF(d);
@@ -263,7 +273,8 @@ static PyObject* THPSize_reduce(PyObject* _self, PyObject* noargs) {
   }
 
   THPObjectPtr dims(Py_BuildValue("(O)", t.get()));
-  TORCH_CHECK_PYTHON(dims);
+  if (!dims)
+    throw python_error();
   PyTuple_SET_ITEM(ret.get(), 1, dims.release());
 
   return ret.release();
@@ -327,5 +338,7 @@ PyTypeObject THPSizeType = {
 };
 
 void THPSize_init(PyObject* module) {
-  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPSizeType) >= 0);
+  if (PyModule_AddType(module, &THPSizeType) < 0) {
+    throw python_error();
+  }
 }

@@ -7,37 +7,16 @@ from typing import NamedTuple
 import torch
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import (
-    gfx_arch_supports_opportunistic_fastatomics,
-    SM90OrLater,
-)
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-    dtypes,
-    dtypesIfCUDA,
-    dtypesIfXPU,
-    toleranceOverride,
-    tol,
-)
-from torch.testing._internal.common_dtype import (
-    all_passthru_types,
-    all_passthru_types_and,
-    get_all_dtypes,
-)
-from torch.testing._internal.common_utils import (
-    DeterministicGuard,
-    HardwareClassification,
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    serialTest,
-    skipIfNoCuteDSL,
-    subtest,
-    TestCase,
-    TEST_CUDA,
-    TEST_WITH_ROCM,
-)
+from torch.testing._internal.common_utils import \
+    (instantiate_parametrized_tests, parametrize, run_tests, skipIfNoCuteDSL,
+     subtest, TestCase, DeterministicGuard, TEST_CUDA, TEST_WITH_ROCM, serialTest)
+from torch.testing._internal.common_device_type import \
+    (instantiate_device_type_tests, onlyCPU, onlyAccelerator, dtypes, dtypesIfCUDA,
+     toleranceOverride, tol,)
+from torch.testing._internal.common_dtype import \
+    (all_passthru_types, all_passthru_types_and, get_all_dtypes,)
+
+from torch.testing._internal.common_cuda import gfx_arch_supports_opportunistic_fastatomics, SM90OrLater
 
 # Protects against includes accidentally setting the default dtype
 if torch.get_default_dtype() is not torch.float32:
@@ -49,113 +28,6 @@ if torch.get_default_dtype() is not torch.float32:
 #   like torch.scatter and torch.gather.
 
 class TestScatterGather(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
-    @parametrize("dtype", [torch.float32, torch.float64, torch.bfloat16, torch.float16])
-    def test_scatter_expanded_index(self, dtype):
-        device = "cpu"
-
-        def helper(input_size, idx_size):
-            input = torch.randn(input_size, device=device).to(dtype=dtype)
-            input2 = input.clone()
-
-            shape = [1] * len(input_size)
-            shape[0] = idx_size
-            dim_size = input_size[0]
-            idx = torch.randint(0, dim_size, shape)
-
-            # The fast path on scatter when index is expanded
-            # will depend on sorted index where the collected src indice
-            # for each row in input will be mapped to rowptrs in a CSR format.
-            # Create some empty rows by masking:
-            mask = (idx > 1) * (idx < 4)
-            idx[mask] = 0
-
-            expanded_shape = input_size
-            expanded_shape[0] = idx_size
-            idx = idx.expand(expanded_shape)
-            idx2 = idx.contiguous()
-            src = torch.randn(expanded_shape, device=device).to(dtype=dtype)
-
-            out = input.scatter_add(0, idx, src)
-            out2 = input2.scatter_add(0, idx2, src)
-            self.assertEqual(out, out2)
-
-            for reduce in ["sum", "prod", "mean", "amax", "amin"]:
-                for include_self in [True, False]:
-                    out = input.scatter_reduce(0, idx, src, reduce=reduce, include_self=include_self)
-                    out2 = input2.scatter_reduce(0, idx2, src, reduce=reduce, include_self=include_self)
-                    self.assertEqual(out, out2)
-
-        helper([50, 17], 100)
-        helper([50, 1], 100)
-        helper([50, 8, 7], 100)
-        helper([50, 3, 4, 5], 100)
-
-    @parametrize("dtype", [torch.float32, torch.float64, torch.bfloat16])
-    def test_gather_expanded_index(self, dtype):
-        device = "cpu"
-
-        # Test when index is [N, 1], which would have stride [1, 0]
-        # should be excluded from the fast path when index ix expanded
-        input = torch.arange(25).view(5, 5)
-        input2 = input.to(dtype=dtype)
-
-        idx = torch.arange(5).view(5, 1)
-        out = torch.gather(input, 0, idx)
-        out2 = torch.gather(input2, 0, idx)
-
-        self.assertEqual(out.to(dtype=dtype), out2)
-
-        def helper(input_size, idx_size):
-            input = torch.randn(input_size, device=device).to(dtype=dtype)
-            input2 = input.clone()
-
-            shape = [1] * len(input_size)
-            shape[0] = idx_size
-            dim_size = input_size[0]
-            idx = torch.randint(0, dim_size, shape)
-
-            # Test the fast path on gather when index is expanded
-            expanded_shape = input_size
-            expanded_shape[0] = idx_size
-            idx = idx.expand(expanded_shape)
-            idx2 = idx.contiguous()
-
-            out = torch.gather(input, 0, idx)
-            out2 = torch.gather(input2, 0, idx2)
-
-            self.assertEqual(out, out2)
-
-            # test unsqueezed index
-            # expanded_index kernel can not handle the case:
-            # the size > 1 and stride == 1 at a dimension.
-            # for example: the index with size of [1, 8, 7],  stride of [1, 1, 0].
-            # see https://github.com/pytorch/pytorch/issues/129093
-            def unsqueeze_helper(idx, dim):
-                if dim == 2:
-                    return idx.unsqueeze(1).t()
-                else:
-                    return unsqueeze_helper(idx, dim - 1).unsqueeze(dim - 1)
-
-            idx = torch.randint(0, dim_size, (input.shape[1],))
-            idx = unsqueeze_helper(idx, len(input_size))
-            expanded_shape[0] = 1
-            idx = idx.expand(expanded_shape)
-            idx2 = idx.contiguous()
-            out = torch.gather(input, 0, idx)
-            out2 = torch.gather(input2, 0, idx2)
-            self.assertEqual(out, out2)
-
-        helper([50, 17], 100)
-        helper([50, 1], 100)
-        helper([50, 8, 7], 100)
-        helper([50, 3, 4, 5], 100)
-
-
-class TestScatterGatherDevice(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
     # Fills an index tensor with valid indices
     def _fill_indices(self, idx, dim, dim_size, elems_per_row, m, n, o, unique_indices=True):
         for i in range(1 if dim == 0 else m):
@@ -170,7 +42,6 @@ class TestScatterGatherDevice(TestCase):
 
     @dtypes(*all_passthru_types())
     @dtypesIfCUDA(*all_passthru_types_and(torch.chalf))
-    @dtypesIfXPU(*all_passthru_types_and(torch.chalf))
     def test_gather(self, device, dtype):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
         elems_per_row = random.randint(1, 10)
@@ -264,6 +135,7 @@ class TestScatterGatherDevice(TestCase):
         if device != 'cpu':
             ref_cpu = torch.gather(src.cpu(), dim=1, index=ind.cpu())
             self.assertEqual(res.cpu(), ref_cpu, atol=0, rtol=0)
+
 
     @dtypes(torch.bool)
     def test_gather_bool(self, device, dtype):
@@ -418,7 +290,6 @@ class TestScatterGatherDevice(TestCase):
     # FIXME: RuntimeError: "cuda_scatter_gather_base_kernel_reduce_multiply" not implemented for 'ComplexFloat'
     @toleranceOverride({torch.float16: tol(atol=1e-2, rtol=0)})
     @dtypesIfCUDA(torch.float16, torch.float32)
-    @dtypesIfXPU(torch.float16, torch.float32)
     @dtypes(torch.float16, torch.float32, torch.complex64)
     def test_scatter__reductions(self, device, dtype):
         for reduction in ("add", "multiply"):
@@ -528,7 +399,6 @@ class TestScatterGatherDevice(TestCase):
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True))
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
-    @dtypesIfXPU(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_prod(self, device, dtype):
         for include_self in (True, False):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
@@ -537,7 +407,6 @@ class TestScatterGatherDevice(TestCase):
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
-    @dtypesIfXPU(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_mean(self, device, dtype):
         for include_self in (True, False):
             for deterministic in [False, True]:
@@ -548,7 +417,6 @@ class TestScatterGatherDevice(TestCase):
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
-    @dtypesIfXPU(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_amax(self, device, dtype):
         for include_self in (True, False):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
@@ -565,9 +433,9 @@ class TestScatterGatherDevice(TestCase):
                     expected_result[1] = 0
                 self.assertEqual(input, expected_result)
 
+
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
-    @dtypesIfXPU(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
     def test_scatter_reduce_amin(self, device, dtype):
         for include_self in (True, False):
             self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
@@ -583,6 +451,46 @@ class TestScatterGatherDevice(TestCase):
                 if (include_self):
                     expected_result[2] = 0
                 self.assertEqual(input, expected_result)
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
+    def test_scatter_expanded_index(self, device, dtype):
+        def helper(input_size, idx_size):
+            input = torch.randn(input_size, device=device).to(dtype=dtype)
+            input2 = input.clone()
+
+            shape = [1] * len(input_size)
+            shape[0] = idx_size
+            dim_size = input_size[0]
+            idx = torch.randint(0, dim_size, shape)
+
+            # The fast path on scatter when index is expanded
+            # will depend on sorted index where the collected src indice
+            # for each row in input will be mapped to rowptrs in a CSR format.
+            # Create some empty rows by masking:
+            mask = (idx > 1) * (idx < 4)
+            idx[mask] = 0
+
+            expanded_shape = input_size
+            expanded_shape[0] = idx_size
+            idx = idx.expand(expanded_shape)
+            idx2 = idx.contiguous()
+            src = torch.randn(expanded_shape, device=device).to(dtype=dtype)
+
+            out = input.scatter_add(0, idx, src)
+            out2 = input2.scatter_add(0, idx2, src)
+            self.assertEqual(out, out2)
+
+            for reduce in ["sum", "prod", "mean", "amax", "amin"]:
+                for include_self in [True, False]:
+                    out = input.scatter_reduce(0, idx, src, reduce=reduce, include_self=include_self)
+                    out2 = input2.scatter_reduce(0, idx2, src, reduce=reduce, include_self=include_self)
+                    self.assertEqual(out, out2)
+
+        helper([50, 17], 100)
+        helper([50, 1], 100)
+        helper([50, 8, 7], 100)
+        helper([50, 3, 4, 5], 100)
 
     @dtypes(torch.float32)
     def test_scatter_add_broadcasted_index_deterministic(self, device, dtype):
@@ -600,6 +508,65 @@ class TestScatterGatherDevice(TestCase):
                 res = inp.clone().scatter_add_(d, idx, src)
             self.assertEqual(res, ref)
 
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    def test_gather_expanded_index(self, device, dtype):
+        # Test when index is [N, 1], which would have stride [1, 0]
+        # should be excluded from the fast path when index ix expanded
+        input = torch.arange(25).view(5, 5)
+        input2 = input.to(dtype=dtype)
+
+        idx = torch.arange(5).view(5, 1)
+        out = torch.gather(input, 0, idx)
+        out2 = torch.gather(input2, 0, idx)
+
+        self.assertEqual(out.to(dtype=dtype), out2)
+
+        def helper(input_size, idx_size):
+            input = torch.randn(input_size, device=device).to(dtype=dtype)
+            input2 = input.clone()
+
+            shape = [1] * len(input_size)
+            shape[0] = idx_size
+            dim_size = input_size[0]
+            idx = torch.randint(0, dim_size, shape)
+
+            # Test the fast path on gather when index is expanded
+            expanded_shape = input_size
+            expanded_shape[0] = idx_size
+            idx = idx.expand(expanded_shape)
+            idx2 = idx.contiguous()
+
+            out = torch.gather(input, 0, idx)
+            out2 = torch.gather(input2, 0, idx2)
+
+            self.assertEqual(out, out2)
+
+            # test unsqueezed index
+            # expanded_index kernel can not handle the case:
+            # the size > 1 and stride == 1 at a dimension.
+            # for example: the index with size of [1, 8, 7],  stride of [1, 1, 0].
+            # see https://github.com/pytorch/pytorch/issues/129093
+            def unsqueeze_helper(idx, dim):
+                if dim == 2:
+                    return idx.unsqueeze(1).t()
+                else:
+                    return unsqueeze_helper(idx, dim - 1).unsqueeze(dim - 1)
+
+            idx = torch.randint(0, dim_size, (input.shape[1],))
+            idx = unsqueeze_helper(idx, len(input_size))
+            expanded_shape[0] = 1
+            idx = idx.expand(expanded_shape)
+            idx2 = idx.contiguous()
+            out = torch.gather(input, 0, idx)
+            out2 = torch.gather(input2, 0, idx2)
+            self.assertEqual(out, out2)
+
+        helper([50, 17], 100)
+        helper([50, 1], 100)
+        helper([50, 8, 7], 100)
+        helper([50, 3, 4, 5], 100)
 
 # ---------------------------------------------------------------------------
 # CuTeDSL scatter_add override tests. Two surfaces:
@@ -764,8 +731,6 @@ class TestScatterAddOverrideConds(TestCase):
     predicates also reject ROCm outright. Correctness-on-fallback is
     covered by TestScatterAddOverrideCorrectness, which is deliberately
     not arch-gated."""
-
-    hw_classification = HardwareClassification.CUDA
 
     @classmethod
     def setUpClass(cls):
@@ -947,8 +912,6 @@ class TestScatterAddOverrideConds(TestCase):
 class TestScatterAddOverrideCorrectness(TestCase):
     """End-to-end: torch.scatter_add vs a naive reference on shapes the
     conds accept (TMA-eligible and vec-scatter-only)."""
-
-    hw_classification = HardwareClassification.CUDA
 
     @classmethod
     def setUpClass(cls):
@@ -1214,8 +1177,11 @@ class TestScatterAddOverrideCorrectness(TestCase):
 instantiate_parametrized_tests(TestScatterAddOverrideConds)
 instantiate_parametrized_tests(TestScatterAddOverrideCorrectness)
 
-instantiate_parametrized_tests(TestScatterGather)
-instantiate_device_type_tests(TestScatterGatherDevice, globals(), allow_xpu=True)
+
+# Generic Device Test Framework instantiation, see
+#   https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
+#   for details.
+instantiate_device_type_tests(TestScatterGather, globals())
 
 if __name__ == '__main__':
     run_tests()

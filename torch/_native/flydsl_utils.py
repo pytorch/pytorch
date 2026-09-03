@@ -28,10 +28,9 @@ log = logging.getLogger(__name__)
 
 _FLYDSL_DSL_NAME = "flydsl"
 
-# The kernels this gate protects -- see ops/norm/flydsl_rmsnorm_fwd.py -- are
-# written against the FlyDSL 0.3.x flydsl.expr.gpu.shuffle_xor interface. Other
-# versions fall back to ATen unless a developer explicitly sets
-# TORCH_NATIVE_SKIP_VERSION_CHECK=1.
+# Kernels registered through this gate are written against the FlyDSL 0.3.x
+# flydsl.expr.gpu.shuffle_xor interface. Other versions fall back to ATen
+# unless a developer explicitly sets TORCH_NATIVE_SKIP_VERSION_CHECK=1.
 _FLYDSL_SUPPORTED_RELEASES = ((0, 3),)
 
 
@@ -110,12 +109,11 @@ def _get_flydsl_device_arch(device_index: int) -> str | None:
     return None
 
 
-@functools.cache
 def _resolve_rocm_arch(device_index: int) -> str | None:
     """Return the gfx name to compile for, or None if it cannot be determined.
 
     FLYDSL_GPU_ARCH wins, then HSA_OVERRIDE_GFX_VERSION, then the device's
-    cached gcnArchName. The normalized result is cached per device.
+    cached gcnArchName. Environment overrides are read on every call.
     """
     env = _environ.get("FLYDSL_GPU_ARCH")
     if env:
@@ -124,7 +122,7 @@ def _resolve_rocm_arch(device_index: int) -> str | None:
     hsa = _environ.get("HSA_OVERRIDE_GFX_VERSION")
     if hsa:
         if hsa.startswith("gfx"):
-            return hsa.split(":", 1)[0]
+            return hsa
         if hsa.count(".") == 2:
             major, minor, stepping = hsa.split(".")
             try:
@@ -133,28 +131,6 @@ def _resolve_rocm_arch(device_index: int) -> str | None:
                 log.debug("Ignoring invalid HSA_OVERRIDE_GFX_VERSION=%s", hsa)
 
     return _get_flydsl_device_arch(device_index)
-
-
-@functools.cache
-def _is_supported_arch(device_index: int, supported_arches: tuple[str, ...]) -> bool:
-    """Whether a device architecture is supported by a FlyDSL operator."""
-    arch = _resolve_rocm_arch(device_index)
-    return arch in supported_arches
-
-
-def _fits_int32_buffer_span(rows_m: int, n: int, itemsize: int) -> bool:
-    """Whether a contiguous (rows_m, n) tensor fits FlyDSL buffer indexing.
-
-    The byte span gets the wider bound because it lands in the descriptor's
-    num_records, which is unsigned; kernels index elements with signed int32.
-    """
-    int32_max = (1 << 31) - 1
-    uint32_max = (1 << 32) - 1
-    return (
-        0 < rows_m <= int32_max
-        and 0 < n <= int32_max
-        and rows_m * n * itemsize <= uint32_max
-    )
 
 
 def deregister_op_overrides() -> None:

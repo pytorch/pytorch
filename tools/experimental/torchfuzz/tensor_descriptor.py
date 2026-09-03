@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 """Utility functions for generating tensor descriptors in code comments."""
 
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec

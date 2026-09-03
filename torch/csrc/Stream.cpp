@@ -102,7 +102,9 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   HANDLE_TH_ERRORS
   auto type = THPStreamClass;
   THPObjectPtr ptr(type->tp_alloc(type, 0));
-  TORCH_CHECK_PYTHON(ptr);
+  if (!ptr) {
+    throw python_error();
+  }
 
   THPStream* self = reinterpret_cast<THPStream*>(ptr.get());
   self->stream_id = stream.id();
@@ -312,7 +314,9 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   // self->context is initialized lazily as a PyList on first __enter__.
   if (!self->context) {
     auto list = THPObjectPtr(PyList_New(0));
-    TORCH_CHECK_PYTHON(list);
+    if (!list) {
+      throw python_error();
+    }
     self->context = list.release();
   }
 
@@ -324,7 +328,9 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   // If the stream is already current, push None as a no-op sentinel.
   if (cur_stream.id() == self->stream_id &&
       cur_stream.device_index() == stream_device_idx) {
-    TORCH_CHECK_PYTHON(PyList_Append(self->context, Py_None) >= 0);
+    if (PyList_Append(self->context, Py_None) < 0) {
+      throw python_error();
+    }
     return Py_NewRef(_self);
   }
 
@@ -341,13 +347,19 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
       THPObjectPtr(THPUtils_packDeviceIndex(cur_device_idx));
   auto ctx_stream = THPObjectPtr(THPStream_Wrap(cur_stream));
   auto dict = THPObjectPtr(PyDict_New());
-  TORCH_CHECK_PYTHON(dict);
-  TORCH_CHECK_PYTHON(
-      PyDict_SetItemString(
-          dict.get(), "_ctx_device_index", ctx_device_index.get()) >= 0);
-  TORCH_CHECK_PYTHON(
-      PyDict_SetItemString(dict.get(), "_ctx_stream", ctx_stream.get()) >= 0);
-  TORCH_CHECK_PYTHON(PyList_Append(self->context, dict.get()) >= 0);
+  if (!dict) {
+    throw python_error();
+  }
+  if (PyDict_SetItemString(
+          dict.get(), "_ctx_device_index", ctx_device_index.get()) < 0) {
+    throw python_error();
+  }
+  if (PyDict_SetItemString(dict.get(), "_ctx_stream", ctx_stream.get()) < 0) {
+    throw python_error();
+  }
+  if (PyList_Append(self->context, dict.get()) < 0) {
+    throw python_error();
+  }
   return Py_NewRef(_self);
   END_HANDLE_TH_ERRORS
 }
@@ -369,19 +381,22 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
 
   // Sentinel: this __enter__ was a no-op, nothing to restore.
   if (Py_IsNone(top)) {
-    TORCH_CHECK_PYTHON(
-        PyList_SetSlice(self->context, stack_size - 1, stack_size, nullptr) >=
-        0);
+    if (PyList_SetSlice(self->context, stack_size - 1, stack_size, nullptr) <
+        0) {
+      throw python_error();
+    }
     Py_RETURN_NONE;
   }
 
   PyObject* py_stream = nullptr;
-  TORCH_CHECK_PYTHON(
-      PyDict_GetItemStringRef(top, "_ctx_stream", &py_stream) >= 0);
+  if (PyDict_GetItemStringRef(top, "_ctx_stream", &py_stream) < 0) {
+    throw python_error();
+  }
   auto ctx_stream = THPObjectPtr(py_stream);
   PyObject* py_device_index = nullptr;
-  TORCH_CHECK_PYTHON(
-      PyDict_GetItemStringRef(top, "_ctx_device_index", &py_device_index) >= 0);
+  if (PyDict_GetItemStringRef(top, "_ctx_device_index", &py_device_index) < 0) {
+    throw python_error();
+  }
   auto ctx_device_index = THPObjectPtr(py_device_index);
   TORCH_INTERNAL_ASSERT(
       ctx_stream.get(), "ctx_stream should be present on the context dict.");
@@ -399,8 +414,9 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   if (static_cast<c10::DeviceIndex>(self->device_index) != prev_device_index) {
     at::accelerator::setDeviceIndex(prev_device_index);
   }
-  TORCH_CHECK_PYTHON(
-      PyList_SetSlice(self->context, stack_size - 1, stack_size, nullptr) >= 0);
+  if (PyList_SetSlice(self->context, stack_size - 1, stack_size, nullptr) < 0) {
+    throw python_error();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -529,5 +545,7 @@ static PyTypeObject THPStreamType = {
 void THPStream_init(PyObject* module) {
   THPStreamClass = &THPStreamType;
   Py_SET_TYPE(&THPStreamType, &PyType_Type);
-  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPStreamType) >= 0);
+  if (PyModule_AddType(module, &THPStreamType) < 0) {
+    throw python_error();
+  }
 }

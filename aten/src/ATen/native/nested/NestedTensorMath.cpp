@@ -5,6 +5,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>

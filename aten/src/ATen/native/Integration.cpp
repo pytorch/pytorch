@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/core/DimVector.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>

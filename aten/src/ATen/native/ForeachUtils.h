@@ -6,7 +6,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/utils/ParamsHash.h>
 #include <c10/util/Exception.h>
-#include <c10/util/MakeNested.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -16,7 +15,6 @@
 #endif
 
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 namespace at::native {

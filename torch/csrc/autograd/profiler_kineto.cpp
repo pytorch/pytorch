@@ -18,6 +18,7 @@
 #include <torch/csrc/profiler/kineto_metadata.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/orchestration/observer.h>
+#include <torch/csrc/profiler/perf.h>
 #include <torch/csrc/profiler/standalone/itt_observer.h>
 #include <torch/csrc/profiler/standalone/nvtx_observer.h>
 #include <torch/csrc/profiler/standalone/privateuse1_observer.h>
@@ -27,6 +28,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <stdexcept>
 #include <utility>
 
 #ifdef USE_KINETO
@@ -561,7 +563,7 @@ void pushGlobalProfilingCallbacks(
           .scopes(scopes);
 
   // Arm the drain gate before the global callback and fire on any thread. If
-  // this is a new profiling session, also bump the session generation.
+  // this a new profiling session, also bump the session generation.
   // disableProfiler() relies on this to know it must drain in-flight callbacks.
   global_callback_session.activate(new_session);
 

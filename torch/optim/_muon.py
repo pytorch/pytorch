@@ -10,7 +10,6 @@ from torch import Tensor
 
 from .optimizer import (
     _disable_dynamo_if_unsupported,
-    _functional_api_doc,
     _params_doc,
     _to_scalar,
     Optimizer,
@@ -18,7 +17,7 @@ from .optimizer import (
 )
 
 
-__all__ = ["Muon", "muon"]
+__all__ = ["Muon"]
 
 # Constants from Keller Jordan's Muon post: https://kellerjordan.github.io/posts/muon/
 # github permlink: https://github.com/KellerJordan/Muon/blob/f90a42b28e00b8d9d2d05865fe90d9f39abcbcbd/muon.py#L16
@@ -53,7 +52,7 @@ def _zeropower_via_newtonschulz(
     if len(ns_coefficients) != 3:
         raise ValueError("Coefficients must be a tuple of exactly 3 values")
     a, b, c = ns_coefficients
-    ortho_grad = grad.to(dtype=torch.bfloat16, copy=True)
+    ortho_grad = grad.bfloat16()
     if grad.size(0) > grad.size(1):
         ortho_grad = ortho_grad.T
     # Ensure spectral norm is at most 1
@@ -369,6 +368,10 @@ def muon(
     adjust_lr_fn: str | None,
     has_complex: bool,
 ) -> None:
+    r"""Functional API that performs Muon algorithm computation.
+
+    See :class:`~torch.optim.Muon` for details.
+    """
     if foreach is not None and foreach:
         raise RuntimeError("Foreach is not supported for Muon yet")
 
@@ -388,6 +391,3 @@ def muon(
         adjust_lr_fn=adjust_lr_fn,
         has_complex=has_complex,
     )
-
-
-muon.__doc__ = _functional_api_doc.format(optimizer="Muon")

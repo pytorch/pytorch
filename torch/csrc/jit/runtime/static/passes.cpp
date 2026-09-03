@@ -1017,7 +1017,12 @@ void RemoveImmutableInputDictLookups(
       continue;
     }
     keys.insert(key);
-    dict_to_getitems.try_emplace(dict).first->second.push_back(getitem_node);
+    auto iter = dict_to_getitems.find(dict);
+    if (iter == dict_to_getitems.end()) {
+      dict_to_getitems.emplace(dict, std::vector<Node*>{getitem_node});
+      continue;
+    }
+    iter->second.push_back(getitem_node);
   }
   if (keys.empty()) {
     return;

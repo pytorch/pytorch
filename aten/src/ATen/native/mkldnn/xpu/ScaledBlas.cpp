@@ -2,7 +2,6 @@
 #include <ATen/BlasBackend.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ceil_div.h>
-#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
@@ -342,7 +341,20 @@ Tensor& _scaled_mm_out_xpu(
         "scaled_mm: fast_accum is not supported in XPU for now. It would silently set use_fast_accum to false.");
   }
 
-  check_mm_shapes(mat1, mat2, "_scaled_mm");
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0],
+      "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0],
+      "x",
+      mat1.sizes()[1],
+      " and ",
+      mat2.sizes()[0],
+      "x",
+      mat2.sizes()[1],
+      ")");
 
   // Check what type of scaling we are doing based on inputs. This list is
   // sorted by decreasing priority.
@@ -511,6 +523,8 @@ Tensor _scaled_mm_xpu(
       out);
 }
 
+using namespace std::placeholders;
+
 namespace scaled_blas = at::native::scaled;
 using scaled_blas::convert_int_to_enum;
 using scaled_blas::ScaledGemmImplementation;
@@ -524,22 +538,40 @@ std::array<ScaleKernelDispatchEntry, 9> scale_kernel_dispatch = {{
      scaled_blas::check_rowwise_recipe,
      ScaledGemmImplementation::ROWWISE_ROWWISE},
     {"block_1x128_128x128",
-     std::bind_front(
+     std::bind(
          scaled_blas::check_deepseek_recipe,
          ScalingType::BlockWise1x128,
-         ScalingType::BlockWise128x128),
+         ScalingType::BlockWise128x128,
+         _1,
+         _2,
+         _3,
+         _4,
+         _5,
+         _6),
      ScaledGemmImplementation::BLOCK_1x128_128x128},
     {"block_128x128_1x128",
-     std::bind_front(
+     std::bind(
          scaled_blas::check_deepseek_recipe,
          ScalingType::BlockWise128x128,
-         ScalingType::BlockWise1x128),
+         ScalingType::BlockWise1x128,
+         _1,
+         _2,
+         _3,
+         _4,
+         _5,
+         _6),
      ScaledGemmImplementation::BLOCK_128x128_1x128},
     {"block_1x128_1x128",
-     std::bind_front(
+     std::bind(
          scaled_blas::check_deepseek_recipe,
          ScalingType::BlockWise1x128,
-         ScalingType::BlockWise1x128),
+         ScalingType::BlockWise1x128,
+         _1,
+         _2,
+         _3,
+         _4,
+         _5,
+         _6),
      ScaledGemmImplementation::BLOCK_1x128_1x128},
     {"mxfp8_mxfp8",
      scaled_blas::check_mxfp8_recipe,

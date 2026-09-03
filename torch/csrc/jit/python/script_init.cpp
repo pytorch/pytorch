@@ -238,7 +238,7 @@ struct PythonResolver : public Resolver {
 
   /**
    * While compiling classes, the class type we're compiling will not be
-   * available in Python, since we haven't finished defining the class yet. So
+   * available in Python, since we haven't fowner_ defining the class yet. So
    * in order to make the class type available to its own methods, we need to
    * explicitly resolve it.
    *

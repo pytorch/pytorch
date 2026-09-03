@@ -18,7 +18,7 @@ from ..graph_bytecode_inputs import (
     reset_user_object_tracking,
 )
 from ..source import CurrentStreamSource
-from .base import GetSet, Method, readonly_setter, VariableTracker
+from .base import GetSet, Method, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
 from .lazy import LazyVariableTracker
@@ -615,9 +615,7 @@ class CudaStreamVariable(StreamVariable):
     _device_handle_attr = "cuda_stream"
 
     tp_getset = {
-        "cuda_stream": GetSet(
-            StreamVariable._stream_device_handle_get, readonly_setter
-        ),
+        "cuda_stream": GetSet(StreamVariable._stream_device_handle_get, None),
     }
 
 
@@ -628,7 +626,7 @@ class XpuStreamVariable(StreamVariable):
     _device_handle_attr = "sycl_queue"
 
     tp_getset = {
-        "sycl_queue": GetSet(StreamVariable._stream_device_handle_get, readonly_setter),
+        "sycl_queue": GetSet(StreamVariable._stream_device_handle_get, None),
     }
 
 

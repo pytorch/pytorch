@@ -2929,7 +2929,7 @@ class CppVecKernel(CppKernel):
         if mask.dtype != torch.bool:
             raise AssertionError(repr(mask))
         num_vectors = self._get_num_vectors(dtype)
-        return f"inductor_vec_mask_cast<{DTYPE_TO_CPP[dtype]},{num_vectors}>({mask})"
+        return f"{mask}.template cast<{DTYPE_TO_CPP[dtype]},{num_vectors}>()"
 
     def _get_vec_load_line(
         self,
@@ -6388,12 +6388,7 @@ class LoopNest:
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
-            # Trip count of `for (var = 0; var < size; var += steps)`. The bound
-            # is `size` and the increment is `steps`, so a loop with size < steps
-            # (a vectorized loop narrower than the vector width) still runs one
-            # iteration. Use CeilDiv, not FloorDiv, which would count 0 and zero
-            # out the whole product.
-            num_steps = num_steps * CeilDiv(loop.size, loop.steps)
+            num_steps = num_steps * FloorDiv(loop.size, loop.steps)
             max_depth += 1
 
         def get_simd_vec_depth(loops):

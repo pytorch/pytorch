@@ -48,8 +48,12 @@ void foreach_pointwise_op_0d_tensor1_(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& alpha) {
-  auto tensor_lists =
-      c10::make_nested<Tensor>(input.vec(), tensors1.vec(), tensors2.vec());
+  std::vector<std::vector<at::Tensor>> tensor_lists;
+
+  // tensor_lists: input, tensor1 (0D), tensor2
+  tensor_lists.emplace_back(input.vec());
+  tensor_lists.emplace_back(tensors1.vec());
+  tensor_lists.emplace_back(tensors2.vec());
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       kHalf,
@@ -77,14 +81,17 @@ std::vector<Tensor> foreach_pointwise_op(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& scalar) {
+  std::vector<std::vector<at::Tensor>> tensor_lists;
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(input.size());
   for (const auto& t : input) {
     vec_res.emplace_back(at::native::empty_like(t));
   }
 
-  auto tensor_lists = c10::make_nested<Tensor>(
-      input.vec(), tensors1.vec(), tensors2.vec(), std::move(vec_res));
+  tensor_lists.emplace_back(input.vec());
+  tensor_lists.emplace_back(tensors1.vec());
+  tensor_lists.emplace_back(tensors2.vec());
+  tensor_lists.emplace_back(std::move(vec_res));
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       kHalf,
@@ -116,14 +123,18 @@ std::vector<Tensor> foreach_pointwise_op_0d_tensor1(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& alpha) {
+  std::vector<std::vector<at::Tensor>> tensor_lists;
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(input.size());
   for (const auto& t : input) {
     vec_res.emplace_back(at::native::empty_like(t));
   }
 
-  auto tensor_lists = c10::make_nested<Tensor>(
-      input.vec(), tensors1.vec(), tensors2.vec(), std::move(vec_res));
+  // tensor_lists: input, tensor1 (0D), tensor2, output
+  tensor_lists.emplace_back(input.vec());
+  tensor_lists.emplace_back(tensors1.vec());
+  tensor_lists.emplace_back(tensors2.vec());
+  tensor_lists.emplace_back(std::move(vec_res));
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       kHalf,
@@ -152,8 +163,10 @@ void foreach_pointwise_op_(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& scalar) {
-  auto tensor_lists =
-      c10::make_nested<Tensor>(input.vec(), tensors1.vec(), tensors2.vec());
+  std::vector<std::vector<at::Tensor>> tensor_lists;
+  tensor_lists.emplace_back(input.vec());
+  tensor_lists.emplace_back(tensors1.vec());
+  tensor_lists.emplace_back(tensors2.vec());
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       kHalf,
@@ -181,8 +194,11 @@ void foreach_pointwise_op_(
     TensorList tensors1,
     TensorList tensors2,
     at::ArrayRef<Scalar> scalars) {
-  auto tensor_lists =
-      c10::make_nested<Tensor>(input.vec(), tensors1.vec(), tensors2.vec());
+  std::vector<std::vector<at::Tensor>> tensor_lists;
+  tensor_lists.reserve(3);
+  tensor_lists.emplace_back(input.vec());
+  tensor_lists.emplace_back(tensors1.vec());
+  tensor_lists.emplace_back(tensors2.vec());
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       kHalf,
@@ -210,14 +226,18 @@ std::vector<Tensor> foreach_pointwise_op(
     TensorList tensors1,
     TensorList tensors2,
     at::ArrayRef<Scalar> scalars) {
+  std::vector<std::vector<at::Tensor>> tensor_lists;
+  tensor_lists.reserve(4);
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(input.size());
   for (const auto& t : input) {
     vec_res.emplace_back(at::native::empty_like(t));
   }
 
-  auto tensor_lists = c10::make_nested<Tensor>(
-      input.vec(), tensors1.vec(), tensors2.vec(), std::move(vec_res));
+  tensor_lists.emplace_back(input.vec());
+  tensor_lists.emplace_back(tensors1.vec());
+  tensor_lists.emplace_back(tensors2.vec());
+  tensor_lists.emplace_back(std::move(vec_res));
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       kHalf,

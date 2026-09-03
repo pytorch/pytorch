@@ -25,7 +25,6 @@ from torchgen.api.types import (
     tensorT,
 )
 from torchgen.context import method_with_native_function, native_function_manager
-from torchgen.dest.native_functions import torch_api_key_word_prefix
 from torchgen.model import (
     Argument,
     BackendIndex,
@@ -447,10 +446,9 @@ class RegisterDispatchKey:
 
             # TODO: dedupe this with the structured codegen
             if self.target is Target.NAMESPACED_DECLARATION:
-                export = torch_api_key_word_prefix(self.backend_index)
                 result = ""
                 for cpp_sig in cpp_sig_group.signatures(symint=self.symint):
-                    result += f"{export} {cpp_sig.decl()};\n"
+                    result += f"TORCH_API {cpp_sig.decl()};\n"
                 return result
             elif self.target is Target.NAMESPACED_DEFINITION:
 
@@ -804,10 +802,9 @@ resize_out(out, sizes, strides, options);
         )
 
         if self.target is Target.NAMESPACED_DECLARATION:
-            export = torch_api_key_word_prefix(self.backend_index)
             result = ""
             for cpp_sig in cpp_sig_group.signatures(symint=self.symint):
-                result += f"{export} {cpp_sig.decl()};\n"
+                result += f"TORCH_API {cpp_sig.decl()};\n"
             return result
 
         elif self.target is Target.NAMESPACED_DEFINITION:

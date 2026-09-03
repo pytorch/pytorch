@@ -12,7 +12,6 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
-    _functional_api_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
@@ -628,6 +627,10 @@ def nadam(
     momentum_decay: float,
     eps: float,
 ) -> None:
+    r"""Functional API that performs NAdam algorithm computation.
+
+    See :class:`~torch.optim.NAdam` for details.
+    """
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
@@ -670,6 +673,3 @@ def nadam(
         differentiable=differentiable,
         has_complex=has_complex,
     )
-
-
-nadam.__doc__ = _functional_api_doc.format(optimizer="NAdam")

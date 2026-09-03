@@ -8,6 +8,7 @@
 #include <c10/util/overflows.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
+#include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
@@ -32,6 +33,7 @@
 #include <cuda_runtime.h>
 #endif
 
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <ATen/native/Resize.h>
 
 #ifdef _MSC_VER
@@ -195,7 +197,9 @@ static PyObject* THPStorage_resize_with_addr_(PyObject* self, PyObject* args) {
         "but got ",
         THPUtils_typename(addr_arg));
     void* addr = PyLong_AsVoidPtr(addr_arg);
-    TORCH_CHECK_PYTHON(addr != nullptr || !PyErr_Occurred());
+    if (addr == nullptr && PyErr_Occurred()) {
+      throw python_error();
+    }
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
         !c10::overflows<size_t>(size_bytes_i, /*strict_unsigned=*/true),

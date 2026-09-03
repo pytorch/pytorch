@@ -180,7 +180,7 @@ struct TORCH_API StaticModuleOptions {
 
 /*
   Responsible for plugging StaticRuntime metadata onto the
-  IR nodes. StaticRuntimeMetadata extends CustomClassHolder
+  IR nodes. StaticRuntimeMetdata extends CustomClassHolder
   which can be casted to IValue and attached to IR node.
   This is needed to pass parent graph metadata to forked
   graph in presence of prim::fork operator

@@ -154,10 +154,9 @@ struct ListLenRefiner {
 struct PeepholeOptimizeListIdiomsImpl {
   PeepholeOptimizeListIdiomsImpl(
       std::shared_ptr<Graph> graph,
-      bool refine_list_len,
-      const AliasDb& alias_db)
+      bool refine_list_len)
       : graph_(std::move(graph)),
-        aliasDb_(alias_db),
+        aliasDb_(std::make_unique<AliasDb>(graph_)),
         refine_list_len_(refine_list_len) {}
 
   bool run() {
@@ -171,7 +170,7 @@ struct PeepholeOptimizeListIdiomsImpl {
 
  private:
   void checkForMutatedList(Value* v) {
-    if (v->type()->castRaw<ListType>() && aliasDb_.hasWriters(v)) {
+    if (v->type()->castRaw<ListType>() && aliasDb_->hasWriters(v)) {
       mutated_lists_.insert(v);
     }
   }
@@ -311,23 +310,15 @@ struct PeepholeOptimizeListIdiomsImpl {
 
   std::unordered_set<Value*> mutated_lists_;
   std::shared_ptr<Graph> graph_;
-  const AliasDb& aliasDb_;
+  std::unique_ptr<AliasDb> aliasDb_;
   bool refine_list_len_;
 };
 
 bool PeepholeOptimizeListIdioms(
     const std::shared_ptr<Graph>& graph,
-    bool refine_list_len,
-    const AliasDb& alias_db) {
-  PeepholeOptimizeListIdiomsImpl opt(graph, refine_list_len, alias_db);
-  return opt.run();
-}
-
-bool PeepholeOptimizeListIdioms(
-    const std::shared_ptr<Graph>& graph,
     bool refine_list_len) {
-  AliasDb alias_db(graph);
-  return PeepholeOptimizeListIdioms(graph, refine_list_len, alias_db);
+  PeepholeOptimizeListIdiomsImpl opt(graph, refine_list_len);
+  return opt.run();
 }
 
 } // namespace torch::jit

@@ -223,7 +223,7 @@ std::shared_ptr<FlightRecorderHook> FlightRecorderHook::attach(
     hook->pg_->registerCompletionHook(
         hook->hook_id_, [weak](const CompletionHookArgs& args) {
           if (auto self = weak.lock()) {
-            self->retireCompleted(args.completionKey, args.duration_ms);
+            self->retireCompleted(args.work, args.duration_ms);
           }
         });
     hook->push_completion_ = true;
@@ -384,6 +384,7 @@ void FlightRecorderHook::remove() {
   // clearing pg_ under the lock, which is what the hooks check, then unregister
   // with nothing held.
   c10::intrusive_ptr<ProcessGroup> pg;
+  std::map<int64_t, InflightOp> inflight;
   bool had_completion_hook = false;
   bool had_abort_hook = false;
   {
@@ -395,6 +396,7 @@ void FlightRecorderHook::remove() {
     // Ops still in flight are simply abandoned -- they are never retired, so a
     // dump keeps reporting them as issued and never seen to finish, which is
     // all we know.
+    inflight = std::move(inflight_);
     inflight_.clear();
     work_ids_.clear();
     had_completion_hook = std::exchange(push_completion_, false);
@@ -408,10 +410,14 @@ void FlightRecorderHook::remove() {
   if (had_abort_hook) {
     pg->unregisterAbortHook(hook_id_);
   }
+  // Drop the Work references before the group, not after: a backend's Work may
+  // hold a non-owning pointer back to the backend that created it (nccl2's
+  // WorkNCCL does), so nothing of ours may outlive the group.
+  inflight.clear();
 }
 
 void FlightRecorderHook::retireCompleted(
-    uint64_t completion_key,
+    const Work* work,
     std::optional<float> duration) {
   // From the completion hook this runs on whichever thread the backend
   // established completion on, usually its watchdog. Only the map lookup
@@ -420,7 +426,7 @@ void FlightRecorderHook::retireCompleted(
   InflightOp op;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto id_it = work_ids_.find(completion_key);
+    auto id_it = work_ids_.find(work);
     if (id_it == work_ids_.end()) {
       // Not one of ours -- an op recorded by a natively recording backend, one
       // issued under a graph capture, one already evicted, or one from before
@@ -434,7 +440,7 @@ void FlightRecorderHook::retireCompleted(
     if (it == inflight_.end()) {
       return;
     }
-    op = it->second;
+    op = std::move(it->second);
     inflight_.erase(it);
     // Only successful completion gets here, so this is the last op known to
     // have finished.
@@ -544,15 +550,17 @@ void FlightRecorderHook::onPre(const PreHookArgs& args) {
     // more; the entry stays un-retired.
     return;
   }
-  inflight_[args.op_id] = op;
+  inflight_[args.op_id] = std::move(op);
   // An op whose work never completes -- a real hang -- must not grow this
   // without bound, and there is nothing to gain from waiting on an op whose
   // entry the ring buffer has already overwritten (retire_completed would no-op
-  // on it), so the buffer's own capacity is the bound.
+  // on it), so the buffer's own capacity is the bound. Dropping the oldest also
+  // releases its Work, so a backend that never finishes an op cannot be pinned
+  // by the recorder for ever.
   while (inflight_.size() > max_inflight_) {
     auto oldest = inflight_.begin();
-    if (oldest->second.workKey) {
-      work_ids_.erase(*oldest->second.workKey);
+    if (oldest->second.work) {
+      work_ids_.erase(oldest->second.work.get());
     }
     inflight_.erase(oldest);
   }
@@ -674,10 +682,10 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
     }
     if (args.work && push_completion_) {
       // The op is only *issued* at this point, so the entry stays un-retired.
-      // The backend's completion hook is what says when it is really done.
-      const auto completion_key = args.work->getCompletionKey();
-      it->second.workKey = completion_key;
-      work_ids_[completion_key] = args.op_id;
+      // The backend's completion hook is what says when it is really done, and
+      // it names the op by this Work.
+      it->second.work = args.work;
+      work_ids_[args.work.get()] = args.op_id;
       lock.unlock();
       // A completion established before that registration found no mapping and
       // retired nothing, leaving a finished collective reading "scheduled" for
@@ -687,7 +695,7 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
       // was never seen to finish (Hooks.hpp). Asked with the lock dropped,
       // since isCompleted() calls into the backend -- see the lock-order note.
       if (args.work->isCompleted() && args.work->isSuccess()) {
-        retireCompleted(completion_key, workDuration(*args.work));
+        retireCompleted(args.work.get(), workDuration(*args.work));
       }
       return;
     }
@@ -695,7 +703,7 @@ void FlightRecorderHook::onPost(const PostHookArgs& args) {
     // allows a null work), or the backend never pushes one. Either way this is
     // the last time the hook hears about this op.
     if (args.work) {
-      retire_at_issue = it->second;
+      retire_at_issue = std::move(it->second);
     }
     inflight_.erase(it);
   }

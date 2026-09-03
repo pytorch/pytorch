@@ -10,7 +10,6 @@
 #include <ATen/native/cpu/utils.h>
 #include <cmath>
 #include <c10/util/Unroll.h>
-#include <c10/util/bit_cast.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -811,12 +810,16 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
   // Cast bfloat16 to float32 inline
   auto cast_bf16_to_f32 = [](uint16_t bf16_val) {
     uint32_t tmp = static_cast<uint32_t>(bf16_val) << 16;
-    return c10::bit_cast<float>(tmp);
+    float f;
+    std::memcpy(&f, &tmp, sizeof(f));
+    return f;
   };
 
   // Cast float32 to bfloat16 inline
   auto cast_f32_to_bf16 = [](float f) {
-    return static_cast<uint16_t>(c10::bit_cast<uint32_t>(f) >> 16);
+    uint32_t bits;
+    std::memcpy(&bits, &f, sizeof(bits));
+    return static_cast<uint16_t>(bits >> 16);
   };
 
   // Quantization pack lambda (channelwise QA8DX)

@@ -377,7 +377,9 @@ static py::object dispatch_on_subclass(
             args,
             kwargs,
             NULL));
-        TORCH_CHECK_PYTHON(ret.ptr() != nullptr);
+        if (ret.ptr() == nullptr) {
+          throw python_error();
+        }
         if (ret.ptr() != Py_NotImplemented) {
           break;
         }
@@ -417,7 +419,9 @@ static py::object dispatch_on_subclass(
           kwargs,
           NULL));
     }
-    TORCH_CHECK_PYTHON(ret.ptr() != nullptr);
+    if (ret.ptr() == nullptr) {
+      throw python_error();
+    }
     if (ret.ptr() != Py_NotImplemented) {
       // Return the reference to the result. This also covers the case where
       // ret is NULL and __torch_function__/__torch_dispatch raised an
@@ -478,7 +482,9 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
           args,
           kwargs,
           NULL));
-      TORCH_CHECK_PYTHON(ret.ptr() != nullptr);
+      if (ret.ptr() == nullptr) {
+        throw python_error();
+      }
       return std::make_tuple(std::move(ret), std::move(mode_obj));
     }
   }
@@ -504,7 +510,9 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
         args,
         kwargs));
   }
-  TORCH_CHECK_PYTHON(ret.ptr() != nullptr);
+  if (ret.ptr() == nullptr) {
+    throw python_error();
+  }
   return std::make_tuple(std::move(ret), std::move(mode_obj));
 }
 
@@ -680,7 +688,6 @@ auto handle_torch_function_no_python_arg_parser(
     ss << "\nFor more information, try re-running with TORCH_LOGS=not_implemented";
     const std::string& tmp = std::move(ss).str();
     PyErr_SetString(PyExc_TypeError, tmp.c_str());
-    // @allow-raw-throw: raises the TypeError set immediately above
     throw python_error();
   }
   return ret.release().ptr();
@@ -1599,8 +1606,9 @@ static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
   Py_ssize_t i = 0;
   for (auto& param : signature.params) {
     int cmp = PyObject_RichCompareBool(name, param.python_name, Py_EQ);
-    TORCH_CHECK_PYTHON(cmp >= 0);
-    if (cmp) {
+    if (cmp < 0) {
+      throw python_error();
+    } else if (cmp) {
       return i;
     }
     i++;
@@ -1964,8 +1972,9 @@ at::Tensor PythonArgs::tensor_slow(int i) {
 
   if (save_symint) {
     auto py_tensor = py::cast(tensor);
-    TORCH_CHECK_PYTHON(
-        PyObject_SetAttrString(py_tensor.ptr(), "_wrapped_number", obj) >= 0);
+    if (PyObject_SetAttrString(py_tensor.ptr(), "_wrapped_number", obj) < 0) {
+      throw python_error();
+    }
   }
 
   return tensor;
@@ -1991,12 +2000,15 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
   if (THPUtils_checkLong(arg)) {
     int overflow = -1;
     long long value = PyLong_AsLongLongAndOverflow(arg, &overflow);
-    TORCH_CHECK_PYTHON(value != -1 || !PyErr_Occurred());
+    if (value == -1 && PyErr_Occurred()) {
+      throw python_error();
+    }
     if (overflow != 0) {
       // try unsigned
       unsigned long long value = PyLong_AsUnsignedLongLong(arg);
-      TORCH_CHECK_PYTHON(
-          value != static_cast<unsigned long long>(-1) || !PyErr_Occurred());
+      if (value == static_cast<unsigned long long>(-1) && PyErr_Occurred()) {
+        throw python_error();
+      }
       return at::Scalar(static_cast<uint64_t>(value));
     } else {
       return at::Scalar(static_cast<int64_t>(value));

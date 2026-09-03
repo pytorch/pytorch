@@ -67,7 +67,8 @@ inline bool THPVariable_Check(PyObject* obj) {
   }
 
   const auto result = PyObject_IsInstance(obj, THPVariableClass);
-  TORCH_CHECK_PYTHON(result != -1);
+  if (result == -1)
+    throw python_error();
   return result;
 }
 

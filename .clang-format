@@ -99,7 +99,7 @@ SpacesInContainerLiterals: true
 SpacesInCStyleCastParentheses: false
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
-Standard:        c++20
+Standard:        c++17
 StatementMacros:
   - C10_DEFINE_bool
   - C10_DEFINE_int

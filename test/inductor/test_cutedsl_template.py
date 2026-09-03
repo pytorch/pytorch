@@ -825,49 +825,6 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
         )
         self.assertEqual(tensor_result, "tensor_a")
 
-    def test_inline_asm_three_outputs_are_shared(self):
-        from torch._inductor.codegen.common import CSEVariable
-        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
-            CuteDSLOpOverrides,
-        )
-        from torch.utils._sympy.value_ranges import ValueRanges
-
-        source = MagicMock(spec=CSEVariable)
-        source.__str__.return_value = "tensor_a"
-        source.dtype = torch.float32
-        source.bounds = ValueRanges.unknown()
-        source.shape = (32, 64)
-        output_dtypes = (torch.float32, torch.float32, torch.float32)
-
-        mock_graph = MockGraphHandler()
-        with V.set_graph_handler(mock_graph):
-            kernel = CuteDSLTemplateKernel(
-                kernel_name="test_inline_asm_three_outputs",
-                input_nodes=[],
-                output_node=None,
-            )
-            with V.set_kernel_handler(kernel):
-                results = tuple(
-                    CuteDSLOpOverrides.inline_asm_elementwise(
-                        source,
-                        asm=("mov.f32 $0, $3; add.f32 $1, $3, $3; mul.f32 $2, $3, $3;"),
-                        constraints="=f,=f,=f,f",
-                        dtype=output_dtype,
-                        input_dtypes=(torch.float32,),
-                        output_dtypes=output_dtypes,
-                        output_index=output_index,
-                    )
-                    for output_index, output_dtype in enumerate(output_dtypes)
-                )
-
-        self.assertTrue(all(isinstance(result, CSEVariable) for result in results))
-        body = kernel.body.getvalue()
-        self.assertEqual(body.count("inline_asm_elementwise_intrinsic("), 1)
-        self.assertIn(
-            "result_type=(cutlass.Float32, cutlass.Float32, cutlass.Float32)",
-            body,
-        )
-
     def test_cutedsl_op_overrides_fast_math(self):
         from torch._inductor.codegen.common import CSEVariable
         from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
