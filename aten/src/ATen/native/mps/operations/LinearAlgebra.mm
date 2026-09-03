@@ -1702,7 +1702,8 @@ static void triangular_solve_metal(const Tensor& A_,
                                    bool conjugate,
                                    Tensor& out) {
   using namespace mps;
-  Tensor X = out.is_contiguous() ? out : out.clone(at::MemoryFormat::Contiguous);
+  // The kernel fully overwrites X, so an uninitialized contiguous buffer is enough.
+  Tensor X = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);
 
   const uint64_t batchSize =
       std::accumulate(A_.sizes().begin(), A_.sizes().end() - 2, 1ULL, std::multiplies<uint64_t>());
@@ -1719,10 +1720,10 @@ static void triangular_solve_metal(const Tensor& A_,
   params.conj = conjugate;
   params.unit = unitriangular;
 
-  MPSStream* stream = getCurrentMPSStream();
+  auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
+      auto encoder = stream->commandEncoder();
       auto pso = lib.getPipelineStateForFunc(fmt::format("triangular_solve_{}", scalarToMetalTypeString(A_)));
       getMPSProfiler().beginProfileKernel(pso, "triangular_solve", {A_, B_}, stream);
       [encoder setComputePipelineState:pso];
