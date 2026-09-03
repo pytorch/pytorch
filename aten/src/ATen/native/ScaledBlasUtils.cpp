@@ -408,6 +408,14 @@ void validate_scaled_mm_v2_inputs(
     // Layout the count belongs to. ROCm accepts two layouts that differ only
     // in padding, so the count alone is ambiguous without naming one.
     const char* scale_layout;
+    // The arch/version gate for SWIZZLE_32_8 lives in the kernel, which can
+    // query the device, so a request for it on an unsupported arch reaches this
+    // size check first whenever the two layouts' counts differ. Name the
+    // requirement, in `check_mx_swizzle`'s words, so that case is not
+    // misdiagnosed as a plain size mismatch.
+    const char* scale_layout_hint = is_mx_32_8
+        ? "; SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)"
+        : "";
     // ROCm and NVIDIA use different blockwise scale shapes; detect at runtime
     // to keep aten-cpu free of GPU-conditional compilation. Formulas mirror
     // _scaled_mxfp8_mxfp8 and _scaled_mxfp4_mxfp4 in cuda/ScaledBlas.cpp.
@@ -444,12 +452,12 @@ void validate_scaled_mm_v2_inputs(
         scale_a.size() == 1 && scale_a[0].sym_numel() == expected_a_elems &&
             scale_a[0].scalar_type() == ScalarType::Float8_e8m0fnu,
         "For Blockwise scaling with ", scale_layout, " scale_a should have ", expected_a_elems,
-        " elements, got: ", scale_a.empty() ? c10::SymInt(0) : scale_a[0].sym_numel());
+        " elements, got: ", scale_a.empty() ? c10::SymInt(0) : scale_a[0].sym_numel(), scale_layout_hint);
     TORCH_CHECK_VALUE(
         scale_b.size() == 1 && scale_b[0].sym_numel() == expected_b_elems &&
             scale_b[0].scalar_type() == ScalarType::Float8_e8m0fnu,
         "For Blockwise scaling with ", scale_layout, " scale_b should have ", expected_b_elems,
-        " elements, got: ", scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
+        " elements, got: ", scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel(), scale_layout_hint);
   } else if (is_nv_1x16) {
     const auto expected_a_elems = nvfp4_scale_elems(M);
     const auto expected_b_elems = nvfp4_scale_elems(N);

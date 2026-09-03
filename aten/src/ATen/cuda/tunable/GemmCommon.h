@@ -730,7 +730,9 @@ struct ScaledGemmParams : OpParams {
     // In TunableOp, we must distinguish in param signature these two cases: with and without a bias vector.
     //
     // The swizzle suffix is only appended when a swizzle is in play, so that
-    // previously recorded tuning results keep their keys.
+    // previously recorded tuning results keep their keys. It keeps the two MX
+    // layouts' keys distinct; it does not make the hipBLASLt candidates
+    // swizzle-aware -- see the BlockWise1x32 note in GemmHipblaslt.h.
     auto sig = fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_rw_%d_bias_%s",
       transa, transb, m, n, k, lda, ldb, ldc,
       a_scaling_type == ScalingType::RowWise && b_scaling_type == ScalingType::RowWise,
