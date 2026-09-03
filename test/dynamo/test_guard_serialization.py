@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
 import dataclasses
+import functools
+import io
 import itertools
 import pickle
 import sys
@@ -32,8 +34,11 @@ from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
+    parametrize,
+    subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -67,6 +72,297 @@ class GlobalNestedModule(torch.nn.Module):
 
 def global_func(x):
     return x + 1
+
+
+def keep_defaults(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if len(func.__defaults__) == 2:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+def keep_kwdefaults(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__kwdefaults__["scale"] == 2.0:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+def keep_attribute(func):
+    func.scale_flag = 2.0
+
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.scale_flag == 2.0:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+def keep_name(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__name__ == "forward":
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+def keep_renamed_name(func):
+    # __name__ reassigned away from co_name, so a reconstruction that falls back
+    # to code.co_name reads "forward" where the real function says otherwise.
+    # keep_name alone cannot catch that: there the two agree.
+    func.__name__ = "renamed_forward"
+
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__name__ == "renamed_forward":
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+FQN_MISMATCH_GLOBAL = 2
+
+
+def keep_global(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__globals__["FQN_MISMATCH_GLOBAL"] == 2:
+            x = x + 10
+        return func(self, x)
+
+    return wrapper
+
+
+def keep_globals_length(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        return func(self, x) + len(func.__globals__)
+
+    return wrapper
+
+
+class UnpicklableDefault:
+    def __reduce__(self):
+        raise RuntimeError("unrelated default cannot pickle")
+
+
+class DecoratedForwardModule(torch.nn.Module):
+    # forward is the wrapper; the undecorated function it closes over has the
+    # same __qualname__ but is unreachable from the module, which is what makes
+    # it unpicklable by reference.
+    @keep_defaults
+    def forward(self, x, scale=2.0, shift=1.0):
+        return x * scale + shift
+
+
+class DecoratedKwdefaultsForwardModule(torch.nn.Module):
+    @keep_kwdefaults
+    def forward(self, x, *, scale=2.0):
+        return x * scale
+
+
+class DecoratedAttributeForwardModule(torch.nn.Module):
+    @keep_attribute
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedNameForwardModule(torch.nn.Module):
+    @keep_name
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedRenamedNameForwardModule(torch.nn.Module):
+    @keep_renamed_name
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedGlobalForwardModule(torch.nn.Module):
+    @keep_global
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedGlobalsLengthForwardModule(torch.nn.Module):
+    @keep_globals_length
+    def forward(self, x):
+        return x * 2
+
+
+class DecoratedUnpicklableDefaultForwardModule(torch.nn.Module):
+    @keep_name
+    def forward(self, x, unused=UnpicklableDefault()):
+        return x * 2
+
+
+# --- module-scope wrappers that reach themselves through their own globals ---
+# `wrapped = deco(base)` at module scope: the wrapper is reachable from its own
+# __globals__, so a globals snapshot passed as a reduce ARG contains the very
+# object being reduced. pickle memoizes only after saving args, so that recursed
+# forever; two wrappers referencing each other do it across the pair.
+MODULE_SCOPE_CONST = 2
+
+
+def module_scope_wrapper(func):
+    @functools.wraps(func)
+    def wrapper(x):
+        # Roots a guard at func.__globals__, which forces the snapshot -- and
+        # the snapshot contains the wrappers themselves.
+        if func.__globals__["MODULE_SCOPE_CONST"] == 2:
+            x = x + 1
+        return func(x)
+
+    return wrapper
+
+
+def _module_scope_base_a(x):
+    return x * 2
+
+
+def _module_scope_base_b(x):
+    return x * 3
+
+
+MODULE_SCOPE_WRAPPED_A = module_scope_wrapper(_module_scope_base_a)
+MODULE_SCOPE_WRAPPED_B = module_scope_wrapper(_module_scope_base_b)
+
+
+# The pickler refuses a locally-defined class before __reduce__ ever runs, so
+# a value whose __reduce__ is the thing under test has to live at module scope.
+_REDUCE_RAISES: type[BaseException] = AssertionError
+
+
+class _RaisesFromReduce:
+    def __reduce__(self):
+        raise _REDUCE_RAISES("from __reduce__")
+
+
+def _cell_is_full(cell):
+    try:
+        cell.cell_contents
+    except ValueError:
+        return False
+    return True
+
+
+def _dump_through_pickle_guards_state(value):
+    """Run ``value`` through pickle_guards_state's try/except.
+
+    A capture cannot reach that handler with an arbitrary exception -- Dynamo
+    would have to raise it from inside a guarded value's __reduce__ mid-trace
+    -- so the state is assembled directly. Only the fields the function reads
+    are populated; the point is which exceptions cross the handler, not what a
+    real GuardsState contains.
+    """
+    from torch._dynamo.guards import GuardsState, pickle_guards_state
+
+    graph = types.SimpleNamespace(
+        guards=[],
+        local_scope={"value": value},
+        global_scope={},
+        guard_on_key_order=set(),
+    )
+    # Kept, not pruned: an unguarded value is replaced by a _Missing sentinel
+    # and its __reduce__ never runs, so the handler is never reached.
+    builder = types.SimpleNamespace(guard_tree_values={id(value): value})
+    state = GuardsState(output_graph=graph, shape_code_parts=None)
+    return pickle_guards_state(state, builder)
+
+
+def self_referencing_wrapper(func):
+    # The wrapper reads an attribute off ITSELF, so `wrapper` becomes one of
+    # its own free variables and the cell holds the object being reduced. A
+    # counter or a cache on the wrapper is the ordinary way a decorator does
+    # this; functools.wraps then makes it fqn-unreachable, which is exactly
+    # the shape the reducer reconstructs.
+    @functools.wraps(func)
+    def wrapper(x):
+        wrapper.calls += 1
+        if func.__globals__["MODULE_SCOPE_CONST"] == 2:
+            x = x + 1
+        return func(x)
+
+    wrapper.calls = 0
+    wrapper.me = wrapper
+    return wrapper
+
+
+def _self_referencing_base(x):
+    return x * 5
+
+
+SELF_REFERENCING_WRAPPED = self_referencing_wrapper(_self_referencing_base)
+
+
+def _make_function_cycle():
+    # The wrapper closes over the base and the base holds the wrapper in its
+    # __dict__, so the cycle runs through the closure of one and the attributes
+    # of the other. Neither is reachable by fqn, so both are reconstructed.
+    def base(x):
+        return x * 2
+
+    @functools.wraps(base)
+    def wrapper(x):
+        return base(x) + 1
+
+    base.wrapper = wrapper
+    return base, wrapper
+
+
+CYCLE_BASE, CYCLE_WRAPPER = _make_function_cycle()
+
+
+# --- an empty closure cell -------------------------------------------------
+def keep_name_with_empty_cell(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__name__ == "forward":
+            x = x + 1
+        if x is None:
+            return unset
+        return func(self, x)
+
+    if func is None:
+        unset = 1  # never runs, so the cell wrapper closes over stays EMPTY
+
+    return wrapper
+
+
+def _empty_cell_base(self, x):
+    return x * 2
+
+
+EMPTY_CELL_WRAPPED = keep_name_with_empty_cell(_empty_cell_base)
+
+
+# --- a guarded default whose VALUE must survive, not just the tuple length --
+def keep_default_value(func):
+    @functools.wraps(func)
+    def wrapper(self, x):
+        if func.__defaults__[0] == 2.0:
+            x = x + 1
+        return func(self, x)
+
+    return wrapper
+
+
+class DecoratedDefaultValueForwardModule(torch.nn.Module):
+    @keep_default_value
+    def forward(self, x, scale=2.0):
+        return x * scale
 
 
 class ModuleNotSerializable(torch.nn.Module):
@@ -475,6 +771,7 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
 
 
 @torch._dynamo.config.patch({"strict_precompile": True})
+@instantiate_parametrized_tests
 class TestGuardSerialization(TestGuardSerializationBase):
     def test_function_locals(self):
         def foo(x):
@@ -484,6 +781,281 @@ class TestGuardSerialization(TestGuardSerializationBase):
             return g(x) + 1
 
         self._test_serialization("TENSOR_MATCH", fn, torch.randn(3), foo)
+
+    def test_guard_rooted_at_module_scope_wrappers_that_reach_themselves(self):
+        # Driven through a real capture, not the pickler: two functools.wraps
+        # helpers bound at module scope and called from one compiled frame is
+        # ordinary code, and the globals snapshot each one carries contains
+        # both of them. Passing that snapshot as a reduce ARG recursed until
+        # RecursionError; it goes in reduce STATE, which pickle applies after
+        # memoizing, so the references resolve to the functions it already
+        # built.
+        def fn(x):
+            return MODULE_SCOPE_WRAPPED_A(x) + MODULE_SCOPE_WRAPPED_B(x)
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+
+    def test_guard_rooted_at_a_wrapper_that_reaches_itself(self):
+        # The globals snapshot moved to reduce STATE, but a kept closure cell,
+        # __dict__ entry or default still travelled in the reduce ARGS. pickle
+        # memoizes an object only AFTER saving its args, so a wrapper holding
+        # itself in any of those re-entered the reducer and recursed until
+        # RecursionError -- a hard capture failure, since aot_compile passes
+        # strict_error=True. Everything that reaches the function now goes in
+        # state too, and __closure__, which is read-only after construction,
+        # is built empty and filled by the state setter.
+        def fn(x):
+            return SELF_REFERENCING_WRAPPED(x)
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+
+    def test_a_reconstructed_wrapper_still_points_at_itself(self):
+        # Deferring to state is only correct if the reference comes BACK. A
+        # wrapper whose cell or attribute silently lost its self-reference
+        # would raise NameError or AttributeError on the first served call
+        # rather than at load, so assert the identity directly.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        w = SELF_REFERENCING_WRAPPED
+        buf = io.BytesIO()
+        GuardsStatePickler(
+            {id(w): w, id(w.__globals__): w.__globals__}, {}, {}, buf
+        ).dump({"fn": w})
+        got = pickle.loads(buf.getvalue())["fn"]
+        self.assertIs(got.me, got)
+        cells = [
+            cell.cell_contents
+            for cell in (got.__closure__ or ())
+            if _cell_is_full(cell)
+        ]
+        self.assertTrue(any(contents is got for contents in cells))
+
+    def test_a_shared_closure_cell_survives_a_self_reference(self):
+        # A cell's CONTENTS travel in the owning function's state, so the cell
+        # itself comes back empty -- that must not cost the sharing keeping the
+        # cell object in the reduce args exists to preserve: two functions
+        # closing over one variable must still close over ONE cell after the
+        # round trip.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        def pair():
+            shared = [0]
+
+            def f():
+                return shared
+
+            def g():
+                return shared
+
+            return f, g
+
+        f, g = pair()
+        buf = io.BytesIO()
+        GuardsStatePickler(
+            {id(f): f, id(g): g, id(f.__closure__[0]): f.__closure__[0]}, {}, {}, buf
+        ).dump({"f": f, "g": g})
+        out = pickle.loads(buf.getvalue())
+        self.assertIs(out["f"].__closure__[0], out["g"].__closure__[0])
+
+    def test_a_dynamo_control_flow_exception_is_not_a_package_bypass(self):
+        # pickle_guards_state catches Exception so a user assert in a
+        # __reduce__ becomes a bypass rather than a hard compile failure. Every
+        # exception Dynamo steers compilation with -- RestartAnalysis,
+        # SkipFrame, Unsupported -- derives from TorchDynamoException, which
+        # derives from RuntimeError, so the broad catch swallowed those too and
+        # a restart silently became a logged bypass. They must propagate.
+        global _REDUCE_RAISES
+        original = _REDUCE_RAISES
+        try:
+            for exc_type in (
+                torch._dynamo.exc.RestartAnalysis,
+                torch._dynamo.exc.SkipFrame,
+                torch._dynamo.exc.Unsupported,
+            ):
+                _REDUCE_RAISES = exc_type
+                with self.subTest(exc=exc_type.__name__):
+                    with self.assertRaisesRegex(exc_type, "from __reduce__"):
+                        _dump_through_pickle_guards_state(_RaisesFromReduce())
+
+            # ... while an ordinary failure inside __reduce__ still becomes one.
+            _REDUCE_RAISES = AssertionError
+            with self.assertRaisesRegex(
+                PackageError, "AssertionError: from __reduce__"
+            ):
+                _dump_through_pickle_guards_state(_RaisesFromReduce())
+        finally:
+            _REDUCE_RAISES = original
+
+    def test_reducer_handles_an_empty_cell_reached_directly(self):
+        # A cell in a reconstructed function's closure is filled from that
+        # function's state. A cell reached directly -- a guarded __closure__
+        # tuple, or the cell itself -- goes through reducer_override's branch,
+        # which read cell_contents unguarded and raised ValueError out of the
+        # pickler, i.e. a package bypass. Pickler-level because a guard cannot
+        # root at a raw cell through a capture: CLOSURE_MATCH is dropped.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        empty = [c for c in EMPTY_CELL_WRAPPED.__closure__ if not _cell_is_full(c)]
+        self.assertEqual(len(empty), 1)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"cell": empty[0]})
+        self.assertGreater(len(buf.getvalue()), 0)
+
+    def test_reduce_handles_an_empty_closure_cell(self):
+        # A free variable a decorator only assigns on a path that did not run
+        # has no contents; reading it raised ValueError out of the reducer,
+        # which reaches the caller as a package bypass.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        wrapped = EMPTY_CELL_WRAPPED
+        empty = [c for c in wrapped.__closure__ if not _cell_is_full(c)]
+        self.assertEqual(len(empty), 1)
+        gtv = {id(wrapped): wrapped}
+        buf = io.BytesIO()
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": wrapped})
+        self.assertGreater(len(buf.getvalue()), 0)
+
+    def test_fqn_mismatched_function_keeps_a_shared_closure_cell_shared(self):
+        # Two functions closing over one variable must still share the cell
+        # after reload; rebuilding every cell silently unshares them.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        def outer():
+            shared = torch.zeros(2)
+
+            def a():
+                return shared
+
+            def b():
+                return shared
+
+            return a, b
+
+        a, b = outer()
+        self.assertIs(a.__closure__[0], b.__closure__[0])
+        buf = io.BytesIO()
+        cell = a.__closure__[0]
+        gtv = {id(a): a, id(b): b, id(cell): cell}
+        pickler = GuardsStatePickler(gtv, {}, {}, buf)
+        pickler.dump({"a": a, "b": b})
+        out = pickle.loads(buf.getvalue())
+        self.assertIs(out["a"].__closure__[0], out["b"].__closure__[0])
+
+    @parametrize(
+        "module_type,guard_type",
+        [
+            # The defaults TUPLE's length, and separately the VALUE of a guarded
+            # element: forcing every default to _Missing passes the first and
+            # fails the second.
+            subtest((DecoratedForwardModule, "SEQUENCE_LENGTH"), name="defaults"),
+            subtest(
+                (DecoratedDefaultValueForwardModule, "EQUALS_MATCH"),
+                name="default_value",
+            ),
+            subtest(
+                (DecoratedKwdefaultsForwardModule, "EQUALS_MATCH"), name="kwdefaults"
+            ),
+            subtest(
+                (DecoratedAttributeForwardModule, "EQUALS_MATCH"), name="attribute"
+            ),
+            subtest((DecoratedNameForwardModule, "EQUALS_MATCH"), name="name"),
+            subtest(
+                (DecoratedGlobalsLengthForwardModule, "DICT_KEYS_MATCH"),
+                name="globals_structure",
+            ),
+        ],
+    )
+    def test_guard_rooted_at_fqn_mismatched_function(self, module_type, guard_type):
+        # forward is a functools.wraps wrapper, so the function it closes over is
+        # unreachable by fqn and has to be reconstructed. Each case guards a
+        # different piece of what the reconstruction must carry with it.
+        mod = module_type()
+        ref, loaded = self._test_serialization(guard_type, mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        self._test_check_fn(
+            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
+        )
+
+    def test_fqn_mismatched_function_preserves_a_renamed_name(self):
+        # keep_name's __name__ happens to equal co_name, so it passes even if
+        # reconstruction falls back to co_name. This one does not.
+        mod = DecoratedRenamedNameForwardModule()
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        self.assertNotEqual(inner.__name__, inner.__code__.co_name)
+        self._test_check_fn(
+            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
+        )
+
+    def test_fqn_mismatched_function_preserves_guarded_globals(self):
+        global FQN_MISMATCH_GLOBAL
+
+        mod = DecoratedGlobalForwardModule()
+        x = torch.ones(1)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, x)
+        inner = type(mod).forward.__wrapped__
+        inputs = {"self": mod, "x": x, "func": inner}
+        self._test_check_fn(ref, loaded, inputs, True)
+
+        try:
+            FQN_MISMATCH_GLOBAL = 3
+            self.assertFalse(ref.check(inputs))
+            guards_state = torch._dynamo.package.load_guards_state(
+                self._cached_guards_state
+            )
+            loaded = torch._dynamo.package.load_guard_manager(
+                guards_state,
+                self._cached_f_code,
+                globals(),
+            )
+            self.assertFalse(loaded.check(inputs))
+        finally:
+            FQN_MISMATCH_GLOBAL = 2
+
+    def test_fqn_mismatched_function_prunes_unguarded_defaults(self):
+        mod = DecoratedUnpicklableDefaultForwardModule()
+        ref, loaded = self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+        inner = type(mod).forward.__wrapped__
+        self._test_check_fn(
+            ref, loaded, {"self": mod, "x": torch.randn(3), "func": inner}, True
+        )
+
+    def test_two_functions_that_reference_each_other(self):
+        # Deferring to state used to be conditional on a DIRECT self-reference,
+        # which a PAIR does not have: the wrapper's cell reaches the base, whose
+        # __dict__ reaches the wrapper, and neither is memoized while its own
+        # args are being saved, so the pair recursed until RecursionError. Only
+        # the code, the names and the cells travel in args now.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        base, wrapper = CYCLE_BASE, CYCLE_WRAPPER
+        cell = wrapper.__closure__[0]
+        gtv = {id(base): base, id(wrapper): wrapper, id(cell): cell}
+        buf = io.BytesIO()
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"wrapper": wrapper})
+        got = pickle.loads(buf.getvalue())["wrapper"]
+        inner = got.__closure__[0].cell_contents
+        self.assertIs(inner.wrapper, got)
+        self.assertEqual(got(torch.ones(1)), torch.full((1,), 3.0))
+
+    def test_a_reconstructed_function_keeps_its_module(self):
+        # A guarded __globals__ makes the function rebuild from a globals
+        # SNAPSHOT, and FunctionType reads __module__ out of globals["__name__"],
+        # which a snapshot has no reason to contain -- so __module__ came back
+        # None and a guard reading it could never match.
+        from torch._dynamo.guards import GuardsStatePickler
+
+        w = SELF_REFERENCING_WRAPPED
+        buf = io.BytesIO()
+        gtv = {id(w): w, id(w.__globals__): w.__globals__}
+        GuardsStatePickler(gtv, {}, {}, buf).dump({"fn": w})
+        got = pickle.loads(buf.getvalue())["fn"]
+        self.assertEqual(got.__module__, w.__module__)
+        self.assertEqual(got.__doc__, w.__doc__)
 
     def test_tensor_match(self):
         def f(x: torch.Tensor):

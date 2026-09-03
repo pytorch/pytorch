@@ -1,19 +1,27 @@
 # Owner(s): ["module: dynamo"]
 
+import copy
 import gc
 import importlib
 import os
+import pickle
 import sys
 import tempfile
 import unittest
 
 import torch
+import torch._dynamo.package as dynamo_package
 import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
+from torch._dynamo.package import (
+    CompilePackage,
+    DiskDynamoStore,
+    DynamoCache,
+    SystemInfo,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
@@ -85,6 +93,50 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
         cache_entry = package.cache_entry()
         self.assertEqual(cache_entry.codes[0].backend_ids, [backend_id])
+
+    def test_cache_entry_loads_from_a_pickle_without_newer_fields(self):
+        # A pickle written before these fields existed must still load and pass
+        # check_versions(), which reads them directly. system_info is the
+        # exception: with nothing recorded there is nothing to compare the host
+        # against, and synthesizing one on load compared the host to itself.
+        def fn(x):
+            return x + 1
+
+        code_entry = dynamo_package._DynamoCodeCacheEntry(
+            python_code=dynamo_package.SerializedCode.from_code_object(fn.__code__),
+            python_module=__name__,
+            function_names=[],
+            guarded_codes=[],
+            import_sources={},
+            backend_ids=[],
+            code_source=None,
+            install_to_global=False,
+        )
+        old_code_entry = copy.copy(code_entry)
+        old_code_entry.__dict__.pop("bypassed")
+        entry = dynamo_package._DynamoCacheEntry(
+            codes=[old_code_entry],
+            source_info=dynamo_package.SourceInfo(set()),
+            device_type="cpu",
+            device_types=frozenset({"cpu"}),
+            system_info=SystemInfo.current(cpu_codegen=False),
+        )
+        old = copy.copy(entry)
+        for name in ("device_types", "requires_native_backend_compatibility"):
+            old.__dict__.pop(name)
+
+        loaded = pickle.loads(pickle.dumps(old))
+        self.assertIsNone(loaded.device_types)
+        self.assertTrue(loaded.requires_native_backend_compatibility)
+        self.assertFalse(loaded.codes[0].bypassed)
+        loaded.check_versions()
+        self.assertEqual(loaded.debug_info()["device_types"], ["cpu"])
+
+        old.__dict__.pop("system_info")
+        loaded = pickle.loads(pickle.dumps(old))
+        self.assertIsNone(loaded.system_info)
+        with self.assertRaisesRegex(RuntimeError, "records no system info"):
+            loaded.check_versions()
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
