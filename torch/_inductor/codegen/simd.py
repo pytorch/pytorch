@@ -1288,10 +1288,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     @contextlib.contextmanager
     def mask_loads(
         self,
-        mask: str | OpsWrapper | CSEVariableType,
+        mask: str | OpsWrapper,
         value: int | float,
         implied_masks: OrderedSet[str] | None = None,
-    ) -> Iterator[Any]:
+    ) -> Iterator[str]:
         """
         Context manager to add an additional mask to tl.load/store.
         ``implied_masks`` are range masks that ``mask`` proves, so
@@ -2364,20 +2364,6 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
             and isinstance(value, CSEVariable)
             and self._value_resolver.is_group_width_shape(value.shape)
         )
-
-    def masked_store(
-        self,
-        name: str,
-        index: sympy.Expr,
-        value: CSEVariable,
-        mask: CSEVariable,
-    ) -> None:
-        k = self._kernel
-        value = self._materialize_group_width(value)
-        mask = self._materialize_group_width(mask)
-        remapped_index = self._family.remap_index(index)
-        with self._family.ensure_active(k):
-            self._inner.masked_store(name, remapped_index, value, mask)
 
     def _materialize_group_width(self, value: Any) -> Any:
         """Widen a group-resolution CSE value when the next operation requires it."""

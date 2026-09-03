@@ -2081,7 +2081,7 @@ class TestScheduler(TestCase):
     @skipCPUIf(True, "requires accelerator Triton")
     @parametrize(
         "extra_cols,with_residual,expected_kernels",
-        ((1, False, 1), (1, True, 2), (16, False, 2)),
+        ((1, False, 1), (1, True, 1), (16, False, 2)),
     )
     def test_cat_reduction_slice_fusion(
         self, device, extra_cols, with_residual, expected_kernels
@@ -2252,22 +2252,6 @@ class TestScheduler(TestCase):
 
     @xfailIfNoAcceleratorTriton
     @skipCPUIf(True, "requires accelerator Triton")
-    def test_masked_expansion_shared_read_gate(self, device):
-        fn, args = self._masked_expansion_fn(device, 1)
-
-        torch._dynamo.reset()
-        metrics.reset()
-        with (
-            fresh_inductor_cache(),
-            inductor_config.patch(masked_expansion_shared_bytes_multiple=10_000),
-        ):
-            actual = torch.compile(fn, fullgraph=True)(*args)
-
-        self.assertEqual(fn(*args), actual, atol=5e-3, rtol=2e-2)
-        self.assertEqual(metrics.generated_kernel_count, 2)
-
-    @xfailIfNoAcceleratorTriton
-    @skipCPUIf(True, "requires accelerator Triton")
     def test_masked_expansion_zero_ratio_disables_pass(self, device):
         fn, args = self._masked_expansion_fn(device, 1)
 
@@ -2333,9 +2317,9 @@ class TestScheduler(TestCase):
     @xfailIfNoAcceleratorTriton
     @skipCPUIf(True, "requires accelerator Triton")
     def test_masked_expansion_rejects_mismatched_read(self, device):
-        # The rolled normalizer is a root-block read of a reduction output
-        # whose access does not match the reduction's write, so the tail
-        # could read out of bounds; the pass must decline.
+        # The rolled normalizer reads the reduction output at another row, so
+        # the consumer cannot be served by the reduction's own program; the
+        # ordinary fusion legality check must still decline after expansion.
         def fn(x, extra):
             values = torch.cat((x, extra), dim=-1)
             normalizer = values.sum(dim=-1, keepdim=True)

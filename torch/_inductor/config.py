@@ -993,10 +993,8 @@ loop_reindexing_after_fusion: bool = (
 )
 
 # Maximum static expansion of a pointwise iteration domain when fusing it into
-# a reduction. Non-positive/non-finite values and benchmark_fusion disable it.
+# a reduction. Non-positive values and benchmark_fusion disable it.
 masked_expansion_max_ratio: float = 0.1
-# Require shared bytes to exceed the estimated expansion cost by this factor.
-masked_expansion_shared_bytes_multiple: int = 4
 
 
 # When trying to fuse two nodes, one with:

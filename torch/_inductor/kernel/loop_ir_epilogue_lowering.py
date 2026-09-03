@@ -187,17 +187,6 @@ class _GemmEpilogueIRHandler(DefaultHandler):
     ) -> None:
         self.stores[name] = GemmEpilogueIRStore(index, value)
 
-    def masked_store(
-        self,
-        name: str,
-        index: sympy.Expr,
-        value: GemmEpilogueIRExpression,
-        mask: GemmEpilogueIRExpression,
-    ) -> None:
-        # Not representable in the epilogue IR. Leaving the store unrecorded
-        # makes store_from_buffer return None, which declines the fusion.
-        return None
-
 
 def _loaded_names(expr: Any) -> frozenset[str]:
     if not isinstance(expr, GemmEpilogueIRExpression):

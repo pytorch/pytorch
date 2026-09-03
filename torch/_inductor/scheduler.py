@@ -3857,9 +3857,9 @@ class SchedulerNode(BaseSchedulerNode):
             return False
         if any(out.get_aliases() for out in self.get_outputs()):
             return False
-        # A masked store only partially defines its buffer, so reusing the input
-        # would leave the input's values in the masked-off region.
-        if isinstance(self._body, LoopBody) and self._body.has_op("masked_store"):
+        # A store under a mask only partially defines its buffer, so reusing the
+        # input would leave the input's values in the masked-off region.
+        if isinstance(self._body, LoopBody) and self._body.has_masked_stores():
             return False
         if len(self.read_writes.writes) == 1 and isinstance(
             read_dep, dependencies.MemoryDep
@@ -6666,7 +6666,6 @@ class Scheduler:
             if (
                 config.loop_reindexing_after_fusion
                 and config.masked_expansion_max_ratio > 0
-                and math.isfinite(config.masked_expansion_max_ratio)
                 and not config.benchmark_fusion
             ):
                 fused_nodes = OrderedSet(nodes)
@@ -9326,7 +9325,7 @@ class Scheduler:
         reduction: BaseSchedulerNode,
         consumer: SchedulerNode,
     ) -> bool:
-        """Expand one static pointwise consumer to a near-sized reduction."""
+        """Expand one pointwise consumer to a near-sized reduction's range."""
         why = WhyNoFuse(reduction, consumer)
         if (
             not isinstance(reduction, (SchedulerNode, FusedSchedulerNode))
@@ -9336,8 +9335,6 @@ class Scheduler:
             )
             or reduction.is_template()
             or reduction.is_foreach()
-            or consumer.is_reduction()
-            or reduction.is_cpu()
             or consumer.has_aliasing_or_mutation()
             or not isinstance(consumer.node, ComputedBuffer)
             or not isinstance(consumer.node.data, Pointwise)
@@ -9349,121 +9346,50 @@ class Scheduler:
             why("masked expansion: unsupported node kinds")
             return False
 
-        body = consumer._body
-        if any(
-            body.has_op(op) for op in (*MASKED_EXPANSION_BANNED_OPS, "masked_store")
-        ) or any(
+        if any(consumer._body.has_op(op) for op in MASKED_EXPANSION_BANNED_OPS) or any(
             isinstance(dep, MemoryDep) and dep.mode is not None
             for dep in consumer.read_writes.writes
         ):
             why("masked expansion: consumer has ops whose writes cannot be masked")
             return False
 
+        # Legality, proved without guards: the consumer loops must end in the
+        # reduced dim as a proper prefix of the reduction's range.
+        sizevars = V.graph.sizevars
         _, (red_numel, red_rnumel) = reduction.group
-        pw_numel = sympy_product(consumer._sizes[0])
-        target_numel = red_numel * red_rnumel
-        if not V.graph.sizevars.statically_known_gt(red_numel, 0):
-            why("masked expansion: reduction numel %s may be empty", red_numel)
-            return False
-        pw_rnumel = FloorDiv(pw_numel, red_numel)
-        # Legality: the consumer domain must be a proper prefix of the
-        # reduction domain along the reduced dim, proved without guards.
-        if not V.graph.sizevars.statically_known_equals(
-            red_numel * pw_rnumel, pw_numel
-        ) or not V.graph.sizevars.statically_known_lt(pw_rnumel, red_rnumel):
-            why("masked expansion: %s is not a prefix of %s", pw_numel, target_numel)
-            return False
-
         iter_sizes = tuple(consumer._sizes[0])
         if not (
             iter_sizes
-            and V.graph.sizevars.statically_known_equals(iter_sizes[-1], pw_rnumel)
-            and V.graph.sizevars.statically_known_equals(
+            and sizevars.statically_known_equals(
                 sympy_product(iter_sizes[:-1]), red_numel
             )
+            and sizevars.statically_known_lt(iter_sizes[-1], red_rnumel)
         ):
             why(
-                "masked expansion: consumer loops %s do not end in the reduced dim",
+                "masked expansion: consumer loops %s are not a prefix of %s",
                 iter_sizes,
+                (red_numel, red_rnumel),
             )
             return False
 
-        # Profitability, decided on hints like other fusion heuristics: the
-        # generated code is correct for any runtime size, only the wasted tail
-        # lanes grow if the hint is off.
-        pw_numel_hint = V.graph.sizevars.optimization_hint(pw_numel, fallback=0)
-        target_numel_hint = V.graph.sizevars.optimization_hint(target_numel, fallback=0)
-        pw_access_bytes = consumer.get_read_write_buffers_sizes()
-        if (
-            not pw_numel_hint
-            or target_numel_hint <= pw_numel_hint
-            or not pw_access_bytes
+        # Profitability on size hints like other fusion heuristics: the code is
+        # correct for any runtime size, only the wasted tail grows if the hint
+        # is off. can_fuse applies the usual shared-memory threshold afterwards.
+        pw_rnumel_hint = sizevars.optimization_hint(iter_sizes[-1], fallback=0)
+        red_rnumel_hint = sizevars.optimization_hint(red_rnumel, fallback=0)
+        if not pw_rnumel_hint or red_rnumel_hint > pw_rnumel_hint * (
+            1 + config.masked_expansion_max_ratio
         ):
-            why("masked expansion: no size hints to estimate the expansion cost")
-            return False
-        if target_numel_hint > pw_numel_hint * (1 + config.masked_expansion_max_ratio):
             why(
                 "masked expansion: %d -> %d exceeds masked_expansion_max_ratio",
-                pw_numel_hint,
-                target_numel_hint,
+                pw_rnumel_hint,
+                red_rnumel_hint,
             )
             return False
-        expansion_bytes = (
-            pw_access_bytes * (target_numel_hint - pw_numel_hint) + pw_numel_hint - 1
-        ) // pw_numel_hint
 
         consumer.expand_dimension_for_pointwise_node_with_masked_stores(
             len(iter_sizes) - 1, red_rnumel
         )
-
-        # Load-safety proof for the unmasked tail. Loads inside ops.masked
-        # subblocks are conjoined with the tail predicate by _MaskStoresHandler,
-        # so they never execute in the tail. Root-block loads run at the raw
-        # expanded coordinate, so each must read a buffer the reduction writes
-        # with the same normalized access; that access is indexed by the
-        # reduction's own domain and is therefore in bounds.
-        root_load_names: OrderedSet[str] = OrderedSet()
-        for body_node in consumer._body.root_block.graph.nodes:
-            if body_node.op == "call_method" and body_node.target == "load":
-                name = body_node.args[1]
-                root_load_names.add(consumer.mutation_renames.get(name, name))
-
-        reduction_deps: dict[str, list[Dep]] = defaultdict(list)
-        for dep in reduction.read_writes.reads_and_writes():
-            reduction_deps[dep.name].append(dep)
-        reduction_writes: dict[str, list[Dep]] = defaultdict(list)
-        for dep in reduction.read_writes.writes:
-            reduction_writes[dep.name].append(dep)
-        for read in consumer.read_writes.reads:
-            if read.name in root_load_names and not any(
-                self.deps_match_normalized(read, write)
-                for write in reduction_writes[read.name]
-            ):
-                why(
-                    "masked expansion: root-block read of %s is not a reduction write",
-                    read.name,
-                )
-                return False
-
-        matched_reads = [
-            read
-            for read in consumer.read_writes.reads
-            if any(
-                self.deps_match_normalized(read, reduction_dep)
-                for reduction_dep in reduction_deps[read.name]
-            )
-        ]
-        shared_bytes = sum(self.dep_size_hint(read) for read in matched_reads)
-        if (
-            expansion_bytes * config.masked_expansion_shared_bytes_multiple
-            > shared_bytes
-        ):
-            why(
-                "masked expansion: shared bytes %d do not pay for expansion cost %d",
-                shared_bytes,
-                expansion_bytes,
-            )
-            return False
         return True
 
     def _fuse_near_sized_reduction_epilogues(

@@ -2578,6 +2578,9 @@ class TritonKernelOverrides(TritonOverrides):
         # operator to save the branching cost.
         for node in nodes:
             for arg in node.args:
+                # A region that only stores (masked expansion) has no value.
+                if arg is None:
+                    continue
                 if (
                     arg.target != "load"
                     or should_unwrap_unspec_arg(arg.args[1])
@@ -2597,6 +2600,8 @@ class TritonKernelOverrides(TritonOverrides):
         ) as new_mask:
             result = body()
 
+        if result is None:
+            return None
         if need_where:
             # Remove once CSEVariables track the dtype
             if result.bounds.is_bool:
@@ -5270,20 +5275,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.outside_loop_vars.add(value)
 
         exit_stack.close()
-
-    def masked_store(
-        self,
-        name: str,
-        index: sympy.Expr,
-        value: CSEVariable,
-        mask: CSEVariable,
-    ) -> None:
-        if not isinstance(value, TritonCSEVariable) or not isinstance(
-            mask, TritonCSEVariable
-        ):
-            raise AssertionError("TritonKernel expects TritonCSEVariable operands")
-        with self.mask_loads(mask, value=0, implied_masks=self._range_implied_masks()):
-            self.store(name, index, value)
 
     def device_assert_async(self, cond, msg) -> None:
         self.compute.writeline(f"tl.device_assert({cond}, {repr(msg)})")
@@ -8291,17 +8282,6 @@ class FusedUserDefinedTritonKernel(TritonKernel):
                 f"Epilogue attempted to store to '{name}'. "
                 "Inductor indexing variables are not defined in user kernel scope. "
             )
-
-    def masked_store(
-        self,
-        name: str,
-        index: sympy.Expr,
-        value: CSEVariable,
-        mask: CSEVariable,
-    ) -> None:
-        raise NotImplementedError(
-            "user-defined Triton kernels do not support masked stores"
-        )
 
     # returns a str which is the src code of a modified version of the user kernel that includes the epilogues
     def codegen(self) -> str:

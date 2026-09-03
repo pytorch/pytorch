@@ -6,7 +6,7 @@ import unittest
 from collections import namedtuple, OrderedDict
 from enum import Enum, IntEnum
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import sympy
 
@@ -15,20 +15,13 @@ import torch._inductor.config as inductor_config
 from torch._inductor import ir
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen import triton_utils
-from torch._inductor.codegen.common import (
-    ArgName,
-    CSEProxy,
-    CSEVariable,
-    SizeArg,
-    TensorArg,
-)
+from torch._inductor.codegen.common import ArgName, CSEVariable, SizeArg, TensorArg
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
-from torch._inductor.codegen.simd import _PointwiseRemapHandler, IterationRangesRoot
+from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
     FixedTritonConfig,
-    FusedUserDefinedTritonKernel,
     get_triton_reduction_function,
     IndexingOptions,
     TritonCSEVariable,
@@ -48,10 +41,6 @@ from torch._inductor.utils import (
     run_and_get_kernels,
 )
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -90,7 +79,6 @@ except ImportError:
     )
 
 
-@instantiate_parametrized_tests
 class TestCodegenTriton(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -173,78 +161,6 @@ class TestCodegenTriton(InductorTestCase):
         self.assertNotIn("r0_mask", loads[0])
         self.assertNotIn("r0_mask", loads[1])
         self.assertIn("r0_mask", loads[2])
-
-    @parametrize("removed", [False, True])
-    def test_masked_store_updates_store_cache_without_destination_load(self, removed):
-        kernel = SimpleNamespace(
-            cse=SimpleNamespace(store_cache={}, invalidated_stores=set()),
-            current_node=None,
-            load=Mock(),
-            masked_store=Mock(),
-            must_keep_buffers=set(),
-            num_store=0,
-            record_op_trace=Mock(),
-            store_buffer_names=set(),
-            store_buffer_counts={},
-        )
-        proxy = CSEProxy(kernel, Mock())
-        value = CSEVariable("value", ValueRanges.unknown(), torch.float32)
-        mask = CSEVariable("mask", ValueRanges.unknown(), torch.bool)
-
-        if removed:
-            self._graph.removed_buffers.add("buf0")
-        try:
-            proxy.masked_store("buf0", sympy.Integer(0), value, mask)
-        finally:
-            self._graph.removed_buffers.discard("buf0")
-
-        self.assertIs(proxy.load("buf0", sympy.Integer(0)), value)
-        kernel.load.assert_not_called()
-        if removed:
-            kernel.masked_store.assert_not_called()
-            self.assertEqual(kernel.store_buffer_counts, {})
-        else:
-            kernel.masked_store.assert_called_once_with(
-                "buf0", sympy.Integer(0), value, mask
-            )
-            self.assertEqual(kernel.store_buffer_counts, {"buf0": 1})
-
-    def test_user_defined_triton_kernel_rejects_masked_store(self):
-        kernel = object.__new__(FusedUserDefinedTritonKernel)
-        value = CSEVariable("value", ValueRanges.unknown(), torch.float32)
-        mask = CSEVariable("mask", ValueRanges.unknown(), torch.bool)
-
-        with self.assertRaisesRegex(NotImplementedError, "user-defined Triton"):
-            kernel.masked_store("buf0", sympy.Integer(0), value, mask)
-
-    def test_pointwise_remap_handler_remaps_masked_store(self):
-        inner = Mock()
-        family = Mock()
-        value_resolver = Mock()
-        remapped_index = sympy.Symbol("remapped_index")
-        family.remap_index.return_value = remapped_index
-        family.ensure_active.return_value = contextlib.nullcontext()
-        handler = _PointwiseRemapHandler(
-            inner, Mock(), family=family, value_resolver=value_resolver
-        )
-        value = CSEVariable("value", ValueRanges.unknown(), torch.float32)
-        mask = CSEVariable("mask", ValueRanges.unknown(), torch.bool)
-        materialized_value = CSEVariable(
-            "materialized_value", ValueRanges.unknown(), torch.float32
-        )
-        materialized_mask = CSEVariable(
-            "materialized_mask", ValueRanges.unknown(), torch.bool
-        )
-        value_resolver.materialize_group_width.side_effect = (
-            materialized_value,
-            materialized_mask,
-        )
-
-        handler.masked_store("buf0", sympy.Symbol("index"), value, mask)
-
-        inner.masked_store.assert_called_once_with(
-            "buf0", remapped_index, materialized_value, materialized_mask
-        )
 
     def test_range_tree_entry_ownership_uses_root_identity(self):
         class AlternateR0Root(IterationRangesRoot):
