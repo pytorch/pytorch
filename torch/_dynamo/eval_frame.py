@@ -240,7 +240,7 @@ _stance = DynamoStance()
 # counter made one request handler's serving() block reject a concurrent
 # handler's legitimate recompile, and a serving process is multi-threaded by
 # definition.
-class DepthTLS(threading.local):
+class _DepthTLS(threading.local):
     # The default lives on the TYPE. Read through getattr(obj, name, default),
     # a bare threading.local() builds and clears an AttributeError on every
     # miss, and the miss is the steady state: only a thread inside the scope
@@ -249,8 +249,8 @@ class DepthTLS(threading.local):
     depth = 0
 
 
-_fail_on_recompile_override = DepthTLS()
-_force_eager_nested_compile = DepthTLS()
+_fail_on_recompile_override = _DepthTLS()
+_force_eager_nested_compile = _DepthTLS()
 
 
 _PRECOMPILE_ENTRIES_REPORTED = 5
