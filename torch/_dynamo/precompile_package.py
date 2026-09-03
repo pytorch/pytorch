@@ -136,7 +136,7 @@ from torch.compiler._precompile_types import (
 from torch.utils._pytree import tree_leaves
 
 from .exc import PackageError
-from .guards import CheckFunctionManager, strip_local_scope
+from .guards import CheckFunctionManager, record_live_guard_leaves, strip_local_scope
 from .package import (
     _BackendId,
     _defining_module_name,
@@ -184,6 +184,7 @@ __all__ = [
     "PrecompileSummary",
     "InstalledCallable",
     "precompile_capture",
+    "prepare_cache_entry",
     "serve_cache_entry",
     "serving",
 ]
@@ -1222,6 +1223,11 @@ def _wont_generalize(
     return tuple(sorted(pinned))
 
 
+# Healing re-serializes, which can in principle prune something new. Bounded
+# rather than open: in practice one pass is always enough.
+_VALIDATION_PASSES = 4
+
+
 def _autograd_cache_bypasses() -> int:
     """How many graphs AOTAutogradCache declined.
 
@@ -1405,6 +1411,23 @@ def _grad_snapshot(
     return found
 
 
+def _unrebuildable_guards(code_entry: Any, cause: Exception) -> PackageError:
+    """The error for a frame whose serialized guards will not rebuild.
+
+    Phrased as a property of the captured model rather than of precompile: this
+    is reached when a guard's SOURCE reaches state that reconstruction does not
+    restore, which is something the caller can act on, and the underlying
+    exception names it.
+    """
+    return PackageError(
+        f"precompile: the guards captured for {code_entry.python_code.co_name} "
+        f"cannot be rebuilt from their serialized form, so the artifact would "
+        f"fail on the machine that loads it. A guard's source reaches state "
+        f"that reconstructing its inputs does not restore: "
+        f"{type(cause).__name__}: {cause}"
+    )
+
+
 def varying_guard_slots(
     guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
 ) -> frozenset[tuple[str, str]]:
@@ -1515,6 +1538,10 @@ class PrecompileSession:
         # variant of every frame. Off by default: the capture session API
         # serializes everything serializable, and precompile() turns it on.
         self._prune_invariant_guards = prune_invariant_guards
+        # The leaves every live guard build produced, to compare a rebuild
+        # against; see _report_guard_drift.
+        self._live_guard_leaves: set[tuple[str, str]] = set()
+        self._drifted_guards: set[tuple[str, str]] = set()
         # The grad mode each compilation ran under, read in the traced frame's
         # own state. The artifact dispatches under it when they all agree.
         self._compile_grad_modes: set[bool] = set()
@@ -1671,6 +1698,7 @@ class PrecompileSession:
         # Backends must serialize into the artifact rather than into the
         # process-local inductor cache.
         stack.enter_context(_capture_config(self._training))
+        self._live_guard_leaves = stack.enter_context(record_live_guard_leaves())
         self._stack = stack
         try:
             if self._example_inputs:
@@ -1797,7 +1825,9 @@ class PrecompileSession:
                         self._state.notify_all()
         self._recorded_exception_keys.clear()
         # Before the report, so that it describes the artifact actually written.
-        if self._prune_invariant_guards and exc[0] is None:
+        # The rebuildability check for the other path is in artifact()/save(),
+        # where a caller can catch it like every other artifact-quality gate.
+        if exc[0] is None and self._prune_invariant_guards:
             self._apply_guard_policy()
         if self._invariants_path is None:
             return
@@ -1814,6 +1844,198 @@ class PrecompileSession:
                 getattr(exc[0], "__name__", exc[0]),
                 self._invariants_path,
             )
+
+    def _drop_unrebuildable_guards(self) -> None:
+        """
+        Drop the guards that cannot be rebuilt from their own pickle.
+
+        Serialization records a guard's VALUE, and rebuilding the tree walks its
+        SOURCE against the reconstructed scope -- so a source reaching state the
+        reconstruction does not restore serializes fine and then explodes on the
+        serving machine, at load or, in the installed mode, inside the first
+        served call. Rebuild each frame's guards here, and drop the ones that
+        raise rather than refusing the artifact over them: whether a guard can
+        be rebuilt and whether it is worth keeping are different questions, and
+        the second one already has an answer the caller controls.
+
+        Recorded as RISKY rather than as an ordinary drop. Dropping a guard is
+        not free -- a guard whose source is a bare attribute leaves its
+        companion HASATTR behind, which rebuilds INVERTED against the
+        attribute-less value and routes calls into the graph traced for the
+        other branch -- so this must fail closed under the default
+        require_no_risky_drops, and pass only where the caller has said it
+        accepts unchecked slots.
+        """
+        from torch._dynamo.guards import CheckFunctionManager
+        from torch._dynamo.output_graph import OutputGraphCommon
+        from torch._dynamo.package import load_guards_state, SerializedCode
+
+        self._drifted_guards.clear()
+        for code_entry in self._package.code_entries():
+            f_code = None
+            for guarded in code_entry.guarded_codes:
+                if f_code is None:
+                    f_code = SerializedCode.to_code_object(code_entry.python_code)
+                loaded = load_guards_state(guarded.guards_state)
+                failures: list[tuple[Guard, Exception]] = []
+                try:
+                    probe = CheckFunctionManager(
+                        f_code,
+                        OutputGraphCommon(loaded.output_graph),
+                        shape_code_parts=loaded.shape_code_parts,
+                        runtime_global_scope=None,
+                        guard_build_local_state=getattr(loaded, "local_state", None),
+                        collect_guard_failures=failures,
+                    )
+                except Exception as e:
+                    raise _unrebuildable_guards(code_entry, e) from e
+                self._report_guard_drift(code_entry, probe.guard_manager)
+                if not failures:
+                    continue
+                guarded.guards_state = self._validated(
+                    code_entry,
+                    f_code,
+                    self._reserialize_without(code_entry, f_code, loaded, failures),
+                )
+
+    def _report_guard_drift(self, code_entry: Any, rebuilt: Any) -> None:
+        """Warn when a guard rebuilds into something the live build never made.
+
+        A guard that cannot be rebuilt at all raises, and is dropped. The
+        quieter half of the same failure is a guard that rebuilds into a
+        DIFFERENT check, because reconstruction lost a value it reads -- a
+        dimension marking, a subclass's requires_grad. That serializes, loads,
+        and then never matches, so nothing downstream notices.
+
+        One-directional on purpose: the invariant-guard policy legitimately
+        drops guards, so a leaf present live and absent at load is expected. A
+        leaf the live build never produced is not.
+
+        A warning rather than a refusal. The exclusions this comparison rests on
+        were established on a handful of models, and refusing an artifact over a
+        false positive is worse than the drift it would catch.
+        """
+        if not self._live_guard_leaves:
+            return
+        extra = rebuilt.leaf_fingerprint() - self._live_guard_leaves
+        if not extra:
+            return
+        self._drifted_guards |= extra
+        log.warning(
+            "precompile: %s's guards rebuild into %d check(s) the capture never "
+            "made, so reconstruction lost something they read. They will not "
+            "match at serve time: %s",
+            code_entry.python_code.co_name,
+            len(extra),
+            sorted(f"{cls}: {payload}" for cls, payload in extra)[:5],
+        )
+
+    def _validated(
+        self, code_entry: Any, f_code: types.CodeType, written: bytes
+    ) -> bytes:
+        """Rebuild the pickle that will SHIP, and heal it if it does not.
+
+        The policy pass validates the pickle it READ and ships the one it WROTE.
+        Those differ -- re-serialization rebuilds the value-pruning tree against
+        reconstructed objects, so a value whose identity the reconstruction
+        changed is pruned on the way out even though the guard naming it was
+        kept. Nothing downstream rebuilds the shipped bytes, so that lands on
+        the serving machine as a load failure.
+
+        Loops rather than checking once, because healing re-serializes and a
+        re-serialization is what introduces this class in the first place.
+        """
+        from torch._dynamo.guards import CheckFunctionManager
+        from torch._dynamo.output_graph import OutputGraphCommon
+        from torch._dynamo.package import load_guards_state
+
+        for _ in range(_VALIDATION_PASSES):
+            loaded = load_guards_state(written)
+            failures: list[tuple[Guard, Exception]] = []
+            try:
+                CheckFunctionManager(
+                    f_code,
+                    OutputGraphCommon(loaded.output_graph),
+                    shape_code_parts=loaded.shape_code_parts,
+                    runtime_global_scope=None,
+                    guard_build_local_state=getattr(loaded, "local_state", None),
+                    collect_guard_failures=failures,
+                )
+            except Exception as e:
+                raise _unrebuildable_guards(code_entry, e) from e
+            if not failures:
+                return written
+            written = self._reserialize_without(code_entry, f_code, loaded, failures)
+        raise _unrebuildable_guards(
+            code_entry,
+            AssertionError(f"still not rebuildable after {_VALIDATION_PASSES} passes"),
+        )
+
+    def _record_unrebuildable(
+        self, code_entry: Any, failures: list[tuple[Guard, Exception]]
+    ) -> set[tuple[str, str]]:
+        dropped = set()
+        for guard, exc in failures:
+            slot = _guard_slot(guard)
+            dropped.add(slot)
+            # Naming the frame matters: several frames can guard the same source
+            # string, so "dropped" and "still failing" are otherwise
+            # indistinguishable between one frame swept and another missed.
+            log.warning(
+                "precompile: dropping guard %s on %s in %s -- it cannot be "
+                "rebuilt from the artifact (%s: %s). Nothing checks it at load "
+                "time.",
+                slot[0],
+                slot[1],
+                code_entry.python_code.co_name,
+                type(exc).__name__,
+                exc,
+            )
+        self._dropped_guards |= dropped
+        self._risky_dropped_guards |= dropped
+        return dropped
+
+    def _reserialize_without(
+        self,
+        code_entry: Any,
+        f_code: types.CodeType,
+        loaded: Any,
+        failures: list[tuple[Guard, Exception]],
+    ) -> bytes:
+        """Re-serialize a frame's guards with the unrebuildable ones removed."""
+        from torch._dynamo.guards import CheckFunctionManager
+        from torch._dynamo.output_graph import OutputGraphCommon
+
+        dropped = self._record_unrebuildable(code_entry, failures)
+
+        def without(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+            return [_guard_slot(e.orig_guard) not in dropped for e in entries]
+
+        failures.clear()
+        try:
+            state = CheckFunctionManager(
+                f_code,
+                OutputGraphCommon(loaded.output_graph),
+                shape_code_parts=loaded.shape_code_parts,
+                runtime_global_scope=None,
+                guard_build_local_state=getattr(loaded, "local_state", None),
+                save_guards=True,
+                serialization_guard_filter_fn=without,
+                strict_error=True,
+                collect_guard_failures=failures,
+            ).guards_state
+        except Exception as e:
+            raise _unrebuildable_guards(code_entry, e) from e
+        # The build above is what drops a failing guard's HASATTR companions
+        # from the pickle, and it reports them here; unrecorded they would
+        # leave the artifact without ever being classed RISKY.
+        if failures:
+            self._record_unrebuildable(code_entry, failures)
+        if state is None:
+            raise _unrebuildable_guards(
+                code_entry, AssertionError("save_guards produced no guards_state")
+            )
+        return state
 
     def _apply_guard_policy(self) -> None:
         """
@@ -1834,6 +2056,7 @@ class PrecompileSession:
 
         varying = varying_guard_slots(self._guard_sets)
         dropped: set[tuple[str, str]] = set()
+        self._drifted_guards.clear()
 
         def survives(guard_type: str, name: str, derived: Sequence[str] = ()) -> bool:
             # An unmodelled guard never enters _guard_sets, so it was never
@@ -1872,8 +2095,13 @@ class PrecompileSession:
                 if f_code is None:
                     f_code = SerializedCode.to_code_object(code_entry.python_code)
                 loaded = load_guards_state(guarded.guards_state)
+                # This rebuild is also the rebuildability check: a guard whose
+                # source cannot be re-evaluated against the reconstructed values
+                # is collected here rather than aborting the frame, so the
+                # public path never pays for a second pass.
+                failures: list[tuple[Guard, Exception]] = []
                 try:
-                    pruned = CheckFunctionManager(
+                    manager = CheckFunctionManager(
                         f_code,
                         OutputGraphCommon(loaded.output_graph),
                         shape_code_parts=loaded.shape_code_parts,
@@ -1882,20 +2110,21 @@ class PrecompileSession:
                         save_guards=True,
                         # The pickle holds only guards that already survived the
                         # default and user filters, so the policy is the whole
-                        # filter here; and a failure is an internal bug, not
-                        # something to bypass silently.
+                        # filter here.
                         serialization_guard_filter_fn=policy,
                         strict_error=True,
-                    ).guards_state
+                        collect_guard_failures=failures,
+                    )
+                    rebuilt = manager.guard_manager
+                    pruned = manager.guards_state
                     if pruned is None:
                         raise AssertionError("save_guards produced no guards_state")
                 except Exception as e:
-                    raise PackageError(
-                        f"precompile: could not re-serialize the guards of "
-                        f"{code_entry.python_code.co_name} while dropping "
-                        f"invariant ones: {type(e).__name__}: {e}"
-                    ) from e
-                guarded.guards_state = pruned
+                    raise _unrebuildable_guards(code_entry, e) from e
+                if failures:
+                    self._record_unrebuildable(code_entry, failures)
+                self._report_guard_drift(code_entry, rebuilt)
+                guarded.guards_state = self._validated(code_entry, f_code, pruned)
 
         self._policy_dropped_guards |= dropped
         # Not "risky": the policy is the caller stating that the environment is
@@ -2145,6 +2374,11 @@ class PrecompileSession:
         """Run the coverage and guard gates, or raise saying which one failed."""
         if self._stack is not None:
             raise RuntimeError(f"{caller} must be called after the capture block exits")
+        # Here rather than in __exit__ so a caller can catch it like every other
+        # gate below. On the precompile() path _apply_guard_policy already
+        # rebuilt every frame, so this is a no-op there.
+        if not self._prune_invariant_guards:
+            self._drop_unrebuildable_guards()
         summary = self.summary()
         if require_complete and summary.capture_errors:
             raise PackageError(
@@ -2537,6 +2771,35 @@ def precompile_load(
     )
 
 
+def prepare_cache_entry(
+    fn: Callable[..., object], cache_entry: PrecompileCacheEntry
+) -> CompilePackage:
+    """Build everything serving needs that does not touch the interpreter.
+
+    An installed artifact defers its mutation to the first served call, which is
+    the right default -- the mutation should happen where the caller can see it
+    -- but every way an artifact can be wrong for the host it landed on was
+    deferred with it, so the failure arrived several batches into a training
+    loop. The version and inlined-source checks run in the constructor here, and
+    the guard trees and backends are built now and CONSUMED by the later
+    install() rather than rebuilt, so this is not extra work, only earlier work.
+    """
+    package = CompilePackage(
+        _entry_fn_of(fn),
+        cache_entry.dynamo,
+        serialization_guard_filter_fn=default_guard_filter_fn,
+    )
+    try:
+        package.prepare(cache_entry.backends)
+    except Exception as e:
+        raise PackageError(
+            f"precompile: this artifact does not fit this host, so serving it "
+            f"would fail inside the first call rather than here: "
+            f"{type(e).__name__}: {e}"
+        ) from e
+    return package
+
+
 def serve_cache_entry(
     fn: Callable[..., object],
     cache_entry: PrecompileCacheEntry,
@@ -2546,6 +2809,7 @@ def serve_cache_entry(
     | None = None,
     recompile_limit: int = 256,
     dynamic: bool | None = None,
+    prepared: CompilePackage | None = None,
 ) -> InstalledCallable:
     """Wire an already-loaded cache entry onto ``fn`` and install it.
 
@@ -2556,7 +2820,9 @@ def serve_cache_entry(
     place rather than being written twice.
     """
     entry_fn = _entry_fn_of(fn)
-    package = CompilePackage(
+    # prepare_cache_entry already built this package's guard trees and backends
+    # at load; install() below consumes them instead of rebuilding.
+    package = prepared or CompilePackage(
         entry_fn,
         cache_entry.dynamo,
         # Composed, as capture composes: a serve-time recompile serializes its

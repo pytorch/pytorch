@@ -1863,6 +1863,30 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(loaded.cache_entry().codes[0].guarded_codes), 2)
         self.assertEqual(len(stored.codes[0].guarded_codes), 1)
 
+    def test_prepare_then_install_round_trip(self):
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+        expected = compiled_fn(x)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        package.prepare(backends)
+        self.assertIsNotNone(package._prepared)
+        package.install(backends)
+        self.assertIsNone(package._prepared)
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), expected)
+
     def test_graph_has_dynamic_shapes_reads_example_value(self):
         # A Dynamo graph stashes its fake values under "example_value", not
         # "val"; reading only "val" would call a dynamic graph static.

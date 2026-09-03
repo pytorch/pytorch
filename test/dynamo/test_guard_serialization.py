@@ -405,6 +405,19 @@ class TaggedPoint(Point):
     pass
 
 
+class StandInOn:
+    # Reduces the way GuardsStatePickler reduces a type-guarded Generator or
+    # Stream, for a device the pickling host need not have.
+    def __init__(self, cls, device):
+        self.cls = cls
+        self.device = device
+
+    def __reduce__(self):
+        from torch._dynamo.guards import _rebuild_type_stand_in
+
+        return _rebuild_type_stand_in, (self.cls, self.device)
+
+
 # --- an empty closure cell -------------------------------------------------
 def keep_name_with_empty_cell(func):
     @functools.wraps(func)
@@ -1214,6 +1227,195 @@ class TestGuardSerialization(TestGuardSerializationBase):
         ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
         self._test_check_fn(ref, loaded, {"x": torch.randn(3), "pt": pt}, True)
 
+    def test_a_guarded_unsupported_type_is_refused(self):
+        # Substituting the sentinel for a value a guard READS is not a pruning:
+        # a TYPE_MATCH rebuilds against type(_Missing()) and then never matches,
+        # so the artifact would load and silently reject every call. Only a value
+        # the guard tree never reached may become the sentinel, and only
+        # pickle_guards_state -- which has checked every guard -- may hand the
+        # pickler a type stand-in instead.
+        from torch._dynamo.guards import _Missing, GuardsStatePickler
+
+        gen = torch.Generator()
+        with self.assertRaisesRegex(PackageError, "torch._C.Generator"):
+            GuardsStatePickler({id(gen): gen}, {}, {}, io.BytesIO()).dump({"gen": gen})
+
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"gen": gen})
+        self.assertIsInstance(pickle.loads(buf.getvalue())["gen"], _Missing)
+
+        buf = io.BytesIO()
+        pickler = GuardsStatePickler(
+            {id(gen): gen}, {}, {}, buf, type_stand_ins={id(gen)}
+        )
+        pickler.dump({"gen": gen})
+        stand_in = pickle.loads(buf.getvalue())["gen"]
+        self.assertIs(type(stand_in), torch.Generator)
+        self.assertEqual(stand_in.device, gen.device)
+
+    def test_a_stand_in_this_host_cannot_build_fails_the_load_by_name(self):
+        # The stand-in is built at load, so a device the loading host lacks
+        # raised the constructor's own error out of pickle.loads, with nothing
+        # to say which type or device the artifact was captured with. A Stream
+        # rather than a Generator: the Generator binds its device lazily.
+        payload = pickle.dumps(StandInOn(torch.Stream, torch.device("cuda:99")))
+        with self.assertRaisesRegex(
+            PackageError,
+            r"captured with a torch.Stream on cuda:99 that this host cannot create",
+        ):
+            pickle.loads(payload)
+
+    def test_a_type_matched_generator_rebuilds_as_a_stand_in(self):
+        # Dynamo guards a Generator with TYPE_MATCH, which needs the type alone,
+        # so the artifact carries a fresh Generator of the same type and device
+        # instead of refusing the frame.
+        def fn(x, gen):
+            if gen.device.type == "cpu":
+                return x + 1
+            return x - 1
+
+        gen = torch.Generator()
+        ref, loaded = self._test_serialization("TYPE_MATCH", fn, torch.randn(3), gen)
+        state = torch._dynamo.package.load_guards_state(self._cached_guards_state)
+        stand_in = state.output_graph.local_scope["gen"]
+        self.assertIs(type(stand_in), torch.Generator)
+        inputs = {"x": torch.randn(3), "gen": torch.Generator()}
+        self._test_check_fn(ref, loaded, inputs, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "gen": 1}, False)
+
+        # A guard THROUGH the object on .device rebuilds too: the stand-in keeps it.
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3), gen)
+        self._test_check_fn(ref, loaded, inputs, True)
+
+    def test_a_type_matched_stream_rebuilds_as_a_stand_in(self):
+        # The stand-in for a stream is a fresh stream on the same device.
+        def fn(x, s):
+            if s.device.type == "cpu":
+                return x + 1
+            return x - 1
+
+        s = torch.Stream(device="cpu")
+        ref, loaded = self._test_serialization("TYPE_MATCH", fn, torch.randn(3), s)
+        state = torch._dynamo.package.load_guards_state(self._cached_guards_state)
+        self.assertIs(type(state.output_graph.local_scope["s"]), torch.Stream)
+        inputs = {"x": torch.randn(3), "s": torch.Stream(device="cpu")}
+        self._test_check_fn(ref, loaded, inputs, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "s": None}, False)
+
+    def test_a_value_guard_on_a_stream_is_refused(self):
+        # s == t emits an EQUALS_MATCH on each stream, which compares the live
+        # stream's identity. A stand-in would rebuild that guard against a
+        # fresh stream, so the value guard keeps the refusal -- with the path.
+        def fn(x, s, t):
+            if s == t:
+                return x + 1
+            return x - 1
+
+        s, t = torch.Stream(device="cpu"), torch.Stream(device="cpu")
+        with self.assertRaisesRegex(
+            PackageError,
+            r"a guard reads a torch.Stream.*\n  reached via: local_scope\['s'\]",
+        ):
+            self._test_serialization("EQUALS_MATCH", fn, torch.randn(3), s, t)
+
+    def test_a_guarded_process_group_is_refused_with_its_path(self):
+        # No stand-in exists for a process group, so a guard reaching one still
+        # refuses the frame, and pickle_guards_state appends where it lives.
+        import torch.distributed as dist
+
+        if not dist.is_available():
+            self.skipTest("Torch distributed is not available")
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        dist.init_process_group("fake", rank=0, world_size=2, store=FakeStore())
+        try:
+            with self.assertRaisesRegex(
+                PackageError,
+                r"a guard reads a torch.distributed.distributed_c10d.ProcessGroup, "
+                r"which precompile cannot serialize\n  reached via: local_scope\['value'\]",
+            ):
+                _dump_through_pickle_guards_state(dist.group.WORLD)
+        finally:
+            dist.destroy_process_group()
+
+    def test_wrapper_subclass_parameter_stays_a_parameter(self):
+        # nn.Parameter of a wrapper subclass IS the subclass, with _is_param set,
+        # and nn.Parameter.__instancecheck__ reads that flag. It is only
+        # presence-tested, so nothing registers it in the guard tree and pruning
+        # dropped it: the rebuilt tensor was no longer a Parameter.
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        def f(x):
+            return x + 1
+
+        p = torch.nn.Parameter(TwoTensor(torch.randn(3), torch.randn(3)))
+        self.assertIsInstance(p, torch.nn.Parameter)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, p)
+        state = torch._dynamo.package.load_guards_state(self._cached_guards_state)
+        rebuilt = state.output_graph.local_scope["x"]
+        self.assertIsInstance(rebuilt, TwoTensor)
+        self.assertIsInstance(rebuilt, torch.nn.Parameter)
+        self._test_check_fn(ref, loaded, {"x": p}, True)
+
+    def test_live_guard_leaves_reach_every_open_recording(self):
+        # Two sessions may record at once, so a live build feeds every open sink
+        # rather than the latest one hiding the rest.
+        from torch._dynamo.guards import record_live_guard_leaves
+
+        def f(x):
+            return x + 1
+
+        def g(x, y):
+            return x + y
+
+        with record_live_guard_leaves() as outer:
+            with record_live_guard_leaves() as inner:
+                self._test_serialization("TENSOR_MATCH", f, torch.randn(3))
+            self.assertTrue(inner)
+            self.assertEqual(inner, outer)
+            self._test_serialization("TENSOR_MATCH", g, torch.randn(3), torch.randn(3))
+        self.assertGreater(len(outer), len(inner))
+        self.assertTrue(outer > inner)
+
+        # Closed by identity: a and b are EQUAL while both are empty, so removing
+        # b by equality would close a instead and the wrong sink would fill.
+        recording_a, recording_b = (
+            record_live_guard_leaves(),
+            record_live_guard_leaves(),
+        )
+        a = recording_a.__enter__()
+        b = recording_b.__enter__()
+        recording_b.__exit__(None, None, None)
+        try:
+            self._test_serialization("TENSOR_MATCH", f, torch.randn(3))
+        finally:
+            recording_a.__exit__(None, None, None)
+        self.assertTrue(a)
+        self.assertFalse(b)
+
+        # A fresh set on every entry, so a new recording starts empty.
+        with record_live_guard_leaves() as leaves:
+            self._test_serialization("TENSOR_MATCH", f, torch.randn(3))
+        self.assertEqual(leaves, a)
+
+    def test_dimension_marking_range_survives(self):
+        # _dynamo_dynamic_range is compared by VALUE, but only when the
+        # _has_dynamo_dim_marking gate is PRESENT on the tensor the guard was
+        # built from. The gate is never read, only hasattr-tested, so nothing
+        # registers it in the guard tree and pruning dropped it -- leaving the
+        # rebuilt guard with no range leaf at all, so a tensor declaring a
+        # different range for the same dim reused the graph.
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(4)
+        torch._dynamo.mark_dynamic(x, 0, min=2, max=8)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+
+        y = torch.randn(4)
+        torch._dynamo.mark_dynamic(y, 0, min=3, max=9)
+        self._test_check_fn(ref, loaded, {"x": y}, False)
+
     def test_tensor_match(self):
         def f(x: torch.Tensor):
             return x + 1
@@ -1231,6 +1433,47 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": torch.randn(2, dtype=torch.float64)}, False
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
+
+    def test_tensor_subclass_requires_grad_survives(self):
+        # A wrapper subclass is rebuilt by __tensor_unflatten__, which derives
+        # the outer's requires_grad from its inners -- so a subclass carrying
+        # autograd metadata of its own reloaded as requires_grad=False and the
+        # rebuilt guard then rejected every training input, permanently.
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        tt = TwoTensor(torch.randn(3), torch.randn(3)).requires_grad_(True)
+        self.assertFalse(tt.a.requires_grad)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, tt)
+        self._test_check_fn(ref, loaded, {"x": tt}, True)
+        self._test_check_fn(
+            ref, loaded, {"x": TwoTensor(torch.randn(3), torch.randn(3))}, False
+        )
+
+    def test_tensor_match_through_a_python_attribute(self):
+        # A tensor is reconstructed from its metadata, which does not include a
+        # plain Python attribute someone assigned onto it -- so a guard whose
+        # SOURCE traverses one could not be rebuilt at all, and the whole state
+        # failed to load with AttributeError.
+        def f(x: torch.Tensor):
+            return x + x.companion
+
+        x = torch.ones(2)
+        x.companion = torch.ones(2)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, x)
+
+        def with_companion(companion):
+            t = torch.randn(2)
+            t.companion = companion
+            return {"x": t}
+
+        self._test_check_fn(ref, loaded, with_companion(torch.randn(2)), True)
+        self._test_check_fn(ref, loaded, with_companion(torch.randn(3)), False)
+        self._test_check_fn(
+            ref, loaded, with_companion(torch.randn(2, dtype=torch.float64)), False
+        )
 
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):

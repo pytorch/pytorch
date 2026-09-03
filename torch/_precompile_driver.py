@@ -813,7 +813,7 @@ def _build_installed_forward():
             f.__kwdefaults__ = dict(kwdefaults)
         return f
 
-    def _serve(fn):
+    def _serve(fn, prepared=None):
         from torch._dynamo.precompile_context import PrecompileContext
         from torch._dynamo.precompile_package import serve_cache_entry
 
@@ -822,7 +822,7 @@ def _build_installed_forward():
         # form of this artifact.
         for _backend in cache_entry.backends.values():
             PrecompileContext.record_artifact(_backend)
-        return serve_cache_entry(fn, cache_entry, backend=BACKEND)
+        return serve_cache_entry(fn, cache_entry, backend=BACKEND, prepared=prepared)
 
     return _InstalledArtifact(
         _serve, _entry_function, grad_enabled=globals().get("CAPTURE_GRAD_ENABLED")
