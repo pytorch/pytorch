@@ -7281,6 +7281,8 @@ class CPUReproTests(TestCase):
             code
         )
 
+    # qnnpack/xnnpack not supported on s390x
+    @xfailIfS390X
     @config.patch(freezing=True)
     def test_add_layernorm(self):
         """
