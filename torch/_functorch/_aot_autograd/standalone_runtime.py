@@ -26,6 +26,11 @@ import torch._dynamo  # noqa: F401
 # its internal AOTAutograd location instead of this stable surface.
 from torch._prims_common import CUDARngStateHelper
 
+# Baked OutputAliasInfo.raw_type for every non-subclass output, and the
+# size/stride entries of every baked MetadataKey.
+from torch._subclasses.functional_tensor import FunctionalTensor
+from torch.fx.experimental.symbolic_shapes import SymIntEqByExpr
+
 # The whole closed set of descriptor classes: baked ViewAndMutationMeta carries
 # whichever ones the traced function produced (tangent descs wrap input-mutation
 # and intermediate-base outputs as readily as plain ones).
@@ -108,6 +113,8 @@ __all__ = [
     "mark_dynamo_propagated_dynamic_indices",
     "normalize_as_list",
     "CUDARngStateHelper",
+    "FunctionalTensor",
+    "SymIntEqByExpr",
     "_AutogradRngStateTracker",
     "_AutogradSavedState",
     "_dealias_marked_returns",

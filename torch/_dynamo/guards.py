@@ -4239,6 +4239,10 @@ class GuardsStatePickler(pickle.Pickler):
         )
         out.pytype = pytype
         out.dispatch_keys = torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw)
+        # __tensor_unflatten__ derives requires_grad from the inner tensors,
+        # which can differ from the outer's (a grad produced under create_graph,
+        # a non-leaf subclass over an autograd-free inner).
+        out.requires_grad_(meta_tensor.requires_grad)
         out.grad = grad
         return out
 
@@ -4387,7 +4391,9 @@ class GuardsStatePickler(pickle.Pickler):
                     inner_data.append((attr, inner))
 
                 return type(self)._unpickle_traceable_wrapper_subclass, (
-                    torch.empty_like(obj, device="meta"),
+                    torch.empty_like(
+                        obj, device="meta", requires_grad=obj.requires_grad
+                    ),
                     obj.device,
                     type(obj),
                     torch._C._dispatch_keys(obj).raw_repr(),
@@ -4633,14 +4639,31 @@ def pickle_guards_state(
     # (see reducer_override). Register grads upfront: pickle memoizes by object
     # id, so a grad that is also an unguarded local-scope leaf would otherwise
     # be memoized as _Missing if pickled before its owner tensor.
+    # A wrapper subclass's inner tensors are in the guard tree only if Dynamo
+    # guarded them (TENSOR_MATCH on the subclass does; TYPE_MATCH alone does
+    # not), so descend into them here rather than relying on the registration
+    # reducer_override does mid-dump, which is too late to un-memoize a grad.
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
     worklist = [v for v in guard_tree_values.values() if isinstance(v, torch.Tensor)]
+
+    def discover(t: torch.Tensor) -> None:
+        if id(t) not in guard_tree_values:
+            guard_tree_values[id(t)] = t
+            missing_values.pop(id(t), None)
+            worklist.append(t)
+
     try:
         while worklist:
-            grad = _serializable_grad(worklist.pop())
-            if grad is not None and id(grad) not in guard_tree_values:
-                guard_tree_values[id(grad)] = grad
-                missing_values.pop(id(grad), None)
-                worklist.append(grad)
+            t = worklist.pop()
+            if is_traceable_wrapper_subclass(t):
+                for attr in t.__tensor_flatten__()[0]:
+                    inner = getattr(t, attr)
+                    if isinstance(inner, torch.Tensor):
+                        discover(inner)
+            grad = _serializable_grad(t)
+            if grad is not None:
+                discover(grad)
     except (AttributeError, TypeError) as e:
         # A subclass whose .grad access fails cannot have its guard state
         # serialized; classify it like the pickling failures below.
@@ -4956,27 +4979,30 @@ class CheckFunctionManager:
         for guard in sorted_guards:
             guard_type = guard.create_fn_name()
             derived_guard_types = tuple(guard.guard_types) if guard.guard_types else ()
-            # BUILTIN_MATCH calls TYPE_MATCH sometimes, and FAKE_SCRIPT_TYPE_MATCH
-            # sets the same flag for a local-scope fake script type, so check
-            # every guard type that can mark itself unserializable.
+            if guard._unserializable:
+                # Set by TYPE_MATCH on a local-scope type (also reached through
+                # BUILTIN_MATCH, SEQUENCE_LENGTH and export TENSOR_MATCH, which
+                # call TYPE_MATCH on the same guard) and by
+                # FAKE_SCRIPT_TYPE_MATCH, so test the flag, not the guard's own
+                # type. Only call builder.get again if we know we're going to
+                # throw. FAKE_SCRIPT_TYPE_MATCH judged the wrapped real object's
+                # type, so name that type, not the FakeScriptObject wrapper.
+                obj = builder.get(guard)
+                if isinstance(obj, FakeScriptObject):
+                    obj = obj.real_obj
+                raise torch._dynamo.exc.GuardSerializationError(
+                    guard_type,
+                    guard.name,
+                    detail=_local_scope_serialization_message(obj),
+                )
             if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH", "FAKE_SCRIPT_TYPE_MATCH"):
-                if guard._unserializable:
-                    # Only call builder.get again if we know we're going to throw.
-                    # FAKE_SCRIPT_TYPE_MATCH judged the wrapped real object's
-                    # type, so name that type, not the FakeScriptObject wrapper.
-                    obj = builder.get(guard)
-                    if isinstance(obj, FakeScriptObject):
-                        obj = obj.real_obj
-                    raise torch._dynamo.exc.GuardSerializationError(
-                        guard_type,
-                        guard.name,
-                        detail=_local_scope_serialization_message(obj),
-                    )
-            elif (
-                guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-            ):
+                # BUILTIN_MATCH derives an ID_MATCH on the builtins-dict entry,
+                # which does serialize (the dict is rebuilt at load), so these
+                # are exempt from the derived-type check below.
+                continue
+            if guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES:
                 raise torch._dynamo.exc.GuardSerializationError(guard_type, guard.name)
-            elif failed := next(
+            if failed := next(
                 (
                     i
                     for i in derived_guard_types
