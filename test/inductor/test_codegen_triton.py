@@ -2373,6 +2373,272 @@ def helper(x):
         self.assertIn("PlistFormat['FMT_XML']", code[0])
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_constexpr_module_missing_in_worker_falls_back_in_process(self):
+        # Compile workers snapshot PYTHONPATH when the pool spawns, so a module
+        # added to sys.path afterwards imports fine in the parent (where codegen
+        # validates it) but raises ModuleNotFoundError in the worker. The
+        # compile must fall back to in-process compilation instead of failing.
+        import importlib
+        import os
+        import sys
+        import tempfile
+
+        import triton
+        import triton.language as tl
+
+        from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
+        from torch._inductor.utils import fresh_cache
+
+        @triton.jit
+        def probe_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE.value == 1:
+                output = x + 1
+            else:
+                output = x * 2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        module_name = f"inductor_constexpr_probe_{os.getpid()}"
+        module_src = "import enum\n\nclass Mode(enum.Enum):\n    ADD = 1\n    MUL = 2\n"
+        x = torch.randn(128, device=GPU_TYPE)
+        patched = {"compile_threads": 2, "worker_start_method": "subprocess"}
+        with tempfile.TemporaryDirectory() as tmpdir, inductor_config.patch(patched):
+            with open(os.path.join(tmpdir, f"{module_name}.py"), "w") as f:
+                f.write(module_src)
+            shutdown_compile_workers()
+            try:
+                # Spawn the worker pool before the module becomes importable so
+                # the workers' PYTHONPATH snapshot cannot contain tmpdir.
+                AsyncCompile.warm_pool()
+                AsyncCompile.wakeup()
+                AsyncCompile.wait_pool_ready()
+                self.assertTrue(AsyncCompile.use_process_pool())
+                sys.path.insert(0, tmpdir)
+                importlib.invalidate_caches()
+                mod = importlib.import_module(module_name)
+
+                def fn(x):
+                    y = torch.empty_like(x)
+                    probe_kernel[(1,)](x, y, x.numel(), mod.Mode.ADD, BLOCK_SIZE=256)
+                    return y
+
+                logger_name = "torch._inductor.async_compile"
+                with (
+                    fresh_cache(),
+                    self.assertLogs(logger_name, level="WARNING") as logs,
+                ):
+                    res, code = run_and_get_code(torch.compile(fn), x)
+                self.assertTrue(
+                    any("in-process compilation" in msg for msg in logs.output)
+                )
+                self.assertEqual(fn(x), res)
+                self.assertIn(module_name, code[0])
+            finally:
+                if tmpdir in sys.path:
+                    sys.path.remove(tmpdir)
+                sys.modules.pop(module_name, None)
+                shutdown_compile_workers()
+
+    def test_constexpr_fallback_result_is_memoized(self):
+        # LambdaFuture.result() re-runs its result_fn on every call and the
+        # worker task re-raises the same SubprocException, so without
+        # memoization every re-entry of the fallback path would warn again and
+        # recompile the kernel in-process again.
+        import os
+        from unittest.mock import Mock
+
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+        module_name = f"inductor_fallback_probe_{os.getpid()}"
+        source_code = f"import {module_name} as __inductor_constexpr_module_0\n"
+        task = Mock()
+        task.result.side_effect = SubprocException(
+            f"ModuleNotFoundError: No module named '{module_name}'"
+        )
+        pool = Mock()
+        pool.submit.return_value = task
+        sentinel_kernel = object()
+        with (
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "process_pool", return_value=pool),
+            patch.object(
+                AsyncCompile, "_compile_triton_in_process", return_value=sentinel_kernel
+            ) as compile_in_process,
+        ):
+            future = AsyncCompile().triton("probe_kernel", source_code)
+            logger_name = "torch._inductor.async_compile"
+            with self.assertLogs(logger_name, level="WARNING") as logs:
+                self.assertIs(future.result(), sentinel_kernel)
+            fallback_warnings = [
+                msg for msg in logs.output if "in-process compilation" in msg
+            ]
+            self.assertEqual(len(fallback_warnings), 1)
+            with self.assertNoLogs(logger_name, level="WARNING"):
+                self.assertIs(future.result(), sentinel_kernel)
+            self.assertEqual(compile_in_process.call_count, 1)
+        self.assertEqual(task.result.call_count, 1)
+
+    def test_constexpr_fallback_survives_wait_timeout(self):
+        # With compile_worker_wait_timeout set, _wait_futures passes a timeout
+        # and LambdaFuture waits on the worker future first; that wait must not
+        # re-raise the worker failure ahead of the result_fn fallback.
+        import os
+        from unittest.mock import Mock
+
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+        module_name = f"inductor_fallback_probe_{os.getpid()}"
+        source_code = f"import {module_name} as __inductor_constexpr_module_0\n"
+        failure = SubprocException(
+            f"ModuleNotFoundError: No module named '{module_name}'"
+        )
+        task = Mock()
+        task.result.side_effect = failure
+        task.exception.return_value = failure
+        pool = Mock()
+        pool.submit.return_value = task
+        sentinel_kernel = object()
+        with (
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "process_pool", return_value=pool),
+            patch.object(
+                AsyncCompile, "_compile_triton_in_process", return_value=sentinel_kernel
+            ),
+        ):
+            future = AsyncCompile().triton("probe_kernel", source_code)
+            with self.assertLogs("torch._inductor.async_compile", level="WARNING"):
+                self.assertIs(future.result(timeout=5), sentinel_kernel)
+        task.exception.assert_called_once_with(timeout=5)
+
+    def test_constexpr_module_missing_in_worker_accepts_exception(self):
+        # Spawn/fork worker pools re-raise the worker's ModuleNotFoundError
+        # directly instead of wrapping it in SubprocException; the helper must
+        # match on the exception's .name.
+        from torch._inductor.async_compile import _constexpr_module_missing_in_worker
+
+        src = "import foo.bar as __inductor_constexpr_module_0\n"
+        err = ModuleNotFoundError("No module named 'foo'", name="foo")
+        self.assertEqual(_constexpr_module_missing_in_worker(src, err), "foo.bar")
+        other = ModuleNotFoundError("No module named 'baz'", name="baz")
+        self.assertIsNone(_constexpr_module_missing_in_worker(src, other))
+        nameless = ModuleNotFoundError("No module named 'foo'")
+        self.assertIsNone(_constexpr_module_missing_in_worker(src, nameless))
+        # The root-name imports emitted for object-valued constexpr parameter
+        # defaults must also trigger the in-process fallback.
+        root_src = "from foo.bar import Cfg as Cfg\n"
+        self.assertEqual(_constexpr_module_missing_in_worker(root_src, err), "foo.bar")
+        self.assertIsNone(_constexpr_module_missing_in_worker(root_src, other))
+        aliased = "from foo.bar import Cfg as Renamed\n"
+        self.assertIsNone(_constexpr_module_missing_in_worker(aliased, err))
+        # `import foo` can fail because foo/__init__.py imports a submodule the
+        # worker lacks; the reported missing name is then a descendant of the
+        # constexpr module and must still be attributed to it.
+        parent_src = "import foo as __inductor_constexpr_module_0\n"
+        descendant = ModuleNotFoundError(
+            "No module named 'foo.helpers'", name="foo.helpers"
+        )
+        self.assertEqual(
+            _constexpr_module_missing_in_worker(parent_src, descendant), "foo"
+        )
+        lookalike = ModuleNotFoundError("No module named 'foobar'", name="foobar")
+        self.assertIsNone(_constexpr_module_missing_in_worker(parent_src, lookalike))
+        # torch.dtype / tl.dtype constexprs import the library roots themselves;
+        # a missing submodule under those is a real error in the worker, not a
+        # stale search path, so it must not trigger the in-process fallback.
+        for root in ("torch", "triton.language"):
+            root_src = f"import {root} as __inductor_constexpr_module_0\n"
+            missing_sub = ModuleNotFoundError(
+                f"No module named '{root}.zzz'", name=f"{root}.zzz"
+            )
+            self.assertIsNone(
+                _constexpr_module_missing_in_worker(root_src, missing_sub)
+            )
+        helper_src = "from triton.language import store as store\n"
+        self.assertIsNone(
+            _constexpr_module_missing_in_worker(
+                helper_src,
+                ModuleNotFoundError(
+                    "No module named 'triton.language.extra.x'",
+                    name="triton.language.extra.x",
+                ),
+            )
+        )
+        # A formatted worker traceback may chain the constexpr import failure
+        # before an unrelated secondary one; any reported missing module that
+        # matches a constexpr import is attributed regardless of chain order,
+        # so the in-process fallback still fires.
+        chained = (
+            "ModuleNotFoundError: No module named 'foo'\n\n"
+            "During handling of the above exception, another exception occurred:\n\n"
+            "ModuleNotFoundError: No module named 'baz'\n"
+        )
+        self.assertEqual(_constexpr_module_missing_in_worker(src, chained), "foo.bar")
+        reversed_chain = (
+            "ModuleNotFoundError: No module named 'baz'\n\n"
+            "During handling of the above exception, another exception occurred:\n\n"
+            "ModuleNotFoundError: No module named 'foo'\n"
+        )
+        self.assertEqual(
+            _constexpr_module_missing_in_worker(src, reversed_chain), "foo.bar"
+        )
+        # A traceback with only unrelated failures matches no constexpr import.
+        unrelated_chain = (
+            "ModuleNotFoundError: No module named 'baz'\n\n"
+            "During handling of the above exception, another exception occurred:\n\n"
+            "ModuleNotFoundError: No module named 'qux'\n"
+        )
+        self.assertIsNone(_constexpr_module_missing_in_worker(src, unrelated_chain))
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_constexpr_fallback_catches_raw_module_not_found(self):
+        # With TORCHINDUCTOR_WORKER_START=spawn/fork the worker's
+        # ModuleNotFoundError propagates raw from future.result(); the fallback
+        # must fire for constexpr imports and re-raise anything else unchanged.
+        import os
+        from unittest.mock import Mock
+
+        from torch._inductor.async_compile import AsyncCompile, CompiledTritonKernels
+
+        # The raw-raise path never calls remove_future, so without this a
+        # Mock-holding LambdaFuture would sit in the process-global kernel
+        # cache until the next compile_fx clears it.
+        self.addCleanup(CompiledTritonKernels.cache_clear)
+        module_name = f"inductor_spawn_probe_{os.getpid()}"
+        source_code = f"import {module_name} as __inductor_constexpr_module_0\n"
+        task = Mock()
+        task.result.side_effect = ModuleNotFoundError(
+            f"No module named '{module_name}'", name=module_name
+        )
+        pool = Mock()
+        pool.submit.return_value = task
+        sentinel_kernel = object()
+        with (
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "process_pool", return_value=pool),
+            patch.object(
+                AsyncCompile, "_compile_triton_in_process", return_value=sentinel_kernel
+            ),
+        ):
+            future = AsyncCompile().triton("probe_kernel", source_code)
+            logger_name = "torch._inductor.async_compile"
+            with self.assertLogs(logger_name, level="WARNING") as logs:
+                self.assertIs(future.result(), sentinel_kernel)
+            self.assertTrue(any("in-process compilation" in msg for msg in logs.output))
+            # An unrelated missing module must propagate unchanged.
+            unrelated = f"import {module_name}x as __inductor_constexpr_module_0\n"
+            future = AsyncCompile().triton("probe_kernel", unrelated)
+            with self.assertRaisesRegex(
+                ModuleNotFoundError, f"No module named '{module_name}'"
+            ):
+                future.result()
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_unspellable_enum_constexpr_errors_clearly(self):
         import triton
         import triton.language as tl
