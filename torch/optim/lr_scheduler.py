@@ -1719,11 +1719,7 @@ class PlateauLR(LRScheduler):
 
     Example:
         >>> # xdoctest: +SKIP
-        >>> optimizer = torch.optim.SGD(
-        ...     model.parameters(),
-        ...     lr=0.1,
-        ...     momentum=0.9,
-        ... )
+        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         >>> scheduler = PlateauLR(optimizer, "min")
         >>> for epoch in range(10):
         >>>     train(...)
