@@ -252,6 +252,46 @@ class PythonNativeModule(PropModule):
         deregister_op_overrides = _get_registry_functions()[0]
         deregister_op_overrides(disable_op_symbols=list(op_symbols))
 
+    def set_override_variant(self, qualified_op: str, name: str | None):
+        """Select which implementation an override runs for one op.
+
+        An override module may carry several implementations of the same op --
+        a DSL kernel and the op's own eager body, say. Whether the override
+        applies at all stays with its ``cond``; this chooses among the
+        implementations it offers. Names are defined by the override module,
+        with ``"passthrough"`` reserved everywhere and meaning "delegate to
+        the op's own implementation".
+
+        Args:
+            qualified_op (str): Namespaced op, e.g.
+                ``"torch_nn::_linear_cross_entropy_batch_chunked"``.
+            name (str | None): Variant name, or ``None`` to restore the
+                override module's default.
+
+        Example::
+
+            torch.backends.python_native.set_override_variant(
+                "torch_nn::_linear_cross_entropy_batch_chunked", "passthrough"
+            )
+        """
+        from torch._native.variants import set_variant
+
+        set_variant(qualified_op, name)
+
+    def override_variant(self, qualified_op: str, name: str | None):
+        """Context manager form of :func:`set_override_variant`.
+
+        Example::
+
+            with torch.backends.python_native.override_variant(
+                "torch_nn::_linear_cross_entropy_batch_chunked", "passthrough"
+            ):
+                loss = model(x, target)
+        """
+        from torch._native.variants import variant
+
+        return variant(qualified_op, name)
+
     def enable_operations(self, *op_symbols: str):
         """Re-enable specific operations across all DSLs.
 
@@ -375,6 +415,8 @@ class PythonNativeModule(PropModule):
                 "available_dsls",
                 "all_dsls",
                 "get_dsl_operations",
+                "set_override_variant",
+                "override_variant",
                 "disable_operations",
                 "enable_operations",
                 "disable_dispatch_keys",
