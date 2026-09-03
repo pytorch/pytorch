@@ -3097,9 +3097,7 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
         if not isinstance(kernel_inputs, MMKernelInputs):
-            raise AssertionError(
-                f"{self.__class__.__name__} requires MMKernelInputs"
-            )
+            raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
 
         mat1, mat2 = kernel_inputs.mat1mat2()
         if len(mat1.get_size()) != 3 or len(mat2.get_size()) != 3:
@@ -3118,9 +3116,7 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         b_row_major = mat2.get_stride()[2] == 1
         b_col_major = mat2.get_stride()[1] == 1
 
-        if not (a_row_major or a_col_major) or not (
-            b_row_major or b_col_major
-        ):
+        if not (a_row_major or a_col_major) or not (b_row_major or b_col_major):
             raise NotImplementedError(
                 "Blackwell BMM requires one contiguous matrix dimension"
             )
