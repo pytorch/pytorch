@@ -186,9 +186,16 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             else:
                 self._assert_tensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
+            params_before_reshard = list(model.parameters())
             model.reshard()  # however, we can manually reshard
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
+            if not reshard_after_forward:
+                # Stale references to the unsharded parameters have freed
+                # storage; accessing them should raise, not IMA
+                for param in params_before_reshard:
+                    with self.assertRaisesRegex(RuntimeError, "freed by FSDP"):
+                        param.data_ptr()
 
         # Multiple FSDP groups
         for reshard_after_forward in (True, False, 2, None):
