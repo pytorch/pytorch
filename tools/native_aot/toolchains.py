@@ -480,6 +480,15 @@ def get_toolchain(kind: str) -> Toolchain:
     return TOOLCHAINS[kind]
 
 
+def all_artifact_exts() -> set[str]:
+    """Every extension some toolchain writes beside a sidecar.
+
+    One notion of "kernel artifact" for both sweeps that hunt undescribed files --
+    export's orphan check and generation's no-declaration check -- which computed
+    separately could disagree about a new toolchain."""
+    return {e for tc in TOOLCHAINS.values() for e in tc.artifact_exts}
+
+
 def for_backend(backend: str) -> dict[str, Toolchain]:
     """The toolchains that can emit kernels for this torch build backend
     ("cuda" or "rocm"), per each kind's BACKENDS."""
