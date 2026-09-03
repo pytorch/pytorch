@@ -1,5 +1,8 @@
 # Owner(s): ["module: dynamo"]
 import operator
+import queue
+import sys
+import threading
 import unittest
 import weakref
 from functools import cache
@@ -15,6 +18,7 @@ from torch._dynamo.eval_frame import (
     _get_total_cache_entry_count,
 )
 from torch._dynamo.exc import FailOnRecompileLimitHit
+from torch._dynamo.types import FrameAction, FrameExecStrategy
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -497,6 +501,81 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         return len(torch._dynamo.eval_frame._debug_get_cache_entry_list(code))
 
     # ===== Basic isolation: independent caches per compile call =====
+
+    def test_concurrent_calls_do_not_deadlock_on_the_cache_lock(self):
+        """lookup() holds the ExtraState cache lock across guard evaluation,
+        and guard evaluation runs Python -- a LAMBDA_GUARD calls straight back
+        into the interpreter, so the GIL can drop mid-iteration. A thread that
+        blocks on that lock while HOLDING the GIL wedges the owner, who needs
+        the GIL to finish. The lock therefore has to release the GIL before it
+        waits. A short switch interval makes the handoff frequent.
+
+        Stress test; not a deterministic reproduction. A wedge shows up as a
+        harness timeout, since join() never returns.
+        """
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        opt = torch.compile(f, backend="eager", dynamic=False)
+        args = [torch.randn(n) for n in (3, 4, 5)]
+        for arg in args:
+            opt(arg)
+
+        errors = queue.SimpleQueue()
+
+        def hammer():
+            try:
+                for _ in range(200):
+                    for arg in args:
+                        opt(arg)
+            except BaseException as e:
+                errors.put(e)
+
+        threads = [threading.Thread(target=hammer, daemon=True) for _ in range(4)]
+        prior_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        finally:
+            sys.setswitchinterval(prior_interval)
+        raised = []
+        while not errors.empty():
+            raised.append(errors.get_nowait())
+        self.assertEqual(raised, [])
+
+    def test_isolate_recompiles_id_is_thread_local(self):
+        """The current region is a property of the call in flight, so it is
+        per thread: a worker spawned from inside a region reads the default
+        (and compiles into the default bucket) unless it enters a region
+        itself, and a region the worker enters is invisible to its parent."""
+        from torch._C._dynamo.eval_frame import (
+            get_eval_frame_isolate_recompiles_id,
+            set_eval_frame_isolate_recompiles_id,
+        )
+
+        seen = []
+
+        def worker():
+            seen.append(get_eval_frame_isolate_recompiles_id())
+            set_eval_frame_isolate_recompiles_id(9)
+            seen.append(get_eval_frame_isolate_recompiles_id())
+
+        prior = set_eval_frame_isolate_recompiles_id(7)
+        try:
+            self.assertEqual(prior, -1)
+            self.assertEqual(get_eval_frame_isolate_recompiles_id(), 7)
+            thread = threading.Thread(target=worker)
+            thread.start()
+            thread.join()
+            self.assertEqual(get_eval_frame_isolate_recompiles_id(), 7)
+        finally:
+            set_eval_frame_isolate_recompiles_id(prior)
+        self.assertEqual(seen, [-1, 9])
+        self.assertEqual(get_eval_frame_isolate_recompiles_id(), -1)
 
     @torch._dynamo.config.patch(
         recompile_limit=1,
@@ -1653,6 +1732,224 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(self._num_cache_entries(f), 0)
 
     # ===== Debug / introspection =====
+
+    def test_has_precompile_entries_is_region_exact(self):
+        """_has_precompile_entries answers for one region only. lookup() never
+        serves a precompile entry from another region, so an entry belonging to
+        a second artifact installed on the same code object is not coverage for
+        the first. It exists so that a caller can ask that question without
+        building the list of wrappers _debug_get_precompile_entries returns."""
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _has_precompile_entries,
+            _load_precompile_entry,
+            _reset_precompile_entries_for_region,
+        )
+
+        def never_compiled(x):
+            return x + 1
+
+        self.assertFalse(_has_precompile_entries(never_compiled.__code__, -1))
+        with self.assertRaisesRegex(TypeError, "expected a code object"):
+            _has_precompile_entries(never_compiled, -1)
+
+        def f(x):
+            return x.sin()
+
+        torch.compile(f, backend="eager", dynamic=False)(torch.randn(3))
+        code = f.__code__
+        self.assertFalse(_has_precompile_entries(code, 7))
+
+        guard_manager = _debug_get_cache_entry_list(code)[0].guard_manager
+        _load_precompile_entry(code, guard_manager, code, 7)
+        try:
+            self.assertTrue(_has_precompile_entries(code, 7))
+            self.assertFalse(_has_precompile_entries(code, 9))
+            self.assertFalse(_has_precompile_entries(code, -1))
+        finally:
+            _reset_precompile_entries_for_region(code, 7)
+        self.assertFalse(_has_precompile_entries(code, 7))
+
+    # ===== Exec strategy / region API =====
+
+    def test_exec_strategy_token_and_compare_and_set(self):
+        """The token API is the concurrency contract installers rely on: a
+        strategy read returns a generation, and a later compare-and-set with
+        that generation succeeds only if nothing -- including a reset -- wrote
+        the strategy in between."""
+        from torch._C._dynamo.eval_frame import (
+            compare_and_set_code_exec_strategy,
+            get_code_exec_strategy,
+            get_code_exec_strategy_token,
+            reset_code,
+            set_code_exec_strategy_with_token,
+        )
+
+        def f(x):
+            return x + 1
+
+        code = f.__code__
+        # Never-touched code object: DEFAULT strategy, generation 0, and a
+        # compare-and-set against it fails outright (no state to write).
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
+        strategy, generation = get_code_exec_strategy_token(code)
+        self.assertEqual(strategy.cur_action, FrameAction.DEFAULT)
+        self.assertEqual(generation, 0)
+        skip = FrameExecStrategy(FrameAction.SKIP, FrameAction.SKIP)
+        self.assertFalse(compare_and_set_code_exec_strategy(code, generation, skip))
+
+        prior, generation = set_code_exec_strategy_with_token(
+            code, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.DEFAULT)
+        )
+        self.assertEqual(prior.cur_action, FrameAction.DEFAULT)
+        self.assertGreater(generation, 0)
+        strategy, token = get_code_exec_strategy_token(code)
+        self.assertEqual(strategy.cur_action, FrameAction.RUN_ONLY)
+        self.assertEqual(token, generation)
+
+        # A compare-and-set with the current generation wins and bumps it...
+        self.assertTrue(compare_and_set_code_exec_strategy(code, token, skip))
+        strategy, new_token = get_code_exec_strategy_token(code)
+        self.assertEqual(strategy.cur_action, FrameAction.SKIP)
+        self.assertNotEqual(new_token, token)
+        # ...and the stale token now loses, leaving the strategy alone.
+        default = FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+        self.assertFalse(compare_and_set_code_exec_strategy(code, token, default))
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
+
+        # A reset invalidates every outstanding token.
+        reset_code(code)
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
+        self.assertFalse(compare_and_set_code_exec_strategy(code, new_token, skip))
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
+
+        # Zero must not be a resurrection token either. A state created by a
+        # region write hands out generation 0 before any global write; that
+        # token must lose after a global write plus a reset, so the reset may
+        # not put the generation back to 0.
+        from torch._C._dynamo.eval_frame import set_code_region_exec_strategy
+
+        def g(x):
+            return x + 2
+
+        code2 = g.__code__
+        set_code_region_exec_strategy(
+            code2, 3, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.DEFAULT)
+        )
+        strategy, zero_token = get_code_exec_strategy_token(code2)
+        self.assertEqual(zero_token, 0)
+        set_code_exec_strategy_with_token(code2, skip)
+        reset_code(code2)
+        self.assertFalse(compare_and_set_code_exec_strategy(code2, zero_token, skip))
+        self.assertEqual(get_code_exec_strategy(code2).cur_action, FrameAction.DEFAULT)
+
+    def test_region_exec_strategy_inherits_skip_but_not_run_only(self):
+        from torch._C._dynamo.eval_frame import (
+            get_code_exec_strategy,
+            get_code_region_exec_strategy,
+            reset_code,
+            set_code_region_exec_strategy,
+        )
+
+        def f(x):
+            return x + 1
+
+        code = f.__code__
+        try:
+            # A region write is region-local: neither its siblings nor the
+            # global strategy see it.
+            set_code_region_exec_strategy(
+                code, 7, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.DEFAULT)
+            )
+            region7 = get_code_region_exec_strategy(code, 7)
+            self.assertEqual(region7.cur_action, FrameAction.RUN_ONLY)
+            region9 = get_code_region_exec_strategy(code, 9)
+            self.assertEqual(region9.cur_action, FrameAction.DEFAULT)
+            self.assertEqual(
+                get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT
+            )
+            # A global RUN_ONLY (a recompile-limit hit) must not poison fresh
+            # regions...
+            set_code_region_exec_strategy(
+                code, -1, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.RUN_ONLY)
+            )
+            region9 = get_code_region_exec_strategy(code, 9)
+            self.assertEqual(region9.cur_action, FrameAction.DEFAULT)
+            self.assertEqual(region9.recursive_action, FrameAction.DEFAULT)
+            # ...but a global SKIP (a deliberate do-not-trace mark) applies
+            # everywhere, except where a region's own strategy wins.
+            set_code_region_exec_strategy(
+                code, -1, FrameExecStrategy(FrameAction.SKIP, FrameAction.SKIP)
+            )
+            region9 = get_code_region_exec_strategy(code, 9)
+            self.assertEqual(region9.cur_action, FrameAction.SKIP)
+            self.assertEqual(region9.recursive_action, FrameAction.SKIP)
+            region7 = get_code_region_exec_strategy(code, 7)
+            self.assertEqual(region7.cur_action, FrameAction.RUN_ONLY)
+        finally:
+            reset_code(code)
+
+    def test_clear_cache_entries_for_region_is_region_exact(self):
+        from torch._C._dynamo.eval_frame import _clear_cache_entries_for_region
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            return x.sin()
+
+        opt_a = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
+        opt_b = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
+        opt_a(torch.randn(3))
+        opt_b(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 2)
+        code = f.__code__
+        region_a = opt_a._isolate_recompiles_id
+        region_b = opt_b._isolate_recompiles_id
+
+        with self.assertRaisesRegex(TypeError, "expected a code object"):
+            _clear_cache_entries_for_region(f, region_a)
+        with self.assertRaisesRegex(ValueError, "default cache region"):
+            _clear_cache_entries_for_region(code, -1)
+
+        _clear_cache_entries_for_region(code, region_a)
+        self.assertEqual(len(_get_cache_entries_for_region(f, region_a)), 0)
+        # The neighbour region is untouched and still serves its entry.
+        self.assertEqual(len(_get_cache_entries_for_region(f, region_b)), 1)
+        opt_b(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 2)
+        # Clearing an already-empty region is a no-op.
+        _clear_cache_entries_for_region(code, region_a)
+
+    def test_force_callback_on_cache_miss_marker_overrides_run_only(self):
+        """Contract of the `_torchdynamo_force_callback_on_cache_miss` marker
+        (read by eval_frame_cpp.cpp): a RUN_ONLY frame whose installed callback
+        carries it still reaches the callback on a cache miss, and its callee
+        frames consult their own strategy instead of inheriting run-only. A
+        precompile serving callback sets it so a miss errors or recaptures
+        instead of silently running eager."""
+        from torch._dynamo.eval_frame import set_code_exec_strategy
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            return x.sin()
+
+        ctx = torch._dynamo.optimize(cnt, dynamic=False)
+        opt = ctx(f)
+        opt(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 1)
+        set_code_exec_strategy(
+            f.__code__, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.RUN_ONLY)
+        )
+        # A miss without the marker runs eager: no new compile.
+        opt(torch.randn(4, 4))
+        self.assertEqual(cnt.frame_count, 1)
+        ctx.callback._torchdynamo_force_callback_on_cache_miss = True
+        try:
+            opt(torch.randn(5, 5))
+            self.assertEqual(cnt.frame_count, 2)
+        finally:
+            del ctx.callback._torchdynamo_force_callback_on_cache_miss
 
     def test_isolate_recompiles_debug_cache_entry_list_deterministic_order(self):
         """_debug_get_cache_entry_list returns entries sorted by
