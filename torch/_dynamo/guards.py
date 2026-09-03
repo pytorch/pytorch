@@ -5249,14 +5249,16 @@ class CheckFunctionManager:
             for k, v in output_graph_guards_state.global_scope.items()
             if k in used_global_vars or k in self.additional_used_global_vars
         }
-        global_scope_state[builtins_dict_name] = {
-            k: v
-            # pyrefly: ignore [missing-attribute]
-            for k, v in output_graph_guards_state.global_scope[
-                builtins_dict_name
-            ].items()  # type: ignore[attr-defined]
-            if k in self.used_builtin_vars
-        }
+        # Absent when this state was itself loaded from a pickle whose guards
+        # were all portable: pickle_guards_state drops global_scope in that
+        # case but keeps the name, and re-serializing must not fail on it.
+        builtins_dict = output_graph_guards_state.global_scope.get(builtins_dict_name)
+        if builtins_dict is not None:
+            global_scope_state[builtins_dict_name] = {
+                k: v
+                for k, v in builtins_dict.items()  # type: ignore[attr-defined]
+                if k in self.used_builtin_vars
+            }
         output_graph_guards_state = dataclasses.replace(
             output_graph_guards_state,
             local_scope={
