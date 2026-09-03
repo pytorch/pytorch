@@ -44,9 +44,6 @@ class SimpleModelUneven(nn.Module):
         x = self.net4(x)
         return x
 
-    def get_input(self):
-        return torch.rand(4, 5, device=self.net1.weight.device)
-
 
 class TestFormatUtilsNoDist(TestCase):
     # These two tests drive the dcp <-> torch.save conversion on the no-dist
