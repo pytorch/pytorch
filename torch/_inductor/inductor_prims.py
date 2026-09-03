@@ -56,6 +56,22 @@ def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     return new_tensor
 
 
+def check_padded_blocked_layout(
+    logical_row_chunk: int, physical_row_chunk: int, row_inner: int, col_inner: int
+) -> None:
+    """Reject layouts whose destination offsets would collide or leave the buffer.
+
+    Shared by the eager prim and its lowering so both agree on what the op means:
+    without it eager silently scatters to duplicate offsets for some shapes.
+    """
+    if (
+        min(logical_row_chunk, physical_row_chunk, row_inner, col_inner) <= 0
+        or physical_row_chunk < logical_row_chunk
+        or physical_row_chunk % (2 * row_inner)
+    ):
+        raise AssertionError("invalid blocked layout parameters")
+
+
 # Sibling to flex_gemm::to_blocked (cuBLAS 128x4). Both pad, but to_blocked only
 # zero-fills trailing tiles; here a logical_row_chunk expands into a larger
 # physical_row_chunk, so padding is interior and takes a caller-supplied value.
@@ -67,6 +83,11 @@ def eager_to_padded_blocked(
     col_inner: int,
     padding_value,
 ) -> Tensor:
+    check_padded_blocked_layout(
+        logical_row_chunk, physical_row_chunk, row_inner, col_inner
+    )
+    if values.ndim != 2:
+        raise AssertionError("values must be two-dimensional")
     rows, cols = values.shape
     col_chunk = 2 * col_inner
     padded_rows = -(-rows // logical_row_chunk) * physical_row_chunk

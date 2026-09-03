@@ -3130,12 +3130,9 @@ def to_padded_blocked(
     values_size = list(values.get_size())
     if len(values_size) != 2:
         raise AssertionError("values must be two-dimensional")
-    if (
-        min(logical_row_chunk, physical_row_chunk, row_inner, col_inner) <= 0
-        or physical_row_chunk < logical_row_chunk
-        or physical_row_chunk % (2 * row_inner)
-    ):
-        raise AssertionError("invalid blocked layout parameters")
+    inductor_prims.check_padded_blocked_layout(
+        logical_row_chunk, physical_row_chunk, row_inner, col_inner
+    )
 
     rows, cols = values_size
     col_chunk = 2 * col_inner

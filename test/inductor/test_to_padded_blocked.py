@@ -118,11 +118,13 @@ class ToPaddedBlockedTest(TestCase):
             (96, 128, 48),  # physical chunk not a multiple of 2 * row_inner
         ],
     )
+    @parametrize("compiled", [False, True])
     def test_invalid_layout_rejected(
-        self, logical_row_chunk, physical_row_chunk, row_inner
+        self, logical_row_chunk, physical_row_chunk, row_inner, compiled
     ):
-        values = torch.zeros((97, 4), dtype=torch.uint8, device=GPU_TYPE)
-
+        # Eager must reject these too: for some shapes the destination offsets
+        # stay in bounds but collide, so an unvalidated eager call would scatter
+        # to duplicate slots and silently return a wrong answer.
         def f(values):
             return inductor_prims.to_padded_blocked(
                 values,
@@ -133,8 +135,12 @@ class ToPaddedBlockedTest(TestCase):
                 PADDING_VALUE,
             )
 
-        with self.assertRaisesRegex(Exception, "invalid blocked layout parameters"):
-            torch.compile(f, fullgraph=True)(values)
+        if compiled:
+            f = torch.compile(f, fullgraph=True)
+        for shape in [(97, 4), (192, 8), (256, 4)]:
+            values = torch.zeros(shape, dtype=torch.uint8, device=GPU_TYPE)
+            with self.assertRaisesRegex(Exception, "invalid blocked layout parameters"):
+                f(values)
 
 
 if __name__ == "__main__":
