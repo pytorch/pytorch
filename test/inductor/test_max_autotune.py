@@ -48,6 +48,7 @@ from torch._inductor.heuristics.template.triton import (
     CUDAAddmmPersistentTMATemplateConfigHeuristic,
     CUDAAddMMTemplateConfigHeuristic,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+    CUDABlackwellBMMTemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAMMTemplateConfigHeuristic,
     CUDAPersistentTMATemplateConfigHeuristic,
@@ -58,7 +59,10 @@ from torch._inductor.heuristics.template.triton import (
     XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
+from torch._inductor.kernel.bmm import blackwell_ws_persistent_tma_bmm_template
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
+from torch._inductor.kernel_inputs import MMKernelInputs
+from torch._inductor.lowering import lowerings
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
 from torch._inductor.scheduler import Scheduler
@@ -75,7 +79,11 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FP8,
+    SM100OrLater,
+    SM90OrLater,
+)
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -150,6 +158,16 @@ _DECOMPOSE_K_PATCH_ROCM = (
 )
 
 
+@torch.library.custom_op("inductor_test::blackwell_bmm", mutates_args={})
+def blackwell_bmm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return torch.bmm(a, b)
+
+
+@blackwell_bmm.register_fake
+def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return a.new_empty((a.shape[0], a.shape[1], b.shape[2]))
+
+
 def benchmark_choice(choice, args, out, expected_out, timings):
     result = choice.benchmark(*args, out=out)
     if expected_out is not None:
@@ -179,6 +197,81 @@ class TestMaxAutotune(TestCase):
         a = make_matrix(M, K, *batch_dims, reduction_dim=-1)
         b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
         return a, b
+
+    def _run_blackwell_bmm_template(
+        self, broadcast_b: bool, epilogue_subtile: int
+    ) -> None:
+        bsz, m, k, n = 3, 256, 8193, 128
+        a_storage = torch.randn(bsz, k, m, device=GPU_TYPE, dtype=torch.bfloat16)
+        a = a_storage.transpose(1, 2)
+        if broadcast_b:
+            b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+            b = b.unsqueeze(0).expand(bsz, -1, -1)
+        else:
+            b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        class TestBlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
+            def _get_template_configs_impl(self, kernel_inputs, op_name):
+                for template_config in super()._get_template_configs_impl(
+                    kernel_inputs, op_name
+                ):
+                    if (
+                        template_config["BLOCK_M"] == 128
+                        and template_config["BLOCK_N"] == 128
+                    ):
+                        yield {
+                            **template_config,
+                            "EPILOGUE_SUBTILE": epilogue_subtile,
+                        }
+                        return
+
+        def lowering(a_node, b_node):
+            choices = V.choices.get_template_configs(
+                MMKernelInputs([a_node, b_node]),
+                [blackwell_ws_persistent_tma_bmm_template],
+                "bmm",
+            )
+            return choices[0].output_node()
+
+        with (
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[
+                    (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
+                ],
+                override_heuristic_class=TestBlackwellBMMHeuristic,
+            ),
+            mock.patch.dict(
+                lowerings,
+                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
+            ),
+            config.patch(compile_threads=1),
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(lambda x, y: blackwell_bmm(x, y), fullgraph=True),
+                a,
+                b,
+            )
+
+        torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
+        self.assertIn("make_tensor_descriptor", codes[0])
+        self.assertNotIn("two_ctas=True", codes[0])
+        self.assertIn(f"EPILOGUE_SUBTILE : tl.constexpr = {epilogue_subtile}", codes[0])
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @parametrize("epilogue_subtile", (1, 2, 4))
+    def test_blackwell_bmm_template(self, epilogue_subtile: int) -> None:
+        self._run_blackwell_bmm_template(
+            broadcast_b=False,
+            epilogue_subtile=epilogue_subtile,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    def test_blackwell_bmm_template_broadcast_b(self) -> None:
+        self._run_blackwell_bmm_template(
+            broadcast_b=True,
+            epilogue_subtile=1,
+        )
 
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
