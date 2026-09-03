@@ -9,7 +9,6 @@ set(AOTI_ABI_CHECK_TEST_ROOT ${TORCH_ROOT}/test/cpp/aoti_abi_check)
 set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/main.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_accessor.cpp
-  ${AOTI_ABI_CHECK_TEST_ROOT}/test_accumulate_type.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_cast.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_copysign.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_devicetype.cpp

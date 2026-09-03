@@ -1,3 +1,5 @@
+#pragma once
+
 #if !defined(C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H)
 #error \
     "torch/headeronly/util/complex_math.h is not meant to be individually included. Include torch/headeronly/util/complex.h instead."
@@ -10,56 +12,54 @@ namespace c10_complex_math {
 // Exponential functions
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> exp(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> exp(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::exp(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::exp(static_cast<std::complex<T>>(x)));
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> log(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> log(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::log(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::log(static_cast<std::complex<T>>(x)));
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> log10(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> log10(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::log10(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::log10(static_cast<std::complex<T>>(x)));
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> log2(
-    const ::torch::headeronly::complex<T>& x) {
-  const ::torch::headeronly::complex<T> log2 =
-      ::torch::headeronly::complex<T>(::log(2.0), 0.0);
+C10_HOST_DEVICE inline c10::complex<T> log2(
+    const c10::complex<T>& x) {
+  const c10::complex<T> log2 =
+      c10::complex<T>(::log(2.0), 0.0);
   return c10_complex_math::log(x) / log2;
 }
 
 // Power functions
 //
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
-
 #if defined(_LIBCPP_VERSION) || \
     (defined(__GLIBCXX__) && !defined(_GLIBCXX11_USE_C99_COMPLEX))
-namespace complex_math_detail {
+namespace _detail {
 namespace {
 // Note [ Complex Square root in libc++]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -71,34 +71,34 @@ namespace {
 // In libstdc++ complex square root yield invalid results
 // for -x-0.0j unless C99 csqrt/csqrtf fallbacks are used
 template <typename T>
-::torch::headeronly::complex<T> compute_csqrt(
-    const ::torch::headeronly::complex<T>& z) {
+c10::complex<T> compute_csqrt(
+    const c10::complex<T>& z) {
   constexpr auto half = T(.5);
 
   // Trust standard library to correctly handle infs and NaNs
   if (std::isinf(z.real()) || std::isinf(z.imag()) || std::isnan(z.real()) ||
       std::isnan(z.imag())) {
-    return static_cast<::torch::headeronly::complex<T>>(
+    return static_cast<c10::complex<T>>(
         std::sqrt(static_cast<std::complex<T>>(z)));
   }
 
   // Special case for square root of pure imaginary values
   if (z.real() == T(0)) {
     if (z.imag() == T(0)) {
-      return ::torch::headeronly::complex<T>(T(0), z.imag());
+      return c10::complex<T>(T(0), z.imag());
     }
     auto v = std::sqrt(half * std::abs(z.imag()));
-    return ::torch::headeronly::complex<T>(v, std::copysign(v, z.imag()));
+    return c10::complex<T>(v, std::copysign(v, z.imag()));
   }
 
   // At this point, z is non-zero and finite
   if (z.real() >= 0.0) {
     auto t = std::sqrt((z.real() + std::abs(z)) * half);
-    return ::torch::headeronly::complex<T>(t, half * (z.imag() / t));
+    return c10::complex<T>(t, half * (z.imag() / t));
   }
 
   auto t = std::sqrt((-z.real() + std::abs(z)) * half);
-  return ::torch::headeronly::complex<T>(
+  return c10::complex<T>(
       half * std::abs(z.imag() / t), std::copysign(t, z.imag()));
 }
 
@@ -107,77 +107,75 @@ template <typename T>
 // cacos(z).re = 2*atan2(sqrt(1-z).re(), sqrt(1+z).re())
 // cacos(z).im = asinh((sqrt(conj(1+z))*sqrt(1-z)).im())
 template <typename T>
-::torch::headeronly::complex<T> compute_cacos(
-    const ::torch::headeronly::complex<T>& z) {
+c10::complex<T> compute_cacos(
+    const c10::complex<T>& z) {
   auto constexpr one = T(1);
   // Trust standard library to correctly handle infs and NaNs
   if (std::isinf(z.real()) || std::isinf(z.imag()) || std::isnan(z.real()) ||
       std::isnan(z.imag())) {
-    return static_cast<::torch::headeronly::complex<T>>(
+    return static_cast<c10::complex<T>>(
         std::acos(static_cast<std::complex<T>>(z)));
   }
   auto a =
-      compute_csqrt(::torch::headeronly::complex<T>(one - z.real(), -z.imag()));
+      compute_csqrt(c10::complex<T>(one - z.real(), -z.imag()));
   auto b =
-      compute_csqrt(::torch::headeronly::complex<T>(one + z.real(), z.imag()));
+      compute_csqrt(c10::complex<T>(one + z.real(), z.imag()));
   auto c =
-      compute_csqrt(::torch::headeronly::complex<T>(one + z.real(), -z.imag()));
+      compute_csqrt(c10::complex<T>(one + z.real(), -z.imag()));
   auto r = T(2) * std::atan2(a.real(), b.real());
   // Explicitly unroll (a*c).imag()
   auto i = std::asinh(a.real() * c.imag() + a.imag() * c.real());
-  return ::torch::headeronly::complex<T>(r, i);
+  return c10::complex<T>(r, i);
 }
 } // anonymous namespace
 
-C10_NOINLINE inline ::torch::headeronly::complex<float> sqrt(
-    const ::torch::headeronly::complex<float>& in) {
+C10_NOINLINE inline c10::complex<float> sqrt(
+    const c10::complex<float>& in) {
   return compute_csqrt(in);
 }
 
-C10_NOINLINE inline ::torch::headeronly::complex<double> sqrt(
-    const ::torch::headeronly::complex<double>& in) {
+C10_NOINLINE inline c10::complex<double> sqrt(
+    const c10::complex<double>& in) {
   return compute_csqrt(in);
 }
 
-C10_NOINLINE inline ::torch::headeronly::complex<float> acos(
-    const ::torch::headeronly::complex<float>& in) {
+C10_NOINLINE inline c10::complex<float> acos(
+    const c10::complex<float>& in) {
   return compute_cacos(in);
 }
 
-C10_NOINLINE inline ::torch::headeronly::complex<double> acos(
-    const ::torch::headeronly::complex<double>& in) {
+C10_NOINLINE inline c10::complex<double> acos(
+    const c10::complex<double>& in) {
   return compute_cacos(in);
 }
-} // namespace complex_math_detail
+} // namespace _detail
 #endif
 
-HIDDEN_NAMESPACE_END(torch, headeronly)
-
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> sqrt(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> sqrt(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::sqrt(static_cast<thrust::complex<T>>(x)));
 #elif !(                        \
     defined(_LIBCPP_VERSION) || \
     (defined(__GLIBCXX__) && !defined(_GLIBCXX11_USE_C99_COMPLEX)))
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::sqrt(static_cast<std::complex<T>>(x)));
 #else
-  return ::torch::headeronly::complex_math_detail::sqrt(x);
+  return _detail::sqrt(x);
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> pow(
-    const ::torch::headeronly::complex<T>& x,
-    const ::torch::headeronly::complex<T>& y) {
+C10_HOST_DEVICE inline c10::complex<T> pow(
+    const c10::complex<T>& x,
+    const c10::complex<T>& y) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(thrust::pow(
+  return static_cast<c10::complex<T>>(thrust::pow(
       static_cast<thrust::complex<T>>(x), static_cast<thrust::complex<T>>(y)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(std::pow(
+  return static_cast<c10::complex<T>>(std::pow(
       static_cast<std::complex<T>>(x), static_cast<std::complex<T>>(y)));
 #endif
 }
@@ -207,77 +205,77 @@ C10_HOST_DEVICE inline thrust::complex<float> complex_mul_fma(
 } // namespace detail
 
 template <>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<float> pow(
-    const ::torch::headeronly::complex<float>& x,
-    const ::torch::headeronly::complex<float>& y) {
+C10_HOST_DEVICE inline c10::complex<float> pow(
+    const c10::complex<float>& x,
+    const c10::complex<float>& y) {
   auto log_x = thrust::log(static_cast<thrust::complex<float>>(x));
   auto y_log_x =
       detail::complex_mul_fma(static_cast<thrust::complex<float>>(y), log_x);
-  return static_cast<::torch::headeronly::complex<float>>(thrust::exp(y_log_x));
+  return static_cast<c10::complex<float>>(thrust::exp(y_log_x));
 }
 #endif
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> pow(
-    const ::torch::headeronly::complex<T>& x,
+C10_HOST_DEVICE inline c10::complex<T> pow(
+    const c10::complex<T>& x,
     const T& y) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::pow(static_cast<thrust::complex<T>>(x), y));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::pow(static_cast<std::complex<T>>(x), y));
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> pow(
+C10_HOST_DEVICE inline c10::complex<T> pow(
     const T& x,
-    const ::torch::headeronly::complex<T>& y) {
+    const c10::complex<T>& y) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::pow(x, static_cast<thrust::complex<T>>(y)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::pow(x, static_cast<std::complex<T>>(y)));
 #endif
 }
 
 template <typename T, typename U>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<decltype(T() * U())> pow(
-    const ::torch::headeronly::complex<T>& x,
-    const ::torch::headeronly::complex<U>& y) {
+C10_HOST_DEVICE inline c10::complex<decltype(T() * U())> pow(
+    const c10::complex<T>& x,
+    const c10::complex<U>& y) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(thrust::pow(
+  return static_cast<c10::complex<T>>(thrust::pow(
       static_cast<thrust::complex<T>>(x), static_cast<thrust::complex<T>>(y)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(std::pow(
+  return static_cast<c10::complex<T>>(std::pow(
       static_cast<std::complex<T>>(x), static_cast<std::complex<T>>(y)));
 #endif
 }
 
 template <typename T, typename U>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<decltype(T() * U())> pow(
-    const ::torch::headeronly::complex<T>& x,
+C10_HOST_DEVICE inline c10::complex<decltype(T() * U())> pow(
+    const c10::complex<T>& x,
     const U& y) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::pow(static_cast<thrust::complex<T>>(x), y));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::pow(static_cast<std::complex<T>>(x), y));
 #endif
 }
 
 template <typename T, typename U>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<decltype(T() * U())> pow(
+C10_HOST_DEVICE inline c10::complex<decltype(T() * U())> pow(
     const T& x,
-    const ::torch::headeronly::complex<U>& y) {
+    const c10::complex<U>& y) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::pow(x, static_cast<thrust::complex<T>>(y)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::pow(x, static_cast<std::complex<T>>(y)));
 #endif
 }
@@ -285,75 +283,75 @@ C10_HOST_DEVICE inline ::torch::headeronly::complex<decltype(T() * U())> pow(
 // Trigonometric functions
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> sin(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> sin(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::sin(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::sin(static_cast<std::complex<T>>(x)));
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> cos(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> cos(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::cos(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::cos(static_cast<std::complex<T>>(x)));
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> tan(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> tan(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::tan(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::tan(static_cast<std::complex<T>>(x)));
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> asin(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> asin(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::asin(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::asin(static_cast<std::complex<T>>(x)));
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> acos(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> acos(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::acos(static_cast<thrust::complex<T>>(x)));
 #elif !defined(_LIBCPP_VERSION)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::acos(static_cast<std::complex<T>>(x)));
 #else
-  return ::torch::headeronly::complex_math_detail::acos(x);
+  return _detail::acos(x);
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> atan(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> atan(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::atan(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::atan(static_cast<std::complex<T>>(x)));
 #endif
 }
@@ -361,80 +359,80 @@ C10_HOST_DEVICE inline ::torch::headeronly::complex<T> atan(
 // Hyperbolic functions
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> sinh(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> sinh(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::sinh(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::sinh(static_cast<std::complex<T>>(x)));
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> cosh(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> cosh(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::cosh(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::cosh(static_cast<std::complex<T>>(x)));
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> tanh(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> tanh(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::tanh(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::tanh(static_cast<std::complex<T>>(x)));
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> asinh(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> asinh(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::asinh(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::asinh(static_cast<std::complex<T>>(x)));
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> acosh(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> acosh(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::acosh(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::acosh(static_cast<std::complex<T>>(x)));
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> atanh(
-    const ::torch::headeronly::complex<T>& x) {
+C10_HOST_DEVICE inline c10::complex<T> atanh(
+    const c10::complex<T>& x) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       thrust::atanh(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<::torch::headeronly::complex<T>>(
+  return static_cast<c10::complex<T>>(
       std::atanh(static_cast<std::complex<T>>(x)));
 #endif
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> log1p(
-    const ::torch::headeronly::complex<T>& z) {
+C10_HOST_DEVICE inline c10::complex<T> log1p(
+    const c10::complex<T>& z) {
 #if defined(__APPLE__) || defined(__MACOSX) || defined(__CUDACC__) || \
     defined(__HIPCC__) || defined(__SYCL_DEVICE_ONLY__)
   // For Mac, the new implementation yielded a high relative error. Falling back
@@ -471,7 +469,7 @@ C10_HOST_DEVICE inline ::torch::headeronly::complex<T> log1p(
 #else
   // CPU path
   // Based on https://github.com/numpy/numpy/pull/22611#issuecomment-1667945354
-  ::torch::headeronly::complex<T> u = z + T(1);
+  c10::complex<T> u = z + T(1);
   if (u == T(1)) {
     return z;
   } else {
@@ -485,8 +483,8 @@ C10_HOST_DEVICE inline ::torch::headeronly::complex<T> log1p(
 }
 
 template <typename T>
-C10_HOST_DEVICE inline ::torch::headeronly::complex<T> expm1(
-    const ::torch::headeronly::complex<T>& z) {
+C10_HOST_DEVICE inline c10::complex<T> expm1(
+    const c10::complex<T>& z) {
   // expm1(z) = exp(z) - 1
   // Define z = x + i * y
   // f = e ^ (x + i * y) - 1

@@ -63,20 +63,6 @@ fastSpecializedAtomicAdd
 # torch/headeronly/util/NumericUtils.h
 _isnan
 _isinf
-exp
-log
-log1p
-tan
-
-# torch/headeronly/util/AccumulateType.h
-acc_type
-acc_type_device
-AccumulateType
-AccumulateTypeDevice
-
-# torch/headeronly/util/complex_math.h
-# complex transcendental functions injected into global and std namespaces
-# via torch/headeronly/util/complex.h
 
 # aten/src/ATen/core/PhiloxRNGEngine.h
 Philox4_32
