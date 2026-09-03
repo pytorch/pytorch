@@ -64,14 +64,23 @@ constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2fnuz>() {
 }
 
 // This code is instantiated regardless of ROCm version.
+// Prior to ROCm 6.3, we hard-code the known enum values.
 template <>
 constexpr hipDataType HipDataTypeFor<c10::Float8_e4m3fn>() {
+#if ROCM_VERSION >= 60300
   return HIP_R_8F_E4M3;
+#else
+  return static_cast<hipDataType>(28);
+#endif
 }
 
 template <>
 constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2>() {
+#if ROCM_VERSION >= 60300
   return HIP_R_8F_E5M2;
+#else
+  return static_cast<hipDataType>(29);
+#endif
 }
 
 // This type is not intended for matrix types but rather a scale factor.
@@ -83,7 +92,11 @@ constexpr hipDataType HipDataTypeFor<c10::Float8_e8m0fnu>() {
 
 template <>
 constexpr hipDataType HipDataTypeFor<c10::Float4_e2m1fn_x2>() {
+#if ROCM_VERSION >= 70000
   return HIP_R_4F_E2M1;
+#else
+  return static_cast<hipDataType>(33);
+#endif
 }
 
 template <typename T>
@@ -627,6 +640,14 @@ auto GetHipBlasLtTypeStringAndOps() {
   auto b_datatype = HipDataTypeFor<BT>();
   auto in_out_datatype = HipDataTypeFor<CT>();
   std::vector<hipblasLtMatmulHeuristicResult_t> heuristic_result;
+#if ROCM_VERSION == 60400
+  // hipblaslt TT fp32 regression on ROCm 6.4, cannot use
+  if ((a_datatype == HIP_R_32F || b_datatype == HIP_R_32F || in_out_datatype == HIP_R_32F)
+          && (transa_outer == HIPBLAS_OP_T && transb_outer == HIPBLAS_OP_T)) {
+    std::vector<std::pair<std::string, std::unique_ptr<Callable<ParamsT>>>> ignore;
+    return ignore;
+  }
+#endif
 
   hipblasComputeType_t computeType = HipBlasComputeTypeFor<CT>();
   if constexpr (std::is_same_v<CT, float>) {
