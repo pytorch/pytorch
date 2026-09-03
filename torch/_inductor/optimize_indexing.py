@@ -182,6 +182,75 @@ def indexing_dtype_strength_reduction(loop_body: LoopBody) -> None:
         )
 
 
+def _index_expr_arg(loop_body: LoopBody, node: Any) -> tuple[str, sympy.Expr] | None:
+    """Indexing name and expression behind an int64 ``index_expr``/``value_expr`` node."""
+    if not (
+        isinstance(node, torch.fx.Node)
+        and node.op == "call_method"
+        and node.target in ("index_expr", "value_expr")
+        and node.args[2] is torch.int64
+    ):
+        return None
+    index = node.args[1]
+    if not (
+        isinstance(index, torch.fx.Node)
+        and index.op == "call_module"
+        and index.target == "get_index"
+    ):
+        return None
+    return index.args[0], loop_body.indexing_exprs[index.args[0]]
+
+
+def _range_implied_indices(loop_body: LoopBody, predicate: Any) -> OrderedSet[str]:
+    result = OrderedSet[str]()
+    if not isinstance(predicate, torch.fx.Node) or predicate.op != "call_method":
+        return result
+    if predicate.target in ("and_", "logical_and"):
+        for term in predicate.args[1:]:
+            result |= _range_implied_indices(loop_body, term)
+        return result
+    if predicate.target != "lt":
+        return result
+    lhs, rhs = predicate.args[1:]
+    lhs_index = _index_expr_arg(loop_body, lhs)
+    if lhs_index is None:
+        return result
+    name, var = lhs_index
+    if not isinstance(var, sympy.Symbol) or var not in loop_body.var_ranges:
+        return result
+    if (
+        isinstance(rhs, torch.fx.Node)
+        and rhs.op == "call_method"
+        and rhs.target == "constant"
+        and rhs.args[2] is torch.int64
+        and type(rhs.args[1]) is int
+    ):
+        bound: sympy.Expr | None = sympy.Integer(rhs.args[1])
+    else:
+        rhs_index = _index_expr_arg(loop_body, rhs)
+        bound = None if rhs_index is None else rhs_index[1]
+    sizevars = V.graph.sizevars
+    if (
+        bound is not None
+        and sizevars.statically_known_geq(bound, 0)
+        and sizevars.statically_known_leq(bound, loop_body.var_ranges[var])
+    ):
+        result.add(name)
+    return result
+
+
+def range_implied_indices(loop_body: LoopBody, node: torch.fx.Node) -> OrderedSet[str]:
+    """
+    Indexing names of ``loop_body`` that are a single iteration var ``v``
+    whose range bound ``v < var_ranges[v]`` is implied by the predicate of
+    ``node``, a ``masked_subblock`` call: the predicate is a conjunction of
+    ``v < bound`` terms with a statically known ``0 <= bound <= var_ranges[v]``.
+    Codegen may drop the range mask of such a var inside the masked region
+    since the predicate already excludes the out-of-range lanes.
+    """
+    return _range_implied_indices(loop_body, node.args[0])
+
+
 @dataclass(frozen=True)
 class _ValueUseRule:
     # These fields are op arguments, so Any covers FX nodes, SymPy exprs,

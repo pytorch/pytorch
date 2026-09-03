@@ -138,6 +138,30 @@ class TestCodegenTriton(InductorTestCase):
         self.assertTrue(torch.isnan(actual_max[2]).item())
         self.assertIn("tl.where", " ".join(code))
 
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_cat_upper_bounds_replace_reduction_mask(self):
+        def fn(a, b, c):
+            return torch.cat((a, b, c), dim=-1).amax(dim=-1)
+
+        shapes = ((8, 32, 1), (8, 32, 31), (8, 32, 1))
+        args = [
+            torch.randn(shape, device=GPU_TYPE, dtype=torch.bfloat16)
+            for shape in shapes
+        ]
+        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+
+        self.assertEqual(actual, fn(*args))
+        loads = [
+            line
+            for source in code
+            for line in source.splitlines()
+            if "tl.load(in_ptr" in line
+        ]
+        self.assertEqual(len(loads), 3)
+        self.assertNotIn("r0_mask", loads[0])
+        self.assertNotIn("r0_mask", loads[1])
+        self.assertIn("r0_mask", loads[2])
+
     def test_range_tree_entry_ownership_uses_root_identity(self):
         class AlternateR0Root(IterationRangesRoot):
             def block_size(self):

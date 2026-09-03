@@ -43,13 +43,14 @@ class InterpreterShim(torch.fx.Interpreter):
     def _dummy_gm():
         return torch.fx.symbolic_trace(identity)
 
-    def __init__(self, graph, submodules):
+    def __init__(self, graph, submodules, loop_body: LoopBody | None = None):
         # call super() with a placeholder to avoid constructing a
         # GraphModule which is very expensive (it does codegen).
         super().__init__(self._dummy_gm(), garbage_collect_values=False)
         self.module = self  # type: ignore[assignment]
         self.graph = graph
         self.submodules = submodules
+        self.loop_body = loop_body
         self.extra_traceback = False
         self.fetch_attr = submodules.__getitem__  # type: ignore[method-assign]
         self.current_node = None
@@ -680,7 +681,7 @@ class LoopBodyBlock:
         graph = self.graph
         submodules = self.body.submodules
 
-        return InterpreterShim(graph, submodules).run(V.get_ops_handler())
+        return InterpreterShim(graph, submodules, self.body).run(V.get_ops_handler())
 
     def debug_str(self, name="block"):
         code = torch.fx.GraphModule(self.body.submodules, self.graph).code
