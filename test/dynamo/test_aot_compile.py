@@ -4,6 +4,7 @@ import contextlib
 import copy
 import dataclasses
 import functools
+import importlib
 import inspect
 import io
 import multiprocessing as mp
@@ -27,11 +28,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.aot_compile import AOTCompiledModel, ModelInput, SerializableCallable
+from torch._dynamo.aot_compile import (
+    AOTCompiledFunction,
+    AOTCompiledModel,
+    ModelInput,
+    SerializableCallable,
+)
 from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 from torch._dynamo.exc import PackageError, Unsupported
+from torch._dynamo.graph_utils import _graph_device_types
 from torch._dynamo.guards import CheckFunctionManager
-from torch._dynamo.package import DynamoCache, SystemInfo
+from torch._dynamo.package import _current_cpu_codegen_target, DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
@@ -41,6 +48,7 @@ from torch._guards import tracing, TracingContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._graph_pickler import GraphPickler
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
@@ -639,6 +647,25 @@ def _subprocess_aot_compile_module():
                     raise AssertionError(
                         f"Expected tensors to be close, got {actual} vs {expected}"
                     )
+
+
+def _subprocess_save_child_module_artifact(path):
+    import torch
+    from torch._dynamo import config
+
+    with config.patch(enable_aot_compile=True):
+        mod = ParentWithChildModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(4, 4),), kwargs={}, contexts=[])]
+        )
+        model._save_aot_compiled_module(path)
+        torch.save(mod.state_dict(), path + ".state_dict")
 
 
 class RedistributeModel(torch.nn.Module):
@@ -1343,12 +1370,13 @@ from user code:
                 self.assertEqual(reloaded(x), expected[mode])
 
     def test_aot_compile_module_reload_is_hermetic(self):
-        # The graph's own globals must stay as serialized. Supplying a scope for
-        # guards must not rewire what the compiled bytecode reads, or a reloaded
-        # artifact silently recomputes against the loading process's state. The
-        # rebind has to happen before the load: deserialization copies the scope
-        # into the reconstructed function's globals, so rebinding afterwards is
-        # invisible whether or not the two scopes are wired together.
+        # Pins, deliberately, that a module artifact's bytecode reads the
+        # globals serialized at capture: supplying a scope for guards must not
+        # rewire what the compiled bytecode reads. The consequence is a known
+        # limitation, not a goal: a same-shape rebind of a global tensor before
+        # the load passes the guards (they read the live scope) and the graph
+        # still serves the capture-time value. The rebind has to happen before
+        # the load so the test can tell the two scopes apart.
         global AOT_HERMETIC_WEIGHT
         model = torch.compile(HermeticModule(), fullgraph=True, backend="inductor")
         x = torch.randn(3, 3)
@@ -1517,6 +1545,83 @@ from user code:
             self.assertEqual(reloaded(x), expected)
         finally:
             g.update(aliases)
+
+    def test_aot_compile_module_import_alias_guard_loads_across_processes(self):
+        # The real deployment shape: the artifact is captured by a process that
+        # never runs here, so the __import_* aliases its guards are rooted at
+        # have to be seeded into this module's globals by the load itself.
+        path = self.path()
+        _run_in_subprocess(
+            functools.partial(_subprocess_save_child_module_artifact, path)
+        )
+        mod = ParentWithChildModule()
+        mod.load_state_dict(torch.load(path + ".state_dict"))
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        with open(path, "rb") as f:
+            model._load_aot_compiled_module(f.read())
+        (result,) = model.forward.compiled_results
+        import_sources = result._artifacts.runtime_env.import_sources
+        self.assertIn("__import_torch_dot_nn_dot_modules_dot_module", import_sources)
+        for alias, module_name in import_sources.items():
+            self.assertIs(globals()[alias], importlib.import_module(module_name))
+        x = torch.randn(4, 4)
+        self.assertEqual(model(x), mod(x))
+
+    def test_load_seeds_exactly_the_recorded_import_aliases(self):
+        # Loading may add only the aliases the artifact recorded, and must not
+        # overwrite a name the loading process already has.
+        mod = ParentWithChildModule()
+        x = torch.randn(4, 4)
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+        (result,) = model.forward.compiled_results
+        import_sources = result._artifacts.runtime_env.import_sources
+        self.assertTrue(import_sources)
+        torch._dynamo.reset()
+
+        scope = {k: v for k, v in globals().items() if not k.startswith("__import_")}
+        kept_alias = next(iter(import_sources))
+        sentinel = object()
+        scope[kept_alias] = sentinel
+        before = set(scope)
+        (serialized,) = pickle.loads(data)
+        AOTCompiledFunction.deserialize(serialized, guard_globals=scope)
+        self.assertEqual(set(scope) - before, set(import_sources) - {kept_alias})
+        self.assertIs(scope[kept_alias], sentinel)
+        for alias, module_name in import_sources.items():
+            if alias != kept_alias:
+                self.assertIs(scope[alias], importlib.import_module(module_name))
+
+    def test_aot_compile_module_partial_forward_falls_back_loudly(self):
+        # A forward that is neither a function nor a bound method has no live
+        # scope to resolve guards against. The artifact still loads, against the
+        # reconstructed scope, but that has to be a warning: it is the one case
+        # where a guarded global does not track the loading process.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        x = torch.randn(3, 3)
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+
+        mod = ScaleModule()
+        mod.forward = functools.partial(ScaleModule.forward, mod)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            reloaded = AOTCompiledModel.deserialize(mod, data)
+        (line,) = logs.output
+        self.assertIn("ScaleModule.forward is functools.partial(", line)
+        self.assertIn("no live guard scope", line)
+        self.assertEqual(reloaded(x), x * 2)
 
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()
@@ -2068,7 +2173,7 @@ from user code:
         # The rest is about the receiver order, which only a native backend
         # reaches.
         artifacts.backend_name = "inductor"
-        current_target = SystemInfo.current().cpu_codegen_target
+        current_target = _current_cpu_codegen_target()
         if current_target is None:
             # No usable C++ compiler, so there is no current target to compare
             # against and the skew arms below have nothing to assert. Skipping
@@ -2098,7 +2203,7 @@ from user code:
     def test_inductor_cpu_capture_records_cpu_codegen_target(self):
         # Pins the recording side: a regression that records None silently
         # disarms check_compatibility via its predates-the-field skip.
-        if SystemInfo.current().cpu_codegen_target is None:
+        if _current_cpu_codegen_target() is None:
             self.skipTest("no CPU codegen target on this host")
 
         def fn(x):
@@ -2118,12 +2223,33 @@ from user code:
         with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
             artifacts.check_compatibility()
 
+    def test_graph_device_types_ignores_placeholders_without_a_device(self):
+        # Under dynamic shapes the leading placeholder is a SymInt, which has no
+        # device. Reading only the first meta value reported "cpu" for this
+        # all-accelerator graph, which armed the toolchain probe and a hard
+        # load-time refusal over CPU code the artifact does not hold.
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            x = torch.empty(2, device="cuda")
+            s0 = shape_env.create_unbacked_symint()
+        graph = torch.fx.Graph()
+        graph.placeholder("s0").meta["val"] = s0
+        x_node = graph.placeholder("x")
+        x_node.meta["val"] = x
+        graph.call_function(torch.ops.aten.add.Tensor, (x_node, 1)).meta["val"] = x
+        self.assertEqual(_graph_device_types(graph), frozenset(("cuda",)))
+
+        graph = torch.fx.Graph()
+        graph.placeholder("n").meta["val"] = 4
+        self.assertEqual(_graph_device_types(graph), frozenset())
+        self.assertEqual(_graph_device_types(None), frozenset())
+
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_mixed_device_graph_arms_cpu_codegen_target(self):
         # A mixed cpu+accelerator graph collapses device_type to the
         # accelerator, but inductor still emits native CPU kernels for the cpu
         # half, so the codegen target must be recorded and compared anyway.
-        if SystemInfo.current().cpu_codegen_target is None:
+        if _current_cpu_codegen_target() is None:
             self.skipTest("no CPU codegen target on this host")
 
         def fn(x, y):
