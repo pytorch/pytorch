@@ -135,6 +135,43 @@ class TestMaxAutotuneBlackwell(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    @parametrize("host_side_tma", (False, True))
+    def test_blackwell_square_operand_dim_order(
+        self, a_transposed: bool, b_transposed: bool, host_side_tma: bool
+    ):
+        # A square operand has the same descriptor shape under either dim_order,
+        # so only the strides distinguish row-major from transposed. Picking the
+        # wrong order is invisible in the shape and shows up as a wrong result.
+        S = 512
+        a = torch.randn(S, S).to(torch.float16).to(GPU_TYPE)
+        b = torch.randn(S, S).to(torch.float16).to(GPU_TYPE)
+
+        def mm(a, b):
+            return torch.mm(a.T if a_transposed else a, b.T if b_transposed else b)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_host_side_tma": host_side_tma,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(mm), a, b)
+        torch.testing.assert_close(actual, mm(a, b), atol=1e-2, rtol=1e-2)
+        fc = FileCheck().check("triton_tem_fused")
+        if host_side_tma:
+            fc.check("host_tma_descriptor_args").check_not("tl.make_tensor_descriptor")
+        else:
+            fc.check("tl.make_tensor_descriptor")
+        fc.run(code[0])
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     @parametrize("op", ("mm", "addmm"))
     def test_blackwell_host_side_tma_transposed_b(self, op: str):
         # Regression test for host-side TMA with a column-major / transposed B

@@ -39,6 +39,7 @@ from ...utils import (
     get_num_sms,
     get_tma_workspace_arg,
     TMA_DESCRIPTOR_SIZE,
+    tma_inner_dim,
     triton_type,
     using_b200,
     using_rocm_rdna3,
@@ -2689,11 +2690,16 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         mat1, mat2 = kernel_inputs.mat1mat2()
 
         def _row_major(node) -> bool:
-            # TMA needs the contiguous dim last. Layout.is_transposed() ignores
-            # size-1 dims, so a contiguous [1, K] operand reports transposed and
-            # the descriptor is then built with a non-unit trailing stride.
+            # TMA needs the contiguous dim last. Use the same inner-dim rule as
+            # can_use_tma, which already accepted these operands -- deriving it
+            # separately here is how a [1, K] operand ended up transposed.
             stride = node.layout.stride
-            return bool(V.graph.sizevars.statically_known_equals(stride[-1], 1))
+            inner = tma_inner_dim(stride)
+            if inner is None:
+                raise AssertionError(
+                    f"host-side TMA: expected exactly one stride-1 dim, got {stride}"
+                )
+            return inner == len(stride) - 1
 
         tma_opts = {
             "A_ROW_MAJOR": _row_major(mat1),
