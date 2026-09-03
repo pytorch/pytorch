@@ -1241,8 +1241,9 @@ class SequentialLR(LRScheduler):
     def state_dict(self) -> dict[str, Any]:
         """Return the state of the scheduler as a :class:`dict`.
 
-        It contains an entry for every variable in ``self.__dict__`` which
-        is not the optimizer.
+        It contains an entry for every variable in ``self.__dict__`` except
+        the optimizer and derived scheduler metadata.
+
         The wrapped scheduler states will also be saved.
         """
         state_dict = {
@@ -1614,8 +1615,9 @@ class ChainedScheduler(LRScheduler):
     def state_dict(self) -> dict[str, Any]:
         """Return the state of the scheduler as a :class:`dict`.
 
-        It contains an entry for every variable in ``self.__dict__`` which
-        is not the optimizer.
+        It contains an entry for every variable in ``self.__dict__`` except
+        the optimizer and derived scheduler metadata.
+
         The wrapped scheduler states will also be saved.
         """
         state_dict = {
