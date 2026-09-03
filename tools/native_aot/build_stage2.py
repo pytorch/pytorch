@@ -598,6 +598,46 @@ def _refuse_cache_drift(before: dict[str, tuple[str, str]]) -> None:
     )
 
 
+def _lib_snapshot() -> dict[str, tuple[int, int]]:
+    """(mtime, size) for every file in the build tree's lib/ except torch_cuda's.
+
+    Stage 2 installs libtorch_cuda.so and nothing else, so these are exactly the
+    libraries a relink may rebuild but this script will not ship.
+    """
+    lib = os.path.join(BUILD_DIR, "lib")
+    out = {}
+    with os.scandir(lib) as entries:
+        for e in entries:
+            if e.name == "libtorch_cuda.so" or not e.is_file(follow_symlinks=False):
+                continue
+            st = e.stat(follow_symlinks=False)
+            out[e.name] = (st.st_mtime_ns, st.st_size)
+    return out
+
+
+def _refuse_unshipped_rebuilds(before: dict[str, tuple[int, int]]) -> None:
+    """Refuse a relink that rebuilt a library stage 2 does not install.
+
+    `--target torch_cuda` builds its DEPENDENCIES too, so a source edited since the
+    last full build lands in libtorch_cpu.so (or c10) as well -- and only
+    libtorch_cuda.so is copied over the installed torch, leaving the two mismatched.
+    Every supported caller builds everything immediately before this, so a difference
+    here means stage 2 was run by hand against an edited tree.
+    """
+    after = _lib_snapshot()
+    rebuilt = sorted(n for n, v in after.items() if before.get(n, v) != v)
+    if not rebuilt:
+        return
+    raise RuntimeError(
+        f"native-AOT stage 2: relinking torch_cuda also rebuilt "
+        f"{', '.join(rebuilt[:4])}{' and others' if len(rebuilt) > 4 else ''}, which "
+        f"stage 2 does not install -- the tree has sources newer than the last full "
+        f"build, and installing libtorch_cuda.so alone would leave the two "
+        f"mismatched. Re-run the build (`spin develop`, or `pip install -e .` "
+        f"followed by this script), which installs them together."
+    )
+
+
 def _cmake_for_this_build() -> str:
     """The cmake that configured this build tree, else cmake from PATH.
 
@@ -906,7 +946,10 @@ def main(argv: list[str] | None = None) -> int:
     build_lib = os.path.join(BUILD_DIR, "lib", "libtorch_cuda.so")
     # Taken across the relink, for the size delta reported below.
     before = os.path.getsize(build_lib) if os.path.exists(build_lib) else 0
+    siblings = _lib_snapshot()
     _run_child(relink, "relinking torch_cuda", cwd=BUILD_DIR)
+    # Before the copy, so a mismatched pair never reaches the installed torch.
+    _refuse_unshipped_rebuilds(siblings)
 
     if not os.path.exists(build_lib):
         raise RuntimeError(f"expected relinked library at {build_lib}")
