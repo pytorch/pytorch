@@ -542,23 +542,28 @@ def _build_multigraph_forward():
             # one script would read another's globals: refuse unless the
             # loader's __main__ is the file the frame was compiled from.
             _captured = SerializedCode.to_code_object(_frame["code"]).co_filename
-            _running = getattr(_module, "__file__", None)
-            # Compared only when both name a real file: a REPL, `python -c` or
-            # a notebook has no __file__, and a frame compiled there records a
-            # placeholder co_filename, so neither can identify another script.
-            if (
-                _running is not None
-                and _os.path.isfile(_running)
-                and _os.path.isfile(_captured)
+            _running = getattr(_module, "__file__", None) or ""
+            # A REPL, `python -c` or a notebook has no __file__, and a frame
+            # compiled there records a placeholder co_filename. Two scripts
+            # must be the same file; a script and a file-less __main__ are
+            # never the same program; two file-less ones cannot be told apart,
+            # so that case is let through and reads the loader's globals.
+            _captured_known = _os.path.isfile(_captured)
+            _running_known = _os.path.isfile(_running)
+            if _captured_known != _running_known or (
+                _captured_known
                 and _os.path.realpath(_running) != _os.path.realpath(_captured)
             ):
                 raise PrecompileError(
                     f"precompile: the captured frame "
                     f"{SerializedCode.to_code_object(_frame['code']).co_name!r} "
-                    f"was compiled in __main__ ({_captured}), and this process's "
-                    f"__main__ is {_running}; the frame reads its module's "
-                    f"globals, which only that script has. Capture from a "
-                    f"function defined in an importable module."
+                    f"was compiled in __main__ "
+                    f"({_captured if _captured_known else 'no file: a REPL, python -c or notebook'}), "
+                    f"and this process's __main__ is "
+                    f"{_running if _running_known else 'a __main__ with no file'}; "
+                    f"the frame reads its module's globals, which only the "
+                    f"program that compiled it has. Capture from a function "
+                    f"defined in an importable module."
                 )
         for _k, _v in vars(_module).items():
             if _k not in _seeded:
@@ -740,19 +745,53 @@ def _build_installed_forward():
     """
     import base64
     import importlib
+    import os as _os
     import pickle
     import sys
     import types
 
     from torch._dynamo.package import SerializedCode
-    from torch._precompile import _InstalledArtifact
+    from torch._precompile import _InstalledArtifact, PrecompileError
 
     cache_entry = pickle.loads(base64.b64decode(_PACKAGE))
 
     # install resolves every frame through sys.modules[...] directly, so each
     # module a captured frame came from has to be imported before it runs.
     for _code_entry in cache_entry.dynamo.codes:
-        importlib.import_module(_code_entry.python_module)
+        try:
+            _module = importlib.import_module(_code_entry.python_module)
+        except ImportError as e:
+            raise PrecompileError(
+                f"precompile: the captured frame "
+                f"{_code_entry.python_code.co_name!r} lives in module "
+                f"{_code_entry.python_module!r}, which cannot be imported here "
+                f"({e}). Make it importable on the loading machine, or recapture "
+                f"from an importable module."
+            ) from e
+        if _code_entry.python_module == "__main__":
+            # See the standalone driver: __main__ is whichever script is
+            # running, so only the script the frame was compiled from can
+            # serve it.
+            _captured = _code_entry.python_code.co_filename
+            _running = getattr(_module, "__file__", None) or ""
+            # Same rule as the standalone driver: two scripts must be the same
+            # file, a script and a file-less __main__ are never the same
+            # program, and two file-less ones cannot be told apart.
+            _captured_known = _os.path.isfile(_captured)
+            _running_known = _os.path.isfile(_running)
+            if _captured_known != _running_known or (
+                _captured_known
+                and _os.path.realpath(_running) != _os.path.realpath(_captured)
+            ):
+                raise PrecompileError(
+                    f"precompile: the captured frame "
+                    f"{_code_entry.python_code.co_name!r} was compiled in __main__ "
+                    f"({_captured if _captured_known else 'no file: a REPL, python -c or notebook'}), "
+                    f"and this process's __main__ is "
+                    f"{_running if _running_known else 'a __main__ with no file'}; "
+                    f"installing it would bind another program's globals. "
+                    f"Capture from a function defined in an importable module."
+                )
 
     def _entry_function():
         # The entry records no qualname to resolve -- it is the callable handed

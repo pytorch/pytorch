@@ -259,9 +259,9 @@ void extra_state_set_region_exec_strategy(
 // deleter for the object on extra scratch space. This function is called
 // internally in _PyCode_SetExtra and also during the code deallocation.
 // It drops the code object's reference to the ExtraState; the state itself is
-// freed when the last lookup or pin holding it lets go. Re-entrant calls on
-// the same slot (Python run by the teardown resetting the code again) return
-// without freeing; see ExtraStateHolder in extra_state.cpp.
+// freed when the last lookup or pin holding it lets go. On a slot that
+// reset_extra_state is already tearing down it returns without freeing; see
+// ExtraStateHolder in extra_state.cpp.
 
 // Developer note - You should not call this function directly. This is called
 // directly inside reset_extra_state. If you are in a situation trying to call
@@ -269,9 +269,9 @@ void extra_state_set_region_exec_strategy(
 void destroy_extra_state(void* obj);
 
 // Detaches the ExtraState from the code object. Safe on a code object that has
-// none or whose state is already being torn down. Note that _PyCode_SetExtra
-// calls the destroy_extra_state deleter internally, and therefore we don't call
-// it explicitly here.
+// none or whose state is already being torn down. A state that Python run by
+// the teardown wrote to this same code object (see init_and_set_extra_state)
+// is installed once the old one is gone.
 void reset_extra_state(PyCodeObject* code);
 
 // Extracts the backend fn from the callback.
@@ -293,8 +293,9 @@ ExtraStateRef get_extra_state(PyCodeObject* code);
 
 // Creates a new extra state and puts it on the extra scratch space of the code
 // object, which must have none (get_extra_state returned nullptr). While the
-// previous state is still being torn down the slot is left alone and the new
-// state is returned detached: it lives only as long as the caller's reference.
+// previous state is still being torn down the slot is left alone: the new state
+// is parked on the holder, served by get_extra_state to every later caller in
+// that teardown, and installed by reset_extra_state once the slot is clear.
 ExtraStateRef init_and_set_extra_state(PyCodeObject* code);
 
 // Lookup the cache held by extra_state. Guards run with cache_mutex released.
