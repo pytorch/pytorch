@@ -1059,9 +1059,10 @@ def _blockwise128x128_shape_match(
     tensor_sz: Sequence[_IntLike],
     transpose: bool,
 ) -> tuple[bool, bool, _IntLike]:
-    # Triton reads [out_blocks, k_blocks]; cuBLAS supplies the transpose of that
-    # with K padded to a multiple of 4. Returns whether sz matches each, plus the
-    # padded K used by both the cuBLAS shape and its stride.
+    # Triton reads [out_blocks, k_blocks]; cuBLAS supplies the transpose of that.
+    # _scaled_mm_v2 pads K to a multiple of 4, torch._scaled_mm does not, so both
+    # widths are a valid cuBLAS shape. Returns whether sz matches each layout, and
+    # the K extent the cuBLAS form implies -- which is also its row stride.
     if transpose:
         out_blocks = ceildiv(tensor_sz[1], 128)
         k_blocks = ceildiv(tensor_sz[0], 128)
@@ -1073,10 +1074,15 @@ def _blockwise128x128_shape_match(
     triton_ok = sizevars.statically_known_equals(
         sz[0], out_blocks
     ) and sizevars.statically_known_equals(sz[1], k_blocks)
-    cublas_ok = sizevars.statically_known_equals(
+    cublas_out_ok = sizevars.statically_known_equals(sz[1], out_blocks)
+    cublas_padded = cublas_out_ok and sizevars.statically_known_equals(
         sz[0], k_blocks_padded
-    ) and sizevars.statically_known_equals(sz[1], out_blocks)
-    return triton_ok, cublas_ok, k_blocks_padded
+    )
+    cublas_unpadded = cublas_out_ok and sizevars.statically_known_equals(
+        sz[0], k_blocks
+    )
+    cublas_k = k_blocks_padded if cublas_padded else k_blocks
+    return triton_ok, cublas_padded or cublas_unpadded, cublas_k
 
 
 def _is_blockwise128x128_scaling(
@@ -1096,7 +1102,7 @@ def _uses_cublas_blockwise128x128_layout(
 ) -> bool:
     if scale_option != ScalingType.BlockWise128x128:
         return False
-    triton_layout, cublas_layout, k_blocks_padded = _blockwise128x128_shape_match(
+    triton_layout, cublas_layout, cublas_k = _blockwise128x128_shape_match(
         scale.get_size(), mat.get_size(), transpose
     )
     if not cublas_layout:
@@ -1111,7 +1117,7 @@ def _uses_cublas_blockwise128x128_layout(
         return False
     return sizevars.statically_known_equals(
         scale_stride[0], 1
-    ) and sizevars.statically_known_equals(scale_stride[1], k_blocks_padded)
+    ) and sizevars.statically_known_equals(scale_stride[1], cublas_k)
 
 
 def _normalize_blockwise_scale(
@@ -1179,10 +1185,6 @@ def is_desired_scaling(
             return _is_blockwise128x128_scaling(scale_size, t.get_size(), transpose)
         case _:
             raise AssertionError(f"Unsupported scaling type {scaling_type}")
-
-
-def get_main_loop_dot_precision(device_type: str) -> str:
-    return '"tf32x3"' if device_type == "cuda" else '"ieee"'
 
 
 def get_tile_size(scale_option: ScalingType) -> int:
@@ -1405,20 +1407,17 @@ def tuned_scaled_mm_v2(
             ):
                 templates_to_use.append(scaled_mm_device_tma_epilogue_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_epilogue_scaling_template.uid] = (
-                    overriders
+                    dict(overriders)
                 )
             elif use_triton_scaling_template(
                 scale_option_a, scale_option_b, main_loop_scaling_types
             ):
                 overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
                 overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
-                overriders["DOT_PRECISION"] = get_main_loop_dot_precision(
-                    mat_a.get_device().type
-                )
 
                 templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
-                    overriders
+                    dict(overriders)
                 )
             else:
                 raise AssertionError(
@@ -1433,7 +1432,7 @@ def tuned_scaled_mm_v2(
             and not bias
         ):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
+            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = dict(
                 overriders
             )
 
@@ -1441,7 +1440,7 @@ def tuned_scaled_mm_v2(
             scale_option_a, scale_option_b, epilogue_scaling_types
         ):
             templates_to_use.append(mm_template)
-            kwarg_overrides[mm_template.uid] = overriders
+            kwarg_overrides[mm_template.uid] = dict(overriders)
 
         # Triton templates use normalized scales; aten keeps the original layout.
         triton_templates = [t for t in templates_to_use if t is not aten__fp8_mm]
@@ -1622,20 +1621,17 @@ def tuned_scaled_mm(
             ):
                 templates_to_use.append(scaled_mm_device_tma_epilogue_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_epilogue_scaling_template.uid] = (
-                    overriders
+                    dict(overriders)
                 )
             elif use_triton_scaling_template(
                 scale_option_a, scale_option_b, main_loop_scaling_types
             ):
                 overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
                 overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
-                overriders["DOT_PRECISION"] = get_main_loop_dot_precision(
-                    mat_a.get_device().type
-                )
 
                 templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
-                    overriders
+                    dict(overriders)
                 )
             else:
                 raise AssertionError(
@@ -1650,7 +1646,7 @@ def tuned_scaled_mm(
             and not bias
         ):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
+            kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = dict(
                 overriders
             )
 
@@ -1658,7 +1654,7 @@ def tuned_scaled_mm(
             scale_option_a, scale_option_b, epilogue_scaling_types
         ):
             templates_to_use.append(mm_template)
-            kwarg_overrides[mm_template.uid] = overriders
+            kwarg_overrides[mm_template.uid] = dict(overriders)
 
         # Triton templates use normalized scales; aten keeps the original layout.
         triton_templates = [t for t in templates_to_use if t is not aten__fp8_mm]
