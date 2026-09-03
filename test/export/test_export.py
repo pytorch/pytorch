@@ -76,17 +76,22 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     xfailIfDistributedNotSupported,
 )
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     find_library_location,
+    HardwareClassification,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    requires_accelerator,
     run_tests,
     skipIfCrossRef,
     skipIfRocm,
     skipIfTorchDynamo,
-    skipIfXpu,
     TEST_WITH_CROSSREF,
     TestCase as TorchTestCase,
 )
@@ -96,7 +101,7 @@ from torch.testing._internal.custom_tensor import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
-from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
+from torch.testing._internal.triton_utils import requires_gpu, requires_gpu_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     register_constant,
@@ -318,6 +323,8 @@ def cleanup_dispatch_trace_metadata(mod: torch.export.ExportedProgram) -> None:
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_export_inline_constraints(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -580,6 +587,8 @@ class InputModuleWithNestedSubclass(torch.nn.Module):
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_export_same_as_eager(self, f, args, kwargs=None):
         kwargs = kwargs or {}
         exported_program = export(f, args, kwargs)
@@ -2628,7 +2637,7 @@ graph():
         # For non-functional graph module, out_copy is not mutated
         self.assertEqual(out_copy2, out_copy3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_export_raw_triton_kernel_non_strict_error(self):
         from torch.testing._internal.triton_utils import add_kernel
 
@@ -2639,8 +2648,8 @@ graph():
                 return out
 
         args = (
-            torch.randn(3, device="cuda"),
-            torch.randn(3, device="cuda"),
+            torch.randn(3, device=GPU_TYPE),
+            torch.randn(3, device=GPU_TYPE),
         )
         with self.assertRaisesRegex(
             RuntimeError,
@@ -10922,10 +10931,10 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
             )
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @testing.expectedFailureCppRuntime
     def test_export_associative_scan_symbol_dim(self):
-        device = torch.device("cuda")
+        device = torch.device(GPU_TYPE)
         combine_mode = "pointwise"
 
         dim1 = torch.export.Dim("dim0", min=5, max=15)
@@ -10947,10 +10956,10 @@ def forward(self, b_a_buffer, x):
         module_out = Foo()(xs)
         self.assertTrue(torch.allclose(ep.module()(xs), module_out))
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @testing.expectedFailureCppRuntime
     def test_export_associative_scan_symbol_scandim(self):
-        device = torch.device("cuda")
+        device = torch.device(GPU_TYPE)
         combine_mode = "pointwise"
 
         dim1 = torch.export.Dim("dim0", min=5, max=15)
@@ -10972,12 +10981,12 @@ def forward(self, b_a_buffer, x):
         module_out = Foo()(xs)
         self.assertTrue(torch.allclose(ep.module()(xs), module_out))
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_export_associative_scan_lifted_buffers(self):
         if "cpp_runtime_nonstrict" in self.id():
             self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
 
-        device = torch.device("cuda")
+        device = torch.device(GPU_TYPE)
         combine_mode = "pointwise"
 
         class A(torch.nn.Module):
@@ -17870,79 +17879,6 @@ class GraphModule(torch.nn.Module):
             ignore_empty_lines=True,
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_module_to_with_shared_weights(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
-
-            def forward(self, x):
-                token_ids = torch.ones((4,), device=x.device, dtype=torch.int64)
-                embedded = self.embedding(token_ids).sum()
-                return x.sum() + embedded.sum()
-
-        class Container(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod = Model()
-
-            def forward(self, x):
-                if "cuda" in str(x.device):
-                    mod = self.mod.to(x.device)
-                    return mod(x)
-                else:
-                    return x.sum()
-
-        with (
-            torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False),
-            torch._export.config.patch(use_legacy_dynamo_graph_capture=False),
-        ):
-            torch.manual_seed(0)
-            container = Container()
-            container_eager = copy.deepcopy(container)
-            gm = torch.export.export(
-                container,
-                (torch.randn(4, 4, 4, device="cuda"),),
-                strict=True,
-            ).module()
-
-            self.assertExpectedInline(
-                str(gm.code).strip(),
-                """\
-def forward(self, x):
-    args_0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    mod_embedding_weight = self.mod.embedding.weight
-    _guards_fn = self._guards_fn(args_0);  _guards_fn = None
-    empty_memory_format = torch.ops.aten.empty.memory_format([10, 8], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
-    detach_default = torch.ops.aten.detach.default(empty_memory_format);  empty_memory_format = None
-    submod_1 = self.submod_1
-    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_1, mod_embedding_weight);  submod_1 = mod_embedding_weight = None
-    getitem = wrap_with_set_grad_enabled[0];  wrap_with_set_grad_enabled = None
-    set__source_tensor = torch.ops.aten.set_.source_Tensor(detach_default, getitem);  detach_default = getitem = None
-    view_as_default = torch.ops.aten.view_as.default(set__source_tensor, set__source_tensor);  set__source_tensor = None
-    ones_default = torch.ops.aten.ones.default([4], dtype = torch.int64, device = device(type='cuda', index=0), pin_memory = False)
-    embedding_default = torch.ops.aten.embedding.default(view_as_default, ones_default);  view_as_default = ones_default = None
-    sum_default = torch.ops.aten.sum.default(embedding_default);  embedding_default = None
-    sum_default_1 = torch.ops.aten.sum.default(args_0);  args_0 = None
-    sum_default_2 = torch.ops.aten.sum.default(sum_default);  sum_default = None
-    add_tensor = torch.ops.aten.add.Tensor(sum_default_1, sum_default_2);  sum_default_1 = sum_default_2 = None
-    return pytree.tree_unflatten((add_tensor,), self._out_spec)""",
-            )
-
-            inp = torch.randn(4, 4, 4, device="cuda")
-
-            # Call container first to move shared weights to CUDA
-            export_out = gm(inp)
-            eager_out = container_eager(inp)
-            self.assertEqual(export_out, eager_out)
-
-            # This should not fail even though weights are now on CUDA
-            # and .to(cuda) returns the same parameter with requires_grad=True
-            export_out_v2 = gm(inp)
-            eager_out_v2 = container_eager(inp)
-            self.assertEqual(export_out_v2, eager_out_v2)
-
     @testing.expectedFailureStrict  # test_hop doesn't have a dynamo implementation
     @testing.expectedFailureStrictV2  # test_hop doesn't have a dynamo implementation
     @testing.expectedFailureRetraceability  # test_hop doesn't have a dynamo implementation
@@ -18038,7 +17974,7 @@ def forward(self, x):
         self.assertEqual(x.sin(), ep.module()(x))
         pytree._deregister_pytree_node(torch.FunctionSchema)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @requires_accelerator
     def test_exception(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -18058,7 +17994,7 @@ def forward(self, x):
                 self.mod = Model()
 
             def forward(self, x):
-                if "cuda" in str(x.device):
+                if device_type in str(x.device):
                     mod = self.mod.to(x.device)
                     return mod(x)
                 else:
@@ -18070,7 +18006,7 @@ def forward(self, x):
                 self.mod = BarModel()
 
             def forward(self, x):
-                with torch.amp.autocast(device_type="cuda"):
+                with torch.amp.autocast(device_type=device_type):
                     y = self.mod(x)
                 return y
 
@@ -18079,7 +18015,7 @@ def forward(self, x):
                 _ = torch.export.export(
                     BarBar(),
                     (),
-                    {"x": torch.randn(4, 4, 4, device="cuda")},
+                    {"x": torch.randn(4, 4, 4, device=device_type)},
                     strict=False,
                 ).module()
 
@@ -18632,6 +18568,8 @@ def forward(self, q, k, v):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_scaled_dot_product_attention_cpu(self):
         """
         This test makes sure we are always getting the same decomposition result for SDPA.
@@ -18667,19 +18605,18 @@ class TestOneOffModelExportResult(TestCase):
             ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
             ep.run_decompositions()
 
-    @skipIfXpu(msg="scaled_dot_product_attention issue on xpu")
     @skipIfCrossRef
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",
     )
-    def test_scaled_dot_product_attention_cuda(self):
+    def test_scaled_dot_product_attention_gpu(self):
         """
         This test makes sure we are always getting the same decomposition result for SDPA.
-        As of now _scaled_dot_product_flash_attention is expected to show up in
-        export() result (GPU tensors are given). Currently there's no downstream
-        backend relies on this export result so if this test fails, feel free to
-        change it to the latest export() result.
+        As of now a fused SDPA op is expected to show up in export() result (GPU
+        tensors are given); which one depends on the backend. Currently there's no
+        downstream backend relies on this export result so if this test fails, feel
+        free to change it to the latest export() result.
         """
 
         class ScaledDotProductAttention(torch.nn.Module):
@@ -18699,26 +18636,32 @@ class TestOneOffModelExportResult(TestCase):
         ep = torch.export.export(
             ScaledDotProductAttention(), (q, k, v)
         ).run_decompositions()
-        code_str = """\
+        # Which fused SDPA op survives decomposition is a property of the backend
+        # (flash or cuDNN on CUDA, the overrideable fused op on XPU), so compare
+        # against the golden graph for whichever op actually shows up.
+        expected_graphs = {
+            "_scaled_dot_product_flash_attention": """\
 def forward(self, q, k, v):
     _scaled_dot_product_flash_attention_default = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v, 0.0, True, scale = 0.125);  q = k = v = None
     getitem = _scaled_dot_product_flash_attention_default[0];  _scaled_dot_product_flash_attention_default = None
-    return (getitem,)"""
-        try:
-            self.assertExpectedInline(
-                ep.graph_module.code.strip(),
-                code_str,
-            )
-        except AssertionError:
-            code_str = """\
+    return (getitem,)""",  # noqa: B950
+            "_scaled_dot_product_cudnn_attention": """\
 def forward(self, q, k, v):
     _scaled_dot_product_cudnn_attention_default = torch.ops.aten._scaled_dot_product_cudnn_attention.default(q, k, v, None, False, 0.0, True);  q = k = v = None
     getitem = _scaled_dot_product_cudnn_attention_default[0];  _scaled_dot_product_cudnn_attention_default = None
-    return (getitem,)"""
-            self.assertExpectedInline(
-                ep.graph_module.code.strip(),
-                code_str,
-            )
+    return (getitem,)""",  # noqa: B950
+            "_scaled_dot_product_fused_attention_overrideable": """\
+def forward(self, q, k, v):
+    _scaled_dot_product_fused_attention_overrideable_default = torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default(q, k, v, None, 0.0, True);  q = k = v = None
+    getitem = _scaled_dot_product_fused_attention_overrideable_default[0];  _scaled_dot_product_fused_attention_overrideable_default = None
+    return (getitem,)""",  # noqa: B950
+        }
+        code = ep.graph_module.code.strip()
+        matched = next((op for op in expected_graphs if op in code), None)
+        self.assertIsNotNone(
+            matched, f"no fused SDPA op in the decomposed graph:\n{code}"
+        )
+        self.assertExpectedInline(code, expected_graphs[matched])
 
     def test_int_list_output(self):
         class M(torch.nn.Module):
@@ -19154,22 +19097,6 @@ def forward(self, x):
             len(list(new_ep.graph.nodes)[-1].args[0]), len(signature.output_specs)
         )
 
-    @requires_cuda_and_triton
-    def test_assert_tensor_metadata_device_index(self):
-        class N(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x, y):
-                x = x.float()
-                y = y.float()
-                return x + y
-
-        inp = (torch.randn(3, device="cuda"), torch.randn(3, device="cuda"))
-        ep = export(N(), inp)
-        ep = move_to_device_pass(ep, {"cuda:0": "cuda"})
-        ep.module()(torch.randn(3, device="cuda:0"), torch.randn(3, device="cuda:0"))
-
     @unittest.skipIf(not HAS_TORCHREC, "only run when there is torchrec imported")
     def test_torchrec_jagged_tensor(self):
         class Foo(torch.nn.Module):
@@ -19319,8 +19246,119 @@ def forward(self, x):
             self.assertEqual(eager_out[1], decomp_out[1])
 
 
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestExportDevice(TorchTestCase):
+    # Not the Dynamo TestCase: instantiate_device_type_tests calls setUpClass at
+    # import time, and the Dynamo TestCase enters a config.patch there that is
+    # never exited, which would leak into every other test in this file.
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_assert_tensor_metadata_device_index(self, device):
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                x = x.float()
+                y = y.float()
+                return x + y
+
+        # The pass drops the device index, so the metadata asserts baked into the
+        # graph must still accept an indexed device at runtime.
+        inp = (torch.randn(3, device=device), torch.randn(3, device=device))
+        ep = export(N(), inp)
+        ep = move_to_device_pass(ep, {device: torch.device(device).type})
+        ep.module()(torch.randn(3, device=device), torch.randn(3, device=device))
+
+    @onlyAccelerator
+    def test_module_to_with_shared_weights(self, device):
+        device_type = self.device_type
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+
+            def forward(self, x):
+                token_ids = torch.ones((4,), device=x.device, dtype=torch.int64)
+                embedded = self.embedding(token_ids).sum()
+                return x.sum() + embedded.sum()
+
+        class Container(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = Model()
+
+            def forward(self, x):
+                if device_type in str(x.device):
+                    mod = self.mod.to(x.device)
+                    return mod(x)
+                else:
+                    return x.sum()
+
+        with (
+            # The golden below is in canonical node naming, which the Dynamo
+            # TestCase turns on class-wide but this class does not inherit.
+            torch._dynamo.config.patch(
+                graph_break_on_nn_param_ctor=False,
+                canonicalize_output_graph_node_order=True,
+            ),
+            torch._export.config.patch(use_legacy_dynamo_graph_capture=False),
+        ):
+            torch.manual_seed(0)
+            container = Container()
+            container_eager = copy.deepcopy(container)
+            gm = torch.export.export(
+                container,
+                (torch.randn(4, 4, 4, device=device),),
+                strict=True,
+            ).module()
+
+            self.assertExpectedInline(
+                str(gm.code).strip(),
+                f"""\
+def forward(self, x):
+    args_0, = fx_pytree.tree_flatten_spec(([x], {{}}), self._in_spec)
+    mod_embedding_weight = self.mod.embedding.weight
+    _guards_fn = self._guards_fn(args_0);  _guards_fn = None
+    empty_memory_format = torch.ops.aten.empty.memory_format([10, 8], dtype = torch.float32, device = device(type='{device_type}', index=0), pin_memory = False)
+    detach_default = torch.ops.aten.detach.default(empty_memory_format);  empty_memory_format = None
+    submod_1 = self.submod_1
+    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_1, mod_embedding_weight);  submod_1 = mod_embedding_weight = None
+    getitem = wrap_with_set_grad_enabled[0];  wrap_with_set_grad_enabled = None
+    set__source_tensor = torch.ops.aten.set_.source_Tensor(detach_default, getitem);  detach_default = getitem = None
+    view_as_default = torch.ops.aten.view_as.default(set__source_tensor, set__source_tensor);  set__source_tensor = None
+    ones_default = torch.ops.aten.ones.default([4], dtype = torch.int64, device = device(type='{device_type}', index=0), pin_memory = False)
+    embedding_default = torch.ops.aten.embedding.default(view_as_default, ones_default);  view_as_default = ones_default = None
+    sum_default = torch.ops.aten.sum.default(embedding_default);  embedding_default = None
+    sum_default_1 = torch.ops.aten.sum.default(args_0);  args_0 = None
+    sum_default_2 = torch.ops.aten.sum.default(sum_default);  sum_default = None
+    add_tensor = torch.ops.aten.add.Tensor(sum_default_1, sum_default_2);  sum_default_1 = sum_default_2 = None
+    return pytree.tree_unflatten((add_tensor,), self._out_spec)""",  # noqa: B950
+            )
+
+            inp = torch.randn(4, 4, 4, device=device)
+
+            # Call container first to move shared weights to the accelerator
+            export_out = gm(inp)
+            eager_out = container_eager(inp)
+            self.assertEqual(export_out, eager_out)
+
+            # This should not fail even though the weights have already moved
+            # and .to() returns the same parameter with requires_grad=True
+            export_out_v2 = gm(inp)
+            eager_out_v2 = container_eager(inp)
+            self.assertEqual(export_out_v2, eager_out_v2)
+
+
+instantiate_device_type_tests(TestExportDevice, globals(), allow_xpu=True)
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         load_torchbind_test_lib()
