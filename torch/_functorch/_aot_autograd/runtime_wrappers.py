@@ -50,6 +50,7 @@ from torch._prims_common import CUDARngStateHelper
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.types import IntLikeType
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
@@ -1328,7 +1329,8 @@ class FakifiedOutWrapper(InductorWrapper):
     # TracingContext.fwd_output_strides
     # Generated from actually doing compile
     # NB: an entry is None if it's not a Tensor
-    fwd_output_strides: list[list[int] | None] | None = None
+    # NB: an inner element may be a SymInt under dynamic shapes
+    fwd_output_strides: list[list[IntLikeType] | None] | None = None
     needs_post_compile: bool = True
 
     def pre_compile(
@@ -1379,7 +1381,7 @@ class FakifiedOutWrapper(InductorWrapper):
 
     # To be called post compile
     def set_fwd_output_strides(
-        self, fwd_output_strides: list[list[int] | None]
+        self, fwd_output_strides: list[list[IntLikeType] | None]
     ) -> None:
         self.fwd_output_strides = fwd_output_strides
 
