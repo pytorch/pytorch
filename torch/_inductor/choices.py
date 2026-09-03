@@ -423,6 +423,16 @@ class InductorChoices:
         """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
         return kernel_kwargs
 
+    def get_extra_triton_kernel_choices(
+        self,
+        kernel_cls: type[TritonKernel],
+        features: SIMDKernelFeatures,
+        kernel_args: list[Any],
+        kernel_kwargs: dict[str, Any],
+    ) -> list[TritonKernel]:
+        """Hook for out-of-tree backends to add Triton kernel choices."""
+        return []
+
     def override_best_choice(
         self,
         best_choice: ChoiceCaller,

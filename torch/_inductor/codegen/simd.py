@@ -32,7 +32,6 @@ from torch.utils._sympy.symbol import (
     symbol_is_type,
     SymT,
 )
-
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
@@ -4257,11 +4256,17 @@ class SIMDScheduling(BaseScheduling):
         kernel.finalize_indexing(all_indexing.keys())
 
         # Second pass to do codegen
+        phase = 0
+        kernel.set_codegen_phase(phase)
         for node in node_schedule:
             if node is DisableReduction:
                 stack.enter_context(kernel.disable_reduction())
+                phase += 1
+                kernel.set_codegen_phase(phase)
             elif node is EnableReduction:
                 stack.close()
+                phase += 1
+                kernel.set_codegen_phase(phase)
             else:
                 # TODO - use split ranges ?
                 self._prepare_loop_body(node._body)
