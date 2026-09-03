@@ -45,7 +45,7 @@ from torch.utils._triton import (
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
-from .. import config, ir, metrics, utils
+from .. import config, dependencies, ir, metrics, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..debug import set_kernel_post_grad_provenance_tracing
@@ -5381,12 +5381,29 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         ):
             return False
 
-        stats = features.memory_stats().persistent
-        writes_r = stats.writes.dim[-1]
-        full_size_outputs = (
-            writes_r.count_per_thread - writes_r.count_per_thread_broadcast
+        nodes = OrderedSet(features.scheduler_nodes())
+        produced = OrderedSet(
+            buf.get_name() for node in nodes for buf in node.get_outputs()
         )
-        return stats.reads.count_per_thread <= 3 and full_size_outputs <= 1
+        loads = OrderedSet(
+            dep
+            for node in nodes
+            for dep in node.read_writes.reads
+            if isinstance(dep, dependencies.MemoryDep) and dep.name not in produced
+        )
+        if len(loads) > 3:
+            return False
+        sizevars = V.graph.sizevars
+        full_numel = sizevars.optimization_hint(
+            features.numel * features.reduction_numel
+        )
+        full_size_outputs = sum(
+            any(user.node not in nodes for user in buf.users)
+            and sizevars.optimization_hint(buf.node.get_numel()) >= full_numel
+            for node in nodes
+            for buf in node.get_outputs()
+        )
+        return full_size_outputs <= 1
 
     def reduction(
         self,
