@@ -1772,6 +1772,9 @@ class PlateauLR(LRScheduler):
             raise ValueError("Factor should be < 1.0.")
         self.factor = factor
 
+        if not isinstance(optimizer, Optimizer):
+            raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
+
         if isinstance(min_lr, (list, tuple)):
             if len(min_lr) != len(optimizer.param_groups):
                 raise ValueError(
