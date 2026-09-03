@@ -20,12 +20,7 @@ from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
 
-from .. import (
-    config as inductor_config,
-    distributed_autotune,
-    inductor_prims,
-    lowering as L,
-)
+from .. import config as inductor_config, distributed_autotune, lowering as L
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
@@ -62,6 +57,7 @@ from ..utils import (
     use_triton_template,
     use_triton_tma_template,
 )
+from .decompose_k import blackwell_decompose_k_subgraph_template
 from .mm_common import (
     _is_static_problem,
     _use_small_mm_pointwise,
@@ -276,59 +272,6 @@ class DecomposeKSugraphTemplate(SubgraphTemplate):
 
 
 decompose_k_subgraph_template = DecomposeKSugraphTemplate()
-
-
-def blackwell_decomposeK(a, b, k_split, config_index):
-    """Aligned decompose-K using the dedicated rank-2 partial template."""
-    m = a.shape[0]
-    n = b.shape[1]
-    m_tiles = (m + 127) // 128
-    if config_index != 0:
-        m_tiles = (m_tiles + 1) // 2 * 2
-    m_pad = m_tiles * 128
-    partial_flat = inductor_prims.blackwell_decompose_k_partial(
-        a, b, k_split, config_index
-    )
-    partials = partial_flat.view(k_split, m_pad, n)
-    return partials[:, :m].sum(0).to(a.dtype)
-
-
-class BlackwellDecomposeKSubgraphTemplate(SubgraphTemplate):
-    def __init__(self):
-        super().__init__(name="blackwell_decompose_k")
-
-    def generate(  # type: ignore[override]
-        self,
-        input_nodes: list[Buffer],
-        layout: Layout,
-        k_split: int,
-        config_index: int,
-    ) -> SubgraphChoiceCaller:
-        from torch._dispatch.python import enable_python_dispatcher
-
-        from ..decomposition import select_decomp_table
-
-        name = f"blackwell_decompose_k_{k_split}_split_config_{config_index}"
-        description = f"{k_split=}, {config_index=}"
-        with enable_python_dispatcher():
-            fn = make_fx(
-                functools.partial(
-                    blackwell_decomposeK,
-                    k_split=k_split,
-                    config_index=config_index,
-                ),
-                decomposition_table=select_decomp_table(),
-            )
-            return super().generate(
-                name=name,
-                input_nodes=input_nodes,
-                layout=layout,
-                make_fx_graph=fn,
-                description=description,
-            )
-
-
-blackwell_decompose_k_subgraph_template = BlackwellDecomposeKSubgraphTemplate()
 
 
 class ContiguousTemplate(SubgraphTemplate):
