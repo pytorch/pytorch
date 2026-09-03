@@ -28,16 +28,15 @@ except ImportError:
 import torch._inductor.config as config
 from torch._inductor import cpu_vec_isa, metrics
 from torch._inductor.codegen.common import (
+    device_op_overrides_dict,
+    DeviceOpOverrides,
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
     register_backend_for_device,
     register_device_op_overrides,
 )
 from torch._inductor.codegen.cpp_utils import device_to_aten
-from torch._inductor.codegen.cpu_device_op_overrides import (
-    CpuDeviceOpOverrides,
-    NoOpDeviceOpOverrides,
-)
+from torch._inductor.codegen.cpu_device_op_overrides import CpuDeviceOpOverrides
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -52,7 +51,7 @@ class ExtensionDeviceOpOverrides(CpuDeviceOpOverrides):
         return "at::kPrivateUse1"
 
 
-class MissingAtenDeviceTypeOverrides(NoOpDeviceOpOverrides):
+class MissingAtenDeviceTypeOverrides(DeviceOpOverrides):
     pass
 
 
@@ -77,15 +76,18 @@ TestCase = test_torchinductor.TestCase
 
 
 class DeviceToAtenTests(TestCase):
-    def test_builtin_device_types(self):
-        for device, expected in (
+    @parametrize(
+        "device, expected",
+        [
             ("cpu", "at::kCPU"),
             ("cuda", "at::kCUDA"),
             ("xpu", "at::kXPU"),
             ("mps", "at::kMPS"),
             ("meta", "at::kMeta"),
-        ):
-            self.assertEqual(device_to_aten(device), expected)
+        ],
+    )
+    def test_builtin_device_types(self, device, expected):
+        self.assertEqual(device_to_aten(device), expected)
 
     def test_unregistered_device_type(self):
         with self.assertRaisesRegex(RuntimeError, "No ATen device type mapping"):
@@ -94,19 +96,22 @@ class DeviceToAtenTests(TestCase):
     def test_missing_aten_device_type(self):
         device = "missing_aten_device_type"
         register_device_op_overrides(device, MissingAtenDeviceTypeOverrides())
+        self.addCleanup(device_op_overrides_dict.pop, device, None)
         with self.assertRaisesRegex(RuntimeError, "No ATen device type mapping"):
             device_to_aten(device)
 
     def test_invalid_aten_device_type(self):
         device = "invalid_aten_device_type"
         register_device_op_overrides(device, InvalidAtenDeviceTypeOverrides())
+        self.addCleanup(device_op_overrides_dict.pop, device, None)
         with self.assertRaisesRegex(RuntimeError, "must return.*at::k"):
             device_to_aten(device)
 
-    def test_unsupported_device_types(self):
-        for device in ("tpu", "mtia"):
-            with self.assertRaisesRegex(RuntimeError, "No ATen device type mapping"):
-                device_to_aten(device)
+    @parametrize("device", ["tpu", "mtia"])
+    def test_unsupported_device_types(self, device):
+        # MTIA has no aoti_torch_device_type_mtia shim yet; update this when it does.
+        with self.assertRaisesRegex(RuntimeError, "No ATen device type mapping"):
+            device_to_aten(device)
 
 
 class BaseExtensionBackendTests(TestCase):
@@ -253,6 +258,7 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
         self.assertTrue(has_cpp_wrapper_for_device(device))
 
 
+instantiate_parametrized_tests(DeviceToAtenTests)
 instantiate_parametrized_tests(ExtensionBackendTests)
 
 

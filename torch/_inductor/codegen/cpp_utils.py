@@ -90,30 +90,42 @@ DEVICE_TO_INT = {"cpu": 0, "cuda": 1}
 
 
 def device_to_aten(device_type: str) -> str:
+    # Meta has no registered DeviceOpOverrides.
     if device_type == "meta":
         return "at::kMeta"
 
-    from .common import get_device_op_overrides
+    from .common import DeviceOpOverrides, get_device_op_overrides
 
     try:
         overrides = get_device_op_overrides(device_type)
     except KeyError as exc:
-        raise RuntimeError(f"No ATen device type mapping for {device_type}") from exc
+        raise RuntimeError(
+            f"No ATen device type mapping for {device_type}: no DeviceOpOverrides "
+            f"is registered; call register_device_op_overrides({device_type!r}, ...)."
+        ) from exc
 
-    try:
-        aten_device_type = overrides.aten_device_type()
-    except NotImplementedError as exc:
-        raise RuntimeError(f"No ATen device type mapping for {device_type}") from exc
+    if type(overrides).aten_device_type is DeviceOpOverrides.aten_device_type:
+        raise RuntimeError(
+            f"No ATen device type mapping for {device_type}: "
+            f"{type(overrides).__name__} does not implement aten_device_type()."
+        )
 
-    if (
-        not isinstance(aten_device_type, str)
-        or not aten_device_type.startswith("at::k")
-        or len(aten_device_type) == len("at::k")
+    aten_device_type = overrides.aten_device_type()
+
+    if not isinstance(aten_device_type, str) or not aten_device_type.startswith(
+        "at::k"
     ):
         raise RuntimeError(
             f"{type(overrides).__name__}.aten_device_type() must return "
-            f"a non-empty ATen device type expression starting with 'at::k', "
+            f"an ATen device type expression starting with 'at::k', "
             f"got {aten_device_type!r}"
+        )
+    suffix = aten_device_type[len("at::k") :]
+    if not suffix.isidentifier():
+        raise RuntimeError(
+            f"{type(overrides).__name__}.aten_device_type() must return "
+            f"an ATen device type expression with a valid identifier suffix "
+            f"after 'at::k', got {aten_device_type!r}"
         )
 
     return aten_device_type
