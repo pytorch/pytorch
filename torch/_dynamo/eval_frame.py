@@ -1894,7 +1894,7 @@ def _optimize(
             dynamic_shapes=dynamic_shapes,
         )
 
-    emits_native_code = _backend_emits_native_code(backend)
+    native_backend = _backend_emits_native_code(backend)
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -1913,7 +1913,7 @@ def _optimize(
             fn=None,
             dynamo=None,
             ignore_inlined_sources=False,
-            requires_native_backend_compatibility=emits_native_code,
+            requires_native_backend_compatibility=native_backend,
         )
 
     return _optimize_catch_errors(
@@ -2844,7 +2844,7 @@ def _optimize_assert(
     Used for fullgraph=True and export, since we must always error on graph breaks and ignore
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
-    emits_native_code = _backend_emits_native_code(backend)
+    native_backend = _backend_emits_native_code(backend)
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -2862,7 +2862,7 @@ def _optimize_assert(
             fn=None,
             dynamo=None,
             ignore_inlined_sources=False,
-            requires_native_backend_compatibility=emits_native_code,
+            requires_native_backend_compatibility=native_backend,
         )
 
     return _optimize_catch_errors(
