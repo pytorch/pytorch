@@ -4961,8 +4961,12 @@ class CheckFunctionManager:
             # every guard type that can mark itself unserializable.
             if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH", "FAKE_SCRIPT_TYPE_MATCH"):
                 if guard._unserializable:
-                    # Only call builder.get again if we know we're going to throw
+                    # Only call builder.get again if we know we're going to throw.
+                    # FAKE_SCRIPT_TYPE_MATCH judged the wrapped real object's
+                    # type, so name that type, not the FakeScriptObject wrapper.
                     obj = builder.get(guard)
+                    if isinstance(obj, FakeScriptObject):
+                        obj = obj.real_obj
                     raise torch._dynamo.exc.GuardSerializationError(
                         guard_type,
                         guard.name,
