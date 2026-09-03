@@ -32,4 +32,4 @@ A job can be marked *unstable* by opening a GitHub issue titled *UNSTABLE &lt;jo
 The following jobs are not eligible for being marked as unstable given the above guidance. At least one lint job, one CPU default test job, and one CUDA default test job must always be present. Absence of signals from the following jobs should block *viable/strict* entirely.
 - Lint / lintrunner-noclang-all / lint
 - pull / linux-jammy-py3.10-gcc11 / test (default)
-- trunk / linux-jammy-cuda13.0-py3.10-gcc11 / test (default)
+- trunk / linux-jammy-cuda13.0-py3.10-gcc13 / test (default)
