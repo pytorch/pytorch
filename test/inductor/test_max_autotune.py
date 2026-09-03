@@ -206,11 +206,7 @@ class TestMaxAutotune(TestCase):
         b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
         return a, b
 
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("broadcast_b", (False, True))
-    @parametrize("data_partition_factor", (1, 2))
-    @parametrize("epilogue_subtile", (1, 2, 4))
-    def test_blackwell_bmm_template(
+    def _run_blackwell_bmm_template(
         self,
         broadcast_b: bool,
         data_partition_factor: int,
@@ -284,7 +280,29 @@ class TestMaxAutotune(TestCase):
         else:
             self.assertNotIn("data_partition_factor", codes[0])
 
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @parametrize("data_partition_factor", (1, 2))
+    @parametrize("epilogue_subtile", (1, 2, 4))
+    def test_blackwell_bmm_template(
+        self,
+        data_partition_factor: int,
+        epilogue_subtile: int,
+    ) -> None:
+        self._run_blackwell_bmm_template(
+            broadcast_b=False,
+            data_partition_factor=data_partition_factor,
+            epilogue_subtile=epilogue_subtile,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    def test_blackwell_bmm_template_broadcast_b(self) -> None:
+        self._run_blackwell_bmm_template(
+            broadcast_b=True,
+            data_partition_factor=1,
+            epilogue_subtile=1,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
     @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
     def test_blackwell_bmm_template_2cta_flat_output(self) -> None:
         bsz, m, k, n = 2, 256, 8193, 128
@@ -302,29 +320,28 @@ class TestMaxAutotune(TestCase):
             CUDABlackwellBMMTemplateConfigHeuristic
         ):
             def _get_template_configs_impl(self, kernel_inputs, op_name):
-                yield {
-                    "BLOCK_M": 128,
-                    "BLOCK_N": 128,
-                    "BLOCK_K": 64,
-                    "GROUP_M": 8,
-                    "num_stages": 4,
-                    "num_warps": 8,
-                    "EPILOGUE_SUBTILE": 1,
-                    "USE_META_WS": True,
-                    "WARP_SPECIALIZE": True,
-                    "FLATTEN": False,
-                    "DATA_PARTITION_FACTOR": 1,
-                    "SEPARATE_EPILOGUE_STORE": True,
-                    "TWO_CTAS": True,
-                    "ctas_per_cga": (2, 1, 1),
-                }
-
-            def get_extra_kwargs(self, kernel_inputs, op_name):
-                return {
-                    **super().get_extra_kwargs(kernel_inputs, op_name),
-                    "FLATTEN_OUTPUT": True,
-                    "tma_store": True,
-                }
+                for template_config in super()._get_template_configs_impl(
+                    kernel_inputs, op_name
+                ):
+                    if (
+                        template_config["BLOCK_M"] == 128
+                        and template_config["BLOCK_N"] == 128
+                    ):
+                        yield {
+                            **template_config,
+                            "BLOCK_K": 64,
+                            "num_stages": 4,
+                            "num_warps": 8,
+                            "EPILOGUE_SUBTILE": 1,
+                            "USE_META_WS": True,
+                            "FLATTEN": False,
+                            "DATA_PARTITION_FACTOR": 1,
+                            "TWO_CTAS": True,
+                            "ctas_per_cga": (2, 1, 1),
+                            "FLATTEN_OUTPUT": True,
+                            "tma_store": True,
+                        }
+                        return
 
         def lowering(a_node, b_node):
             choices = V.choices.get_template_configs(
@@ -362,7 +379,7 @@ class TestMaxAutotune(TestCase):
         self.assertIn("ctas_per_cga=(2, 1, 1)", codes[0])
         self.assertIn("make_tensor_descriptor(out_ptr0", codes[0])
 
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
     def test_blackwell_bmm_template_choice(self) -> None:
         bsz, m, k, n = 3, 256, 8193, 128
         a_storage = torch.randn(bsz, k, m, device=GPU_TYPE, dtype=torch.bfloat16)
@@ -382,7 +399,7 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
 
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
     def test_blackwell_bmm_template_rejects_unaligned_batch_base(self) -> None:
         bsz, m, k, n = 3, 128, 1025, 128
         a = (
