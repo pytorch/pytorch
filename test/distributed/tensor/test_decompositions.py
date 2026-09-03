@@ -148,7 +148,7 @@ class TestDecompSharding(TestCase):
         # binary_cross_entropy_with_logits
         check_no_strategy(aten.binary_cross_entropy_with_logits.default)
         input = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
-        target = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
+        target = d_empty(16, device_mesh=mesh, placements=[Shard(0)]).fill_(0.5)
         weight = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
         out = aten.binary_cross_entropy_with_logits.default(input, target, weight)
         self.assertEqual(out.placements, (Partial("avg"),))
