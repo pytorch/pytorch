@@ -20,6 +20,7 @@ from torch._dynamo.eval_frame import (
     _get_total_cache_entry_count,
 )
 from torch._dynamo.exc import FailOnRecompileLimitHit
+from torch._dynamo.types import FrameAction
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1874,6 +1875,76 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
         ids = [e.isolate_recompiles_id for e in entries]
         self.assertEqual(ids, sorted(ids))
+
+
+class FrameCacheTeardownTests(torch._dynamo.test_case.TestCase):
+    """reset_code tears a code object's C++ state down while Python may still
+    write to that same code object: the compiled function dies with its cache
+    entry, and a finalizer on it can reach Dynamo (extra_state.cpp,
+    ExtraStateHolder)."""
+
+    @staticmethod
+    def _action(fn):
+        strategy = torch._C._dynamo.eval_frame.get_code_exec_strategy(fn.__code__)
+        return strategy.cur_action
+
+    @staticmethod
+    def _compile_with_finalizer(callback):
+        # The transformed code is owned by the cache entry alone, so it dies,
+        # and the finalizer runs, while reset_code tears the state down.
+        def model(x):
+            return x + 1
+
+        torch.compile(model, backend="eager")(torch.randn(2))
+        entry = torch._dynamo.eval_frame._debug_get_cache_entry_list(model)[0]
+        weakref.finalize(entry.code, callback)
+        return model
+
+    def _frames_compiled(self, model):
+        cnt = torch._dynamo.testing.CompileCounter()
+        torch.compile(model, backend=cnt)(torch.randn(2))
+        return cnt.frame_count
+
+    def test_skip_code_written_during_reset_survives_it(self):
+        model = None
+        seen_during_teardown = []
+
+        def during_teardown():
+            torch._dynamo.eval_frame.skip_code(model.__code__)
+            seen_during_teardown.append(self._action(model))
+
+        model = self._compile_with_finalizer(during_teardown)
+        self.assertEqual(self._action(model), FrameAction.DEFAULT)
+        torch._dynamo.reset_code(model.__code__)
+        # The write landed on a state parked during the teardown, which every
+        # reader in that teardown already saw, and which reset_code installed
+        # once the old state was gone.
+        self.assertEqual(seen_during_teardown, [FrameAction.SKIP])
+        self.assertEqual(self._action(model), FrameAction.SKIP)
+        self.assertEqual(
+            len(torch._dynamo.eval_frame._debug_get_cache_entry_list(model)), 0
+        )
+        self.assertEqual(self._frames_compiled(model), 0)
+        torch._dynamo.reset_code(model.__code__)
+        self.assertEqual(self._action(model), FrameAction.DEFAULT)
+        self.assertEqual(self._frames_compiled(model), 1)
+
+    def test_reset_during_reset_drops_what_the_teardown_wrote(self):
+        model = None
+        seen_during_teardown = []
+
+        def during_teardown():
+            torch._dynamo.eval_frame.skip_code(model.__code__)
+            seen_during_teardown.append(self._action(model))
+            torch._dynamo.reset_code(model.__code__)
+            seen_during_teardown.append(self._action(model))
+
+        model = self._compile_with_finalizer(during_teardown)
+        torch._dynamo.reset_code(model.__code__)
+        # Last writer wins: the nested reset forgot the parked SKIP.
+        self.assertEqual(seen_during_teardown, [FrameAction.SKIP, FrameAction.DEFAULT])
+        self.assertEqual(self._action(model), FrameAction.DEFAULT)
+        self.assertEqual(self._frames_compiled(model), 1)
 
 
 instantiate_parametrized_tests(IsolateRecompilesTests)

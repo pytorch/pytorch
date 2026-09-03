@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import copyreg
 import dataclasses
 import functools
 import io
@@ -371,6 +372,26 @@ class ReconstructedByNewargs:
 
     def __getnewargs__(self):
         return (self.payload,)
+
+
+class CopyregReduced:
+    # copyreg.pickle registers the reducer from OUTSIDE the class, so no pickle
+    # hook is present on the class itself; _builds_its_own_pickle must still
+    # detect it via the dispatch table, or a pruned attribute reaches the
+    # validating rebuild as the sentinel instead of the value guarded siblings
+    # of it were traced against.
+    def __init__(self, tag, payload):
+        if not isinstance(payload, CarriedPayload):
+            raise TypeError(f"payload must be a CarriedPayload, got {payload}")
+        self.tag = tag
+        self.payload = payload
+
+
+def _rebuild_copyreg(tag, payload):
+    return CopyregReduced(tag, payload)
+
+
+copyreg.pickle(CopyregReduced, lambda o: (_rebuild_copyreg, (o.tag, o.payload)))
 
 
 class Point(NamedTuple):
@@ -1170,6 +1191,23 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 self._test_check_fn(
                     ref, loaded, {"x": torch.randn(3), "obj": obj}, True
                 )
+
+    def test_guard_on_a_copyreg_registered_class(self):
+        # A reducer registered with copyreg.pickle decides what its arguments
+        # mean, exactly as a __reduce__ on the class would, so pruning a sibling
+        # attribute would hand the rebuild the sentinel. It must be kept whole.
+        from torch._dynamo.guards import _builds_its_own_pickle
+
+        self.assertTrue(_builds_its_own_pickle(CopyregReduced))
+        obj = CopyregReduced("tag", CarriedPayload(3))
+
+        def fn(x):
+            if obj.tag == "tag":
+                return x + 1
+            return x - 1
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "obj": obj}, True)
 
     def test_guard_on_a_namedtuple_subclass_with_an_unpicklable_extra(self):
         # Every namedtuple has a __getnewargs__, but it returns the ITEMS, which

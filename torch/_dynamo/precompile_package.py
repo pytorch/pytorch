@@ -812,8 +812,8 @@ class _PrecompileBackend:
             inner, "backend_ctx_ctor", contextlib.nullcontext
         )
         # Rendering a subgraph as source needs the graph, which only exists
-        # here. Kept for the REAL capture only: the guard probe throws its
-        # graphs away, and rendering is a second full lowering.
+        # here. Kept only where it will be rendered: rendering is a second full
+        # lowering, and retaining deepcopies every compiled graph.
         self._keep_graphs = keep_graphs
         self.graphs: dict[str, tuple[torch.fx.GraphModule, list[Any]]] = {}
         # Serving an INSTALLED artifact answers a guard miss by compiling,
@@ -1556,8 +1556,8 @@ class PrecompileSession:
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
         self._training = training
-        # On for the real capture; the guard probe leaves it off so it does not
-        # pay for a lowering whose source is thrown away.
+        # Off unless the subgraphs will be rendered: retaining them deepcopies
+        # every compiled graph for the life of the session.
         self._keep_graphs = keep_graphs
         self._backend_obj: _PrecompileBackend | None = None
         self._policy_dropped_guards: set[tuple[str, str]] = set()
@@ -2063,7 +2063,7 @@ class PrecompileSession:
         from torch._dynamo.output_graph import OutputGraphCommon
         from torch._dynamo.package import load_guards_state, SerializedCode
 
-        keep_only = varying_guard_slots(self._guard_sets)
+        varying = varying_guard_slots(self._guard_sets)
         dropped: set[tuple[str, str]] = set()
         self._drifted_guards.clear()
 
@@ -2084,7 +2084,7 @@ class PrecompileSession:
             return (
                 guard_type in kept_types
                 or any(d in kept_types for d in derived)
-                or (guard_type, _normalize(name)) in keep_only
+                or (guard_type, _normalize(name)) in varying
             )
 
         def policy(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
@@ -2218,7 +2218,7 @@ class PrecompileSession:
         """
         What each ``example_inputs`` call returned, in order.
 
-        Only populated when ``_collect_results`` was set before ``__enter__``;
+        Only populated when the session was built with ``collect_results=True``;
         otherwise empty, because a session that outlives its calls must not pin
         the caller's output tensors.
         """
@@ -2655,7 +2655,7 @@ class PrecompileSession:
             backends,
             self._with_unrendered(summary),
             self._backend,
-            _entry_fn_of(self._fn),
+            self._entry_fn,
             rendered,
             grad_enabled=self._capture_grad_mode(),
         )
@@ -3171,6 +3171,13 @@ def _check_artifact_matches(
 def _entry_fn_of(fn: object) -> Callable[..., object]:
     if not callable(fn):
         raise TypeError(f"expected a callable or nn.Module, got {type(fn).__name__}")
+    from .eval_frame import innermost_fn
+
+    # A torch._dynamo.disable wrapper has the inner function's name on a
+    # (*args, **kwargs) signature of its own, and Dynamo compiles the inner
+    # function; the entry, its varargs check and the binding written into the
+    # artifact all have to be that same function.
+    fn = innermost_fn(fn)
     if not hasattr(fn, "__code__"):
         raise TypeError(
             f"expected a function or nn.Module, got {type(fn).__name__}, which "
