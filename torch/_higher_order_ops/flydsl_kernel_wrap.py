@@ -299,9 +299,43 @@ def invoke_flydsl_launcher(
     registration.launcher(*positional_args, **keyword_args)
 
 
+class FlyDSLPythonLauncher:
+    def __init__(self, launcher_idx: int, call_spec_idx: int) -> None:
+        self.launcher_idx = launcher_idx
+        self.call_spec_idx = call_spec_idx
+
+    def run(self, *runtime_args: Any, stream: int | None = None) -> None:
+        registration = flydsl_launcher_side_table.get_registration(self.launcher_idx)
+        constant_args = flydsl_launcher_side_table.get_call_spec(self.call_spec_idx)
+        runtime_args_iter = iter(runtime_args)
+        args = []
+        for idx in range(len(registration.signature.parameters)):
+            if idx in constant_args:
+                args.append(constant_args[idx])
+                continue
+            try:
+                args.append(next(runtime_args_iter))
+            except StopIteration as exc:
+                raise TypeError(
+                    "not enough runtime arguments for FlyDSL launcher"
+                ) from exc
+        try:
+            next(runtime_args_iter)
+        except StopIteration:
+            pass
+        else:
+            raise TypeError("too many runtime arguments for FlyDSL launcher")
+
+        if stream is None:
+            invoke_flydsl_launcher(registration, tuple(args))
+            return
+        with torch.cuda.stream(torch.cuda.ExternalStream(stream)):
+            invoke_flydsl_launcher(registration, tuple(args))
+
+
 class FlyDSLKernelWrapperMutation(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("flydsl_kernel_wrapper_mutation", cacheable=True)
+        super().__init__("flydsl_kernel_wrapper_mutation", cacheable=False)
 
     def __call__(
         self,
@@ -320,7 +354,7 @@ class FlyDSLKernelWrapperMutation(HigherOrderOperator):
 
 class FlyDSLKernelWrapperFunctional(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("flydsl_kernel_wrapper_functional", cacheable=True)
+        super().__init__("flydsl_kernel_wrapper_functional", cacheable=False)
 
     def __call__(
         self,
