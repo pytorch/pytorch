@@ -9,14 +9,15 @@ from torch._inductor import config
 from torch._inductor.heuristics.registry import register_template_heuristic
 
 from ...ir import get_free_symbols
-from ...kernel.decompose_k import (
-    BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
-    blackwell_decompose_k_subgraph_template,
-)
+from ...kernel.decompose_k import BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS
 from ...kernel.mm import decompose_k_subgraph_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
-from ...runtime.hints import DeviceProperties
-from ...utils import get_k_splits
+from ...utils import (
+    get_k_splits,
+    use_aten_gemm_kernels,
+    use_triton_blackwell_tma_template,
+    use_triton_template,
+)
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
@@ -71,79 +72,53 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
 
         m, n, k = kernel_inputs.mnk_symbolic()
         k_splits = get_k_splits(m, n, k)
-        for k_split in k_splits:
-            if not V.graph.sizevars.statically_known_true(
+        exact_k_splits = [
+            k_split
+            for k_split in k_splits
+            if V.graph.sizevars.statically_known_true(
                 sympy.Eq(sympy.Mod(k, k_split), 0)
-            ):
-                continue
-            yield {"k_split": k_split}
+            )
+        ]
 
+        if use_aten_gemm_kernels():
+            for k_split in exact_k_splits:
+                yield {"k_split": k_split, "bmm_backend": "aten"}
 
-@register_template_heuristic(
-    blackwell_decompose_k_subgraph_template.uid,
-    None,
-    op_name="mm",
-)
-class EmptyBlackwellDecomposeKConfigHeuristics(TemplateConfigHeuristics):
-    """Skip the experimental partial template outside NVIDIA CUDA."""
-
-
-@register_template_heuristic(
-    blackwell_decompose_k_subgraph_template.uid,
-    "cuda",
-    op_name="mm",
-)
-class BlackwellDecomposeKConfigHeuristics(TemplateConfigHeuristics):
-    """Generate one bounded 1CTA and one bounded 2CTA complete-plan seed."""
-
-    def _get_template_configs_impl(
-        self,
-        kernel_inputs: KernelInputs,
-        op_name: str,
-    ) -> Generator[dict[str, Any], None, None]:
-        if not config.triton.enable_blackwell_decompose_k:
-            return
-        if not isinstance(kernel_inputs, MMKernelInputs):
-            raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
-        if any(
-            len(get_free_symbols(value, unbacked_only=True)) > 0
-            for value in (
-                *kernel_inputs.shapes_symbolic(),
-                *kernel_inputs.strides_symbolic(),
+        mat1, mat2 = kernel_inputs.mat1mat2()
+        layout = kernel_inputs.output_layout()
+        if not (
+            config.triton.enable_blackwell_decompose_k
+            and use_triton_template(layout, check_max_autotune=True)
+            and use_triton_blackwell_tma_template(
+                mat1,
+                mat2,
+                output_layout=layout,
+                add_guards=True,
             )
         ):
             return
 
-        device = DeviceProperties.create(kernel_inputs.device())
-        if device.type != "cuda" or device.major != 10:
-            return
-        m_sym, n_sym, k_sym = kernel_inputs.mnk_symbolic()
-        m, n, k = int(m_sym), int(n_sym), int(k_sym)
-
+        m_hint, n_hint, k_hint = map(int, (m, n, k))
         config_indices = [0, 3]
-        if m > 128:
-            config_indices.extend((1, 4) if n <= 128 else (2, 5))
+        if m_hint > 128:
+            config_indices.extend((1, 4) if n_hint <= 128 else (2, 5))
 
-        for config_index in config_indices:
-            partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
-            m_tiles = math.ceil(m / partial_config.block_m)
-            if partial_config.two_ctas:
-                m_tiles = math.ceil(m_tiles / 2) * 2
-            output_tiles = m_tiles * math.ceil(n / partial_config.block_n)
-            waves = 1 if partial_config.two_ctas else 2
-            k_split = max(
-                2,
-                round(waves * device.multi_processor_count / output_tiles),
-            )
-            k_split = min(k_split, k // partial_config.block_k)
-            while k_split >= 2:
+        for k_split in exact_k_splits:
+            for config_index in config_indices:
+                partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
+                m_tiles = math.ceil(m_hint / partial_config.block_m)
+                if partial_config.two_ctas:
+                    m_tiles = math.ceil(m_tiles / 2) * 2
                 k_part = (
-                    math.ceil(math.ceil(k / k_split) / partial_config.block_k)
+                    math.ceil(math.ceil(k_hint / k_split) / partial_config.block_k)
                     * partial_config.block_k
                 )
-                workspace_bytes = k_split * m_tiles * partial_config.block_m * n * 4
-                if (k_split - 1) * k_part < k and workspace_bytes <= 128 * 1024**2:
-                    break
-                k_split -= 1
-            if k_split >= 2:
-                yield {"k_split": k_split, "config_index": config_index}
+                workspace_bytes = (
+                    k_split * m_tiles * partial_config.block_m * n_hint * 4
+                )
+                if (k_split - 1) * k_part < k_hint and workspace_bytes <= 128 * 1024**2:
+                    yield {
+                        "k_split": k_split,
+                        "bmm_backend": "triton",
+                        "bmm_config_index": config_index,
+                    }
