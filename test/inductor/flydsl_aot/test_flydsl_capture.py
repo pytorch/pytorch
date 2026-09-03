@@ -575,12 +575,159 @@ class FlyDSLCaptureTest(TestCase):
         )
         self.assertEqual(1, len(custom_op_nodes))
 
-        decomposed = exported.run_decompositions()
+        preserved = exported.run_decompositions(
+            decomp_table={},
+            decompose_custom_triton_ops=True,
+        )
+        self.assertEqual(
+            1,
+            len(
+                preserved.graph_module.graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops.test_flydsl_capture.export.default,
+                )
+            ),
+        )
+        self.assertEqual(
+            [],
+            preserved.graph_module.graph.find_nodes(
+                op="call_function",
+                target=flydsl_kernel_wrapper_functional,
+            ),
+        )
+
+        with torch._functorch.config.patch(decompose_custom_flydsl_ops=False):
+            decomposed = exported.run_decompositions(
+                decomp_table={},
+                decompose_custom_triton_ops=False,
+                decompose_custom_flydsl_ops=True,
+            )
         flydsl_nodes = decomposed.graph_module.graph.find_nodes(
             op="call_function",
             target=flydsl_kernel_wrapper_functional,
         )
         self.assertEqual(1, len(flydsl_nodes))
+
+    def test_flydsl_op_decomposes_for_torch_compile_by_default(self):
+        from torch._dynamo.testing import AotEagerAndRecordGraphs
+
+        captured = torch.library.wrap_flydsl(_launcher, mutates_args={"out"})
+
+        @torch.library.flydsl_op(
+            "test_flydsl_capture::compile_default",
+            mutates_args=(),
+        )
+        def flydsl_copy(inp: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(inp)
+            captured(out, inp, inp.numel())
+            return out
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                return flydsl_copy(inp)
+
+        backend = AotEagerAndRecordGraphs()
+        inp = torch.randn(8)
+
+        def invoke(_, args):
+            args[0].copy_(args[1])
+
+        with mock.patch(
+            "torch._higher_order_ops.flydsl_kernel_wrap.invoke_flydsl_launcher",
+            side_effect=invoke,
+        ):
+            actual = torch.compile(
+                Model(),
+                backend=backend,
+                fullgraph=True,
+            )(inp)
+
+        torch.testing.assert_close(actual, inp)
+        self.assertEqual(1, len(backend.fw_graphs))
+        graph = backend.fw_graphs[0].graph
+        self.assertEqual(
+            1,
+            len(
+                graph.find_nodes(
+                    op="call_function",
+                    target=flydsl_kernel_wrapper_functional,
+                )
+            ),
+        )
+        self.assertEqual(
+            [],
+            graph.find_nodes(
+                op="call_function",
+                target=torch.ops.test_flydsl_capture.compile_default.default,
+            ),
+        )
+
+    def test_flydsl_op_preserved_in_joint_export(self):
+        from torch.export.experimental import _export_forward_backward
+
+        captured = torch.library.wrap_flydsl(_launcher, mutates_args={"out"})
+
+        @torch.library.flydsl_op(
+            "test_flydsl_capture::joint_export",
+            mutates_args=(),
+        )
+        def flydsl_copy(inp: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(inp)
+            captured(out, inp, inp.numel())
+            return out
+
+        def backward(ctx, grad):
+            return grad
+
+        flydsl_copy.register_autograd(backward)
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                return flydsl_copy(inp).sum()
+
+        exported = torch.export.export(
+            Model(),
+            (torch.randn(8, requires_grad=True),),
+        )
+        joint = _export_forward_backward(exported)
+
+        self.assertEqual(
+            1,
+            len(
+                joint.graph_module.graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops.test_flydsl_capture.joint_export.default,
+                )
+            ),
+        )
+        self.assertEqual(
+            [],
+            joint.graph_module.graph.find_nodes(
+                op="call_function",
+                target=flydsl_kernel_wrapper_functional,
+            ),
+        )
+
+        decomposed = joint.run_decompositions(
+            decomp_table={},
+            decompose_custom_flydsl_ops=True,
+        )
+        self.assertEqual(
+            [],
+            decomposed.graph_module.graph.find_nodes(
+                op="call_function",
+                target=torch.ops.test_flydsl_capture.joint_export.default,
+            ),
+        )
+        self.assertEqual(
+            1,
+            len(
+                decomposed.graph_module.graph.find_nodes(
+                    op="call_function",
+                    target=flydsl_kernel_wrapper_functional,
+                )
+            ),
+        )
 
     def test_flydsl_op_preserves_mutation_when_decomposed(self):
         captured_launcher = torch.library.wrap_flydsl(
@@ -602,7 +749,7 @@ class FlyDSLCaptureTest(TestCase):
                 return out
 
         exported = torch.export.export(Model(), (torch.randn(8),))
-        decomposed = exported.run_decompositions()
+        decomposed = exported.run_decompositions(decompose_custom_flydsl_ops=True)
 
         nodes = decomposed.graph_module.graph.find_nodes(
             op="call_function",
@@ -647,7 +794,7 @@ class FlyDSLCaptureTest(TestCase):
             (torch.randn(4, 8),),
             dynamic_shapes=({0: batch},),
         )
-        decomposed = exported.run_decompositions()
+        decomposed = exported.run_decompositions(decompose_custom_flydsl_ops=True)
 
         flydsl_nodes = decomposed.graph_module.graph.find_nodes(
             op="call_function",

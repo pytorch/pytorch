@@ -335,6 +335,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     python_decomp_table: dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: int | None,
     decompose_custom_triton_ops,
+    decompose_custom_flydsl_ops=False,
 ):
     from torch._export.passes.lift_constants_pass import _materialize_and_lift_constants
     from torch._functorch.aot_autograd import aot_export_module
@@ -342,6 +343,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _disable_custom_triton_op_functional_decomposition,
         _export_to_aten_ir,
         _ignore_backend_decomps,
+        _set_custom_flydsl_op_functional_decomposition,
         _verify_nn_module_stack,
         _verify_placeholder_names,
         _verify_stack_trace,
@@ -489,6 +491,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     decomp_table=python_decomp_table,
                     _prettify_placeholder_names=False,
                     decompose_custom_triton_ops=decompose_custom_triton_ops,
+                    decompose_custom_flydsl_ops=decompose_custom_flydsl_ops,
                 )
 
                 # aten_export_artifact.constants contains only fake script objects, we need to map them back
@@ -601,6 +604,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         fake_mode_ctx,
         _override_composite_implicit_decomp(cia_to_decomp),
         custom_triton_ops_decomposition_ctx(),
+        _set_custom_flydsl_op_functional_decomposition(decompose_custom_flydsl_ops),
     ):
         gm, graph_signature = aot_export_module(
             ep.graph_module,
@@ -1018,6 +1022,7 @@ def _decompose_exported_program(
     python_decomp_table: dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: int | None,
     decompose_custom_triton_ops: bool,
+    decompose_custom_flydsl_ops: bool = False,
 ):
     (
         gm,
@@ -1030,6 +1035,7 @@ def _decompose_exported_program(
         python_decomp_table=python_decomp_table,
         joint_loss_index=joint_loss_index,
         decompose_custom_triton_ops=decompose_custom_triton_ops,
+        decompose_custom_flydsl_ops=decompose_custom_flydsl_ops,
     )
 
     # The signatures of ep.module_call_graph refer to input / output nodes of
@@ -1516,6 +1522,7 @@ class ExportedProgram:
         self,
         decomp_table: dict[torch._ops.OperatorBase, Callable] | None = None,
         decompose_custom_triton_ops: bool = False,
+        decompose_custom_flydsl_ops: bool = False,
     ) -> "ExportedProgram":
         """
         Run a set of decompositions on the exported program and returns a new
@@ -1530,6 +1537,10 @@ class ExportedProgram:
              An optional argument that specifies decomp behaviour for Aten ops
              (1) If None, we decompose to core aten decompositions
              (2) If empty, we don't decompose any operator
+            decompose_custom_flydsl_ops:
+             Whether to decompose :func:`torch.library.flydsl_op` operators into
+             their wrapped FlyDSL launchers. Defaults to ``False`` independently
+             of ``decompose_custom_triton_ops``.
 
 
         Some examples:
@@ -1580,6 +1591,7 @@ class ExportedProgram:
             python_decomp_table=python_decomp_table,
             joint_loss_index=None,
             decompose_custom_triton_ops=decompose_custom_triton_ops,
+            decompose_custom_flydsl_ops=decompose_custom_flydsl_ops,
         )
 
     def _transform_do_not_use(self, *passes: PassType) -> "ExportedProgram":
