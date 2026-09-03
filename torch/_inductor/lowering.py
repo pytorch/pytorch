@@ -86,6 +86,7 @@ from .ir import (
     View,
 )
 from .ops_handler import register_pointwise_op
+from .runtime.runtime_utils import next_power_of_2
 from .utils import (
     ceildiv,
     convert_symint_to_expr,
@@ -8436,6 +8437,14 @@ def mode_default(self, dim=-1, keepdim=False):
     return mode_vals, mode_idxs
 
 
+# Matches the top-k persistent block cap in ir.Sort.create. The selection
+# costs about k * block lanes of work per row; past 2**16 the ATen radix
+# select is faster.
+_TRITON_TOPK_MAX_WIDTH = 16384
+_TRITON_TOPK_MAX_K = 128
+_TRITON_TOPK_MAX_WORK = 2**16
+
+
 def _use_triton_topk(x, k, dim) -> bool:
     """Whether to select top-k in a fusible sort kernel instead of ATen."""
     shape = x.get_size()
@@ -8452,10 +8461,18 @@ def _use_triton_topk(x, k, dim) -> bool:
     ):
         return False
     k, width = int(k), int(shape[dim])
+    capability = torch.cuda.get_device_capability(device)
+    # On SM100+ the in-tree CuTeDSL aten::topk override (torch/_native/ops/topk)
+    # serves fp32 k=16 rows of 512 to 2048 lanes faster than this kernel.
+    native_wins = (
+        x.dtype == torch.float32 and k == 16 and width >= 512 and capability >= (10, 0)
+    )
     return (
-        2 <= k <= 16
-        and k <= width <= 256
-        and torch.cuda.get_device_capability(device) >= (9, 0)
+        2 <= k <= _TRITON_TOPK_MAX_K
+        and k <= width <= _TRITON_TOPK_MAX_WIDTH
+        and k * next_power_of_2(width) <= _TRITON_TOPK_MAX_WORK
+        and capability >= (9, 0)
+        and not native_wins
         and V.graph.sizevars.optimization_hint(sympy_product(shape[:dim])) > 0
     )
 
