@@ -77,6 +77,7 @@ GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
 GH_OUTPUT_KEY_AMI = "runner-ami"
 GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
 GH_OUTPUT_KEY_AMD_SANDBOX_LABEL_TYPE = "amd-sandbox-label-type"
+GH_OUTPUT_KEY_SCALE_CONFIG_LABEL_TYPE = "scale-config-label-type"
 OPT_OUT_LABEL = "no-runner-experiments"
 
 SETTING_EXPERIMENTS = "experiments"
@@ -91,6 +92,16 @@ LF_FLEET_EXPERIMENT = "lf"
 META_LABEL_PREFIX = "mt-"
 META_CANARY_LABEL_PREFIX = "c-mt-"
 LF_LABEL_PREFIX = "lf-"
+
+# Scale-config fleets (the EC2 autoscaler runners declared in test-infra's
+# {,canary-,lf-,lf-canary-}scale-config.yml) name their labels with a dot
+# scheme -- "", "lf.", "lf.c." -- and hang per-runner AMI `variants:` off the
+# experiment name, e.g. the wincanary variant of lf.windows.12xlarge is
+# reached as wincanary.lf.windows.12xlarge. Windows never moved to ARC, so it
+# needs this scheme rather than the ARC prefixes above; it is published on its
+# own output so ARC consumers keep seeing mt-/c-mt-/lf- unchanged.
+SCALE_CONFIG_LF_PREFIX = "lf"
+SCALE_CONFIG_CANARY_SUFFIX = ".c"
 
 AMD_SANDBOX_EXPERIMENT = "amd-sandbox"
 AMD_SANDBOX_LABEL_PREFIX = "amd-sandbox-"
@@ -122,6 +133,9 @@ class RunnerPrefixResult(NamedTuple):
     # Dedicated prefix for the amd-sandbox experiment, exposed via its own output
     # (amd-sandbox-label-type) instead of being folded into ``prefix``.
     amd_sandbox_prefix: str = ""
+    # Dot-scheme prefix for the scale-config (EC2) fleets, exposed via
+    # scale-config-label-type. Empty means the default Meta scale-config fleet.
+    scale_config_prefix: str = ""
 
 
 class Settings(NamedTuple):
@@ -531,6 +545,9 @@ def get_runner_prefix(
 
     lf_enabled = False
     amd_sandbox_prefix = ""
+    # Non-fleet experiments enabled for this run, in the order encountered.
+    # These name scale-config AMI `variants:` (e.g. wincanary).
+    scale_config_experiments: list[str] = []
     for experiment_name, experiment_settings in settings.experiments.items():
         if not experiment_settings.all_branches and is_exception_branch(branch):
             log.info(
@@ -653,9 +670,12 @@ def get_runner_prefix(
                 lf_enabled = True
                 log.info("lf experiment enabled. Using the Linux Foundation fleet.")
             else:
+                # Not an ARC fleet selector, but it may name a scale-config AMI
+                # variant, which is how Windows canary AMIs are reached.
+                scale_config_experiments.append(experiment_name)
                 log.info(
-                    f"Experiment '{experiment_name}' enabled but no longer affects "
-                    "the runner label prefix; ignoring."
+                    f"Experiment '{experiment_name}' enabled; it does not affect the "
+                    "ARC label prefix but is offered on scale-config-label-type."
                 )
 
     # Fleet selection: the Meta (OSDC) fleet is the default; the lf experiment
@@ -664,7 +684,28 @@ def get_runner_prefix(
         prefix = LF_LABEL_PREFIX
     else:
         prefix = META_CANARY_LABEL_PREFIX if is_canary else META_LABEL_PREFIX
-    return RunnerPrefixResult(prefix=prefix, amd_sandbox_prefix=amd_sandbox_prefix)
+
+    # Scale-config scheme, assembled fleet-first and dot-joined with a trailing
+    # dot, e.g. "" / "lf." / "lf.c." / "wincanary." / "lf.wincanary.".
+    if len(scale_config_experiments) > 1:
+        log.error(
+            "Only a fleet and one other experiment can be enabled for a job at any "
+            f"time. Enabling {scale_config_experiments[0]} and ignoring the rest, "
+            f"which are {', '.join(scale_config_experiments[1:])}"
+        )
+        del scale_config_experiments[1:]
+    if lf_enabled:
+        fleet = SCALE_CONFIG_LF_PREFIX + (SCALE_CONFIG_CANARY_SUFFIX if is_canary else "")
+        scale_config_experiments.insert(0, fleet)
+    scale_config_prefix = (
+        ".".join(scale_config_experiments) + "." if scale_config_experiments else ""
+    )
+
+    return RunnerPrefixResult(
+        prefix=prefix,
+        amd_sandbox_prefix=amd_sandbox_prefix,
+        scale_config_prefix=scale_config_prefix,
+    )
 
 
 def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -> str:
@@ -728,6 +769,7 @@ def main() -> None:
 
     runner_label_prefix = META_LABEL_PREFIX
     amd_sandbox_label_prefix = ""
+    scale_config_label_prefix = ""
 
     # no-runner-experiments means "use Meta, not LF": opt out of the lf
     # experiment, so the run stays on the default Meta fleet.
@@ -770,6 +812,7 @@ def main() -> None:
         )
         runner_label_prefix = result.prefix
         amd_sandbox_label_prefix = result.amd_sandbox_prefix
+        scale_config_label_prefix = result.scale_config_prefix
 
     except Exception as e:
         log.error(
@@ -778,6 +821,7 @@ def main() -> None:
 
     set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
     set_github_output(GH_OUTPUT_KEY_AMD_SANDBOX_LABEL_TYPE, amd_sandbox_label_prefix)
+    set_github_output(GH_OUTPUT_KEY_SCALE_CONFIG_LABEL_TYPE, scale_config_label_prefix)
 
 
 if __name__ == "__main__":
