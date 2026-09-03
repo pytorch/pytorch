@@ -48,6 +48,7 @@ from torch._inductor.heuristics.template.triton import (
     CUDAAddmmPersistentTMATemplateConfigHeuristic,
     CUDAAddMMTemplateConfigHeuristic,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+    CUDABlackwellBMMTemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAMMTemplateConfigHeuristic,
     CUDAPersistentTMATemplateConfigHeuristic,
@@ -58,10 +59,8 @@ from torch._inductor.heuristics.template.triton import (
     XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
-from torch._inductor.kernel.bmm import (
-    append_blackwell_bmm_choice,
-    BlackwellBMMConfig,
-)
+from torch._inductor.kernel.bmm import blackwell_ws_persistent_tma_bmm_template
+from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.lowering import lowerings
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.runtime.hints import DeviceProperties
@@ -172,16 +171,6 @@ def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return a.new_empty((a.shape[0], a.shape[1], b.shape[2]))
 
 
-@torch.library.custom_op("inductor_test::blackwell_bmm_flat", mutates_args={})
-def blackwell_bmm_flat(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    return torch.bmm(a, b).flatten(0, 1)
-
-
-@blackwell_bmm_flat.register_fake
-def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    return a.new_empty((a.shape[0] * a.shape[1], b.shape[2]))
-
-
 def benchmark_choice(choice, args, out, expected_out, timings):
     result = choice.benchmark(*args, out=out)
     if expected_out is not None:
@@ -214,9 +203,13 @@ class TestMaxAutotune(TestCase):
 
     @requires_sm100
     @parametrize("broadcast_b", (False, True))
+    @parametrize("data_partition_factor", (1, 2))
     @parametrize("epilogue_subtile", (1, 2, 4))
     def test_blackwell_bmm_template(
-        self, broadcast_b: bool, epilogue_subtile: int
+        self,
+        broadcast_b: bool,
+        data_partition_factor: int,
+        epilogue_subtile: int,
     ) -> None:
         bsz, m, k, n = 3, 256, 8193, 128
         a_storage = torch.randn(bsz, k, m, device=GPU_TYPE, dtype=torch.bfloat16)
@@ -227,28 +220,38 @@ class TestMaxAutotune(TestCase):
         else:
             b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
 
-        template_config = BlackwellBMMConfig(
-            block_m=128,
-            block_n=128,
-            block_k=128,
-            num_stages=3,
-            epilogue_subtile=epilogue_subtile,
-        )
+        class TestBlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
+            def _get_template_configs_impl(self, kernel_inputs, op_name):
+                for template_config in super()._get_template_configs_impl(
+                    kernel_inputs, op_name
+                ):
+                    if (
+                        template_config["BLOCK_M"] == 128
+                        and template_config["BLOCK_N"] == 128
+                    ):
+                        yield {
+                            **template_config,
+                            "DATA_PARTITION_FACTOR": data_partition_factor,
+                            "EPILOGUE_SUBTILE": epilogue_subtile,
+                        }
+                        return
 
         def lowering(a_node, b_node):
-            layout = FixedLayout(
-                a_node.get_device(),
-                a_node.get_dtype(),
-                [bsz, m, n],
-                [m * n, n, 1],
-            )
-            choices = []
-            append_blackwell_bmm_choice(
-                choices, (a_node, b_node), layout, config=template_config
+            choices = V.choices.get_template_configs(
+                MMKernelInputs([a_node, b_node]),
+                [blackwell_ws_persistent_tma_bmm_template],
+                "bmm",
             )
             return choices[0].output_node()
 
         with (
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[
+                    (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
+                ],
+                override_heuristic_class=TestBlackwellBMMHeuristic,
+            ),
             mock.patch.dict(
                 lowerings,
                 {torch.ops.inductor_test.blackwell_bmm.default: lowering},
@@ -264,56 +267,17 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
         self.assertIn("make_tensor_descriptor", codes[0])
         self.assertNotIn("two_ctas=True", codes[0])
-
-    @requires_sm100
-    @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
-    def test_blackwell_bmm_template_2cta_flat_output(self) -> None:
-        bsz, m, k, n = 2, 256, 8193, 128
-        a_storage = torch.randn(bsz, k, m, device=GPU_TYPE, dtype=torch.bfloat16)
-        a = a_storage.transpose(1, 2)
-        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-        template_config = BlackwellBMMConfig(
-            block_m=128,
-            block_n=128,
-            block_k=64,
-            num_stages=4,
-            epilogue_subtile=1,
-            two_ctas=True,
+        self.assertIn(
+            f"EPILOGUE_SUBTILE : tl.constexpr = {epilogue_subtile}", codes[0]
         )
-
-        def lowering(a_node, b_node):
-            layout = FixedLayout(
-                a_node.get_device(),
-                a_node.get_dtype(),
-                [bsz * m, n],
-                [n, 1],
+        if meta_ws_enabled():
+            self.assertIn(
+                f"DATA_PARTITION_FACTOR : tl.constexpr = {data_partition_factor}",
+                codes[0],
             )
-            choices = []
-            append_blackwell_bmm_choice(
-                choices, (a_node, b_node), layout, config=template_config
-            )
-            return choices[0].output_node()
-
-        with (
-            mock.patch.dict(
-                lowerings,
-                {torch.ops.inductor_test.blackwell_bmm_flat.default: lowering},
-            ),
-            config.patch(
-                compile_threads=1,
-                **{"triton.enable_template_tma_store": True},
-            ),
-        ):
-            actual, codes = run_and_get_code(
-                torch.compile(blackwell_bmm_flat, fullgraph=True), a, b
-            )
-
-        torch.testing.assert_close(
-            actual.view(bsz, m, n), torch.bmm(a, b), atol=1e-2, rtol=1e-2
-        )
-        self.assertIn("TWO_CTAS : tl.constexpr = True", codes[0])
-        self.assertIn("ctas_per_cga=(2, 1, 1)", codes[0])
-        self.assertIn("make_tensor_descriptor(out_ptr0", codes[0])
+            self.assertIn("SEPARATE_EPILOGUE_STORE : tl.constexpr = True", codes[0])
+        else:
+            self.assertNotIn("data_partition_factor", codes[0])
 
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))

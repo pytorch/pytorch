@@ -36,15 +36,13 @@
 
     start_pid = tl.program_id(0)
     grid_m = tl.cdiv(M, BLOCK_M)
-    {%- if TWO_CTAS %}
-    grid_m = (grid_m + 1) // 2 * 2
-    {%- endif %}
     grid_n = tl.cdiv(N, BLOCK_N)
     num_tiles = grid_m * grid_n
     num_pid_in_group = GROUP_M * grid_n
     k_tiles = tl.cdiv(K, BLOCK_K)
     tile_id_c = start_pid - NUM_SMS
 
+    {%- if USE_META_WS %}
     for tile_id in tl.range(
         start_pid,
         num_tiles,
@@ -54,6 +52,15 @@
         data_partition_factor=DATA_PARTITION_FACTOR,
         separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
     ):
+    {%- else %}
+    for tile_id in tl.range(
+        start_pid,
+        num_tiles,
+        NUM_SMS,
+        flatten=FLATTEN,
+        warp_specialize=WARP_SPECIALIZE,
+    ):
+    {%- endif %}
         pid_m, pid_n = _blackwell_bmm_pid(
             tile_id, num_pid_in_group, grid_m, GROUP_M
         )
@@ -72,7 +79,6 @@
                 a if A_ROW_MAJOR else a.T,
                 b if B_ROW_MAJOR else b.T,
                 allow_tf32=ALLOW_TF32,
-                two_ctas=TWO_CTAS,
             )
 
         tile_id_c += NUM_SMS
@@ -86,15 +92,6 @@
         )
         for i in tl.static_range(EPILOGUE_SUBTILE):
             offs_cn_i = offs_cn + i * (BLOCK_N // EPILOGUE_SUBTILE)
-            {%- if FLATTEN_OUTPUT %}
-            {{store_output(
-                ("batch * M + offs_cm", "offs_cn_i"),
-                "subtiles[i]",
-                indent_width=12,
-                val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE"),
-                block_indexing=True
-            )}}
-            {%- else %}
             rm = offs_cm + tl.arange(0, BLOCK_M)[:, None]
             rn = offs_cn_i + tl.arange(0, BLOCK_N // EPILOGUE_SUBTILE)[None, :]
             mask = (rm < M) & (rn < N)
@@ -105,7 +102,6 @@
                 indent_width=12,
                 val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE")
             )}}
-            {%- endif %}
 
 
 @triton.jit
