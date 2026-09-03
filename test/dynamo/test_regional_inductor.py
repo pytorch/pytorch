@@ -638,6 +638,47 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
             body.append(line)
         return "\n".join(body)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        fx_graph_cache=False,
+        fx_graph_remote_cache=False,
+        max_autotune=False,
+    )
+    def test_nested_region_inductor_config_max_autotune(self):
+        from torch._inductor.utils import add_scheduler_init_hook
+        from torch._inductor.virtualized import V
+
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"max_autotune": True}
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def g(x):
+            return torch.sin(x) + 1
+
+        def fn(x):
+            return g(torch.cos(x)) * 2
+
+        scheduler_max_autotune = {}
+
+        def record_max_autotune(_scheduler, _nodes):
+            scheduler_max_autotune[V.graph.name] = torch._inductor.config.max_autotune
+
+        with add_scheduler_init_hook(record_max_autotune):
+            x = torch.randn(10)
+            result = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+
+        self.assertEqual(result, fn(x))
+        self.assertFalse(scheduler_max_autotune[None])
+        self.assertIn(
+            True,
+            [
+                max_autotune
+                for name, max_autotune in scheduler_max_autotune.items()
+                if name is not None
+            ],
+        )
+
     @requires_gpu_and_triton
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_nested_region_inductor_config_persistent_reduction_codegen(self):
@@ -1174,6 +1215,48 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 ignore_empty_lines=True,
             )
 
+    @parametrize("serialize", [False])  # , True
+    def test_max_autotune(self, serialize):
+        """Test that max-autotune is applied via inductor_config_patches."""
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"max_autotune": True}
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def g(sin, y):
+            mul = sin * y
+            add = mul + 1
+            return add
+
+        def fn(x, y):
+            sin = torch.sin(x)
+            add = g(sin, y)
+            return torch.sin(add)
+
+        original_compile = torch._inductor.compile_fx._compile_fx_inner
+        captured_options = []
+
+        def verify_options(*args, **kwargs):
+            options = kwargs.get("inductor_config_patches", {})
+            captured_options.append(options)
+            if not torch._inductor.config.max_autotune:
+                raise AssertionError("max_autotune should be True")
+            return original_compile(*args, **kwargs)
+
+        with mock.patch.object(
+            torch._inductor.compile_fx, "_compile_fx_inner", verify_options
+        ):
+            backend = aot_eager_regional_inductor(
+                serialize=serialize, on_invoke_subgraph=True
+            )
+            opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+            x = torch.randn(10, requires_grad=True)
+            y = torch.randn(10, requires_grad=True)
+            _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, y))
+
+        self.assertEqual(len(codes), 2)
+        self.assertGreater(len(captured_options), 0)
+
     def test_invalid_inductor_config(self):
         """Test that invalid inductor config keys are caught with a clear error."""
 
@@ -1187,10 +1270,11 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 }
             )
 
-    def test_default_inductor_config_keeps_autotune_compiler_local(self):
+    def test_default_inductor_config_max_autotune_mutation_reaches_helpers(self):
         nested_config = get_invoke_subgraph_compile_options()
         self.assertEqual(nested_config.inductor_config_patches, {})
         nested_config.inductor_config_patches["triton.persistent_reductions"] = False
+        nested_config.inductor_config_patches["max_autotune"] = True
         observed_configs = []
 
         def compile_fx_inner(gm, example_inputs):
@@ -1198,6 +1282,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 (
                     torch._inductor.config.triton.autotune_at_compile_time,
                     torch._inductor.config.triton.persistent_reductions,
+                    torch._inductor.config.max_autotune,
                 )
             )
 
@@ -1215,6 +1300,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 {
                     "triton.autotune_at_compile_time": False,
                     "triton.persistent_reductions": True,
+                    "max_autotune": False,
                 }
             ),
         ):
@@ -1223,7 +1309,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                     raise AssertionError("Expected an Inductor compiler")
                 compiler(self._empty_graph_module(), [])
 
-        self.assertEqual(observed_configs, [(True, False), (True, False)])
+        self.assertEqual(observed_configs, [(True, False, True), (True, False, True)])
 
     @parametrize("direction", ("forward", "backward"))
     @parametrize(
@@ -1232,7 +1318,6 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
             ("cpp_wrapper", True),
             ("cudagraph_unsafe_unbacked_ops", []),
             ("graph_partition", True),
-            ("max_autotune", True),
             ("post_grad_custom_post_pass", lambda _: None),
             ("post_grad_custom_pre_pass", lambda _: None),
             ("triton.autotune_at_compile_time", True),
