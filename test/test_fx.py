@@ -1160,6 +1160,67 @@ class TestFX(JitTestCase):
         for node in m_g.graph.nodes:
             self.assertTrue(node.name != "getattr")
 
+    def test_format_target_unsafe_names(self):
+        """`_format_target` must emit valid Python for any legal module name."""
+        from torch.fx.graph import _format_target
+
+        # Keywords pass `str.isidentifier()` but are not usable with dot syntax.
+        self.assertEqual(_format_target("self", "class"), 'getattr(self, "class")')
+        self.assertEqual(
+            _format_target("self", "seq.class"), 'getattr(self.seq, "class")'
+        )
+        self.assertEqual(_format_target("self", "None"), 'getattr(self, "None")')
+        # Soft keywords are legal attribute names and stay on the dot path.
+        self.assertEqual(_format_target("self", "match"), "self.match")
+        # Names needing escapes must not be spliced into a double-quoted literal.
+        self.assertEqual(
+            _format_target("self", 'quote"key'), "getattr(self, 'quote\"key')"
+        )
+        self.assertEqual(
+            _format_target("self", "back\\slash"), "getattr(self, 'back\\\\slash')"
+        )
+        self.assertEqual(_format_target("self", "a\nb"), "getattr(self, 'a\\nb')")
+        # The common, safe cases keep their historical spelling unchanged.
+        self.assertEqual(_format_target("self", "seq.0"), 'getattr(self.seq, "0")')
+        self.assertEqual(_format_target("self", "a.b"), "self.a.b")
+
+    def test_trace_module_name_is_keyword(self):
+        """A submodule named after a keyword must not emit `self.seq.class`."""
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seq = torch.nn.Sequential()
+                self.seq.add_module("class", torch.nn.Identity())
+
+            def forward(self, x):
+                return self.seq(x)
+
+        m = M()
+        m_g = symbolic_trace(m)
+        m_g.graph.lint()
+        self.assertIn('getattr(self.seq, "class")', m_g.code)
+        x = torch.ones(1)
+        torch.testing.assert_close(m_g(x), m(x))
+
+    def test_trace_module_name_needs_escape(self):
+        """A submodule name containing a quote must be escaped, not spliced."""
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.add_module('quote"key', torch.nn.Identity())
+
+            def forward(self, x):
+                return getattr(self, 'quote"key')(x)
+
+        m = M()
+        m_g = symbolic_trace(m)
+        m_g.graph.lint()
+        self.assertIn("getattr(self, 'quote\"key')", m_g.code)
+        x = torch.ones(1)
+        torch.testing.assert_close(m_g(x), m(x))
+
     @unittest.skip("https://github.com/pytorch/pytorch/issues/74208")
     @unittest.skip("Hotfix for SEV remediation")
     def test_trace_buffer_slice(self):
