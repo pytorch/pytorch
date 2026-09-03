@@ -7494,7 +7494,7 @@ print(value, end="")
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
-    @unittest.skipIf(TEST_WITH_ROCM, "AMD SMI is flaky on ROCm DPX runners")
+    @skipIfRocmArch(MI350_ARCH)
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
@@ -7536,7 +7536,7 @@ print(value, end="")
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
-    @unittest.skipIf(TEST_WITH_ROCM, "AMD SMI is flaky on ROCm DPX runners")
+    @skipIfRocmArch(MI350_ARCH)
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
