@@ -6780,19 +6780,6 @@ def split_group(
             "No backend for the parent process group or its backend does not support splitting"
         )
 
-    if not _use_torchcomms_enabled():
-        is_initialized = getattr(parent_backend, "_is_initialized", None)
-        parent_is_initialized = (
-            is_initialized()
-            if is_initialized is not None
-            else parent_pg.bound_device_id is not None
-        )
-        if not parent_is_initialized:
-            raise RuntimeError(
-                "Parent process group backend is not initialized; pass device_id "
-                "when creating it or run a collective before split_group"
-            )
-
     device_id = parent_pg.bound_device_id
 
     # set the group_desc before the color or no_color split
