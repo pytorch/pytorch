@@ -2788,23 +2788,28 @@ class BuiltinVariable(BaseBuiltinVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        # Declarative type-attribute dispatch (__name__, __bases__, __base__,
-        # __flags__), mirroring the consultation at the top of
-        # VariableTracker.getattro_impl. Inlined because this override keeps its
-        # own object / GetAttrVariable handling below instead of delegating.
+        # Mirror CPython getattr on a builtin function/type: raise AttributeError
+        # for a missing attribute, resolve literal introspection attributes
+        # (__doc__, __module__, __qualname__, __type_params__) to real guarded
+        # values so they are usable during tracing, and defer everything else
+        # (callables, complex objects) to a GetAttrVariable.
         source = self.source and AttrSource(self.source, name)
+        try:
+            value = getattr(self.fn, name)
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
         if self.fn is object:
             # for object, we can just directly read the attribute
-            try:
-                value = getattr(self.fn, name)
-            except AttributeError:
-                raise_observed_exception(AttributeError, tx)
             if not callable(value):
                 return VariableTracker.build(tx, value, source)
-        attr = getattr(self.fn, name, None)
-        return variables.GetAttrVariable(
-            self, name, py_type=type(attr) if attr is not None else None, source=source
-        )
+        if ConstantVariable.is_literal(value):
+            return VariableTracker.build(tx, value, source)
+        if isinstance(value, types.MappingProxyType):
+            # e.g. `type.__dict__` on a builtin class. Model it as a real
+            # MappingProxyVariable so iteration / dict.update work, instead of a
+            # deferred GetAttrVariable.
+            return VariableTracker.build(tx, value, source)
+        return variables.GetAttrVariable(self, name, py_type=type(value), source=source)
 
     def call_delattr(
         self,

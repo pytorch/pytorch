@@ -378,6 +378,26 @@ fn_known_dunder_attrs = {
     "__module__",
 }
 
+# Writable getset/member data descriptors on the function type. CPython keeps
+# these in dedicated per-instance storage (func_getsetlist / func_memberlist),
+# separate from the instance __dict__ (tp_dictoffset), and a data descriptor is
+# never shadowed by a __dict__ entry. So `func.__dict__[name] = x` (e.g. via
+# functools.update_wrapper copying type.__dict__) must not change `func.name`,
+# and setattr of these must not leak into __dict__. __annotations__ has its own
+# dedicated field (self.annotations) and is handled separately.
+fn_getset_data_descriptor_attrs = frozenset(
+    {
+        "__name__",
+        "__qualname__",
+        "__code__",
+        "__defaults__",
+        "__kwdefaults__",
+        "__type_params__",
+        "__doc__",
+        "__module__",
+    }
+)
+
 
 def fn_getattro_impl(
     tx: "InstructionTranslatorBase", fn: object, source: Source | None, name: str
@@ -412,6 +432,9 @@ class BaseUserFunctionVariable(VariableTracker):
     # funcobject.c func_annotations: a dedicated slot, NOT a __dict__ entry.
     # Materialized per-instance once accessed/assigned.
     annotations: "VariableTracker | None" = None
+    # getset/member data-descriptor overrides (e.g. __name__ set via setattr),
+    # kept separate from the instance __dict__. See fn_getset_data_descriptor_attrs.
+    getset_overrides: "dict[str, VariableTracker] | None" = None
 
     def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
@@ -439,6 +462,13 @@ class BaseUserFunctionVariable(VariableTracker):
             if args[0].is_constant_match("__annotations__"):
                 self.annotations = args[1]
                 return ConstantVariable.create(None)
+            if args[0].is_python_constant():
+                attr_name = args[0].as_python_constant()
+                if attr_name in fn_getset_data_descriptor_attrs:
+                    if self.getset_overrides is None:
+                        self.getset_overrides = {}
+                    self.getset_overrides[attr_name] = args[1]
+                    return ConstantVariable.create(None)
             return self.get_dict_vt(tx).call_method(
                 tx, "__setitem__", list(args), kwargs
             )
@@ -446,6 +476,12 @@ class BaseUserFunctionVariable(VariableTracker):
             if args[0].is_constant_match("__annotations__"):
                 self.annotations = None
                 return ConstantVariable.create(None)
+            if args[0].is_python_constant():
+                attr_name = args[0].as_python_constant()
+                if attr_name in fn_getset_data_descriptor_attrs:
+                    if self.getset_overrides is not None:
+                        self.getset_overrides.pop(attr_name, None)
+                    return ConstantVariable.create(None)
             return self.get_dict_vt(tx).call_method(tx, "__delitem__", list(args), {})
         return super().call_method(tx, name, list(args), kwargs)
 
@@ -481,15 +517,25 @@ class BaseUserFunctionVariable(VariableTracker):
         return self.get_globals()["__name__"]
 
     def _get_defaults(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        override = self._getset_override("__defaults__")
+        if override is not None:
+            return override
         d = getattr(self, "defaults", None)
         return d if d is not None else ConstantVariable.create(None)
+
+    def _getset_override(self, name: str) -> "VariableTracker | None":
+        if self.getset_overrides is not None:
+            return self.getset_overrides.get(name)
+        return None
 
     def _get_named_attr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        fn_dict = self.get_dict_vt(tx)
-        if fn_dict.contains(name):
-            return fn_dict.getitem(name)
+        # These are getset/member data descriptors: never shadowed by the
+        # instance __dict__. A setattr override lives in getset_overrides.
+        override = self._getset_override(name)
+        if override is not None:
+            return override
         val = getattr(self, f"get_{name[2:-2]}")()
         return ConstantVariable.create(
             val, source=self.source and AttrSource(self.source, name)
@@ -505,12 +551,18 @@ class BaseUserFunctionVariable(VariableTracker):
         return self.annotations
 
     def _get_type_params(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return self.get_dict_vt(tx).getitem_or_default(
-            "__type_params__",
-            lambda: variables.TupleVariable([], mutation_type=ValueMutationNew()),
-        )
+        # __type_params__ is a getset data descriptor, never shadowed by the
+        # instance __dict__. A setattr override lives in getset_overrides;
+        # otherwise it defaults to the empty tuple for these synthesized VTs.
+        override = self._getset_override("__type_params__")
+        if override is not None:
+            return override
+        return variables.TupleVariable([], mutation_type=ValueMutationNew())
 
     def _get_kwdefaults(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        override = self._getset_override("__kwdefaults__")
+        if override is not None:
+            return override
         d = getattr(self, "kwdefaults", None)
         return d if d is not None else ConstantVariable.create(None)
 
@@ -2278,6 +2330,17 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             for name, value in tx.output.side_effects.store_attr_mutations[
                 self
             ].items():
+                codegen.dup_top()
+                codegen(value)
+                codegen.extend_output(create_rot_n(2))
+                codegen.store_attr(name)
+
+        # getset/member data-descriptor overrides (e.g. __name__ set via setattr)
+        # live in dedicated storage separate from the instance __dict__. Replay
+        # them as real setattr so they hit the getset slot, after the __dict__
+        # mutations above so a setattr override wins over a __dict__ entry.
+        if self.getset_overrides:
+            for name, value in self.getset_overrides.items():
                 codegen.dup_top()
                 codegen(value)
                 codegen.extend_output(create_rot_n(2))
