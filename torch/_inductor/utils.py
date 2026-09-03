@@ -2174,12 +2174,62 @@ def get_tma_workspace_arg(
     )
 
 
-def get_default_kpack(block_k: int = 16) -> int:
+def kpack_supported() -> bool:
+    # kpack > 1 is honored only on gfx90a/gfx942.
+    # It is deprecated starting from gfx950 (compiler forces it to 1)
+    if not torch.version.hip:
+        return False
+    arch = torch.cuda.get_device_properties(0).gcnArchName
+    return "gfx90a" in arch or "gfx942" in arch
+
+
+def get_default_kpack(block_k: int = 0) -> int:
     if not torch.version.hip:
         return 0
-    if "gfx942" in torch.cuda.get_device_properties(0).gcnArchName and block_k <= 16:
-        return 1
-    return 2
+    if kpack_supported() and block_k > 16:
+        return 2
+    return 1
+
+
+# K-extent (kdim) of the CDNA MFMA instruction Triton selects, keyed by
+# (element_byte_width, matrix_instr_nonkdim). On gfx90a fp8 is
+# emulated with f16, so it lands on the same K-extent as int8.
+_MFMA_KDIM_CDNA3 = {
+    # nonkdim == 16 : 16x16x{K}
+    (4, 16): 4,  # f32      -> 16x16x4
+    (2, 16): 16,  # f16/bf16 -> 16x16x16
+    (1, 16): 32,  # f8/i8    -> 16x16x32
+    # nonkdim == 32 : 32x32x{K}
+    (4, 32): 2,  # f32      -> 32x32x2
+    (2, 32): 8,  # f16/bf16 -> 32x32x8
+    (1, 32): 16,  # f8/i8    -> 32x32x16
+}
+
+_MFMA_KDIM_CDNA2 = {
+    # nonkdim == 16 : 16x16x{K}
+    (4, 16): 4,  # f32      -> 16x16x4
+    (2, 16): 16,  # f16/bf16 -> 16x16x16
+    (1, 16): 16,  # f8/i8    -> 16x16x16
+    # nonkdim == 32 : 32x32x{K}
+    (4, 32): 2,  # f32      -> 32x32x2
+    (2, 32): 8,  # f16/bf16 -> 32x32x8
+    (1, 32): 8,  # f8/i8    -> 32x32x8
+}
+
+
+def mfma_kdim(dtype_size: int, matrix_instr_nonkdim: int) -> int | None:
+    """MFMA K-extent for the current CDNA arch, None for an unknown
+    (dtype_size, nonkdim) pair. Only gfx90a/gfx942 are distinguished since
+    kpack > 1 (the sole consumer) is limited to those archs."""
+    if not torch.version.hip:
+        return None
+    arch = torch.cuda.get_device_properties(0).gcnArchName
+    if "gfx90a" in arch:
+        return _MFMA_KDIM_CDNA2.get((dtype_size, matrix_instr_nonkdim))
+    elif "gfx942" in arch:
+        return _MFMA_KDIM_CDNA3.get((dtype_size, matrix_instr_nonkdim))
+    else:
+        return None
 
 
 def _use_template_for_gpu(
