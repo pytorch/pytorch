@@ -562,20 +562,27 @@ def _cache_entries() -> dict[str, tuple[str, str]]:
     return entries
 
 
+# The doc lines EnvVarForwarding writes above an entry it sourced from the environment.
+_ENV_SOURCED = ("From environment", "From env ")
+
+
 def _refuse_cache_drift(before: dict[str, tuple[str, str]]) -> None:
     """Refuse a reconfigure that changed this build's configuration.
 
-    EnvVarForwarding FORCEs every BUILD_*/USE_*/CMAKE_* environment variable (and the
-    names in its alias lists, TORCH_CUDA_ARCH_LIST among them) into the cache whenever
-    it differs from the cached value, so a stage-2 run in a different environment than
-    the build silently relinks torch_cuda against other settings. New entries are fine;
-    a changed one is not.
+    EnvVarForwarding writes every BUILD_*/USE_*/CMAKE_* environment variable (and the
+    names in its alias lists, TORCH_CUDA_ARCH_LIST among them) into the cache when it
+    differs from the cached value, so a stage-2 run in another environment than the
+    build silently relinks torch_cuda against other settings. It CREATES the entry when
+    the build had none, so an added env-sourced one is drift too; additions CMake makes
+    itself are not.
     """
-    drift = [
-        (name, before[name][0], value, doc)
-        for name, (value, doc) in _cache_entries().items()
-        if name in before and before[name][0] != value
-    ]
+    drift = []
+    for name, (value, doc) in _cache_entries().items():
+        if name in before:
+            if before[name][0] != value:
+                drift.append((name, before[name][0], value, doc))
+        elif doc.startswith(_ENV_SOURCED):
+            drift.append((name, "absent", value, doc))
     if not drift:
         return
     changed = "\n".join(
