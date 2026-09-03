@@ -5,6 +5,7 @@
 #include <deque>
 #include <mutex>
 #include <set>
+#include <thread>
 #include <vector>
 
 namespace c10::xpu::XPUCachingAllocator {
@@ -547,6 +548,9 @@ class DeviceCachingAllocator {
 
   // tracks which pools should not split a segment.
   ska::flat_hash_set<MempoolId_t, MempoolIdHash> no_split_pools;
+
+  // tracks which pools we can use as a last resort before ooming
+  ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
 
   // Blocks freed during XPU graph capture whose stream_uses are non-empty.
   // Deferred because querying event status are illegal during graph recording.
@@ -1248,6 +1252,38 @@ class DeviceCachingAllocator {
     return stat_types;
   }
 
+  bool try_mempool_fallback(
+      AllocParams& params,
+      size_t size,
+      sycl::queue* queue,
+      c10::DeviceIndex device_idx,
+      size_t alloc_size) {
+    bool block_found = false;
+    // if already trying to use a mempool, then just oom
+    bool active_pool = params.pool->owner_PrivatePool;
+    if (!active_pool) {
+      for (MempoolId_t mempool_id : use_on_oom_pools) {
+        auto tid = std::this_thread::get_id();
+        auto filter = [tid](sycl::queue*) {
+          return std::this_thread::get_id() == tid;
+        };
+        beginAllocateToPool(mempool_id, filter);
+        auto& mempool = get_pool(size, queue);
+        AllocParams mempool_params(
+            device_idx, size, queue, &mempool, alloc_size);
+        mempool_params.stat_types = get_stat_types_for_pool(mempool);
+        block_found = get_free_block(mempool_params);
+        endAllocateToPool(mempool_id);
+        releasePool(mempool_id);
+        if (block_found) {
+          params = mempool_params;
+          break;
+        }
+      }
+    }
+    return block_found;
+  }
+
   Block* alloc_found_block(
       const AllocParams& params,
       size_t orig_size,
@@ -1472,8 +1508,13 @@ class DeviceCachingAllocator {
     // Can't reuse an existing block, try to get a new one.
     if (!block_found) {
       block_found = alloc_block(params, false, context) ||
-          (release_cached_blocks(context, {0, 0}) &&
-           alloc_block(params, true, context));
+          // Skip mempool fallback and cache release during graph capture:
+          // these operations may free memory whose address is baked into the
+          // graph, causing replay to access invalid memory.
+          (C10_LIKELY(!is_capture_context()) &&
+           (try_mempool_fallback(params, size, &queue, device, alloc_size) ||
+            (release_cached_blocks(context, {0, 0}) &&
+             alloc_block(params, true, context))));
     }
     if (!block_found) {
       const auto& raw_device = c10::xpu::get_raw_device(device);
@@ -1846,6 +1887,16 @@ class DeviceCachingAllocator {
     // releasePool.
     std::lock_guard<std::recursive_mutex> lock(mutex);
     no_split_pools.insert(mempool_id);
+  }
+
+  void setUseOnOOM(MempoolId_t mempool_id, bool use_on_oom) {
+    // Enable or disable used on OOM for this pool.
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (use_on_oom) {
+      use_on_oom_pools.insert(mempool_id);
+    } else {
+      use_on_oom_pools.erase(mempool_id);
+    }
   }
 
   int getPoolUseCount(MempoolId_t mempool_id) {
@@ -2352,6 +2403,14 @@ class NativeCachingAllocator : public XPUAllocator {
     device_allocators[device]->setNoSplit(mempool_id);
   }
 
+  void setUseOnOOM(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      bool use_on_oom) {
+    assertValidDevice(device);
+    device_allocators[device]->setUseOnOOM(mempool_id, use_on_oom);
+  }
+
   int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
     assertValidDevice(device);
     return device_allocators[device]->getPoolUseCount(std::move(mempool_id));
@@ -2452,6 +2511,13 @@ void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
 
 void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.setNoSplit(device, mempool_id);
+}
+
+void setUseOnOOM(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id,
+    bool use_on_oom) {
+  return native_allocator.setUseOnOOM(device, mempool_id, use_on_oom);
 }
 
 int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
