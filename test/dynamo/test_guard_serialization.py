@@ -319,6 +319,23 @@ class DecoratedUnpicklableGuardedDefaultForwardModule(torch.nn.Module):
         return x * 2
 
 
+class RecursingGuardedDefault:
+    flag = 2.0
+
+    def __init__(self, inner=None):
+        self.inner = inner
+
+    def __reduce__(self):
+        # Hands pickle a fresh instance every time, so nothing is ever memoized.
+        return type(self), (type(self)(),)
+
+
+class DecoratedRecursingGuardedDefaultForwardModule(torch.nn.Module):
+    @keep_default_attribute
+    def forward(self, x, cfg=RecursingGuardedDefault()):
+        return x * 2
+
+
 def keep_name_with_empty_cell(func):
     @functools.wraps(func)
     def wrapper(x):
@@ -390,6 +407,25 @@ class DecoratedDictAttributeForwardModule(torch.nn.Module):
     @keep_dict_attribute
     def forward(self, x):
         return x * 2
+
+
+# A module-level lambda's qualname is "<lambda>", which resolves to nothing.
+GLOBAL_LAMBDA = lambda x: x * 2  # noqa: E731
+GLOBAL_LAMBDA.scale_flag = 2.0
+
+
+def keep_fn_name(func):
+    @functools.wraps(func)
+    def wrapper(x):
+        if func.__name__ == "base":
+            x = x + 1
+        return func(x)
+
+    return wrapper
+
+
+def global_add(obj, x):
+    return x + 1
 
 
 # mutation: what to change on the undecorated function so the guard stops matching.
@@ -1023,6 +1059,19 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIs(out.me, out)
         self.assertIs(out.__closure__[cell[0]].cell_contents, out)
 
+    def test_bound_method_under_a_name_self_lacks(self):
+        # types.MethodType can bind a function under a name self has no
+        # attribute for. _reduce_bound_method looked that name up unguarded,
+        # and the AttributeError bypassed the package instead of carrying the
+        # function and self explicitly.
+        m = types.MethodType(global_add, Inputs(1, 2))
+        self.assertFalse(hasattr(m.__self__, "global_add"))
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"m": m})
+        out = pickle.loads(buf.getvalue())["m"]
+        self.assertIs(out.__func__, global_add)
+        self.assertIsInstance(out.__self__, Inputs)
+
 
 # NB config.patch subclasses the class it decorates, so it has to go outermost:
 # instantiate_parametrized_tests deletes the template method it expands, which
@@ -1131,6 +1180,36 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with self.assertRaisesRegex(PackageError, "guarded default cannot pickle"):
             self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
 
+    def test_recursing_guarded_value_is_not_a_package_error(self):
+        # A reducer that never bottoms out is a pickler bug, not a value that
+        # cannot be serialized, so dump lets RecursionError through.
+        mod = DecoratedRecursingGuardedDefaultForwardModule()
+        with self.assertRaises(RecursionError):
+            self._test_serialization("EQUALS_MATCH", mod, torch.randn(3))
+
+    def test_fqn_mismatched_function_from_a_module_gone_at_load(self):
+        # The rebuilt function's __module__ names a module that only ever lived
+        # in sys.modules (exec-created, transformers_modules.*), so the load
+        # cannot import it; see FunctionPicklerBase._unpickle_fn_from_module.
+        name = "dynamo_test_guard_serialization_exec_module"
+        mod = types.ModuleType(name)
+        mod.keep_fn_name = keep_fn_name
+        exec("@keep_fn_name\ndef base(x):\n    return x * 2\n", mod.__dict__)
+        sys.modules[name] = mod
+        try:
+            ref, _ = self._test_serialization("EQUALS_MATCH", mod.base, torch.randn(3))
+        finally:
+            del sys.modules[name]
+        inner = mod.base.__wrapped__
+        self.assertEqual(inner.__module__, name)
+        state = torch._dynamo.package.load_guards_state(self._cached_guards_state)
+        f_code, f_globals = self._cached_f_code, keep_fn_name.__globals__
+        loaded = torch._dynamo.package.load_guard_manager(state, f_code, f_globals)
+        inputs = {"x": torch.randn(3), "func": inner}
+        self._test_check_fn(ref, loaded, inputs, True)
+        inner.__name__ = "renamed"
+        self._test_check_fn(ref, loaded, inputs, False)
+
     @parametrize("guard_type,cls,mutation", FQN_MISMATCH_CASES)
     def test_guard_rooted_at_fqn_mismatched_function(self, guard_type, cls, mutation):
         # The undecorated function the guard is rooted at is rebuilt by value
@@ -1196,6 +1275,58 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, inputs, False)
         finally:
             inner.tag = 2.0
+
+    def test_guard_rooted_at_a_lambda(self):
+        # A module-level lambda is an fqn mismatch too (see GLOBAL_LAMBDA) and
+        # is rebuilt by value with the guarded attribute intact.
+        def fn(x):
+            if GLOBAL_LAMBDA.scale_flag == 2.0:
+                x = x + 1
+            return GLOBAL_LAMBDA(x)
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+        GLOBAL_LAMBDA.scale_flag = 3.0
+        try:
+            self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
+        finally:
+            GLOBAL_LAMBDA.scale_flag = 2.0
+
+    def test_guard_rooted_at_fqn_mismatched_bound_method(self):
+        # The undecorated forward bound directly: the method carries its
+        # function explicitly (_reduce_bound_method), and that function is an
+        # fqn mismatch rebuilt by value.
+        mod = DecoratedAttributeForwardModule()
+        inner = type(mod).forward.__wrapped__
+        bound = types.MethodType(inner, mod)
+
+        def fn(f, x):
+            if f.scale_flag == 2.0:
+                x = x + 1
+            return f(x)
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, bound, x)
+        self._test_check_fn(ref, loaded, {"f": bound, "x": x}, True)
+        inner.scale_flag = 3.0
+        try:
+            self._test_check_fn(ref, loaded, {"f": bound, "x": x}, False)
+        finally:
+            inner.scale_flag = 2.0
+
+    def test_guard_rooted_at_bound_method_under_a_name_self_lacks(self):
+        # See TestGuardsStatePickler.test_bound_method_under_a_name_self_lacks.
+        bound = types.MethodType(global_add, Inputs(1, 2))
+
+        def fn(f, x):
+            if callable(f):
+                x = x + 1
+            return f(x)
+
+        x = torch.randn(3)
+        ref, loaded = self._test_serialization("TYPE_MATCH", fn, bound, x)
+        self._test_check_fn(ref, loaded, {"f": bound, "x": x}, True)
+        self._test_check_fn(ref, loaded, {"f": global_add, "x": x}, False)
 
     def test_tensor_match(self):
         def f(x: torch.Tensor):
