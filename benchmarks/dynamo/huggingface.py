@@ -446,12 +446,13 @@ class HuggingfaceRunner(BenchmarkRunner):
             model, example_inputs = benchmark_cls.get_model_and_inputs(
                 model_name, device
             )
+            model.generation_config.disable_compile = True
 
             # Set this flag so that when we test for speedup, we use
             # model.generate instead of using model.forward
             self.hf_llm = True
 
-            def generate(self, _, example_inputs, collect_outputs=True):
+            def generate(self, model, example_inputs, collect_outputs=True):
                 return model.generate(**example_inputs)
 
             self.generate = types.MethodType(generate, self)
