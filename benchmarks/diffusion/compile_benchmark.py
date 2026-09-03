@@ -10,7 +10,7 @@ But if you are looking to reduce the cold start time for full models, these are
 excellent candidates.
 
 Example:
-    python compile_benchmark.py --model auroflow --mode full
+    python compile_benchmark.py --model auraflow --mode full
     python compile_benchmark.py --model flux --mode full --backend eager
 
 If you see issues downloading models, try: pip uninstall hf_xet
@@ -53,7 +53,7 @@ def bench(run_fn, warmup_steps=1, bench_steps=50):
     print(f"{t1 - t0:.3f}s")
 
 
-def auroflow_benchmark(mode, backend="inductor"):
+def auraflow_benchmark(mode, backend="inductor"):
     transformer = AuraFlowTransformer2DModel.from_single_file(
         "https://huggingface.co/city96/AuraFlow-v0.3-gguf/blob/main/aura_flow_0.3-Q2_K.gguf",
         quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
@@ -193,7 +193,8 @@ def flux_benchmark(mode, backend="inductor"):
 
 
 BENCHMARKS = {
-    "auroflow": auroflow_benchmark,
+    "auraflow": auraflow_benchmark,
+    "auroflow": auraflow_benchmark,
     "wan": wan_benchmark,
     "ltx": ltx_benchmark,
     "flux": flux_benchmark,

@@ -215,7 +215,6 @@ skip:
     - hf_distil_whisper
     - timm_vision_transformer_large
     # https://github.com/pytorch/pytorch/issues/167895
-    - stable_diffusion
     - stable_diffusion_text_encoder
     - stable_diffusion_unet
     # Has never been working correctly
@@ -238,8 +237,6 @@ skip:
       - sam_fast
       # model is CUDA only
       - llama_v2_7b_16h
-      # flaky
-      - stable_diffusion
       # requires FBGEMM, CUDA only
       - torchrec_dlrm
       - simple_gpt
