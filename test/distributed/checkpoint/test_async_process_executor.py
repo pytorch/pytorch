@@ -14,9 +14,7 @@ from torch.distributed.checkpoint._async_process_executor import (
 from torch.distributed.checkpoint.api import CheckpointException
 from torch.distributed.checkpoint.storage import StorageWriter
 from torch.distributed.elastic.utils.distributed import get_free_port
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_win32
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -364,10 +362,14 @@ class TestProcessGroupInitInfo(DTensorTestBase):
             self.assertFalse(pg_init_info.disable_manual_gc)
 
 
-instantiate_device_type_tests(TestAsyncProcessExecutor, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestAsyncProcessExecutor, globals(), except_for="cpu", allow_xpu=True
+)
 instantiate_device_type_tests(
     TestAsyncProcessExecutorPrefixStore, globals(), only_for="cpu"
 )
-instantiate_device_type_tests(TestProcessGroupInitInfo, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestProcessGroupInitInfo, globals(), except_for="cpu", allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
