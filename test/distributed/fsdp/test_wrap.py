@@ -1026,8 +1026,8 @@ class TestWrapUtils(TestCase):
         _validate_frozen_params(model, modules_to_wrap, ignored_params, use_orig_params)
 
 
-instantiate_device_type_tests(TestFSDPWrap, globals(), except_for="cpu")
-instantiate_device_type_tests(TestAutoWrap, globals(), except_for="cpu")
+instantiate_device_type_tests(TestFSDPWrap, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(TestAutoWrap, globals(), except_for="cpu", allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
