@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 import unittest.mock as mock
@@ -1948,6 +1949,53 @@ class TestEndToEndGeneration(unittest.TestCase):
                 except Exception as e:
                     err = e
             yield art, err
+
+    def test_a_second_generation_over_the_same_inputs_touches_nothing(self):
+        # These files are build inputs: restamping them recompiles the generated
+        # sources and relinks torch_cuda, dirtying all ~110 targets that consume it.
+        with tempfile.TemporaryDirectory() as art, tempfile.TemporaryDirectory() as ops:
+            art_op = os.path.join(art, "sm_100a", "fakeop")
+            os.makedirs(art_op)
+            _touch_artifacts(art_op, SIDECAR["prefix"])
+            sidecar = dict(
+                SIDECAR,
+                spec={"N": 1024, "K": 8},
+                sources=_current_sources(),
+                runtimes=_RUNTIMES,
+                version=export.SIDECAR_VERSION,
+            )
+            with open(os.path.join(art_op, SIDECAR["prefix"] + ".json"), "w") as f:
+                json.dump(sidecar, f)
+            os.makedirs(os.path.join(ops, "fakeop"))
+            with open(os.path.join(ops, "fakeop", "aot.py"), "w") as f:
+                f.write(self._DECL)
+
+            # By INODE, not mtime: os.replace gives a rewritten file a new inode, while
+            # two runs inside one filesystem timestamp tick share an mtime. The include
+            # is exempt -- it is rewritten by construction (invalidated first, then
+            # written) and only its timestamp is restored, which is what the build reads.
+            def stamps():
+                out = {}
+                for root, _, files in os.walk(art):
+                    for name in files:
+                        p = os.path.join(root, name)
+                        st = os.stat(p)
+                        rel = os.path.relpath(p, art)
+                        keep = (
+                            st.st_mtime_ns
+                            if name == gen_aot_lib.CMAKE_INCLUDE
+                            else st.st_ino
+                        )
+                        out[rel] = (keep, st.st_size)
+                return out
+
+            with _patched_generation(ops, declarations=None):
+                gen_aot_lib.main(["--artifacts-dir", art])
+                first = stamps()
+                # Past a timestamp tick, so a restamped file is visible as one.
+                time.sleep(0.05)
+                gen_aot_lib.main(["--artifacts-dir", art])
+                self.assertEqual(stamps(), first)
 
     def test_main_writes_aot_source(self):
         # Artifacts live at <root>/<arch>/<decl_id>/. _generated writes them for real,
@@ -4299,6 +4347,38 @@ class TestCiAndCMakeWiring(unittest.TestCase):
                 self.assertIn(in_contributing, contributing)
 
 
+class TestStageTwoRefusesAnImportTimeRebuild(unittest.TestCase):
+    """scikit-build-core's editable.rebuild rebuilds torch on import."""
+
+    class ScikitBuildRedirectingFinder:
+        rebuild_flag = True
+
+    def test_the_installed_finder_is_read_for_the_rebuild_flag(self):
+        with mock.patch.object(
+            build_stage2.sys, "meta_path", [self.ScikitBuildRedirectingFinder()]
+        ):
+            self.assertIsNotNone(build_stage2._editable_rebuild_finder())
+            with self.assertRaisesRegex(RuntimeError, "editable.rebuild"):
+                build_stage2.main([])
+
+    def test_a_finder_without_the_flag_is_left_alone(self):
+        finder = self.ScikitBuildRedirectingFinder()
+        finder.rebuild_flag = False
+        with mock.patch.object(build_stage2.sys, "meta_path", [finder]):
+            self.assertIsNone(build_stage2._editable_rebuild_finder())
+
+    def test_the_opt_out_still_wins(self):
+        # Ordered like every other refusal: TORCH_NATIVE_AOT=0 exempts it.
+        with (
+            mock.patch.object(
+                build_stage2.sys, "meta_path", [self.ScikitBuildRedirectingFinder()]
+            ),
+            mock.patch.dict(os.environ, {"TORCH_NATIVE_AOT": "0"}),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(build_stage2.main([]), 0)
+
+
 class TestStageTwoArgvContract(unittest.TestCase):
     """What main() passes to its two children, and the invariant that ties them:
     a tree export creates must be one generation was told about."""
@@ -4458,6 +4538,7 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
         grew=0,
         cache_after=None,
         cmake_command=None,
+        rebuild_sibling=False,
     ):
         """main() with every child faked, so the ORDER is the production one.
 
@@ -4474,6 +4555,9 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
         def fake_call(cmd, **kw):
             commands.append(list(cmd))
             children.append(os.path.basename(str(cmd[1])) if len(cmd) > 1 else cmd[0])
+            if rebuild_sibling and "--target" in cmd:
+                with open(os.path.join(build, "lib", "libtorch_cpu.so"), "wb") as f:
+                    f.write(b"REBUILT-DEPENDENCY")
             if grew and "--target" in cmd:
                 with open(os.path.join(build, "lib", "libtorch_cuda.so"), "wb") as f:
                     f.truncate(grew)  # sparse: only the reported size matters
@@ -4512,6 +4596,10 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
                 # file unconditionally, so it is linked by every later configure.
                 with open(include, "w") as f:
                     f.write('target_sources(torch_cuda PRIVATE "/x/k.o")\n')
+            # A dependency of torch_cuda, which the relink may rebuild and stage 2
+            # does not install.
+            with open(os.path.join(build, "lib", "libtorch_cpu.so"), "wb") as f:
+                f.write(b"AS-BUILT")
             if built:
                 with open(os.path.join(build, "lib", "libtorch_cuda.so"), "wb") as f:
                     f.write(self.NEW)
@@ -4708,6 +4796,12 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
         with self._main(cache_after=grown) as run:
             self.assertEqual(run.outcome, "returned 0")
         self.assertEqual(run.content, self.NEW)
+
+    def test_a_relink_that_rebuilt_a_dependency_is_refused(self):
+        # --target torch_cuda builds its dependencies too, and only torch_cuda ships.
+        with self._main(rebuild_sibling=True) as run:
+            self.assertIn("also rebuilt libtorch_cpu.so", run.outcome)
+        self.assertEqual(run.content, self.OLD)
 
     def test_a_new_env_sourced_cache_entry_is_drift(self):
         # EnvVarForwarding creates the entry when the build had none.
