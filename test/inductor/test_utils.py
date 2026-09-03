@@ -1478,6 +1478,17 @@ class TestDeviceClassification(TestCase):
             with self.assertLogs("torch._inductor.utils", level="WARNING"):
                 self.assertEqual(get_gpu_type(), "fakegpu")
 
+    def test_in_tree_gpu_types_unchanged(self):
+        # The registry scan replaces a hardcoded GPU_TYPES literal, so pin the
+        # in-tree result: dropping an is_gpu() override would otherwise shift
+        # the classification silently, with no test in the repo failing.
+        known = {"cuda", "xpu", "mtia", "mps", "cpu", "tpu"}
+        self.assertEqual(set(_gpu_types()) & known, {"cuda", "xpu", "mtia", "mps"})
+        # MPS is GPU-class but exposes no Stream, so it takes no stream guard.
+        self.assertFalse(device_need_guard("mps"))
+        self.assertFalse(is_gpu("cpu"))
+        self.assertFalse(is_gpu("cuda:0"))
+
 
 if __name__ == "__main__":
     run_tests()

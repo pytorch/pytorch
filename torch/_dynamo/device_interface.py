@@ -210,7 +210,10 @@ class DeviceInterface:
 
         Overriding the Stream slot is the contract for stream support: it is
         what opts a GPU-class device into stream guards (device_need_guard),
-        so stream-capable backends must override it.
+        so stream-capable backends must override it. The override must be a
+        real, instantiable torch.Stream subclass: a placeholder that raises on
+        construction is still reported as stream-capable here and fails later,
+        at guard time.
         """
         return cls.Stream is not DeviceInterface.Stream
 
@@ -437,7 +440,19 @@ class MtiaInterface(DeviceInterface):
 
     current_device = staticmethod(torch.mtia.current_device)
     set_device = staticmethod(torch.mtia.set_device)  # type: ignore[assignment]
-    device_count = staticmethod(torch.mtia.device_count)
+
+    # Unlike torch.cuda/torch.xpu, torch.mtia.device_count() has no
+    # _is_compiled() guard: it goes straight to at::detail::getMTIAHooks(),
+    # which latches a process-lifetime static on first call and would
+    # permanently shadow an MTIAHooks impl that registers later (e.g. a
+    # JIT-built extension loaded in a test's setUpClass). Report 0 until the
+    # registry has one, so no registry-driven consumer can latch the fallback.
+    @staticmethod
+    def device_count() -> int:
+        if not torch.mtia._is_compiled():
+            return 0
+        return torch.mtia.device_count()
+
     stream = staticmethod(torch.mtia.stream)  # type: ignore[assignment]
     current_stream = staticmethod(torch.mtia.current_stream)
     set_stream = staticmethod(torch.mtia.set_stream)  # type: ignore[assignment]
@@ -789,13 +804,10 @@ def init_device_reg() -> None:
         register_interface_for_device(f"xpu:{i}", XpuInterface)
 
     register_interface_for_device("mtia", MtiaInterface)
-    # device_count() latches at::detail::getMTIAHooks() into a process-lifetime
-    # static on first call. Skip it when no MTIAHooks impl is registered yet
-    # (e.g. a JIT-built extension registers later, in a test's setUpClass) so
-    # that later registration is not permanently shadowed by the fallback hooks.
-    if torch.mtia._is_compiled():
-        for i in range(torch.mtia.device_count()):
-            register_interface_for_device(f"mtia:{i}", MtiaInterface)
+    # MtiaInterface.device_count() reports 0 until an MTIAHooks impl is
+    # registered, so this enumeration cannot latch the fallback hooks.
+    for i in range(MtiaInterface.device_count()):
+        register_interface_for_device(f"mtia:{i}", MtiaInterface)
 
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
