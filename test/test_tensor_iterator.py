@@ -148,6 +148,7 @@ class TestTensorIteratorBuild(TestCase):
         with self.assertRaises(RuntimeError):
             TensorIterator(outputs=[None], const_inputs=[a, b])
 
+
 class TestTensorIterator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
