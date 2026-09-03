@@ -1167,6 +1167,73 @@ class FakeTensorTest(TestCase):
         with torch._subclasses.CrossRefFakeMode():
             y = torch.full((4, 4), 1)
 
+    def test_tensor_constructor_meta_device(self):
+        eager_indexed = torch.tensor([[1.0, 2.0], [3.0]], device="meta:0")
+        eager_values = torch.tensor([[1.0, 2.0], [3.0, 4.0]], device="meta")
+
+        self.assertEqual(eager_indexed.device, torch.device("meta"))
+        self.assertEqual(eager_indexed.shape, (2, 2))
+        self.assertEqual(eager_values.shape, (2, 2))
+
+        with FakeTensorMode(), torch.device("meta"):
+            scalar = torch.tensor(3.0)
+            values = torch.tensor([1.0, 2.0, 3.0])
+
+        self.assertIsInstance(scalar, FakeTensor)
+        self.assertEqual(scalar.device, torch.device("meta"))
+        self.assertEqual(scalar.shape, ())
+        self.assertIsInstance(values, FakeTensor)
+        self.assertEqual(values.device, torch.device("meta"))
+        self.assertEqual(values.shape, (3,))
+
+        with FakeTensorMode():
+            explicit = torch.tensor(3.0, device="meta")
+            explicit_indexed = torch.tensor(3.0, device="meta:0")
+
+        self.assertIsInstance(explicit, FakeTensor)
+        self.assertEqual(explicit.device, torch.device("meta"))
+        self.assertEqual(explicit.shape, ())
+        self.assertIsInstance(explicit_indexed, FakeTensor)
+        self.assertEqual(explicit_indexed.device, torch.device("meta"))
+        self.assertEqual(explicit_indexed.shape, ())
+
+    @parametrize("device", ("meta", "meta:0"))
+    def test_tensor_constructor_meta_device_from_storage(self, device):
+        storage = torch.tensor([1.0, 2.0]).storage()
+
+        with patch.object(FakeTensorMode, "avoid_device_init", True):
+            with FakeTensorMode():
+                tensor = torch.tensor(storage, device=device)
+
+        self.assertIsInstance(tensor, FakeTensor)
+        self.assertEqual(tensor.device, torch.device("meta"))
+        self.assertEqual(tensor.shape, (2,))
+
+    @expectedFailurePropagateRealTensors
+    @parametrize(
+        "device,expected_device",
+        (("cpu", "cpu"), ("cpu:0", "cpu"), ("cuda:1", "cuda:1")),
+    )
+    def test_tensor_constructor_meta_storage_device(self, device, expected_device):
+        storage = torch.empty(2, device="meta").storage()
+
+        with patch.object(FakeTensorMode, "avoid_device_init", True):
+            with FakeTensorMode():
+                tensor = torch.tensor(storage, dtype=torch.float32, device=device)
+
+        self.assertIsInstance(tensor, FakeTensor)
+        self.assertEqual(tensor.device, torch.device(expected_device))
+        self.assertEqual(tensor.shape, (2,))
+
+    def test_tensor_constructor_meta_device_disallowed(self):
+        with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
+            with self.assertRaisesRegex(
+                AssertionError,
+                "device.type must not be 'meta' when allow_meta is False",
+            ):
+                with FakeTensorMode():
+                    torch.tensor(3.0, device="meta")
+
     def check_function_with_fake(self, fn):
         out = fn()
         with torch._subclasses.FakeTensorMode():
@@ -4103,6 +4170,66 @@ class FakeTensorDispatchCache(TestCase):
                 DynamicOutputShapeException,
                 lambda: torch.ops.aten.index(x, [None, idx_tensor1]),
             )
+
+    def test_cache_output_synthesis_ignores_proxy_tracing(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+
+        # Create a cache entry whose output metadata contains an untracked
+        # symbolic size.  Rebuilding that FakeTensor inside make_fx should not
+        # try to record cache-internal SymInt checks in the proxy graph.
+        with fake_mode, shape_env.ignore_fresh_unbacked_symbols():
+            u0 = shape_env.create_unbacked_symint()
+            x = torch.empty(u0)
+            output = x.clone()
+
+        state = _CacheKeyState(shape_env)
+        args = (x,)
+        key = fake_mode._cache_key(state, aten.clone.default, args, {})
+        entry = fake_mode._make_cache_entry(
+            state, key, aten.clone.default, args, {}, output
+        )
+
+        def f(dummy):
+            fake_mode._output_from_cache_entry(state, entry, key, args)
+            return dummy + 1
+
+        gm = make_fx(f)(torch.randn(1))
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, dummy_1):
+    add = torch.ops.aten.add.Tensor(dummy_1, 1);  dummy_1 = None
+    return add""",
+        )
+
+    def test_cache_crosscheck_ignores_proxy_tracing(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
+        with fake_mode, shape_env.ignore_fresh_unbacked_symbols():
+            u0 = shape_env.create_unbacked_symint()
+            x = torch.empty(u0)
+
+        FakeTensorMode.cache_clear()
+        dispatch_types = (FakeTensor,)
+        dispatch_args = (x,)
+        cache_hits = FakeTensorMode.cache_hits
+
+        def f(dummy):
+            fake_mode.dispatch(aten.sum.default, dispatch_types, dispatch_args, {})
+            fake_mode.dispatch(aten.sum.default, dispatch_types, dispatch_args, {})
+            return dummy
+
+        gm = make_fx(f)(torch.randn(1))
+        self.assertEqual(FakeTensorMode.cache_hits, cache_hits + 1)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, dummy_1):
+    _tensor_constant0 = self._tensor_constant0
+    sum_1 = torch.ops.aten.sum.dim_IntList(_tensor_constant0, []);  _tensor_constant0 = sum_1 = None
+    return dummy_1""",
+        )
 
     @skipIfWindows(
         msg="weird bug - cache may not be cleared after https://github.com/pytorch/pytorch/pull/154283"
