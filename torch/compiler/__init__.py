@@ -8,8 +8,9 @@ from typing_extensions import ParamSpec
 import torch
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 
-# ``torch.compiler.precompile``: example_inputs=[(...), ...] is the one calling
-# convention, and ``tracer`` picks the front-end -- make_fx takes a single call and
+# ``torch.compiler.precompile``: example_inputs=[(...), ...] is the calling convention
+# (the 2.14 positional spelling is deprecated but still accepted), and ``tracer`` picks
+# the front-end -- make_fx takes a single call and
 # produces a self-contained Python source plus an acceleration cache, dynamo takes
 # several and produces a guarded multi-graph artifact spanning graph breaks and
 # recompilations. Re-exported from the private impl, whose
@@ -1004,7 +1005,9 @@ def load_compiled_function(
 
     Args:
         file: A file-like object containing the serialized compiled function.
-        f_globals: Optional global scope enclosing the compiled function.
+        f_globals: Optional global scope enclosing the compiled function. Guards
+                   are evaluated against this dict by reference, so a global
+                   rebound after loading is seen on the next call.
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.
@@ -1015,4 +1018,6 @@ def load_compiled_function(
     from torch._dynamo.aot_compile import AOTCompiledFunction
 
     data = file.read()
-    return AOTCompiledFunction.deserialize(data, f_globals, external_data)
+    return AOTCompiledFunction.deserialize(
+        data, f_globals, external_data, guard_globals=f_globals
+    )
