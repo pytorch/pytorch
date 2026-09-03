@@ -4901,27 +4901,30 @@ class CheckFunctionManager:
         for guard in sorted_guards:
             guard_type = guard.create_fn_name()
             derived_guard_types = tuple(guard.guard_types) if guard.guard_types else ()
-            # BUILTIN_MATCH calls TYPE_MATCH sometimes, and FAKE_SCRIPT_TYPE_MATCH
-            # sets the same flag for a local-scope fake script type, so check
-            # every guard type that can mark itself unserializable.
+            if guard._unserializable:
+                # Set by TYPE_MATCH on a local-scope type (also reached through
+                # BUILTIN_MATCH, SEQUENCE_LENGTH and export TENSOR_MATCH, which
+                # call TYPE_MATCH on the same guard) and by
+                # FAKE_SCRIPT_TYPE_MATCH, so test the flag, not the guard's own
+                # type. Only call builder.get again if we know we're going to
+                # throw. FAKE_SCRIPT_TYPE_MATCH judged the wrapped real object's
+                # type, so name that type, not the FakeScriptObject wrapper.
+                obj = builder.get(guard)
+                if isinstance(obj, FakeScriptObject):
+                    obj = obj.real_obj
+                raise torch._dynamo.exc.GuardSerializationError(
+                    guard_type,
+                    guard.name,
+                    detail=_local_scope_serialization_message(obj),
+                )
             if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH", "FAKE_SCRIPT_TYPE_MATCH"):
-                if guard._unserializable:
-                    # Only call builder.get again if we know we're going to throw.
-                    # FAKE_SCRIPT_TYPE_MATCH judged the wrapped real object's
-                    # type, so name that type, not the FakeScriptObject wrapper.
-                    obj = builder.get(guard)
-                    if isinstance(obj, FakeScriptObject):
-                        obj = obj.real_obj
-                    raise torch._dynamo.exc.GuardSerializationError(
-                        guard_type,
-                        guard.name,
-                        detail=_local_scope_serialization_message(obj),
-                    )
-            elif (
-                guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-            ):
+                # BUILTIN_MATCH derives an ID_MATCH on the builtins-dict entry,
+                # which does serialize (the dict is rebuilt at load), so these
+                # are exempt from the derived-type check below.
+                continue
+            if guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES:
                 raise torch._dynamo.exc.GuardSerializationError(guard_type, guard.name)
-            elif failed := next(
+            if failed := next(
                 (
                     i
                     for i in derived_guard_types
