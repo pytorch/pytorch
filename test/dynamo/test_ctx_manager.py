@@ -884,6 +884,22 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(out, retraced_out)
         self.assertFalse(torch.is_inference_mode_enabled())
 
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_inference_mode_canonicalize_node_order(self):
+        # https://github.com/pytorch/pytorch/issues/195418
+        # Canonicalization must not move compute out of the region between
+        # _enter_inference_mode and _exit_inference_mode.
+        def f(x):
+            with torch.inference_mode():
+                return x + 1
+
+        x = torch.tensor(1.0, requires_grad=True)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+        self.assertFalse(res.requires_grad)
+        self.assertTrue(torch.is_inference(res))
+
     @parametrize(
         "Ctx",
         [CustomizedCtxManagerWithGraphBreak, customized_ctx_manager_with_graph_break],
