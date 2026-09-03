@@ -365,19 +365,19 @@ class BackendEntryPointTest(TestCase):
         with unittest.mock.patch.object(c10d, "default_pg_nccl_timeout", timeout):
             self.assertEqual(c10d._get_default_timeout(backend), timeout)
 
-    @parametrize("use_nccl2", [False, True])
-    def test_nccl_backend_registration(self, use_nccl2):
+    @parametrize("nccl2_override", [None, "0", "1"])
+    def test_nccl_backend_registration(self, nccl2_override):
         with unittest.mock.patch.dict(os.environ):
-            if use_nccl2:
-                os.environ["TORCH_DIST_USE_NCCL2"] = "1"
-            else:
+            if nccl2_override is None:
                 os.environ.pop("TORCH_DIST_USE_NCCL2", None)
+            else:
+                os.environ["TORCH_DIST_USE_NCCL2"] = nccl2_override
             c10d._register_builtin_nccl_backend()
 
         expected_creator = (
-            c10d._create_nccl2_process_group
-            if use_nccl2
-            else c10d._create_nccl_process_group
+            c10d._create_nccl_process_group
+            if nccl2_override == "0"
+            else c10d._create_nccl2_process_group
         )
         self.assertIs(
             dist.Backend._plugins["NCCL"].creator_fn,
@@ -387,6 +387,21 @@ class BackendEntryPointTest(TestCase):
             dist.Backend.backend_type_map["nccl"],
             dist.ProcessGroup.BackendType.NCCL,
         )
+
+    def test_nccl2_device_uses_rank_without_local_rank(self):
+        opts = c10d._DistributedBackendOptions()
+        opts.enable_reconfigure = False
+        opts.process_group = None
+        opts.group_rank = 1
+        opts.global_ranks_in_group = [2, 3]
+        with (
+            unittest.mock.patch.dict(os.environ),
+            unittest.mock.patch.object(torch.cuda, "device_count", return_value=4),
+            unittest.mock.patch.object(torch.cuda, "is_initialized", return_value=True),
+            unittest.mock.patch.object(torch.cuda, "current_device", return_value=0),
+        ):
+            os.environ.pop("LOCAL_RANK", None)
+            self.assertEqual(c10d._nccl2_device(opts), torch.device("cuda:3"))
 
     def test_nccl_legacy_backend_registration(self):
         c10d._register_builtin_nccl_legacy_backend()
@@ -2682,6 +2697,21 @@ class SplitGroupOptionsTest(TestCase):
         self.assertIsNot(default_backend.split_opts, opts)
         self.assertEqual(opts.group_name, "")
         self.assertEqual(opts._timeout, timedelta(seconds=5))
+
+
+class RegisterBackendWithoutBackendTest(TestCase):
+    def test_second_device_reuses_backend(self):
+        # _register_backend's backend argument defaults to None, and when the
+        # BackendType is already registered setBackend reuses the backend
+        # already stored for it. That reuse path used to dereference the
+        # absent optional to compare bound device ids.
+        backend = C10DBackend(0, 1)
+        pg = dist.ProcessGroup(dist.HashStore(), 0, 1)
+        pg._register_backend(
+            torch.device("cpu"), dist.ProcessGroup.BackendType.CUSTOM, backend
+        )
+        pg._register_backend(torch.device("cuda"), dist.ProcessGroup.BackendType.CUSTOM)
+        self.assertEqual(pg._get_backend(torch.device("cuda")), backend)
 
 
 class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
