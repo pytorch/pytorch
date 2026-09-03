@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
 
@@ -23,7 +24,12 @@ def _is_device_predicate(name: str) -> bool:
     if not name.startswith("is_"):
         return False
     try:
-        torch.device(name[3:])
+        # Deliberately probing, so a name that parses only with a deprecation
+        # warning (``mkldnn``) must not surface one to the caller. Runs at most
+        # once per name thanks to the cache.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            torch.device(name[3:])
     except RuntimeError:
         return False
     return True

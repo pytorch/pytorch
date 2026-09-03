@@ -32,6 +32,7 @@ from torch.testing._internal.common_nn import (
 )
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
+    HardwareClassification,
     make_tensor,
     parametrize,
     run_tests,
@@ -46,6 +47,8 @@ class TestContext:
 
 
 class TestExpandedWeightHelperFunction(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_forward_helper(self, device):
         input = torch.randn(3, 4, device=device)
         weight = torch.randn(5, 4, device=device)
@@ -232,21 +235,35 @@ class TestExpandedWeightHelperFunction(TestCase):
         weight = torch.randn(3, 4, device=device, requires_grad=True)
         expanded = ExpandedWeight(weight, 5, loss_reduction="sum")
 
+        # Whichever device this class was instantiated for is the one that has
+        # to work, so a new backend is covered without an entry here.
         device_type = torch.device(device).type
-        for name in sorted(
-            {f"is_{device_type}", "is_cpu", "is_cuda", "is_xpu", "is_mps", "is_mtia"}
-        ):
-            self.assertEqual(getattr(expanded, name), getattr(weight, name), msg=name)
         self.assertTrue(getattr(expanded, f"is_{device_type}"))
 
-        # Only device predicates are answered; everything else still raises, so
-        # this does not quietly turn ExpandedWeight into a general proxy.
+        # No is_* property may answer differently from the weight it wraps.
+        # Collected from Tensor rather than listed, for the same reason.
+        getset = type(torch._C.TensorBase.is_cuda)
+        for name in sorted(dir(torch._C.TensorBase)):
+            if not name.startswith("is_") or not isinstance(
+                getattr(torch._C.TensorBase, name), getset
+            ):
+                continue
+            try:
+                answer = getattr(expanded, name)
+            except RuntimeError:
+                continue  # not forwarded; the block below pins which those are
+            self.assertEqual(answer, getattr(weight, name), msg=name)
+
+        # These are not device types, so they must still raise -- this list does
+        # not grow when a backend is added.
         for name in ("is_sparse", "is_nested", "is_leaf", "is_quantized"):
             with self.assertRaisesRegex(RuntimeError, "cannot handle function"):
                 getattr(expanded, name)
 
 
 class TestExpandedWeightFunctional(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _compare_ew_and_for_loop_per_sample_grads(self, op, sample_input, reduction):
         input = sample_input.input
         args = sample_input.args
@@ -643,6 +660,8 @@ class TestExpandedWeightFunctional(TestCase):
 
 
 class TestExpandedWeightModule(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _do_test(
         self,
         module,
