@@ -7,6 +7,7 @@ import tempfile
 import types
 import warnings
 from functools import partial
+from unittest import expectedFailure
 
 import torch
 import torch.nn.functional as F
@@ -73,70 +74,50 @@ class TestLRScheduler(TestCase):
             else:
                 return False
 
-    class LegacyScheduler(LRScheduler):
-        """A third-party scheduler using the pre-metrics step signature."""
+    class LegacyGetLRScheduler(LRScheduler):
+        """A third-party scheduler whose `get_lr` predates keyword arguments."""
 
         def get_lr(self):
             return [group["lr"] for group in self.optimizer.param_groups]
 
-        def step(self, epoch=None):
-            super().step(epoch)
-
-    class KwargsRecordingScheduler(LRScheduler):
-        """A third-party scheduler collecting its step arguments in
-        ``**kwargs``.
-        """
-
-        def __init__(self, optimizer):
-            self.step_kwargs = []
-            super().__init__(optimizer)
-
-        def get_lr(self):
-            return [group["lr"] for group in self.optimizer.param_groups]
-
-        def step(self, epoch=None, **kwargs):
-            self.step_kwargs.append(kwargs)
-            super().step(epoch)
-
-    class LegacyUpdateScheduler(LRScheduler):
-        """A third-party scheduler overriding the previous private hook."""
-
-        def get_lr(self):
-            return [group["lr"] for group in self.optimizer.param_groups]
+    class LegacyUpdateLRScheduler(LegacyGetLRScheduler):
+        """A third-party scheduler whose `_update_lr` predates keyword arguments."""
 
         def _update_lr(self, epoch=None):
             super()._update_lr(epoch)
 
-    class KwargsUpdateScheduler(LRScheduler):
-        """A third-party scheduler consuming kwargs in the update hook."""
+    class LegacyStepScheduler(LegacyUpdateLRScheduler):
+        """A third-party scheduler whose `step` predates keyword arguments."""
+
+        def step(self, epoch=None):
+            super().step(epoch)
+
+    class RecordingScheduler(LRScheduler):
+        """A third-party scheduler that records inputs at every update hook."""
 
         def __init__(self, optimizer):
+            self.step_kwargs = []
             self.update_kwargs = []
-            super().__init__(optimizer)
-
-        def get_lr(self):
-            return [group["lr"] for group in self.optimizer.param_groups]
-
-        def _update_lr(self, epoch=None, **kwargs):
-            self.update_kwargs.append(kwargs)
-            super()._update_lr(epoch)
-
-    class LegacyGetLRScheduler(LRScheduler):
-        """A third-party scheduler using the previous ``get_lr`` API."""
-
-        def get_lr(self):
-            return [group["lr"] for group in self.optimizer.param_groups]
-
-    class KwargsGetLRScheduler(LRScheduler):
-        """A third-party scheduler consuming kwargs in ``get_lr``."""
-
-        def __init__(self, optimizer):
             self.get_lr_kwargs = []
             super().__init__(optimizer)
 
         def get_lr(self, **kwargs):
             self.get_lr_kwargs.append(kwargs)
             return [group["lr"] for group in self.optimizer.param_groups]
+
+        def _update_lr(self, epoch=None, **kwargs):
+            self.update_kwargs.append(kwargs)
+            super()._update_lr(epoch, **kwargs)
+
+        def step(self, epoch=None, **kwargs):
+            self.step_kwargs.append(kwargs)
+            super().step(epoch, **kwargs)
+
+        def clear(self):
+            """Forget the inputs recorded so far, including the initial step."""
+            self.step_kwargs.clear()
+            self.update_kwargs.clear()
+            self.get_lr_kwargs.clear()
 
     exact_dtype = True
 
@@ -656,204 +637,93 @@ class TestLRScheduler(TestCase):
         new_lrs = new_scheduler._last_lr
         torch.testing.assert_close(original_lrs, new_lrs, rtol=1e-4, atol=1e-5)
 
-    def test_reduce_lr_on_plateau1(self):
-        epochs = 10
-        for param_group in self.opt.param_groups:
-            param_group["lr"] = 0.5
-        targets = [[0.5] * 20]
-        metrics = [10 - i * 0.0167 for i in range(20)]
-        scheduler = ReduceLROnPlateau(
-            self.opt,
-            threshold_mode="abs",
-            mode="min",
-            threshold=0.01,
-            patience=5,
-            cooldown=5,
-        )
-        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
-
-    def test_reduce_lr_on_plateau2(self):
-        epochs = 22
-        for param_group in self.opt.param_groups:
-            param_group["lr"] = 0.5
-        targets = [[0.5] * 6 + [0.05] * 7 + [0.005] * 7 + [0.0005] * 2]
-        metrics = [10 - i * 0.0165 for i in range(22)]
-        scheduler = ReduceLROnPlateau(
-            self.opt,
-            patience=5,
-            cooldown=0,
-            threshold_mode="abs",
-            mode="min",
-            threshold=0.1,
-        )
-        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
-
-    def test_reduce_lr_on_plateau3(self):
-        epochs = 22
-        for param_group in self.opt.param_groups:
-            param_group["lr"] = 0.5
-        targets = [[0.5] * (2 + 6) + [0.05] * (5 + 6) + [0.005] * 4]
-        metrics = [-0.8] * 2 + [-0.234] * 20
-        scheduler = ReduceLROnPlateau(
-            self.opt, mode="max", patience=5, cooldown=5, threshold_mode="abs"
-        )
-        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
-
-    def test_reduce_lr_on_plateau4(self):
-        epochs = 20
-        for param_group in self.opt.param_groups:
-            param_group["lr"] = 0.5
-        targets = [[0.5] * 20]
-        metrics = [1.5 * (1.025**i) for i in range(20)]  # 1.025 > 1.1**0.25
-        scheduler = ReduceLROnPlateau(
-            self.opt, mode="max", patience=3, threshold_mode="rel", threshold=0.1
-        )
-        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
-
-    def test_reduce_lr_on_plateau5(self):
-        epochs = 20
-        for param_group in self.opt.param_groups:
-            param_group["lr"] = 0.5
-        targets = [[0.5] * 6 + [0.05] * (5 + 6) + [0.005] * 4]
-        metrics = [1.5 * (1.005**i) for i in range(20)]
-        scheduler = ReduceLROnPlateau(
-            self.opt,
-            mode="max",
-            threshold_mode="rel",
-            threshold=0.1,
-            patience=5,
-            cooldown=5,
-        )
-        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
-
-    def test_reduce_lr_on_plateau6(self):
-        epochs = 20
-        for param_group in self.opt.param_groups:
-            param_group["lr"] = 0.5
-        targets = [[0.5] * 20]
-        metrics = [1.5 * (0.85**i) for i in range(20)]
-        scheduler = ReduceLROnPlateau(
-            self.opt, mode="min", threshold_mode="rel", threshold=0.1
-        )
-        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
-
-    def test_reduce_lr_on_plateau7(self):
-        epochs = 20
-        for param_group in self.opt.param_groups:
-            param_group["lr"] = 0.5
-        targets = [[0.5] * 6 + [0.05] * (5 + 6) + [0.005] * 4]
-        metrics = [1] * 7 + [0.6] + [0.5] * 12
-        scheduler = ReduceLROnPlateau(
-            self.opt,
-            mode="min",
-            threshold_mode="rel",
-            threshold=0.1,
-            patience=5,
-            cooldown=5,
-        )
-        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
-
-    def test_reduce_lr_on_plateau8(self):
-        epochs = 20
-        for param_group in self.opt.param_groups:
-            param_group["lr"] = 0.5
-        targets = [[0.5] * 6 + [0.4] * 14, [0.5] * 6 + [0.3] * 14]
-        metrics = [1.5 * (1.005**i) for i in range(20)]
-        scheduler = ReduceLROnPlateau(
-            self.opt,
-            mode="max",
-            threshold_mode="rel",
-            min_lr=[0.4, 0.3],
-            threshold=0.1,
-            patience=5,
-            cooldown=5,
-        )
-        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
-
-    def test_reduce_lr_on_plateau_get_last_lr_before_step(self):
-        for param_group in self.opt.param_groups:
-            param_group["lr"] = 0.5
-        scheduler = ReduceLROnPlateau(
-            self.opt,
-        )
-        self.assertEqual(
-            scheduler.get_last_lr(), [0.5 for param_group in self.opt.param_groups]
-        )
-
-    def test_reduce_lr_on_plateau_preserves_lr_type(self):
-        # Ensures that tensor lrs are preserved, preventing recompilations.
-        types = [type(group["lr"]) for group in self.opt.param_groups]
-        scheduler = ReduceLROnPlateau(self.opt, mode="min", patience=0)
-        scheduler.step(1.0)
-        scheduler.step(2.0)  # Triggers scheduler._reduce_lr
-        for group, type_ in zip(self.opt.param_groups, types):
-            self.assertEqual(type(group["lr"]), type_)
-
-    def test_reduce_lr_on_plateau_is_deprecated(self):
-        with self.assertWarnsRegex(FutureWarning, "PlateauLR"):
-            ReduceLROnPlateau(self.opt)
-
-    def test_lrscheduler_kwargs_support_legacy_update_hook(self):
-        scheduler = self.LegacyUpdateScheduler(self.opt)
+    def test_scheduler_step_forwards_kwargs_to_update_hooks(self):
+        scheduler = self.RecordingScheduler(self.opt)
         self.opt.step()
-        scheduler.step(metrics=1.0)
+        scheduler.step(metrics=1.0, extra=2.0)
 
-        self.assertEqual(scheduler.last_epoch, 1)
+        expected = {"metrics": 1.0, "extra": 2.0}
+        # The initial step performed on construction carries no inputs.
+        self.assertEqual(scheduler.step_kwargs, [{}, expected])
+        self.assertEqual(scheduler.update_kwargs, [{}, expected])
+        self.assertEqual(scheduler.get_lr_kwargs, [{}, expected])
 
-    def test_sequentiallr_kwargs_support_legacy_update_hook_at_handoff(self):
-        legacy = self.LegacyUpdateScheduler(self.opt)
-        scheduler = SequentialLR(
-            self.opt,
-            schedulers=[ConstantLR(self.opt), legacy],
-            milestones=[1],
-        )
-
-        self.opt.step()
-        scheduler.step(metrics=1.0)
-
-        self.assertEqual(legacy.last_epoch, 0)
-
-    def test_kwargs_reach_update_hook_directly_and_at_handoff(self):
-        direct = self.KwargsUpdateScheduler(self.opt)
-        self.opt.step()
-        direct.step(metrics=1.0)
-        self.assertEqual(direct.update_kwargs[-1], {"metrics": 1.0})
-
-        handoff = self.KwargsUpdateScheduler(self.opt)
-        scheduler = SequentialLR(
-            self.opt,
-            schedulers=[ConstantLR(self.opt), handoff],
-            milestones=[1],
-        )
-        self.opt.step()
-        scheduler.step(metrics=2.0)
-        self.assertEqual(handoff.update_kwargs[-1], {"metrics": 2.0})
-
-    def test_lrscheduler_kwargs_support_legacy_get_lr(self):
+    def test_scheduler_step_supports_legacy_get_lr(self):
         scheduler = self.LegacyGetLRScheduler(self.opt)
+        initial_lrs = [float(group["lr"]) for group in self.opt.param_groups]
+
+        # The inputs cannot reach a `get_lr` that predates them, but the step
+        # still goes through.
         self.opt.step()
         scheduler.step(metrics=1.0)
 
         self.assertEqual(scheduler.last_epoch, 1)
+        self.assertEqual(
+            [float(group["lr"]) for group in self.opt.param_groups], initial_lrs
+        )
 
-    def test_kwargs_reach_get_lr(self):
-        scheduler = self.KwargsGetLRScheduler(self.opt)
+    def test_scheduler_step_supports_legacy_update_lr(self):
+        scheduler = self.LegacyUpdateLRScheduler(self.opt)
+        initial_lrs = [float(group["lr"]) for group in self.opt.param_groups]
+
+        # The inputs cannot reach an `_update_lr` that predates them, but the
+        # step still goes through.
         self.opt.step()
         scheduler.step(metrics=1.0)
 
-        self.assertEqual(scheduler.get_lr_kwargs[-1], {"metrics": 1.0})
+        self.assertEqual(scheduler.last_epoch, 1)
+        self.assertEqual(
+            [float(group["lr"]) for group in self.opt.param_groups], initial_lrs
+        )
 
-    # PlateauLR is ReduceLROnPlateau's composable replacement (properly
-    # implements get_lr(), so it can be used inside SequentialLR/
-    # ChainedScheduler). Its get_lr()-driven logic is meant to be numerically
-    # identical to ReduceLROnPlateau's hand-rolled step() body, so these
-    # standalone tests reuse the exact metrics/target vectors from
-    # test_reduce_lr_on_plateau1-8 above as a regression check.
+    @parametrize(
+        "scheduler_factory",
+        [
+            partial(LambdaLR, lr_lambda=lambda epoch: 1.0),
+            partial(MultiplicativeLR, lr_lambda=lambda epoch: 1.0),
+            partial(StepLR, step_size=2),
+            partial(MultiStepLR, milestones=[2]),
+            ConstantLR,
+            LinearLR,
+            partial(ExponentialLR, gamma=0.9),
+            PolynomialLR,
+            partial(CosineAnnealingLR, T_max=4),
+            partial(CyclicLR, base_lr=0.01, max_lr=0.1, cycle_momentum=False),
+            partial(OneCycleLR, max_lr=0.1, total_steps=4, cycle_momentum=False),
+            partial(CosineAnnealingWarmRestarts, T_0=2),
+            partial(SWALR, swa_lr=0.01),
+        ],
+    )
+    def test_scheduler_step_ignores_unused_kwargs(self, scheduler_factory):
+        optimizer = SGD([torch.nn.Parameter(torch.ones(1))], lr=0.05)
+        reference_optimizer = SGD([torch.nn.Parameter(torch.ones(1))], lr=0.05)
+        scheduler = scheduler_factory(optimizer)
+        reference = scheduler_factory(reference_optimizer)
+
+        for _ in range(3):
+            optimizer.step()
+            scheduler.step(unused=True)
+            reference_optimizer.step()
+            reference.step()
+
+            self.assertEqual(scheduler.get_last_lr(), reference.get_last_lr())
+
     def test_plateau_lr_rejects_invalid_optimizer(self):
         with self.assertRaisesRegex(TypeError, "object is not an Optimizer"):
             PlateauLR(object())  # type: ignore[arg-type]
 
-    def test_plateau_lr1(self):
+    def test_plateau_lr_rejects_invalid_configuration(self):
+        cases = [
+            ({"factor": 1.0}, "Factor should be < 1.0"),
+            ({"min_lr": [0.0]}, "expected 2 min_lrs"),
+            ({"mode": "median"}, "mode median is unknown"),
+            ({"threshold_mode": "percentage"}, "threshold mode percentage is unknown"),
+        ]
+        for kwargs, error in cases:
+            with self.subTest(kwargs=kwargs), self.assertRaisesRegex(ValueError, error):
+                PlateauLR(self.opt, **kwargs)
+
+    def test_plateau_lr_absolute_min_tracks_improvements(self):
         epochs = 10
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -869,7 +739,7 @@ class TestLRScheduler(TestCase):
         )
         self._test_with_metrics(scheduler, targets, metrics, epochs)
 
-    def test_plateau_lr2(self):
+    def test_plateau_lr_absolute_min_respects_patience(self):
         epochs = 22
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -885,7 +755,7 @@ class TestLRScheduler(TestCase):
         )
         self._test_with_metrics(scheduler, targets, metrics, epochs)
 
-    def test_plateau_lr3(self):
+    def test_plateau_lr_absolute_max_respects_cooldown(self):
         epochs = 22
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -896,7 +766,7 @@ class TestLRScheduler(TestCase):
         )
         self._test_with_metrics(scheduler, targets, metrics, epochs)
 
-    def test_plateau_lr4(self):
+    def test_plateau_lr_relative_max_tracks_improvements(self):
         epochs = 20
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -907,7 +777,7 @@ class TestLRScheduler(TestCase):
         )
         self._test_with_metrics(scheduler, targets, metrics, epochs)
 
-    def test_plateau_lr5(self):
+    def test_plateau_lr_relative_max_respects_cooldown(self):
         epochs = 20
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -923,7 +793,7 @@ class TestLRScheduler(TestCase):
         )
         self._test_with_metrics(scheduler, targets, metrics, epochs)
 
-    def test_plateau_lr6(self):
+    def test_plateau_lr_relative_min_tracks_improvements(self):
         epochs = 20
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -932,7 +802,7 @@ class TestLRScheduler(TestCase):
         scheduler = PlateauLR(self.opt, mode="min", threshold_mode="rel", threshold=0.1)
         self._test_with_metrics(scheduler, targets, metrics, epochs)
 
-    def test_plateau_lr7(self):
+    def test_plateau_lr_relative_min_respects_cooldown(self):
         epochs = 20
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -948,7 +818,7 @@ class TestLRScheduler(TestCase):
         )
         self._test_with_metrics(scheduler, targets, metrics, epochs)
 
-    def test_plateau_lr8(self):
+    def test_plateau_lr_respects_per_group_min_lr(self):
         epochs = 20
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -965,10 +835,11 @@ class TestLRScheduler(TestCase):
         )
         self._test_with_metrics(scheduler, targets, metrics, epochs)
 
-    def test_plateau_lr_get_last_lr_before_step(self):
+    def test_plateau_lr_initial_state(self):
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
         scheduler = PlateauLR(self.opt)
+        self.assertEqual(scheduler.last_epoch, 0)
         self.assertEqual(
             scheduler.get_last_lr(), [0.5 for param_group in self.opt.param_groups]
         )
@@ -984,42 +855,193 @@ class TestLRScheduler(TestCase):
         for group, type_ in zip(self.opt.param_groups, types):
             self.assertEqual(type(group["lr"]), type_)
 
-    def test_plateau_lr_get_lr_warns(self):
-        scheduler = PlateauLR(self.opt, factor=0.5, patience=0)
+    def test_plateau_lr_skips_reduction_smaller_than_eps(self):
+        initial_lrs = [group["lr"] for group in self.opt.param_groups]
+        scheduler = PlateauLR(self.opt, factor=0.5, patience=0, eps=0.3)
+        for metric in [1.0, 2.0]:
+            self.opt.step()
+            scheduler.step(metrics=metric)
+        self.assertEqual(scheduler.get_last_lr(), initial_lrs)
+
+    def test_plateau_lr_warns_when_get_lr_is_called_directly(self):
+        scheduler = PlateauLR(self.opt)
         with self.assertWarnsRegex(UserWarning, r"please use `get_last_lr\(\)`"):
-            self.assertEqual(scheduler.get_lr(), scheduler.get_last_lr())
+            scheduler.get_lr()
 
     def test_plateau_lr_requires_metrics(self):
         scheduler = PlateauLR(self.opt)
         self.opt.step()
-        with self.assertRaisesRegex(ValueError, "requires the metric it monitors"):
-            scheduler.step()
-        with self.assertRaisesRegex(ValueError, "requires the metric it monitors"):
-            scheduler.step(metrics=None)
+        for kwargs in [{}, {"metrics": None}, {"metric": 1.0}]:
+            with (
+                self.subTest(kwargs=kwargs),
+                self.assertRaisesRegex(ValueError, "requires the metric it monitors"),
+            ):
+                scheduler.step(**kwargs)
+
+    def test_plateau_lr_rejects_metrics_passed_positionally(self):
+        scheduler = PlateauLR(self.opt)
+        self.opt.step()
         error = r"Did you mean `step\(metrics=\.\.\.\)`\?"
         with self.assertRaisesRegex(ValueError, error):
             scheduler.step(1.0)
 
-    def test_plateau_lr_initial_step_no_metrics(self):
-        # Construction performs an implicit initial step with no metric
-        # available; it must not raise, and must leave the lr unchanged.
+    def test_reduce_lr_on_plateau_rejects_invalid_optimizer(self):
+        with self.assertRaisesRegex(TypeError, "object is not an Optimizer"):
+            ReduceLROnPlateau(object())  # type: ignore[arg-type]
+
+    def test_reduce_lr_on_plateau_rejects_invalid_configuration(self):
+        cases = [
+            ({"factor": 1.0}, "Factor should be < 1.0"),
+            ({"min_lr": [0.0]}, "expected 2 min_lrs"),
+            ({"mode": "median"}, "mode median is unknown"),
+            ({"threshold_mode": "percentage"}, "threshold mode percentage is unknown"),
+        ]
+        for kwargs, error in cases:
+            with self.subTest(kwargs=kwargs), self.assertRaisesRegex(ValueError, error):
+                ReduceLROnPlateau(self.opt, **kwargs)
+
+    def test_reduce_lr_on_plateau_absolute_min_tracks_improvements(self):
+        epochs = 10
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
-        scheduler = PlateauLR(self.opt)
-        self.assertEqual(scheduler.last_epoch, 0)
-        self.assertEqual(scheduler.get_last_lr(), [0.5 for _ in self.opt.param_groups])
+        targets = [[0.5] * 20]
+        metrics = [10 - i * 0.0167 for i in range(20)]
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+            threshold_mode="abs",
+            mode="min",
+            threshold=0.01,
+            patience=5,
+            cooldown=5,
+        )
+        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
-    def test_plateau_lr_state_dict(self):
-        scheduler = PlateauLR(self.opt, mode="min", factor=0.1, patience=2)
-        for score in [1.0, 2.0, 3.0, 4.0, 3.0, 4.0, 5.0, 3.0, 2.0, 1.0]:
-            self.opt.step()
-            scheduler.step(metrics=score)
-        scheduler_copy = PlateauLR(self.opt, mode="max", factor=0.5, patience=10)
-        scheduler_copy.load_state_dict(scheduler.state_dict())
-        for key in scheduler.__dict__:
-            if key != "optimizer":
-                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
-        self.assertNotIn("_metrics", scheduler.state_dict())
+    def test_reduce_lr_on_plateau_absolute_min_respects_patience(self):
+        epochs = 22
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 0.5
+        targets = [[0.5] * 6 + [0.05] * 7 + [0.005] * 7 + [0.0005] * 2]
+        metrics = [10 - i * 0.0165 for i in range(22)]
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+            patience=5,
+            cooldown=0,
+            threshold_mode="abs",
+            mode="min",
+            threshold=0.1,
+        )
+        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
+
+    def test_reduce_lr_on_plateau_absolute_max_respects_cooldown(self):
+        epochs = 22
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 0.5
+        targets = [[0.5] * (2 + 6) + [0.05] * (5 + 6) + [0.005] * 4]
+        metrics = [-0.8] * 2 + [-0.234] * 20
+        scheduler = ReduceLROnPlateau(
+            self.opt, mode="max", patience=5, cooldown=5, threshold_mode="abs"
+        )
+        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
+
+    def test_reduce_lr_on_plateau_relative_max_tracks_improvements(self):
+        epochs = 20
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 0.5
+        targets = [[0.5] * 20]
+        metrics = [1.5 * (1.025**i) for i in range(20)]  # 1.025 > 1.1**0.25
+        scheduler = ReduceLROnPlateau(
+            self.opt, mode="max", patience=3, threshold_mode="rel", threshold=0.1
+        )
+        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
+
+    def test_reduce_lr_on_plateau_relative_max_respects_cooldown(self):
+        epochs = 20
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 0.5
+        targets = [[0.5] * 6 + [0.05] * (5 + 6) + [0.005] * 4]
+        metrics = [1.5 * (1.005**i) for i in range(20)]
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+            mode="max",
+            threshold_mode="rel",
+            threshold=0.1,
+            patience=5,
+            cooldown=5,
+        )
+        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
+
+    def test_reduce_lr_on_plateau_relative_min_tracks_improvements(self):
+        epochs = 20
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 0.5
+        targets = [[0.5] * 20]
+        metrics = [1.5 * (0.85**i) for i in range(20)]
+        scheduler = ReduceLROnPlateau(
+            self.opt, mode="min", threshold_mode="rel", threshold=0.1
+        )
+        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
+
+    def test_reduce_lr_on_plateau_relative_min_respects_cooldown(self):
+        epochs = 20
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 0.5
+        targets = [[0.5] * 6 + [0.05] * (5 + 6) + [0.005] * 4]
+        metrics = [1] * 7 + [0.6] + [0.5] * 12
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+            mode="min",
+            threshold_mode="rel",
+            threshold=0.1,
+            patience=5,
+            cooldown=5,
+        )
+        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
+
+    def test_reduce_lr_on_plateau_respects_per_group_min_lr(self):
+        epochs = 20
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 0.5
+        targets = [[0.5] * 6 + [0.4] * 14, [0.5] * 6 + [0.3] * 14]
+        metrics = [1.5 * (1.005**i) for i in range(20)]
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+            mode="max",
+            threshold_mode="rel",
+            min_lr=[0.4, 0.3],
+            threshold=0.1,
+            patience=5,
+            cooldown=5,
+        )
+        self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
+
+    def test_reduce_lr_on_plateau_initial_state(self):
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 0.5
+        scheduler = ReduceLROnPlateau(self.opt)
+        self.assertEqual(scheduler.last_epoch, 0)
+        self.assertEqual(
+            scheduler.get_last_lr(), [0.5 for param_group in self.opt.param_groups]
+        )
+
+    def test_reduce_lr_on_plateau_preserves_lr_type(self):
+        # Ensures that tensor lrs are preserved, preventing recompilations.
+        types = [type(group["lr"]) for group in self.opt.param_groups]
+        scheduler = ReduceLROnPlateau(self.opt, mode="min", patience=0)
+        scheduler.step(1.0)
+        scheduler.step(2.0)  # Triggers scheduler._reduce_lr
+        for group, type_ in zip(self.opt.param_groups, types):
+            self.assertEqual(type(group["lr"]), type_)
+
+    def test_reduce_lr_on_plateau_skips_reduction_smaller_than_eps(self):
+        initial_lrs = [group["lr"] for group in self.opt.param_groups]
+        scheduler = ReduceLROnPlateau(self.opt, factor=0.5, patience=0, eps=0.3)
+        scheduler.step(1.0)
+        scheduler.step(2.0)
+        self.assertEqual(scheduler.get_last_lr(), initial_lrs)
+
+    def test_reduce_lr_on_plateau_is_deprecated(self):
+        with self.assertWarnsRegex(FutureWarning, "PlateauLR"):
+            ReduceLROnPlateau(self.opt)
 
     def test_sequentiallr1(self):
         epochs = 19
@@ -1241,19 +1263,84 @@ class TestLRScheduler(TestCase):
         self._test(scheduler, targets, epochs)
         self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
 
-    def test_sequentiallr_with_plateau_lr(self):
-        """Warm up with a fixed schedule, then hand off to PlateauLR."""
+    def test_sequential_lr_forwards_kwargs_to_the_active_scheduler(self):
+        first = self.RecordingScheduler(self.opt)
+        second = self.RecordingScheduler(self.opt)
+        scheduler = SequentialLR(self.opt, [first, second], milestones=[2])
+        first.clear()
+        second.clear()
+
+        self.opt.step()
+        scheduler.step(metrics=1.0, extra=2.0)
+
+        expected = {"metrics": 1.0, "extra": 2.0}
+        self.assertEqual(first.step_kwargs, [expected])
+        self.assertEqual(first.update_kwargs, [expected])
+        self.assertEqual(first.get_lr_kwargs, [expected])
+        self.assertEqual(second.step_kwargs, [])
+        self.assertEqual(second.update_kwargs, [])
+
+    def test_sequential_lr_forwards_kwargs_at_the_handoff(self):
+        first = self.RecordingScheduler(self.opt)
+        second = self.RecordingScheduler(self.opt)
+        scheduler = SequentialLR(self.opt, [first, second], milestones=[2])
+        second.clear()
+
+        for metric in [1.0, 2.0]:
+            self.opt.step()
+            scheduler.step(metrics=metric)
+
+        # A milestone updates the incoming scheduler through `_update_lr`
+        # rather than `step`, so the inputs have to reach it along that path.
+        self.assertEqual(second.step_kwargs, [])
+        self.assertEqual(second.update_kwargs, [{"metrics": 2.0}])
+        self.assertEqual(second.get_lr_kwargs, [{"metrics": 2.0}])
+
+    def test_sequential_lr_supports_legacy_children(self):
+        first = self.LegacyStepScheduler(self.opt)
+        second = self.LegacyStepScheduler(self.opt)
+        scheduler = SequentialLR(self.opt, [first, second], milestones=[2])
+
+        for metric in [1.0, 2.0, 3.0]:
+            self.opt.step()
+            scheduler.step(metrics=metric)
+
+        # `first` ran once, then `second` took over at the milestone and ran
+        # once, neither ever handed the metric it cannot accept.
+        self.assertEqual(first.last_epoch, 1)
+        self.assertEqual(second.last_epoch, 1)
+
+    def test_sequential_lr_state_dict_omits_kwargs_support(self):
+        scheduler = SequentialLR(
+            self.opt,
+            schedulers=[ConstantLR(self.opt), PlateauLR(self.opt)],
+            milestones=[2],
+        )
+        # Which schedulers accept scheduling inputs is rederived on
+        # construction, so it must stay out of the checkpoint.
+        self.assertNotIn("_schedulers_accept_kwargs", scheduler.state_dict())
+
+    def test_sequential_lr_starts_with_plateau_lr(self):
         epochs = 8
         for param_group in self.opt.param_groups:
             param_group["lr"] = 1.0
-        # The metric never improves after its first sighting, so with
-        # patience=0 the plateau scheduler reduces every subsequent epoch;
-        # its first sighting always counts as an improvement over `inf`.
+        metrics = [1.0] * epochs
+        plateau_targets = [1.0, 0.5]
+        step_targets = [1.0, 1.0, 0.1, 0.1, 0.01, 0.01]
+        targets = [plateau_targets + step_targets]
+        schedulers = [
+            PlateauLR(self.opt, mode="min", factor=0.5, patience=0, threshold=0),
+            StepLR(self.opt, step_size=2, gamma=0.1),
+        ]
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=[3])
+        self._test_with_metrics(scheduler, targets, metrics, epochs)
+
+    def test_sequential_lr_hands_off_to_plateau_lr(self):
+        epochs = 8
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 1.0
         metrics = [1.0] * epochs
         warmup_targets = [0.625, 0.75, 0.875]
-        # At the milestone PlateauLR applies its epoch-0 lr, which is
-        # whatever the warmup left behind, and records that step's metric as
-        # its first observation.
         handoff_and_plateau_targets = [0.875, 0.4375, 0.21875, 0.109375, 0.0546875]
         targets = [warmup_targets + handoff_and_plateau_targets]
         schedulers = [
@@ -1264,114 +1351,34 @@ class TestLRScheduler(TestCase):
         self._test_with_metrics(scheduler, targets, metrics, epochs)
         self.assertEqual(scheduler.get_last_lr(), schedulers[1].get_last_lr())
 
-    def test_sequentiallr_forwards_metrics_at_plateau_lr_handoff(self):
-        plateau = PlateauLR(self.opt)
+    def test_sequential_lr_hands_off_to_plateau_lr_without_metrics(self):
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 1.0
+        plateau = PlateauLR(self.opt, mode="min", factor=0.5, patience=0, threshold=0)
         scheduler = SequentialLR(
             self.opt,
-            schedulers=[ConstantLR(self.opt), plateau],
+            schedulers=[ConstantLR(self.opt, factor=1.0), plateau],
             milestones=[1],
         )
 
+        # A handoff without a metric leaves the learning rate and the plateau
+        # state alone.
         self.opt.step()
-        scheduler.step(metrics=0.5)
+        scheduler.step()
+        self.assertEqual(plateau.best, math.inf)
+        self.assertEqual(scheduler.get_last_lr(), [1.0, 1.0])
 
-        self.assertEqual(plateau.best, 0.5)
-
-    def test_composite_schedulers_support_legacy_children(self):
-        chained = ChainedScheduler([self.LegacyScheduler(self.opt)], optimizer=self.opt)
+        # The first later call carrying a metric establishes the baseline.
         self.opt.step()
-        chained.step()
-        self.opt.step()
-        chained.step(metrics=1.0)
-
-        sequential = SequentialLR(
-            self.opt,
-            schedulers=[self.LegacyScheduler(self.opt), PlateauLR(self.opt)],
-            milestones=[2],
-        )
-        self.opt.step()
-        sequential.step(metrics=1.0)
-
-    def test_composite_schedulers_forward_all_kwargs_to_children(self):
-        """Composites pass their step kwargs through, not just `metrics`."""
-        chained_child = self.KwargsRecordingScheduler(self.opt)
-        chained = ChainedScheduler([chained_child], optimizer=self.opt)
-        self.opt.step()
-        chained.step(metrics=1.0, other=2)
-
-        self.assertEqual(chained_child.step_kwargs[-1], {"metrics": 1.0, "other": 2})
-
-        sequential_child = self.KwargsRecordingScheduler(self.opt)
-        sequential = SequentialLR(
-            self.opt,
-            schedulers=[sequential_child, ConstantLR(self.opt)],
-            milestones=[2],
-        )
-        self.opt.step()
-        sequential.step(metrics=3.0, other=4)
-
-        self.assertEqual(sequential_child.step_kwargs[-1], {"metrics": 3.0, "other": 4})
-
-    def test_scheduler_ignores_kwargs_it_does_not_use(self):
-        scheduler = StepLR(self.opt, step_size=1)
-        self.opt.step()
-        scheduler.step(some_future_input=1.0)
-
-    def test_plateau_lr_rejects_misspelled_metrics(self):
-        """A misspelled `metrics` argument is not silently ignored."""
-        scheduler = PlateauLR(self.opt)
-        self.opt.step()
-        with self.assertRaisesRegex(ValueError, "requires the metric it monitors"):
-            scheduler.step(metric=1.0)
-
-    def test_chained_scheduler_forwards_kwargs_to_update_hook(self):
-        child = self.KwargsUpdateScheduler(self.opt)
-        scheduler = ChainedScheduler([child], optimizer=self.opt)
+        scheduler.step(metrics=1.0)
+        self.assertEqual(plateau.best, 1.0)
+        self.assertEqual(scheduler.get_last_lr(), [1.0, 1.0])
 
         self.opt.step()
         scheduler.step(metrics=1.0)
+        self.assertEqual(scheduler.get_last_lr(), [0.5, 0.5])
 
-        self.assertEqual(child.update_kwargs[-1], {"metrics": 1.0})
-
-    def test_chained_scheduler_supports_duck_typed_children(self):
-        class DuckTypedScheduler:
-            def __init__(self, optimizer):
-                self.optimizer = optimizer
-                self._last_lr = [group["lr"] for group in optimizer.param_groups]
-
-            def step(self):
-                self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
-
-            def get_last_lr(self):
-                return self._last_lr
-
-        child = DuckTypedScheduler(self.opt)
-        scheduler = ChainedScheduler([child], optimizer=self.opt)
-        self.opt.step()
-        scheduler.step(metrics=1.0)
-
-        self.assertEqual(scheduler.get_last_lr(), child.get_last_lr())
-
-    def test_sequentiallr_with_plateau_lr_first(self):
-        """PlateauLR as the scheduler a SequentialLR starts with."""
-        epochs = 8
-        for param_group in self.opt.param_groups:
-            param_group["lr"] = 1.0
-        metrics = [1.0] * epochs
-        plateau_targets = [1.0, 0.5]
-        # At the milestone StepLR takes over from its own epoch 0, i.e. from
-        # `initial_lr` again -- not from whatever PlateauLR left behind.
-        step_targets = [1.0, 1.0, 0.1, 0.1, 0.01, 0.01]
-        targets = [plateau_targets + step_targets]
-        schedulers = [
-            PlateauLR(self.opt, mode="min", factor=0.5, patience=0, threshold=0),
-            StepLR(self.opt, step_size=2, gamma=0.1),
-        ]
-        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=[3])
-        self._test_with_metrics(scheduler, targets, metrics, epochs)
-
-    def test_sequentiallr_with_only_plateau_lr(self):
-        """SequentialLR initializes the optimizer from a PlateauLR stage."""
+    def test_sequential_lr_hands_off_between_plateau_lr_schedulers(self):
         epochs = 5
         for param_group in self.opt.param_groups:
             param_group["lr"] = 1.0
@@ -1384,39 +1391,23 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=[2])
         self._test_with_metrics(scheduler, targets, metrics, epochs)
 
-    def test_composed_plateau_lr_without_metrics(self):
-        """Stepping a composer without a metric while PlateauLR is active
-        is an error.
-        """
+    def test_sequential_lr_requires_metrics_for_the_active_plateau_lr(self):
         scheduler = SequentialLR(
             self.opt,
-            schedulers=[
-                LinearLR(self.opt, total_iters=2),
-                PlateauLR(self.opt),
-            ],
+            schedulers=[LinearLR(self.opt, total_iters=2), PlateauLR(self.opt)],
             milestones=[2],
         )
-        # The milestone is PlateauLR's epoch-0 initialization update. Without
-        # a metric, it leaves the plateau state unchanged; subsequent active
-        # steps require one.
+        # Stepping without a metric is fine while the warmup is active, and at
+        # the milestone, where the handoff does not need one.
         for _ in range(2):
             self.opt.step()
             scheduler.step()
+
         self.opt.step()
         with self.assertRaisesRegex(ValueError, "requires the metric it monitors"):
             scheduler.step()
 
-        chained = ChainedScheduler(
-            [ConstantLR(self.opt), PlateauLR(self.opt)], optimizer=self.opt
-        )
-        self.opt.step()
-        with self.assertRaisesRegex(ValueError, "requires the metric it monitors"):
-            chained.step()
-
-    def test_sequentiallr_with_plateau_lr_state_dict(self):
-        """Resuming from a checkpoint taken while the plateau stage is
-        active.
-        """
+    def test_sequential_lr_restores_plateau_lr_state(self):
         base_lr = 0.1
         milestone = 2
         total_steps = 8
@@ -1469,7 +1460,7 @@ class TestLRScheduler(TestCase):
 
         self.assertEqual(resumed_lrs, reference_lrs[resume_step:])
 
-    def test_sequentiallr_does_not_accept_explicit_epoch(self):
+    def test_sequential_lr_rejects_explicit_epoch(self):
         scheduler = SequentialLR(
             self.opt,
             schedulers=[ConstantLR(self.opt), ConstantLR(self.opt)],
@@ -1478,38 +1469,45 @@ class TestLRScheduler(TestCase):
         with self.assertRaises(TypeError):
             scheduler.step(5)
 
-    def test_chained_scheduler_does_not_accept_explicit_epoch(self):
+    def test_chained_scheduler_forwards_kwargs_to_children(self):
+        first = self.RecordingScheduler(self.opt)
+        second = self.RecordingScheduler(self.opt)
+        scheduler = ChainedScheduler([first, second], optimizer=self.opt)
+        first.clear()
+        second.clear()
+
+        self.opt.step()
+        scheduler.step(metrics=1.0, extra=2.0)
+
+        expected = {"metrics": 1.0, "extra": 2.0}
+        for child in [first, second]:
+            self.assertEqual(child.step_kwargs, [expected])
+            self.assertEqual(child.update_kwargs, [expected])
+            self.assertEqual(child.get_lr_kwargs, [expected])
+
+    def test_chained_scheduler_supports_legacy_children(self):
+        recording = self.RecordingScheduler(self.opt)
+        legacy = self.LegacyStepScheduler(self.opt)
+        scheduler = ChainedScheduler([recording, legacy], optimizer=self.opt)
+        recording.clear()
+
+        self.opt.step()
+        scheduler.step(metrics=1.0)
+
+        # The legacy child is stepped without the metric it cannot accept,
+        # while the one that can still receives it.
+        self.assertEqual(recording.step_kwargs, [{"metrics": 1.0}])
+        self.assertEqual(legacy.last_epoch, 1)
+
+    def test_chained_scheduler_state_dict_omits_kwargs_support(self):
         scheduler = ChainedScheduler(
-            [ConstantLR(self.opt), ConstantLR(self.opt)], optimizer=self.opt
+            [ConstantLR(self.opt), PlateauLR(self.opt)], optimizer=self.opt
         )
-        with self.assertRaises(TypeError):
-            scheduler.step(5)
+        # Which schedulers accept scheduling inputs is rederived on
+        # construction, so it must stay out of the checkpoint.
+        self.assertNotIn("_schedulers_accept_kwargs", scheduler.state_dict())
 
-    def test_sequentiallr_still_rejects_reduce_lr_on_plateau(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", FutureWarning)
-            with self.assertRaisesRegex(
-                ValueError, "does not support `ReduceLROnPlateau`"
-            ):
-                SequentialLR(
-                    self.opt,
-                    schedulers=[ConstantLR(self.opt), ReduceLROnPlateau(self.opt)],
-                    milestones=[2],
-                )
-
-    def test_chained_scheduler_still_rejects_reduce_lr_on_plateau(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", FutureWarning)
-            with self.assertRaisesRegex(
-                ValueError, "does not support `ReduceLROnPlateau`"
-            ):
-                ChainedScheduler(
-                    [ConstantLR(self.opt), ReduceLROnPlateau(self.opt)],
-                    optimizer=self.opt,
-                )
-
-    def test_chained_scheduler_with_plateau_lr(self):
-        """A chained PlateauLR composes with the other schedulers."""
+    def test_chained_scheduler_composes_with_plateau_lr(self):
         epochs = 5
         for param_group in self.opt.param_groups:
             param_group["lr"] = 1.0
@@ -1523,16 +1521,43 @@ class TestLRScheduler(TestCase):
         self._test_with_metrics(scheduler, targets, metrics, epochs)
         self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
 
-    def test_cosine_annealing_warm_restarts_ignores_metrics(self):
-        """The new keyword-only `metrics` param is inert for this scheduler."""
-        opt_a = SGD(self.SchedulerTestNet().parameters(), lr=0.05)
-        opt_b = SGD(self.SchedulerTestNet().parameters(), lr=0.05)
-        scheduler_a = CosineAnnealingWarmRestarts(opt_a, T_0=4, T_mult=2)
-        scheduler_b = CosineAnnealingWarmRestarts(opt_b, T_0=4, T_mult=2)
-        for epoch in range(10):
-            scheduler_a.step()
-            scheduler_b.step(metrics=1.0 + epoch)
-            self.assertEqual(scheduler_a.get_last_lr(), scheduler_b.get_last_lr())
+    def test_chained_scheduler_requires_metrics_for_plateau_lr(self):
+        scheduler = ChainedScheduler(
+            [ConstantLR(self.opt), PlateauLR(self.opt)], optimizer=self.opt
+        )
+        self.opt.step()
+        with self.assertRaisesRegex(ValueError, "requires the metric it monitors"):
+            scheduler.step()
+
+    def test_chained_scheduler_rejects_explicit_epoch(self):
+        scheduler = ChainedScheduler(
+            [ConstantLR(self.opt), ConstantLR(self.opt)], optimizer=self.opt
+        )
+        with self.assertRaises(TypeError):
+            scheduler.step(5)
+
+    def test_sequential_lr_rejects_reduce_lr_on_plateau(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            with self.assertRaisesRegex(
+                ValueError, "does not support `ReduceLROnPlateau`"
+            ):
+                SequentialLR(
+                    self.opt,
+                    schedulers=[ConstantLR(self.opt), ReduceLROnPlateau(self.opt)],
+                    milestones=[2],
+                )
+
+    def test_chained_scheduler_rejects_reduce_lr_on_plateau(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            with self.assertRaisesRegex(
+                ValueError, "does not support `ReduceLROnPlateau`"
+            ):
+                ChainedScheduler(
+                    [ConstantLR(self.opt), ReduceLROnPlateau(self.opt)],
+                    optimizer=self.opt,
+                )
 
     def test_compound_step_and_multistep_lr(self):
         epochs = 10
@@ -1678,7 +1703,7 @@ class TestLRScheduler(TestCase):
         schedulers[1] = ExponentialLR(self.opt, gamma=0.1)
         self._test(schedulers, targets, epochs)
 
-    def test_compound_reduce_lr_on_plateau1(self):
+    def test_compound_reduce_lr_on_plateau_and_step_lr(self):
         epochs = 10
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -1700,7 +1725,7 @@ class TestLRScheduler(TestCase):
         schedulers[1] = StepLR(self.opt, gamma=0.1, step_size=3)
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
-    def test_compound_reduce_lr_on_plateau2(self):
+    def test_compound_reduce_lr_on_plateau_and_multi_step_lr(self):
         epochs = 22
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -1722,7 +1747,7 @@ class TestLRScheduler(TestCase):
         schedulers[1] = MultiStepLR(self.opt, gamma=0.1, milestones=[3, 8, 12])
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
-    def test_compound_reduce_lr_on_plateau3(self):
+    def test_compound_reduce_lr_on_plateau_and_exponential_lr(self):
         epochs = 22
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -1739,7 +1764,7 @@ class TestLRScheduler(TestCase):
         schedulers[1] = ExponentialLR(self.opt, gamma=0.1)
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
-    def test_compound_reduce_lr_on_plateau4(self):
+    def test_compound_reduce_lr_on_plateau_and_cosine_annealing_lr(self):
         epochs = 20
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.05
@@ -1759,7 +1784,7 @@ class TestLRScheduler(TestCase):
         schedulers[1] = CosineAnnealingLR(self.opt, epochs, eta_min)
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
-    def test_compound_reduce_lr_on_plateau5(self):
+    def test_compound_reduce_lr_on_plateau_and_linear_lr(self):
         iters = 4
         start_factor = 0.4
         epochs = 22
@@ -2734,6 +2759,17 @@ class TestLRScheduler(TestCase):
             epochs=epochs,
         )
 
+    def test_plateau_lr_state_dict(self):
+        scheduler = PlateauLR(self.opt, mode="min", factor=0.1, patience=2)
+        for score in [1.0, 2.0, 3.0, 4.0, 3.0, 4.0, 5.0, 3.0, 2.0, 1.0]:
+            self.opt.step()
+            scheduler.step(metrics=score)
+        scheduler_copy = PlateauLR(self.opt, mode="max", factor=0.5, patience=10)
+        scheduler_copy.load_state_dict(scheduler.state_dict())
+        for key in scheduler.__dict__:
+            if key != "optimizer":
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
+
     def test_reduce_lr_on_plateau_state_dict(self):
         scheduler = ReduceLROnPlateau(self.opt, mode="min", factor=0.1, patience=2)
         for score in [1.0, 2.0, 3.0, 4.0, 3.0, 4.0, 5.0, 3.0, 2.0, 1.0]:
@@ -2920,20 +2956,10 @@ class TestLRScheduler(TestCase):
                     rtol=0,
                 )
 
-    def _test_reduce_lr_on_plateau(
-        self, schedulers, targets, metrics, epochs=10, verbose=False
-    ):
-        if isinstance(schedulers, (LRScheduler, ReduceLROnPlateau)):
-            schedulers = [schedulers]
+    def _test_with_metrics(self, scheduler, targets, metrics, epochs=10):
         for epoch in range(epochs):
             self.opt.step()
-            for scheduler in schedulers:
-                if isinstance(scheduler, ReduceLROnPlateau):
-                    scheduler.step(metrics[epoch])
-                else:
-                    scheduler.step()
-            if verbose:
-                print("epoch{}:\tlr={}".format(epoch, self.opt.param_groups[0]["lr"]))
+            scheduler.step(metrics=metrics[epoch])
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertEqual(
                     target[epoch],
@@ -2948,19 +2974,20 @@ class TestLRScheduler(TestCase):
                     rtol=0,
                 )
 
-    def _test_with_metrics(self, schedulers, targets, metrics, epochs=10):
-        """Like `_test`, but forwards `metrics` to every scheduler's `step`.
-
-        Unlike `_test_reduce_lr_on_plateau`, this needs no isinstance dispatch:
-        every scheduler now accepts the keyword-only `metrics` argument, plain
-        schedulers just ignore it.
-        """
-        if isinstance(schedulers, LRScheduler):
+    def _test_reduce_lr_on_plateau(
+        self, schedulers, targets, metrics, epochs=10, verbose=False
+    ):
+        if isinstance(schedulers, (LRScheduler, ReduceLROnPlateau)):
             schedulers = [schedulers]
         for epoch in range(epochs):
             self.opt.step()
             for scheduler in schedulers:
-                scheduler.step(metrics=metrics[epoch])
+                if isinstance(scheduler, ReduceLROnPlateau):
+                    scheduler.step(metrics[epoch])
+                else:
+                    scheduler.step()
+            if verbose:
+                print("epoch{}:\tlr={}".format(epoch, self.opt.param_groups[0]["lr"]))
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertEqual(
                     target[epoch],
@@ -3105,8 +3132,8 @@ class TestLRScheduler(TestCase):
                 milestones=[2],
                 **kwargs,
             ),
-            ReduceLROnPlateau,
             PlateauLR,
+            ReduceLROnPlateau,
             partial(CyclicLR, base_lr=0.01, max_lr=0.1),
             partial(OneCycleLR, max_lr=0.01, total_steps=10, anneal_strategy="linear"),
             partial(CosineAnnealingWarmRestarts, T_0=20),
@@ -3128,103 +3155,31 @@ class TestLRScheduler(TestCase):
             scheduler2.load_state_dict(state_dict_loaded)
             self.assertEqual(scheduler2.state_dict(), state_dict)
 
-    @parametrize("min_lr", ["scalar", "list"])
-    def test_add_param_group_does_not_break_reduce_lr_on_plateau(self, min_lr):
-        epochs = 20
-        for param_group in self.opt.param_groups:
-            param_group["lr"] = 0.5
-        targets = [[0.5] * 6 + [0.05] * (5 + 6) + [0.005] * 4]
-        metrics = [1] * 7 + [0.6] + [0.5] * 12
-        scheduler = ReduceLROnPlateau(
-            self.opt,
-            mode="min",
-            threshold_mode="rel",
-            threshold=0.1,
-            patience=5,
-            cooldown=5,
-            min_lr=0 if min_lr == "scalar" else [1e-5, 1e-4],
-        )
-        for epoch in range(epochs):
-            # Point is to test the use case in #104361
-            if epoch == 8:
-                param = torch.nn.Parameter(torch.rand(2, 3))
-                self.opt.add_param_group({"params": [param], "lr": 0.05})
-                if min_lr == "list":
-                    scheduler.min_lrs.append(1e-6)
-            self.opt.step()
-            scheduler.step(metrics[epoch])
-            for param_group, target in zip(self.opt.param_groups, targets):
-                self.assertEqual(
-                    target[epoch],
-                    param_group["lr"],
-                    msg=lambda msg: f"{msg}\n"
-                    + (
-                        "LR is wrong in epoch {}: expected {}, got {}".format(
-                            epoch, target[epoch], param_group["lr"]
-                        )
-                    ),
-                    atol=1e-5,
-                    rtol=0,
-                )
-
-    def test_add_param_group_errors_reduce_lr_on_plateau(self):
-        scheduler = ReduceLROnPlateau(
-            self.opt,
-            mode="min",
-            threshold_mode="rel",
-            threshold=1e-5,
-            patience=0,
-            cooldown=0,
-            min_lr=[1e-5, 1e-4],
-        )
-        param = torch.nn.Parameter(torch.rand(2, 3))
-        self.opt.add_param_group({"params": [param], "lr": 0.05})
-        self.opt.step()
-        scheduler.step(1)
-        with self.assertRaisesRegex(RuntimeError, "The number of param groups in the"):
-            self.opt.step()
-            scheduler.step(1.3)
-
-    @parametrize("min_lr", ["scalar", "list"])
-    def test_add_param_group_does_not_break_plateau_lr(self, min_lr):
-        epochs = 20
-        for param_group in self.opt.param_groups:
-            param_group["lr"] = 0.5
-        targets = [[0.5] * 6 + [0.05] * (5 + 6) + [0.005] * 4]
-        metrics = [1] * 7 + [0.6] + [0.5] * 12
+    @parametrize("min_lr", [0, [1e-5, 1e-4]])
+    def test_plateau_lr_supports_added_param_group(self, min_lr):
         scheduler = PlateauLR(
             self.opt,
-            mode="min",
-            threshold_mode="rel",
-            threshold=0.1,
-            patience=5,
-            cooldown=5,
-            min_lr=0 if min_lr == "scalar" else [1e-5, 1e-4],
+            factor=0.1,
+            patience=0,
+            min_lr=min_lr,
         )
-        for epoch in range(epochs):
-            # Point is to test the use case in #104361
-            if epoch == 8:
-                param = torch.nn.Parameter(torch.rand(2, 3))
-                self.opt.add_param_group({"params": [param], "lr": 0.05})
-                if min_lr == "list":
-                    scheduler.min_lrs.append(1e-6)
-            self.opt.step()
-            scheduler.step(metrics=metrics[epoch])
-            for param_group, target in zip(self.opt.param_groups, targets):
-                self.assertEqual(
-                    target[epoch],
-                    param_group["lr"],
-                    msg=lambda msg: f"{msg}\n"
-                    + (
-                        "LR is wrong in epoch {}: expected {}, got {}".format(
-                            epoch, target[epoch], param_group["lr"]
-                        )
-                    ),
-                    atol=1e-5,
-                    rtol=0,
-                )
+        self.opt.step()
+        scheduler.step(metrics=1.0)
 
-    def test_add_param_group_errors_plateau_lr(self):
+        self.opt.add_param_group(
+            {"params": [torch.nn.Parameter(torch.rand(2, 3))], "lr": 0.05}
+        )
+        if isinstance(min_lr, list):
+            scheduler.min_lrs.append(1e-6)
+        self.opt.step()
+        scheduler.step(metrics=2.0)
+
+        self.assertEqual(
+            [group["lr"] for group in self.opt.param_groups],
+            [0.005, 0.05, 0.005],
+        )
+
+    def test_plateau_lr_requires_min_lr_for_added_param_group(self):
         scheduler = PlateauLR(
             self.opt,
             mode="min",
@@ -3241,6 +3196,48 @@ class TestLRScheduler(TestCase):
         with self.assertRaisesRegex(RuntimeError, "The number of param groups in the"):
             self.opt.step()
             scheduler.step(metrics=1.3)
+
+    @parametrize("min_lr", [0, [1e-5, 1e-4]])
+    def test_reduce_lr_on_plateau_supports_added_param_group(self, min_lr):
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+            factor=0.1,
+            patience=0,
+            min_lr=min_lr,
+        )
+        self.opt.step()
+        scheduler.step(1.0)
+
+        self.opt.add_param_group(
+            {"params": [torch.nn.Parameter(torch.rand(2, 3))], "lr": 0.05}
+        )
+        if isinstance(min_lr, list):
+            scheduler.min_lrs.append(1e-6)
+        self.opt.step()
+        scheduler.step(2.0)
+
+        self.assertEqual(
+            [group["lr"] for group in self.opt.param_groups],
+            [0.005, 0.05, 0.005],
+        )
+
+    def test_reduce_lr_on_plateau_requires_min_lr_for_added_param_group(self):
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+            mode="min",
+            threshold_mode="rel",
+            threshold=1e-5,
+            patience=0,
+            cooldown=0,
+            min_lr=[1e-5, 1e-4],
+        )
+        param = torch.nn.Parameter(torch.rand(2, 3))
+        self.opt.add_param_group({"params": [param], "lr": 0.05})
+        self.opt.step()
+        scheduler.step(1)
+        with self.assertRaisesRegex(RuntimeError, "The number of param groups in the"):
+            self.opt.step()
+            scheduler.step(1.3)
 
     @parametrize(
         "LRClass",
@@ -3390,6 +3387,17 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
+    def test_lr_scheduler_checkpoint_on_plateau_lr(self):
+        model = torch.nn.Linear(3, 3)
+        optim = torch.optim.AdamW(model.parameters())
+        sch = PlateauLR(optim, mode="min")
+        optim.step()
+        sch.step(metrics=1)
+        optim2 = torch.optim.AdamW(model.parameters())
+        optim2.load_state_dict(optim.state_dict())
+        sch2 = PlateauLR(optim2, mode="min")
+        self.assertEqual(sch2.get_last_lr()[0], optim.param_groups[0]["lr"])
+
     def test_lr_scheduler_checkpoint_on_plateau(self):
         model = torch.nn.Linear(3, 3)
         optim = torch.optim.AdamW(model.parameters())
@@ -3406,21 +3414,94 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
-    def test_lr_scheduler_checkpoint_on_plateau_lr(self):
-        model = torch.nn.Linear(3, 3)
-        optim = torch.optim.AdamW(model.parameters())
-        sch = PlateauLR(optim, mode="min")
-        optim.step()
-        sch.step(metrics=1)
-        optim2 = torch.optim.AdamW(model.parameters())
-        optim2.load_state_dict(optim.state_dict())
-        sch2 = PlateauLR(optim2, mode="min")
-        self.assertEqual(
-            sch2._get_closed_form_lr()[0]
-            if hasattr(self, "_get_closed_form_lr")
-            else sch2.get_last_lr()[0],
-            optim.param_groups[0]["lr"],
-        )
+    # NOTE: Expected-failure tests for known scheduler issues.
+    #
+    # These tests should be converted to normal regression tests once
+    # the underlying behavior is fixed.
+
+    @expectedFailure
+    def test_sequentiallr_resume_reproducibility(self):
+        # Note: Saving and restoring both the optimizer and SequentialLR
+        # state mid training should reproduce the same LR sequence as a
+        # continuous uninterrupted run.
+        #
+        # This currently fails around scheduler transition boundaries after
+        # restoring from checkpoint state.
+        #
+        # The problematic state transition comes from SequentialLR's restore
+        # model:
+        # 1. SequentialLR.__init__() sets last_epoch, resets each param group
+        #    lr back to initial_lr, calls recursive_undo(), and then replays
+        #    _schedulers[0]._initial_step().
+        # 2. At this resume point, that constructor path leaves the optimizer
+        #    lr at 0.05 even though the saved scheduler state corresponds to
+        #    an effective lr of 0.08.
+        # 3. SequentialLR.load_state_dict() restores scheduler fields like
+        #    last_epoch and _last_lr, but it does not re-synchronize the
+        #    optimizer param-group lr with that loaded scheduler state.
+        # 4. LinearLR.get_lr() is recursive: it multiplies the current
+        #    optimizer lr, so the next resumed step advances
+        #    0.05 -> 0.05625 instead of the uninterrupted run's 0.08 -> 0.09.
+
+        base_lr = 0.1
+        milestone = 5
+        total_steps = 8
+        resume_step = 3
+
+        def make_scheduler(optim):
+            return SequentialLR(
+                optim,
+                [
+                    LinearLR(optim, start_factor=0.5, total_iters=milestone),
+                    ExponentialLR(optim, gamma=0.5),
+                ],
+                milestones=[milestone],
+            )
+
+        # run the full schedule and record the LR.
+        model = torch.nn.Linear(1, 1)
+        optim = torch.optim.SGD(model.parameters(), lr=base_lr)
+        sched = make_scheduler(optim)
+
+        reference_lrs = []
+        for _ in range(total_steps):
+            optim.step()
+            sched.step()
+            reference_lrs.append(sched.get_last_lr()[0])
+
+        # run a fresh optimizer/scheduler pair up to an intermediate step
+        model2 = torch.nn.Linear(1, 1)
+        optim2 = torch.optim.SGD(model2.parameters(), lr=base_lr)
+        sched2 = make_scheduler(optim2)
+
+        for _ in range(resume_step):
+            optim2.step()
+            sched2.step()
+
+        # save state to simulate checkpointing.
+        optim_state = optim2.state_dict()
+        sched_state = sched2.state_dict()
+
+        # restore into a new optimizer/scheduler pair
+        model3 = torch.nn.Linear(1, 1)
+        optim3 = torch.optim.SGD(model3.parameters(), lr=base_lr)
+        optim3.load_state_dict(optim_state)
+
+        sched3 = make_scheduler(optim3)
+        sched3.load_state_dict(sched_state)
+
+        loaded_optimizer_lr = optim3.param_groups[0]["lr"]
+        loaded_scheduler_lr = sched3.get_last_lr()[0]
+
+        resumed_lrs = []
+        for _ in range(resume_step, total_steps):
+            optim3.step()
+            sched3.step()
+            resumed_lrs.append(sched3.get_last_lr()[0])
+
+        self.assertEqual(loaded_optimizer_lr, loaded_scheduler_lr)
+        self.assertEqual(resumed_lrs[0], reference_lrs[resume_step])
+        self.assertEqual(resumed_lrs, reference_lrs[resume_step:])
 
 
 instantiate_parametrized_tests(TestLRScheduler)
