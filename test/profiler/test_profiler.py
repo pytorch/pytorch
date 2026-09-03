@@ -1771,6 +1771,20 @@ class TestProfiler(TestCase):
 
         self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
 
+    def test_device_type_classification(self):
+        is_host = torch.autograd.profiler._is_host_device_type
+        for device_type in (DeviceType.CPU, DeviceType.MKLDNN, DeviceType.IDEEP):
+            self.assertTrue(is_host(device_type), f"{device_type} should be host")
+        for device_type in (
+            DeviceType.CUDA,
+            DeviceType.HIP,
+            DeviceType.XPU,
+            DeviceType.PrivateUse1,
+            DeviceType.MTIA,
+            DeviceType.HPU,
+        ):
+            self.assertFalse(is_host(device_type), f"{device_type} should be device")
+
     def test_guarded_record_function_fast(self):
         x, y = (torch.rand((4, 4)) for _ in range(2))
 
