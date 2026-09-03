@@ -1008,8 +1008,16 @@ class _TorchDynamoContext:
         def get_compiler_config() -> CompilerConfig | None:
             return self.compiler_config
 
-        from .package import acquire_live_package, live_package_key
+        from .package import (
+            acquire_live_package,
+            drain_pending_releases,
+            live_package_key,
+        )
 
+        # A package every wrapper dropped may still hold a process-wide skip on
+        # this frame if its finalizer fired under a lock; release it before the
+        # new wrapper's first call would run that frame eager.
+        drain_pending_releases()
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
             if self._package is not None and not self._package.is_initialized():
@@ -1023,6 +1031,7 @@ class _TorchDynamoContext:
                         self._isolate_recompiles_id,
                         innermost_backend(self.callback),  # type: ignore[arg-type]
                         self._package,
+                        self._hooks.guard_filter_fn if self._hooks else None,
                     ),
                     self._package,
                     functools.partial(self._load_package, fn_key),

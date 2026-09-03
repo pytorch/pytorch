@@ -150,6 +150,35 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
 
 using ExtraStateRef = std::shared_ptr<ExtraState>;
 
+// Acquiring a mutex while holding the GIL deadlocks against a thread that holds
+// the mutex and needs the GIL. Nothing under cache_mutex runs Python or drops
+// the GIL (see ExtraState), so contention should not arise; if it does anyway,
+// take the uncontended fast path without touching the GIL and release it before
+// blocking so the owner can finish rather than deadlock.
+class VISIBILITY_HIDDEN CacheLock {
+ public:
+  explicit CacheLock(std::mutex& mutex) : lock_(mutex, std::try_to_lock) {
+    if (lock_.owns_lock()) {
+      return;
+    }
+    if (PyGILState_Check()) {
+      py::gil_scoped_release release;
+      lock_.lock();
+    } else {
+      lock_.lock();
+    }
+  }
+
+  CacheLock(const CacheLock&) = delete;
+  CacheLock& operator=(const CacheLock&) = delete;
+  CacheLock(CacheLock&&) = delete;
+  CacheLock& operator=(CacheLock&&) = delete;
+  ~CacheLock() = default;
+
+ private:
+  std::unique_lock<std::mutex> lock_;
+};
+
 // What guard_manager.extra_state holds on the Python side. Weak on purpose: the
 // entries own their guard managers, so a strong reference here would close a
 // cycle Python's GC cannot see. invalidate() is a no-op once the state is gone.
@@ -255,23 +284,23 @@ void extra_state_set_region_exec_strategy(
     int64_t isolate_recompiles_id,
     FrameExecStrategy strategy);
 
-// This is passed as freefunc to _PyEval_RequestCodeExtraIndex. This acts as a
-// deleter for the object on extra scratch space. This function is called
-// internally in _PyCode_SetExtra and also during the code deallocation.
-// It drops the code object's reference to the ExtraState; the state itself is
+// This is passed as freefunc to _PyEval_RequestCodeExtraIndex: CPython calls it
+// from _PyCode_SetExtra when a slot is overwritten and from code_dealloc. It
+// drops the code object's reference to the ExtraState; the state itself is
 // freed when the last lookup or pin holding it lets go. On a slot that
 // reset_extra_state is already tearing down it returns without freeing; see
 // ExtraStateHolder in extra_state.cpp.
 
-// Developer note - You should not call this function directly. This is called
-// directly inside reset_extra_state. If you are in a situation trying to call
-// this function, consider if reset_extra_state should be called.
+// Developer note - You should not call this function directly. CPython does.
+// If you are in a situation trying to call this function, consider if
+// reset_extra_state should be called.
 void destroy_extra_state(void* obj);
 
 // Detaches the ExtraState from the code object. Safe on a code object that has
 // none or whose state is already being torn down. A state that Python run by
 // the teardown wrote to this same code object (see init_and_set_extra_state)
-// is installed once the old one is gone.
+// is installed once the old one is gone, unless a later reset issued by that
+// same teardown asked to forget it: the last writer wins.
 void reset_extra_state(PyCodeObject* code);
 
 // Extracts the backend fn from the callback.
@@ -291,11 +320,13 @@ void enable_precompile_cache_keys();
 //  - extra_state: a reference, or nullptr when the code object has none.
 ExtraStateRef get_extra_state(PyCodeObject* code);
 
-// Creates a new extra state and puts it on the extra scratch space of the code
-// object, which must have none (get_extra_state returned nullptr). While the
-// previous state is still being torn down the slot is left alone: the new state
-// is parked on the holder, served by get_extra_state to every later caller in
-// that teardown, and installed by reset_extra_state once the slot is clear.
+// Returns the code object's extra state, creating and installing one when
+// get_extra_state returned nullptr. While the previous state is still being
+// torn down the slot is left alone: the new state is parked on the holder,
+// served by get_extra_state to every later caller in that teardown, and
+// installed by reset_extra_state once the slot is clear. Allocating the state
+// can run Python (see the definition), so a state another writer installed or
+// parked meanwhile is returned instead of the fresh one.
 ExtraStateRef init_and_set_extra_state(PyCodeObject* code);
 
 // Lookup the cache held by extra_state. Guards run with cache_mutex released.
