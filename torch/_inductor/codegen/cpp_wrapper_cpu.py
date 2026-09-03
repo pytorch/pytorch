@@ -2435,6 +2435,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{name}", {name}));'
             )
 
+    def _codegen_runtime_assert(self, code: IndentedBuffer, stmt: str) -> None:
+        if V.graph.aot_mode:
+            guarded = f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
+            if V.graph.is_dual_wrapper_mode:
+                # The environment gate is AOTI-only. JIT mirrors the Python
+                # wrapper and emits assertions selected by the compile-time
+                # size_asserts/alignment_asserts configuration unconditionally.
+                code.writeline_jit(stmt)
+                code.writeline_aot(guarded)
+            else:
+                code.writeline(guarded)
+        else:
+            code.writeline(stmt)
+
     def _codegen_assert_size_stride(
         self,
         code: IndentedBuffer,
@@ -2450,23 +2464,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f', {self.codegen_dtype(dtype)}, "{dtype}"' if dtype is not None else ""
         )
         stmt = f'assert_size_stride({name}, {size}, {stride}, "{op_name}"{dtype_args});'
-        if V.graph.aot_mode:
-            guarded = f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}"
-            if V.graph.is_dual_wrapper_mode:
-                # _check_aoti_runtime_check_inputs_env() is AOTI-only; the JIT
-                # side gets the plain assert.
-                code.writeline_jit(stmt)
-                code.writeline_aot(guarded)
-            else:
-                code.writeline(guarded)
-        else:
-            code.writeline(stmt)
+        self._codegen_runtime_assert(code, stmt)
 
     def _codegen_assert_size_stride_grouped(
         self, code: IndentedBuffer, asserts: list[tuple[str, str, str]], op_name: str
     ) -> None:
         for name, size, stride in asserts:
             self._codegen_assert_size_stride(code, name, size, stride, op_name)
+
+    def _codegen_assert_alignment(
+        self, code: IndentedBuffer, name: str, alignment: int, op_name: str
+    ) -> None:
+        if V.graph.aot_mode and V.graph.is_const_graph:
+            return
+        stmt = f'assert_alignment({name}, {alignment}, "{op_name}");'
+        self._codegen_runtime_assert(code, stmt)
 
     def codegen_device(self, device):
         if device.type not in DEVICE_TO_ATEN:
@@ -2918,9 +2930,36 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return output_names
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
-        raise NotImplementedError(
-            "codegen invoke_subgraph is not implemented for cpp wrapper"
-        )
+        """Emit ABI-compatible C++ for an invoke_subgraph (nested compile region).
+
+        Same shape as codegen_switch / codegen_while_loop: pre-declare an owning
+        handle per output, then inline the region body via codegen_subgraph.
+        """
+        outer_inputs = [buf.codegen_reference() for buf in invoke_subgraph.inputs]
+
+        outer_outputs = []
+        for out in invoke_subgraph.outputs:
+            if isinstance(out, (ir.ShapeAsConstantBuffer, ir.NoneAsConstantBuffer)):
+                # codegen_subgraph_suffix assigns into outer_outputs unconditionally,
+                # so a non-tensor output would need a differently-typed variable.
+                # Reject explicitly rather than emitting C++ that will not compile.
+                raise NotImplementedError(
+                    "cpp wrapper invoke_subgraph: non-tensor region output "
+                    f"({type(out).__name__}) is not supported"
+                )
+            # in ABI-compatible mode, ir.MultiOutput is not codegened,
+            # hence pre-declare output variables directly and separately
+            self.writeline(f"RAIIAtenTensorHandle {out.get_name()};")
+            outer_outputs.append(out.get_name())
+
+        # The region runs its own Scheduler, which re-emits per-device state such as
+        # `<stream_t> stream0;`; unscoped that redefines the parent's declaration.
+        self.writeline("{")
+        with self._preserve_device_guard_state():
+            self.writeline(EnterSubgraphLine(self, invoke_subgraph.subgraph.graph))
+            self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, outer_outputs)
+            self.writeline(ExitSubgraphLine(self))
+        self.writeline("}")
 
     def codegen_switch(self, node) -> None:
         """Emit ABI-compatible C++ for a higher-order cond/switch."""

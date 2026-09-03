@@ -25,6 +25,7 @@ from ..utils import (
     get_gpu_shared_memory,
     get_num_sms,
     has_free_symbols,
+    is_bf16x9_matmul,
     use_aten_gemm_kernels,
     use_blackwell_cutedsl_grouped_mm,
     use_nv_universal_gemm_template,
@@ -152,7 +153,8 @@ def has_rocm_fp8_hardware_support() -> bool:
     # Keep this in sync with torch.testing._internal.common_cuda.PLATFORM_SUPPORTS_FP8;
     # this is the production-side equivalent used to gate Triton FP8 lowering.
     arch = _rocm_gcn_arch()
-    rocm_version = tuple(int(v) for v in torch.version.hip.split(".")[:2])
+    rocm_version_str = getattr(torch.version, "rocm", None) or torch.version.hip
+    rocm_version = tuple(int(v) for v in rocm_version_str.split(".")[:2])
     if arch.startswith("gfx94"):
         return True
     if arch.startswith("gfx120") and rocm_version >= (6, 3):
@@ -373,6 +375,15 @@ def _tuned_grouped_mm_common(
         use_fast_accum = False
 
     choices: list[ChoiceCaller] = []
+    # Native _grouped_mm accepts FP32 even though its current meta function is
+    # narrower. Keep that path safe when the meta contract is corrected.
+    if is_bf16x9_matmul(mat_a.get_device().type, mat_a.get_dtype()):
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        choices.append(aten_choice)
+        node, _ = autotune_select_algorithm(
+            algorithm_name, choices, input_nodes, layout
+        )
+        return node
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 
