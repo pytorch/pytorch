@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import functools
+import gc
 import itertools
 import logging
 import os
@@ -1250,8 +1251,6 @@ class AOTInductorTestsTemplate:
         if self.device != "cpu":
             raise unittest.SkipTest("CPU coverage is sufficient")
 
-        import gc
-
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1280,6 +1279,10 @@ class AOTInductorTestsTemplate:
             wrapper_name = pathlib.PurePosixPath(wrapper_files[0].filename).name
             wrapper_size = wrapper_files[0].file_size
 
+            # Only the constants mapping reaches the tail of the wrapper file;
+            # the loader's own writable segment stops well before it. Counting
+            # by exact numbers rather than by delta keeps a mistargeted
+            # predicate from making this test pass without observing anything.
             def count_weight_mappings() -> int:
                 count = 0
                 with open("/proc/self/maps") as maps:
@@ -1298,14 +1301,14 @@ class AOTInductorTestsTemplate:
                 return count
 
             gc.collect()
-            baseline_mappings = count_weight_mappings()
+            self.assertEqual(count_weight_mappings(), 0)
             for _ in range(2):
                 runner = torch._inductor.aoti_load_package(package_path)
-                self.assertGreater(count_weight_mappings(), baseline_mappings)
+                self.assertEqual(count_weight_mappings(), 1)
 
                 del runner
                 gc.collect()
-                self.assertEqual(count_weight_mappings(), baseline_mappings)
+                self.assertEqual(count_weight_mappings(), 0)
 
     def test_large_mmaped_weights_on_disk(self):
         class Model(torch.nn.Module):
