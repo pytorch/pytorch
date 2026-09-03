@@ -3185,6 +3185,36 @@ class TestExperimentalUtils(TestCase):
             self.assertEqual(os.path.basename(filename), "square.c")
             self.assertTrue(1 <= lineno <= 4, f"unexpected line {lineno}")
 
+    @unittest.skipIf(
+        not IS_LINUX or not (IS_X86 or IS_ARM64), "linux x86/aarch64 only cpp unwinding"
+    )
+    @parametrize(
+        "env, expected",
+        [
+            ({}, "fast"),
+            ({"TORCH_DISABLE_ADDR2LINE": "1"}, "dladdr"),
+            ({"TORCH_DISABLE_ADDR2LINE": "0"}, "addr2line"),
+            (
+                {"TORCH_SYMBOLIZE_MODE": "addr2line", "TORCH_DISABLE_ADDR2LINE": "1"},
+                "addr2line",
+            ),
+            ({"TORCH_SYMBOLIZE_MODE": "dladdr"}, "dladdr"),
+        ],
+        name_fn=lambda env, expected: expected + "_" + "_".join(sorted(env)),
+    )
+    def test_default_symbolize_mode(self, env, expected):
+        child_env = {k: v for k, v in os.environ.items() if not k.startswith("TORCH_")}
+        child_env.update(env)
+        code = "import torch; print(torch._C._profiler._get_symbolize_mode())"
+        r = subprocess.run(
+            [sys.executable, "-c", code],
+            env=child_env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(r.stdout.strip(), expected)
+
     def test_profiler_overload_names(self):
         from torch.library import _scoped_library, fallthrough_kernel
 
