@@ -2487,11 +2487,11 @@ class _ReplayedSideEffects:
         self.sources: list[str] = []
         self._handle = register_bytecode_hook(self._record)
 
-    def _record(self, code: types.CodeType, out_code: types.CodeType) -> None:
+    def _record(self, code: types.CodeType, new_code: types.CodeType) -> None:
         from torch._dynamo.convert_frame import get_compiled_code_side_effects
 
         if code is self._code:
-            self.sources.extend(get_compiled_code_side_effects(out_code) or ())
+            self.sources.extend(get_compiled_code_side_effects(new_code) or ())
 
     def remove(self) -> None:
         self._handle.remove()
