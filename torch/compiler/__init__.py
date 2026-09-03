@@ -8,16 +8,22 @@ from typing_extensions import ParamSpec
 import torch
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 
-# ``torch.compiler.precompile``: make_fx AOT capture -> self-contained Python source
-# plus an acceleration cache. Re-exported from the private impl module, whose
+# ``torch.compiler.precompile``: example_inputs=[(...), ...] is the calling convention
+# (the 2.14 positional spelling is deprecated but still accepted), and ``tracer`` picks
+# the front-end -- make_fx takes a single call and
+# produces a self-contained Python source plus an acceleration cache, dynamo takes
+# several and produces a guarded multi-graph artifact spanning graph breaks and
+# recompilations. Re-exported from the private impl, whose
 # ``_PrecompileApi.__module__`` is forced to "torch.compiler" so this is the single
-# public location. Distinct from ``torch._dynamo.config.caching_precompile`` (a
-# ``torch.compile`` guard-serialization caching mode), despite the shared word.
+# public location. Distinct from ``torch._dynamo.config.caching_precompile``
+# (a ``torch.compile`` guard-serialization caching mode), despite the shared word.
 # ``PrecompileError`` is also re-exported here as ``torch.compiler.PrecompileError`` so the
 # conventional ``except torch.compiler.PrecompileError`` works; its ``__module__`` is already
 # forced to "torch.compiler" in the impl module, matching this public location.
 from torch._precompile import (
     precompile as precompile,
+    PrecompiledCallable as PrecompiledCallable,
+    PrecompiledRunnable as PrecompiledRunnable,
     PrecompileError as PrecompileError,
 )
 
@@ -47,6 +53,8 @@ __all__ = [
     "cudagraph_mark_warmup_incomplete",
     "load_compiled_function",
     "precompile",
+    "PrecompiledCallable",
+    "PrecompiledRunnable",
     "PrecompileError",
     "wrap_numpy",
     "is_compiling",
@@ -999,7 +1007,17 @@ def load_compiled_function(
 
     Args:
         file: A file-like object containing the serialized compiled function.
-        f_globals: Optional global scope enclosing the compiled function.
+        f_globals: Optional global scope enclosing the compiled function. Guards
+                   are evaluated against this dict by reference, so a global
+                   rebound after loading is seen on the next call, and a guarded
+                   global the dict lacks fails the guard (there is no fallback to
+                   the values serialized with the artifact). Loading mutates the
+                   dict: the ``__import_*`` module aliases recorded at capture
+                   are inserted, never overwriting an existing key. The compiled
+                   bytecode reads a copy of ``f_globals`` taken at load time, so
+                   a rebind after load changes which graph the guards select but
+                   not what a selected graph computes. (An ``nn.Module`` artifact
+                   differs: its bytecode reads the globals serialized at capture.)
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.
@@ -1010,4 +1028,6 @@ def load_compiled_function(
     from torch._dynamo.aot_compile import AOTCompiledFunction
 
     data = file.read()
-    return AOTCompiledFunction.deserialize(data, f_globals, external_data)
+    return AOTCompiledFunction.deserialize(
+        data, f_globals, external_data, guard_globals=f_globals
+    )

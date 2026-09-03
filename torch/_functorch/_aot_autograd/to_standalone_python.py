@@ -85,7 +85,8 @@ _COMPILE_LOCK = threading.RLock()
 #
 # The objects a wrapper closes over come in a few kinds:
 #   - public runtime helpers the codegen'd source references (e.g. increment_version,
-#     gen_alias_from_base, _unwrap_tensoralias, mark_dynamo_propagated_dynamic_indices,
+#     gen_alias_from_base, _unwrap_tensoralias, _dealias_marked_returns,
+#     mark_dynamo_propagated_dynamic_indices,
 #     the CUDARngStateHelper staticmethods) -- ordinary importable objects;
 #   - the inner Inductor ``call`` that the chain ultimately invokes;
 #   - sibling captured wrappers -- the next link of the runtime chain (an inner subclass /
@@ -201,6 +202,14 @@ def _known_helper_table() -> dict[int, tuple[str, str]]:
         id(rt._unwrap_tensoralias): (
             f"{_RT} _unwrap_tensoralias",
             "_unwrap_tensoralias",
+        ),
+        id(rt._dealias_marked_returns): (
+            f"{_RT} _dealias_marked_returns",
+            "_dealias_marked_returns",
+        ),
+        id(rt._replay_input_mutation): (
+            f"{_RT} _replay_input_mutation",
+            "_replay_input_mutation",
         ),
         id(rt.CUDARngStateHelper.get_torch_state_as_tuple): (
             f"{_RT} CUDARngStateHelper",
@@ -828,7 +837,12 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     strides has static sizes, and treating it as static would silently specialize the
     artifact to the example strides. (Unbacked symints appearing only in intermediates,
     not on any placeholder, are still missed here, but such a graph fails loudly
-    downstream when emit_value rejects the still-symbolic metadata.)"""
+    downstream when emit_value rejects the still-symbolic metadata.)
+
+    Both metadata keys are checked, like ``_resolve_fake_mode``: make_fx stashes the fake
+    under "val", while a Dynamo graph (which torch.compiler.precompile's dynamo tracer
+    feeds here) stashes it under "example_value" -- reading only "val" would call a
+    dynamic Dynamo graph static and silently specialize it to the example sizes."""
     import torch
 
     def _is_symbolic(v: Any) -> bool:
@@ -837,15 +851,16 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     for node in gm.graph.nodes:
         if node.op != "placeholder":
             continue
-        val = node.meta.get("val")
-        if _is_symbolic(val):
-            return True
-        if isinstance(val, torch.Tensor) and (
-            any(_is_symbolic(s) for s in val.shape)
-            or any(_is_symbolic(s) for s in val.stride())
-            or _is_symbolic(val.storage_offset())
-        ):
-            return True
+        for key in ("val", "example_value"):
+            val = node.meta.get(key)
+            if _is_symbolic(val):
+                return True
+            if isinstance(val, torch.Tensor) and (
+                any(_is_symbolic(s) for s in val.shape)
+                or any(_is_symbolic(s) for s in val.stride())
+                or _is_symbolic(val.storage_offset())
+            ):
+                return True
     return False
 
 
