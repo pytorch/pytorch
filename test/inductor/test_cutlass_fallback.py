@@ -12,7 +12,11 @@ from torch._inductor.select_algorithm import AlgorithmSelectorCache, ExternKerne
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_caches
 from torch.testing._internal.common_cuda import SM90OrLater
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 # Check if CUTLASS is available
@@ -34,9 +38,9 @@ def _get_path_without_sccache() -> str:
 class TestCutlassFallback(TestCase):
     """Tests for CUTLASS fallback behavior when benchmarks fail."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
-        if not HAS_CUDA_AND_TRITON:
-            self.skipTest("CUDA and triton are not available")
         if torch.version.hip:
             self.skipTest("CUTLASS backend is not supported on HIP")
 
@@ -56,10 +60,11 @@ class TestCutlassFallback(TestCase):
         super().tearDown()
         clear_caches()
 
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @unittest.skipIf(not HAS_CUTLASS, "requires CUTLASS")
     @unittest.skipIf(not SM90OrLater, "requires SM90+")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_fallback_to_aten_when_cutlass_benchmarks_fail(self):
+    def test_fallback_to_aten_when_cutlass_benchmarks_fail(self, device):
         """ATen fallback is used when all CUTLASS benchmarks return inf."""
         from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
 
@@ -83,8 +88,8 @@ class TestCutlassFallback(TestCase):
 
                 # Use dimensions that trigger CUTLASS selection
                 M, N, K = 256, 2048, 3520
-                a = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
-                b = torch.randn(K, N, device="cuda", dtype=torch.bfloat16)
+                a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+                b = torch.randn(K, N, device=device, dtype=torch.bfloat16)
 
                 # Should not crash - should fall back to ATen
                 result = fn(a, b)
@@ -93,10 +98,11 @@ class TestCutlassFallback(TestCase):
                 expected = torch.mm(a, b)
                 torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
 
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @unittest.skipIf(not HAS_CUTLASS, "requires CUTLASS")
     @unittest.skipIf(not SM90OrLater, "requires SM90+")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_extern_kernel_included_in_prescreening(self):
+    def test_extern_kernel_included_in_prescreening(self, device):
         """Test that ExternKernelCaller choices are included in prescreening candidates."""
         prescreening_candidates = []
 
@@ -128,8 +134,8 @@ class TestCutlassFallback(TestCase):
                     return torch.mm(a, b)
 
                 M, N, K = 256, 2048, 3520
-                a = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
-                b = torch.randn(K, N, device="cuda", dtype=torch.bfloat16)
+                a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+                b = torch.randn(K, N, device=device, dtype=torch.bfloat16)
 
                 _ = fn(a, b)
 
@@ -149,10 +155,11 @@ class TestCutlassFallback(TestCase):
                     # that's OK -- ATen fallback is in the main benchmark path
                     pass
 
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @unittest.skipIf(not HAS_CUTLASS, "requires CUTLASS")
     @unittest.skipIf(not SM90OrLater, "requires SM90+")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_addmm_fallback_on_cutlass_failure(self):
+    def test_addmm_fallback_on_cutlass_failure(self, device):
         """addmm falls back to ATen when CUTLASS benchmarks fail."""
         from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
 
@@ -176,9 +183,9 @@ class TestCutlassFallback(TestCase):
 
                 # Use dimensions from issue #171094
                 M, N, K = 256, 2048, 3520
-                a = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
-                b = torch.randn(K, N, device="cuda", dtype=torch.bfloat16)
-                bias = torch.randn(N, device="cuda", dtype=torch.bfloat16)
+                a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+                b = torch.randn(K, N, device=device, dtype=torch.bfloat16)
+                bias = torch.randn(N, device=device, dtype=torch.bfloat16)
 
                 # Should not crash
                 result = fn(bias, a, b)
@@ -187,10 +194,11 @@ class TestCutlassFallback(TestCase):
                 expected = torch.addmm(bias, a, b)
                 torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
 
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @unittest.skipIf(not HAS_CUTLASS, "requires CUTLASS")
     @unittest.skipIf(not SM90OrLater, "requires SM90+")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_issue_171094_dimensions(self):
+    def test_issue_171094_dimensions(self, device):
         """Regression test with exact dimensions from #171094."""
         with config.patch(
             {
@@ -208,9 +216,9 @@ class TestCutlassFallback(TestCase):
 
             # Exact dimensions from issue #171094
             M, K, N = 256, 3520, 2048
-            a = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
-            b = torch.randn(K, N, device="cuda", dtype=torch.bfloat16)
-            bias = torch.randn(N, device="cuda", dtype=torch.bfloat16)
+            a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+            b = torch.randn(K, N, device=device, dtype=torch.bfloat16)
+            bias = torch.randn(N, device=device, dtype=torch.bfloat16)
 
             # This should complete without CUDA illegal memory access
             result = fn(bias, a, b)
@@ -222,6 +230,8 @@ class TestCutlassFallback(TestCase):
 
 class TestCutlassSubprocessRouting(TestCase):
     """Tests for CUTLASS subprocess benchmarking routing and error recovery."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_cutlass_forces_subprocess_benchmarking(self):
         """make_benchmark_fn routes to subprocess when CUTLASS choices are present."""
@@ -412,6 +422,9 @@ class TestCutlassSubprocessRouting(TestCase):
             )
 
         self.assertEqual(result, [])
+
+
+instantiate_device_type_tests(TestCutlassFallback, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":

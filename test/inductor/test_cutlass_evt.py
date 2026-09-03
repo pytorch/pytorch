@@ -14,27 +14,27 @@ from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwi
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
 from torch.testing._internal.common_cuda import IS_SM10X, IS_SM90, SM90OrLater
-from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
-from torch.testing._internal.common_xpu import Xe2_Or_Later
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_CPU,
-    HAS_GPU_AND_TRITON,
-    MockGraphHandler,
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIf,
+    skipXPUIf,
 )
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_xpu import Xe2_Or_Later
+from torch.testing._internal.inductor_utils import HAS_CPU, MockGraphHandler, has_triton
 
 
 def _is_cuda_sm90_or_sm10x():
     return bool(IS_SM90) or bool(IS_SM10X)
 
 
-def _cuda_evt_arch_supported():
-    if GPU_TYPE != "cuda":
+def _cuda_evt_arch_supported(device):
+    if torch.device(device).type != "cuda":
         return True
 
     from cutlass_cppgen.backend.evt.passes.util import cc_map
 
-    return int(cutlass_arch(GPU_TYPE)) in cc_map
+    return int(cutlass_arch(torch.device(device).type)) in cc_map
 
 
 if try_import_cutlass():
@@ -128,8 +128,8 @@ class MockComputedBuffer(ComputedBuffer):
         return 1
 
 
-class TestCutlassEVT(TestCase):
-    device_type = GPU_TYPE
+class TestCutlassEVTGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
@@ -526,11 +526,15 @@ return D""",
                 result["buf1"].element, torch_dtype_to_cutlass_type(torch.float32)
             )
 
+
+class TestCutlassEVTAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not _is_cuda_sm90_or_sm10x(), "need sm_90 or sm_10x")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
-    def test_evt_argument_codegen(self):
-        arch = int(cutlass_arch(GPU_TYPE))
+    def test_evt_argument_codegen(self, device):
+        arch = int(cutlass_arch(torch.device(device).type))
 
         def render_code():
             epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS, arch)
@@ -540,11 +544,11 @@ return D""",
                 lambda x: int(x),
             )[0]
 
-        if not _cuda_evt_arch_supported():
+        if not _cuda_evt_arch_supported(device):
             self.skipTest(f"CUTLASS EVT does not support arch {arch}")
 
         code = render_code()
-        if GPU_TYPE == "xpu":
+        if torch.device(device).type == "xpu":
             self.assertExpectedInline(
                 code,
                 """\
@@ -596,8 +600,8 @@ return D""",
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not _is_cuda_sm90_or_sm10x(), "need sm_90 or sm_10x")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
-    def test_evt_argument_codegen_return_accumulator(self):
-        arch = int(cutlass_arch(GPU_TYPE))
+    def test_evt_argument_codegen_return_accumulator(self, device):
+        arch = int(cutlass_arch(torch.device(device).type))
 
         code = """
 def fn(accum, bias):
@@ -628,12 +632,12 @@ def fn(accum, bias):
                 lambda x: int(x),
             )[0]
 
-        if not _cuda_evt_arch_supported():
+        if not _cuda_evt_arch_supported(device):
             self.skipTest(f"CUTLASS EVT does not support arch {arch}")
 
         code = render_code()
 
-        if GPU_TYPE == "xpu":
+        if torch.device(device).type == "xpu":
             self.assertExpectedInline(
                 code,
                 """\
@@ -665,7 +669,7 @@ def fn(accum, bias):
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
     @skipCUDAIf(not _is_cuda_sm90_or_sm10x(), "need sm_90 or sm_10x")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
-    def test_evt_codegen(self):
+    def test_evt_codegen(self, device):
         def render_code():
             return trace(
                 BIAS_CODE,
@@ -676,11 +680,13 @@ def fn(accum, bias):
                 EpilogueScheduleType.ScheduleAuto,
                 _create_mock_buffer_name_map(EXAMPLE_TENSORS),
                 lambda x: x,  # static shapes
-                device_type=GPU_TYPE,
+                device_type=torch.device(device).type,
             )[2]
 
-        if not _cuda_evt_arch_supported():
-            self.skipTest(f"CUTLASS EVT does not support arch {cutlass_arch(GPU_TYPE)}")
+        if not _cuda_evt_arch_supported(device):
+            self.skipTest(
+                f"CUTLASS EVT does not support arch {cutlass_arch(torch.device(device).type)}"
+            )
 
         code = render_code()
         if IS_SM90:
@@ -888,7 +894,7 @@ using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
 
 """,
             )
-        if GPU_TYPE == "xpu":
+        if torch.device(device).type == "xpu":
             self.assertExpectedInline(
                 code,
                 """\
@@ -978,8 +984,16 @@ using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
             )
 
 
+instantiate_device_type_tests(
+    TestCutlassEVTAccelerator,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU_AND_TRITON:
+    if HAS_CPU or has_triton():
         run_tests(needs="filelock")
