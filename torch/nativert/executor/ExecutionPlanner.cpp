@@ -67,6 +67,7 @@ void ExecutionPlanner::generateDeallocationPlan(ExecutionPlan& plan) {
   size_t numNodes = nodes.size();
 
   std::unordered_map<ValueId, NodeIndex> lastUsedBy;
+  lastUsedBy.reserve(graph_.numValues());
 
   // Traverse from the last node to the first node
   // For each Value, find out which is the last node that uses it
