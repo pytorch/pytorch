@@ -188,13 +188,18 @@ def _find_rocm_home() -> str | None:
     # Guess #1
     rocm_home = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH')
     if rocm_home is None:
-        # Guess #2: Support for ROCm distribution from TheRock
-        # rocm-sdk-core installs everything under <site-packages>/_rocm_sdk_core
-        # (include/, lib/, bin/, ...), so the module's own location is the
-        # ROCM_HOME we want. Use find_spec to locate it without importing.
-        spec = importlib.util.find_spec('_rocm_sdk_core')
-        if spec is not None and spec.origin is not None:
-            rocm_home = str(Path(spec.origin).parent.resolve())
+        # Guess #2: Support for ROCm distribution from TheRock, which installs
+        # everything under <site-packages>/_rocm_sdk_* (include/, lib/, bin/,
+        # ...), so the module's own location is the ROCM_HOME we want.
+        # Prefer rocm-sdk-devel: rocm-sdk-core is runtime-only and ships no math
+        # library headers, so the hipBLAS/hipSPARSE includes pulled in by ATen's
+        # HIP headers would not resolve. find_spec locates the packages without
+        # importing them, and never triggers the multi-GB devel expansion.
+        for pkg in ('_rocm_sdk_devel', '_rocm_sdk_core'):
+            spec = importlib.util.find_spec(pkg)
+            if spec is not None and spec.origin is not None:
+                rocm_home = str(Path(spec.origin).parent.resolve())
+                break
     if rocm_home is None:
         # Guess #3
         hipcc_path = shutil.which('hipcc')
