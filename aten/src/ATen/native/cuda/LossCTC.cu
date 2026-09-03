@@ -43,7 +43,7 @@ namespace {
 // this ad-hoc converts from targets (l in [1]) to augmented targets (l' in [1])
 // so if l is l_0 l_1 ... l_(tl-1) then this looks up idx in
 // l' = BLANK l_0 BLANK l_1 BLANK ... BLANK l_(tl-1) BLANK
-// - note that no bound-checking is done
+// - labels are bound-checked against num_labels by a device-side assert
 // - it is important to only call it with idx == 0 if the target length is 0
 // - __restrict__ impact to be measured, see
 //   https://devblogs.nvidia.com/cuda-pro-tip-optimize-pointer-aliasing/
@@ -53,11 +53,14 @@ __device__ static inline int64_t get_target_prime(
     int64_t offset,
     int64_t stride,
     int64_t idx,
+    int64_t num_labels,
     int64_t BLANK) {
   if (idx % 2 == 0) {
     return BLANK;
   } else {
-    return target[offset + stride * (idx / 2)];
+    int64_t label = target[offset + stride * (idx / 2)];
+    CUDA_KERNEL_ASSERT(label >= 0 && label < num_labels && "ctc_loss: target label out of range [0, num_labels)");
+    return label;
   }
 }
 
@@ -82,7 +85,7 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
                                     int64_t lp_input_stride, int64_t lp_batch_stride, int64_t lp_char_stride,
                                     int64_t la_batch_stride, int64_t la_input_stride, int64_t la_target_stride,
                                     const int64_t* __restrict__ tg_batch_offsets, int64_t tg_target_stride,
-                                    int64_t batch_size, int64_t BLANK) {
+                                    int64_t batch_size, int64_t num_labels, int64_t BLANK) {
 
   constexpr scalar_t neginf = -INFINITY;
 
@@ -123,6 +126,7 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
                                              tg_batch_offset,
                                              tg_target_stride,
                                              1,
+                                             num_labels,
                                              BLANK)];
       break;
     default:
@@ -144,6 +148,7 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
           tg_batch_offset,
           tg_target_stride,
           s,
+          num_labels,
           BLANK);
       have_three =
           ((s > 1) &&
@@ -152,6 +157,7 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
                 tg_batch_offset,
                 tg_target_stride,
                 s - 2,
+                num_labels,
                 BLANK) != current_char));
     } else {
       current_char = BLANK;
@@ -209,9 +215,9 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
 }
 
 // The forward computation. Lot's of admin and a call to the alpha kernel.
-// Note: we do not check that the labels are in the valid range. As we use
-// them for indexing in the kernels, you'll see memory errors when you
-// pass corrupt labels.
+// Note: labels are checked to be in the valid range by a device-side assert in
+// the kernels (they are used for indexing there), so corrupt labels abort
+// rather than reading out of bounds.
 // We support both a 2-dimensional tensor as targets (one set of targets in each row) and
 // a 1-dimensional tensor where all targets are concatenated (and we use target_lengths
 // to figure out where they begin).
@@ -315,7 +321,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
                       log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
                       log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
                       tg_batch_offsets.template const_data_ptr<int64_t>(), tg_target_stride,
-                      batch_size, BLANK);
+                      batch_size, num_labels, BLANK);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return std::make_tuple(neg_log_likelihood, log_alpha);
 }
@@ -331,7 +337,7 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
                                       int64_t lp_input_stride, int64_t lp_batch_stride, int64_t lp_char_stride,
                                       int64_t lb_batch_stride, int64_t lb_input_stride, int64_t lb_target_stride,
                                       const int64_t* __restrict__ tg_batch_offsets, int64_t tg_target_stride,
-                                      int64_t batch_size, int64_t BLANK) {
+                                      int64_t batch_size, int64_t num_labels, int64_t BLANK) {
   constexpr scalar_t neginf = -INFINITY;
 
   int64_t b = threadIdx.y + blockIdx.y * blockDim.y;
@@ -360,6 +366,7 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
           tg_batch_offset,
           tg_target_stride,
           s,
+          num_labels,
           BLANK);
       lb = log_probs_data[lp_batch_offset + (input_length-1) * lp_input_stride + lp_char_stride * current_target_prime];
     } else {
@@ -381,6 +388,7 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
           tg_batch_offset,
           tg_target_stride,
           s,
+          num_labels,
           BLANK);
       have_three =
           ((s < 2 * target_length - 1) &&
@@ -389,6 +397,7 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
                 tg_batch_offset,
                 tg_target_stride,
                 s + 2,
+                num_labels,
                 BLANK) != current_target_prime));
     } else {
       current_target_prime = BLANK;
@@ -543,6 +552,7 @@ ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
           tg_batch_offset,
           tg_target_stride,
           s,
+          num_labels,
           BLANK);
       scalar_t log_alpha_beta = (log_alpha_data[la_batch_offset + la_input_stride * t + la_target_stride * s]
                                  + log_beta_data[lb_batch_offset + lb_input_stride * t + lb_target_stride * s]);
@@ -673,7 +683,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
        tg_batch_offsets.template const_data_ptr<int64_t>(), tg_target_stride,
-       batch_size, BLANK);
+       batch_size, num_labels, BLANK);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
