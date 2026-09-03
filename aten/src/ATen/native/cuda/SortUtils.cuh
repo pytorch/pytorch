@@ -10,8 +10,9 @@
 #include <ATen/native/StridedRandomAccessor.h>
 
 #if defined(USE_ROCM)
-// ROCm: WarpMergeSort available and tested on every supported ROCm
-#define HAS_WARP_MERGE_SORT() (1)
+// ROCm: WarpMergeSort available and tested on ROCm 7.0+
+// ROCM_VERSION encoding: MAJOR*10000 + MINOR*100 + PATCH
+#define HAS_WARP_MERGE_SORT() (ROCM_VERSION >= 70000)
 #else
 // CUDA: WarpMergeSort available since CUDA 11.6
 #define HAS_WARP_MERGE_SORT() (CUDA_VERSION >= 11060)
