@@ -16826,6 +16826,27 @@ fn
         self.assertTrue(res, torch.ones(1))
         self.assertEqual(foo.x, 1)
 
+    def test_dataclass_replace_sourceless_instance(self):
+        # slots=True matches the originally reported repro; the bug isn't
+        # specific to it, any dataclass reproduces it.
+        @dataclasses.dataclass(slots=True)
+        class Foo:
+            a: torch.Tensor
+            b: int
+
+        # `f` is built during tracing, so it has no source of its own. `Foo`
+        # does, and dataclasses.replace goes through `f.__class__(**changes)`,
+        # which is only traceable if `__class__` keeps the class provenance.
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x):
+            f = Foo(a=x, b=1)
+            return dataclasses.replace(f, a=x * 2)
+
+        x = torch.randn(3)
+        f2 = run(x)
+        self.assertEqual(f2.a, x * 2)
+        self.assertEqual(f2.b, 1)
+
     def test_frozenset_of_non_literals(self):
         class Foo:
             pass
