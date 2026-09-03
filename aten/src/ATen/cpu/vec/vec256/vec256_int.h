@@ -6,18 +6,16 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 
-#ifdef CPU_CAPABILITY_AVX512
-#include <array>
-#endif
-
-namespace at::vec::inline CPU_CAPABILITY {
+namespace at::vec {
+inline namespace CPU_CAPABILITY {
 
 #ifdef CPU_CAPABILITY_AVX2
 
 struct Vectorizedi {
  protected:
-  __m256i values{_mm256_setzero_si256()};
+  __m256i values;
 
   static inline __m256i invert(const __m256i& v) {
     const auto ones = _mm256_set1_epi64x(-1);
@@ -25,7 +23,9 @@ struct Vectorizedi {
   }
 
  public:
-  Vectorizedi() = default;
+  Vectorizedi() {
+    values = _mm256_setzero_si256();
+  }
   Vectorizedi(__m256i v) : values(v) {}
   operator __m256i() const {
     return values;
@@ -55,15 +55,21 @@ class Vectorized<int64_t> : public Vectorizedi {
     return 4;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized(int64_t v) : Vectorizedi{_mm256_set1_epi64x(v)} {}
-  Vectorized(int64_t val1, int64_t val2, int64_t val3, int64_t val4)
-      : Vectorizedi{_mm256_setr_epi64x(val1, val2, val3, val4)} {}
+  Vectorized() {
+    values = _mm256_setzero_si256();
+  }
+  Vectorized(int64_t v) {
+    values = _mm256_set1_epi64x(v);
+  }
+  Vectorized(int64_t val1, int64_t val2, int64_t val3, int64_t val4) {
+    values = _mm256_setr_epi64x(val1, val2, val3, val4);
+  }
   template <int64_t mask>
   static Vectorized<int64_t> blend(
       Vectorized<int64_t> a,
       Vectorized<int64_t> b) {
-    __at_align__ std::array<int64_t, size()> tmp_values;
-    a.store(tmp_values.data());
+    __at_align__ int64_t tmp_values[size()];
+    a.store(tmp_values);
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi64(b.values, 0);
     if (mask & 0x02)
@@ -72,7 +78,7 @@ class Vectorized<int64_t> : public Vectorizedi {
       tmp_values[2] = _mm256_extract_epi64(b.values, 2);
     if (mask & 0x08)
       tmp_values[3] = _mm256_extract_epi64(b.values, 3);
-    return loadu(tmp_values.data());
+    return loadu(tmp_values);
   }
   static Vectorized<int64_t> blendv(
       const Vectorized<int64_t>& a,
@@ -100,22 +106,21 @@ class Vectorized<int64_t> : public Vectorizedi {
         return blend<3>(a, b);
       case 3:
         return blend<7>(a, b);
-      default:
-        return b;
     }
+    return b;
   }
   static Vectorized<int64_t> loadu(const void* ptr) {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vectorized<int64_t> loadu(const void* ptr, int64_t count) {
-    __at_align__ std::array<int64_t, size()> tmp_values;
-    // Fill tail with 1.
-    tmp_values.fill(1);
+    __at_align__ int64_t tmp_values[size()];
+    // Fill tail with 1; loop for GCC 11 auto-vec.
+    for (const auto i : c10::irange(size())) {
+      tmp_values[i] = 1;
+    }
     std::memcpy(
-        tmp_values.data(),
-        ptr,
-        std::min<int64_t>(count, size()) * sizeof(int64_t));
-    return loadu(tmp_values.data());
+        tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(int64_t));
+    return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
@@ -123,13 +128,10 @@ class Vectorized<int64_t> : public Vectorizedi {
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ std::array<int64_t, size()> tmp_values;
-      _mm256_storeu_si256(
-          reinterpret_cast<__m256i*>(tmp_values.data()), values);
+      __at_align__ int64_t tmp_values[size()];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(
-          ptr,
-          tmp_values.data(),
-          std::min<int64_t>(count, size()) * sizeof(int64_t));
+          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(int64_t));
     }
   }
   const int64_t& operator[](int idx) const = delete;
@@ -191,7 +193,10 @@ class Vectorized<int32_t> : public Vectorizedi {
     return 8;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized(int32_t v) : Vectorizedi{_mm256_set1_epi32(v)} {}
+  Vectorized() = default;
+  Vectorized(int32_t v) {
+    values = _mm256_set1_epi32(v);
+  }
   Vectorized(
       int32_t val1,
       int32_t val2,
@@ -200,16 +205,9 @@ class Vectorized<int32_t> : public Vectorizedi {
       int32_t val5,
       int32_t val6,
       int32_t val7,
-      int32_t val8)
-      : Vectorizedi{_mm256_setr_epi32(
-            val1,
-            val2,
-            val3,
-            val4,
-            val5,
-            val6,
-            val7,
-            val8)} {}
+      int32_t val8) {
+    values = _mm256_setr_epi32(val1, val2, val3, val4, val5, val6, val7, val8);
+  }
   template <int64_t mask>
   static Vectorized<int32_t> blend(
       Vectorized<int32_t> a,
@@ -257,22 +255,21 @@ class Vectorized<int32_t> : public Vectorizedi {
         return blend<63>(a, b);
       case 7:
         return blend<127>(a, b);
-      default:
-        return b;
     }
+    return b;
   }
   static Vectorized<int32_t> loadu(const void* ptr) {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vectorized<int32_t> loadu(const void* ptr, int32_t count) {
-    __at_align__ std::array<int32_t, size()> tmp_values;
-    // Fill tail with 1.
-    tmp_values.fill(1);
+    __at_align__ int32_t tmp_values[size()];
+    // Fill tail with 1; loop for GCC 11 auto-vec.
+    for (const auto i : c10::irange(size())) {
+      tmp_values[i] = 1;
+    }
     std::memcpy(
-        tmp_values.data(),
-        ptr,
-        std::min<int64_t>(count, size()) * sizeof(int32_t));
-    return loadu(tmp_values.data());
+        tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(int32_t));
+    return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
@@ -280,13 +277,10 @@ class Vectorized<int32_t> : public Vectorizedi {
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ std::array<int32_t, size()> tmp_values;
-      _mm256_storeu_si256(
-          reinterpret_cast<__m256i*>(tmp_values.data()), values);
+      __at_align__ int32_t tmp_values[size()];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(
-          ptr,
-          tmp_values.data(),
-          std::min<int64_t>(count, size()) * sizeof(int32_t));
+          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(int32_t));
     }
   }
   const int32_t& operator[](int idx) const = delete;
@@ -360,12 +354,12 @@ class Vectorized<int32_t> : public Vectorizedi {
 
 template <>
 inline void convert(const int32_t* src, float* dst, int64_t n) {
-  int64_t i{0};
+  int64_t i;
   // int32_t and float have same size
 #ifndef _MSC_VER
 #pragma unroll
 #endif
-  for (; i <= (n - Vectorized<int32_t>::size());
+  for (i = 0; i <= (n - Vectorized<int32_t>::size());
        i += Vectorized<int32_t>::size()) {
     auto input_vec =
         _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
@@ -382,12 +376,12 @@ inline void convert(const int32_t* src, float* dst, int64_t n) {
 
 template <>
 inline void convert(const int32_t* src, double* dst, int64_t n) {
-  int64_t i{0};
+  int64_t i;
   // int32_t has half the size of double
 #ifndef _MSC_VER
 #pragma unroll
 #endif
-  for (; i <= (n - Vectorized<double>::size());
+  for (i = 0; i <= (n - Vectorized<double>::size());
        i += Vectorized<double>::size()) {
     auto input_128_vec =
         _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i));
@@ -416,7 +410,10 @@ class Vectorized<int16_t> : public Vectorizedi {
     return 16;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized(int16_t v) : Vectorizedi{_mm256_set1_epi16(v)} {}
+  Vectorized() = default;
+  Vectorized(int16_t v) {
+    values = _mm256_set1_epi16(v);
+  }
   Vectorized(
       int16_t val1,
       int16_t val2,
@@ -433,30 +430,31 @@ class Vectorized<int16_t> : public Vectorizedi {
       int16_t val13,
       int16_t val14,
       int16_t val15,
-      int16_t val16)
-      : Vectorizedi{_mm256_setr_epi16(
-            val1,
-            val2,
-            val3,
-            val4,
-            val5,
-            val6,
-            val7,
-            val8,
-            val9,
-            val10,
-            val11,
-            val12,
-            val13,
-            val14,
-            val15,
-            val16)} {}
+      int16_t val16) {
+    values = _mm256_setr_epi16(
+        val1,
+        val2,
+        val3,
+        val4,
+        val5,
+        val6,
+        val7,
+        val8,
+        val9,
+        val10,
+        val11,
+        val12,
+        val13,
+        val14,
+        val15,
+        val16);
+  }
   template <int64_t mask>
   static Vectorized<int16_t> blend(
       Vectorized<int16_t> a,
       Vectorized<int16_t> b) {
-    __at_align__ std::array<int16_t, size()> tmp_values;
-    a.store(tmp_values.data());
+    __at_align__ int16_t tmp_values[size()];
+    a.store(tmp_values);
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi16(b.values, 0);
     if (mask & 0x02)
@@ -489,7 +487,7 @@ class Vectorized<int16_t> : public Vectorizedi {
       tmp_values[14] = _mm256_extract_epi16(b.values, 14);
     if (mask & 0x8000)
       tmp_values[15] = _mm256_extract_epi16(b.values, 15);
-    return loadu(tmp_values.data());
+    return loadu(tmp_values);
   }
   static Vectorized<int16_t> blendv(
       const Vectorized<int16_t>& a,
@@ -556,22 +554,21 @@ class Vectorized<int16_t> : public Vectorizedi {
         return blend<16383>(a, b);
       case 15:
         return blend<32767>(a, b);
-      default:
-        return b;
     }
+    return b;
   }
   static Vectorized<int16_t> loadu(const void* ptr) {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vectorized<int16_t> loadu(const void* ptr, int16_t count) {
-    __at_align__ std::array<int16_t, size()> tmp_values;
-    // Fill tail with 1.
-    tmp_values.fill(1);
+    __at_align__ int16_t tmp_values[size()];
+    // Fill tail with 1; loop for GCC 11 auto-vec.
+    for (const auto i : c10::irange(size())) {
+      tmp_values[i] = 1;
+    }
     std::memcpy(
-        tmp_values.data(),
-        ptr,
-        std::min<int64_t>(count, size()) * sizeof(int16_t));
-    return loadu(tmp_values.data());
+        tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(int16_t));
+    return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
@@ -579,13 +576,10 @@ class Vectorized<int16_t> : public Vectorizedi {
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ std::array<int16_t, size()> tmp_values;
-      _mm256_storeu_si256(
-          reinterpret_cast<__m256i*>(tmp_values.data()), values);
+      __at_align__ int16_t tmp_values[size()];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(
-          ptr,
-          tmp_values.data(),
-          std::min<int64_t>(count, size()) * sizeof(int16_t));
+          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(int16_t));
     }
   }
   const int16_t& operator[](int idx) const = delete;
@@ -645,7 +639,10 @@ class Vectorized8 : public Vectorizedi {
     return 32;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized8(T v) : Vectorizedi{_mm256_set1_epi8(v)} {}
+  Vectorized8() = default;
+  Vectorized8(T v) {
+    values = _mm256_set1_epi8(v);
+  }
   Vectorized8(
       T val1,
       T val2,
@@ -678,44 +675,45 @@ class Vectorized8 : public Vectorizedi {
       T val29,
       T val30,
       T val31,
-      T val32)
-      : Vectorizedi{_mm256_setr_epi8(
-            val1,
-            val2,
-            val3,
-            val4,
-            val5,
-            val6,
-            val7,
-            val8,
-            val9,
-            val10,
-            val11,
-            val12,
-            val13,
-            val14,
-            val15,
-            val16,
-            val17,
-            val18,
-            val19,
-            val20,
-            val21,
-            val22,
-            val23,
-            val24,
-            val25,
-            val26,
-            val27,
-            val28,
-            val29,
-            val30,
-            val31,
-            val32)} {}
+      T val32) {
+    values = _mm256_setr_epi8(
+        val1,
+        val2,
+        val3,
+        val4,
+        val5,
+        val6,
+        val7,
+        val8,
+        val9,
+        val10,
+        val11,
+        val12,
+        val13,
+        val14,
+        val15,
+        val16,
+        val17,
+        val18,
+        val19,
+        val20,
+        val21,
+        val22,
+        val23,
+        val24,
+        val25,
+        val26,
+        val27,
+        val28,
+        val29,
+        val30,
+        val31,
+        val32);
+  }
   template <int64_t mask>
   static Vectorized<T> blend(Vectorized<T> a, Vectorized<T> b) {
-    __at_align__ std::array<T, size()> tmp_values;
-    a.store(tmp_values.data());
+    __at_align__ T tmp_values[size()];
+    a.store(tmp_values);
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi8(b.values, 0);
     if (mask & 0x02)
@@ -780,7 +778,7 @@ class Vectorized8 : public Vectorizedi {
       tmp_values[30] = _mm256_extract_epi8(b.values, 30);
     if (mask & 0x80000000)
       tmp_values[31] = _mm256_extract_epi8(b.values, 31);
-    return loadu(tmp_values.data());
+    return loadu(tmp_values);
   }
   static Vectorized<T> blendv(
       const Vectorized<T>& a,
@@ -892,9 +890,8 @@ class Vectorized8 : public Vectorizedi {
         return blend<0x3FFFFFFF>(a, b);
       case 31:
         return blend<0x7FFFFFFF>(a, b);
-      default:
-        return b;
     }
+    return b;
   }
   static Vectorized<T> loadu(const void* ptr) {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
@@ -911,12 +908,13 @@ class Vectorized8 : public Vectorizedi {
     return _mm256_castsi128_si256(input_128);
   }
   static Vectorized<T> loadu(const void* ptr, T count) {
-    __at_align__ std::array<T, size()> tmp_values;
-    // Fill tail with 1.
-    tmp_values.fill(1);
-    std::memcpy(
-        tmp_values.data(), ptr, std::min<int64_t>(count, size()) * sizeof(T));
-    return loadu(tmp_values.data());
+    __at_align__ T tmp_values[size()];
+    // Fill tail with 1; loop for GCC 11 auto-vec.
+    for (const auto i : c10::irange(size())) {
+      tmp_values[i] = 1;
+    }
+    std::memcpy(tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(T));
+    return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
@@ -929,13 +927,10 @@ class Vectorized8 : public Vectorizedi {
         _mm_storel_epi64(
             reinterpret_cast<__m128i*>(ptr), _mm256_castsi256_si128(values));
       } else {
-        __at_align__ std::array<T, size()> tmp_values;
-        _mm256_storeu_si256(
-            reinterpret_cast<__m256i*>(tmp_values.data()), values);
+        __at_align__ T tmp_values[size()];
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
         std::memcpy(
-            ptr,
-            tmp_values.data(),
-            std::min<int64_t>(count, size()) * sizeof(T));
+            ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(T));
       }
     }
   }
@@ -1216,20 +1211,24 @@ Vectorized<T> inline int_elementwise_binary_256(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
     Op op) {
-  std::array<T, Vectorized<T>::size()> values_a;
-  std::array<T, Vectorized<T>::size()> values_b;
-  a.store(values_a.data());
-  b.store(values_b.data());
+  T values_a[Vectorized<T>::size()];
+  T values_b[Vectorized<T>::size()];
+  a.store(values_a);
+  b.store(values_b);
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     values_a[i] = op(values_a[i], values_b[i]);
   }
-  return Vectorized<T>::loadu(values_a.data());
+  return Vectorized<T>::loadu(values_a);
 }
 
 template <>
 Vectorized<int8_t> inline operator*(
     const Vectorized<int8_t>& a,
     const Vectorized<int8_t>& b) {
+  // We don't have an instruction for multiplying int8_t
+#ifndef CPU_CAPABILITY_AVX2
+  return int_elementwise_binary_256(a, b, std::multiplies<int8_t>());
+#else
   __m256i mask00FF = _mm256_set1_epi16(0x00FF);
   __m256i a_lo = _mm256_srai_epi16(_mm256_slli_epi16(a, 8), 8);
   __m256i b_lo = _mm256_srai_epi16(_mm256_slli_epi16(b, 8), 8);
@@ -1239,6 +1238,7 @@ Vectorized<int8_t> inline operator*(
   __m256i res_hi = _mm256_slli_epi16(_mm256_mullo_epi16(a_hi, b_hi), 8);
   __m256i res = _mm256_or_si256(res_hi, res_lo);
   return res;
+#endif
 }
 
 template <>
@@ -1246,6 +1246,9 @@ Vectorized<uint8_t> inline operator*(
     const Vectorized<uint8_t>& a,
     const Vectorized<uint8_t>& b) {
   // We don't have an instruction for multiplying uint8_t
+#ifndef CPU_CAPABILITY_AVX2
+  return int_elementwise_binary_256(a, b, std::multiplies<uint8_t>());
+#else
   __m256i mask00FF = _mm256_set1_epi16(0x00FF);
   __m256i a_lo = _mm256_and_si256(a, mask00FF);
   __m256i b_lo = _mm256_and_si256(b, mask00FF);
@@ -1255,14 +1258,21 @@ Vectorized<uint8_t> inline operator*(
   __m256i res_hi = _mm256_slli_epi16(_mm256_mullo_epi16(a_hi, b_hi), 8);
   __m256i res = _mm256_or_si256(res_hi, res_lo);
   return res;
+#endif
 }
 
 template <>
 Vectorized<int64_t> inline minimum(
     const Vectorized<int64_t>& a,
     const Vectorized<int64_t>& b) {
+#ifndef CPU_CAPABILITY_AVX2
+  return emulate(a, b, [](int64_t a_point, int64_t b_point) {
+    return std::min(a_point, b_point);
+  });
+#else
   __m256i cmp = _mm256_cmpgt_epi64(a, b);
   return _mm256_blendv_epi8(a, b, cmp);
+#endif
 }
 
 template <>
@@ -1297,8 +1307,14 @@ template <>
 Vectorized<int64_t> inline maximum(
     const Vectorized<int64_t>& a,
     const Vectorized<int64_t>& b) {
+#ifndef CPU_CAPABILITY_AVX2
+  return emulate(a, b, [](int64_t a_point, int64_t b_point) {
+    return std::max(a_point, b_point);
+  });
+#else
   __m256i cmp = _mm256_cmpgt_epi64(a, b);
   return _mm256_blendv_epi8(b, a, cmp);
+#endif
 }
 
 template <>
@@ -1334,7 +1350,17 @@ Vectorized<int64_t> inline clamp(
     const Vectorized<int64_t>& a,
     const Vectorized<int64_t>& min_val,
     const Vectorized<int64_t>& max_val) {
+#ifndef CPU_CAPABILITY_AVX2
+  return emulate(
+      a,
+      min_val,
+      max_val,
+      [](int64_t a_point, int64_t min_point, int64_t max_point) {
+        return std::min(max_point, std::max(a_point, min_point));
+      });
+#else
   return minimum(maximum(a, min_val), max_val);
+#endif
 }
 
 template <>
@@ -1373,7 +1399,13 @@ template <>
 Vectorized<int64_t> inline clamp_max(
     const Vectorized<int64_t>& a,
     const Vectorized<int64_t>& max_val) {
+#ifndef CPU_CAPABILITY_AVX2
+  return emulate(a, max_val, [](int64_t a_point, int64_t max_point) {
+    return std::min(max_point, a_point);
+  });
+#else
   return minimum(max_val, a);
+#endif
 }
 
 template <>
@@ -1408,7 +1440,13 @@ template <>
 Vectorized<int64_t> inline clamp_min(
     const Vectorized<int64_t>& a,
     const Vectorized<int64_t>& min_val) {
+#ifndef CPU_CAPABILITY_AVX2
+  return emulate(a, min_val, [](int64_t a_point, int64_t min_point) {
+    return std::max(min_point, a_point);
+  });
+#else
   return maximum(min_val, a);
+#endif
 }
 
 template <>
@@ -1456,7 +1494,7 @@ std::
     return _mm256_cvtepi8_epi32(
         _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr)));
   } else {
-    auto a = Vectorized<int8_t>::loadu(ptr, static_cast<int8_t>(count));
+    auto a = Vectorized<int8_t>::loadu(ptr, count);
     return _mm256_cvtepi8_epi32(_mm256_castsi256_si128(a));
   }
 }
@@ -1470,7 +1508,7 @@ std::
     return _mm256_cvtepu8_epi32(
         _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr)));
   } else {
-    auto a = Vectorized<uint8_t>::loadu(ptr, static_cast<uint8_t>(count));
+    auto a = Vectorized<uint8_t>::loadu(ptr, count);
     return _mm256_cvtepu8_epi32(_mm256_castsi256_si128(a));
   }
 }
@@ -1479,58 +1517,62 @@ template <>
 Vectorized<int64_t> inline operator/(
     const Vectorized<int64_t>& a,
     const Vectorized<int64_t>& b) {
-  return int_elementwise_binary_256(a, b, std::divides<>());
+  return int_elementwise_binary_256(a, b, std::divides<int64_t>());
 }
 template <>
 Vectorized<int32_t> inline operator/(
     const Vectorized<int32_t>& a,
     const Vectorized<int32_t>& b) {
-  return int_elementwise_binary_256(a, b, std::divides<>());
+  return int_elementwise_binary_256(a, b, std::divides<int32_t>());
 }
 template <>
 Vectorized<int16_t> inline operator/(
     const Vectorized<int16_t>& a,
     const Vectorized<int16_t>& b) {
-  return int_elementwise_binary_256(a, b, std::divides<>());
+  return int_elementwise_binary_256(a, b, std::divides<int16_t>());
 }
 template <>
 Vectorized<int8_t> inline operator/(
     const Vectorized<int8_t>& a,
     const Vectorized<int8_t>& b) {
-  return int_elementwise_binary_256(a, b, std::divides<>());
+  return int_elementwise_binary_256(a, b, std::divides<int8_t>());
 }
 template <>
 Vectorized<uint8_t> inline operator/(
     const Vectorized<uint8_t>& a,
     const Vectorized<uint8_t>& b) {
-  return int_elementwise_binary_256(a, b, std::divides<>());
+  return int_elementwise_binary_256(a, b, std::divides<uint8_t>());
 }
 
 template <
     class T,
-    typename std::
-        enable_if_t<std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
+    typename std::enable_if_t<
+        std::is_base_of<Vectorizedi, Vectorized<T>>::value,
+        int> = 0>
 inline Vectorized<T> operator&(const Vectorized<T>& a, const Vectorized<T>& b) {
   return _mm256_and_si256(a, b);
 }
 template <
     class T,
-    typename std::
-        enable_if_t<std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
+    typename std::enable_if_t<
+        std::is_base_of<Vectorizedi, Vectorized<T>>::value,
+        int> = 0>
 inline Vectorized<T> operator|(const Vectorized<T>& a, const Vectorized<T>& b) {
   return _mm256_or_si256(a, b);
 }
 template <
     class T,
-    typename std::
-        enable_if_t<std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
+    typename std::enable_if_t<
+        std::is_base_of<Vectorizedi, Vectorized<T>>::value,
+        int> = 0>
 inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
   return _mm256_xor_si256(a, b);
 }
 template <
     class T,
-    typename std::
-        enable_if_t<std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
+    typename std::enable_if_t<
+        std::is_base_of<Vectorizedi, Vectorized<T>>::value,
+        int> = 0>
 inline Vectorized<T> operator~(const Vectorized<T>& a) {
   return _mm256_xor_si256(a, _mm256_set1_epi32(-1));
 }
@@ -1685,8 +1727,6 @@ inline Vectorized<uint8_t> Vectorized<uint8_t>::le(
   return (*this <= other) & Vectorized<uint8_t>(1);
 }
 
-constexpr int8_t top_bit_set{-128}; // 0x80
-
 template <bool left_shift>
 Vectorized<int16_t> inline shift_256_16(
     const Vectorized<int16_t>& a,
@@ -1702,67 +1742,67 @@ Vectorized<int16_t> inline shift_256_16(
   __m256i ctl_0_1 = _mm256_set_epi8(
       29,
       28,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       25,
       24,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       21,
       20,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       17,
       16,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       13,
       12,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       9,
       8,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       5,
       4,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       1,
       0,
-      top_bit_set,
-      top_bit_set);
+      0x80,
+      0x80);
   __m256i ctl_1_0 = _mm256_set_epi8(
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       31,
       30,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       27,
       26,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       23,
       22,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       19,
       18,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       15,
       14,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       11,
       10,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       7,
       6,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       3,
       2);
 
@@ -1773,7 +1813,7 @@ Vectorized<int16_t> inline shift_256_16(
   // element with the same index in output pair, while the other
   // element in output pair will be set to all 0s.
   __m256i keep_0 = _mm256_set1_epi32(0xFFFF);
-  __m256i keep_1 = _mm256_set1_epi32(-0x00010000); // 0xFFFF0000
+  __m256i keep_1 = _mm256_set1_epi32(0xFFFF0000);
 
   // Take each 16-bit element with idx%2==0 from input array to be
   // shifted and extend it to 32 bits so that 0s are added to the
@@ -1837,268 +1877,268 @@ Vectorized<T> inline shift_256_8(
   // set to all 0s.
   __m256i ctl_0_3 = _mm256_set_epi8(
       28,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       24,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       20,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       16,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       12,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       8,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       4,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       0,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set);
+      0x80,
+      0x80,
+      0x80);
   __m256i ctl_1_0 = _mm256_set_epi8(
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       29,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       25,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       21,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       17,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       13,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       9,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       5,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       1);
   __m256i ctl_1_3 = _mm256_set_epi8(
       29,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       25,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       21,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       17,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       13,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       9,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       5,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       1,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set);
+      0x80,
+      0x80,
+      0x80);
   __m256i ctl_2_0 = _mm256_set_epi8(
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       30,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       26,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       22,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       18,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       14,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       10,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       6,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       2);
   __m256i ctl_2_3 = _mm256_set_epi8(
       30,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       26,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       22,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       18,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       14,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       10,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       6,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       2,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set);
+      0x80,
+      0x80,
+      0x80);
   __m256i ctl_3_0 = _mm256_set_epi8(
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       31,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       27,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       23,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       19,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       15,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       11,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       7,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       3);
   __m256i ctl_3_1 = _mm256_set_epi8(
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
       31,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       27,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       23,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       19,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       15,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       11,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       7,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       3,
-      top_bit_set);
+      0x80);
   __m256i ctl_3_2 = _mm256_set_epi8(
-      top_bit_set,
+      0x80,
       31,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       27,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       23,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       19,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       15,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       11,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       7,
-      top_bit_set,
-      top_bit_set,
-      top_bit_set,
+      0x80,
+      0x80,
+      0x80,
       3,
-      top_bit_set,
-      top_bit_set);
+      0x80,
+      0x80);
 
   // Masks for bitwise and operation, treating 256 bits as an array of
   // 8-bit elements, and considering them in quadruples of neighboring
@@ -2107,7 +2147,7 @@ Vectorized<T> inline shift_256_8(
   // into element with the same index in output quadruple, while the
   // other elements in output quadruple will be set to all 0s.
   __m256i keep_0 = _mm256_set1_epi32(0xFF);
-  __m256i keep_3 = _mm256_set1_epi32(-0x01000000); // 0xFF000000
+  __m256i keep_3 = _mm256_set1_epi32(0xFF000000);
 
   // Take each 8-bit element with idx%4==0 from input array to be
   // shifted and extend it to 32 bits so that 0s are added to the
@@ -2273,4 +2313,5 @@ Vectorized<uint8_t> inline operator>>(
 
 #endif
 
-} // namespace at::vec::inline CPU_CAPABILITY
+} // namespace CPU_CAPABILITY
+} // namespace at::vec

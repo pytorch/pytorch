@@ -417,9 +417,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
     ) -> str:
         """Get a pointer to an array that only exists for the duration of the C++
         statement it's used in."""
-        if len(elements) == 0:
-            return "nullptr"
-
         # If the c_type is already a pointer, return a mutable pointer to the array.
         # Otherwise, return a const pointer.  In the C-shim API, pointer types are only
         # const-qualified with respect to the underlying value, not any nested pointers.
@@ -745,12 +742,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return False
 
         if isinstance(value, sympy.Expr):
-            # Sometimes this would generate lines that look like "int64_t x = x".  These
-            # are valid in Python, but obviously not C++, so manually skip them.
-            if (is_symbol := isinstance(value, sympy.Symbol)) and str(value) == name:
-                bound_vars.add(value)
-
-            if not is_symbol or value in bound_vars:
+            if not isinstance(value, sympy.Symbol) or value in bound_vars:
                 return
             if symbol_is_type(value, (SymT.FLOAT, SymT.UNBACKED_FLOAT)):
                 decl = "double"
@@ -1893,9 +1885,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         kernel_suffix = kernel_tokens[-1]
         if kernel_suffix == "call":
             kernel_suffix = kernel_tokens[-2]
-        # Handle explicit default overloads, and non-default overloads.
-        kernel_suffix = kernel_suffix.removesuffix(".default")
-        kernel_suffix = kernel_suffix.replace(".", "_")
 
         shim_fn = f"aoti_torch_{device}_{kernel_suffix}"
         return shim_fn
@@ -3077,17 +3066,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
         finally:
             self.pop_codegened_graph()
-
-    def codegen_subgraph_with_flattened_outputs(
-        self, subgraph, outer_inputs, outer_flattened_outputs
-    ):
-        # TODO: as with codegen_subgraph, this is the old way of supporting subgraphs.
-
-        # Callers of this function don't codegen the outputs, so do it manually.
-        for out in outer_flattened_outputs:
-            self.writeline(f"RAIIAtenTensorHandle {out};")
-
-        self.codegen_subgraph(subgraph, outer_inputs, outer_flattened_outputs)
 
     def codegen_while_loop(self, while_loop, stack_output=False):
         """Emit ABI-compatible C++ for a higher-order while_loop.
