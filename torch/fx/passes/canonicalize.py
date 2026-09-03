@@ -17,6 +17,7 @@ from collections.abc import Callable
 
 import torch
 import torch.fx as fx
+import torch.utils._pytree as pytree
 
 
 __all__ = ["canonicalize_graph", "rename_nodes_to_canonical"]
@@ -69,9 +70,10 @@ def _canonical_node_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> obj
 def _is_safe_to_reorder(node: fx.Node) -> bool:
     """Check if a node is safe to reorder during graph canonicalization.
 
-    Builds on Node.is_impure() (used by DCE) with two additional checks for
-    cases it doesn't cover: in-place call_method nodes and non-OpOverload
-    state-changing functions detected by a no-node-arguments heuristic.
+    Builds on Node.is_impure() (used by DCE) with additional checks for cases
+    it doesn't cover: in-place call_method nodes and non-OpOverload
+    state-changing functions detected by no-node-arguments and
+    no-tensor-or-symbolic-value heuristics.
     """
     if node.op == "call_method":
         return not node.target.endswith("_")  # pyrefly: ignore[missing-attribute]
@@ -106,6 +108,25 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
             return False
         # functorch batch dim ops modify the vmap interpreter stack.
         if name in ("_add_batch_dim", "_remove_batch_dim"):
+            return False
+        # HigherOrderOperators are proper operators whose impurity is_impure()
+        # already tracks via the effects system, and graph passes (e.g. Dynamo
+        # graph deduplication) create HOP nodes without example_value/val
+        # meta, so the value heuristic below does not apply to them.
+        if isinstance(node.target, torch._ops.HigherOrderOperator):
+            return True
+        # State-changing functions that consume other nodes escape the
+        # no-node-arguments heuristic above (e.g. _exit_inference_mode takes
+        # the token produced by _enter_inference_mode, _sdpa_kernel takes
+        # _backend_from_string nodes). Dynamo and export attach a tensor or
+        # symbolic example_value/val to every node whose result feeds the
+        # program; state-changing calls are never wrapped as data, so a node
+        # carrying no such value only exists for its side effect.
+        values = [node.meta.get("example_value"), node.meta.get("val")]
+        if not any(
+            isinstance(v, (torch.Tensor, torch.SymInt, torch.SymFloat, torch.SymBool))
+            for v in pytree.tree_leaves(values)
+        ):
             return False
     return True
 
