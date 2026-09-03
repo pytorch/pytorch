@@ -903,13 +903,13 @@ def main(argv: list[str] | None = None) -> int:
     jobs = os.getenv("MAX_JOBS") or os.getenv("CMAKE_BUILD_PARALLEL_LEVEL")
     if jobs and jobs.isdigit():
         relink += ["--parallel", jobs]
-    built = os.path.join(BUILD_DIR, "lib", "libtorch_cuda.so")
+    build_lib = os.path.join(BUILD_DIR, "lib", "libtorch_cuda.so")
     # Taken across the relink, for the size delta reported below.
-    before = os.path.getsize(built) if os.path.exists(built) else 0
+    before = os.path.getsize(build_lib) if os.path.exists(build_lib) else 0
     _run_child(relink, "relinking torch_cuda", cwd=BUILD_DIR)
 
-    if not os.path.exists(built):
-        raise RuntimeError(f"expected relinked library at {built}")
+    if not os.path.exists(build_lib):
+        raise RuntimeError(f"expected relinked library at {build_lib}")
     installed = os.path.join(_installed_lib_dir(), "libtorch_cuda.so")
     if not os.path.exists(installed):
         # Refuse to create it: _installed_lib_dir found *a* torch, so a layout that
@@ -923,14 +923,14 @@ def main(argv: list[str] | None = None) -> int:
     # and one os.replace means `installed` never stops existing.
     staged = f"{installed}.naot.{os.getpid()}.tmp"
     try:
-        shutil.copy2(built, staged)
+        shutil.copy2(build_lib, staged)
         os.replace(staged, installed)
     finally:
         if os.path.exists(staged):
             os.remove(staged)
-    grew = (os.path.getsize(built) - before) >> 20
+    grew = (os.path.getsize(build_lib) - before) >> 20
     _report(
-        f"{os.path.getsize(built) >> 20} MiB relinked into {installed} "
+        f"{os.path.getsize(build_lib) >> 20} MiB relinked into {installed} "
         f"({grew:+d} MiB of embedded kernels)"
     )
     # Size is not evidence: this script's artifacts dir must agree with the one
@@ -947,7 +947,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.wheel:
         _report(f"embedding into {args.wheel}")
-        patch_wheel(args.wheel, built)
+        patch_wheel(args.wheel, build_lib)
     _report("done")
     return 0
 
