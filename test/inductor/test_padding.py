@@ -579,7 +579,6 @@ class PaddingTest(TestCaseBase):
         x = torch.randn(3, 9, device=device)
         self.common_numeric_check(f, x)
 
-
     def test_pad_3d_tensor(self, device):
         """
         Constructing this test case guided by the fact that we don't pad
@@ -632,9 +631,7 @@ class PaddingTest(TestCaseBase):
         self.check_close(ref, act)
         if DO_PERF_TEST:
             latency_with_padding = benchmarker.benchmark_gpu(lambda: fun(x2, weight))
-            latency_without_padding = benchmarker.benchmark_gpu(
-                lambda: fun(x1, weight)
-            )
+            latency_without_padding = benchmarker.benchmark_gpu(lambda: fun(x1, weight))
             print(
                 f"Latency with and without padding: "
                 f"{latency_with_padding:.3f} v.s. "
@@ -704,8 +701,7 @@ class PaddingTest(TestCaseBase):
         """
         func = torch.add
         inputs = tuple(
-            torch.randn(*shape, device=device, dtype=dtype)
-            for input_idx in range(2)
+            torch.randn(*shape, device=device, dtype=dtype) for input_idx in range(2)
         )
 
         # Compile and run
@@ -841,6 +837,7 @@ class PaddingTest(TestCaseBase):
         # Count actual buffer allocations (not import lines) by matching
         # "= empty_strided_<device>(" pattern.
         import re
+
         dev_type = torch.device(device).type
         num_allocs = len(re.findall(rf"= empty_strided_{dev_type}\(", code[0]))
         self.assertEqual(
@@ -1045,9 +1042,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     PerfTestWithAndWithoutPadding, globals(), except_for="cpu", allow_xpu=True
 )
-instantiate_device_type_tests(
-    PaddingTest, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(PaddingTest, globals(), except_for="cpu", allow_xpu=True)
 
 
 if __name__ == "__main__":
