@@ -14,7 +14,11 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     get_full_params,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 
 device_type = torch.device(get_devtype())
@@ -48,6 +52,8 @@ class Model(Module):
 
 
 class TestMultiForward(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _dist_train(self, wrap_fsdp):
         # keep everything deterministic for input data
         torch.manual_seed(0)
