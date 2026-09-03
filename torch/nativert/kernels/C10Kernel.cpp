@@ -12,6 +12,37 @@
 
 namespace torch::nativert {
 
+namespace {
+
+// Rebuild the argument stack for an error message.
+//
+// callBoxed() unboxes a list-typed argument by moving it out of the stack --
+// ivalue_to_arg<ArrayRef<T>> in
+// ATen/core/boxing/impl/make_boxed_from_unboxed_functor.h routes through
+// std::move(v).to<std::vector<T>>() -- which leaves that slot holding None.
+// Formatting the post-call stack therefore reports every Tensor[] / int[] /
+// float[] argument as "None" no matter what was passed, hiding exactly the
+// argument an op that takes a Tensor[] tends to fail on. Tensors bound to
+// `const Tensor&` and POD scalars are read in place and do survive.
+//
+// The frame still holds the inputs, so re-derive them here instead of copying
+// the stack on the hot path. Rebuilding must never mask the real exception, so
+// fall back to the consumed stack if it fails.
+std::vector<c10::IValue> rebuildArgsForError(
+    const ExecutionFrame& executionFrame,
+    const Arguments& arguments,
+    const std::vector<c10::IValue>& consumedStack) {
+  try {
+    std::vector<c10::IValue> stack = arguments.getStackWithStaticArgs();
+    fillDynamicInputs(executionFrame, arguments, stack);
+    return stack;
+  } catch (const std::exception&) {
+    return consumedStack;
+  }
+}
+
+} // namespace
+
 C10Kernel::C10Kernel(
     const Node* node,
     OpKernelKind kind,
@@ -38,7 +69,9 @@ void C10Kernel::computeInternal(ExecutionFrame& executionFrame) const {
         *node_,
         "\n"
         "with args:\n",
-        readableArgs(op_.schema(), stack),
+        readableArgs(
+            op_.schema(),
+            rebuildArgsForError(executionFrame, arguments_, stack)),
         "\n",
         ex.what(),
         "\n",
