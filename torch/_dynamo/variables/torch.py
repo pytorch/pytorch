@@ -88,12 +88,14 @@ from ..utils import (
     has_torch_function,
     hashable,
     is_wrapper_or_member_descriptor,
+    no_keywords,
+    no_positional,
     product,
     proxy_args_kwargs,
     unpack_iterable,
     unwrap_if_wrapper,
 )
-from .base import AsPythonConstantNotImplementedError, typestr, VariableTracker
+from .base import AsPythonConstantNotImplementedError, Method, typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
@@ -4526,29 +4528,68 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
         install_guard(source.make_guard(GuardBuilder.ID_MATCH))
         return cls(value, source=source)
 
-    def call_method(
+    def key(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "VariableTracker":
-        if name == "key":
-            return VariableTracker.build(tx, self.value.key())
-        elif name == "process":
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, self.value.process.__func__),
-                [self] + args,
-                kwargs,
-            )
-        elif name in ["level", "batch_size", "randomness"]:
-            return VariableTracker.build(tx, getattr(self.value, name)())
-        elif name == "lower":
-            if args:
-                raise AssertionError(f"lower() expects no args, got {len(args)}")
-            if kwargs:
-                raise AssertionError(f"lower() expects no kwargs, got {len(kwargs)}")
-            return variables.TemporarilyPopInterpreterStackCtxManagerVariable.create(
-                tx, None
-            )
-        return super().call_method(tx, name, args, kwargs)
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.key())
+
+    def process(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, self.value.process.__func__),
+            [self] + args,
+            kwargs,
+        )
+
+    def level(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.level())
+
+    def batch_size(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.batch_size())
+
+    def randomness(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.randomness())
+
+    def lower(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Python method, so Method cannot derive METH_NOARGS from ml_flags.
+        no_positional(tx, "lower", args)
+        no_keywords(tx, "lower", kwargs)
+        return variables.TemporarilyPopInterpreterStackCtxManagerVariable.create(
+            tx, None
+        )
+
+    tp_methods = {
+        "key": Method(key),
+        "process": Method(process),
+        "level": Method(level),
+        "batch_size": Method(batch_size),
+        "randomness": Method(randomness),
+        "lower": Method(lower),
+    }
