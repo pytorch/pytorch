@@ -165,7 +165,7 @@ def _p2p_edge_matchings(topology: _P2PTopology) -> tuple[_P2PWarmupRound, ...]:
     """Partition used physical edges into deterministic directed matchings."""
     remaining = sorted(
         {
-            tuple(sorted((source, destination)))
+            (min(source, destination), max(source, destination))
             for source, destination in itertools.pairwise(topology)
             if source != destination
         }
@@ -185,9 +185,11 @@ def _p2p_edge_matchings(topology: _P2PTopology) -> tuple[_P2PWarmupRound, ...]:
         remaining = deferred
 
     rounds: list[_P2PWarmupRound] = []
-    for matching in matchings:
-        rounds.append(matching)
-        rounds.append(tuple((destination, source) for source, destination in matching))
+    for matching_edges in matchings:
+        rounds.append(matching_edges)
+        rounds.append(
+            tuple((destination, source) for source, destination in matching_edges)
+        )
     return tuple(rounds)
 
 
