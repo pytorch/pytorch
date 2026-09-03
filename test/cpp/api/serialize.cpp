@@ -1092,3 +1092,25 @@ TEST(SerializeTest, UnserializableSubmoduleIsIgnoredWhenLoadingModule) {
   // "b.foo" before serialization.
   ASSERT_EQ(output, 5);
 }
+TEST(SerializeTest, StateDict) {
+  torch::manual_seed(0);
+
+  // Create two identical models
+  auto model1 = torch::nn::Linear(3, 2);
+  auto model2 = torch::nn::Linear(3, 2);
+
+  // Initialize model1 with random weights
+  model1->weight.data().normal_(0, 1);
+  model1->bias.data().normal_(0, 1);
+
+  // Save state dict
+  auto tempfile = c10::make_tempfile();
+  torch::save_state_dict(model1, tempfile.name);
+
+  // Load state dict into model2
+  torch::load_state_dict(model2, tempfile.name);
+
+  // Check that weights are the same
+  ASSERT_TRUE(model1->weight.allclose(model2->weight));
+  ASSERT_TRUE(model1->bias.allclose(model2->bias));
+}
