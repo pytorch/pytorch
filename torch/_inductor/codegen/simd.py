@@ -3673,7 +3673,10 @@ class SIMDScheduling(BaseScheduling):
                 grouped_reduction_body.var_ranges[v]
                 for v in grouped_reduction_body.iter_vars
             ],
-            group_reduction_vars.iter_remapped,
+            [
+                reduced_output_family.remap_index(value)
+                for value in group_reduction_vars.iter_remapped
+            ],
         )
         parent_full_load_transform = _ParentFullLoadTransform(kernel, layout)
         for sn in grouped_schedule:
