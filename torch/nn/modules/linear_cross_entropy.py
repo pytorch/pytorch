@@ -94,9 +94,7 @@ def _neg_weight_target(
         # grad_output[n] for the VJP -- do NOT add a .neg_() here to mirror the
         # "sum" case.
         if loss_grad_output is not None:
-            neg_weight_target.neg_().mul_(
-                loss_grad_output.to(neg_weight_target.dtype)
-            )
+            neg_weight_target.neg_().mul_(loss_grad_output.to(neg_weight_target.dtype))
     return neg_weight_target
 
 
