@@ -849,6 +849,10 @@ class TestLRScheduler(TestCase):
     # identical to ReduceLROnPlateau's hand-rolled step() body, so these
     # standalone tests reuse the exact metrics/target vectors from
     # test_reduce_lr_on_plateau1-8 above as a regression check.
+    def test_plateau_lr_rejects_invalid_optimizer(self):
+        with self.assertRaisesRegex(TypeError, "object is not an Optimizer"):
+            PlateauLR(object())  # type: ignore[arg-type]
+
     def test_plateau_lr1(self):
         epochs = 10
         for param_group in self.opt.param_groups:
