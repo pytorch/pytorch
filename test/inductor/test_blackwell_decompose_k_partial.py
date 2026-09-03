@@ -138,7 +138,7 @@ class TestBlackwellDecomposeKPartial(TestCase):
             **{
                 "triton.enable_template_tma_store": True,
                 "triton.enable_persistent_tma_matmul": True,
-                "triton.enable_blackwell_decompose_k_partial": True,
+                "triton.enable_blackwell_decompose_k": True,
                 "triton.num_decompose_k_splits": 4,
                 "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
             },

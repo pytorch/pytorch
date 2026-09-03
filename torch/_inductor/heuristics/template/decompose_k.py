@@ -101,7 +101,7 @@ class BlackwellDecomposeKConfigHeuristics(TemplateConfigHeuristics):
         kernel_inputs: KernelInputs,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
-        if not config.triton.enable_blackwell_decompose_k_partial:
+        if not config.triton.enable_blackwell_decompose_k:
             return
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")

@@ -2269,11 +2269,10 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
-    # Experimental Blackwell partial template with divisor-free aligned K
-    # partitions.  Kept opt-in until complete-plan coverage is broader.
-    enable_blackwell_decompose_k_partial = (
-        os.environ.get("TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K_PARTIAL", "0")
-        == "1"
+    # Experimental Blackwell decompose-K subgraph with divisor-free aligned K
+    # partitions. Kept opt-in until complete-plan coverage is broader.
+    enable_blackwell_decompose_k = (
+        os.environ.get("TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K", "0") == "1"
     )
 
     # Experimental logical rank-3 Blackwell BMM template.  The initial route
