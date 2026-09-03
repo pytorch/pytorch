@@ -583,8 +583,8 @@ void Reducer::set_mixed_precision_param_dtype(c10::ScalarType dtype) {
   }
 }
 
-// Right now delay_all_reduce is only called when static_graph_=true and
-// num_iterations_==1.
+// Right now delay_all_reduce is only called when static_graph_=true on the
+// first gradient-syncing backward (enqueued once from _DDPSink.backward).
 void Reducer::delay_all_reduce() {
   std::lock_guard<std::mutex> lock(this->mutex_);
 
@@ -692,7 +692,14 @@ void Reducer::autograd_hook(size_t index) {
     });
   }
 
-  if (static_graph_first_iteration()) {
+  // expect_autograd_hooks_ (set by prepare_for_backward, which _post_forward
+  // skips under no_sync()) restricts this to syncing backwards. Otherwise
+  // every no_sync accumulation micro-batch backward also increments the map,
+  // since num_bwd_calls_ stays 1 across the whole first-iteration window so
+  // static_graph_first_iteration() stays true. Those inflated counts stop the
+  // per-iteration counter from reaching zero on later iterations, so the
+  // gradients are never all-reduced.
+  if (static_graph_first_iteration() && expect_autograd_hooks_) {
     numGradHooksTriggeredMap_[index] += 1;
     return;
   }
