@@ -216,11 +216,15 @@ size_t parseChosenWorkspaceSize() {
 #define TORCH_CUBLAS_WORKSPACE_CACHE "TORCH_CUBLAS_WORKSPACE_CACHE"
 bool isCUDABlasWorkspaceCachingEnabled() {
 #ifndef USE_ROCM
+  // default false
   static bool cache =
       c10::utils::check_env(TORCH_CUBLAS_WORKSPACE_CACHE) == true;
   return cache;
 #else
-  return true;
+  // default true
+  static bool cache =
+      c10::utils::check_env(TORCH_CUBLAS_WORKSPACE_CACHE) != false;
+  return cache;
 #endif
 }
 
