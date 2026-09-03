@@ -1354,7 +1354,10 @@ class TestAOTJointWithDescriptorsDevice(TestCase):
 
 
 instantiate_device_type_tests(
-    TestAOTJointWithDescriptorsDevice, globals(), only_for=("cuda",)
+    TestAOTJointWithDescriptorsDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 
 
