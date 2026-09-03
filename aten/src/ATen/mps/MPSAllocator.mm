@@ -493,8 +493,7 @@ bool MPSHeapAllocatorImpl::insert_available_buffer(BufferPool& pool, BufferBlock
   bool inserted = pool.available_buffers.insert(buffer_block).second;
   auto it = pool.available_buffers_by_stream.find(buffer_block->stream);
   if (it == pool.available_buffers_by_stream.end()) {
-    it = pool.available_buffers_by_stream
-             .emplace(buffer_block->stream, std::set<BufferBlock*, BufferComparison>(BufferBlock::Comparator))
+    it = pool.available_buffers_by_stream.emplace(buffer_block->stream, std::set<BufferBlock*, BufferComparison>())
              .first;
   }
   it->second.insert(buffer_block);
@@ -522,7 +521,7 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
   m_active_bytes.decrease(buffer_block->size);
   if (buffer_block->event) {
     // returns the MPSEvent back to MPSEventPool
-    buffer_block->event.reset(nullptr);
+    buffer_block->event.reset();
   }
   // Releases every consumer stream's MPSEvent back to MPSEventPool
   buffer_block->stream_uses.clear();
@@ -687,7 +686,7 @@ bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
         buffer_block->event = m_event_pool->acquireEvent(false, buffer_block->stream);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer_block->event);
       }
-      buffer_block->event->record(/*needsLock*/ false);
+      buffer_block->event->get()->record(/*needsLock*/ false);
       recordedEvent = true;
     }
   }
@@ -697,7 +696,8 @@ bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
 bool MPSHeapAllocatorImpl::recordStream(const void* ptr, MPSStream* stream) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
-  if (!buffer_block || !(buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
+  if (!buffer_block || !(buffer_block->heap->pool->usage & UsageFlags::SHARED) || stream == buffer_block->stream) {
+    // Usage by the allocation stream is sequential, so it can be skipped.
     return false;
   }
   // Each consumer stream gets its own event so that recording a new stream
@@ -708,14 +708,14 @@ bool MPSHeapAllocatorImpl::recordStream(const void* ptr, MPSStream* stream) {
     it = buffer_block->stream_uses.emplace(stream, m_event_pool->acquireEvent(false, stream)).first;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(it->second);
   }
-  it->second->record(/*needsLock*/ false);
+  it->second->get()->record(/*needsLock*/ true);
   return true;
 }
 
 bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
   struct PendingWait {
     BufferBlock* buffer_block;
-    std::vector<MPSEvent*> events;
+    std::vector<MPSEventPtr> events;
   };
   std::vector<PendingWait> pending_waits;
   {
@@ -728,13 +728,13 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
         auto& event = buffer_block->event;
         auto& stream_uses = buffer_block->stream_uses;
         size_t num_events = stream_uses.size() + (event ? 1 : 0);
-        std::vector<MPSEvent*> events;
+        std::vector<MPSEventPtr> events;
         events.reserve(num_events);
         if (event) {
-          events.push_back(event.get());
+          events.push_back(event);
         }
         for (auto& stream_use : stream_uses) {
-          events.push_back(stream_use.second.get());
+          events.push_back(stream_use.second);
         }
         if (!events.empty()) {
           pending_waits.push_back({buffer_block, std::move(events)});
@@ -749,8 +749,8 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
     if (pending_wait.buffer_block->retainCount() > 1) {
       bool waitedOnCPU = false;
       // Every consumer stream that was recorded on this buffer must finish.
-      for (MPSEvent* event : pending_wait.events) {
-        waitedOnCPU |= event->synchronize();
+      for (MPSEventPtr event : pending_wait.events) {
+        waitedOnCPU |= event->get()->synchronize();
       }
       if (waitedOnCPU) {
         // after waiting, it's a good time to free some pending inactive buffers
