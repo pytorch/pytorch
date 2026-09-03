@@ -52,6 +52,7 @@ from torch.fx.experimental.symbolic_shapes import (
     resolve_unbacked_bindings,
     SymTypes,
 )
+from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
@@ -7992,8 +7993,121 @@ fallback_cummax = fallback_handler(aten.cummax.default)
 fallback_cummin = fallback_handler(aten.cummin.default)
 
 
+def _fx_kwargs(node: Any) -> dict[str, Any] | None:
+    """Schema-normalized arguments of an aten call, defaults included."""
+    if not isinstance(node, torch.fx.Node) or not isinstance(
+        node.target, torch._ops.OpOverload
+    ):
+        return None
+    normalized = normalize_function(
+        node.target, node.args, node.kwargs, normalize_to_only_use_kwargs=True
+    )
+    return normalized.kwargs if normalized else None
+
+
+# The bounded grouping below materializes a [bound, len(keys)] predicate matrix,
+# so both the value bound and the key count are capped.
+_BOUNDED_GROUP_MAX_BOUND = 256
+_BOUNDED_GROUP_MAX_KEYS = 16384
+
+
+def _topk_index_bound(node: Any) -> int | None:
+    """Exclusive bound of node's values if they are topk indices seen through views."""
+    while isinstance(node, torch.fx.Node) and node.target in (
+        aten.view.default,
+        aten.reshape.default,
+        aten._unsafe_view.default,
+    ):
+        node = node.args[0]
+    if not (
+        isinstance(node, torch.fx.Node)
+        and node.target is operator.getitem
+        and node.args[1] == 1
+    ):
+        return None
+    topk_node = node.args[0]
+    if not (
+        isinstance(topk_node, torch.fx.Node)
+        and topk_node.target is aten.topk.default
+        and (topk := _fx_kwargs(topk_node)) is not None
+    ):
+        return None
+    val = topk["input"].meta.get("val")
+    if not isinstance(val, torch.Tensor):
+        return None
+    bound = val.shape[topk["dim"]]
+    if not isinstance(bound, int) or bound > _BOUNDED_GROUP_MAX_BOUND:
+        return None
+    return bound
+
+
+def _bounded_group_keys(x: TensorBox, node: Any) -> int | None:
+    """Value bound of keys x (lowered from fx node) if the bounded grouping applies."""
+    device = x.get_device()
+    size = x.get_size()
+    if not (
+        len(size) == 1
+        and isinstance(size[0], (int, sympy.Integer))
+        and 2 <= int(size[0]) <= _BOUNDED_GROUP_MAX_KEYS
+        and device is not None
+        and device.type == "cuda"
+        and torch.version.hip is None
+        and V.graph.has_feature(device, BackendFeature.SCAN)
+        and torch.cuda.get_device_capability(device) >= (9, 0)
+    ):
+        return None
+    return _topk_index_bound(node)
+
+
+def _bounded_histogram_cumsum(axis, dtype):
+    """cumsum(histc(sorted_keys, bins, 0, bins - 1)) for proven-bounded topk keys.
+
+    Every key lies in [0, bins) or is dropped by histc, so the inclusive offsets
+    are a single reduction over the original keys, fusible with their sort.
+    """
+    node = V.graph.current_node
+    if node is None or node.target is not aten.cumsum.default or axis not in (0, -1):
+        return None
+    histc_node = node.args[0]
+    if not (
+        isinstance(histc_node, torch.fx.Node)
+        and histc_node.target is aten.histc.default
+        and (histc := _fx_kwargs(histc_node)) is not None
+    ):
+        return None
+    bins = histc["bins"]
+    if not (isinstance(bins, int) and histc["min"] == 0 and histc["max"] == bins - 1):
+        return None
+    sorted_keys = histc["input"]
+    if (
+        isinstance(sorted_keys, torch.fx.Node)
+        and sorted_keys.target is prims.convert_element_type.default
+    ):
+        sorted_keys = sorted_keys.args[0]
+    if not (
+        isinstance(sorted_keys, torch.fx.Node)
+        and sorted_keys.target is operator.getitem
+        and sorted_keys.args[1] == 0
+    ):
+        return None
+    sort_node = sorted_keys.args[0]
+    if not isinstance(sort_node, torch.fx.Node) or bins > _BOUNDED_GROUP_MAX_BOUND:
+        return None
+    keys = V.graph.bounded_sort_keys.get(sort_node)
+    if keys is None:
+        return None
+
+    from .kernel.bounded_group import bounded_group_offsets
+
+    return bounded_group_offsets(keys, bins, node.meta["val"].dtype)
+
+
 @register_lowering(aten.cumsum)
 def cumsum(x, axis=None, dtype=None):
+    offsets = _bounded_histogram_cumsum(axis, dtype)
+    if offsets is not None:
+        return offsets
+
     if (
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
@@ -8277,6 +8391,18 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
 
 @register_lowering(aten.sort.default, type_promotion_kind=None)
 def sort(x, dim=-1, descending=False):
+    node = V.graph.current_node
+    if (
+        not descending
+        and dim in (-1, 0)
+        and node is not None
+        and node.target is aten.sort.default
+        and (bound := _bounded_group_keys(x, node.args[0])) is not None
+    ):
+        from .kernel.bounded_group import bounded_group
+
+        V.graph.bounded_sort_keys[node] = x
+        return bounded_group(x, bound)
     return sort_stable(x, stable=False, dim=dim, descending=descending)
 
 
