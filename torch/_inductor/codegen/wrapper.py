@@ -424,10 +424,11 @@ def _constexpr_source_node(
     else:
         if matches is True:
             return source
-    # Types with a constructor-style repr over literal arguments but none of the
-    # field protocols above (fractions.Fraction, decimal.Decimal, ...): spell
-    # the type through its module alias and keep the repr's argument list.
-    # _verify_constexpr_source still has to rebuild an equal value from it.
+    # Types with a constructor-style repr but none of the field protocols above
+    # (fractions.Fraction, decimal.Decimal, ...): spell the type through its
+    # module alias and keep the repr's argument text verbatim. It is not
+    # restricted to literals; _verify_constexpr_source evaluates it (in this
+    # process, at codegen) and only accepts it if that rebuilds an equal value.
     prefix = _constexpr_type_repr_prefix(value)
     if prefix is not None and type(value).__module__ != "builtins":
         cls_ref = _constexpr_type_ref(type(value), module_aliases, imports)
