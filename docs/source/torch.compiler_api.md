@@ -57,7 +57,7 @@ releases without a deprecation cycle.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *, example_inputs, artifact_path, cache_path, backend="inductor", tracer="dynamo", guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False, keep_example_grads=False)
+.. py:function:: precompile(fn, *, example_inputs, artifact_path, cache_path, backend="inductor", guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False, keep_example_grads=False)
 
    Ahead-of-time precompile ``fn`` against ``example_inputs`` -- a sequence of calls, each
    a tuple of positional arguments -- write the artifact to ``artifact_path`` and
@@ -67,8 +67,8 @@ releases without a deprecation cycle.
    real batches hands its losses on without a second forward. Reload with
    ``torch.compiler.precompile.load(artifact_path=..., cache_path=...)``.
 
-   This form is ``tracer="dynamo"`` only: a ``make_fx`` trace runs ``fn`` under proxy
-   tensors and has no results to give, so it is refused before ``fn`` runs. The pair in
+   This form always traces with dynamo: a ``make_fx`` trace runs ``fn`` under proxy
+   tensors and has no results to give, so precompile does not offer it here. The pair in
    memory, and the ``make_fx`` tracer, are :meth:`precompile.artifact`, which documents the
    contract both forms share and the remaining parameters -- read it, and
    Note [precompile programming model], before relying on an artifact.
@@ -81,7 +81,6 @@ releases without a deprecation cycle.
        ``cache_path`` -- the two halves load only as a matched pair, so naming one without
        the other raises. Parent directories are created.
    :param cache_path: File to write ``cache`` to; see ``artifact_path``.
-   :param tracer: ``"dynamo"``, and nothing else.
    :returns: What each ``example_inputs`` call returned, in order.
    :raises PrecompileError: as :meth:`precompile.artifact` does.
 
@@ -251,7 +250,7 @@ releases without a deprecation cycle.
 ```
 
 ```{eval-rst}
-.. py:method:: precompile.accumulate(fn, *, artifact_path, cache_path, backend="inductor", tracer="dynamo", guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False)
+.. py:method:: precompile.accumulate(fn, *, artifact_path, cache_path, backend="inductor", guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False)
 
    Capture ``fn`` across calls that YOUR loop makes, rewriting the artifact each time.
 
@@ -287,8 +286,6 @@ releases without a deprecation cycle.
        positionally, exactly as :func:`torch.compiler.precompile` does.
    :param artifact_path: File to write ``python_code`` to, rewritten on every call. Required.
    :param cache_path: File to write the acceleration cache to. Required.
-   :param tracer: ``"dynamo"``, and nothing else -- a make_fx trace is a single graph of a
-       single call and has nothing to accumulate.
    :returns: A ``precompile.AccumulatingCapture``. Call it like ``fn``; it also exposes
        ``summary()`` (coverage, recompilation, failure and guard information for everything
        captured so far), ``invariants()`` (the guards that held across every captured variant
@@ -327,8 +324,10 @@ releases without a deprecation cycle.
 
    .. warning::
 
-      ``load`` runs the artifact as code: it executes ``python_code`` (via ``exec``) and,
-      for the inductor backend, primes the kernel caches from the ``cache``. Treat
+      ``load`` runs the artifact as code: it executes ``python_code`` (via ``exec``) and
+      unpickles the ``cache`` bytes (and, for the inductor backend, primes the kernel
+      caches from them). Both are arbitrary code execution -- a crafted ``python_code``
+      runs whatever it contains, and a crafted pickle runs code as it is loaded. Treat
       ``(python_code, cache)`` as trusted, executable input -- only load a pair you
       produced yourself or otherwise trust, exactly as you would any code you are about to
       run (see Note [precompile programming model], invariant 7). ``load`` also emits a
@@ -350,8 +349,10 @@ releases without a deprecation cycle.
        callable mutates process state on first call (or on ``__enter__``) and supports
        ``with`` / ``unload()`` to take that back out. An artifact whose frames are all
        reachable from the entry -- including one that graph-broke or recompiled only
-       within the entry frame -- is standalone: a plain callable, no installation and no
-       ``unload``. Which one you get is a property of the capture, not a load-time choice.
+       within the entry frame -- is standalone: it installs nothing, and its ``with`` /
+       ``unload()`` are no-ops. Both expose the same surface, and ``installed`` (``True``
+       for the installing shape, ``False`` for standalone) tells them apart. Which one
+       you get is a property of the capture, not a load-time choice.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
        fails to parse or is missing its calling-convention metadata), if ``cache`` is
        paired with a different ``python_code`` (mismatched ``backend`` tag, ``tracer``
@@ -380,6 +381,91 @@ releases without a deprecation cycle.
 
    Returned by :func:`precompile.load` for an artifact that serves by installing,
    and used as a callable or context manager; it is not constructed directly.
+
+.. py:class:: precompile.AccumulatingCapture
+
+   The object :meth:`precompile.accumulate` returns. Call it like ``fn`` to fold one
+   call into the artifact (see :meth:`precompile.accumulate` for the semantics); it is
+   not constructed directly. Also exposes:
+
+   .. py:method:: summary()
+
+      A :class:`PrecompileSummary` for everything captured so far.
+
+   .. py:method:: invariants()
+
+      A tuple of :class:`FrameInvariants`, one per captured frame -- the guards that held
+      across every captured variant of each frame.
+
+   .. py:method:: calls()
+
+      How many calls have been folded into the capture.
+
+   .. py:method:: close()
+
+      Give back the live compiled region; the two files are unaffected, and closing twice
+      is a no-op. Entering the object as a context manager closes it on exit.
+
+.. py:class:: PrecompileSummary
+
+   Coverage and guard information from a capture, returned by ``summary()`` on a loaded
+   callable or an accumulating capture. Frozen dataclass; ``str(summary)`` renders a
+   one-line digest and :attr:`complete` says whether the capture covers everything it
+   exercised.
+
+   .. py:attribute:: frames
+   .. py:attribute:: resume_functions
+   .. py:attribute:: guarded_codes
+   .. py:attribute:: backend_graphs
+
+      Counts of captured frames, graph-break continuations, guarded code objects, and
+      backend graphs.
+
+   .. py:attribute:: bypassed
+   .. py:attribute:: truncated
+   .. py:attribute:: uncovered_frames
+   .. py:attribute:: wont_generalize
+
+      Frames that fell back to eager, hit the recompile limit, were never reached, or
+      carry value-pinned guards that will not generalize.
+
+   .. py:attribute:: dropped_guards
+   .. py:attribute:: kept_guards
+   .. py:attribute:: risky_dropped_guards
+   .. py:attribute:: policy_dropped_guards
+
+      ``(guard_type, source)`` pairs for guards the artifact omitted (could not serialize),
+      kept, omitted riskily, or dropped by the invariance policy though serializable.
+
+   .. py:attribute:: dropped_guard_code
+
+      ``(guard_type, source, rendered_check)`` for each dropped slot that renders to a
+      check. The slot's ``(guard_type, source)`` alone can be ambiguous -- a dropped
+      ``HASATTR`` may be the benign companion of a kept ``TENSOR_MATCH`` or the only thing
+      guarding an optional attribute -- so the rendered check is reported alongside to tell
+      them apart.
+
+   .. py:attribute:: capture_errors
+
+      Messages from example calls that raised during capture.
+
+   .. py:property:: complete
+
+      Whether the capture covers everything it exercised: false if any frame produced no
+      guarded code, hit the recompile limit, was bypassed, or a capture call raised.
+
+.. py:class:: FrameInvariants
+
+   Per-frame guard classification, returned by ``invariants()``. Frozen dataclass with the
+   frame's name, ``filename``, ``lineno``, the number of ``variants`` seen, and three tuples
+   of :class:`GuardFact`: ``invariant`` (held identically across every variant), ``varying``
+   (differed between variants), and ``undetermined`` (a single variant could not decide).
+
+.. py:class:: GuardFact
+
+   One guard observed while compiling a frame variant. Frozen dataclass with ``guard_type``,
+   ``source``, ``code`` (the rendered check parts), ``value``, and ``enforced`` (whether the
+   artifact still checks it). ``render()`` returns one stable, human-readable line.
 
 
 ```

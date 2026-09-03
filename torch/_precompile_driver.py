@@ -482,16 +482,19 @@ def _build_multigraph_forward():
     # mode gets this check from CompilePackage; here it is the artifact's own.
     from torch._dynamo.package import _hash_sourcelines
 
+    _unverifiable = []
     for _module, _first, _last, _checksum in globals().get("INLINED_SOURCES", ()):
         try:
             _hash = _hash_sourcelines(importlib.import_module(_module), _first, _last)
         except (ImportError, OSError):
             # The module is absent, or importable but source-less (.pyc-only):
-            # drift is UNVERIFIABLE here, not detected. The traced code is
-            # baked into the compiled graphs, and a module the bytecode
-            # actually needs is caught by the import_sources loop below with a
-            # clean error -- an unverifiable entry must not reject an artifact
-            # that would serve identically.
+            # drift is UNVERIFIABLE here, not detected. The traced code is baked
+            # into the compiled graphs, and a module the bytecode actually needs
+            # is caught by the import_sources loop below with a clean error -- an
+            # unverifiable entry must not reject an artifact that would serve
+            # identically -- but a since-edited .pyc-only module would go
+            # unnoticed, so warn.
+            _unverifiable.append(_module)
             continue
         if _hash != _checksum:
             raise _PrecompileError(
@@ -499,6 +502,15 @@ def _build_multigraph_forward():
                 f"(line {_first} - line {_last}); the captured graphs inlined "
                 f"the old source, so recapture the artifact."
             )
+    if _unverifiable:
+        import warnings as _warnings
+
+        _warnings.warn(
+            f"precompile: could not verify inlined source is unchanged for "
+            f"{sorted(set(_unverifiable))} (module absent or source-less here). "
+            f"The captured graphs inline the source as it was at capture, so a "
+            f"since-edited module would serve stale code undetected."
+        )
 
     frames = pickle.loads(base64.b64decode(_FRAMES))
     backends = pickle.loads(base64.b64decode(_BACKENDS)) if _BACKENDS else {}
@@ -628,7 +640,7 @@ def _build_multigraph_forward():
             for manager, variant in bound:
                 if manager.check(f_locals):
                     return variant(*args, **kwargs)
-            raise RuntimeError(
+            raise _PrecompileError(
                 f"precompile: no captured variant of {target.co_name!r} matches this "
                 f"call. The artifact serves only what capture exercised; add an "
                 f"example covering it and recapture. Captured "
@@ -678,7 +690,7 @@ def _build_multigraph_forward():
         elif _frame["is_entry"]:
             entry = dispatcher
     if entry is None:
-        raise ValueError("artifact has no entry frame")
+        raise _PrecompileError("precompile: artifact has no entry frame")
     return entry
 
 

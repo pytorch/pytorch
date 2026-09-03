@@ -233,61 +233,45 @@ def _identity(x: Any) -> Any:
 
 
 @functools.cache
-def _warn_replayed_custom_function_view(idx: int) -> None:
-    # Once per process per mutated input index, where idx is the input's
-    # position among the compiled function's inputs (the cache, not warnings'
+def _warn_replayed_custom_function_view(compile_id: str | None, idx: int) -> None:
+    # Once per (compiled graph, input) via the cache rather than warnings'
     # registry: each codegen'd epilogue is a fresh fabricated frame, so the
-    # registry would re-warn per compiled function). Tests reset it with
-    # .cache_clear().
+    # registry would re-warn on every call.
+    graph = f" of compiled graph [{compile_id}]" if compile_id else ""
     warnings.warn(
-        f"torch.compile is writing mutated input {idx} back onto a view created "
-        "inside a custom autograd.Function (or an input it returned as-is) "
-        "without autograd tracking. Eager rejects an autograd-visible in-place "
-        "op on such a view; compile cannot tell that apart from a write that "
-        "bypasses autograd (e.g. through .data), so it replays the mutation "
+        f"torch.compile is writing mutated input {idx}{graph} back onto a view "
+        "created inside a custom autograd.Function (or an input it returned "
+        "as-is) without autograd tracking. Eager rejects an autograd-visible "
+        "in-place op on such a view; compile cannot tell that apart from a write "
+        "that bypasses autograd (e.g. through .data), so it replays the mutation "
         "invisibly and gradients that later flow through this input see its "
         "pre-mutation history only."
     )
 
 
-def _replay_input_mutation(orig: torch.Tensor, updated: torch.Tensor, idx: int) -> None:
-    """Write a functionalized input mutation back onto the caller's tensor.
+def _replay_input_mutation(
+    orig: torch.Tensor, updated: torch.Tensor, idx: int, compile_id: str | None
+) -> None:
+    """Write functionalized input mutation ``idx`` back onto the caller's tensor.
 
-    Normally a tracked ``copy_``. The exception is a view stamped
-    ``CreationMeta.IN_CUSTOM_FUNCTION`` -- what an input returned as-is by a
-    custom autograd.Function becomes -- which refuses any tracked in-place
-    edit. For that target the write is replayed invisibly: under ``no_grad``
-    with the version counter preserved, i.e. the way an op that writes through
-    raw pointers or ``.data`` (FBGEMM's fused-optimizer kernels, the motivating
-    case) actually did it in eager, where nothing raised.
-
-    This deliberately diverges from eager. Eager raises on an autograd-VISIBLE
-    in-place op to such a view; compile cannot tell a ``.data`` write from a
-    visible one at the region boundary (both functionalize to the same
-    ``mutates_data`` metadata), so it replays either kind invisibly and warns
-    once per process per mutated input index (``idx``, the input's position
-    among the compiled function's inputs). A later use of the view then
-    differentiates through its pre-mutation history: the custom Function's
-    backward runs, but on the gradient of the post-mutation values with no
-    contribution from the mutating op. Clearing CreationMeta to force a tracked
-    copy through instead would reroute the base's history and silently drop the
-    custom Function's backward entirely.
-
-    Decided per call rather than baked into the epilogue because nothing
-    guards it -- a graph traced against an ordinary tensor can be handed such
-    a view later, which for a serialized artifact means a different process.
-    Exactly IN_CUSTOM_FUNCTION, not merely "not DEFAULT": a view made under
-    no_grad or inference mode, or a multi-output-node view, still takes a
-    tracked copy_ so autograd's version check can catch a genuinely stale use.
+    A tracked ``copy_``, except onto a requires-grad view stamped
+    IN_CUSTOM_FUNCTION (an input a custom autograd.Function returned as-is),
+    which autograd refuses to modify in place. The mutation is in the epilogue
+    rather than the graph because the target requires grad
+    (_check_if_mutation_can_be_in_graph), so that write is replayed under no_grad
+    with the version counter preserved, as a ``.data`` write did in eager. Decided
+    per call: nothing guards the view's provenance. Deliberately diverges from
+    eager, which raises on a visible write to that view.
     """
     # pybind11 hands back a fresh enum object each call, so this cannot be `is`.
     if (
-        orig._is_view()
+        orig.requires_grad
+        and orig._is_view()
         and torch._C._autograd._get_creation_meta(orig)
         == torch._C._autograd.CreationMeta.IN_CUSTOM_FUNCTION
     ):
         if torch.is_grad_enabled() and orig.requires_grad:
-            _warn_replayed_custom_function_view(idx)
+            _warn_replayed_custom_function_view(compile_id, idx)
         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
             orig.copy_(updated)
     else:
@@ -822,6 +806,8 @@ class _RuntimeForwardEpilogue:
                 )
             else:
                 if meta.mutates_data and meta.mutates_metadata:
+                    # Tracked, so a metadata mutation on an IN_CUSTOM_FUNCTION
+                    # view is still refused here, matching eager.
                     original_inpt.as_strided_(
                         updated_inpt.size(),
                         updated_inpt.stride(),
@@ -856,9 +842,12 @@ class _RuntimeForwardEpilogue:
                             "Mutations on inputs with user-specified streams are not yet supported. "
                             "See: https://github.com/pytorch/pytorch/issues/172522"
                         )
-                    # Keep in sync with the codegen'd epilogue, which emits
-                    # _replay_input_mutation here (see finalize()).
-                    _replay_input_mutation(original_inpt, updated_inpt, inpt_idx)
+                    _replay_input_mutation(
+                        original_inpt,
+                        updated_inpt,
+                        inpt_idx,
+                        self.runtime_metadata.compile_id_str,
+                    )
 
     def _replay_output_aliases(
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any]
@@ -1037,6 +1026,10 @@ def _create_runtime_wrapper(
     keep_input_mutations: bool,
     disable_amp: bool,
 ) -> Callable[..., Any]:
+    if runtime_metadata.compile_id_str is None:
+        compile_id = CompileContext.current_compile_id()
+        if compile_id is not None:
+            runtime_metadata.compile_id_str = str(compile_id)
     compiled_invoker = _RuntimeCompiledFnInvoker(
         compiled_fn=compiled_fn,
         indices_of_inps_to_detach=indices_of_inps_to_detach,
@@ -1179,6 +1172,8 @@ def _create_runtime_wrapper(
                     )
                 else:
                     if meta.mutates_data and meta.mutates_metadata:
+                        # Tracked, so a metadata mutation on an IN_CUSTOM_FUNCTION
+                        # view is still refused here, matching eager.
                         buf.writeline(
                             f"{oi}.as_strided_({ui}.size(), {ui}.stride(), {ui}.storage_offset())"
                         )
@@ -1187,29 +1182,28 @@ def _create_runtime_wrapper(
                             raise AssertionError(
                                 f"expected mutates_data for input {inpt_idx}"
                             )
+                    has_stream = (
+                        runtime_metadata.mutated_inp_stream_indices is not None
+                        and i < len(runtime_metadata.mutated_inp_stream_indices)
+                        and runtime_metadata.mutated_inp_stream_indices[i] is not None
+                    )
+                    if has_stream:
+                        msg_name = buf.bind_value(
+                            "_stream_err",
+                            "Mutations on inputs with user-specified streams are not yet supported. "
+                            "See: https://github.com/pytorch/pytorch/issues/172522",
+                        )
+                        write_back = f"raise RuntimeError({msg_name})"
+                    else:
+                        args = f"{oi}, {ui}, {inpt_idx}, {runtime_metadata.compile_id_str!r}"
+                        write_back = f"_replay_input_mutation({args})"
                     if meta.is_leaf:
                         buf.writeline(
                             f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"
                         )
-                        buf.writeline(f"else: {oi}.copy_({ui})")
+                        buf.writeline(f"else: {write_back}")
                     else:
-                        has_stream = (
-                            runtime_metadata.mutated_inp_stream_indices is not None
-                            and i < len(runtime_metadata.mutated_inp_stream_indices)
-                            and runtime_metadata.mutated_inp_stream_indices[i]
-                            is not None
-                        )
-                        if has_stream:
-                            msg_name = buf.bind_value(
-                                "_stream_err",
-                                "Mutations on inputs with user-specified streams are not yet supported. "
-                                "See: https://github.com/pytorch/pytorch/issues/172522",
-                            )
-                            buf.writeline(f"raise RuntimeError({msg_name})")
-                        else:
-                            buf.writeline(
-                                f"_replay_input_mutation({oi}, {ui}, {inpt_idx})"
-                            )
+                        buf.writeline(write_back)
             if not wrote_body:
                 buf.writeline("pass")
 
@@ -3097,31 +3091,6 @@ class _AutogradBackwardCompiler:
                 )
 
 
-@dataclass(frozen=True)
-class KeptTangentInfo:
-    """Compile-time description of the tangent slots the backward prologue keeps.
-
-    One of these is built per backward prologue and passed (as a single shared
-    object, not per element) to process_runtime_tangent, which reads it only when
-    a kept slot arrives holding something other than a Tensor. Everything here is
-    metadata that is gone by the time the backward runs: output_info is not
-    reachable from the runtime tangent, and traced_tangents (hence the dtypes)
-    are dropped by ViewAndMutationMeta.make_runtime_safe.
-    """
-
-    # kept tangent j -> its index among the autograd.Function's returned slots
-    grad_out_idx: tuple[int, ...]
-    # kept tangent j -> dtype of the forward output / mutated input behind it
-    dtype: tuple[torch.dtype | None, ...]
-    num_mutated_inputs: int
-    num_outputs: int
-    num_intermediate_bases: int
-    # parallel to fw_metadata.output_info, indexed by user forward output
-    output_type: tuple[str, ...]
-    output_requires_grad: tuple[bool, ...]
-    output_requires_grad_for_backward: tuple[bool, ...]
-
-
 def _codegen_backward_prologue(
     fw_metadata: ViewAndMutationMeta,
     maybe_subclass_meta: SubclassMeta | None,
@@ -3168,22 +3137,6 @@ def _codegen_backward_prologue(
         + list(range(intermediate_start, expected_grad_outs))
     )
     num_flat_bw_args_with_grads = len(all_surviving)
-
-    tangent_dtypes = fw_metadata.traced_tangent_dtypes or []
-    if len(tangent_dtypes) != num_flat_bw_args_with_grads:
-        tangent_dtypes = [None] * num_flat_bw_args_with_grads
-    kept_tangent_info = KeptTangentInfo(
-        grad_out_idx=tuple(all_surviving),
-        dtype=tuple(tangent_dtypes),
-        num_mutated_inputs=num_mutated_runtime_inps,
-        num_outputs=num_outputs,
-        num_intermediate_bases=num_intermediate_bases,
-        output_type=tuple(i.output_type.name for i in fw_metadata.output_info),
-        output_requires_grad=tuple(i.requires_grad for i in fw_metadata.output_info),
-        output_requires_grad_for_backward=tuple(
-            i.requires_grad_for_backward for i in fw_metadata.output_info
-        ),
-    )
 
     buf = PySourceBuilder(
         "_backward_prologue",
@@ -3257,7 +3210,6 @@ def _codegen_backward_prologue(
             _tangent_descs_=fw_metadata.traced_tangents_descs,
             _compile_id_=fw_metadata.compile_id_str,
             _stack_traces_=fw_metadata.tangent_source_stack_traces or (),
-            _kept_tangent_info_=kept_tangent_info,
         )
 
         if has_subclass:
@@ -3275,8 +3227,7 @@ def _codegen_backward_prologue(
             buf.writeline(
                 "_fpt = list(_chain_("
                 "_process_tangent_(t, m, idx, desc, _compile_id_, "
-                "_stack_traces_[idx] if _stack_traces_ else None, "
-                "_kept_tangent_info_)[1] "
+                "_stack_traces_[idx] if _stack_traces_ else None)[1] "
                 "for idx, (t, m, desc) in enumerate("
                 "zip(_tangents, _tangent_metas_, _tangent_descs_))))"
             )
@@ -3295,8 +3246,7 @@ def _codegen_backward_prologue(
                 buf.writeline(
                     "all_args[_i] = _process_tangent_(all_args[_i], "
                     "_tangent_metas_[j], j, _tangent_descs_[j], _compile_id_, "
-                    "_stack_traces_[j] if _stack_traces_ else None, "
-                    "_kept_tangent_info_)[0]"
+                    "_stack_traces_[j] if _stack_traces_ else None)[0]"
                 )
 
         if has_mutations_in_bw:
@@ -3871,140 +3821,6 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
             )
 
     @staticmethod
-    def _non_tensor_tangent_error(
-        x: Any,
-        tangent_idx: int,
-        tangent_desc: Any | None,
-        compile_id_str: str | None,
-        tangent_stack_trace: str | None,
-        kept_tangent_info: KeptTangentInfo | None,
-    ) -> RuntimeError:
-        """Explain a kept tangent slot that arrived as a non-Tensor (in practice None).
-
-        Autograd hands a compiled backward None for a returned slot only when it
-        recorded no gradient metadata for it, and AOTAutograd's forward epilogue sets
-        ctx._materialize_non_diff_grads = False so nothing zero-fills it. Naming the
-        forward output behind the slot is the whole point: inductor reports this
-        several frames lower as "TypeError: expected Tensor()" against a codegen'd
-        name like tangents_3, which is not positional and cannot be mapped back to a
-        user output by hand.
-        """
-        from .descriptors import (
-            IntermediateBaseAOTOutput,
-            PlainAOTOutput,
-            TangentAOTInput,
-        )
-
-        # The descriptor names the user output behind the slot, including through an
-        # intermediate base (which is not itself a user output).
-        out_idx: int | None = None
-        via_base = False
-        if isinstance(tangent_desc, TangentAOTInput):
-            out = tangent_desc.output
-            if isinstance(out, IntermediateBaseAOTOutput):
-                via_base = True
-                out = out.base_of
-            if isinstance(out, PlainAOTOutput):
-                out_idx = out.idx
-
-        lines = [
-            f"  tangent index         : {tangent_idx}",
-            f"  received              : {x!r:.200} (type {type(x).__name__}, expected a Tensor)",
-            f"  tangent descriptor    : {tangent_desc!r}",
-        ]
-        if isinstance(tangent_desc, TangentAOTInput):
-            lines.append(f"  descriptor expression : {tangent_desc.expr()}")
-
-        dtype: torch.dtype | None = None
-        if kept_tangent_info is not None and tangent_idx < len(
-            kept_tangent_info.grad_out_idx
-        ):
-            info = kept_tangent_info
-            dtype = info.dtype[tangent_idx]
-            grad_out_idx = info.grad_out_idx[tangent_idx]
-            total = (
-                info.num_mutated_inputs + info.num_outputs + info.num_intermediate_bases
-            )
-            if grad_out_idx < info.num_mutated_inputs:
-                what = "the updated value of a mutated forward input"
-            elif grad_out_idx < info.num_mutated_inputs + info.num_outputs:
-                what = f"user forward output {grad_out_idx - info.num_mutated_inputs}"
-            else:
-                nth = grad_out_idx - info.num_mutated_inputs - info.num_outputs
-                # An intermediate base is not a user output: AOTAutograd appends
-                # the base of several aliasing outputs as an extra return.
-                what = f"intermediate base {nth} (not a user output)"
-            lines.append(
-                f"  grad_output slot      : {grad_out_idx} of {total} slots returned "
-                "by the compiled autograd.Function"
-            )
-            lines.append(f"  that slot holds       : {what}")
-            if out_idx is not None and out_idx < len(info.output_type):
-                lines.append(
-                    f"  user output index     : {out_idx}"
-                    + (" (the output this intermediate base backs)" if via_base else "")
-                )
-                lines.append(
-                    f"  its OutputType        : OutputType.{info.output_type[out_idx]}"
-                )
-                lines.append(
-                    f"  its requires_grad     : {info.output_requires_grad[out_idx]} "
-                    f"(requires_grad_for_backward="
-                    f"{info.output_requires_grad_for_backward[out_idx]})"
-                )
-            if dtype is not None:
-                lines.append(f"  its dtype             : {dtype}")
-        elif out_idx is not None:
-            lines.append(f"  user output index     : {out_idx}")
-
-        marked_reason = """(2) or (3), since the dtype above is differentiable.
-AOTAutograd marks every returned slot whose recorded requires_grad is False, and
-marking is keyed on TensorImpl, so a backend returning the SAME tensor object in
-two returned slots marks both -- inductor lowers aten.detach to a no-op and
-folds h * 1 / h + 0 away, which is how one object ends up in two slots."""
-        if dtype is None:
-            reason = "any of (1), (2) or (3): no dtype was recorded for this slot."
-        elif not (dtype.is_floating_point or dtype.is_complex):
-            reason = f"""(1).
-{dtype} is not a differentiable dtype, so autograd never recorded gradient
-metadata for this output, yet AOTAutograd recorded that same output as needing a
-tangent."""
-        else:
-            reason = marked_reason
-
-        graph_hint = (
-            f"\nThis error occurred in compiled graph [{compile_id_str}]."
-            if compile_id_str is not None
-            else ""
-        )
-        stack_hint = (
-            f"\nThe forward output was created here:\n{tangent_stack_trace}"
-            if tangent_stack_trace is not None
-            else ""
-        )
-        body = "\n".join(lines)
-        return RuntimeError(
-            f"""
-The compiled backward was handed a non-Tensor for a tangent it requires.
-
-{body}
-
-Autograd hands back None rather than a zero tangent only for a returned slot it
-recorded no gradient metadata for, which is exactly three cases: (1) the output
-has a non-differentiable dtype, (2) the output was marked via
-ctx.mark_non_differentiable, or (3) the forward returned a non-Tensor in that
-slot. AOTAutograd's forward epilogue sets ctx._materialize_non_diff_grads =
-False, so nothing fills the slot back in.
-
-This slot is case {reason}
-
-The backward requires this tangent, so none of the three is something your model
-can ask for: this is a bug in AOTAutograd or in the backend. Please report it
-with this message.
-{graph_hint}{stack_hint}"""
-        )
-
-    @staticmethod
     def process_runtime_tangent(
         x: Any,
         meta: PlainTensorMeta | SubclassCreationMeta,
@@ -4012,24 +3828,36 @@ with this message.
         tangent_desc: Any | None = None,
         compile_id_str: str | None = None,
         tangent_stack_trace: str | None = None,
-        kept_tangent_info: KeptTangentInfo | None = None,
     ) -> tuple[Any, list[Any]]:
         if not isinstance(x, torch.Tensor):
-            # Every top-level call comes from the backward prologue, which only
-            # iterates the slots it kept (all_surviving), so a non-Tensor here is
-            # always a tangent the backward graph is about to be handed. Slots the
-            # prologue drops never reach this function, and the recursive call for a
-            # subclass's attrs passes no tangent_idx.
-            if tangent_idx is not None:
-                raise AOTDispatchAutograd._non_tensor_tangent_error(
-                    x,
-                    tangent_idx,
-                    tangent_desc,
-                    compile_id_str,
-                    tangent_stack_trace,
-                    kept_tangent_info,
-                )
-            return x, [x]
+            # The prologue only routes kept slots here (with a tangent_idx), so a
+            # None is a tangent the backward graph requires. Without this check it
+            # surfaces inside the backend against a codegen'd name like tangents_3.
+            if tangent_idx is None:
+                return x, [x]
+            from .descriptors import (
+                IntermediateBaseAOTOutput,
+                PlainAOTOutput,
+                TangentAOTInput,
+            )
+
+            which = tangent_desc.expr() if tangent_desc else "an unknown output"
+            if isinstance(tangent_desc, TangentAOTInput):
+                out, via = tangent_desc.output, ""
+                if isinstance(out, IntermediateBaseAOTOutput):
+                    out, via = out.base_of, "the intermediate base behind "
+                if isinstance(out, PlainAOTOutput):
+                    which = f"{via}forward output {out.idx}"
+            graph = f" in compiled graph [{compile_id_str}]" if compile_id_str else ""
+            trace = ""
+            if tangent_stack_trace:
+                trace = f"\nThe forward output was created here:\n{tangent_stack_trace}"
+            raise RuntimeError(
+                f"The compiled backward{graph} was handed {x!r} instead of a Tensor "
+                f"for tangent {tangent_idx}, the gradient of {which}. The backward "
+                "requires this tangent, so this is a bug in AOTAutograd or the backend "
+                f"(materialize_grads / mark_non_differentiable mismatch); please report it.{trace}"
+            )
 
         if is_fake_tensor(x):
             if not meta.memory_format:
