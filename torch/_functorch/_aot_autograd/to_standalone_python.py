@@ -207,6 +207,10 @@ def _known_helper_table() -> dict[int, tuple[str, str]]:
             f"{_RT} _dealias_marked_returns",
             "_dealias_marked_returns",
         ),
+        id(rt._replay_input_mutation): (
+            f"{_RT} _replay_input_mutation",
+            "_replay_input_mutation",
+        ),
         id(rt.CUDARngStateHelper.get_torch_state_as_tuple): (
             f"{_RT} CUDARngStateHelper",
             "CUDARngStateHelper.get_torch_state_as_tuple",

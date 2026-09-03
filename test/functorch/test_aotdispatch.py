@@ -5332,6 +5332,141 @@ def forward(self, tangents_1):
         outs[0].sum().backward()
         self.assertEqual(x.grad, x_ref.grad)
 
+    def test_input_mutation_on_custom_function_view_diverges_from_eager_with_warning(
+        self,
+    ):
+        # An input a custom Function returned as-is is a view stamped
+        # IN_CUSTOM_FUNCTION; eager refuses an autograd-visible in-place op on
+        # it. Compile cannot tell that write from a .data one at the region
+        # boundary, so it replays the mutation invisibly (warning once per
+        # process and input): the values land, but a later use of the view
+        # differentiates through its pre-mutation history -- the custom
+        # Function's backward runs on the post-mutation values and the
+        # mutating op contributes nothing (x gets no gradient).
+        from torch._functorch._aot_autograd import runtime_wrappers as rw
+
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, t):
+                return t
+
+            @staticmethod
+            def backward(ctx, g):
+                return g * 3
+
+        def body(w, x):
+            w.add_(x)
+            return (w * x).sum()
+
+        base = torch.randn(4, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "is a view and is being modified inplace"
+        ):
+            body(Scale.apply(base * 1.0), torch.randn(4))
+
+        torch._dynamo.reset()
+        compiled = torch.compile(body, backend="aot_eager")
+        compiled(
+            torch.randn(4, requires_grad=True) * 1.0, torch.randn(4, requires_grad=True)
+        )
+
+        rw._warn_replayed_custom_function_view.cache_clear()
+        base = torch.randn(4, requires_grad=True)
+        x = torch.randn(4, requires_grad=True)
+        w = Scale.apply(base * 1.0)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            compiled(w, x)
+            compiled(w, x)
+        hits = [c for c in caught if "without autograd tracking" in str(c.message)]
+        self.assertEqual(len(hits), 1)
+        self.assertIn("mutated input 0", str(hits[0].message))
+        self.assertEqual(w.detach(), base.detach() + 2 * x.detach())
+
+        (w * w).sum().backward()
+        self.assertEqual(base.grad, 3 * 2 * w.detach())
+        self.assertIsNone(x.grad)
+
+    def test_input_mutation_replayed_onto_restricted_view(self):
+        # Functionalization lifts an input mutation out of the graph and replays
+        # it as a tracked copy_, which is stricter than the write it stands in
+        # for. Here the write is an opaque op that declares Tensor(a!) but goes
+        # through .data (no version bump, and its meta kernel writes nothing),
+        # and the target is an input a custom Function returned as-is, which
+        # autograd turns into a view stamped IN_CUSTOM_FUNCTION that refuses
+        # tracked in-place edits. Eager accepts the write; the replay must too.
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, t):
+                return t
+
+            @staticmethod
+            def backward(ctx, g):
+                return g * 3
+
+        def opaque_add_(w, x):
+            w.data.add_(x)
+
+        with torch.library._scoped_library("aotmut", "FRAGMENT") as lib:
+            lib.define("opaque_add_(Tensor(a!) w, Tensor x) -> ()")
+            lib.impl("opaque_add_", opaque_add_, "CompositeExplicitAutograd")
+            lib.impl("opaque_add_", lambda w, x: None, "Meta")
+
+            def body(w, x):
+                torch.ops.aotmut.opaque_add_(w, x)
+                return (w * x).sum()
+
+            def run(backend, restricted):
+                torch._dynamo.reset()
+                torch.manual_seed(0)
+                base = torch.randn(4, requires_grad=True)
+                x = torch.randn(4, requires_grad=True)
+                w = base * 1.0
+                if restricted:
+                    w = Scale.apply(w)
+                f = body if backend is None else torch.compile(body, backend=backend)
+                f(w, x).backward()
+                return base.grad, x.grad, w.detach()
+
+            ref = run(None, True)
+            for backend in ("aot_eager", "inductor"):
+                self.assertEqual(run(backend, True), ref, f"diverged on {backend}")
+
+            # Whether the caller's tensor is such a view is not guarded, so a
+            # graph traced against an ordinary tensor can be handed one later --
+            # for a serialized artifact, in a different process. The choice has
+            # to be made per call, not baked into the epilogue.
+            torch._dynamo.reset()
+            compiled = torch.compile(body, backend="inductor")
+            b1 = torch.randn(4, requires_grad=True)
+            compiled(b1 * 1.0, torch.randn(4, requires_grad=True)).backward()
+            b2 = torch.randn(4, requires_grad=True)
+            compiled(
+                Scale.apply(b2 * 1.0), torch.randn(4, requires_grad=True)
+            ).backward()
+            self.assertIsNotNone(b2.grad)
+
+    def test_input_mutation_on_nonleaf_view_matches_eager(self):
+        # A plain non-leaf view accepts a tracked in-place edit in eager, so the
+        # epilogue's tracked copy_ has to reproduce both the values and the
+        # gradient path through the view, used again after the compiled region.
+        def body(w, x):
+            w.mul_(2)
+            return (w * x).sum()
+
+        def run(f):
+            torch.manual_seed(0)
+            base = torch.randn(2, 4, requires_grad=True)
+            x = torch.randn(4, requires_grad=True)
+            w = (base * 1.0)[0]
+            out = f(w, x)
+            (out + (w * 3).sum()).backward()
+            return base.grad, x.grad, w.detach()
+
+        ref = run(body)
+        torch._dynamo.reset()
+        self.assertEqual(run(torch.compile(body, backend="aot_eager")), ref)
+
     def test_none_tangent_in_kept_slot_names_the_forward_output(self):
         # Disabling the marking dedup puts a None back in the kept
         # intermediate-base slot (tangent 1; tangent 0 is x * 3).
