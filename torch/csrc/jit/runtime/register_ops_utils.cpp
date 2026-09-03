@@ -130,8 +130,8 @@ void checkDoubleInRange(double a) {
   if (std::isnan(a) || std::isinf(a) ||
       a > double(std::numeric_limits<int64_t>::max()) ||
       a < double(std::numeric_limits<int64_t>::min())) {
-    throw c10::Error(
-        "Cannot convert float " + std::to_string(a) + " to integer");
+    TORCH_CHECK(
+        false, "Cannot convert float ", std::to_string(a), " to integer");
   }
 }
 
@@ -165,9 +165,7 @@ int nminussumofbits(int v) {
 }
 
 int64_t factorial(int n) {
-  if (n < 0) {
-    throw std::runtime_error("factorial() not defined for negative values");
-  }
+  TORCH_CHECK(n >= 0, "factorial() not defined for negative values");
   int64_t p = 1, r = 1;
   loop(n, p, r);
   return r << nminussumofbits(n);

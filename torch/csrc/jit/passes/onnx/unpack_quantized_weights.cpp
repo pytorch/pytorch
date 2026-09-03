@@ -196,10 +196,9 @@ static void unpackQuantizedWeightsHelper(
         match_vmap.at(vmap.at("r"))->node()->inputs()[1]->debugName();
 
     auto itr = paramsDict.find(quantized_weight);
-    if (itr == paramsDict.end()) {
-      throw std::runtime_error(
-          "getValues: Quantized weight value not found amongst constant parameters.");
-    }
+    TORCH_CHECK(
+        itr != paramsDict.end(),
+        "getValues: Quantized weight value not found amongst constant parameters.");
     at::Tensor unpacked_weight;
     std::optional<at::Tensor> bias;
     constexpr int64_t stride_idx = 2;
