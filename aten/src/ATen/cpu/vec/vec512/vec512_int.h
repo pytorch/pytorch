@@ -6,16 +6,18 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/irange.h>
 
-namespace at::vec {
-inline namespace CPU_CAPABILITY {
+#ifdef CPU_CAPABILITY_AVX512
+#include <array>
+#endif
+
+namespace at::vec::inline CPU_CAPABILITY {
 
 #ifdef CPU_CAPABILITY_AVX512
 
 struct Vectorizedi {
  protected:
-  __m512i values;
+  __m512i values{_mm512_setzero_si512()};
   static constexpr __m512i zero_vector{0, 0, 0, 0, 0, 0, 0, 0};
   static inline __m512i invert(const __m512i& v) {
     const auto ones = _mm512_set1_epi64(-1);
@@ -53,12 +55,7 @@ class Vectorized<int64_t> : public Vectorizedi {
     return 8;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {
-    values = _mm512_setzero_si512();
-  }
-  Vectorized(int64_t v) {
-    values = _mm512_set1_epi64(v);
-  }
+  Vectorized(int64_t v) : Vectorizedi{_mm512_set1_epi64(v)} {}
   Vectorized(
       int64_t val1,
       int64_t val2,
@@ -67,9 +64,16 @@ class Vectorized<int64_t> : public Vectorizedi {
       int64_t val5,
       int64_t val6,
       int64_t val7,
-      int64_t val8) {
-    values = _mm512_setr_epi64(val1, val2, val3, val4, val5, val6, val7, val8);
-  }
+      int64_t val8)
+      : Vectorizedi{_mm512_setr_epi64(
+            val1,
+            val2,
+            val3,
+            val4,
+            val5,
+            val6,
+            val7,
+            val8)} {}
   template <int64_t mask>
   static Vectorized<int64_t> blend(
       Vectorized<int64_t> a,
@@ -80,7 +84,7 @@ class Vectorized<int64_t> : public Vectorizedi {
       const Vectorized<int64_t>& a,
       const Vectorized<int64_t>& b,
       const Vectorized<int64_t>& mask) {
-    auto msb_one = _mm512_set1_epi64(0xFFFFFFFFFFFFFFFF);
+    auto msb_one = _mm512_set1_epi64(-1);
     auto mask_ = _mm512_cmp_epi64_mask(mask, msb_one, _MM_CMPINT_EQ);
     return _mm512_mask_blend_epi64(mask_, a.values, b.values);
   }
@@ -119,8 +123,9 @@ class Vectorized<int64_t> : public Vectorizedi {
         return blend<63>(a, b);
       case 7:
         return blend<127>(a, b);
+      default:
+        return b;
     }
-    return b;
   }
   static Vectorized<int64_t> loadu(const void* ptr) {
     return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
@@ -148,8 +153,7 @@ class Vectorized<int64_t> : public Vectorizedi {
   int64_t& operator[](int idx) = delete;
   Vectorized<int64_t> abs() const {
     auto is_larger_mask = _mm512_cmpgt_epi64_mask(zero_vector, values);
-    auto is_larger =
-        _mm512_mask_set1_epi64(zero_vector, is_larger_mask, 0xFFFFFFFFFFFFFFFF);
+    auto is_larger = _mm512_mask_set1_epi64(zero_vector, is_larger_mask, -1);
     auto inverse = _mm512_xor_si512(values, is_larger);
     return _mm512_sub_epi64(inverse, is_larger);
   }
@@ -165,27 +169,27 @@ class Vectorized<int64_t> : public Vectorizedi {
   Vectorized<int64_t> neg() const;
   Vectorized<int64_t> operator==(const Vectorized<int64_t>& other) const {
     auto mask = _mm512_cmpeq_epi64_mask(values, other.values);
-    return _mm512_mask_set1_epi64(zero_vector, mask, 0xFFFFFFFFFFFFFFFF);
+    return _mm512_mask_set1_epi64(zero_vector, mask, -1);
   }
   Vectorized<int64_t> operator!=(const Vectorized<int64_t>& other) const {
     auto mask = _mm512_cmpneq_epi64_mask(values, other.values);
-    return _mm512_mask_set1_epi64(zero_vector, mask, 0xFFFFFFFFFFFFFFFF);
+    return _mm512_mask_set1_epi64(zero_vector, mask, -1);
   }
   Vectorized<int64_t> operator<(const Vectorized<int64_t>& other) const {
     auto mask = _mm512_cmplt_epi64_mask(values, other.values);
-    return _mm512_mask_set1_epi64(zero_vector, mask, 0xFFFFFFFFFFFFFFFF);
+    return _mm512_mask_set1_epi64(zero_vector, mask, -1);
   }
   Vectorized<int64_t> operator<=(const Vectorized<int64_t>& other) const {
     auto mask = _mm512_cmple_epi64_mask(values, other.values);
-    return _mm512_mask_set1_epi64(zero_vector, mask, 0xFFFFFFFFFFFFFFFF);
+    return _mm512_mask_set1_epi64(zero_vector, mask, -1);
   }
   Vectorized<int64_t> operator>(const Vectorized<int64_t>& other) const {
     auto mask = _mm512_cmpgt_epi64_mask(values, other.values);
-    return _mm512_mask_set1_epi64(zero_vector, mask, 0xFFFFFFFFFFFFFFFF);
+    return _mm512_mask_set1_epi64(zero_vector, mask, -1);
   }
   Vectorized<int64_t> operator>=(const Vectorized<int64_t>& other) const {
     auto mask = _mm512_cmpge_epi64_mask(values, other.values);
-    return _mm512_mask_set1_epi64(zero_vector, mask, 0xFFFFFFFFFFFFFFFF);
+    return _mm512_mask_set1_epi64(zero_vector, mask, -1);
   }
 
   Vectorized<int64_t> eq(const Vectorized<int64_t>& other) const;
@@ -210,10 +214,7 @@ class Vectorized<int32_t> : public Vectorizedi {
     return 16;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() = default;
-  Vectorized(int32_t v) {
-    values = _mm512_set1_epi32(v);
-  }
+  Vectorized(int32_t v) : Vectorizedi{_mm512_set1_epi32(v)} {}
   Vectorized(
       int32_t val1,
       int32_t val2,
@@ -230,25 +231,24 @@ class Vectorized<int32_t> : public Vectorizedi {
       int32_t val13,
       int32_t val14,
       int32_t val15,
-      int32_t val16) {
-    values = _mm512_setr_epi32(
-        val1,
-        val2,
-        val3,
-        val4,
-        val5,
-        val6,
-        val7,
-        val8,
-        val9,
-        val10,
-        val11,
-        val12,
-        val13,
-        val14,
-        val15,
-        val16);
-  }
+      int32_t val16)
+      : Vectorizedi{_mm512_setr_epi32(
+            val1,
+            val2,
+            val3,
+            val4,
+            val5,
+            val6,
+            val7,
+            val8,
+            val9,
+            val10,
+            val11,
+            val12,
+            val13,
+            val14,
+            val15,
+            val16)} {}
   template <int64_t mask>
   static Vectorized<int32_t> blend(
       Vectorized<int32_t> a,
@@ -259,7 +259,7 @@ class Vectorized<int32_t> : public Vectorizedi {
       const Vectorized<int32_t>& a,
       const Vectorized<int32_t>& b,
       const Vectorized<int32_t>& mask) {
-    auto msb_one = _mm512_set1_epi32(0xFFFFFFFF);
+    auto msb_one = _mm512_set1_epi32(-1);
     auto mask_ = _mm512_cmp_epi32_mask(mask, msb_one, _MM_CMPINT_EQ);
     return _mm512_mask_blend_epi32(mask_, a.values, b.values);
   }
@@ -322,8 +322,9 @@ class Vectorized<int32_t> : public Vectorizedi {
         return blend<16383>(a, b);
       case 15:
         return blend<32767>(a, b);
+      default:
+        return b;
     }
-    return b;
   }
   static Vectorized<int32_t> loadu(const void* ptr) {
     return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
@@ -370,27 +371,27 @@ class Vectorized<int32_t> : public Vectorizedi {
   }
   Vectorized<int32_t> operator==(const Vectorized<int32_t>& other) const {
     auto mask = _mm512_cmpeq_epi32_mask(values, other.values);
-    return _mm512_mask_set1_epi32(zero_vector, mask, 0xFFFFFFFF);
+    return _mm512_mask_set1_epi32(zero_vector, mask, -1);
   }
   Vectorized<int32_t> operator!=(const Vectorized<int32_t>& other) const {
     auto mask = _mm512_cmpneq_epi32_mask(values, other.values);
-    return _mm512_mask_set1_epi32(zero_vector, mask, 0xFFFFFFFF);
+    return _mm512_mask_set1_epi32(zero_vector, mask, -1);
   }
   Vectorized<int32_t> operator<(const Vectorized<int32_t>& other) const {
     auto mask = _mm512_cmplt_epi32_mask(values, other.values);
-    return _mm512_mask_set1_epi32(zero_vector, mask, 0xFFFFFFFF);
+    return _mm512_mask_set1_epi32(zero_vector, mask, -1);
   }
   Vectorized<int32_t> operator<=(const Vectorized<int32_t>& other) const {
     auto mask = _mm512_cmple_epi32_mask(values, other.values);
-    return _mm512_mask_set1_epi32(zero_vector, mask, 0xFFFFFFFF);
+    return _mm512_mask_set1_epi32(zero_vector, mask, -1);
   }
   Vectorized<int32_t> operator>(const Vectorized<int32_t>& other) const {
     auto mask = _mm512_cmpgt_epi32_mask(values, other.values);
-    return _mm512_mask_set1_epi32(zero_vector, mask, 0xFFFFFFFF);
+    return _mm512_mask_set1_epi32(zero_vector, mask, -1);
   }
   Vectorized<int32_t> operator>=(const Vectorized<int32_t>& other) const {
     auto mask = _mm512_cmpge_epi32_mask(values, other.values);
-    return _mm512_mask_set1_epi32(zero_vector, mask, 0xFFFFFFFF);
+    return _mm512_mask_set1_epi32(zero_vector, mask, -1);
   }
   Vectorized<int32_t> eq(const Vectorized<int32_t>& other) const;
   Vectorized<int32_t> ne(const Vectorized<int32_t>& other) const;
@@ -402,12 +403,12 @@ class Vectorized<int32_t> : public Vectorizedi {
 
 template <>
 inline void convert(const int32_t* src, float* dst, int64_t n) {
-  int64_t i;
+  int64_t i{0};
   // int32_t and float have same size
 #ifndef _MSC_VER
 #pragma unroll
 #endif
-  for (i = 0; i <= (n - Vectorized<int32_t>::size());
+  for (; i <= (n - Vectorized<int32_t>::size());
        i += Vectorized<int32_t>::size()) {
     auto input_vec =
         _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + i));
@@ -424,12 +425,12 @@ inline void convert(const int32_t* src, float* dst, int64_t n) {
 
 template <>
 inline void convert(const int32_t* src, double* dst, int64_t n) {
-  int64_t i;
+  int64_t i{0};
   // int32_t has half the size of double
 #ifndef _MSC_VER
 #pragma unroll
 #endif
-  for (i = 0; i <= (n - Vectorized<double>::size());
+  for (; i <= (n - Vectorized<double>::size());
        i += Vectorized<double>::size()) {
     auto input_256_vec =
         _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
@@ -459,10 +460,7 @@ class Vectorized<int16_t> : public Vectorizedi {
     return 32;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() = default;
-  Vectorized(int16_t v) {
-    values = _mm512_set1_epi16(v);
-  }
+  Vectorized(int16_t v) : Vectorizedi{_mm512_set1_epi16(v)} {}
   Vectorized(
       int16_t val1,
       int16_t val2,
@@ -495,41 +493,40 @@ class Vectorized<int16_t> : public Vectorizedi {
       int16_t val29,
       int16_t val30,
       int16_t val31,
-      int16_t val32) {
-    values = _mm512_set_epi16(
-        val32,
-        val31,
-        val30,
-        val29,
-        val28,
-        val27,
-        val26,
-        val25,
-        val24,
-        val23,
-        val22,
-        val21,
-        val20,
-        val19,
-        val18,
-        val17,
-        val16,
-        val15,
-        val14,
-        val13,
-        val12,
-        val11,
-        val10,
-        val9,
-        val8,
-        val7,
-        val6,
-        val5,
-        val4,
-        val3,
-        val2,
-        val1);
-  }
+      int16_t val32)
+      : Vectorizedi{_mm512_set_epi16(
+            val32,
+            val31,
+            val30,
+            val29,
+            val28,
+            val27,
+            val26,
+            val25,
+            val24,
+            val23,
+            val22,
+            val21,
+            val20,
+            val19,
+            val18,
+            val17,
+            val16,
+            val15,
+            val14,
+            val13,
+            val12,
+            val11,
+            val10,
+            val9,
+            val8,
+            val7,
+            val6,
+            val5,
+            val4,
+            val3,
+            val2,
+            val1)} {}
   template <int64_t mask>
   static Vectorized<int16_t> blend(
       Vectorized<int16_t> a,
@@ -540,7 +537,7 @@ class Vectorized<int16_t> : public Vectorizedi {
       const Vectorized<int16_t>& a,
       const Vectorized<int16_t>& b,
       const Vectorized<int16_t>& mask) {
-    auto msb_one = _mm512_set1_epi16(0xFFFF);
+    auto msb_one = _mm512_set1_epi16(-1);
     auto mask_ = _mm512_cmp_epi16_mask(mask, msb_one, _MM_CMPINT_EQ);
     return _mm512_mask_blend_epi16(mask_, a.values, b.values);
   }
@@ -651,8 +648,9 @@ class Vectorized<int16_t> : public Vectorizedi {
         return blend<0x3FFFFFFF>(a, b);
       case 31:
         return blend<0x7FFFFFFF>(a, b);
+      default:
+        return b;
     }
-    return b;
   }
   static Vectorized<int16_t> loadu(const void* ptr) {
     return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
@@ -693,27 +691,27 @@ class Vectorized<int16_t> : public Vectorizedi {
   Vectorized<int16_t> neg() const;
   Vectorized<int16_t> operator==(const Vectorized<int16_t>& other) const {
     auto mask = _mm512_cmpeq_epi16_mask(values, other.values);
-    return _mm512_mask_set1_epi16(zero_vector, mask, 0xFFFF);
+    return _mm512_mask_set1_epi16(zero_vector, mask, -1);
   }
   Vectorized<int16_t> operator!=(const Vectorized<int16_t>& other) const {
     auto mask = _mm512_cmpneq_epi16_mask(values, other.values);
-    return _mm512_mask_set1_epi16(zero_vector, mask, 0xFFFF);
+    return _mm512_mask_set1_epi16(zero_vector, mask, -1);
   }
   Vectorized<int16_t> operator<(const Vectorized<int16_t>& other) const {
     auto mask = _mm512_cmplt_epi16_mask(values, other.values);
-    return _mm512_mask_set1_epi16(zero_vector, mask, 0xFFFF);
+    return _mm512_mask_set1_epi16(zero_vector, mask, -1);
   }
   Vectorized<int16_t> operator<=(const Vectorized<int16_t>& other) const {
     auto mask = _mm512_cmple_epi16_mask(values, other.values);
-    return _mm512_mask_set1_epi16(zero_vector, mask, 0xFFFF);
+    return _mm512_mask_set1_epi16(zero_vector, mask, -1);
   }
   Vectorized<int16_t> operator>(const Vectorized<int16_t>& other) const {
     auto mask = _mm512_cmpgt_epi16_mask(values, other.values);
-    return _mm512_mask_set1_epi16(zero_vector, mask, 0xFFFF);
+    return _mm512_mask_set1_epi16(zero_vector, mask, -1);
   }
   Vectorized<int16_t> operator>=(const Vectorized<int16_t>& other) const {
     auto mask = _mm512_cmpge_epi16_mask(values, other.values);
-    return _mm512_mask_set1_epi16(zero_vector, mask, 0xFFFF);
+    return _mm512_mask_set1_epi16(zero_vector, mask, -1);
   }
 
   Vectorized<int16_t> eq(const Vectorized<int16_t>& other) const;
@@ -740,10 +738,7 @@ class Vectorized8 : public Vectorizedi {
     return 64;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized8() = default;
-  Vectorized8(T v) {
-    values = _mm512_set1_epi8(v);
-  }
+  Vectorized8(T v) : Vectorizedi{_mm512_set1_epi8(v)} {}
   Vectorized8(
       T val1,
       T val2,
@@ -808,73 +803,72 @@ class Vectorized8 : public Vectorizedi {
       T val61,
       T val62,
       T val63,
-      T val64) {
-    values = _mm512_set_epi8(
-        val64,
-        val63,
-        val62,
-        val61,
-        val60,
-        val59,
-        val58,
-        val57,
-        val56,
-        val55,
-        val54,
-        val53,
-        val52,
-        val51,
-        val50,
-        val49,
-        val48,
-        val47,
-        val46,
-        val45,
-        val44,
-        val43,
-        val42,
-        val41,
-        val40,
-        val39,
-        val38,
-        val37,
-        val36,
-        val35,
-        val34,
-        val33,
-        val32,
-        val31,
-        val30,
-        val29,
-        val28,
-        val27,
-        val26,
-        val25,
-        val24,
-        val23,
-        val22,
-        val21,
-        val20,
-        val19,
-        val18,
-        val17,
-        val16,
-        val15,
-        val14,
-        val13,
-        val12,
-        val11,
-        val10,
-        val9,
-        val8,
-        val7,
-        val6,
-        val5,
-        val4,
-        val3,
-        val2,
-        val1);
-  }
+      T val64)
+      : Vectorizedi{_mm512_set_epi8(
+            val64,
+            val63,
+            val62,
+            val61,
+            val60,
+            val59,
+            val58,
+            val57,
+            val56,
+            val55,
+            val54,
+            val53,
+            val52,
+            val51,
+            val50,
+            val49,
+            val48,
+            val47,
+            val46,
+            val45,
+            val44,
+            val43,
+            val42,
+            val41,
+            val40,
+            val39,
+            val38,
+            val37,
+            val36,
+            val35,
+            val34,
+            val33,
+            val32,
+            val31,
+            val30,
+            val29,
+            val28,
+            val27,
+            val26,
+            val25,
+            val24,
+            val23,
+            val22,
+            val21,
+            val20,
+            val19,
+            val18,
+            val17,
+            val16,
+            val15,
+            val14,
+            val13,
+            val12,
+            val11,
+            val10,
+            val9,
+            val8,
+            val7,
+            val6,
+            val5,
+            val4,
+            val3,
+            val2,
+            val1)} {}
   template <int64_t mask>
   static Vectorized<T> blend(Vectorized<T> a, Vectorized<T> b) {
     return _mm512_mask_blend_epi8(mask, a.values, b.values);
@@ -1149,7 +1143,7 @@ class Vectorized<int8_t> : public Vectorized8<int8_t> {
       const Vectorized<int8_t>& a,
       const Vectorized<int8_t>& b,
       const Vectorized<int8_t>& mask) {
-    auto msb_one = _mm512_set1_epi8(0xFF);
+    auto msb_one = _mm512_set1_epi8(-1);
     auto mask_ = _mm512_cmp_epi8_mask(mask, msb_one, _MM_CMPINT_EQ);
     return _mm512_mask_blend_epi8(mask_, a.values, b.values);
   }
@@ -1162,19 +1156,19 @@ class Vectorized<int8_t> : public Vectorized8<int8_t> {
 
   Vectorized<int8_t> operator==(const Vectorized<int8_t>& other) const {
     auto mask = _mm512_cmpeq_epi8_mask(values, other.values);
-    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+    return _mm512_mask_set1_epi8(zero_vector, mask, -1);
   }
   Vectorized<int8_t> operator!=(const Vectorized<int8_t>& other) const {
     auto mask = _mm512_cmpneq_epi8_mask(values, other.values);
-    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+    return _mm512_mask_set1_epi8(zero_vector, mask, -1);
   }
   Vectorized<int8_t> operator<(const Vectorized<int8_t>& other) const {
     auto mask = _mm512_cmplt_epi8_mask(values, other.values);
-    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+    return _mm512_mask_set1_epi8(zero_vector, mask, -1);
   }
   Vectorized<int8_t> operator<=(const Vectorized<int8_t>& other) const {
     auto mask = _mm512_cmple_epi8_mask(values, other.values);
-    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+    return _mm512_mask_set1_epi8(zero_vector, mask, -1);
   }
   Vectorized<int8_t> operator>(const Vectorized<int8_t>& other) const {
     return other < *this;
@@ -1203,7 +1197,7 @@ class Vectorized<uint8_t> : public Vectorized8<uint8_t> {
       const Vectorized<uint8_t>& a,
       const Vectorized<uint8_t>& b,
       const Vectorized<uint8_t>& mask) {
-    auto msb_one = _mm512_set1_epi8(0xFF);
+    auto msb_one = _mm512_set1_epi8(-1);
     auto mask_ = _mm512_cmp_epu8_mask(mask, msb_one, _MM_CMPINT_EQ);
     return _mm512_mask_blend_epi8(mask_, a.values, b.values);
   }
@@ -1216,19 +1210,19 @@ class Vectorized<uint8_t> : public Vectorized8<uint8_t> {
 
   Vectorized<uint8_t> operator==(const Vectorized<uint8_t>& other) const {
     auto mask = _mm512_cmpeq_epu8_mask(values, other.values);
-    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+    return _mm512_mask_set1_epi8(zero_vector, mask, -1);
   }
   Vectorized<uint8_t> operator!=(const Vectorized<uint8_t>& other) const {
     auto mask = _mm512_cmpneq_epu8_mask(values, other.values);
-    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+    return _mm512_mask_set1_epi8(zero_vector, mask, -1);
   }
   Vectorized<uint8_t> operator<(const Vectorized<uint8_t>& other) const {
     auto mask = _mm512_cmplt_epu8_mask(values, other.values);
-    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+    return _mm512_mask_set1_epi8(zero_vector, mask, -1);
   }
   Vectorized<uint8_t> operator<=(const Vectorized<uint8_t>& other) const {
     auto mask = _mm512_cmple_epu8_mask(values, other.values);
-    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+    return _mm512_mask_set1_epi8(zero_vector, mask, -1);
   }
   Vectorized<uint8_t> operator>(const Vectorized<uint8_t>& other) const {
     return other < *this;
@@ -1362,14 +1356,14 @@ Vectorized<T> inline int_elementwise_binary_512(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
     Op op) {
-  T values_a[Vectorized<T>::size()];
-  T values_b[Vectorized<T>::size()];
-  a.store(values_a);
-  b.store(values_b);
+  std::array<T, Vectorized<T>::size()> values_a;
+  std::array<T, Vectorized<T>::size()> values_b;
+  a.store(values_a.data());
+  b.store(values_b.data());
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     values_a[i] = op(values_a[i], values_b[i]);
   }
-  return Vectorized<T>::loadu(values_a);
+  return Vectorized<T>::loadu(values_a.data());
 }
 
 template <>
@@ -1377,9 +1371,6 @@ Vectorized<int8_t> inline operator*(
     const Vectorized<int8_t>& a,
     const Vectorized<int8_t>& b) {
   // We don't have an instruction for multiplying int8_t
-#ifndef CPU_CAPABILITY_AVX512
-  return int_elementwise_binary_512(a, b, std::multiplies<int8_t>());
-#else
   __m512i mask00FF = _mm512_set1_epi16(0x00FF);
   __m512i a_lo = _mm512_srai_epi16(_mm512_slli_epi16(a, 8), 8);
   __m512i b_lo = _mm512_srai_epi16(_mm512_slli_epi16(b, 8), 8);
@@ -1389,7 +1380,6 @@ Vectorized<int8_t> inline operator*(
   __m512i res_hi = _mm512_slli_epi16(_mm512_mullo_epi16(a_hi, b_hi), 8);
   __m512i res = _mm512_or_si512(res_hi, res_lo);
   return res;
-#endif
 }
 
 template <>
@@ -1397,9 +1387,6 @@ Vectorized<uint8_t> inline operator*(
     const Vectorized<uint8_t>& a,
     const Vectorized<uint8_t>& b) {
   // We don't have an instruction for multiplying uint8_t
-#ifndef CPU_CAPABILITY_AVX512
-  return int_elementwise_binary_512(a, b, std::multiplies<uint8_t>());
-#else
   __m512i mask00FF = _mm512_set1_epi16(0x00FF);
   __m512i a_lo = _mm512_and_si512(a, mask00FF);
   __m512i b_lo = _mm512_and_si512(b, mask00FF);
@@ -1409,7 +1396,6 @@ Vectorized<uint8_t> inline operator*(
   __m512i res_hi = _mm512_slli_epi16(_mm512_mullo_epi16(a_hi, b_hi), 8);
   __m512i res = _mm512_or_si512(res_hi, res_lo);
   return res;
-#endif
 }
 
 template <>
@@ -1609,7 +1595,7 @@ std::
     return _mm512_cvtepi8_epi32(
         _mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr)));
   } else {
-    auto a = Vectorized<int8_t>::loadu(ptr, count);
+    auto a = Vectorized<int8_t>::loadu(ptr, static_cast<int8_t>(count));
     return _mm512_cvtepi8_epi32(_mm512_castsi512_si128(a));
   }
 }
@@ -1632,62 +1618,58 @@ template <>
 Vectorized<int64_t> inline operator/(
     const Vectorized<int64_t>& a,
     const Vectorized<int64_t>& b) {
-  return int_elementwise_binary_512(a, b, std::divides<int64_t>());
+  return int_elementwise_binary_512(a, b, std::divides<>());
 }
 template <>
 Vectorized<int32_t> inline operator/(
     const Vectorized<int32_t>& a,
     const Vectorized<int32_t>& b) {
-  return int_elementwise_binary_512(a, b, std::divides<int32_t>());
+  return int_elementwise_binary_512(a, b, std::divides<>());
 }
 template <>
 Vectorized<int16_t> inline operator/(
     const Vectorized<int16_t>& a,
     const Vectorized<int16_t>& b) {
-  return int_elementwise_binary_512(a, b, std::divides<int16_t>());
+  return int_elementwise_binary_512(a, b, std::divides<>());
 }
 template <>
 Vectorized<int8_t> inline operator/(
     const Vectorized<int8_t>& a,
     const Vectorized<int8_t>& b) {
-  return int_elementwise_binary_512(a, b, std::divides<int8_t>());
+  return int_elementwise_binary_512(a, b, std::divides<>());
 }
 template <>
 Vectorized<uint8_t> inline operator/(
     const Vectorized<uint8_t>& a,
     const Vectorized<uint8_t>& b) {
-  return int_elementwise_binary_512(a, b, std::divides<uint8_t>());
+  return int_elementwise_binary_512(a, b, std::divides<>());
 }
 
 template <
     class T,
-    typename std::enable_if_t<
-        std::is_base_of<Vectorizedi, Vectorized<T>>::value,
-        int> = 0>
+    typename std::
+        enable_if_t<std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
 inline Vectorized<T> operator&(const Vectorized<T>& a, const Vectorized<T>& b) {
   return _mm512_and_si512(a, b);
 }
 template <
     class T,
-    typename std::enable_if_t<
-        std::is_base_of<Vectorizedi, Vectorized<T>>::value,
-        int> = 0>
+    typename std::
+        enable_if_t<std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
 inline Vectorized<T> operator|(const Vectorized<T>& a, const Vectorized<T>& b) {
   return _mm512_or_si512(a, b);
 }
 template <
     class T,
-    typename std::enable_if_t<
-        std::is_base_of<Vectorizedi, Vectorized<T>>::value,
-        int> = 0>
+    typename std::
+        enable_if_t<std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
 inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
   return _mm512_xor_si512(a, b);
 }
 template <
     class T,
-    typename std::enable_if_t<
-        std::is_base_of<Vectorizedi, Vectorized<T>>::value,
-        int> = 0>
+    typename std::
+        enable_if_t<std::is_base_of_v<Vectorizedi, Vectorized<T>>, int> = 0>
 inline Vectorized<T> operator~(const Vectorized<T>& a) {
   return _mm512_xor_si512(a, _mm512_set1_epi32(-1));
 }
@@ -1851,6 +1833,8 @@ template <
 Vectorized<T> inline shift_512_8(
     const Vectorized<T>& a,
     const Vectorized<T>& b) {
+  constexpr int8_t top_bit_set{-128}; // 0x80
+
   // No vector instruction for shifting int8_t/uint8_t, so emulating
   // it instead.
 
@@ -1862,133 +1846,133 @@ Vectorized<T> inline shift_512_8(
   // with index M in output pair will be set to all 0s.
   __m512i ctl_0_1 = _mm512_set_epi8(
       62,
-      0x80,
+      top_bit_set,
       60,
-      0x80,
+      top_bit_set,
       58,
-      0x80,
+      top_bit_set,
       56,
-      0x80,
+      top_bit_set,
       54,
-      0x80,
+      top_bit_set,
       52,
-      0x80,
+      top_bit_set,
       50,
-      0x80,
+      top_bit_set,
       48,
-      0x80,
+      top_bit_set,
       46,
-      0x80,
+      top_bit_set,
       44,
-      0x80,
+      top_bit_set,
       42,
-      0x80,
+      top_bit_set,
       40,
-      0x80,
+      top_bit_set,
       38,
-      0x80,
+      top_bit_set,
       36,
-      0x80,
+      top_bit_set,
       34,
-      0x80,
+      top_bit_set,
       32,
-      0x80,
+      top_bit_set,
       30,
-      0x80,
+      top_bit_set,
       28,
-      0x80,
+      top_bit_set,
       26,
-      0x80,
+      top_bit_set,
       24,
-      0x80,
+      top_bit_set,
       22,
-      0x80,
+      top_bit_set,
       20,
-      0x80,
+      top_bit_set,
       18,
-      0x80,
+      top_bit_set,
       16,
-      0x80,
+      top_bit_set,
       14,
-      0x80,
+      top_bit_set,
       12,
-      0x80,
+      top_bit_set,
       10,
-      0x80,
+      top_bit_set,
       8,
-      0x80,
+      top_bit_set,
       6,
-      0x80,
+      top_bit_set,
       4,
-      0x80,
+      top_bit_set,
       2,
-      0x80,
+      top_bit_set,
       0,
-      0x80);
+      top_bit_set);
   __m512i ctl_1_0 = _mm512_set_epi8(
-      0x80,
+      top_bit_set,
       63,
-      0x80,
+      top_bit_set,
       61,
-      0x80,
+      top_bit_set,
       59,
-      0x80,
+      top_bit_set,
       57,
-      0x80,
+      top_bit_set,
       55,
-      0x80,
+      top_bit_set,
       53,
-      0x80,
+      top_bit_set,
       51,
-      0x80,
+      top_bit_set,
       49,
-      0x80,
+      top_bit_set,
       47,
-      0x80,
+      top_bit_set,
       45,
-      0x80,
+      top_bit_set,
       43,
-      0x80,
+      top_bit_set,
       41,
-      0x80,
+      top_bit_set,
       39,
-      0x80,
+      top_bit_set,
       37,
-      0x80,
+      top_bit_set,
       35,
-      0x80,
+      top_bit_set,
       33,
-      0x80,
+      top_bit_set,
       31,
-      0x80,
+      top_bit_set,
       29,
-      0x80,
+      top_bit_set,
       27,
-      0x80,
+      top_bit_set,
       25,
-      0x80,
+      top_bit_set,
       23,
-      0x80,
+      top_bit_set,
       21,
-      0x80,
+      top_bit_set,
       19,
-      0x80,
+      top_bit_set,
       17,
-      0x80,
+      top_bit_set,
       15,
-      0x80,
+      top_bit_set,
       13,
-      0x80,
+      top_bit_set,
       11,
-      0x80,
+      top_bit_set,
       9,
-      0x80,
+      top_bit_set,
       7,
-      0x80,
+      top_bit_set,
       5,
-      0x80,
+      top_bit_set,
       3,
-      0x80,
+      top_bit_set,
       1);
 
   // Masks for bitwise and operation, treating 512 bits as an array of
@@ -1998,7 +1982,7 @@ Vectorized<T> inline shift_512_8(
   // element with the same index in output pair, while the other
   // element in output pair will be set to all 0s.
   __m512i keep_0 = _mm512_set1_epi16(0xFF);
-  __m512i keep_1 = _mm512_set1_epi16(0xFF00);
+  __m512i keep_1 = _mm512_set1_epi16(-0x0100); // 0xFF00
 
   // Take each 8-bit element with idx%2==0 from input array to be
   // shifted and extend it to 16 bits so that 0s are added to the
@@ -2117,5 +2101,4 @@ Vectorized<uint8_t> inline operator>>(
 
 #endif
 
-} // namespace CPU_CAPABILITY
-} // namespace at::vec
+} // namespace at::vec::inline CPU_CAPABILITY
