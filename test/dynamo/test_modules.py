@@ -3902,20 +3902,30 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager, compiled)
 
     def test_batchnorm_momentum_none_fullgraph(self):
-        module = torch.nn.BatchNorm1d(4, momentum=None).train()
-        x = torch.randn(3, 4)
-        compiled = torch.compile(module, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(RuntimeError, "BatchNorm\\(momentum=None\\)"):
-            compiled(x)
+        inputs = {
+            torch.nn.BatchNorm1d: (3, 4),
+            torch.nn.BatchNorm2d: (2, 4, 8, 8),
+            torch.nn.BatchNorm3d: (2, 4, 4, 8, 8),
+        }
+        for bn_cls, input_shape in inputs.items():
+            torch._dynamo.reset()
+            module = bn_cls(4, momentum=None).train()
+            x = torch.randn(*input_shape)
+            compiled = torch.compile(module, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(RuntimeError, "BatchNorm\\(momentum=None\\)"):
+                compiled(x)
 
-        m_eager = torch.nn.BatchNorm1d(4, momentum=None).train()
-        m_compiled = torch.nn.BatchNorm1d(4, momentum=None).train()
-        ref = m_eager(x)
-        out = torch.compile(m_compiled, backend="eager", fullgraph=False)(x)
-        self.assertEqual(ref, out)
-        self.assertEqual(m_eager.running_mean, m_compiled.running_mean)
-        self.assertEqual(m_eager.running_var, m_compiled.running_var)
-        self.assertEqual(m_eager.num_batches_tracked, m_compiled.num_batches_tracked)
+            torch._dynamo.reset()
+            m_eager = bn_cls(4, momentum=None).train()
+            m_compiled = bn_cls(4, momentum=None).train()
+            ref = m_eager(x)
+            out = torch.compile(m_compiled, backend="eager", fullgraph=False)(x)
+            self.assertEqual(ref, out)
+            self.assertEqual(m_eager.running_mean, m_compiled.running_mean)
+            self.assertEqual(m_eager.running_var, m_compiled.running_var)
+            self.assertEqual(
+                m_eager.num_batches_tracked, m_compiled.num_batches_tracked
+            )
 
 
 instantiate_device_type_tests(
