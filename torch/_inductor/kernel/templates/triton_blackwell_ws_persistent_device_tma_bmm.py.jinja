@@ -1,20 +1,4 @@
 {{def_kernel("A", "B")}}
-    {%- if DECOMPOSE_K %}
-    BATCH = K_SPLIT
-    M = {{size("A", 0)}}
-    N = {{size("B", 1)}}
-    K = {{size("A", 1)}}
-    batch = tl.program_id(1).to(tl.int32)
-    stride_am = {{stride("A", 0)}}
-    stride_ak = {{stride("A", 1)}}
-    stride_bk = {{stride("B", 0)}}
-    stride_bn = {{stride("B", 1)}}
-    a_base = A
-    b_base = B
-    k_base, k_tiles = _blackwell_bmm_aligned_partition(
-        batch, K, K_SPLIT, BLOCK_K
-    )
-    {%- else %}
     BATCH = {{size("A", 0)}}
     M = {{size("A", 1)}}
     N = {{size("B", 2)}}
@@ -33,9 +17,6 @@
 
     a_base = A + batch * stride_ab
     b_base = B + batch * stride_bb
-    k_base = 0
-    k_tiles = tl.cdiv(K, BLOCK_K)
-    {%- endif %}
 
     # A logical rank-3 BMM is represented by one rank-2 descriptor per batch.
     # This supports arbitrary/zero batch strides and keeps the descriptor-load
@@ -61,8 +42,10 @@
     grid_n = tl.cdiv(N, BLOCK_N)
     num_tiles = grid_m * grid_n
     num_pid_in_group = GROUP_M * grid_n
+    k_tiles = tl.cdiv(K, BLOCK_K)
     tile_id_c = start_pid - NUM_SMS
 
+    {%- if USE_META_WS %}
     for tile_id in tl.range(
         start_pid,
         num_tiles,
@@ -72,6 +55,15 @@
         data_partition_factor=DATA_PARTITION_FACTOR,
         separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
     ):
+    {%- else %}
+    for tile_id in tl.range(
+        start_pid,
+        num_tiles,
+        NUM_SMS,
+        flatten=FLATTEN,
+        warp_specialize=WARP_SPECIALIZE,
+    ):
+    {%- endif %}
         pid_m, pid_n = _blackwell_bmm_pid(
             tile_id, num_pid_in_group, grid_m, GROUP_M
         )
@@ -79,7 +71,7 @@
         offs_bn = (pid_n * BLOCK_N).to(tl.int32)
         accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
         for ki in range(k_tiles):
-            offs_k = (k_base + ki * BLOCK_K).to(tl.int32)
+            offs_k = (ki * BLOCK_K).to(tl.int32)
             a = a_desc.load(
                 [offs_am, offs_k] if A_ROW_MAJOR else [offs_k, offs_am],
             )
@@ -105,13 +97,8 @@
         for i in tl.static_range(EPILOGUE_SUBTILE):
             offs_cn_i = offs_cn + i * (BLOCK_N // EPILOGUE_SUBTILE)
             {%- if FLATTEN_OUTPUT %}
-            {%- if DECOMPOSE_K %}
-            output_row = batch * M_PAD + offs_cm
-            {%- else %}
-            output_row = batch * M + offs_cm
-            {%- endif %}
             {{store_output(
-                ("output_row", "offs_cn_i"),
+                ("batch * M + offs_cm", "offs_cn_i"),
                 "subtiles[i]",
                 indent_width=12,
                 val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE"),
@@ -129,17 +116,6 @@
                 val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE")
             )}}
             {%- endif %}
-
-
-@triton.jit
-def _blackwell_bmm_aligned_partition(
-    split,
-    K,
-    K_SPLIT: tl.constexpr,
-    BLOCK_K: tl.constexpr,
-):
-    k_part = tl.cdiv(tl.cdiv(K, K_SPLIT), BLOCK_K) * BLOCK_K
-    return split * k_part, k_part // BLOCK_K
 
 
 @triton.jit
