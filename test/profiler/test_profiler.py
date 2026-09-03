@@ -358,6 +358,52 @@ with profile(activities=[ProfilerActivity.CUDA]):
         finally:
             torch._C._profiler._set_cuda_sync_enabled_val(False)
 
+    @skipIfRocm(msg="Stream wait event correlation metadata is CUPTI-only")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_profiler_stream_wait_event_metadata(self):
+        device = torch.device("cuda:0")
+        producer_stream = torch.cuda.Stream(device=device)
+        consumer_stream = torch.cuda.Stream(device=device)
+
+        with _profile(
+            use_kineto=True,
+            use_device="cuda",
+            experimental_config=_ExperimentalConfig(enable_cuda_sync_events=True),
+        ) as prof:
+            with torch.cuda.stream(producer_stream):
+                tensor = torch.ones(1, device=device)
+                tensor.add_(1)
+
+            consumer_stream.wait_stream(producer_stream)
+            with torch.cuda.stream(consumer_stream):
+                tensor.add_(1)
+            torch.cuda.synchronize()
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                events = json.load(f)["traceEvents"]
+
+        wait_args = [
+            event["args"]
+            for event in events
+            if "wait_on_stream" in event.get("args", {})
+            and "wait_on_cuda_event_record_corr_id" in event["args"]
+        ]
+
+        resolved_waits = [
+            args
+            for args in wait_args
+            if args.get("wait_on_stream", -1) >= 0
+            and args.get("wait_on_cuda_event_record_corr_id", -1) >= 0
+            and args["wait_on_stream"] != args.get("stream")
+        ]
+        self.assertTrue(
+            resolved_waits,
+            "Expected wait metadata with resolved source stream and event "
+            f"correlation, got: {wait_args}",
+        )
+
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_disable_external_correlation(self):
