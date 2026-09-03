@@ -4498,6 +4498,9 @@ class GuardsStatePickler(pickle.Pickler):
             # None slips past it. This matters most for the removal callbacks
             # of weak containers, which are restored from their pickled closure
             # and would otherwise run against a bogus self.
+            #
+            # No callback is attached, so a restored container's len()/bool()
+            # still count the dead entry even though iteration skips it.
             return _make_dead_weakref, ()
 
         elif isinstance(obj, _get_unsupported_types()):
