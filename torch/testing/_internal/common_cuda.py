@@ -3,12 +3,10 @@
 r"""This file is allowed to initialize CUDA context when imported."""
 
 import functools
-import threading
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU, TEST_MTIA
 from torch.utils._import_utils import _check_module_exists
-import inspect
 import contextlib
 import os
 import unittest
@@ -403,143 +401,16 @@ def initialize_cuda_context_rng():
         __cuda_ctx_rng_initialized = True
 
 
-_tf32_off_lock = threading.Lock()
-_tf32_off_depth = 0
-_tf32_off_saved_precision = None
-_tf32_off_cudnn_ctx = None
-
-
-@contextlib.contextmanager
-def tf32_off():
-    # First-in saves state and disables tf32; last-out restores. Multithreaded
-    # test runners (e.g. MultiThreadedTestCase) enter this context once per
-    # rank thread over the same process-global flags, so per-entry
-    # save/restore can interleave and leak a modified state past the last
-    # exit, which the TestCase fp32 precision leak detector then flags.
-    global _tf32_off_depth, _tf32_off_saved_precision, _tf32_off_cudnn_ctx
-    with _tf32_off_lock:
-        if _tf32_off_depth == 0:
-            # Snapshot fp32_precision (a string), not allow_tf32 (a bool):
-            # writing allow_tf32 back can't reproduce the "none" default (it
-            # yields "ieee"), which the leak detector would flag on ROCm.
-            _tf32_off_saved_precision = torch.backends.cuda.matmul.fp32_precision
-            torch.backends.cuda.matmul.allow_tf32 = False
-            _tf32_off_cudnn_ctx = torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False)
-            _tf32_off_cudnn_ctx.__enter__()
-        _tf32_off_depth += 1
-    try:
-        yield
-    finally:
-        with _tf32_off_lock:
-            _tf32_off_depth -= 1
-            if _tf32_off_depth == 0:
-                _tf32_off_cudnn_ctx.__exit__(None, None, None)
-                _tf32_off_cudnn_ctx = None
-                torch.backends.cuda.matmul.fp32_precision = _tf32_off_saved_precision
-                _tf32_off_saved_precision = None
-
-
-@contextlib.contextmanager
-def tf32_on(self, tf32_precision=1e-5):
-    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
-    old_precision = self.precision
-    try:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        self.precision = tf32_precision
-        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
-            yield
-    finally:
-        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
-        self.precision = old_precision
-
-
-@contextlib.contextmanager
-def tf32_enabled():
-    """
-    Context manager to temporarily enable TF32 for CUDA operations.
-    Restores the previous TF32 state after exiting the context.
-    """
-    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
-    try:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        with torch.backends.cudnn.flags(
-            enabled=None, benchmark=None, deterministic=None, allow_tf32=True
-        ):
-            yield
-    finally:
-        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
-
-
-# This is a wrapper that wraps a test to run this test twice, one with
-# allow_tf32=True, another with allow_tf32=False. When running with
-# allow_tf32=True, it will use reduced precision as specified by the
-# argument. For example:
-#    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-#    @tf32_on_and_off(0.005)
-#    def test_matmul(self, device, dtype):
-#        a = ...; b = ...;
-#        c = torch.matmul(a, b)
-#        self.assertEqual(c, expected)
-# In the above example, when testing torch.float32 and torch.complex64 on CUDA
-# on a CUDA >= 11 build on an >=Ampere architecture, the matmul will be running at
-# TF32 mode and TF32 mode off, and on TF32 mode, the assertEqual will use reduced
-# precision to check values.
-#
-# This decorator can be used for function with or without device/dtype, such as
-# @tf32_on_and_off(0.005)
-# def test_my_op(self)
-# @tf32_on_and_off(0.005)
-# def test_my_op(self, device)
-# @tf32_on_and_off(0.005)
-# def test_my_op(self, device, dtype)
-# @tf32_on_and_off(0.005)
-# def test_my_op(self, dtype)
-# if neither device nor dtype is specified, it will check if the system has ampere device
-# if device is specified, it will check if device is cuda
-# if dtype is specified, it will check if dtype is float32 or complex64
-# tf32 and fp32 are different only when all the three checks pass
-def tf32_on_and_off(tf32_precision=1e-5, *, only_if=True):
-    def with_tf32_disabled(self, function_call):
-        with tf32_off():
-            function_call()
-
-    def with_tf32_enabled(self, function_call):
-        with tf32_on(self, tf32_precision):
-            function_call()
-
-    def wrapper(f):
-        params = inspect.signature(f).parameters
-        arg_names = tuple(params.keys())
-
-        @functools.wraps(f)
-        def wrapped(*args, **kwargs):
-            kwargs.update(zip(arg_names, args, strict=False))
-            cond = torch.cuda.is_tf32_supported() and only_if
-            if 'device' in kwargs:
-                cond = cond and (torch.device(kwargs['device']).type == 'cuda')
-            if 'dtype' in kwargs:
-                cond = cond and (kwargs['dtype'] in {torch.float32, torch.complex64})
-            if cond:
-                with_tf32_disabled(kwargs['self'], lambda: f(**kwargs))
-                with_tf32_enabled(kwargs['self'], lambda: f(**kwargs))
-            else:
-                f(**kwargs)
-
-        return wrapped
-    return wrapper
-
-# This is a wrapper that wraps a test to run it with TF32 turned off.
-# This wrapper is designed to be used when a test uses matmul or convolutions
-# but the purpose of that test is not testing matmul or convolutions.
-# Disabling TF32 will enforce torch.float tensors to be always computed
-# at full precision.
-def with_tf32_off(f):
-    @functools.wraps(f)
-    def wrapped(*args, **kwargs):
-        with tf32_off():
-            return f(*args, **kwargs)
-
-    return wrapped
+# TF32 helpers (CUDA + XPU) are defined in common.py and re-exported here so
+# that existing ``from torch.testing._internal.common_cuda import tf32_*``
+# call sites continue to work without modification.
+from torch.testing._internal.common import (  # noqa: F401
+    tf32_off,
+    tf32_on,
+    tf32_enabled,
+    tf32_on_and_off,
+    with_tf32_off,
+)
 
 def _get_magma_version():
     if 'Magma' not in torch.__config__.show():
