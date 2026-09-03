@@ -4308,22 +4308,11 @@ class GuardsStatePickler(FunctionPicklerBase):
     # fail forever with no load error.
 
     def _keep(self, value: object) -> bool:
-        """Whether a value a reconstructed function holds has to be carried.
-
-        Matching is by identity, which for an interned value (True, None, a small
-        int, a short str) can coincide with an unrelated guarded one and keep it.
-        That is harmless: such values are trivially picklable, and a kept value is
-        always the real one.
-        """
+        """Identity match; an interned value that collides is kept, harmlessly."""
         return id(value) in self.guard_tree_values
 
     def _missing(self, reason: str) -> _Missing:
-        """One shared sentinel per reason within this pickle.
-
-        A snapshot prunes a whole module dict, so a fresh instance per pruned
-        value bloats the payload with thousands of identical sentinels.
-        Nothing compares sentinels by identity, so sharing is safe.
-        """
+        """One sentinel per reason; a snapshot prunes a whole module dict."""
         if reason not in self._missing_cache:
             self._missing_cache[reason] = _Missing(reason)
         return self._missing_cache[reason]
@@ -4332,14 +4321,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         return value if self._keep(value) else self._missing(reason)
 
     def _globals_snapshot(self, f_globals: dict[str, Any]) -> dict[str, Any]:
-        """The pruned module scope, built once per module dict in this pickle.
-
-        Reused so that pickle memoizes it: every function reconstructed from one
-        module otherwise carries its own copy of the whole scope, and the payload
-        grows with their product.
-        """
+        """Built once per module dict so pickle memoizes it across functions."""
         snapshot = self._globals_snapshots.get(id(f_globals))
         if snapshot is None:
+            # A sentinel __builtins__ is harmless: FunctionType({}, ...) binds
+            # builtins from the interpreter (CPython >= 3.10) before this applies.
             snapshot = {
                 name: self._prune(value, "unguarded function global")
                 for name, value in f_globals.items()
@@ -4679,11 +4665,10 @@ def pickle_guards_state(
 
     # Anything dump raises means a guarded value cannot be serialized, which is
     # a bypass (an error under strict_precompile), never a compiler crash. A
-    # RecursionError is a cycle the reducers did not route through pickle
-    # state, i.e. a pickler bug, so it stays loud.
+    # PackageError raised inside reducer_override already carries its message.
     try:
         pickler.dump(state)
-    except RecursionError:
+    except torch._dynamo.exc.PackageError:
         raise
     except Exception as e:
         raise torch._dynamo.exc.PackageError(str(e)) from e
@@ -4704,16 +4689,17 @@ class CheckFunctionManager:
         guard_fail_fn: Callable[[GuardFail], None] | None = None,
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
         | None = None,
-        serialization_guard_filter_fn: Callable[
-            [Sequence[GuardFilterEntry]], Sequence[bool]
-        ]
-        | None = None,
-        explicit_capture: bool = False,
         shape_code_parts: ShapeCodeParts | None = None,
         runtime_global_scope: dict[str, Any] | None = None,
         save_guards: bool = False,
         strict_error: bool = False,
         guard_build_local_state: Any | None = None,
+        *,
+        serialization_guard_filter_fn: Callable[
+            [Sequence[GuardFilterEntry]], Sequence[bool]
+        ]
+        | None = None,
+        explicit_capture: bool = False,
     ) -> None:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -4867,7 +4853,10 @@ class CheckFunctionManager:
                 # not reach is replaced by a placeholder. Dropping a guard must
                 # not drop the VALUE it named, because the rest of the state
                 # still refers to it -- a pruned tensor comes back with no
-                # dtype. So prune against the unfiltered tree.
+                # dtype. So prune against the unfiltered tree. Known limitation:
+                # missing_values is keyed by id(), so one unguarded attribute
+                # holding e.g. torch.bfloat16 stands in for every reference to
+                # that dtype in the pickle; this merge masks that, not fixes it.
                 serialization_builder.guard_tree_values = {
                     **builder.guard_tree_values,
                     **serialization_builder.guard_tree_values,

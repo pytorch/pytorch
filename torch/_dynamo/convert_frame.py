@@ -58,6 +58,7 @@ from weakref import ReferenceType
 
 import torch
 import torch._logging
+from torch._C._dynamo.eval_frame import _get_cache_entry_count_for_region
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.distributed import get_compile_pg
@@ -679,7 +680,7 @@ class ConvertFrameAssert:
         else:
             total_count = _get_total_cache_entry_count(code)
             for region_id in _get_explicit_compile_regions():
-                total_count -= len(_get_cache_entries_for_region(code, region_id))
+                total_count -= _get_cache_entry_count_for_region(code, region_id)
         cache_size = compute_cache_size(frame, cache_entries, total_count)
         input_codes.add(code)
         if code in output_codes:
