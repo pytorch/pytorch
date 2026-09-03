@@ -1801,18 +1801,10 @@ class PlateauLR(LRScheduler):
         self.cooldown_counter = 0
         self.num_bad_epochs = 0
 
-    @property
-    def in_cooldown(self) -> bool:
-        return self.cooldown_counter > 0
-
-    # Keep `epoch` for API parity with LRScheduler while its step argument is
+    # `epoch` was added for API parity with LRScheduler while its step argument is
     # being deprecated.
     @override
-    def step(
-        self,
-        epoch: int | None = None,
-        **kwargs: Any,
-    ) -> None:
+    def step(self, epoch: int | None = None, **kwargs: Any) -> None:
         r"""Perform a step.
 
         Args:
@@ -1904,6 +1896,10 @@ class PlateauLR(LRScheduler):
             if old_lr - new_lr > self.eps:
                 new_lrs[i] = new_lr
         return new_lrs
+
+    @property
+    def in_cooldown(self):
+        return self.cooldown_counter > 0
 
     def _is_better(self, a, best):
         if self.mode == "min" and self.threshold_mode == "rel":
