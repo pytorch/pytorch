@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import torch
 import torch._dynamo.testing
@@ -15,6 +16,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+from torch._dynamo.exc import PackageError
 from torch._dynamo.package import (
     CompilePackage,
     DiskDynamoStore,
@@ -115,6 +117,35 @@ class TestPackage(torch._inductor.test_case.TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
             entry.check_versions()
+
+    def test_codegen_drift_refuses_serialization_not_introspection(self):
+        # A drifted package can never be serialized, but building a
+        # cache_entry() for introspection (summary(), backend enumeration,
+        # session teardown) must keep working -- a refusal there would erupt
+        # out of __exit__ and mask the in-flight capture exception.
+        def fn(x):
+            return x + 1
+
+        graph = torch.fx.Graph()
+        graph.placeholder("x").meta["example_value"] = torch.ones(2)
+        base = SystemInfo.current(cpu_codegen=False)
+        infos = [
+            dataclasses.replace(base, cpu_codegen_target=("x86_64", isa, 256, None))
+            for isa in ("avx2", "avx512")
+        ]
+        package = CompilePackage(fn)
+        with (
+            mock.patch.object(SystemInfo, "current", side_effect=infos),
+            self.assertLogs("torch._dynamo.package", level="WARNING") as logs,
+        ):
+            package.update_device_type(graph)
+            package.update_device_type(graph)
+        self.assertIn("CPU codegen target changed during capture", logs.output[0])
+        self.assertIsNotNone(package.cache_entry())
+        with self.assertRaisesRegex(PackageError, "cannot be serialized"):
+            package.refuse_unserializable()
+        with self.assertRaisesRegex(PackageError, "cannot be serialized"):
+            DynamoCache.record_package(package)
 
     def test_guarded_code_records_backend_ids_from_bytecode(self):
         def fn(x):
@@ -543,8 +574,6 @@ def add(x, y):
         # Regression test for https://github.com/pytorch/pytorch/issues/190664.
         # package.install() must register target_code in input_codes so that
         # torch._dynamo.reset() clears precompile entries on the installed code.
-        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -621,6 +650,24 @@ def add(x, y):
             with self.assertRaisesRegex(RuntimeError, "Detected recompile"):
                 compiled(x)
         self.assertEqual(compiled(x), expected)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_saving_does_not_bypass_the_live_entry(self):
+        # from_cache_entry marks a code whose backend it cannot find as bypassed
+        # on the entry it is handed. Saving must work on a copy: the live entry
+        # keeps serving this process, and a save that came up short on a
+        # backend must not flip it to bypassed.
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn)(x), fn(x))  # noqa: UNSPECIFIED_BACKEND
+        ((key, live),) = PrecompileContext._dynamo_cache_entries.items()
+        self.assertTrue(live.codes[0].backend_ids)
+        PrecompileContext._backend_artifacts_by_key.clear()
+        saved, _ = PrecompileContext.create_cache_entries()
+        self.assertTrue(saved[key].dynamo.codes[0].bypassed)
+        self.assertFalse(live.codes[0].bypassed)
 
     def test_abandoned_package_uninstalls_on_gc(self):
         # Without the finalizer, each load+install of one artifact would leave
