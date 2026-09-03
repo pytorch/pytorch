@@ -21,7 +21,7 @@ from ._fsdp_state import _get_module_fsdp_state
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from typing import Any
 
     from ._fsdp_api import DataParallelMeshDims, MixedPrecisionPolicy, OffloadPolicy
@@ -430,6 +430,53 @@ def _apply_to_module(
         module.__class__ = new_cls
 
 
+def _resolve_offload_policy(
+    offload_policy: "OffloadPolicy | Mapping[str, OffloadPolicy]",
+    modules: tuple[nn.Module, ...],
+    params: list[nn.Parameter],
+) -> "OffloadPolicy | dict[nn.Parameter, OffloadPolicy]":
+    """Resolve ``offload_policy`` into a per-parameter offload mapping.
+
+    A single ``OffloadPolicy`` is returned unchanged and applies uniformly. A
+    mapping from parameter FQN (relative to the ``fully_shard`` module) to
+    ``OffloadPolicy`` is validated and rekeyed by the managed parameter
+    objects; FQNs absent from the mapping default to no offloading. A
+    ``ValueError`` is raised for any FQN that does not name a managed parameter.
+    """
+    from collections.abc import Mapping
+
+    from ._fsdp_api import OffloadPolicy
+
+    if isinstance(offload_policy, OffloadPolicy):
+        return offload_policy
+    if not isinstance(offload_policy, Mapping):
+        raise TypeError(
+            "offload_policy must be an OffloadPolicy or a mapping from parameter "
+            f"FQN to OffloadPolicy, but got {type(offload_policy)}"
+        )
+    managed = set(params)
+    fqn_to_param: dict[str, nn.Parameter] = {}
+    for module in modules:
+        for fqn, param in module.named_parameters():
+            if param in managed:
+                fqn_to_param[fqn] = param
+    unknown = sorted(fqn for fqn in offload_policy if fqn not in fqn_to_param)
+    if unknown:
+        raise ValueError(
+            "offload_policy contains FQNs that do not name a parameter managed "
+            f"by this fully_shard call: {unknown}"
+        )
+    param_to_policy: dict[nn.Parameter, OffloadPolicy] = {}
+    for fqn, policy in offload_policy.items():
+        if not isinstance(policy, OffloadPolicy):
+            raise TypeError(
+                f"offload_policy[{fqn!r}] must be an OffloadPolicy, but got "
+                f"{type(policy)}"
+            )
+        param_to_policy[fqn_to_param[fqn]] = policy
+    return param_to_policy
+
+
 def _init_param_group(
     state: "FSDPState",
     params: list[nn.Parameter],
@@ -439,7 +486,7 @@ def _init_param_group(
     device: torch.device,
     shard_placement_fn: "Callable[[nn.Parameter], ShardPlacementFnResult] | None",
     mp_policy: "MixedPrecisionPolicy",
-    offload_policy: "OffloadPolicy",
+    offload_policy: "OffloadPolicy | dict[nn.Parameter, OffloadPolicy]",
     reshard_after_forward: bool | int = True,
 ) -> None:
     """
