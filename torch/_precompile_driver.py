@@ -627,3 +627,78 @@ def _build_multigraph_forward():
     if entry is None:
         raise _PrecompileError("precompile: artifact has no entry frame")
     return entry
+
+
+def _build_installed_forward():
+    """Serve a multi-graph capture by INSTALLING it onto the live code objects.
+
+    A self-contained driver dispatches only the entry frame and the
+    continuations the entry's own bytecode names. A model that graph-breaks
+    inside nested module forwards puts almost every compiled frame behind an
+    ordinary method call, which no name in the entry reaches, so those frames
+    would run eager. This driver instead rebuilds the captured package and hands
+    it to the frame evaluator, which reaches every frame by code object.
+
+    Nothing is installed here: building the handle only resolves and imports.
+    Entering it, or calling it, installs; unload() takes it back out.
+    """
+    import base64
+    import importlib
+    import pickle
+    import sys
+    import types
+
+    from torch._dynamo.package import SerializedCode
+    from torch._precompile import _InstalledArtifact, PrecompileError
+
+    cache_entry = pickle.loads(base64.b64decode(_PACKAGE))
+
+    # install resolves every frame through sys.modules[...] directly, so each
+    # module a captured frame came from has to be imported before it runs.
+    for _code_entry in cache_entry.dynamo.codes:
+        try:
+            importlib.import_module(_code_entry.python_module)
+        except ImportError as e:
+            raise PrecompileError(
+                f"precompile: this artifact holds a frame captured from module "
+                f"{_code_entry.python_module!r}, which is not importable here "
+                f"({e}). Load it where that module is, or pass fn= to load()."
+            ) from e
+
+    def _entry_function():
+        # The entry records no qualname to resolve -- it is the callable handed
+        # to precompile, not something reached from a module -- so rebuild a
+        # function around its code object. Capture refuses an entry whose
+        # closure or defaults this could not reproduce, and load(fn=...) lets a
+        # caller supply the real function instead.
+        code_entry = cache_entry.dynamo.codes[0]
+        code = SerializedCode.to_code_object(code_entry.python_code)
+        return types.FunctionType(
+            code, sys.modules[code_entry.python_module].__dict__, code.co_name
+        )
+
+    def _serve(fn):
+        from torch._dynamo.precompile_context import PrecompileContext
+        from torch._dynamo.precompile_package import serve_cache_entry
+
+        # The backends have to be in the context before install deserializes
+        # them, the same thing DynamoStore.load_cache_entry does for the path
+        # form of this artifact.
+        for _backend in cache_entry.backends.values():
+            PrecompileContext.record_artifact(_backend)
+        return serve_cache_entry(fn, cache_entry, backend=BACKEND)
+
+    def _check_entry(fn):
+        from torch._dynamo.precompile_package import (
+            _check_artifact_matches,
+            _entry_fn_of,
+        )
+
+        _check_artifact_matches(cache_entry.dynamo, _entry_fn_of(fn), "this artifact")
+
+    return _InstalledArtifact(
+        _serve,
+        _entry_function,
+        check_fn=_check_entry,
+        backend_keys=tuple(cache_entry.backends),
+    )

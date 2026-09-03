@@ -212,6 +212,7 @@ import io
 import logging
 import pickle
 import sys
+import threading
 import types
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
@@ -229,7 +230,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.compiler._precompile_types import PrecompileSummary
@@ -310,6 +311,137 @@ class PrecompiledRunnable:
 
     def unload(self) -> None:
         """Remove whatever this loaded artifact installed; a no-op when it installed nothing."""
+
+
+class PrecompiledCallable(PrecompiledRunnable):
+    """Callable handle for one loaded multi-graph precompile artifact.
+
+    Returned by :func:`torch.compiler.precompile.load` for an artifact that
+    serves by installing; it is not constructed directly. Part of the prototype
+    ``torch.compiler.precompile`` API, so it may change without a deprecation
+    cycle.
+    """
+
+    def __init__(self, compiled: Any) -> None:
+        self._compiled = compiled
+
+    def _call(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
+        from torch._dynamo.exc import PackageError, RecompileError
+
+        try:
+            return method(*args, **kwargs)
+        except (PackageError, RecompileError) as e:
+            raise PrecompileError(str(e)) from e
+
+    installed: bool = True
+    """Serves by installing onto the captured code objects; see :meth:`unload`."""
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        return self._call(self._compiled, *args, **kwargs)
+
+    def __enter__(self) -> Self:
+        self._call(self._compiled.__enter__)
+        return self
+
+    def unload(self) -> None:
+        """Remove everything this loaded artifact installed.
+
+        The precompiled entries come off the code objects and the globals the
+        artifact wrote come out of their modules, so the model recompiles
+        normally afterwards. Exiting this object as a context manager does the
+        same thing; call it directly when the artifact's lifetime is not
+        lexically scoped. Unloading twice is harmless, and a call already in
+        flight on another thread is allowed to finish first.
+        """
+        self._call(self._compiled.unload)
+
+
+class _InstalledArtifact:
+    """Handle for a multi-graph artifact that serves by installing.
+
+    ``load`` builds this without touching any code object; entering it or the
+    first call installs the captured frames, and ``unload``/exit takes them back
+    out. After an unload a bare call raises rather than silently re-installing;
+    re-entering as a context manager is the explicit way to install again.
+    """
+
+    def __init__(
+        self,
+        serve: Callable[[Callable[..., object]], Any],
+        entry_factory: Callable[[], Callable[..., object]],
+        *,
+        check_fn: Callable[[Callable[..., object]], None] | None = None,
+        backend_keys: Sequence[str] = (),
+    ) -> None:
+        self._serve = serve
+        self._entry_factory = entry_factory
+        # Refuses a load(fn=...) target the artifact was not captured from.
+        self._check_fn = check_fn
+        # PrecompileContext keys serve() records; unload() takes them back out.
+        self._backend_keys = backend_keys
+        self._fn: Callable[..., object] | None = None
+        self._inner: Any = None
+        self._unloaded = False
+        # Installing mutates process-global code objects, so racing first calls
+        # must not both install.
+        self._install_lock = threading.Lock()
+
+    def _rebind(self, fn: Callable[..., object]) -> None:
+        from torch._dynamo.exc import PackageError
+
+        with self._install_lock:
+            if self._inner is not None:
+                raise PrecompileError(
+                    "precompile: this artifact is already installed; pass fn= to load() "
+                    "before the first call."
+                )
+            if self._check_fn is not None:
+                try:
+                    self._check_fn(fn)
+                except (PackageError, TypeError) as e:
+                    raise PrecompileError(str(e)) from e
+            self._fn = fn
+
+    def _ensure(self) -> Any:
+        inner = self._inner
+        if inner is None:
+            with self._install_lock:
+                if self._unloaded:
+                    raise PrecompileError(
+                        "precompile: this artifact has been unloaded; enter it "
+                        "as a context manager to install it again, or load() a "
+                        "new handle."
+                    )
+                if self._inner is None:
+                    fn = self._entry_factory() if self._fn is None else self._fn
+                    self._inner = self._serve(fn)
+                inner = self._inner
+        return inner
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        return self._ensure()(*args, **kwargs)
+
+    def __enter__(self) -> Self:
+        # Entering IS a point in the caller's control flow, so it explicitly
+        # re-arms a handle a prior unload() retired for bare calls.
+        with self._install_lock:
+            self._unloaded = False
+        self._ensure()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.unload()
+
+    def unload(self) -> None:
+        from torch._dynamo.precompile_context import PrecompileContext
+
+        with self._install_lock:
+            self._unloaded = True
+            inner, self._inner = self._inner, None
+        if inner is not None:
+            inner.unload()
+            for key in self._backend_keys:
+                PrecompileContext.take_artifact(key)
 
 
 class PrecompileSession:
@@ -1594,6 +1726,56 @@ def _build_multigraph_python_source(
     parts.append("# Values pinned to exactly what capture saw; any other value misses.")
     parts.append(f"WONT_GENERALIZE = {tuple(summary.wont_generalize)!r}")
     parts.append("")
+    if serving_mode == "installed":
+        reachable = _reachable_frames(frames)
+        dead = sorted(
+            SerializedCode.to_code_object(frame["code"]).co_name
+            for i, frame in enumerate(frames)
+            if frame["variants"] and i not in reachable
+        )
+        parts.append("# " + "=" * 70)
+        parts.append("# 2. How this artifact serves: INSTALLED (readable)")
+        parts.append("#")
+        parts.append("# A source artifact dispatches only the entry frame and the")
+        parts.append(
+            "# continuations its bytecode names. These frames are entered by an"
+        )
+        parts.append(
+            "# ordinary call, so nothing in the entry reaches them and they would"
+        )
+        parts.append("# run eager. This artifact therefore installs onto the live code")
+        parts.append("# objects instead, which reaches every frame.")
+        parts.append("#")
+        parts.append("# load() installs NOTHING; entering the result -- or calling")
+        parts.append("# it -- installs, and unload()/exit removes it again.")
+        parts.append("# " + "=" * 70)
+        parts.append('SERVING_MODE = "installed"')
+        parts.append(f"UNREACHABLE_WITHOUT_INSTALL = {tuple(dead)!r}")
+        parts.append("")
+        parts.append("# " + "=" * 70)
+        parts.append("# 3. The captured package -- OPAQUE")
+        parts.append("#")
+        parts.append("# base64(pickle) of the serialized Dynamo state (per-frame guard")
+        parts.append(
+            "# trees and transformed bytecode) plus the compiled subgraphs. Guard"
+        )
+        parts.append(
+            "# trees are a spec for a C++ GuardManager and have no readable form;"
+        )
+        parts.append("# the counts and names above describe what is in here.")
+        parts.append("# " + "=" * 70)
+        parts.append(f"_PACKAGE = {_b64(package_entry)!r}")
+        parts.append("")
+        parts.append("# The entry's defaults and closure values; see the standalone")
+        parts.append("# note above -- the installed driver rebuilds an entry too.")
+        parts.append(f"_ENTRY_BINDING = {_b64(entry_binding or {})!r}")
+        parts.append("")
+        parts.append("# " + "=" * 70)
+        parts.append("# 4. Driver: rebuild the package, install, dispatch (readable)")
+        parts.append("# " + "=" * 70)
+        parts.append(_emit_installed_driver_source())
+        return "\n".join(p for p in parts if p is not None)
+
     parts.append('SERVING_MODE = "standalone"')
     parts.append("")
     parts.append("# The entry's defaults and closure values: a code object carries")
@@ -1859,7 +2041,17 @@ def _build_multigraph_artifact(
     the tag binding it to this python_code (invariant 7).
     """
     frames = _multigraph_frames(entry)
-    _reject_unreachable_frames(frames, entry)
+    serving_mode = _serving_mode(frames)
+    package_entry = None
+    if serving_mode == "installed":
+        # Frames a source artifact cannot reach would run eager, so serve this
+        # capture by installing instead. That needs the package itself, not the
+        # per-frame records the standalone driver rebuilds from.
+        from torch._dynamo.package import PrecompileCacheEntry
+
+        package_entry = PrecompileCacheEntry(entry, cast("dict[Any, Any]", backends))
+    else:
+        _reject_unreachable_frames(frames, entry)
     # Defaults the artifact can carry; closure cells it cannot. Dynamo guards a
     # cell by identity, and a rebuilt cell holding the same value is a different
     # object, so a closure entry would load and then miss every variant.
@@ -1870,8 +2062,8 @@ def _build_multigraph_artifact(
         backends,
         summary,
         backend,
-        "standalone",
-        None,
+        serving_mode,
+        package_entry,
         _entry_binding(entry_fn),
         dict(rendered or {}),
     )
@@ -1905,6 +2097,16 @@ def _emit_multigraph_driver_source() -> str:
 
     body = inspect.getsource(driver._build_multigraph_forward).rstrip()
     return "\n" + body + "\n\n\nforward = _build_multigraph_forward()\n"
+
+
+def _emit_installed_driver_source() -> str:
+    """Emit the installing driver as text, the same getsource path the others use."""
+    import inspect
+
+    from torch import _precompile_driver as driver
+
+    body = inspect.getsource(driver._build_installed_forward).rstrip()
+    return "\n" + body + "\n\n\nforward = _build_installed_forward()\n"
 
 
 def _assert_supported(gm: torch.fx.GraphModule) -> None:

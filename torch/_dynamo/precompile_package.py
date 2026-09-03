@@ -57,6 +57,7 @@ import threading
 import types
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, TYPE_CHECKING
+from typing_extensions import Self
 
 import torch
 import torch._functorch.config as functorch_config
@@ -105,6 +106,7 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 # import *` in a debugging session pulls the entry points rather than every
 # private helper, and so linters do not flag them as unused.
 __all__ = [
+    "precompile_load",
     "ExampleInput",
     "FrameInvariants",
     "PrecompileSession",
@@ -1468,6 +1470,7 @@ class PrecompileSession:
                 raise RuntimeError("PrecompileSession is not active")
             compiled = self._compiled
             self._active_calls += 1
+        from .pgo import _use_code_state
 
         try:
             with _capture_config(self._training), _use_code_state(self._pgo_state):
@@ -2410,6 +2413,85 @@ class _SingleFileStore(DynamoStore):
         return entry
 
 
+def precompile_load(
+    fn: Callable[..., object],
+    path: str,
+    *,
+    backend: str = "inductor",
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+    | None = None,
+    recompile_limit: int = 256,
+    dynamic: bool | None = None,
+) -> _ServedCallable:
+    r"""Load an artifact and return a callable ready to serve it.
+
+    .. warning::
+        Loading unpickles the artifact and executes code from it. Only load
+        artifacts from a trusted source.
+
+    Installing mutates global state on the underlying code objects, so the result
+    is also a context manager that unloads on exit. ``torch._dynamo.reset()`` is
+    not that unload: it destroys the precompile entries while leaving the
+    installed globals in place, so a call after a reset raises rather than
+    silently recompiling. Load the artifact again instead.
+
+    Runtime guards remain intact for any compilation allowed outside
+    ``serving()``. ``guard_filter_fn`` affects only its serialized package state.
+    """
+    entry_fn = _entry_fn_of(fn)
+    store = _SingleFileStore()
+    cache_entry = store.load_cache_entry(path)
+    _check_artifact_matches(cache_entry.dynamo, entry_fn, f"the artifact at {path}")
+    return serve_cache_entry(
+        fn,
+        cache_entry,
+        backend=backend,
+        guard_filter_fn=guard_filter_fn,
+        recompile_limit=recompile_limit,
+        dynamic=dynamic,
+    )
+
+
+def serve_cache_entry(
+    fn: Callable[..., object],
+    cache_entry: PrecompileCacheEntry,
+    *,
+    backend: str = "inductor",
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+    | None = None,
+    recompile_limit: int = 256,
+    dynamic: bool | None = None,
+) -> _ServedCallable:
+    """Wire an already-loaded cache entry onto ``fn`` and install it.
+
+    Shared by ``precompile_load``, which reads the entry from a path, and by the
+    multi-graph artifact whose driver carries the same entry inline: the wiring
+    is order-sensitive (the package has to be attached to the optimize context
+    before its globals and guarded codes are installed), so it lives in one
+    place rather than being written twice.
+    """
+    entry_fn = _entry_fn_of(fn)
+    package = CompilePackage(
+        entry_fn,
+        cache_entry.dynamo,
+        serialization_guard_filter_fn=(
+            default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
+        ),
+        explicit_capture=True,
+        serving=True,
+    )
+    optimize_ctx = _optimize_isolated(
+        _PrecompileBackend(backend),
+        package,
+        recompile_limit=recompile_limit,
+        dynamic=dynamic,
+    )
+    compiled = optimize_ctx(fn)
+    isolate_recompiles_id = optimize_ctx.isolate_recompiles_id
+    package.install(cache_entry.backends, isolate_recompiles_id=isolate_recompiles_id)
+    return _ServedCallable(compiled, package, isolate_recompiles_id)
+
+
 def precompile_capture(
     fn: Callable[..., object],
     *,
@@ -2460,6 +2542,101 @@ def precompile_capture(
         keep_graphs=keep_graphs,
         prune_invariant_guards=prune_invariant_guards,
     )
+
+
+class _ServedCallable:
+    """A loaded artifact. Call it, or use it as a context manager to scope it."""
+
+    def __init__(
+        self,
+        compiled: Callable[..., object],
+        package: CompilePackage,
+        isolate_recompiles_id: int,
+    ) -> None:
+        self._compiled: Callable[..., object] | None = compiled
+        self._package = package
+        self._isolate_recompiles_id = isolate_recompiles_id
+        from .pgo import _new_code_state
+
+        self._pgo_state = _new_code_state()
+        self._state = threading.Condition()
+        self._active_calls = 0
+        self._unloading = False
+        self._loaded = True
+        from .eval_frame import _register_explicit_compile_region
+
+        _register_explicit_compile_region(isolate_recompiles_id, self)
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        with self._state:
+            if not self._loaded or self._unloading:
+                raise PackageError("this loaded artifact has been unloaded")
+            if self._package.installed_entries_dropped():
+                raise PackageError(
+                    "torch._dynamo.reset() cleared the precompiled code this "
+                    "artifact installed. The installed globals are still in "
+                    "place, so this call would silently recompile instead of "
+                    "serving, or fail with an indistinguishable RecompileError "
+                    "under serving(). Load the artifact again after the reset."
+                )
+            compiled = self._compiled
+            if compiled is None:
+                raise AssertionError("loaded callable is missing")
+            self._active_calls += 1
+        try:
+            with _use_code_state(self._pgo_state):
+                return compiled(*args, **kwargs)
+        finally:
+            with self._state:
+                self._active_calls -= 1
+                if self._active_calls == 0:
+                    self._state.notify_all()
+
+    def __enter__(self) -> Self:
+        with self._state:
+            if not self._loaded or self._unloading:
+                raise PackageError("this loaded artifact has been unloaded")
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.unload()
+
+    def unload(self) -> None:
+        """Remove installed globals and precompile entries from the code objects."""
+        with self._state:
+            while self._unloading:
+                self._state.wait()
+            if not self._loaded:
+                return
+            self._unloading = True
+            try:
+                while self._active_calls:
+                    self._state.wait()
+            except BaseException:
+                self._unloading = False
+                self._state.notify_all()
+                raise
+            self._loaded = False
+        # uninstall() forgets which code objects it installed onto, and a frame
+        # reached through code_source was installed onto the live code the
+        # running program resolves rather than the reconstructed twin the
+        # package holds, so the set to clear has to be taken first.
+        codes = self._package.region_codes()
+        try:
+            self._package.uninstall()
+        finally:
+            try:
+                _clear_package_region(codes, self._isolate_recompiles_id)
+            finally:
+                from .eval_frame import _unregister_explicit_compile_region
+
+                _unregister_explicit_compile_region(self._isolate_recompiles_id)
+                with self._state:
+                    self._unloading = False
+                    self._compiled = None
+                    self._package.cached_backends.clear()
+                    self._pgo_state.clear()
+                    self._state.notify_all()
 
 
 @contextlib.contextmanager
