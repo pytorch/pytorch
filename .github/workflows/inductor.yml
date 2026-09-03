@@ -92,8 +92,8 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-cuda13.2-py3.10-gcc11-sm86
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.2-py3.10-gcc13-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc13-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.6'
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -108,7 +108,7 @@ jobs:
         ]}
       build-additional-packages: "vision audio fbgemm torchao"
       python-version: "3.10"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
     secrets: inherit
 
@@ -124,7 +124,7 @@ jobs:
       test-matrix: ${{ needs.inductor-build-cuda132.outputs.test-matrix }}
       enable-torch-trace: "1"
       python-version: "3.10"
-      compiler: gcc11
+      compiler: gcc13
       cuda-version: "13.2"
     secrets: inherit
 

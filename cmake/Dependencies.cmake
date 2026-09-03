@@ -1496,6 +1496,13 @@ if(NOT INTERN_BUILD_MOBILE)
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13)
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-dangling-reference ")
       endif()
+      # c10/cuda/CUDAEvent.h and friends align on
+      # std::hardware_destructive_interference_size, which GCC 12+ warns about
+      # because the value tracks -mtune. The host C++ flags carry the same
+      # suppression; nvcc host compiles need it forwarded explicitly.
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 12)
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-interference-size ")
+      endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=pass-failed ")
