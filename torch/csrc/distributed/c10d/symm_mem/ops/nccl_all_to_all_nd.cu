@@ -175,19 +175,9 @@ void nccl_all_to_all_nd(
     ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     reqs.lsaBarrierCount = A2A_MAX_CTA_COUNT;
     ncclDevComm devcomm;
-#ifdef USE_ROCM
-    {
-      c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
-          cudaStreamCaptureModeRelaxed};
-      C10D_NCCL_CHECK(
-          ncclDevCommCreate(comm, &reqs, &devcomm),
-          "ncclDevCommCreate failed in nccl_all_to_all_nd");
-    }
-#else
     C10D_NCCL_CHECK(
         ncclDevCommCreate(comm, &reqs, &devcomm),
         "ncclDevCommCreate failed in nccl_all_to_all_nd");
-#endif
     devcomm_opt = manager.register_devcomm(group_name, devcomm, kDevcommKey);
   }
   ncclDevComm& devcomm = devcomm_opt->get();

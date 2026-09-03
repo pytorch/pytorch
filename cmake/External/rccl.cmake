@@ -9,6 +9,9 @@ if(NOT __NCCL_INCLUDED)
       add_library(__caffe2_nccl INTERFACE)
       target_link_libraries(__caffe2_nccl INTERFACE roc::rccl)
 
+      # Some RCCL packages ship nccl_device.h before it is compatible with host
+      # C++ translation units. Probe the installed header instead of assuming
+      # that header presence or version macros imply host compatibility.
       block()
         set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
         set(rccl_device_header_test
