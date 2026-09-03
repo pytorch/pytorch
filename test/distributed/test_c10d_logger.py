@@ -16,7 +16,6 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import DistributedTestBase, TEST_SKIPS
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -140,8 +139,6 @@ class C10dErrorLoggerTest(DistributedTestBase):
             self.assertIn("local_rank", error_msg_dict.keys())
             self.assertIn(str(dist.get_rank()), error_msg_dict["local_rank"])
 
-
-instantiate_device_type_tests(C10dErrorLoggerTest, globals())
 
 if __name__ == "__main__":
     run_tests()
