@@ -55,6 +55,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
@@ -452,6 +453,8 @@ class TensorWithCounter(torch.Tensor):
 
 
 class TestOpaqueObject(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         # Must run first: super().setUp() can raise SkipTest (e.g. under
         # PYTORCH_TEST_SKIP_FAST), and unittest skips tearDown when setUp
