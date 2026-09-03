@@ -85,7 +85,7 @@ def vt_identity_compare(
     from .dicts import ConstDictVariable
     from .exception import ExceptionVariable, TracebackVariable
     from .lists import ListVariable
-    from .sets import FrozensetVariable, SetVariable
+    from .sets import DictKeySetVariable, FrozensetVariable, SetVariable
 
     if isinstance(
         left,
@@ -94,6 +94,7 @@ def vt_identity_compare(
             ListVariable,
             SetVariable,
             FrozensetVariable,
+            DictKeySetVariable,
             TracebackVariable,
             ExceptionVariable,
         ),
