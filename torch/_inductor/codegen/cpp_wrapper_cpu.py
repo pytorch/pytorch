@@ -3040,16 +3040,30 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # wrapper, we have moved to lifting subgraphs as functions, supported by
         # PythonWrapperCode `codegen_subgraph` function. We should perhaps
         # support lifting of subgraphs as functions for cpp wrapper as well.
+        # Only invoke_subgraph regions have nested config patches set. The
+        # cond/while_loop branch subgraphs are ir.Subgraph too, but leave the
+        # field at None; getattr additionally keeps this robust to non-ir.Subgraph
+        # adapters (e.g. the CodegenGraph used for decompose_k) that reach the
+        # base-class subgraph codegen paths. Mirrors
+        # PythonWrapperCodegen.codegen_subgraph_by_inlining so a nested region is
+        # codegened under its own Inductor config here too.
+        inductor_config_patches = getattr(subgraph, "inductor_config_patches", None)
+        ctx = (
+            config.patch(inductor_config_patches)
+            if inductor_config_patches
+            else contextlib.nullcontext()
+        )
         try:
             self.push_codegened_graph(subgraph.graph)
-            self.writeline(f"// subgraph: {subgraph.name}")
-            self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
-            parent_graph = V.graph
-            with V.set_graph_handler(subgraph.graph):
-                subgraph.graph.codegen_subgraph(
-                    parent_graph=parent_graph,
-                )
-            self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
+            with ctx:
+                self.writeline(f"// subgraph: {subgraph.name}")
+                self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
+                parent_graph = V.graph
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.codegen_subgraph(
+                        parent_graph=parent_graph,
+                    )
+                self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
         finally:
             self.pop_codegened_graph()
 
