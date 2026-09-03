@@ -223,6 +223,26 @@ def custom_triton_ops_decomposition_disabled():
     return not torch._functorch.config.decompose_custom_triton_ops
 
 
+@contextmanager
+def _set_custom_flydsl_op_functional_decomposition(enabled: bool):
+    old = torch._functorch.config.decompose_custom_flydsl_ops
+    try:
+        torch._functorch.config.decompose_custom_flydsl_ops = enabled
+        yield torch._functorch.config.decompose_custom_flydsl_ops
+    finally:
+        torch._functorch.config.decompose_custom_flydsl_ops = old
+
+
+@contextmanager
+def _disable_custom_flydsl_op_functional_decomposition():
+    with _set_custom_flydsl_op_functional_decomposition(False) as enabled:
+        yield enabled
+
+
+def custom_flydsl_ops_decomposition_disabled():
+    return not torch._functorch.config.decompose_custom_flydsl_ops
+
+
 def _fixup_key(x):
     return "L__self__" + _strip_root(x)
 
@@ -1020,9 +1040,9 @@ def _export_to_torch_ir(
     # them here.
     args, kwargs = pytree.tree_map_only(
         _IntWrapper,
-        lambda a: a.val
-        if a.dynamism is None or a.dynamism.type == _DimHintType.STATIC
-        else a,
+        lambda a: (
+            a.val if a.dynamism is None or a.dynamism.type == _DimHintType.STATIC else a
+        ),
         (args, kwargs),
     )
 
@@ -1177,6 +1197,7 @@ def _export_to_aten_ir(
     decomp_table=None,
     _prettify_placeholder_names: bool = True,
     decompose_custom_triton_ops: bool = False,
+    decompose_custom_flydsl_ops: bool = False,
 ) -> ATenExportArtifact:
     custom_triton_ops_decomposition_ctx = (
         nullcontext
@@ -1199,6 +1220,9 @@ def _export_to_aten_ir(
         stack.enter_context(_ignore_backend_decomps())
         stack.enter_context(_compiling_state_context())
         stack.enter_context(custom_triton_ops_decomposition_ctx())
+        stack.enter_context(
+            _set_custom_flydsl_op_functional_decomposition(decompose_custom_flydsl_ops)
+        )
         stack.enter_context(torch.no_grad())
 
         gm, graph_signature = transform(_aot_export_joint_with_descriptors)(
@@ -1562,9 +1586,11 @@ def _process_export_inputs(
     mod: torch.nn.Module,
     args: tuple[object, ...],
     kwargs: dict[str, object] | None,
-    dynamic_shapes: _DynamicShapesInput
-    | torch.export.AdditionalInputs
-    | torch.export.ShapesCollection,
+    dynamic_shapes: (
+        _DynamicShapesInput
+        | torch.export.AdditionalInputs
+        | torch.export.ShapesCollection
+    ),
 ) -> tuple[
     tuple[object, ...],
     dict[str, object],

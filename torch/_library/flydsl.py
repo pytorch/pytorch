@@ -61,6 +61,11 @@ def flydsl_op(
         from .._subclasses.functional_tensor import FunctionalTensorMode
 
         def functional_decomp(mode, op, types, args, kwargs):
+            from torch.export._trace import custom_flydsl_ops_decomposition_disabled
+
+            if custom_flydsl_ops_decomposition_disabled():
+                return mode.__torch_dispatch__(op, types, args, kwargs)
+
             import torch._subclasses
 
             unrecognized_types = [
