@@ -7,9 +7,9 @@ import torch
 from torch._inductor import config
 from torch._inductor.kernel.decompose_k import (
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
-    blackwell_decomposeK,
     lower_blackwell_decompose_k_partial,
 )
+from torch._inductor.kernel.mm import decomposeK
 from torch._inductor.lowering import lowerings
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
@@ -160,7 +160,7 @@ class TestBlackwellDecomposeKPartial(TestCase):
             },
         ):
             actual = torch.compile(
-                lambda x, y: blackwell_decomposeK(x, y, 33, 0), fullgraph=True
+                lambda x, y: decomposeK(x, y, 33, "triton", 0), fullgraph=True
             )(a, b)
         torch.testing.assert_close(actual, a @ b, atol=16.0, rtol=1e-1)
 
