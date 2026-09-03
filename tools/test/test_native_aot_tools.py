@@ -4709,6 +4709,13 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
             self.assertEqual(run.outcome, "returned 0")
         self.assertEqual(run.content, self.NEW)
 
+    def test_a_new_env_sourced_cache_entry_is_drift(self):
+        # EnvVarForwarding creates the entry when the build had none.
+        added = "//From environment\nWERROR:STRING=1\n"
+        with self._main(cache_after=added) as run:
+            self.assertIn("WERROR: absent -> STRING=1", run.outcome)
+            self.assertNotIn("--build", run.children)
+
     def test_both_children_run_the_cmake_that_configured_the_build(self):
         # CMAKE_COMMAND is often a pip wheel's cmake, not the one on PATH.
         with self._main(cmake_command=sys.executable) as run:
