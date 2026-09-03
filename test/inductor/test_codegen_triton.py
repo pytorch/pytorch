@@ -2,9 +2,10 @@
 import ast
 import contextlib
 import dataclasses
+import plistlib
 import unittest
-from collections import namedtuple, OrderedDict
-from enum import Enum, IntEnum
+from collections import namedtuple
+from enum import Enum, Flag, IntEnum, IntFlag
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -12,6 +13,7 @@ import sympy
 
 import torch
 import torch._inductor.config as inductor_config
+from torch._dynamo.exc import BackendCompilerFailed
 from torch._inductor import ir
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen import triton_utils
@@ -41,6 +43,11 @@ from torch._inductor.utils import (
     run_and_get_kernels,
 )
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    subtest,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -55,30 +62,61 @@ from torch.utils._triton import has_triton_package
 
 try:
     from .triton_constexpr_configs import (
+        runner as LauncherScopeShadowConfig,
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
+        UserDefinedAttrsPrivateFieldConfig,
+        UserDefinedBareNestedReprConfig,
         UserDefinedPydanticLikeConfig,
+        UserDefinedPydanticLikeNoEqConfig,
+        UserDefinedTritonKernelCoercingConfig,
         UserDefinedTritonKernelConfigMode,
         UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelCountingConfig,
+        UserDefinedTritonKernelDefaultArgConfig,
         UserDefinedTritonKernelEnumConfig,
         UserDefinedTritonKernelHiddenConfig,
+        UserDefinedTritonKernelHiddenDefaultConfig,
         UserDefinedTritonKernelNestedConfig,
         UserDefinedTritonKernelNonInitConfig,
+        UserDefinedTritonKernelSelfReferentialConfig,
     )
 except ImportError:
     from triton_constexpr_configs import (
+        runner as LauncherScopeShadowConfig,
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
+        UserDefinedAttrsPrivateFieldConfig,
+        UserDefinedBareNestedReprConfig,
         UserDefinedPydanticLikeConfig,
+        UserDefinedPydanticLikeNoEqConfig,
+        UserDefinedTritonKernelCoercingConfig,
         UserDefinedTritonKernelConfigMode,
         UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelCountingConfig,
+        UserDefinedTritonKernelDefaultArgConfig,
         UserDefinedTritonKernelEnumConfig,
         UserDefinedTritonKernelHiddenConfig,
+        UserDefinedTritonKernelHiddenDefaultConfig,
         UserDefinedTritonKernelNestedConfig,
         UserDefinedTritonKernelNonInitConfig,
+        UserDefinedTritonKernelSelfReferentialConfig,
     )
 
 
+def _constexpr_source(value):
+    # Render one constant through the production entry point used by
+    # define_user_defined_triton_kernel; None when rendering declines.
+    from torch._inductor.codegen.wrapper import _render_constexpr_mappings
+
+    try:
+        (rendered,), imports = _render_constexpr_mappings([{"VALUE": value}])
+    except RuntimeError:
+        return None
+    return repr(rendered["VALUE"]), imports
+
+
+@instantiate_parametrized_tests
 class TestCodegenTriton(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -216,11 +254,16 @@ class TestCodegenTriton(InductorTestCase):
         self.assertEqual(type_specs[0].module, namespace.__module__)
         self.assertEqual(type_specs[0].root_name, namespace.__name__)
 
-    def test_importable_constexpr_types_bare_nested_class_repr(self):
+    def test_importable_constexpr_types_ignore_repr_spelling(self):
+        # Defaults are never repr'd into the generated module (the user's own
+        # def-time expression is spliced), so a repr that spells a nested type
+        # by its bare name is irrelevant; only the root import matters.
         nested_type = UserDefinedTritonKernelConfigNamespace.BareNested
-        value = nested_type(offset=2)
-        with self.assertRaisesRegex(ImportError, "uses the bare name BareNested"):
-            get_importable_constexpr_types([value])
+        type_specs = get_importable_constexpr_types([nested_type(offset=2)])
+        self.assertEqual(
+            [spec.root_name for spec in type_specs],
+            [UserDefinedTritonKernelConfigNamespace.__name__],
+        )
 
     def test_importable_constexpr_types_skip_hidden_dataclass_field(self):
         @dataclasses.dataclass
@@ -236,12 +279,16 @@ class TestCodegenTriton(InductorTestCase):
             UserDefinedTritonKernelHiddenConfig.__qualname__,
         )
 
-    def test_importable_constexpr_types_non_init_dataclass_field_error(self):
+    def test_importable_constexpr_types_ignore_constructor_shape(self):
+        # Same reason as above: an init=False repr field only matters for
+        # rendered constants (which decline in _render_constexpr_mappings), not
+        # for a default the user constructed themselves.
         value = UserDefinedTritonKernelNonInitConfig(offset=2)
-        with self.assertRaisesRegex(
-            ImportError, "repr-visible field derived with init=False"
-        ):
-            get_importable_constexpr_types([value])
+        type_specs = get_importable_constexpr_types([value])
+        self.assertEqual(
+            [spec.qualname for spec in type_specs],
+            [UserDefinedTritonKernelNonInitConfig.__qualname__],
+        )
 
     def test_importable_constexpr_types_skip_builtin_repr(self):
         with patch("builtins.repr") as repr_mock:
@@ -1265,14 +1312,19 @@ def helper(x):
             values = tl.load(x + offsets, mask=mask)
             tl.store(out + offsets, values + cfg.nested.offset, mask=mask)
 
-        def fn(x):
+        # Dynamo graph-breaks on a dataclass argument of a directly called
+        # kernel, so route the call through a triton_op: the kernel reaches
+        # inductor via the HOP side table and fullgraph=True guarantees the
+        # constexpr is compiled into the kernel rather than run in eager.
+        @torch.library.triton_op("test_codegen_triton::add_cfg", mutates_args={})
+        def add_cfg(x: torch.Tensor) -> torch.Tensor:
             out = torch.empty_like(x)
             n_elements = x.numel()
 
             def grid(meta):
                 return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-            add_constexpr_kernel[grid](
+            torch.library.wrap_triton(add_constexpr_kernel)[grid](
                 x,
                 out,
                 n_elements,
@@ -1283,10 +1335,182 @@ def helper(x):
             )
             return out
 
+        def fn(x):
+            return add_cfg(x)
+
         device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
         x = torch.randn(1024, device=device)
-        actual = torch.compile(fn)(x)
+        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
         self.assertEqual(actual, x + 2)
+        code_str = " ".join(code)
+        self.assertIn("add_constexpr_kernel", code_str)
+        self.assertIn("UserDefinedTritonKernelNestedConfig(nested=", code_str)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        "requires CPU or GPU Triton",
+    )
+    @parametrize(
+        "op_name, cfg",
+        (
+            subtest(
+                (
+                    "nested_point",
+                    UserDefinedTritonKernelConfigNamespace.Point(offset=2),
+                ),
+                name="nested_point",
+            ),
+            subtest(
+                ("launcher_shadow", LauncherScopeShadowConfig(offset=3)),
+                name="launcher_shadow",
+            ),
+        ),
+    )
+    def test_namedtuple_constexpr_launcher_does_not_reimport_types(self, op_name, cfg):
+        # The generated launcher references constants only via injected
+        # _constexpr_N object bindings, never by type name, so a class-nested
+        # namedtuple (bare class name in its repr) and a type named like a
+        # launcher scope binding ("runner") must both compile and run.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_offset_kernel(
+            x,
+            out,
+            n_elements,
+            cfg: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(x + offsets, mask=mask)
+            tl.store(out + offsets, values + cfg.offset, mask=mask)
+
+        @torch.library.triton_op(f"test_codegen_triton::{op_name}", mutates_args={})
+        def op(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            torch.library.wrap_triton(add_offset_kernel)[grid](
+                x, out, n_elements, cfg=cfg, BLOCK_SIZE=128
+            )
+            return out
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(1024, device=device)
+        compiled = torch.compile(lambda x: op(x), fullgraph=True)
+        actual, code = run_and_get_code(compiled, x)
+        self.assertEqual(actual, x + cfg.offset)
+        self.assertIn(f"{type(cfg).__qualname__}._make(", " ".join(code))
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        "requires CPU or GPU Triton",
+    )
+    def test_hidden_field_constexpr_value_fidelity(self):
+        # A config whose repr omits a field only renders when the omitted state
+        # still matches what the constructor call rebuilds; otherwise the
+        # kernel would silently compute with wrong constants.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def scaled_offset_kernel(
+            x, out, n_elements, cfg: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(x + offsets, mask=mask)
+            tl.store(out + offsets, values + cfg.offset * cfg.scale, mask=mask)
+
+        def make_op(name, cfg):
+            @torch.library.triton_op(f"test_codegen_triton::{name}", mutates_args={})
+            def op(x: torch.Tensor) -> torch.Tensor:
+                out = torch.empty_like(x)
+                n_elements = x.numel()
+
+                def grid(meta):
+                    return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+                torch.library.wrap_triton(scaled_offset_kernel)[grid](
+                    x, out, n_elements, cfg=cfg, BLOCK_SIZE=128
+                )
+                return out
+
+            return op
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(1024, device=device)
+        faithful = UserDefinedTritonKernelHiddenDefaultConfig(offset=3)
+        op = make_op("scaled_offset_faithful", faithful)
+        compiled = torch.compile(lambda t, op=op: op(t), fullgraph=True)
+        self.assertEqual(compiled(x), x + 3)
+        unfaithful = UserDefinedTritonKernelHiddenDefaultConfig(offset=3, scale=7)
+        op = make_op("scaled_offset_unfaithful", unfaithful)
+        compiled = torch.compile(lambda t, op=op: op(t), fullgraph=True)
+        with self.assertRaisesRegex(BackendCompilerFailed, "cannot be written into"):
+            compiled(x)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        "requires CPU or GPU Triton",
+    )
+    def test_object_constexpr_default_in_user_defined_triton_kernel(self):
+        # The def-time default expression is evaluated when the generated
+        # module re-execs the spliced kernel def (even when the caller passes
+        # cfg explicitly), and it references the config type by its bare root
+        # name, so the module must bind it via `from module import Root as
+        # Root`.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_default_cfg_kernel(
+            x,
+            out,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+            cfg: tl.constexpr = UserDefinedTritonKernelDefaultArgConfig(),
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(x + offsets, mask=mask)
+            tl.store(out + offsets, values + cfg.offset, mask=mask)
+
+        @torch.library.triton_op(
+            "test_codegen_triton::add_default_cfg", mutates_args={}
+        )
+        def add_default_cfg(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            torch.library.wrap_triton(add_default_cfg_kernel)[grid](
+                x,
+                out,
+                n_elements,
+                BLOCK_SIZE=128,
+                cfg=UserDefinedTritonKernelDefaultArgConfig(offset=5),
+            )
+            return out
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(1024, device=device)
+        compiled = torch.compile(lambda t: add_default_cfg(t), fullgraph=True)
+        actual, code = run_and_get_code(compiled, x)
+        self.assertEqual(actual, x + 5)
+        root = "UserDefinedTritonKernelDefaultArgConfig"
+        module = UserDefinedTritonKernelDefaultArgConfig.__module__
+        self.assertIn(f"from {module} import {root} as {root}", " ".join(code))
 
     @unittest.skipUnless(
         HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
@@ -1350,116 +1574,554 @@ def helper(x):
             self.assertIn("\nfrom torch._dynamo.testing import rand_strided\n", imports)
             self.assertIn("\nimport torch\n", imports)
 
-    def test_sanitize_for_repr(self):
-        from torch._inductor.codegen.wrapper import _sanitize_for_repr
+    def test_constexpr_source_module_enum_rendering(self):
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
 
-        class Color(Enum):
-            RED = "red"
-            BLUE = "blue"
-
-        class Priority(IntEnum):
-            LOW = 0
-            HIGH = 1
-
-        # Enum -> value
-        self.assertEqual(_sanitize_for_repr(Color.RED), "red")
-        self.assertEqual(_sanitize_for_repr(Priority.HIGH), 1)
-
-        # Recursion into containers
         self.assertEqual(
-            _sanitize_for_repr({"a": Color.RED, "b": [Priority.LOW, 42]}),
-            {"a": "red", "b": [0, 42]},
+            _constexpr_source(plistlib.FMT_XML),
+            (
+                "__inductor_constexpr_module_0.PlistFormat['FMT_XML']",
+                ["import plistlib as __inductor_constexpr_module_0"],
+            ),
         )
-
-        # Tuples
+        (rendered,), imports = _render_constexpr_mappings(
+            [{"FORMAT": plistlib.FMT_XML}]
+        )
         self.assertEqual(
-            _sanitize_for_repr((Color.BLUE, 1)),
-            ("blue", 1),
+            repr(rendered["FORMAT"]),
+            "__inductor_constexpr_module_0.PlistFormat['FMT_XML']",
         )
+        self.assertEqual(imports, ["import plistlib as __inductor_constexpr_module_0"])
 
-        # Namedtuples
-        Pair = namedtuple("Pair", ["x", "y"])
-        result = _sanitize_for_repr(Pair(Color.RED, Priority.HIGH))
-        self.assertIsInstance(result, Pair)
-        self.assertEqual(result, Pair("red", 1))
-
-        # Enum as dict key
+    def test_constexpr_source_constructor_repr_config(self):
+        config = UserDefinedTritonKernelNestedConfig(
+            nested=UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+        )
+        source, imports = _constexpr_source(config)
+        alias = "__inductor_constexpr_module_0"
         self.assertEqual(
-            _sanitize_for_repr({Color.RED: 1}),
-            {"red": 1},
+            source,
+            f"{alias}.UserDefinedTritonKernelNestedConfig(nested={alias}.UserDefinedTritonKernelConfigNamespace.Nested(offset=2))",
         )
+        self.assertEqual(imports, [f"import {type(config).__module__} as {alias}"])
+        scope = {}
+        exec("\n".join(imports), scope)
+        self.assertEqual(eval(source, scope), config)
 
-        # Nested enum value
-        class Outer(Enum):
-            INNER = Color.RED
-
-        self.assertEqual(_sanitize_for_repr(Outer.INNER), "red")
-
+    def test_constexpr_source_constructor_repr_enum_field(self):
         config = UserDefinedTritonKernelEnumConfig(
-            UserDefinedTritonKernelConfigMode.FAST
+            mode=UserDefinedTritonKernelConfigMode.FAST
         )
-        self.assertEqual(len(get_importable_constexpr_types([config])), 1)
-        sanitized_config = _sanitize_for_repr(config)
-        self.assertIsInstance(sanitized_config, UserDefinedTritonKernelEnumConfig)
-        self.assertEqual(sanitized_config.mode, 1)
-        compile(repr(sanitized_config), "<sanitized-constexpr>", "eval")
-
-        for config_type in (UserDefinedAttrsLikeConfig, UserDefinedPydanticLikeConfig):
-            config = config_type(UserDefinedTritonKernelConfigMode.FAST, "hidden")
-            self.assertEqual(len(get_importable_constexpr_types([config])), 1)
-            sanitized_config = _sanitize_for_repr(config)
-            self.assertIsInstance(sanitized_config.nested, int)
-            compile(repr(sanitized_config), "<sanitized-constexpr>", "eval")
-
-            unchanged_config = config_type(1, "hidden")
-            self.assertIs(_sanitize_for_repr(unchanged_config), unchanged_config)
-
-        sanitized_set = _sanitize_for_repr({UserDefinedTritonKernelConfigMode.FAST})
-        self.assertIsInstance(next(iter(sanitized_set)), int)
-        unchanged_set = {1}
-        self.assertIs(_sanitize_for_repr(unchanged_set), unchanged_set)
-        sanitized_frozenset = _sanitize_for_repr(
-            frozenset({UserDefinedTritonKernelConfigMode.FAST})
+        source, _ = _constexpr_source(config)
+        # The interchangeable IntEnum field goes through the stack's enum
+        # normalization, not the field's raw repr.
+        self.assertEqual(
+            source,
+            "__inductor_constexpr_module_0.UserDefinedTritonKernelEnumConfig(mode=1)",
         )
-        self.assertIsInstance(next(iter(sanitized_frozenset)), int)
 
-        mapping = OrderedDict([("mode", UserDefinedTritonKernelConfigMode.FAST)])
-        sanitized_mapping = _sanitize_for_repr(mapping)
-        self.assertIsInstance(sanitized_mapping, OrderedDict)
-        self.assertIsInstance(sanitized_mapping["mode"], int)
+    @parametrize(
+        "config_type",
+        (
+            subtest(UserDefinedAttrsLikeConfig, name="attrs"),
+            subtest(UserDefinedPydanticLikeConfig, name="pydantic"),
+        ),
+    )
+    def test_constexpr_source_constructor_repr_protocols(self, config_type):
+        nested = UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+        source, imports = _constexpr_source(config_type(nested=nested))
+        alias = "__inductor_constexpr_module_0"
+        self.assertEqual(
+            source,
+            f"{alias}.{config_type.__name__}(nested={alias}.UserDefinedTritonKernelConfigNamespace.Nested(offset=2))",
+        )
+        scope = {}
+        exec("\n".join(imports), scope)
+        rebuilt = eval(source, scope)
+        self.assertIs(type(rebuilt), config_type)
+        self.assertEqual(rebuilt.nested, nested)
 
-        unchanged_mapping = OrderedDict([("mode", 1)])
-        self.assertIs(_sanitize_for_repr(unchanged_mapping), unchanged_mapping)
+    def test_constexpr_source_attrs_private_field_uses_alias(self):
+        nested = UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+        config = UserDefinedAttrsPrivateFieldConfig(nested=nested)
+        source, imports = _constexpr_source(config)
+        alias = "__inductor_constexpr_module_0"
+        self.assertEqual(
+            source,
+            f"{alias}.UserDefinedAttrsPrivateFieldConfig(nested={alias}.UserDefinedTritonKernelConfigNamespace.Nested(offset=2))",
+        )
+        scope = {}
+        exec("\n".join(imports), scope)
+        self.assertEqual(eval(source, scope), config)
 
-        class ComputedReprArgs:
-            @property
-            def computed(self):
-                return 1
+    def test_constexpr_source_constructor_repr_types(self):
+        # Types with a constructor-style repr over literal arguments but no
+        # field protocol (Fraction, Decimal) render through the module alias and
+        # rebuild equal, as they did before the field-protocol renderer.
+        from decimal import Decimal
+        from fractions import Fraction
 
-            def __repr_args__(self):
-                return (("computed", self.computed),)
+        for value in (Fraction(1, 2), Decimal("1.5")):
+            source, imports = _constexpr_source(value)
+            scope = {}
+            exec("\n".join(imports), scope)
+            rebuilt = eval(source, scope)
+            self.assertIs(type(rebuilt), type(value))
+            self.assertEqual(rebuilt, value)
 
-        computed = ComputedReprArgs()
-        self.assertIs(_sanitize_for_repr(computed), computed)
+    def test_constexpr_source_repr_args_without_eq(self):
+        # A pydantic-style __repr_args__ type is verified field-wise, so it does
+        # not need an __eq__ of its own.
+        nested = UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+        source, imports = _constexpr_source(
+            UserDefinedPydanticLikeNoEqConfig(nested=nested)
+        )
+        scope = {}
+        exec("\n".join(imports), scope)
+        rebuilt = eval(source, scope)
+        self.assertIs(type(rebuilt), UserDefinedPydanticLikeNoEqConfig)
+        self.assertEqual(rebuilt.nested, nested)
 
-        class PositionalReprArgs:
-            def __repr_args__(self):
-                return ((None, 1),)
+    def test_constexpr_source_repr_args_hidden_state_declines(self):
+        # __repr_args__ hides `hidden`; the type's own __eq__ sees it, so a
+        # non-default hidden value must decline rather than render as the
+        # default and silently miscompute.
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
 
-        positional = PositionalReprArgs()
-        self.assertIs(_sanitize_for_repr(positional), positional)
+        nested = UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+        with self.assertRaisesRegex(RuntimeError, "not equal to the original"):
+            _render_constexpr_mappings(
+                [{"CFG": UserDefinedPydanticLikeConfig(nested=nested, hidden="secret")}]
+            )
+        # The default hidden value still renders (equal after rebuild).
+        source, _ = _constexpr_source(UserDefinedPydanticLikeConfig(nested=nested))
+        self.assertIn("UserDefinedPydanticLikeConfig(nested=", source)
 
-        class LabelledMapping(dict):
-            def __init__(self, label, values):
-                super().__init__(values)
-                self.label = label
+    def test_constexpr_decline_names_evaluation_error(self):
+        # A constructor repr over a name the generated module cannot bind
+        # declines with the evaluation error, not a guess about hidden fields.
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
 
-        labelled_mapping = LabelledMapping("config", {"mode": 1})
-        self.assertIs(_sanitize_for_repr(labelled_mapping), labelled_mapping)
+        with self.assertRaisesRegex(RuntimeError, "evaluating it raised NameError"):
+            _render_constexpr_mappings([{"CFG": UserDefinedBareNestedReprConfig(1)}])
 
-        # Non-enum passthrough
-        self.assertEqual(_sanitize_for_repr(42), 42)
-        self.assertEqual(_sanitize_for_repr("hello"), "hello")
+    def test_restore_degraded_kwargs_requires_agreement(self):
+        # A cached raw value that several candidates serialize to is only
+        # restored when they agree on the typed value; a Mode.A vs raw 1 split
+        # must re-autotune instead of picking by candidate order.
+        from types import SimpleNamespace
+
+        from torch._inductor.runtime.autotune_cache import _restore_degraded_kwargs
+
+        class Mode(Enum):
+            A = 1
+
+        for order in (
+            [
+                SimpleNamespace(kwargs={"MODE": 1}),
+                SimpleNamespace(kwargs={"MODE": Mode.A}),
+            ],
+            [
+                SimpleNamespace(kwargs={"MODE": Mode.A}),
+                SimpleNamespace(kwargs={"MODE": 1}),
+            ],
+        ):
+            self.assertFalse(_restore_degraded_kwargs({"MODE": 1, "BLOCK": 8}, order))
+        # Agreement is structural: (1, 2) and (1.0, 2) both serialize to the
+        # cached [1.0, 2] but Triton specializes int vs float, so a split inside
+        # a tuple re-autotunes too, in either order.
+        for order in (
+            [
+                SimpleNamespace(kwargs={"S": (1, 2)}),
+                SimpleNamespace(kwargs={"S": (1.0, 2)}),
+            ],
+            [
+                SimpleNamespace(kwargs={"S": (1.0, 2)}),
+                SimpleNamespace(kwargs={"S": (1, 2)}),
+            ],
+        ):
+            self.assertFalse(_restore_degraded_kwargs({"S": [1.0, 2]}, order))
+        best = {"MODE": 1, "SHAPE": [2, 3], "BLOCK": 8, "num_warps": 4}
+        agreeing = [
+            SimpleNamespace(kwargs={"MODE": Mode.A, "SHAPE": (2, 3), "BLOCK": b})
+            for b in (8, 16)
+        ]
+        self.assertTrue(_restore_degraded_kwargs(best, agreeing))
+        self.assertIs(best["MODE"], Mode.A)
+        self.assertEqual(best["SHAPE"], (2, 3))
+        self.assertEqual(best["num_warps"], 4)
+
+    def test_constexpr_decline_detail_names_cause(self):
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
+
+        class Local(list):
+            __slots__ = ()
+
+        with self.assertRaisesRegex(RuntimeError, "subclasses list"):
+            _render_constexpr_mappings([{"CFG": Local([1])}])
+        with self.assertRaisesRegex(RuntimeError, "repr-visible but init=False"):
+            _render_constexpr_mappings(
+                [{"CFG": UserDefinedTritonKernelNonInitConfig(offset=2)}]
+            )
+        with self.assertRaisesRegex(RuntimeError, "not equal to the original"):
+            _render_constexpr_mappings(
+                [{"CFG": UserDefinedTritonKernelHiddenDefaultConfig(offset=3, scale=7)}]
+            )
+
+    def test_hashable_constexpr_key(self):
+        from torch._inductor.codegen.wrapper import _hashable_constexpr_key
+
+        key = _hashable_constexpr_key({"a": [1, {2, 3}], "b": (4, [5])})
+        hash(key)
+        self.assertEqual(
+            key, _hashable_constexpr_key({"a": [1, {3, 2}], "b": (4, [5])})
+        )
+        self.assertNotEqual(
+            key, _hashable_constexpr_key({"a": [1, {2, 3}], "b": (4, (5,))})
+        )
+        self.assertIs(_hashable_constexpr_key(7), 7)
+
+    def test_constexpr_nested_nan_decline_names_nan(self):
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
+
+        # A NaN nested inside a container declines the whole value; the error
+        # must still name NaN as the cause rather than fall through to the
+        # generic message.
+        for value in ([1.0, float("nan")], {"k": (float("nan"),)}):
+            with self.assertRaisesRegex(RuntimeError, "NaN constexprs are rejected"):
+                _render_constexpr_mappings([{"CFG": value}])
+
+    def test_constexpr_source_constructor_repr_declines(self):
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
+
+        @dataclasses.dataclass(frozen=True)
+        class LocalConfig:
+            offset: int
+
+        # A local (unimportable) config type declines with the loud error,
+        # which names the offending scope.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"cannot be written into.*LocalConfig is defined inside a function",
+        ):
+            _render_constexpr_mappings([{"CFG": LocalConfig(offset=2)}])
+        # A repr-visible init=False field cannot be passed as a constructor
+        # argument; a hidden required init parameter makes the constructor
+        # call fail. Both decline instead of crashing the generated module.
+        self.assertIsNone(
+            _constexpr_source(UserDefinedTritonKernelNonInitConfig(offset=2))
+        )
+        self.assertIsNone(
+            _constexpr_source(UserDefinedTritonKernelHiddenConfig(2, object()))
+        )
+
+    def test_constexpr_source_declines_value_unfaithful_configs(self):
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
+
+        # The repr omits scale, so evaluating it would silently rebuild the
+        # config with the default scale=1 instead of 7; rendering must decline
+        # into the loud error rather than compile with wrong constants.
+        unfaithful = UserDefinedTritonKernelHiddenDefaultConfig(offset=3, scale=7)
+        with self.assertRaisesRegex(RuntimeError, "cannot be written into"):
+            _render_constexpr_mappings([{"CFG": unfaithful}])
+        # __post_init__ coerces again on rebuild: repr shows offset=6, but
+        # evaluating Cfg(offset=6) produces offset=12.
+        coercing = UserDefinedTritonKernelCoercingConfig(offset=3)
+        self.assertEqual(coercing.offset, 6)
+        self.assertIsNone(_constexpr_source(coercing))
+        # A hidden field still holding its default rebuilds faithfully.
+        faithful = UserDefinedTritonKernelHiddenDefaultConfig(offset=3)
+        source, imports = _constexpr_source(faithful)
+        scope = {}
+        exec("\n".join(imports), scope)
+        self.assertEqual(eval(source, scope), faithful)
+
+    def test_constexpr_source_declines_self_referential_config(self):
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
+
+        cfg = UserDefinedTritonKernelSelfReferentialConfig()
+        cfg.child = cfg
+        with self.assertRaisesRegex(RuntimeError, "cannot be written into"):
+            _render_constexpr_mappings([{"CFG": cfg}])
+
+    def test_constexpr_source_constructs_each_object_once(self):
+        inner = UserDefinedTritonKernelCountingConfig()
+        cfg = UserDefinedTritonKernelCountingConfig(
+            UserDefinedTritonKernelCountingConfig(inner)
+        )
+        UserDefinedTritonKernelCountingConfig.constructed = 0
+        result = _constexpr_source(cfg)
+        self.assertIsNotNone(result)
+        # Rendering verifies by evaluating the source once at the top level, so
+        # compile-time constructor work stays linear in the number of objects.
+        self.assertEqual(UserDefinedTritonKernelCountingConfig.constructed, 3)
+
+    @parametrize(
+        "value, expected",
+        (
+            subtest((IntEnum("Mode", {"EVEN": 2}).EVEN, 2), name="int_enum"),
+            subtest((IntFlag("Flags", {"A": 1}).A, 1), name="int_flag"),
+            subtest((Enum("TextMode", {"A": "a"}, type=str).A, "a"), name="str_enum"),
+            subtest(
+                (Enum("FloatMode", {"A": 1.5}, type=float).A, 1.5), name="float_enum"
+            ),
+        ),
+    )
+    def test_constexpr_constant_enum_interchange(self, value, expected):
+        from torch._inductor.codegen.wrapper import _constexpr_constant
+
+        self.assertEqual(_constexpr_constant(value), expected)
+
+    def test_constexpr_constant_namedtuple_recursion(self):
+        from torch._inductor.codegen.wrapper import _constexpr_constant
+
+        class Mode(IntEnum):
+            EVEN = 2
+
+        Pair = namedtuple("Pair", ("left", "right"))
+        nested = {Mode.EVEN: [Mode.EVEN, (Mode.EVEN,), Pair(Mode.EVEN, 3)]}
+        self.assertEqual(_constexpr_constant(nested), {2: [2, (2,), Pair(2, 3)]})
+
+    def test_constexpr_constant_namedtuple_with_shifting_new(self):
+        from torch._inductor.codegen.wrapper import _constexpr_constant
+
+        class Shifted(namedtuple("ShiftedBase", ("value",))):
+            __slots__ = ()
+
+            def __new__(cls, value):
+                return super().__new__(cls, value + 1)
+
+        shifted = Shifted(1)
+        self.assertEqual(_constexpr_constant(shifted).value, 2)
+
+    def test_constexpr_source_declines_local_enum(self):
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
+
+        class Local(Enum):
+            VALUE = 1
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"cannot be written into.*Local is defined inside a function"
+        ):
+            _render_constexpr_mappings([{"MODE": Local.VALUE}])
+
+    def test_constexpr_source_declines_main_module_enum(self):
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
+
+        # An enum living in __main__ (an enum defined at the top of a user
+        # script) is not importable from the generated module; decline rather
+        # than emit a dangling import, and tell the user where it lives.
+        with (
+            patch.object(plistlib.PlistFormat, "__module__", "__main__"),
+            self.assertRaisesRegex(
+                RuntimeError,
+                r"cannot be written into.*PlistFormat is defined in __main__",
+            ),
+        ):
+            _render_constexpr_mappings([{"FORMAT": plistlib.FMT_XML}])
+
+    def test_constexpr_source_names_nested_unimportable_scope(self):
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
+
+        @dataclasses.dataclass(frozen=True)
+        class LocalNested:
+            offset: int
+
+        # The unimportable type may sit inside an otherwise renderable config.
+        cfg = UserDefinedTritonKernelNestedConfig(nested=LocalNested(offset=2))
+        with self.assertRaisesRegex(
+            RuntimeError, r"cannot be written into.*LocalNested is defined inside"
+        ):
+            _render_constexpr_mappings([{"CFG": cfg}])
+
+    def test_constexpr_source_ordered_set_round_trip(self):
+        from torch.utils._ordered_set import OrderedSet
+
+        # A set subclass's type and iteration order are semantic: the source
+        # must reconstruct the exact type in order, not a sorted builtin set.
+        ordered = OrderedSet([2, 1])
+        source, imports = _constexpr_source(ordered)
+        scope = {}
+        exec("\n".join(imports), scope)
+        reconstructed = eval(source, scope)
+        self.assertIs(type(reconstructed), OrderedSet)
+        self.assertEqual(list(reconstructed), [2, 1])
+
+    def test_constexpr_source_declines_set_subclasses(self):
+        from torch.utils._ordered_set import OrderedSet
+
+        class LocalSet(set):
+            pass
+
+        self.assertIsNone(_constexpr_source(LocalSet({1})))
+
+        # Only OrderedSet exactly reconstructs: other subclasses -- even fully
+        # importable ones, which the reference-resolution path alone would
+        # accept -- decline rather than emit hash-order-nondeterministic or
+        # constructor-assuming source.
+        import torch.utils._ordered_set as ordered_set_module
+
+        class OrderedSubSet(OrderedSet):
+            pass
+
+        OrderedSubSet.__module__ = "torch.utils._ordered_set"
+        OrderedSubSet.__qualname__ = "OrderedSubSet"
+        with patch.object(
+            ordered_set_module, "OrderedSubSet", OrderedSubSet, create=True
+        ):
+            self.assertIsNone(_constexpr_source(OrderedSubSet([1])))
+
+    @parametrize(
+        "base, sample",
+        (
+            subtest((dict, {"a": 1}), name="dict"),
+            subtest((list, [1]), name="list"),
+            subtest((tuple, (1,)), name="tuple"),
+        ),
+    )
+    def test_constexpr_container_subclass_declines(self, base, sample):
+        # Consistent with the set-subclass policy: emitting a container display
+        # for a dict/list/tuple subclass would silently drop its type, so these
+        # decline with the clear error instead of coercing to plain builtins.
+        from torch._inductor.codegen.wrapper import (
+            _constexpr_constant,
+            _render_constexpr_mappings,
+        )
+
+        class Local(base):
+            __slots__ = ()
+
+        value = Local(sample)
+        self.assertIs(_constexpr_constant(value), value)
+        with self.assertRaisesRegex(RuntimeError, "cannot be written into"):
+            _render_constexpr_mappings([{"MODE": value}])
+
+    @parametrize(
+        "value, expected",
+        (
+            subtest((64, ("64", [])), name="int"),
+            subtest((float("inf"), ("float('inf')", [])), name="positive_inf"),
+            subtest((float("-inf"), ("float('-inf')", [])), name="negative_inf"),
+            subtest((float("nan"), None), name="nan"),
+            subtest((-float("nan"), None), name="negative_nan"),
+            subtest(
+                (
+                    torch.float32,
+                    (
+                        "__inductor_constexpr_module_0.float32",
+                        ["import torch as __inductor_constexpr_module_0"],
+                    ),
+                ),
+                name="torch_dtype",
+            ),
+            subtest((torch.Size((128,)), ("(128,)", [])), name="torch_size"),
+            subtest(
+                ((torch.Size((2, 3)), 1), ("((2, 3), 1)", [])),
+                name="nested_torch_size",
+            ),
+            subtest((slice(1, 5, 2), ("slice(1, 5, 2)", [])), name="slice"),
+            subtest((range(3), ("range(0, 3)", [])), name="range"),
+            subtest(
+                (frozenset({1, 2}), ("frozenset((1, 2,))", [])),
+                name="frozenset",
+            ),
+            subtest(({2, 1}, ("{1, 2}", [])), name="set"),
+            subtest((set(), ("set()", [])), name="empty_set"),
+        ),
+    )
+    def test_constexpr_builtin_source(self, value, expected):
+        self.assertEqual(_constexpr_source(value), expected)
+
+    def test_constexpr_bytearray_source(self):
+        value = bytearray(b"a\x00'\"b")
+        source, imports = _constexpr_source(value)
+        self.assertEqual(imports, [])
+        rebuilt = eval(source)
+        self.assertIs(type(rebuilt), bytearray)
+        self.assertEqual(rebuilt, value)
+
+    def test_source_literal_eq_hash(self):
+        from torch._inductor.codegen.wrapper import _SourceLiteral
+
+        left, right = _SourceLiteral("mod.X"), _SourceLiteral("mod.X")
+        self.assertEqual(left, right)
+        self.assertEqual(hash(left), hash(right))
+        self.assertNotEqual(left, _SourceLiteral("mod.Y"))
+        self.assertNotEqual(left, "mod.X")
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_constexpr_triton_dtype_source(self):
+        import triton.language as tl
+
+        self.assertEqual(
+            _constexpr_source(tl.float32),
+            (
+                "__inductor_constexpr_module_0.float32",
+                ["import triton.language as __inductor_constexpr_module_0"],
+            ),
+        )
+        self.assertEqual(
+            _constexpr_source((tl.float32,)),
+            (
+                "(__inductor_constexpr_module_0.float32,)",
+                ["import triton.language as __inductor_constexpr_module_0"],
+            ),
+        )
+
+    def test_constexpr_enum_imports_do_not_collide(self):
+        import uuid
+
+        from torch._inductor.codegen.wrapper import _render_constexpr_mappings
+
+        values = (plistlib.FMT_XML, uuid.SafeUUID.safe)
+        rendered, imports = _render_constexpr_mappings(
+            [{"LEFT": values[0]}, {"RIGHT": values[1]}]
+        )
+        scope = {}
+        exec("\n".join(imports), scope)
+        left, right = (eval(repr(mapping), scope) for mapping in rendered)
+        self.assertIs(left["LEFT"], values[0])
+        self.assertIs(right["RIGHT"], values[1])
+
+        class Bits(Flag):
+            LEFT = 1
+            RIGHT = 2
+
+        self.assertIsNone(_constexpr_source(Bits.LEFT | Bits.RIGHT))
+
+    def test_launcher_constexpr_scope_avoids_argument_names(self):
+        from torch._inductor.runtime.triton_heuristics import CompileResult
+
+        class Mode(Enum):
+            VALUE = 1
+
+        result = CompileResult(
+            None,
+            SimpleNamespace(kwargs={}),
+            {
+                "constants": {"MODE": Mode.VALUE, "LIMIT": float("inf")},
+                "signature": {
+                    "x": "i32",
+                    "_constexpr_0": "i32",
+                    "MODE": "i32",
+                    "LIMIT": "fp32",
+                },
+            },
+            {},
+        )
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.triton_version_uses_attrs_dict",
+            return_value=True,
+        ):
+            call_args, def_args, _, constant_scope = result._get_arg_lists(
+                ["x", "_constexpr_0", "MODE", "LIMIT"], {2, 3}
+            )
+        self.assertEqual(def_args, ["x", "_constexpr_0"])
+        self.assertEqual(
+            call_args, ["x", "_constexpr_0", "_constexpr_1", "_constexpr_2"]
+        )
+        self.assertIs(constant_scope["_constexpr_1"], Mode.VALUE)
+        self.assertEqual(constant_scope["_constexpr_2"], float("inf"))
 
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     def test_enum_constexpr_in_user_defined_triton_kernel(self):
@@ -1495,6 +2157,944 @@ def helper(x):
         self.assertEqual(fn(x), res)
         # Verify generated code doesn't contain invalid Enum repr like <Mode.ADD: 1>
         self.assertNotIn("<Mode.", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_plain_enum_constexpr_in_cpp_wrapper(self):
+        # The cpp_wrapper/AOTI path consumes the kernel metas returned by
+        # define_user_defined_triton_kernel; those must carry real values (no
+        # rendering placeholders) and still compile with a non-interchangeable
+        # Enum constexpr.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE.value == 1:
+                output = x + 1
+            else:
+                output = x * 2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            enum_kernel[(1,)](x, y, x.numel(), plistlib.FMT_XML, BLOCK_SIZE=256)
+            return y
+
+        x = torch.randn(128, device=GPU_TYPE)
+        with inductor_config.patch(cpp_wrapper=True):
+            res, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(fn(x), res)
+        for generated in code:
+            self.assertNotIn("<PlistFormat.", generated)
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_enum_constexpr_in_autotune_config(self):
+        import triton
+        import triton.language as tl
+
+        class Mode(IntEnum):
+            ADD = 1
+            MUL = 2
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"MODE": Mode.ADD, "BLOCK_SIZE": 64}, num_warps=4),
+                triton.Config({"MODE": Mode.MUL, "BLOCK_SIZE": 128}, num_warps=4),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = tl.where(MODE == 1, x + 1, x * 2)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            output = torch.empty_like(x)
+
+            def grid(meta):
+                return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
+
+            enum_kernel[grid](x, output, x.numel())
+            return output
+
+        x = torch.randn(128, device=GPU_TYPE)
+        actual, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(actual, fn(x))
+        self.assertNotIn("<Mode.", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_plain_enum_constexpr_in_autotune_config(self):
+        # A non-interchangeable Enum in an autotune config reaches the runtime as
+        # a real Enum member; autotuning (with >1 config) then saves the winner to
+        # the JSON autotune cache, which must store the underlying value.
+        import triton
+        import triton.language as tl
+
+        @triton.autotune(
+            configs=[
+                triton.Config(
+                    {"MODE": plistlib.FMT_XML, "BLOCK_SIZE": 64},
+                    num_warps=4,
+                ),
+                triton.Config(
+                    {"MODE": plistlib.FMT_BINARY, "BLOCK_SIZE": 128}, num_warps=4
+                ),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = x + 1
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            output = torch.empty_like(x)
+
+            def grid(meta):
+                return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
+
+            enum_kernel[grid](x, output, x.numel())
+            return output
+
+        x = torch.randn(128, device=GPU_TYPE)
+        actual, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(actual, fn(x))
+        self.assertIn("PlistFormat['", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_user_autotune_cache_not_stamped_coordesc(self):
+        # Coordinate descent tuning never runs for USER_AUTOTUNE kernels, so their
+        # cache entries must not claim found_by_coordesc: a warm load would skip
+        # candidate matching and reconstruct a Config whose Enum kwargs degrade to
+        # the raw JSON values.
+        if inductor_config.force_disable_caches:
+            self.skipTest("requires autotune caching enabled")
+        if not inductor_config.autotune_local_cache:
+            self.skipTest("requires the local autotune cache")
+        import triton
+        import triton.language as tl
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+
+        @triton.autotune(
+            configs=[
+                triton.Config(
+                    {"CD_MODE": plistlib.FMT_XML, "BLOCK_SIZE": 64},
+                    num_warps=4,
+                ),
+                triton.Config(
+                    {"CD_MODE": plistlib.FMT_BINARY, "BLOCK_SIZE": 128}, num_warps=4
+                ),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, CD_MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = x + 1
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            output = torch.empty_like(x)
+
+            def grid(meta):
+                return (triton.cdiv(x.numel(), meta["BLOCK_SIZE"]),)
+
+            enum_kernel[grid](x, output, x.numel())
+            return output
+
+        x = torch.randn(128, device=GPU_TYPE)
+        with (
+            inductor_config.patch(coordinate_descent_tuning=True),
+            patch.object(
+                AutotuneCache, "save", autospec=True, side_effect=AutotuneCache.save
+            ) as saves,
+        ):
+            self.assertEqual(torch.compile(fn)(x), fn(x))
+        enum_saves = [c for c in saves.call_args_list if "CD_MODE" in c.args[1].kwargs]
+        self.assertTrue(enum_saves)
+        for call in enum_saves:
+            self.assertFalse(call.kwargs.get("found_by_coordesc", False))
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_autotune_cache_matches_enum_config_kwargs(self):
+        import json
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import (
+            _config_json_cacheable,
+            _json_config_value,
+            _load_cached_autotuning,
+        )
+
+        cfg = triton.Config(
+            {"MODE": plistlib.FMT_XML, "BLOCK": 64},
+            num_warps=4,
+            num_stages=2,
+        )
+        self.assertTrue(_config_json_cacheable(cfg))
+        data = {key: _json_config_value(val) for key, val in cfg.kwargs.items()}
+        data.update({"num_warps": 4, "num_stages": 2, "configs_hash": "h"})
+        best = json.loads(json.dumps(data))  # must be JSON-representable
+        self.assertIs(_load_cached_autotuning(best, "h", [cfg], {}), cfg)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    @parametrize("via_enum", (True, False))
+    def test_autotune_cache_declines_non_json_config_kwargs(self, via_enum):
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import (
+            _config_json_cacheable,
+            AutotuneCache,
+        )
+
+        class SetMode(Enum):
+            PAIR = frozenset({1, 2})
+
+        value = SetMode.PAIR if via_enum else {1, 2}
+        cfg = triton.Config({"MODE": value, "BLOCK": 64}, num_warps=4, num_stages=2)
+        self.assertFalse(_config_json_cacheable(cfg))
+        # save() must skip such a config entirely. A bare instance suffices: the
+        # gate returns before any cache state is touched, so if the gate were
+        # removed this call would fail on the missing attributes.
+        cache = object.__new__(AutotuneCache)
+        self.assertIsNone(cache.save(cfg, time_taken_ns=0))
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_autotune_cache_matches_tuple_config_kwargs(self):
+        # Tuple kwargs (directly or as an Enum's value) serialize as JSON
+        # lists; warm load must match the stored list back to the tuple-kwarg
+        # candidate and return that exact Config object so the kernel sees a
+        # real tuple, not the degraded list.
+        import os
+        import tempfile
+
+        import triton
+
+        from torch._inductor.remote_cache import LocalAutotuneCache
+        from torch._inductor.runtime.autotune_cache import (
+            _config_json_cacheable,
+            _load_cached_autotuning,
+            AutotuneCache,
+        )
+
+        class TupleMode(Enum):
+            PAIR = (1, 2)
+
+        kw = {"MODE": TupleMode.PAIR, "SHAPE": (2, 3), "NEST": [(1,)], "BLOCK": 64}
+        cfg = triton.Config(dict(kw), num_warps=4, num_stages=2)
+        self.assertTrue(_config_json_cacheable(cfg))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            key = os.path.join(tmpdir, "kernel.best_config")
+            local_cache = LocalAutotuneCache("local-autotune")
+            cache = AutotuneCache(configs_hash="h", local_cache=(local_cache, key))
+            cache.save(cfg, time_taken_ns=0)
+            best = local_cache.get(key)
+        self.assertIsNotNone(best)
+        self.assertEqual(best["SHAPE"], [2, 3])
+        loaded = _load_cached_autotuning(best, "h", [cfg], {})
+        self.assertIs(loaded, cfg)
+        self.assertEqual(loaded.kwargs, kw)
+        self.assertIs(loaded.kwargs["MODE"], TupleMode.PAIR)
+        self.assertIs(type(loaded.kwargs["SHAPE"]), tuple)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_autotune_cache_coordesc_entry_restores_typed_kwargs(self):
+        # A coordesc-stamped winner is reconstructed from JSON, so a tuple
+        # constexpr comes back as a list; the candidates (which hold the tuple,
+        # constant across configs) supply the typed value instead of forcing a
+        # re-autotune on every warm start.
+        import json
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        cfg = triton.Config({"SHAPE": (2, 3), "BLOCK": 64}, num_warps=4, num_stages=2)
+        data = {"SHAPE": [2, 3], "BLOCK": 128, "num_warps": 8, "num_stages": 2}
+        data.update({"configs_hash": "h", "found_by_coordesc": True})
+        best = json.loads(json.dumps(data))
+        loaded = _load_cached_autotuning(
+            best, "h", [cfg], {"coordinate_descent_tuning": True}
+        )
+        self.assertIsNotNone(loaded)
+        self.assertTrue(loaded.found_by_coordesc)
+        self.assertEqual(loaded.kwargs, {"SHAPE": (2, 3), "BLOCK": 128})
+        self.assertIs(type(loaded.kwargs["SHAPE"]), tuple)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_autotune_cache_degraded_no_match_reautotunes(self):
+        # A stored winner matching no candidate normally reconstructs (it may
+        # be a dynamically added config), but when some candidate kwarg
+        # degrades under the JSON round-trip (tuple -> list) the miss may be a
+        # serialization artifact and reconstruction would bake the degraded
+        # value into the kernel; warm load must re-autotune instead.
+        import json
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        cfg = triton.Config({"SHAPE": (2, 3), "BLOCK": 64}, num_warps=4, num_stages=2)
+        data = {"SHAPE": [4, 5], "BLOCK": 32, "num_warps": 4, "num_stages": 2}
+        data["configs_hash"] = "h"
+        best = json.loads(json.dumps(data))
+        self.assertIsNone(_load_cached_autotuning(best, "h", [cfg], {}))
+
+        # A plain Enum kwarg (identity __eq__) is degraded too; IntEnum and
+        # str-mixin members ==-match their unwrapped values and are not.
+        class Mode(Enum):
+            A = 1
+
+        cfg_enum = triton.Config({"MODE": Mode.A}, num_warps=4, num_stages=2)
+        data = {"MODE": 3, "num_warps": 4, "num_stages": 2, "configs_hash": "h"}
+        best = json.loads(json.dumps(data))
+        self.assertIsNone(_load_cached_autotuning(best, "h", [cfg_enum], {}))
+
+        # Without degraded candidate kwargs the same miss still reconstructs.
+        plain = triton.Config({"BLOCK": 64}, num_warps=4, num_stages=2)
+        data = {"BLOCK": 32, "num_warps": 4, "num_stages": 2, "configs_hash": "h"}
+        best = json.loads(json.dumps(data))
+        loaded = _load_cached_autotuning(best, "h", [plain], {})
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.kwargs, {"BLOCK": 32})
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_autotune_cache_saves_container_enum_config_kwargs(self):
+        # Enum members nested inside list/dict kwargs pass _config_json_cacheable
+        # (which recurses), so _json_config_value must unwrap them recursively
+        # too: otherwise save() hands raw Enum members to json.dumps and the
+        # resulting TypeError aborts the run. A plain Enum (not IntEnum, which
+        # json serializes as its int) exercises this.
+        import json
+        import os
+        import tempfile
+
+        import triton
+
+        from torch._inductor.remote_cache import LocalAutotuneCache
+        from torch._inductor.runtime.autotune_cache import (
+            _config_json_cacheable,
+            _json_config_value,
+            _load_cached_autotuning,
+            AutotuneCache,
+        )
+
+        class Mode(Enum):
+            A = 1
+            B = 2
+
+        kwargs = {"MODES": [Mode.A], "TABLE": {"m": Mode.A}, "BLOCK": 64}
+        cfg = triton.Config(dict(kwargs), num_warps=4, num_stages=2)
+        self.assertTrue(_config_json_cacheable(cfg))
+        data = {key: _json_config_value(val) for key, val in cfg.kwargs.items()}
+        self.assertEqual(data, {"MODES": [1], "TABLE": {"m": 1}, "BLOCK": 64})
+        json.dumps(data)  # anything cacheable must serialize
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            key = os.path.join(tmpdir, "kernel.best_config")
+            local_cache = LocalAutotuneCache("local-autotune")
+            cache = AutotuneCache(configs_hash="h", local_cache=(local_cache, key))
+            cache.save(cfg, time_taken_ns=0)
+            best = local_cache.get(key)
+        self.assertIsNotNone(best)
+        # Warm load must match back to the original config, keeping the real
+        # Enum members rather than the degraded JSON values.
+        loaded = _load_cached_autotuning(best, "h", [cfg], {})
+        self.assertIs(loaded, cfg)
+        self.assertEqual(loaded.kwargs, kwargs)
+        self.assertIs(loaded.kwargs["MODES"][0], Mode.A)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_autotune_cache_ambiguous_match_reautotunes(self):
+        # Enum unwrapping makes MODE=Mode.A and MODE=1 serialize identically, so
+        # a cached winner matches both candidates. Reconstructing would bake the
+        # raw JSON value even when the winner was the Enum member (plain Enum
+        # __eq__ is identity, a silent semantic flip); re-autotune instead.
+        import json
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        class Mode(Enum):
+            A = 1
+
+        cfg_enum = triton.Config({"MODE": Mode.A}, num_warps=4, num_stages=2)
+        cfg_raw = triton.Config({"MODE": 1}, num_warps=4, num_stages=2)
+        data = {"MODE": 1, "num_warps": 4, "num_stages": 2, "configs_hash": "h"}
+        best = json.loads(json.dumps(data))
+        self.assertIsNone(_load_cached_autotuning(best, "h", [cfg_enum, cfg_raw], {}))
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_autotune_cache_multi_match_without_enums_reconstructs(self):
+        # Multiple value-identical matches carry no Enum-vs-raw ambiguity
+        # (duplicate identical configs, or a config whose kwargs are a subset
+        # of the saved best); warm load must fall through to reconstruction
+        # rather than silently re-autotuning on every run.
+        import json
+
+        import triton
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        dup = [triton.Config({"BLOCK": 64}, num_warps=4, num_stages=2) for _ in "ab"]
+        data = {"BLOCK": 64, "num_warps": 4, "num_stages": 2, "configs_hash": "h"}
+        loaded = _load_cached_autotuning(json.loads(json.dumps(data)), "h", dup, {})
+        self.assertIs(loaded, dup[0])
+        self.assertEqual(loaded.num_warps, 4)
+        self.assertEqual(loaded.num_stages, 2)
+
+        # Duplicate candidates with tuple kwargs (JSON stores lists) are
+        # interchangeable, so warm load must return one of them rather than
+        # treating the tuple/list mismatch as Enum ambiguity and re-autotuning.
+        dup_tuple = [
+            triton.Config({"BLOCK_SHAPE": (64, 32)}, num_warps=4, num_stages=2)
+            for _ in "ab"
+        ]
+        data_tuple = {"BLOCK_SHAPE": [64, 32], "num_warps": 4, "num_stages": 2}
+        data_tuple["configs_hash"] = "h"
+        loaded = _load_cached_autotuning(
+            json.loads(json.dumps(data_tuple)), "h", dup_tuple, {}
+        )
+        self.assertIs(loaded, dup_tuple[0])
+        self.assertIs(type(loaded.kwargs["BLOCK_SHAPE"]), tuple)
+
+        subset = [
+            triton.Config({"BLOCK": 64}, num_warps=4, num_stages=2),
+            triton.Config({"BLOCK": 64, "SPLIT": 2}, num_warps=4, num_stages=2),
+        ]
+        data["SPLIT"] = 2
+        loaded = _load_cached_autotuning(json.loads(json.dumps(data)), "h", subset, {})
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.kwargs, {"BLOCK": 64, "SPLIT": 2})
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_plain_enum_constexpr_in_user_defined_triton_kernel(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE.value == 1:
+                output = x + 1
+            else:
+                output = x * 2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            output = torch.empty_like(x)
+            enum_kernel[(1,)](x, output, x.numel(), plistlib.FMT_XML, BLOCK_SIZE=256)
+            return output
+
+        x = torch.randn(128, device=GPU_TYPE)
+        actual, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(actual, fn(x))
+        self.assertIn("PlistFormat['FMT_XML']", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_torch_size_constexpr_in_user_defined_triton_kernel(self):
+        # torch.Size is a tuple subclass with no semantics of its own, so it
+        # must render as a plain tuple rather than hit the generic
+        # tuple-subclass decline ("cannot be written into the generated
+        # kernel"), which would regress from eager.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def size_kernel(
+            in_ptr, out_ptr, numel, SHAPE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + SHAPE[0], mask=mask)
+
+        def fn(x):
+            output = torch.empty_like(x)
+            size_kernel[(1,)](x, output, x.numel(), x.shape, BLOCK_SIZE=256)
+            return output
+
+        x = torch.randn(128, device=GPU_TYPE)
+        actual, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(actual, fn(x))
+        self.assertIn("(128,)", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_escape_bearing_constexpr_in_user_defined_triton_kernel(self):
+        # The rendered constants are spliced into the '''...''' literal passed
+        # to async_compile.triton and parsed twice; reprs carrying backslashes
+        # or quotes (a "\n" string, bytes) must be escaped like kernel_src or
+        # the generated module fails with SyntaxError on the second parse.
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def esc_kernel(
+            in_ptr,
+            out_ptr,
+            numel,
+            MODE: tl.constexpr,
+            TAG: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE == "a\nb":
+                output = x + 1
+            else:
+                output = x * 2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            esc_kernel[(1,)](x, y, x.numel(), "a\nb", b"\x00\\", 256)
+            return y
+
+        x = torch.randn(128, device=GPU_TYPE)
+        res, code = run_and_get_code(torch.compile(fn), x)
+        # x + 1, not x * 2: the "a\nb" constexpr survived both parses intact.
+        self.assertEqual(fn(x), res)
+        compile(code[0], "<test-generated-wrapper>", "exec")
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_module_enum_constexpr_compiles_in_subprocess_worker(self):
+        # The generated "import plistlib as __inductor_constexpr_module_N" must
+        # execute inside a real compile-worker subprocess, not just the parent.
+        import triton
+        import triton.language as tl
+
+        from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
+        from torch._inductor.utils import fresh_cache
+
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE.value == 1:
+                output = x + 1
+            else:
+                output = x * 2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            enum_kernel[(1,)](x, y, x.numel(), plistlib.FMT_XML, BLOCK_SIZE=256)
+            return y
+
+        x = torch.randn(128, device=GPU_TYPE)
+        patched = {"compile_threads": 2, "worker_start_method": "subprocess"}
+        with inductor_config.patch(patched):
+            shutdown_compile_workers()
+            try:
+                AsyncCompile.warm_pool()
+                AsyncCompile.wakeup()
+                AsyncCompile.wait_pool_ready()
+                self.assertTrue(AsyncCompile.use_process_pool())
+                logger_name = "torch._inductor.async_compile"
+                with (
+                    fresh_cache(),
+                    self.assertNoLogs(logger_name, level="WARNING"),
+                ):
+                    res, code = run_and_get_code(torch.compile(fn), x)
+            finally:
+                shutdown_compile_workers()
+        self.assertEqual(fn(x), res)
+        self.assertIn("PlistFormat['FMT_XML']", code[0])
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_constexpr_module_missing_in_worker_falls_back_in_process(self):
+        # Compile workers snapshot PYTHONPATH when the pool spawns, so a module
+        # added to sys.path afterwards imports fine in the parent (where codegen
+        # validates it) but raises ModuleNotFoundError in the worker. The
+        # compile must fall back to in-process compilation instead of failing.
+        import importlib
+        import os
+        import sys
+        import tempfile
+
+        import triton
+        import triton.language as tl
+
+        from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
+        from torch._inductor.utils import fresh_cache
+
+        @triton.jit
+        def probe_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE.value == 1:
+                output = x + 1
+            else:
+                output = x * 2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        module_name = f"inductor_constexpr_probe_{os.getpid()}"
+        module_src = "import enum\n\nclass Mode(enum.Enum):\n    ADD = 1\n    MUL = 2\n"
+        x = torch.randn(128, device=GPU_TYPE)
+        patched = {"compile_threads": 2, "worker_start_method": "subprocess"}
+        with tempfile.TemporaryDirectory() as tmpdir, inductor_config.patch(patched):
+            with open(os.path.join(tmpdir, f"{module_name}.py"), "w") as f:
+                f.write(module_src)
+            shutdown_compile_workers()
+            try:
+                # Spawn the worker pool before the module becomes importable so
+                # the workers' PYTHONPATH snapshot cannot contain tmpdir.
+                AsyncCompile.warm_pool()
+                AsyncCompile.wakeup()
+                AsyncCompile.wait_pool_ready()
+                self.assertTrue(AsyncCompile.use_process_pool())
+                sys.path.insert(0, tmpdir)
+                importlib.invalidate_caches()
+                mod = importlib.import_module(module_name)
+
+                def fn(x):
+                    y = torch.empty_like(x)
+                    probe_kernel[(1,)](x, y, x.numel(), mod.Mode.ADD, BLOCK_SIZE=256)
+                    return y
+
+                logger_name = "torch._inductor.async_compile"
+                with (
+                    fresh_cache(),
+                    self.assertLogs(logger_name, level="WARNING") as logs,
+                ):
+                    res, code = run_and_get_code(torch.compile(fn), x)
+                self.assertTrue(
+                    any("in-process compilation" in msg for msg in logs.output)
+                )
+                self.assertEqual(fn(x), res)
+                self.assertIn(module_name, code[0])
+            finally:
+                if tmpdir in sys.path:
+                    sys.path.remove(tmpdir)
+                sys.modules.pop(module_name, None)
+                shutdown_compile_workers()
+
+    def test_constexpr_fallback_result_is_memoized(self):
+        # LambdaFuture.result() re-runs its result_fn on every call and the
+        # worker task re-raises the same SubprocException, so without
+        # memoization every re-entry of the fallback path would warn again and
+        # recompile the kernel in-process again.
+        import os
+        from unittest.mock import Mock
+
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+        module_name = f"inductor_fallback_probe_{os.getpid()}"
+        source_code = f"import {module_name} as __inductor_constexpr_module_0\n"
+        task = Mock()
+        task.result.side_effect = SubprocException(
+            f"ModuleNotFoundError: No module named '{module_name}'"
+        )
+        pool = Mock()
+        pool.submit.return_value = task
+        sentinel_kernel = object()
+        with (
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "process_pool", return_value=pool),
+            patch.object(
+                AsyncCompile, "_compile_triton_in_process", return_value=sentinel_kernel
+            ) as compile_in_process,
+        ):
+            future = AsyncCompile().triton("probe_kernel", source_code)
+            logger_name = "torch._inductor.async_compile"
+            with self.assertLogs(logger_name, level="WARNING") as logs:
+                self.assertIs(future.result(), sentinel_kernel)
+            fallback_warnings = [
+                msg for msg in logs.output if "in-process compilation" in msg
+            ]
+            self.assertEqual(len(fallback_warnings), 1)
+            with self.assertNoLogs(logger_name, level="WARNING"):
+                self.assertIs(future.result(), sentinel_kernel)
+            self.assertEqual(compile_in_process.call_count, 1)
+        self.assertEqual(task.result.call_count, 1)
+
+    def test_constexpr_fallback_survives_wait_timeout(self):
+        # With compile_worker_wait_timeout set, _wait_futures passes a timeout
+        # and LambdaFuture waits on the worker future first; that wait must not
+        # re-raise the worker failure ahead of the result_fn fallback.
+        import os
+        from unittest.mock import Mock
+
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+        module_name = f"inductor_fallback_probe_{os.getpid()}"
+        source_code = f"import {module_name} as __inductor_constexpr_module_0\n"
+        failure = SubprocException(
+            f"ModuleNotFoundError: No module named '{module_name}'"
+        )
+        task = Mock()
+        task.result.side_effect = failure
+        task.exception.return_value = failure
+        pool = Mock()
+        pool.submit.return_value = task
+        sentinel_kernel = object()
+        with (
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "process_pool", return_value=pool),
+            patch.object(
+                AsyncCompile, "_compile_triton_in_process", return_value=sentinel_kernel
+            ),
+        ):
+            future = AsyncCompile().triton("probe_kernel", source_code)
+            with self.assertLogs("torch._inductor.async_compile", level="WARNING"):
+                self.assertIs(future.result(timeout=5), sentinel_kernel)
+        task.exception.assert_called_once_with(timeout=5)
+
+    def test_autotune_cache_multi_match_with_degraded_kwarg_restores(self):
+        # Several matching candidates plus a tuple kwarg constant across them
+        # (a superset cache against subset-kwarg candidates, or an int/float
+        # split) must reconstruct with the tuple restored, not re-autotune on
+        # every warm start; only a genuine Enum-vs-raw disagreement declines.
+        from types import SimpleNamespace
+
+        from torch._inductor.runtime import autotune_cache
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        class Mode(Enum):
+            A = 1
+
+        def cfg(**kwargs):
+            return SimpleNamespace(kwargs=kwargs, num_warps=4, num_stages=2)
+
+        def load(cached, configs):
+            best = dict(cached, num_warps=4, num_stages=2, configs_hash="h")
+            with patch.object(
+                autotune_cache,
+                "_reconstruct_triton_config",
+                side_effect=lambda best_config, extra: dict(best_config),
+            ):
+                return _load_cached_autotuning(best, "h", configs, {})
+
+        superset = [cfg(BLOCK=64, SHAPE=(2, 3)), cfg(BLOCK=64, SPLIT=2, SHAPE=(2, 3))]
+        loaded = load({"BLOCK": 64, "SPLIT": 2, "SHAPE": [2, 3]}, superset)
+        self.assertEqual(loaded["SHAPE"], (2, 3))
+        self.assertIs(type(loaded["SHAPE"]), tuple)
+        split = [cfg(S=1, SHAPE=(2, 3)), cfg(S=1.0, SHAPE=(2, 3))]
+        loaded = load({"S": 1, "SHAPE": [2, 3]}, split)
+        self.assertIs(type(loaded["S"]), int)
+        self.assertIs(type(loaded["SHAPE"]), tuple)
+        ambiguous = [cfg(MODE=Mode.A, BLOCK=8), cfg(MODE=1, BLOCK=8)]
+        self.assertIsNone(load({"MODE": 1, "BLOCK": 8}, ambiguous))
+
+    def test_autotune_cache_match_keeps_cached_type_regardless_of_order(self):
+        # Candidates that differ only in an int/float or bool/int kwarg (which
+        # compare == and serialize alike) are not interchangeable: the load
+        # must not hand back whichever came first but reconstruct from the
+        # cached value, so the winner keeps the type it was saved with.
+        from types import SimpleNamespace
+
+        from torch._inductor.runtime import autotune_cache
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        def cfg(**kwargs):
+            return SimpleNamespace(kwargs=kwargs, num_warps=4, num_stages=2)
+
+        cases = (
+            ({"S": 1.0}, cfg(S=1), cfg(S=1.0), float),
+            ({"S": 1}, cfg(S=1.0), cfg(S=1), int),
+            ({"F": True}, cfg(F=1), cfg(F=True), bool),
+            ({"F": 1}, cfg(F=True), cfg(F=1), int),
+        )
+        for cached, a, b, expected_type in cases:
+            for order in ([a, b], [b, a]):
+                best = dict(cached, num_warps=4, num_stages=2, configs_hash="h")
+                with patch.object(
+                    autotune_cache,
+                    "_reconstruct_triton_config",
+                    side_effect=lambda best_config, extra: dict(best_config),
+                ):
+                    loaded = _load_cached_autotuning(best, "h", order, {})
+                self.assertIsInstance(loaded, dict)
+                (key,) = cached
+                self.assertIs(type(loaded[key]), expected_type)
+
+    def test_constexpr_module_missing_in_worker_accepts_exception(self):
+        # Spawn/fork worker pools re-raise the worker's ModuleNotFoundError
+        # directly instead of wrapping it in SubprocException; the helper must
+        # match on the exception's .name.
+        from torch._inductor.async_compile import _constexpr_module_missing_in_worker
+
+        src = "import foo.bar as __inductor_constexpr_module_0\n"
+        err = ModuleNotFoundError("No module named 'foo'", name="foo")
+        self.assertEqual(_constexpr_module_missing_in_worker(src, err), "foo.bar")
+        other = ModuleNotFoundError("No module named 'baz'", name="baz")
+        self.assertIsNone(_constexpr_module_missing_in_worker(src, other))
+        nameless = ModuleNotFoundError("No module named 'foo'")
+        self.assertIsNone(_constexpr_module_missing_in_worker(src, nameless))
+        # The root-name imports emitted for object-valued constexpr parameter
+        # defaults must also trigger the in-process fallback.
+        root_src = "from foo.bar import Cfg as Cfg\n"
+        self.assertEqual(_constexpr_module_missing_in_worker(root_src, err), "foo.bar")
+        self.assertIsNone(_constexpr_module_missing_in_worker(root_src, other))
+        aliased = "from foo.bar import Cfg as Renamed\n"
+        self.assertIsNone(_constexpr_module_missing_in_worker(aliased, err))
+        # `import foo` can fail because foo/__init__.py imports a submodule the
+        # worker lacks; the reported missing name is then a descendant of the
+        # constexpr module and must still be attributed to it.
+        parent_src = "import foo as __inductor_constexpr_module_0\n"
+        descendant = ModuleNotFoundError(
+            "No module named 'foo.helpers'", name="foo.helpers"
+        )
+        self.assertEqual(
+            _constexpr_module_missing_in_worker(parent_src, descendant), "foo"
+        )
+        lookalike = ModuleNotFoundError("No module named 'foobar'", name="foobar")
+        self.assertIsNone(_constexpr_module_missing_in_worker(parent_src, lookalike))
+        # torch.dtype / tl.dtype constexprs import the library roots themselves;
+        # a missing submodule under those is a real error in the worker, not a
+        # stale search path, so it must not trigger the in-process fallback.
+        for root in ("torch", "triton.language"):
+            root_src = f"import {root} as __inductor_constexpr_module_0\n"
+            missing_sub = ModuleNotFoundError(
+                f"No module named '{root}.zzz'", name=f"{root}.zzz"
+            )
+            self.assertIsNone(
+                _constexpr_module_missing_in_worker(root_src, missing_sub)
+            )
+        helper_src = "from triton.language import store as store\n"
+        self.assertIsNone(
+            _constexpr_module_missing_in_worker(
+                helper_src,
+                ModuleNotFoundError(
+                    "No module named 'triton.language.extra.x'",
+                    name="triton.language.extra.x",
+                ),
+            )
+        )
+        # A formatted worker traceback may chain the constexpr import failure
+        # before an unrelated secondary one; any reported missing module that
+        # matches a constexpr import is attributed regardless of chain order,
+        # so the in-process fallback still fires.
+        chained = (
+            "ModuleNotFoundError: No module named 'foo'\n\n"
+            "During handling of the above exception, another exception occurred:\n\n"
+            "ModuleNotFoundError: No module named 'baz'\n"
+        )
+        self.assertEqual(_constexpr_module_missing_in_worker(src, chained), "foo.bar")
+        reversed_chain = (
+            "ModuleNotFoundError: No module named 'baz'\n\n"
+            "During handling of the above exception, another exception occurred:\n\n"
+            "ModuleNotFoundError: No module named 'foo'\n"
+        )
+        self.assertEqual(
+            _constexpr_module_missing_in_worker(src, reversed_chain), "foo.bar"
+        )
+        # A traceback with only unrelated failures matches no constexpr import.
+        unrelated_chain = (
+            "ModuleNotFoundError: No module named 'baz'\n\n"
+            "During handling of the above exception, another exception occurred:\n\n"
+            "ModuleNotFoundError: No module named 'qux'\n"
+        )
+        self.assertIsNone(_constexpr_module_missing_in_worker(src, unrelated_chain))
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_constexpr_fallback_catches_raw_module_not_found(self):
+        # With TORCHINDUCTOR_WORKER_START=spawn/fork the worker's
+        # ModuleNotFoundError propagates raw from future.result(); the fallback
+        # must fire for constexpr imports and re-raise anything else unchanged.
+        import os
+        from unittest.mock import Mock
+
+        from torch._inductor.async_compile import AsyncCompile, CompiledTritonKernels
+
+        # The raw-raise path never calls remove_future, so without this a
+        # Mock-holding LambdaFuture would sit in the process-global kernel
+        # cache until the next compile_fx clears it.
+        self.addCleanup(CompiledTritonKernels.cache_clear)
+        module_name = f"inductor_spawn_probe_{os.getpid()}"
+        source_code = f"import {module_name} as __inductor_constexpr_module_0\n"
+        task = Mock()
+        task.result.side_effect = ModuleNotFoundError(
+            f"No module named '{module_name}'", name=module_name
+        )
+        pool = Mock()
+        pool.submit.return_value = task
+        sentinel_kernel = object()
+        with (
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "process_pool", return_value=pool),
+            patch.object(
+                AsyncCompile, "_compile_triton_in_process", return_value=sentinel_kernel
+            ),
+        ):
+            future = AsyncCompile().triton("probe_kernel", source_code)
+            logger_name = "torch._inductor.async_compile"
+            with self.assertLogs(logger_name, level="WARNING") as logs:
+                self.assertIs(future.result(), sentinel_kernel)
+            self.assertTrue(any("in-process compilation" in msg for msg in logs.output))
+            # An unrelated missing module must propagate unchanged.
+            unrelated = f"import {module_name}x as __inductor_constexpr_module_0\n"
+            future = AsyncCompile().triton("probe_kernel", unrelated)
+            with self.assertRaisesRegex(
+                ModuleNotFoundError, f"No module named '{module_name}'"
+            ):
+                future.result()
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_unspellable_enum_constexpr_errors_clearly(self):
+        import triton
+        import triton.language as tl
+
+        class Mode(Enum):
+            ADD = 1
+
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = tl.where(MODE == 1, x + 1, x * 2)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            output = torch.empty_like(x)
+            enum_kernel[(1,)](x, output, x.numel(), Mode.ADD, 256)
+            return output
+
+        x = torch.randn(128, device=GPU_TYPE)
+        with self.assertRaisesRegex(
+            BackendCompilerFailed,
+            r"cannot be written into.*Mode is defined inside a function",
+        ):
+            torch.compile(fn)(x)
 
 
 if __name__ == "__main__":

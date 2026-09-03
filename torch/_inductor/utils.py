@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import collections
 import contextlib
-import copy
 import dataclasses
 import enum
 import functools
@@ -244,101 +243,34 @@ _TRITON_CONSTEXPR_RESERVED_NAMES = frozenset(
 )
 
 
-class ConstexprReprChildren(NamedTuple):
-    values: tuple[object, ...]
-    rebuild: Callable[[tuple[object, ...]], object]
-
-
-def get_constexpr_repr_children(value: object) -> ConstexprReprChildren | None:
-    """Describe the immediate values included in an object's repr."""
+def get_constexpr_repr_children(value: object) -> tuple[object, ...] | None:
+    """Return the immediate values included in an object's repr."""
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        fields = tuple(field for field in dataclasses.fields(value) if field.repr)
-
-        def rebuild_dataclass(children: tuple[object, ...]) -> object:
-            # Avoid constructors that could coerce sanitized values back to Enum.
-            result = copy.copy(value)
-            for field, child in zip(fields, children):
-                object.__setattr__(result, field.name, child)
-            return result
-
-        return ConstexprReprChildren(
-            tuple(getattr(value, field.name) for field in fields),
-            rebuild_dataclass,
-        )
+        fields = dataclasses.fields(value)
+        return tuple(getattr(value, field.name) for field in fields if field.repr)
 
     attrs_fields = getattr(type(value), "__attrs_attrs__", None)
     if attrs_fields is not None:
         # attrs permits callable repr formatters, so only False hides a field.
-        fields = tuple(
-            field for field in attrs_fields if getattr(field, "repr", True) is not False
-        )
-
-        def rebuild_attrs(children: tuple[object, ...]) -> object:
-            result = copy.copy(value)
-            for field, child in zip(fields, children):
-                object.__setattr__(result, field.name, child)
-            return result
-
-        return ConstexprReprChildren(
-            tuple(getattr(value, field.name) for field in fields),
-            rebuild_attrs,
+        return tuple(
+            getattr(value, field.name)
+            for field in attrs_fields
+            if getattr(field, "repr", True) is not False
         )
 
     repr_args = getattr(value, "__repr_args__", None)
     if callable(repr_args):
-        items = tuple(cast(Callable[[], Iterable[tuple[object, object]]], repr_args)())
-
-        def rebuild_repr_args(children: tuple[object, ...]) -> object:
-            result = copy.copy(value)
-            for (name, _), child in zip(items, children):
-                if not isinstance(name, str):
-                    raise TypeError(
-                        "Cannot sanitize an unnamed value returned by __repr_args__"
-                    )
-                object.__setattr__(result, name, child)
-            return result
-
-        return ConstexprReprChildren(
-            tuple(item for _, item in items),
-            rebuild_repr_args,
-        )
+        items = cast(Callable[[], Iterable[tuple[object, object]]], repr_args)()
+        return tuple(item for _, item in items)
 
     if isinstance(value, Mapping):
-        items = tuple(value.items())
-        mapping_constructor = cast(
-            Callable[[Mapping[object, object]], object], type(value)
-        )
+        return tuple(item for pair in value.items() for item in pair)
 
-        def rebuild_mapping(children: tuple[object, ...]) -> object:
-            # children is the flattened key, value, key, value stream.
-            child_iter = iter(children)
-            sanitized = dict(zip(child_iter, child_iter))
-            if isinstance(value, collections.defaultdict):
-                return type(value)(value.default_factory, sanitized)
-            return mapping_constructor(sanitized)
-
-        return ConstexprReprChildren(
-            tuple(item for pair in items for item in pair),
-            rebuild_mapping,
-        )
-
-    if isinstance(value, list):
-        return ConstexprReprChildren(
-            tuple(value), lambda children: type(value)(children)
-        )
-
-    if isinstance(value, tuple) and hasattr(value, "_fields"):
-        return ConstexprReprChildren(
-            tuple(value),
-            lambda children: getattr(type(value), "_make")(children),  # noqa: B009
-        )
-
-    if isinstance(value, tuple):
-        return ConstexprReprChildren(tuple(value), tuple)
+    if isinstance(value, (list, tuple)):
+        return tuple(value)
 
     if isinstance(value, AbstractSet):
-        set_constructor = cast(Callable[[Iterable[object]], object], type(value))
-        return ConstexprReprChildren(tuple(value), set_constructor)
+        return tuple(value)
 
     return None
 
@@ -383,23 +315,11 @@ def _collect_importable_constexpr_types(
                 f"{type_module}.{type_qualname} is not importable. "
                 "Define constexpr config classes at module scope in an importable module."
             )
-        repr_qualname = repr_prefix.removesuffix("(")
-        if repr_qualname != type_qualname:
-            raise ImportError(
-                "Triton constexpr nested value type "
-                f"{type_module}.{type_qualname} uses the bare name "
-                f"{repr_qualname} in its repr, which generated code cannot import. "
-                "Use the type's qualified name in its repr."
-            )
-        if dataclasses.is_dataclass(value) and not isinstance(value, type):
-            for field in dataclasses.fields(value):
-                if field.repr and not field.init:
-                    raise ImportError(
-                        "Triton constexpr dataclass value type "
-                        f"{type_module}.{type_qualname} has repr-visible field "
-                        f"{field.name} with init=False, so its repr cannot be "
-                        "evaluated as a constructor call. Set repr=False or init=True."
-                    )
+        # Only the type's importability matters here: the default value is
+        # never repr'd into the generated module (its def-time expression is
+        # spliced verbatim), so the repr's spelling and constructor shape are
+        # irrelevant. See the bare-root-name contract at the call site in
+        # codegen/wrapper.py.
         root_name = type_qualname.split(".", 1)[0]
         if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES:
             raise ImportError(
@@ -428,7 +348,7 @@ def _collect_importable_constexpr_types(
 
     repr_children = get_constexpr_repr_children(value)
     if repr_children is not None:
-        for child in repr_children.values:
+        for child in repr_children:
             _collect_importable_constexpr_types(child, result, seen)
 
 

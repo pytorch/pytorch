@@ -324,12 +324,14 @@ class SerializedGraphModule:
 
 
 def serialize_graph_module(gm: torch.fx.GraphModule) -> SerializedGraphModule:
-    # NOTE: mutates the graph module
-    gm.meta = {}
-    for node in gm.graph.nodes:
-        # pyrefly: ignore [implicit-any]
-        node.meta = {}
-    return SerializedGraphModule(gm)
+    # GraphModule.__reduce__ pickles a copy of __dict__ plus the regenerated
+    # source, never node.meta, so only gm.meta needs dropping; drop it from that
+    # copy and leave the live module (which the lazy backward keeps using)
+    # untouched.
+    serialized = SerializedGraphModule(gm)
+    state, import_block = serialized.args
+    serialized.args = ({**state, "meta": {}}, import_block)
+    return serialized
 
 
 TForward = TypeVar("TForward", bound="InductorOutput[Any]")
