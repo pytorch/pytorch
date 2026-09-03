@@ -7,7 +7,6 @@ from torch import Tensor
 from torch._native.instrumentation import instrumented_cutedsl_cache
 from torch.nn.functional import ScalingType, SwizzleType
 
-from ._compile_with_safe_names import _compile_with_safe_names
 from .scaled_grouped_mm_prepare_metadata import (
     _compile_scaled_grouped_mm_prepare_metadata,
 )
@@ -687,27 +686,25 @@ def _compile_scaled_grouped_mm_blockscaled(
         uniform_mn_groups=uniform_mn_groups,
     )
 
-    compiled = _compile_with_safe_names(
-        lambda: cute.compile(
-            grouped_gemm,
-            initial_a=fake_a,
-            initial_b=fake_b,
-            initial_c=fake_c,
-            initial_sfa=fake_scale_a,
-            initial_sfb=fake_scale_b,
-            tensor_addr_global_scale=fake_global_scale_ptrs,
-            group_count=0,
-            problem_shape_mnkl=fake_problem,
-            strides_abc=fake_strides,
-            tensor_address_abc=fake_ptrs_abc,
-            tensor_address_sfasfb=fake_ptrs_scale,
-            estimate_total_num_clusters=cutlass.Int32(1),
-            total_num_clusters=fake_total_clusters,
-            tensormap_cute_tensor=fake_tensormap,
-            max_active_clusters=max_active_clusters,
-            stream=fake_stream,
-            options="--enable-assertions --enable-tvm-ffi",
-        )
+    compiled = cute.compile(
+        grouped_gemm,
+        initial_a=fake_a,
+        initial_b=fake_b,
+        initial_c=fake_c,
+        initial_sfa=fake_scale_a,
+        initial_sfb=fake_scale_b,
+        tensor_addr_global_scale=fake_global_scale_ptrs,
+        group_count=0,
+        problem_shape_mnkl=fake_problem,
+        strides_abc=fake_strides,
+        tensor_address_abc=fake_ptrs_abc,
+        tensor_address_sfasfb=fake_ptrs_scale,
+        estimate_total_num_clusters=cutlass.Int32(1),
+        total_num_clusters=fake_total_clusters,
+        tensormap_cute_tensor=fake_tensormap,
+        max_active_clusters=max_active_clusters,
+        stream=fake_stream,
+        options="--enable-assertions --enable-tvm-ffi",
     )
     return compiled
 

@@ -22,6 +22,7 @@
 # group search.
 
 from dataclasses import dataclass
+from inspect import signature
 
 import cutlass
 import cutlass.cute as cute
@@ -30,6 +31,13 @@ from cutlass.pipeline import PipelineClcFetchAsync, PipelineState
 from cutlass.utils import (
     ClcDynamicPersistentTileScheduler,
     ClcDynamicPersistentTileSchedulerParams,
+)
+
+
+# swizzle_size/raster_along_m only exist on the 4.5.2+ CLC scheduler.
+_CLC_PARAMS_TAKE_RASTER = (
+    "swizzle_size"
+    in signature(ClcDynamicPersistentTileSchedulerParams.__init__).parameters
 )
 
 
@@ -163,6 +171,13 @@ def make_clc_problem_shape(
             cutlass.Int32(total_num_clusters),
         )
     cluster_shape_mnk = (*cluster_shape_mn, 1)
+    if not _CLC_PARAMS_TAKE_RASTER:
+        if swizzle_size != 1 or not raster_along_m:
+            raise ValueError("CLC raster order requires CuTeDSL >= 4.5.2")
+        return ClcDynamicPersistentTileSchedulerParams(
+            problem_shape_ntile_mnl=problem_shape_ntile_mnl,
+            cluster_shape_mnk=cluster_shape_mnk,
+        )
     return ClcDynamicPersistentTileSchedulerParams(
         problem_shape_ntile_mnl=problem_shape_ntile_mnl,
         cluster_shape_mnk=cluster_shape_mnk,

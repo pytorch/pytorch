@@ -23,6 +23,28 @@ _SCHED_WANTS_CACHED_SHAPES = (
 _SCHED_NUM_BASE_VALUES = 19 if _SCHED_WANTS_CACHED_SHAPES else 11
 
 
+# CuTeDSL 4.5 added the overload taking separate a_dtype/b_dtype; 4.4 has only
+# the single-ab_dtype form, so passing both shifts every argument by one there.
+_MMA_WANTS_AB_DTYPE = (
+    "ab_dtype" in signature(sm100_utils.make_blockscaled_trivial_tiled_mma).parameters
+)
+
+
+def _make_blockscaled_tiled_mma(
+    ab_dtype, a_major_mode, b_major_mode, sf_dtype, sf_vec_size, cta_group, mma_tiler_mn
+):
+    dtypes = (ab_dtype,) if _MMA_WANTS_AB_DTYPE else (ab_dtype, ab_dtype)
+    return sm100_utils.make_blockscaled_trivial_tiled_mma(
+        *dtypes,
+        a_major_mode,
+        b_major_mode,
+        sf_dtype,
+        sf_vec_size,
+        cta_group,
+        mma_tiler_mn,
+    )
+
+
 def _zero_cached_problem_shapes():
     if not _SCHED_WANTS_CACHED_SHAPES:
         return []
@@ -238,9 +260,8 @@ class Sm100GroupedBlockScaledGemmKernel:
             cute.round_up(self.mma_inst_shape_mn[1], 128),
         )
 
-        tiled_mma = sm100_utils.make_blockscaled_trivial_tiled_mma(
+        tiled_mma = _make_blockscaled_tiled_mma(
             self.a_dtype,
-            self.b_dtype,
             self.a_major_mode,
             self.b_major_mode,
             self.sf_dtype,
@@ -249,9 +270,8 @@ class Sm100GroupedBlockScaledGemmKernel:
             self.mma_inst_shape_mn,
         )
 
-        tiled_mma_sfb = sm100_utils.make_blockscaled_trivial_tiled_mma(
+        tiled_mma_sfb = _make_blockscaled_tiled_mma(
             self.a_dtype,
-            self.b_dtype,
             self.a_major_mode,
             self.b_major_mode,
             self.sf_dtype,
@@ -432,9 +452,8 @@ class Sm100GroupedBlockScaledGemmKernel:
         )
         tensor_sfb = cute.make_tensor(tensor_sfb.iterator, sfb_layout)
 
-        tiled_mma = sm100_utils.make_blockscaled_trivial_tiled_mma(
+        tiled_mma = _make_blockscaled_tiled_mma(
             self.a_dtype,
-            self.b_dtype,
             self.a_major_mode,
             self.b_major_mode,
             self.sf_dtype,
@@ -443,9 +462,8 @@ class Sm100GroupedBlockScaledGemmKernel:
             self.mma_inst_shape_mn,
         )
 
-        tiled_mma_sfb = sm100_utils.make_blockscaled_trivial_tiled_mma(
+        tiled_mma_sfb = _make_blockscaled_tiled_mma(
             self.a_dtype,
-            self.b_dtype,
             self.a_major_mode,
             self.b_major_mode,
             self.sf_dtype,

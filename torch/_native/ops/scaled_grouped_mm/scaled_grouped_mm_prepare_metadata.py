@@ -1,7 +1,5 @@
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
-from ._compile_with_safe_names import _compile_with_safe_names
-
 
 @instrumented_cutedsl_cache("aten::_scaled_grouped_mm_v2")
 def _compile_scaled_grouped_mm_prepare_metadata(
@@ -331,52 +329,50 @@ def _compile_scaled_grouped_mm_prepare_metadata(
     fake_nclusters = make_fake_tensor(cutlass.Int32, (1,), stride=(1,))
     fake_stream = make_fake_stream(use_tvm_ffi_env_stream=True)
 
-    compiled = _compile_with_safe_names(
-        lambda: cute.compile(
-            _launch_scaled_grouped_mm_prepare_metadata,
-            dims=(
-                cute.sym_int(32),
-                cute.sym_int(32),
-                cute.sym_int(32),
-                cute.sym_int(32),
-            ),
-            base_ptrs=(
-                cute.sym_int(64),
-                cute.sym_int(64),
-                cute.sym_int(64),
-                cute.sym_int(64),
-                cute.sym_int(64),
-                cute.sym_int(64),
-            ),
-            offs=fake_offs,
-            logical_vals_per_elem=logical_vals_per_elem,
-            scale_vec_size=scale_vec_size,
-            sizeof_ab=sizeof_ab,
-            sizeof_scale_ab=sizeof_scale_ab,
-            sizeof_c=sizeof_c,
-            sizeof_global_scale=sizeof_global_scale,
-            stride_a_packed=(cute.sym_int(64), cute.sym_int(64)),
-            stride_b_packed=(cute.sym_int(64), cute.sym_int(64), cute.sym_int(64)),
-            stride_a=(cute.sym_int(64), cute.sym_int(64)),
-            stride_b=(cute.sym_int(64), cute.sym_int(64), cute.sym_int(64)),
-            stride_c=(cute.sym_int(64), cute.sym_int(64)),
-            stride_scale_a=(cute.sym_int(64), cute.sym_int(64)),
-            stride_scale_b=(cute.sym_int(64), cute.sym_int(64)),
-            a_is_2d=a_is_2d,
-            b_is_2d=b_is_2d,
-            transpose_ab=0,
-            cluster_tile_m=0,
-            cluster_tile_n=0,
-            out_mnkl=fake_mnkl,
-            out_ptrs_abc=fake_ptrs_abc,
-            out_ptrs_scale_ab=fake_ptrs_scale_ab,
-            out_ptrs_global_scale=fake_ptrs_global_scale,
-            out_strides_abc=fake_strides_abc,
-            out_nclusters=fake_nclusters,
-            num_blocks=1,
-            threads_per_block=threads_per_block,
-            stream=fake_stream,
-            options="--enable-assertions --enable-tvm-ffi",
-        )
+    compiled = cute.compile(
+        _launch_scaled_grouped_mm_prepare_metadata,
+        dims=(
+            cute.sym_int(32),
+            cute.sym_int(32),
+            cute.sym_int(32),
+            cute.sym_int(32),
+        ),
+        base_ptrs=(
+            cute.sym_int(64),
+            cute.sym_int(64),
+            cute.sym_int(64),
+            cute.sym_int(64),
+            cute.sym_int(64),
+            cute.sym_int(64),
+        ),
+        offs=fake_offs,
+        logical_vals_per_elem=logical_vals_per_elem,
+        scale_vec_size=scale_vec_size,
+        sizeof_ab=sizeof_ab,
+        sizeof_scale_ab=sizeof_scale_ab,
+        sizeof_c=sizeof_c,
+        sizeof_global_scale=sizeof_global_scale,
+        stride_a_packed=(cute.sym_int(64), cute.sym_int(64)),
+        stride_b_packed=(cute.sym_int(64), cute.sym_int(64), cute.sym_int(64)),
+        stride_a=(cute.sym_int(64), cute.sym_int(64)),
+        stride_b=(cute.sym_int(64), cute.sym_int(64), cute.sym_int(64)),
+        stride_c=(cute.sym_int(64), cute.sym_int(64)),
+        stride_scale_a=(cute.sym_int(64), cute.sym_int(64)),
+        stride_scale_b=(cute.sym_int(64), cute.sym_int(64)),
+        a_is_2d=a_is_2d,
+        b_is_2d=b_is_2d,
+        transpose_ab=0,
+        cluster_tile_m=0,
+        cluster_tile_n=0,
+        out_mnkl=fake_mnkl,
+        out_ptrs_abc=fake_ptrs_abc,
+        out_ptrs_scale_ab=fake_ptrs_scale_ab,
+        out_ptrs_global_scale=fake_ptrs_global_scale,
+        out_strides_abc=fake_strides_abc,
+        out_nclusters=fake_nclusters,
+        num_blocks=1,
+        threads_per_block=threads_per_block,
+        stream=fake_stream,
+        options="--enable-assertions --enable-tvm-ffi",
     )
     return compiled
