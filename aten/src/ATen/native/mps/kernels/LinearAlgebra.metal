@@ -2815,7 +2815,7 @@ kernel void luInvSmall(
 }
 
 #define INSTANTIATE_LU_INV_SMALL(N)                      \
-  template [[host_name("luInvSmall_float_" #N)]]         \
+  template [[host_name("luInvSmall_" #N)]]               \
   kernel void luInvSmall<N>(                             \
       device const float* A [[buffer(0)]],               \
       device float* X [[buffer(1)]],                     \

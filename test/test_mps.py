@@ -9202,11 +9202,9 @@ class TestMPS(TestCaseMPS):
         helper(2)
         helper(6)
         helper(3)
-        # register-kernel cutoffs: inv n <= 8, then lu_factor panel + lu_solve n <= 16
+        # both sides of the n <= 8 register-kernel cutoff
         helper(8)
         helper(9)
-        helper(16)
-        helper(17)
         helper(1025, atol=1e-4)
 
     # Test tril

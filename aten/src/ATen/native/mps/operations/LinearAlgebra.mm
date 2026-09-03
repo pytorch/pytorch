@@ -1181,7 +1181,7 @@ static void lu_inv_small_encode(const Tensor& A, const Tensor& result, const Ten
                                   .X_bstride = X.stride(0),
                                   .X_rstride = X.stride(1),
                                   .X_cstride = X.stride(2)};
-  auto pso = lib.getPipelineStateForFunc(fmt::format("luInvSmall_{}_{}", mps::scalarToMetalTypeString(A), n));
+  auto pso = lib.getPipelineStateForFunc(fmt::format("luInvSmall_{}", n));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
