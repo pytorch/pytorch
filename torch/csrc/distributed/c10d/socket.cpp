@@ -5,6 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <c10/util/error.h>
+#include <torch/csrc/distributed/c10d/TerminationSignal.hpp>
 #include <torch/csrc/distributed/c10d/socket.h>
 
 #include <optional>
@@ -110,7 +111,10 @@ void delay(std::chrono::milliseconds d) {
     // We don't care about error conditions other than EINTR since a failure
     // here is not critical.
     if (err == std::errc::interrupted) {
-      C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(err.value()));
+      if (c10d::detail::isTerminationSignalReceived()) {
+        C10_THROW_ERROR(
+            DistInterruptedError, c10::utils::str_error(err.value()));
+      }
     }
   }
 #endif
@@ -321,7 +325,10 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
   if (hnd == invalid_socket) {
     std::error_code err = getSocketError();
     if (err == std::errc::interrupted) {
-      C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(err.value()));
+      if (c10d::detail::isTerminationSignalReceived()) {
+        C10_THROW_ERROR(
+            DistInterruptedError, c10::utils::str_error(err.value()));
+      }
     }
 
     std::string msg{};
@@ -481,7 +488,12 @@ bool SocketImpl::waitForInput(std::chrono::milliseconds timeout) {
       C10D_WARNING(
           "waitForInput: poll for socket {} returned operation_in_progress before a timeout",
           *this);
-    } else if (err != std::errc::interrupted) {
+    } else if (err == std::errc::interrupted) {
+      if (c10d::detail::isTerminationSignalReceived()) {
+        C10_THROW_ERROR(
+            DistInterruptedError, c10::utils::str_error(err.value()));
+      }
+    } else {
       C10D_WARNING(
           "waitForInput: poll for socket {} failed with res={}, err={}.",
           *this,
@@ -922,7 +934,10 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(
   if (cr == ConnectResult::Error) {
     std::error_code err = getSocketError();
     if (err == std::errc::interrupted) {
-      C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(err.value()));
+      if (c10d::detail::isTerminationSignalReceived()) {
+        C10_THROW_ERROR(
+            DistInterruptedError, c10::utils::str_error(err.value()));
+      }
     }
 
     // Retry if the server is not yet listening or if its backlog is exhausted.
