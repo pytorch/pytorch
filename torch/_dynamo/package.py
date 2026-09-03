@@ -120,13 +120,11 @@ class FunctionPicklerBase(pickle.Pickler):
     decides what a rebuilt function carries; this class fixes HOW it is rebuilt
     so a fix in one pickler cannot be missed in the other.
 
-    A cell carries its contents, and a function everything beyond what
-    FunctionType() needs, as pickle STATE rather than as reduce args. pickle
-    memoizes an object only after saving its reduce args, so a value that
-    reaches back to the object being reduced -- a wrapper closing over itself,
-    `wrapper.cache = wrapper`, two module-scope wrappers in each other's
-    globals -- would otherwise recurse until RecursionError. State is applied
-    after memoization, so such references resolve to the pickle already built.
+    Defaults, __dict__, and the globals snapshot travel as pickle STATE, applied
+    after memoization, so `wrapper.me = wrapper` and module-scope cycles end.
+    A closure cell is a reduce ARGUMENT: a function closing over itself is
+    reduced twice, and only the C pickler's recursive-object fallback in
+    save_reduce drops the outer copy, so the pure-Python pickler is unsupported.
     """
 
     @classmethod
@@ -171,20 +169,31 @@ class FunctionPicklerBase(pickle.Pickler):
         return fn
 
     @classmethod
-    def _unpickle_fn_from_module(cls, module: str, *args: Any) -> types.FunctionType:
-        # NB module is not reliably where the function LIVES -- functools.wraps
-        # copies __module__ from the wrapped function -- so this scope can belong
-        # to a different file. A pickler that guards __globals__ sends the
-        # snapshot variant instead.
+    def _unpickle_fn_from_module(
+        cls,
+        module: str,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        # functools.wraps copies __module__, so this scope can be a different
+        # file from the one the function lives in; a pickler that guards
+        # __globals__ sends the snapshot variant instead.
         f_globals = importlib.import_module(module).__dict__
-        return cls._build_function(f_globals, module, *args)
+        return cls._build_function(f_globals, module, code, qualname, name, closure)
 
     @classmethod
-    def _unpickle_fn_from_snapshot(cls, module: str, *args: Any) -> types.FunctionType:
+    def _unpickle_fn_from_snapshot(
+        cls,
+        module: str,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
         # The scope arrives as pickle STATE, through _apply_function_state.
-        # Deliberately no import_module fallback: importing a module only to
-        # discard its dict is a load-time failure mode this branch is free of.
-        return cls._build_function({}, module, *args)
+        return cls._build_function({}, module, code, qualname, name, closure)
 
     @staticmethod
     def _apply_function_state(fn: types.FunctionType, state: tuple[Any, ...]) -> None:
@@ -215,7 +224,7 @@ class FunctionPicklerBase(pickle.Pickler):
         # wrong when that does not resolve back to the same function; those
         # carry the function and self explicitly.
         func = method.__func__
-        inner = getattr(method.__self__, func.__name__)
+        inner = getattr(method.__self__, func.__name__, None)
         if inspect.ismethod(inner):
             inner = inner.__func__
         if func is inner:

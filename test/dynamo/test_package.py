@@ -13,6 +13,7 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
+from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
@@ -536,8 +537,6 @@ def add(x, y):
         # convert_frame used to assert on the missing guards_state because it
         # checked the package it was handed, not the one the bypass had
         # cleared on the output graph.
-        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-
         def fn(x, cfg=UnpicklableConfig()):
             if cfg.flag == 2.0:
                 x = x + 1
@@ -558,6 +557,33 @@ def add(x, y):
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             self.assertEqual(compiled(x), expected)
         self.assertTrue(any("package bypass" in line for line in logs.output))
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_bypassed_recompile_drops_the_frames_earlier_variants(self):
+        # A bypass marks the frame's whole entry, so a variant that serialized
+        # fine earlier goes with it and install() skips the frame.
+        def fn(x, cfg=None):
+            if cfg is not None and cfg.flag == 2.0:
+                x = x + 1
+            return x.sin()
+
+        x = torch.randn(3)
+        expected = fn(x)
+        compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(compiled(x), expected)
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            compiled(x, UnpicklableConfig())
+        self.assertTrue(any("package bypass" in line for line in logs.output))
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertEqual(entry["backend_ids"], [])
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(RuntimeError, "Detected recompile"):
+                compiled(x)
+        self.assertEqual(compiled(x), expected)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
