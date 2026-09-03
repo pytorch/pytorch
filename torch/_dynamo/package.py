@@ -16,6 +16,7 @@ import functools
 import hashlib
 import importlib
 import inspect
+import io
 import itertools
 import json
 import logging
@@ -167,6 +168,28 @@ class SerializedCode:
         )
 
 
+class _Missing:
+    def __init__(self, reason: str | None = None) -> None:
+        self._reason = reason
+
+    def __repr__(self) -> str:
+        return f"_Missing({self._reason})"
+
+    def __str__(self) -> str:
+        return f"_Missing({self._reason})"
+
+    # Sometimes _Missing object is used as the callable with functools.partial,
+    # so we add a dummy __call__ here to bypass TypeError from partial().
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return _Missing()
+
+
+# The persistent id GuardsStatePickler.persistent_id emits for a pruned value
+# the C pickler never routes through reducer_override; _GuardsStateUnpickler
+# turns it back into _Missing. Any other persistent id in a guards state is a bug.
+_PRUNED_VALUE_PID = "missing values"
+
+
 class FunctionPicklerBase(pickle.Pickler):
     """Reducers shared by GuardsStatePickler and AOTCompilePickler.
 
@@ -179,8 +202,8 @@ class FunctionPicklerBase(pickle.Pickler):
     Defaults, __dict__, and the globals snapshot travel as pickle STATE, applied
     after memoization, so `wrapper.me = wrapper` and module-scope cycles end.
     A closure cell is a reduce ARGUMENT: a function closing over itself is
-    reduced twice, and only the C pickler's recursive-object fallback in
-    save_reduce drops the outer copy, so the pure-Python pickler is unsupported.
+    reduced twice, and save_reduce's recursive-object fallback (present in both
+    the C and the pure-Python pickler) drops the outer copy.
     """
 
     @classmethod
@@ -235,8 +258,14 @@ class FunctionPicklerBase(pickle.Pickler):
     ) -> types.FunctionType:
         # functools.wraps copies __module__, so this scope can be a different
         # file from the one the function lives in; a pickler that guards
-        # __globals__ sends the snapshot variant instead.
-        f_globals = importlib.import_module(module).__dict__
+        # __globals__ sends the snapshot variant instead. A module that only
+        # existed in sys.modules at save (exec-created, transformers_modules.*)
+        # gets an empty scope: a guard never calls the rebuilt function.
+        f_globals: dict[str, Any]
+        try:
+            f_globals = importlib.import_module(module).__dict__
+        except ImportError:
+            f_globals = {}
         return cls._build_function(f_globals, module, code, qualname, name, closure)
 
     @classmethod
@@ -319,6 +348,13 @@ class _GuardedCodeCacheEntry:
     dynamo_code: SerializedCode
 
 
+class _GuardsStateUnpickler(pickle.Unpickler):
+    def persistent_load(self, pid: Any) -> Any:
+        if pid != _PRUNED_VALUE_PID:
+            raise pickle.UnpicklingError(f"unknown guards state persistent id {pid!r}")
+        return _Missing(pid)
+
+
 def load_guards_state(guards_state: bytes) -> Any:
     try:
         import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
@@ -327,7 +363,7 @@ def load_guards_state(guards_state: bytes) -> Any:
     except ImportError:
         ctx = nullcontext()  # type: ignore[assignment]
     with ctx:
-        return pickle.loads(guards_state)
+        return _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
 
 
 def load_guard_manager(
@@ -406,25 +442,27 @@ def _scan_sys_modules_for_file(filename: str) -> str | None:
     Memoized because the fallback is O(len(sys.modules)) and this runs per
     inlined code object during capture, on the shared caching_precompile path.
 
-    A hit is cached outright. A MISS is only cached while sys.modules has not
-    changed size, because the usual reason for one is that the module has not
-    been imported yet -- caching that permanently, which functools.cache would,
-    silently drops the source checksum for every lazily imported file for the
-    rest of the process.
+    A hit is cached for as long as the key still names a module with this
+    file. A MISS is only cached while sys.modules has not changed size, because
+    the usual reason for one is that the module has not been imported yet --
+    caching that permanently, which functools.cache would, silently drops the
+    source checksum for every lazily imported file for the rest of the process.
 
     Length is an ABA check, not a version: equal-size churn between two calls
     keeps a stale miss, and ``del sys.modules[m]; import m`` -- the ordinary
     force-reimport idiom -- is exactly that. sys.modules exposes no mutation
     counter to use instead. A stale MISS costs this file's checksum, so a later
-    edit to it is not caught at load. A stale HIT is never revalidated at all
-    and is worse: delete the module without re-importing and ``add_code``
-    raises KeyError on the dead name. Both predate the memo; worth knowing when
-    hunting a checksum that should have fired.
+    edit to it is not caught at load; worth knowing when hunting a checksum
+    that should have fired.
     """
     generation = len(sys.modules)
     cached = _MODULE_KEY_BY_FILE.get(filename)
-    if cached is not None and (cached[1] is not None or cached[0] == generation):
-        return cached[1]
+    if cached is not None:
+        if cached[1] is None:
+            if cached[0] == generation:
+                return None
+        elif getattr(sys.modules.get(cached[1]), "__file__", None) == filename:
+            return cached[1]
     found = None
     for key, candidate in list(sys.modules.items()):
         if getattr(candidate, "__file__", None) == filename:
@@ -442,7 +480,9 @@ class SourceInfo:
         module_name = _defining_module_name(code)
         if module_name is None:
             return
-        module = sys.modules[module_name]
+        module = sys.modules.get(module_name)
+        if module is None:
+            return
         sourcelines, firstlineno = inspect.getsourcelines(code)
         lastlineno = firstlineno + len(sourcelines)
         source = "".join(sourcelines)
@@ -494,6 +534,9 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
+    # Why Dynamo gave up on this frame. Known at the bypass site and otherwise
+    # only reachable via tlparse, which leaves a refusal downstream guessing.
+    bypass_reason: str | None = None
 
 
 def _resume_global_renames(
@@ -702,14 +745,16 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
     """(machine, vec_isa, simdlen, march): what inductor bakes into CPU code.
 
     ``pick_vec_isa`` dry-compiles a probe with the C++ toolchain, so call this
-    only when the artifact can hold native CPU code. A host with no usable
-    compiler records None: it can neither produce nor run an inductor CPU kernel.
+    only when the artifact can hold native CPU code. None means the host has no
+    usable CPU codegen target: the probe raised, or it picked no valid vector
+    ISA (``pick_vec_isa`` never raises for a missing compiler; it returns
+    ``invalid_vec_isa``), so it can neither produce nor run a vectorized
+    inductor CPU kernel.
     """
-    from torch._inductor import config as inductor_config
-    from torch._inductor.cpu_vec_isa import pick_vec_isa
+    from torch._inductor import config as inductor_config, cpu_vec_isa
 
     try:
-        vec_isa = str(pick_vec_isa())
+        vec_isa = cpu_vec_isa.pick_vec_isa()
     except Exception:
         logger.warning(
             "Could not determine the CPU vector ISA, so no CPU codegen target "
@@ -717,13 +762,44 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
             exc_info=True,
         )
         return None
+    if isinstance(vec_isa, cpu_vec_isa.InvalidVecISA):
+        return None
 
     return (
         platform.machine(),
-        vec_isa,
+        str(vec_isa),
         inductor_config.cpp.simdlen,
         inductor_config.cpp.march,
     )
+
+
+def _cpu_codegen_target_problem(
+    cached: _CpuCodegenTarget, current: _CpuCodegenTarget | None
+) -> str | None:
+    """Why code built for ``cached`` cannot run on this host, or None.
+
+    Vector ISAs nest (an avx512 host runs avx2 code), so the artifact's ISA
+    only has to be one this host can build for; simdlen and march change the
+    emitted code and must match exactly.
+    """
+    if current is None:
+        return (
+            "This host has no usable CPU codegen target (no C++ toolchain or no "
+            "supported vector ISA), so it cannot run inductor CPU kernels."
+        )
+    from torch._inductor import cpu_vec_isa
+
+    machine, vec_isa, simdlen, march = cached
+    if machine != current[0]:
+        return f"The artifact was built for machine {machine!r}, this host is {current[0]!r}."
+    host_isas = sorted(str(isa) for isa in cpu_vec_isa.valid_vec_isa_list())
+    if vec_isa not in host_isas:
+        return f"The artifact needs vector ISA {vec_isa!r}; this host can build for {host_isas}."
+    if simdlen != current[2]:
+        return f"The artifact was built with simdlen={simdlen!r}, this host uses {current[2]!r}."
+    if march != current[3]:
+        return f"The artifact was built with march={march!r}, this host uses {current[3]!r}."
+    return None
 
 
 # Registered backends that generate no native code, so an artifact of theirs
@@ -821,20 +897,16 @@ class SystemInfo:
             check_codegen
             and device_type == "cpu"
             and self.cpu_codegen_target is not None
-            and self.cpu_codegen_target != other.cpu_codegen_target
         ):
-            # None on the current side means the probe could not run at all;
-            # None on the cached side is the "predates the field" case handled
-            # by the condition above and never reaches here.
-            hint = (
-                " The current target is unknown because no usable C++ compiler was found."
-                if other.cpu_codegen_target is None
-                else ""
+            problem = _cpu_codegen_target_problem(
+                self.cpu_codegen_target, other.cpu_codegen_target
             )
-            raise RuntimeError(
-                "Compile package was created with a different CPU codegen target: "
-                f"cached={self.cpu_codegen_target}, current={other.cpu_codegen_target}.{hint}"
-            )
+            if problem is not None:
+                raise RuntimeError(
+                    "Compile package was created for a CPU codegen target this host "
+                    f"cannot run: cached={self.cpu_codegen_target}, "
+                    f"current={other.cpu_codegen_target}. {problem}"
+                )
         if device_type in self.CHECK_GPUS:
             # Device EXISTENCE is not a native-code question: an artifact
             # holding cuda tensors cannot run without cuda whatever backend
@@ -1035,23 +1107,31 @@ def _compile_frame_context(
     return _ctx()
 
 
-# Installed-globals state of packages that died without uninstall(), awaiting
+@dataclasses.dataclass
+class _DeadPackageState:
+    installed_globals: dict[types.ModuleType, list[_InstalledGlobal]]
+    skipped_codes: list[types.CodeType]
+
+
+# Registry-held state of packages that died without uninstall(), awaiting
 # cleanup. The finalize callback can fire from GC at an arbitrary allocation --
 # including under _INSTALLER_REGISTRY_LOCK on this very thread -- so it must
 # never BLOCK on that lock; states it cannot clean immediately are parked here
 # and drained by the next install()/uninstall()/_claim_global(). deque.append is
 # atomic, so parking itself needs no lock.
-_DEAD_PACKAGE_GLOBALS: deque[dict[types.ModuleType, list[_InstalledGlobal]]] = deque()
+_DEAD_PACKAGES: deque[_DeadPackageState] = deque()
 
 
-def _cleanup_dead_package_globals(blocking: bool) -> None:
-    while _DEAD_PACKAGE_GLOBALS:
+def _cleanup_dead_packages(blocking: bool) -> None:
+    from torch._C._dynamo.eval_frame import compare_and_set_code_exec_strategy
+
+    while _DEAD_PACKAGES:
         if not _INSTALLER_REGISTRY_LOCK.acquire(blocking=blocking):
             return
         rebinds = []
         try:
             try:
-                installed_globals = _DEAD_PACKAGE_GLOBALS.popleft()
+                dead = _DEAD_PACKAGES.popleft()
             except IndexError:
                 return
             # Pruning ownerless frames and rebinding to the survivor is the
@@ -1060,7 +1140,7 @@ def _cleanup_dead_package_globals(blocking: bool) -> None:
             # from the dead owner's own finalize, its entry can still be
             # pending removal and len() would count it, but iteration yields
             # only live members.
-            for module, installed in installed_globals.items():
+            for module, installed in dead.installed_globals.items():
                 for installed_global in installed:
                     by_name = _GLOBAL_BINDINGS.get(module) or {}
                     stack = by_name.get(installed_global.name) or []
@@ -1069,6 +1149,14 @@ def _cleanup_dead_package_globals(blocking: bool) -> None:
                     if not stack:
                         by_name.pop(installed_global.name, None)
                     rebinds.append((module, installed_global, survivor))
+            for code in dead.skipped_codes:
+                state = _SKIP_INSTALLERS.get(code)
+                if state is None or any(True for _ in state.owners):
+                    continue
+                del _SKIP_INSTALLERS[code]
+                compare_and_set_code_exec_strategy(
+                    code, state.generation, state.prior_strategy
+                )
         finally:
             _INSTALLER_REGISTRY_LOCK.release()
         for module, installed_global, survivor in rebinds:
@@ -1085,23 +1173,32 @@ def _cleanup_dead_package_globals(blocking: bool) -> None:
 
 def _uninstall_abandoned_package(
     installed_globals: dict[types.ModuleType, list[_InstalledGlobal]],
+    skipped_codes: list[types.CodeType],
+    region_skipped_codes: list[types.CodeType],
     precompile_codes: list[types.CodeType],
     region_id: int,
     owner: object,
 ) -> None:
     # weakref.finalize callback for a CompilePackage that died while still
-    # installed: its precompile entries and installed globals must not
-    # outlive it, or every reload of one artifact grows the frame cache and
-    # the module globals without bound. GC can fire this mid-guard-evaluation
-    # or under this module's own locks, so nothing here may block: entry
-    # teardown parks in C++ when the cache lock is unavailable, and the
-    # globals cleanup parks above when the registry lock is.
-    from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_owner
+    # installed: its precompile entries, skip strategies and installed globals
+    # must not outlive it, or every reload of one artifact grows the frame
+    # cache and the module globals without bound. GC can fire this
+    # mid-guard-evaluation or under this module's own locks, so nothing here
+    # may block: entry teardown parks in C++ when the cache lock is
+    # unavailable, the strategy calls take only a C++ mutex no Python runs
+    # under, and the registry-held state parks above when the registry lock is.
+    from torch._C._dynamo.eval_frame import (
+        _reset_precompile_entries_for_owner,
+        set_code_region_exec_strategy,
+    )
 
     for code in precompile_codes:
         _reset_precompile_entries_for_owner(code, region_id, owner)
-    _DEAD_PACKAGE_GLOBALS.append(installed_globals)
-    _cleanup_dead_package_globals(blocking=False)
+    default_strategy = FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+    for code in region_skipped_codes:
+        set_code_region_exec_strategy(code, region_id, default_strategy)
+    _DEAD_PACKAGES.append(_DeadPackageState(installed_globals, skipped_codes))
+    _cleanup_dead_packages(blocking=False)
 
 
 class CompilePackage:
@@ -1126,6 +1223,7 @@ class CompilePackage:
         serialization_guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]]
         | None = None,
         explicit_capture: bool = False,
+        serving: bool = False,
         requires_native_backend_compatibility: bool = True,
     ) -> None:
         self._innermost_fn = None
@@ -1188,11 +1286,16 @@ class CompilePackage:
         self._resume_codes: set[types.CodeType] = set()
         # Runtime guards stay intact; this filter applies only to the guard
         # state recorded in the package.
-        self.serialization_guard_filter_fn = serialization_guard_filter_fn
+        self._serialization_guard_filter_fn = serialization_guard_filter_fn
         # A torch.compiler.precompile capture or serve, as opposed to the
-        # ambient caching_precompile cache: guards are built strictly, only the
-        # filtered copy is recorded, and the package is never auto-persisted.
-        self.explicit_capture = explicit_capture
+        # ambient caching_precompile cache: only the filtered copy of the guards
+        # is recorded, and the package is never auto-persisted.
+        self._explicit_capture = explicit_capture
+        # Serves a loaded artifact. A frame it does not cover still compiles
+        # and counts toward the recompile limit, but nothing will ever save
+        # this package, so its guards are neither serialized nor held to the
+        # strictness of a capture.
+        self._serving = serving
         self._initialized = False
         if fn is not None:
             self.initialize(fn, dynamo, ignore_inlined_sources)
@@ -1200,6 +1303,20 @@ class CompilePackage:
 
     def is_initialized(self) -> bool:
         return self._initialized
+
+    @property
+    def serialization_guard_filter_fn(
+        self,
+    ) -> Callable[[Sequence[Any]], Sequence[bool]] | None:
+        return self._serialization_guard_filter_fn
+
+    @property
+    def explicit_capture(self) -> bool:
+        return self._explicit_capture
+
+    @property
+    def serving(self) -> bool:
+        return self._serving
 
     def initialize(
         self,
@@ -1398,15 +1515,18 @@ class CompilePackage:
         needs_cpu_codegen = (
             self._requires_native_backend_compatibility and "cpu" in device_types
         )
-        current = SystemInfo.current(cpu_codegen=needs_cpu_codegen)
         if self._system_info is None:
-            self._system_info = current
+            self._system_info = SystemInfo.current(cpu_codegen=needs_cpu_codegen)
         elif needs_cpu_codegen:
+            # Re-read per cpu compile, not the whole SystemInfo: the toolchain
+            # probe is cached, and the inductor config it folds in can change
+            # between compiles of one process.
+            current_target = _current_cpu_codegen_target()
             if self._system_info.cpu_codegen_target is None:
                 self._system_info = dataclasses.replace(
-                    self._system_info, cpu_codegen_target=current.cpu_codegen_target
+                    self._system_info, cpu_codegen_target=current_target
                 )
-            elif self._system_info.cpu_codegen_target != current.cpu_codegen_target:
+            elif self._system_info.cpu_codegen_target != current_target:
                 # Never fail the compile: the ambient caching_precompile path
                 # runs through here. refuse_unserializable() refuses the
                 # mixed-target package at serialization boundaries instead.
@@ -1414,7 +1534,7 @@ class CompilePackage:
                     self._cpu_codegen_target_drift = (
                         "CPU codegen target changed during capture: "
                         f"first={self._system_info.cpu_codegen_target}, "
-                        f"current={current.cpu_codegen_target}"
+                        f"current={current_target}"
                     )
                     logger.warning(
                         "%s; this package will not be serialized.",
@@ -1422,12 +1542,8 @@ class CompilePackage:
                     )
         self._device_types.update(device_types)
 
-    def has_current_entry(self) -> bool:
-        return self._current_entry is not None
-
-    def current_entry(self) -> _DynamoCodeCacheEntry:
-        if self._current_entry is None:
-            raise AssertionError("_current_entry is not set in current_entry")
+    @property
+    def current_entry(self) -> _DynamoCodeCacheEntry | None:
         return self._current_entry
 
     def mark_current_entry_truncated(self) -> None:
@@ -1481,7 +1597,7 @@ class CompilePackage:
         """
         return (*self._codes, *self._installed_precompile_codes)
 
-    def bypass_current_entry(self) -> None:
+    def bypass_current_entry(self, reason: str | None = None) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
@@ -1489,6 +1605,7 @@ class CompilePackage:
         # would only be serialized for nothing.
         self._current_entry.backend_ids.clear()
         self._current_entry.guarded_codes.clear()
+        self._current_entry.bypass_reason = reason
 
     def add_resume_function(
         self,
@@ -1514,8 +1631,6 @@ class CompilePackage:
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_backend_id")
-        if self._current_entry.bypassed:
-            return
         if backend_id not in self._current_entry.backend_ids:
             self._current_entry.backend_ids.append(backend_id)
         if backend is not None:
@@ -1551,7 +1666,7 @@ class CompilePackage:
         self._claim_global(module, name, value)
 
     def _claim_global(self, module: types.ModuleType, name: str, value: Any) -> None:
-        _cleanup_dead_package_globals(blocking=True)
+        _cleanup_dead_packages(blocking=True)
         self._installed_globals.setdefault(module, []).append(
             _InstalledGlobal(name, value)
         )
@@ -1586,7 +1701,7 @@ class CompilePackage:
 
     def uninstall(self) -> None:
         with _PACKAGE_INSTALL_LOCK:
-            _cleanup_dead_package_globals(blocking=True)
+            _cleanup_dead_packages(blocking=True)
             self._uninstall()
 
     def _uninstall(self) -> None:
@@ -1726,7 +1841,7 @@ class CompilePackage:
         """
         deserialized_backends = self._deserialize_backends(backends)
         with _PACKAGE_INSTALL_LOCK:
-            _cleanup_dead_package_globals(blocking=True)
+            _cleanup_dead_packages(blocking=True)
             self._uninstall()
             # A fresh token per install: the uninstall above may have PARKED
             # its eviction (lock contended, or run from inside a lookup), and
@@ -1993,12 +2108,20 @@ class CompilePackage:
             self,
             _uninstall_abandoned_package,
             self._installed_globals,
+            self._skipped_codes,
+            self._region_skipped_codes,
             self._installed_precompile_codes,
             self._installed_precompile_region_id,
             self._install_owner,
         )
         # Not at interpreter exit: module dicts and the frame cache are torn down.
         self._uninstall_finalizer.atexit = False
+
+    def code_entries(self) -> Iterable["_DynamoCodeCacheEntry"]:
+        """The per-frame entries, for a caller that edits them before they are
+        packaged. Unlike cache_entry(), this does not require a complete
+        capture."""
+        return self._codes.values()
 
     def refuse_unserializable(self) -> None:
         """Raise PackageError if this package can never be serialized -- its

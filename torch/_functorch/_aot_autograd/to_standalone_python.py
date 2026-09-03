@@ -117,8 +117,7 @@ _COMPILE_LOCK = threading.RLock()
 # We do NOT reimplement any of this. We CAPTURE AOTAutograd's exact codegen'd wrapper
 # source together with the (pre-exec) globals dict each wrapper closed over: a
 # thread-local sink in codegen.py records one GeneratedSource per wrapper.
-# To trigger the capture we run AOTAutograd ourselves (under no_grad, the inference path --
-# see compile_to_python's ``grad_enabled`` for the one graph shape that needs grad on)
+# To trigger the capture we run AOTAutograd ourselves (under no_grad, the inference path)
 # with a capture-only inner compiler: it grabs the dense inner graph and returns a
 # placeholder callable, so AOTAutograd still codegen's the runtime-wrapper chain AROUND
 # that placeholder -- which is what the sink records. Inductor does not run in that pass;
@@ -870,20 +869,8 @@ def compile_to_python(
     example_inputs: Sequence[Any],
     *,
     options: dict[str, Any] | None = None,
-    grad_enabled: bool = False,
 ) -> tuple[str, bytes | None]:
     """Compile ``gm`` to ``(python_code, cache)``; see the module docstring.
-
-    ``grad_enabled`` runs the AOTAutograd capture pass under ``enable_grad`` instead of the
-    default ``no_grad``. Pass it ONLY for a graph that performs autograd INTERNALLY -- a
-    Dynamo graph captured with ``trace_autograd_ops``, whose traced ``torch.autograd.grad``
-    call needs a live autograd graph to differentiate and otherwise fails the capture pass
-    with "element 0 of tensors does not require grad". Such a graph is still an INFERENCE
-    graph at the AOT boundary (its backward lives inside the traced call, so AOTAutograd
-    still emits exactly one forward module). Do NOT pass it for an ordinary graph whose
-    INPUTS require grad: ``no_grad`` is what pins AOTAutograd to the inference path there,
-    and enabling grad would make it emit a joint forward+backward the standalone composer
-    cannot compose.
 
     THREADING: serialized by a process-global lock (``_COMPILE_LOCK``). The wrapper-source
     capture is thread-local, but the AOTAutograd pass and the inner inductor compile both
@@ -979,7 +966,7 @@ def compile_to_python(
             "from_graph" if _graph_has_dynamic_shapes(gm) else "from_example_inputs"
         )
         with (
-            torch.enable_grad() if grad_enabled else torch.no_grad(),
+            torch.no_grad(),
             _standalone_context(gm, shapes_mode, aot=False),
             capture_generated_sources(captured),
         ):
