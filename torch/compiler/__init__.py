@@ -8,8 +8,9 @@ from typing_extensions import ParamSpec
 import torch
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 
-# ``torch.compiler.precompile``: example_inputs=[(...), ...] is the one calling
-# convention. Calling it captures with the dynamo tracer, writes the artifact to
+# ``torch.compiler.precompile``: example_inputs=[(...), ...] is the calling
+# convention (the 2.14 positional spelling is kept for one release behind a
+# FutureWarning). Calling it captures with the dynamo tracer, writes the artifact to
 # files and returns the example calls' results; ``precompile.artifact(...)`` returns
 # the (python_code, cache) pair in memory for either tracer -- make_fx takes a single
 # call and produces a self-contained Python source plus an acceleration cache, dynamo
@@ -24,6 +25,7 @@ from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 from torch._precompile import (
     precompile as precompile,
     PrecompiledCallable as PrecompiledCallable,
+    PrecompiledRunnable as PrecompiledRunnable,
     PrecompileError as PrecompileError,
 )
 
@@ -54,6 +56,7 @@ __all__ = [
     "load_compiled_function",
     "precompile",
     "PrecompiledCallable",
+    "PrecompiledRunnable",
     "PrecompileError",
     "wrap_numpy",
     "is_compiling",
@@ -1008,7 +1011,15 @@ def load_compiled_function(
         file: A file-like object containing the serialized compiled function.
         f_globals: Optional global scope enclosing the compiled function. Guards
                    are evaluated against this dict by reference, so a global
-                   rebound after loading is seen on the next call.
+                   rebound after loading is seen on the next call, and a guarded
+                   global the dict lacks fails the guard (there is no fallback to
+                   the values serialized with the artifact). Loading mutates the
+                   dict: the ``__import_*`` module aliases recorded at capture
+                   are inserted, never overwriting an existing key. The compiled
+                   bytecode reads a copy of ``f_globals`` taken at load time, so
+                   a rebind after load changes which graph the guards select but
+                   not what a selected graph computes. (An ``nn.Module`` artifact
+                   differs: its bytecode reads the globals serialized at capture.)
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.

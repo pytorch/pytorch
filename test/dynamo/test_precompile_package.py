@@ -2,6 +2,7 @@
 
 import builtins
 import contextlib
+import copy
 import dataclasses
 import functools
 import gc
@@ -1955,7 +1956,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.skipTest("no C++ toolchain to determine a CPU codegen target")
         skewed = ("mips", "DEFAULT", None, "INVALID")
         captured = dataclasses.replace(serving, cpu_codegen_target=skewed)
-        with self.assertRaisesRegex(RuntimeError, "different CPU codegen target"):
+        with self.assertRaisesRegex(RuntimeError, "built for machine 'mips'"):
             captured.check_compatibility(serving, "cpu")
 
     def test_eager_artifact_accepts_cpu_codegen_target_skew(self):
@@ -2288,10 +2289,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             requires_native_backend_compatibility=True,
             system_info=dataclasses.replace(
                 SystemInfo.current(),
-                cpu_codegen_target=("mips", "DEFAULT", None, "INVALID", None, None),
+                cpu_codegen_target=("mips", "DEFAULT", None, "INVALID"),
             ),
         )
-        with self.assertRaisesRegex(RuntimeError, "different CPU codegen target"):
+        with self.assertRaisesRegex(RuntimeError, "built for machine 'mips'"):
             entry.check_versions()
 
     def test_codegen_skew_message_says_when_the_probe_could_not_run(self):
@@ -2306,12 +2307,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         cached = dataclasses.replace(
             SystemInfo.current(),
-            cpu_codegen_target=("x86_64", "AVX512", None, "avx512", None, None),
+            cpu_codegen_target=("x86_64", "AVX512", None, "avx512"),
         )
         with mock.patch.object(cpu_vec_isa, "pick_vec_isa", no_toolchain):
             current = SystemInfo.current()
         self.assertIsNone(current.cpu_codegen_target)
-        with self.assertRaisesRegex(RuntimeError, "no usable C\\+\\+ compiler"):
+        with self.assertRaisesRegex(RuntimeError, "no usable CPU codegen target"):
             cached.check_compatibility(current, "cpu")
 
     def test_caching_precompile_inductor_still_records_the_cpu_target(self):
@@ -3525,9 +3526,97 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         other_host = dataclasses.replace(entry.system_info, gpu_name="Some Other GPU")
         entry.system_info.check_compatibility(other_host, "mtia")
         self.assertIn(entry.device_type, SystemInfo.CHECK_GPUS)
-        if torch.cuda.is_available():
-            with self.assertRaisesRegex(RuntimeError, "different GPU"):
-                entry.system_info.check_compatibility(other_host, entry.device_type)
+        # The GPU-name check is what a surviving "mtia" would have skipped; it
+        # sits behind the availability check, so a cpu host reaches it mocked.
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            self.assertRaisesRegex(RuntimeError, "different GPU"),
+        ):
+            entry.system_info.check_compatibility(other_host, entry.device_type)
+
+    def test_a_served_call_allows_empty_graphs_only_for_its_own_frames(self):
+        # The package's callback compiles an uncovered no-op branch as a guarded
+        # variant instead of Dynamo's eager-only SkipFrame. An unrelated
+        # torch.compile'd function running eagerly inside the served call
+        # compiles on its own callback and must keep the SkipFrame.
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+        def unrelated(n):
+            return n + 1
+
+        compiled_unrelated = torch.compile(unrelated, backend="eager")
+
+        @torch._dynamo.disable
+        def eager_helper(n):
+            return compiled_unrelated(n)
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return (x + 1) * eager_helper(2)
+
+        model = Model()
+        x = torch.randn(4)
+        session = precompile_capture(model, backend="eager", dynamic=False)
+        with session as compiled:
+            compiled(x)
+        session.save(self.path(), require_no_dropped_guards=False)
+
+        torch._dynamo.reset()
+        with precompile_load(
+            model, self.path(), backend="eager", dynamic=False
+        ) as loaded:
+            self.assertEqual(loaded(x), model(x))
+            self.assertEqual(len(_debug_get_cache_entry_list(unrelated.__code__)), 0)
+
+    def test_hook_guards_dynamo_skips_are_not_policy_drops(self):
+        # Under skip_nnmodule_hook_guards, the default, GuardBuilder emits
+        # nothing for EMPTY_NN_MODULE_HOOKS_DICT, so there is no check for the
+        # invariance policy to drop and none to report as dropped.
+        def hook_slots(session):
+            return [
+                slot
+                for slot in session.summary().policy_dropped_guards
+                if slot[0] == "EMPTY_NN_MODULE_HOOKS_DICT"
+            ]
+
+        def capture():
+            session = precompile_capture(
+                PrecompileStockSequential(),
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(torch.randn(n, 8),) for n in (4, 5)],
+                prune_invariant_guards=True,
+            )
+            with session:
+                pass
+            return session
+
+        session = capture()
+        self.assertEqual(hook_slots(session), [])
+        self.assertTrue(session.summary().policy_dropped_guards)
+        torch._dynamo.reset()
+        with torch._dynamo.config.patch(skip_nnmodule_hook_guards=False):
+            self.assertTrue(hook_slots(capture()))
+
+    def test_source_graph_module_deepcopy_does_not_share_module_state(self):
+        from torch._dynamo.precompile_context import (
+            _EagerGraphSource,
+            _SourceGraphModule,
+        )
+
+        src = _EagerGraphSource(
+            code="def forward(self, x):\n    return x + self.b\n",
+            import_block="",
+            body={"_buffers": {"b": torch.ones(3)}},
+        )
+        original = _SourceGraphModule(src)
+        dup = copy.deepcopy(original)
+        dup.register_forward_hook(lambda *args: None)
+        dup._non_persistent_buffers_set.add("b")
+        self.assertEqual(len(original._forward_hooks), 0)
+        self.assertEqual(original._non_persistent_buffers_set, set())
+        self.assertIs(dup._src, original._src)
+        self.assertEqual(dup(torch.zeros(3)), torch.ones(3))
 
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_failed_cache_install_cold_falls_back_on_same_package(self):
@@ -3844,9 +3933,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             current, "cpu"
         )
         drifted = dataclasses.replace(
-            current, cpu_codegen_target=("mips", "DEFAULT", None, "INVALID", None, None)
+            current, cpu_codegen_target=("mips", "DEFAULT", None, "INVALID")
         )
-        with self.assertRaisesRegex(RuntimeError, "different CPU codegen target"):
+        with self.assertRaisesRegex(RuntimeError, "built for machine 'mips'"):
             drifted.check_compatibility(current, "cpu")
 
     def test_scan_sys_modules_retries_after_a_later_import(self):

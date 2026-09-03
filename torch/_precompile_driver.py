@@ -589,13 +589,11 @@ def _build_multigraph_forward():
         target = SerializedCode.to_code_object(frame["code"])
         arg_names = target.co_varnames[: target.co_argcount]
         is_entry = frame["is_entry"]
-        # A code object carries neither defaults nor closure values, so the
-        # entry gets them back from the artifact. Without the defaults an
-        # omitted parameter is missing from f_locals and every guard misses;
-        # without the closure a closure entry cannot be built at all.
+        # A code object carries no defaults, so the entry gets them back from
+        # the artifact; without them an omitted parameter is missing from
+        # f_locals and every guard misses. Capture refuses a closure entry.
         entry_defaults = entry_binding.get("defaults") if is_entry else None
         entry_kwdefaults = entry_binding.get("kwdefaults") if is_entry else None
-        entry_cells = entry_binding.get("closure") if is_entry else None
         variants = []
         for guarded in frame["variants"]:
             guards_state = load_guards_state(guarded["guards_state"])
@@ -646,16 +644,6 @@ def _build_multigraph_forward():
                 f"example covering it and recapture. Captured "
                 f"{len(variants)} variant(s)."
             )
-
-        if is_entry and target.co_freevars:
-            # The entry's cells come from the artifact, not from a caller: only
-            # a continuation is handed a closure per call.
-            bound = _bind(tuple(types.CellType(v) for v in (entry_cells or ())))
-
-            def entry_dispatch(*args, **kwargs):
-                return _dispatch_with(bound, args, kwargs)
-
-            return entry_dispatch, target
 
         if target.co_freevars:
             # Dynamo binds a continuation that closes over locals as a FACTORY
@@ -747,28 +735,33 @@ def _build_installed_forward():
     # install resolves every frame through sys.modules[...] directly, so each
     # module a captured frame came from has to be imported before it runs.
     for _code_entry in cache_entry.dynamo.codes:
-        importlib.import_module(_code_entry.python_module)
+        try:
+            importlib.import_module(_code_entry.python_module)
+        except ImportError as e:
+            raise _PrecompileError(
+                f"precompile: this artifact holds a frame captured from module "
+                f"{_code_entry.python_module!r}, which is not importable here "
+                f"({e}). Load it where that module is, or pass fn= to load()."
+            ) from e
 
     def _entry_function():
         # The entry records no qualname to resolve -- it is the callable handed
         # to precompile, not something reached from a module -- so rebuild a
-        # function around its code object. A code object carries neither
-        # defaults nor closure values, so they come back from the artifact the
-        # same way the standalone driver's _bind takes them; without them a
-        # defaulted parameter is simply absent at the served call and every
-        # guard misses. load(fn=...) lets a caller supply the real function.
+        # function around its code object. A code object carries no defaults,
+        # so they come back from the artifact; without them a defaulted
+        # parameter is simply absent at the served call and every guard misses.
+        # Capture refuses a closure entry. load(fn=...) lets a caller supply the
+        # real function.
         code_entry = cache_entry.dynamo.codes[0]
         code = SerializedCode.to_code_object(code_entry.python_code)
         binding = (
             pickle.loads(base64.b64decode(_ENTRY_BINDING)) if _ENTRY_BINDING else {}
         )
-        cells = binding.get("closure")
         f = types.FunctionType(
             code,
             sys.modules[code_entry.python_module].__dict__,
             code.co_name,
             binding.get("defaults"),
-            tuple(types.CellType(value) for value in cells) if cells else None,
         )
         kwdefaults = binding.get("kwdefaults")
         if kwdefaults:

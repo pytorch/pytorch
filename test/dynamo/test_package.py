@@ -6,8 +6,10 @@ import importlib
 import os
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
@@ -15,18 +17,28 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+from torch._C._dynamo.eval_frame import (
+    _debug_get_precompile_entries,
+    get_code_exec_strategy,
+)
 from torch._dynamo.exc import PackageError
 from torch._dynamo.package import (
+    _current_cpu_codegen_target,
+    _MODULE_KEY_BY_FILE,
+    _rename_globals,
+    _scan_sys_modules_for_file,
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
     SystemInfo,
 )
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.precompile_package import precompile_capture, precompile_load
 from torch._dynamo.testing import reduce_to_scalar_loss
+from torch._dynamo.types import FrameAction
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
+from torch._inductor import cpu_vec_isa
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -92,7 +104,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         # codegen target must be recorded and compared even though the
         # collapsed device_type reads as the accelerator. The graph is
         # fabricated (never run), so no accelerator is needed.
-        if SystemInfo.current().cpu_codegen_target is None:
+        if _current_cpu_codegen_target() is None:
             self.skipTest("no CPU codegen target on this host")
 
         def fn(x):
@@ -118,6 +130,94 @@ class TestPackage(torch._inductor.test_case.TestCase):
         with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
             entry.check_versions()
 
+    def test_cpu_codegen_target_accepts_an_isa_the_host_can_build(self):
+        # Vector ISAs nest: an avx512 host runs avx2 code, and the same hardware
+        # picks a different ISA under ATEN_CPU_CAPABILITY. The artifact's ISA
+        # only has to be one the host can build for; a superset host accepts a
+        # subset artifact, never the reverse, and the machine must match.
+        def check(cached_target, host_target, host_isas):
+            base = SystemInfo.current(cpu_codegen=False)
+            cached = dataclasses.replace(base, cpu_codegen_target=cached_target)
+            with (
+                patch.object(cpu_vec_isa, "valid_vec_isa_list", return_value=host_isas),
+                patch(
+                    "torch._dynamo.package._current_cpu_codegen_target",
+                    return_value=host_target,
+                ),
+            ):
+                cached.check_compatibility(SystemInfo.current())
+
+        avx2, avx512 = cpu_vec_isa.VecAVX2(), cpu_vec_isa.VecAVX512()
+        check(
+            ("x86_64", "avx2", None, None),
+            ("x86_64", "avx512", None, None),
+            [avx512, avx2],
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, r"needs vector ISA 'avx512'.*\['avx2'\]"
+        ):
+            check(
+                ("x86_64", "avx512", None, None), ("x86_64", "avx2", None, None), [avx2]
+            )
+        with self.assertRaisesRegex(
+            RuntimeError, "machine 'aarch64', this host is 'x86_64'"
+        ):
+            check(
+                ("aarch64", "asimd", None, None), ("x86_64", "avx2", None, None), [avx2]
+            )
+        with self.assertRaisesRegex(RuntimeError, "simdlen=256, this host uses None"):
+            check(("x86_64", "avx2", 256, None), ("x86_64", "avx2", None, None), [avx2])
+        with self.assertRaisesRegex(RuntimeError, "no usable CPU codegen target"):
+            check(("x86_64", "avx2", None, None), None, [])
+
+    def test_no_valid_vec_isa_records_no_cpu_codegen_target(self):
+        # pick_vec_isa never raises for a missing compiler; it returns
+        # invalid_vec_isa, which must read as "no target", not as a target
+        # named INVALID_VEC_ISA that only an equally broken host would match.
+        with patch.object(cpu_vec_isa, "valid_vec_isa_list", return_value=[]):
+            self.assertIsNone(_current_cpu_codegen_target())
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_eager_backend_entry_is_exempt_from_the_codegen_target(self):
+        def fn(x):
+            return x + 1
+
+        def custom_backend(gm, example_inputs):
+            return gm
+
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target",
+            side_effect=AssertionError("toolchain probe ran for an eager backend"),
+        ):
+            torch.compile(fn, backend="eager")(torch.randn(3))
+            (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        self.assertFalse(entry.requires_native_backend_compatibility)
+        self.assertIsNone(entry.system_info.cpu_codegen_target)
+
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        # A user's own callable may emit anything, so it counts as native.
+        torch.compile(fn, backend=custom_backend)(torch.randn(3))
+        (entry,) = PrecompileContext._dynamo_cache_entries.values()
+        self.assertTrue(entry.requires_native_backend_compatibility)
+
+    def test_loaded_eager_package_stays_exempt_on_resave(self):
+        def fn(x):
+            return x + 1
+
+        package = CompilePackage(fn, requires_native_backend_compatibility=False)
+        torch._dynamo.optimize(backend="eager", package=package)(fn)(torch.randn(3))
+        with patch(
+            "torch._dynamo.package._current_cpu_codegen_target",
+            side_effect=AssertionError("toolchain probe ran for an eager backend"),
+        ):
+            entry = package.cache_entry()
+            self.assertFalse(entry.requires_native_backend_compatibility)
+            self.assertIsNone(entry.system_info.cpu_codegen_target)
+            resaved = CompilePackage(fn, entry).cache_entry()
+        self.assertFalse(resaved.requires_native_backend_compatibility)
+        self.assertIsNone(resaved.system_info.cpu_codegen_target)
+
     def test_codegen_drift_refuses_serialization_not_introspection(self):
         # A drifted package can never be serialized, but building a
         # cache_entry() for introspection (summary(), backend enumeration,
@@ -129,13 +229,15 @@ class TestPackage(torch._inductor.test_case.TestCase):
         graph = torch.fx.Graph()
         graph.placeholder("x").meta["example_value"] = torch.ones(2)
         base = SystemInfo.current(cpu_codegen=False)
-        infos = [
-            dataclasses.replace(base, cpu_codegen_target=("x86_64", isa, 256, None))
-            for isa in ("avx2", "avx512")
-        ]
+        target = ("x86_64", "avx2", 256, None)
+        first = dataclasses.replace(base, cpu_codegen_target=target)
         package = CompilePackage(fn)
         with (
-            mock.patch.object(SystemInfo, "current", side_effect=infos),
+            mock.patch.object(SystemInfo, "current", return_value=first),
+            mock.patch(
+                "torch._dynamo.package._current_cpu_codegen_target",
+                return_value=("x86_64", "avx512", 256, None),
+            ),
             self.assertLogs("torch._dynamo.package", level="WARNING") as logs,
         ):
             package.update_device_type(graph)
@@ -721,6 +823,245 @@ def add(x, y):
         gc.collect()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), counts[0])
         pkg.uninstall()
+
+    def test_rename_globals_rewrites_nested_code(self):
+        def outer(x):
+            def inner(y):
+                return resume_at_16_3(y)  # noqa: F821
+
+            return inner(x) + resume_at_16_3(x)  # noqa: F821
+
+        old, new = "resume_at_16_3", "resume_at_16_3_0123456789abcdef_tok"
+        code = _rename_globals(outer.__code__, {old: new})
+        (inner_code,) = [c for c in code.co_consts if isinstance(c, types.CodeType)]
+        self.assertIn(new, code.co_names)
+        self.assertNotIn(old, code.co_names)
+        self.assertIn(new, inner_code.co_names)
+        self.assertNotIn(old, inner_code.co_names)
+        # Indices into co_names are preserved, so the bytecode is untouched and
+        # the renamed code follows the new binding.
+        self.assertEqual(code.co_code, outer.__code__.co_code)
+        renamed = types.FunctionType(code, {new: lambda y: y + 1})
+        self.assertEqual(renamed(1), 4)
+        # The original is not mutated, and renames that apply nowhere hand the
+        # same object back.
+        self.assertIn(old, outer.__code__.co_names)
+        self.assertIs(_rename_globals(outer.__code__, {"absent": "x"}), outer.__code__)
+
+    def _save_eager_package(self, fn, ctx, args, guard_filter_fn=None):
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=guard_filter_fn
+        )(fn)
+        compiled_fn(*args)
+        for backend_id, bknd in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, bknd)
+        ctx.save_package(package, self.path())
+        torch._dynamo.reset()
+
+    def test_two_packages_from_one_artifact_coexist(self):
+        # Two loads of one artifact serve the same frame at once: their
+        # precompile entries are told apart by owner and their resume functions
+        # by per-install names, so each is served while the other is live and
+        # unloads without disturbing it.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return y + x.cos()
+
+        def guard_filter_fn(guards):
+            unserializable = ("MODULE_MATCH", "CLOSURE_MATCH", "FUNCTION_MATCH")
+            return [guard.guard_type not in unserializable for guard in guards]
+
+        x = torch.randn(3, 2)
+        expected = fn(x)
+        self._save_eager_package(fn, ctx, (x,), guard_filter_fn)
+        module_dict = sys.modules[fn.__module__].__dict__
+        before = set(module_dict)
+
+        pkg_a, backends_a = ctx.load_package(fn, self.path())
+        pkg_a.install(backends_a)
+        count = len(_debug_get_precompile_entries(fn.__code__))
+        self.assertGreater(count, 0)
+        resume_a = {k for k in set(module_dict) - before if k.startswith("__resume_at")}
+        pkg_b, backends_b = ctx.load_package(fn, self.path())
+        pkg_b.install(backends_b)
+        resume_b = {k for k in set(module_dict) - before if k.startswith("__resume_at")}
+        resume_b -= resume_a
+        self.assertTrue(resume_a)
+        self.assertTrue(resume_b)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 2 * count)
+
+        compiled_fn = torch._dynamo.optimize(package=pkg_a)(fn)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), expected)
+        # a's unload takes only a's entries and a's resume functions. (An
+        # import alias both loads bind to the same module object still goes
+        # with the first unload, so b is not called here; teardown by owner
+        # count for shared names is a separate change.)
+        pkg_a.uninstall()
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), count)
+        self.assertFalse(resume_a & set(module_dict))
+        self.assertTrue(resume_b <= set(module_dict))
+        pkg_b.uninstall()
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        self.assertFalse(resume_b & set(module_dict))
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(RuntimeError, "Detected recompile"):
+                compiled_fn(x)
+
+    def test_uninstall_leaves_a_users_rebinding_alone(self):
+        # uninstall() pops a global only while it still holds the value this
+        # package installed, as the GC finalizer already did.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x + 1
+
+        self._save_eager_package(fn, ctx, (torch.randn(3, 2),))
+        module_dict = sys.modules[fn.__module__].__dict__
+        before = set(module_dict)
+        pkg, backends = ctx.load_package(fn, self.path())
+        pkg.install(backends)
+        (name,) = [
+            k for k in set(module_dict) - before if k.startswith("__compiled_fn")
+        ]
+        sentinel = object()
+        module_dict[name] = sentinel
+        self.addCleanup(module_dict.pop, name, None)
+        pkg.uninstall()
+        self.assertIs(module_dict[name], sentinel)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+    def test_system_info_is_read_once_per_package(self):
+        # SystemInfo.current probes the accelerator and the C++ toolchain, and
+        # update_device_type runs on every compile under caching_precompile.
+        def fn(x):
+            return x + 1
+
+        graph = torch.fx.Graph()
+        graph.placeholder("x").meta["example_value"] = torch.ones(2)
+        package = CompilePackage(fn)
+        with mock.patch.object(
+            SystemInfo, "current", wraps=SystemInfo.current
+        ) as current:
+            for _ in range(3):
+                package.update_device_type(graph)
+        self.assertEqual(current.call_count, 1)
+        self.assertIsNone(package._cpu_codegen_target_drift)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_unrecordable_package_warns_and_still_compiles(self):
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3)
+        with (
+            mock.patch.object(
+                DynamoCache, "record_package", side_effect=PackageError("drifted")
+            ),
+            self.assertLogs("torch._dynamo.convert_frame", level="WARNING") as logs,
+        ):
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+        self.assertTrue(
+            any("Not recording compile package: drifted" in m for m in logs.output)
+        )
+
+    def test_scan_sys_modules_revalidates_a_stale_hit(self):
+        # Renaming a module's sys.modules key keeps len(sys.modules) equal, so
+        # the ABA check alone would keep returning the dead key.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "_package_stale_hit.py")
+            with open(path, "w") as f:
+                f.write("def f(x):\n    return x + 1\n")
+            spec = importlib.util.spec_from_file_location("_package_stale_hit", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            sys.modules["_package_stale_hit"] = module
+            try:
+                self.assertEqual(_scan_sys_modules_for_file(path), "_package_stale_hit")
+                sys.modules["_package_stale_hit_renamed"] = sys.modules.pop(
+                    "_package_stale_hit"
+                )
+                self.assertEqual(
+                    _scan_sys_modules_for_file(path), "_package_stale_hit_renamed"
+                )
+                del sys.modules["_package_stale_hit_renamed"]
+                self.assertIsNone(_scan_sys_modules_for_file(path))
+            finally:
+                sys.modules.pop("_package_stale_hit", None)
+                sys.modules.pop("_package_stale_hit_renamed", None)
+                _MODULE_KEY_BY_FILE.pop(path, None)
+
+    def test_abandoned_package_restores_skipped_frames_on_gc(self):
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x.sin()
+
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(backend="eager", package=package)(fn)(torch.randn(3))
+        # A frame with no guarded code is what install() skip_code()s.
+        entry = package.cache_entry().codes[0]
+        entry.guarded_codes.clear()
+        entry.backend_ids.clear()
+        package.cached_backends.clear()
+        ctx.save_package(package, self.path())
+        torch._dynamo.reset()
+        del package
+        gc.collect()
+
+        code = fn.__code__
+        pkg, backends = ctx.load_package(fn, self.path())
+        pkg.install(backends)
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
+        del pkg, backends
+        gc.collect()
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
+
+    def test_explicit_capture_is_not_inferred_from_the_serialization_filter(self):
+        # The serialization filter and the capture mode are independent: a
+        # package can carry a filter without being an explicit capture, and be
+        # an explicit capture without one.
+        def fn(x):
+            return x + 1
+
+        def keep_all(entries):
+            return [True] * len(entries)
+
+        filtered = CompilePackage(fn, serialization_guard_filter_fn=keep_all)
+        self.assertFalse(filtered.explicit_capture)
+        self.assertIs(filtered.serialization_guard_filter_fn, keep_all)
+        explicit = CompilePackage(fn, explicit_capture=True)
+        self.assertTrue(explicit.explicit_capture)
+        self.assertIsNone(explicit.serialization_guard_filter_fn)
+
+    def test_serving_package_compiles_uncovered_calls_like_torch_compile(self):
+        # Outside serving() an uncovered call is an ordinary compile. The serve
+        # package is never saved, so its guards are neither serialized nor held
+        # to a capture's strictness: an unpicklable guarded value must not raise.
+        def fn(x, cfg=None):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            if cfg is not None and cfg.flag == 2.0:
+                y = y + 1
+            return y + x.cos()
+
+        x = torch.randn(3)
+        path = os.path.join(self.path(), "artifact")
+        session = precompile_capture(fn, backend="eager", dynamic=False)
+        with session as compiled:
+            compiled(x)
+        session.save(path)
+
+        torch._dynamo.reset()
+        loaded = precompile_load(fn, path, backend="eager", dynamic=False)
+        with loaded:
+            self.assertEqual(loaded(x), fn(x))
+            cfg = UnpicklableConfig()
+            self.assertEqual(loaded(x, cfg), fn(x, cfg))
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @parametrize("isolate_recompiles", (False, True))

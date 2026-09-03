@@ -47,8 +47,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
 ```{warning}
 `torch.compiler.precompile` and everything reached through it (`precompile.load`,
-`torch.compiler.PrecompiledCallable`, and the other objects it returns) is a
-prototype API. Signatures, error types and the artifact format may change between
+`torch.compiler.PrecompiledRunnable`, `torch.compiler.PrecompiledCallable`, and the
+other objects it returns) is a prototype API. Signatures, error types and the artifact format may change between
 releases without a deprecation cycle.
 ```
 
@@ -83,6 +83,19 @@ releases without a deprecation cycle.
    :param cache_path: File to write ``cache`` to; see ``artifact_path``.
    :returns: What each ``example_inputs`` call returned, in order.
    :raises PrecompileError: as :meth:`precompile.artifact` does.
+   :raises ValueError: if ``example_inputs`` is missing or empty, if only one of
+       ``artifact_path`` and ``cache_path`` is given, if neither is, or if both name the
+       same file.
+   :raises TypeError: if ``tracer`` or ``decompositions`` is passed without positional
+       example arguments (they belong to :meth:`precompile.artifact`), or if positional
+       example arguments are combined with ``example_inputs`` or the paths.
+
+   .. deprecated:: 2.15
+
+      The spelling 2.14 shipped, ``precompile(fn, *example_inputs, backend="inductor",
+      tracer="make_fx", decompositions=None)``, still returns the ``(python_code, cache)``
+      pair and emits a ``FutureWarning``; it is :meth:`precompile.artifact` called with
+      ``example_inputs=[example_inputs]``. Write that instead.
 
    Example::
 
@@ -108,8 +121,9 @@ releases without a deprecation cycle.
    pair to disk instead. ``tracer`` picks the capture front-end: ``"make_fx"`` (the
    default) is one non-strict ATen trace and takes exactly one call, while ``"dynamo"``
    takes as many as you give it and captures every graph-break continuation and guarded
-   recompilation those calls exercise, under full runtime guards.
-   This is execution-driven coverage, not an
+   recompilation those calls exercise; the artifact serializes the guards that pin what
+   its graphs specialized on and drops the rest (see ``guard_filter_fn`` and the
+   ``require_*`` gates). This is execution-driven coverage, not an
    exhaustive analysis: paths and values that no example executes are absent. ``fn`` is
    the whole computation, taking the model(s) as
    explicit arguments, e.g. ``lambda model, x: model(x)`` or a training step. The
@@ -132,7 +146,8 @@ releases without a deprecation cycle.
       model] in ``torch/_precompile.py``. ``torch.compiler.precompile`` is distinct from
       ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` caching mode).
 
-   If ``fn`` runs a backward, the artifact re-runs the whole forward and backward and
+   If ``fn`` runs a backward (pass ``training=True``; the example calls run under
+   ``torch.no_grad()`` otherwise), the artifact re-runs the whole forward and backward and
    scatters the resulting parameter gradients onto the runtime model's ``parameters()``
    ``.grad`` fields, accumulating (``p.grad += g``) exactly like eager ``.backward()`` --
    so keep your usual ``zero_grad()`` / ``optimizer.step()`` loop. Which params receive a
@@ -194,20 +209,20 @@ releases without a deprecation cycle.
        and overrides a lower ambient accumulated-recompile limit for this capture.
    :param dynamic: Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
    :param invariants: Optional path receiving the multi-graph invariant report.
-   :param require_complete: Refuse to produce an artifact whose capture was incomplete --
-       a call raised, a frame hit ``recompile_limit``, a frame exercised during capture
-       produced no guarded code, or no graph was compiled at all (every captured frame
-       was empty, as when the whole body sits behind ``torch._dynamo.disable``). Applies
-       only to ``tracer="dynamo"``.
-   :param require_no_risky_drops: Refuse to produce an artifact that dropped a guard which
-       can affect dispatch. Nothing checks such a guard at load, so a different value can
-       silently select the wrong graph instead of recompiling. Applies only to
-       ``tracer="dynamo"``.
-   :param require_no_dropped_guards: Refuse to produce an artifact that dropped ANY guard.
-       Off by default and deliberately so: every real model drops the identity guards
-       precompile cannot serialize. Applies only to ``tracer="dynamo"``.
-   :param training: Run the example calls with grad enabled, for a capture whose ``fn``
-       performs a backward.
+   :param require_complete: ``tracer="dynamo"`` only; defaults to ``True``. Refuse to
+       produce an artifact whose capture summary is not complete -- a frame that produced
+       no guarded code, hit the recompile limit, or was bypassed, or a capture that
+       compiled no graph at all. (An example call that raises propagates out of
+       ``precompile`` before any gate runs.)
+   :param require_no_risky_drops: ``tracer="dynamo"`` only; defaults to ``True``. Refuse
+       to produce an artifact that dropped a guard whose loss could change the answer
+       (every drop made by a custom ``guard_filter_fn`` counts as risky).
+   :param require_no_dropped_guards: ``tracer="dynamo"`` only; defaults to ``False``.
+       Refuse to produce an artifact that dropped any guard at all. Off by default because
+       every model drops identity guards that cannot be serialized.
+   :param training: Run the example calls with grad enabled and lower a backward into the
+       artifact; defaults to ``False`` (calls run under ``torch.no_grad()``, for either
+       ``tracer``). Required for a ``fn`` that runs a backward.
    :param keep_example_grads: Leave ``.grad`` exactly as the example calls left it.
        By default precompile snapshots and clears the example model's gradients before
        the calls and restores them afterwards, so capturing cannot double the gradients
@@ -338,12 +353,14 @@ releases without a deprecation cycle.
    :param artifact_path: File holding ``python_code``, as written by ``precompile``'s
        ``artifact_path``. Pass it together with ``cache_path``.
    :param cache_path: File holding ``cache``; see ``artifact_path``.
-   :param fn: The original callable, for an artifact that installs onto live code objects
-       rather than dispatching its own entry. Supply it before the first call; a
-       standalone artifact rejects ``fn=`` with ``PrecompileError``.
-   :returns: A runnable callable with the same calling convention as the captured ``fn``.
-       Arguments are matched positionally at both capture and load time; keyword-argument
-       calling conventions are not supported. A dynamo artifact with captured frames the
+   :param fn: For a dynamo artifact that serves by installing onto live code objects,
+       the function object to install onto, when it is not importable from where it was
+       captured (e.g. defined in ``__main__`` or a notebook); pass it before the first
+       call. A standalone artifact rejects ``fn=`` with ``PrecompileError``.
+   :returns: A :class:`torch.compiler.PrecompiledRunnable` with the same calling
+       convention as the captured ``fn``. A ``make_fx`` artifact takes positional arguments
+       only; a dynamo artifact also accepts keyword arguments, the way its
+       ``ExampleInput`` calls passed them. A dynamo artifact with captured frames the
        entry bytecode cannot reach on its own -- for example a graph break inside a child
        module's frame -- serves by INSTALLING onto the captured code objects: the returned
        callable mutates process state on first call (or on ``__enter__``) and supports
@@ -363,7 +380,8 @@ releases without a deprecation cycle.
    One capture call for ``example_inputs`` when positional arguments alone are not
    enough (``tracer="dynamo"`` only). A plain tuple in ``example_inputs`` is the
    positional arguments of one
-   call; wrap a call that needs keyword arguments in this instead::
+   call; wrap a call that needs keyword arguments in this instead, and call the loaded
+   artifact with the same keywords::
 
        torch.compiler.precompile.artifact(
            fn,
@@ -372,9 +390,18 @@ releases without a deprecation cycle.
                torch.compiler.precompile.ExampleInput(args=(x,), kwargs={"scale": 2}),
            ],
        )
+       loaded = torch.compiler.precompile.load(python_code, cache)
+       loaded(x, scale=2)
 
 .. autoexception:: torch.compiler.PrecompileError
    :members: result
+
+.. autoclass:: torch.compiler.PrecompiledRunnable
+   :members: unload
+
+   Every object :func:`precompile.load` returns is one of these, whichever of the
+   two shapes below the capture produced, so ``isinstance(loaded,
+   torch.compiler.PrecompiledRunnable)`` holds for both.
 
 .. autoclass:: torch.compiler.PrecompiledCallable
    :members: unload, serve_time_compiles
@@ -390,11 +417,11 @@ releases without a deprecation cycle.
 
    .. py:method:: summary()
 
-      A :class:`PrecompileSummary` for everything captured so far.
+      A :class:`precompile.PrecompileSummary` for everything captured so far.
 
    .. py:method:: invariants()
 
-      A tuple of :class:`FrameInvariants`, one per captured frame -- the guards that held
+      A tuple of :class:`precompile.FrameInvariants`, one per captured frame -- the guards that held
       across every captured variant of each frame.
 
    .. py:method:: calls()
@@ -406,10 +433,10 @@ releases without a deprecation cycle.
       Give back the live compiled region; the two files are unaffected, and closing twice
       is a no-op. Entering the object as a context manager closes it on exit.
 
-.. py:class:: PrecompileSummary
+.. py:class:: precompile.PrecompileSummary
 
-   Coverage and guard information from a capture, returned by ``summary()`` on a loaded
-   callable or an accumulating capture. Frozen dataclass; ``str(summary)`` renders a
+   Coverage and guard information from a capture, returned by
+   :meth:`precompile.AccumulatingCapture.summary`. Frozen dataclass; ``str(summary)`` renders a
    one-line digest and :attr:`complete` says whether the capture covers everything it
    exercised.
 
@@ -454,14 +481,14 @@ releases without a deprecation cycle.
       Whether the capture covers everything it exercised: false if any frame produced no
       guarded code, hit the recompile limit, was bypassed, or a capture call raised.
 
-.. py:class:: FrameInvariants
+.. py:class:: precompile.FrameInvariants
 
    Per-frame guard classification, returned by ``invariants()``. Frozen dataclass with the
    frame's name, ``filename``, ``lineno``, the number of ``variants`` seen, and three tuples
-   of :class:`GuardFact`: ``invariant`` (held identically across every variant), ``varying``
+   of :class:`precompile.GuardFact`: ``invariant`` (held identically across every variant), ``varying``
    (differed between variants), and ``undetermined`` (a single variant could not decide).
 
-.. py:class:: GuardFact
+.. py:class:: precompile.GuardFact
 
    One guard observed while compiling a frame variant. Frozen dataclass with ``guard_type``,
    ``source``, ``code`` (the rendered check parts), ``value``, and ``enforced`` (whether the
