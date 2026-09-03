@@ -45,6 +45,7 @@ import dataclasses
 import functools
 import hashlib
 import importlib.machinery
+import itertools
 import logging
 import os
 import pickle
@@ -132,11 +133,29 @@ def _capture_config(training: bool) -> Iterator[None]:
     # .backward(), so a training capture that never makes one forces it eager.
     depth = _CAPTURE_CONFIG_DEPTH.get()
     if depth == 0:
-        functorch_patch: dict[str, Any] = {"bundled_autograd_cache": True}
+        functorch_patch: dict[str, Any] = {
+            "bundled_autograd_cache": True,
+            # AOTAutogradCache refuses to KEY a graph it cannot address soundly
+            # -- a graph calling anything outside its allowlist -- and a refusal
+            # means it never saves, so the bundled artifact precompile needs is
+            # never recorded and the capture ends with nothing to serialize.
+            # That gate asks whether the key tells this graph's behaviour apart
+            # from another's, which a precompile artifact does not depend on: it
+            # is addressed by backend id and pinned to one torch build, so fall
+            # back to a nonce key rather than declining, as
+            # torch._dynamo.aot_compile and aot_compile_joint_with_descriptors
+            # already do.
+            "bypass_autograd_cache_key": True,
+        }
         if training:
             functorch_patch["force_non_lazy_backward_lowering"] = True
         stack = contextlib.ExitStack()
         stack.enter_context(functorch_config.patch(functorch_patch))
+        # allow_empty_graphs keeps an empty graph as a compiled frame so its
+        # guards reach the artifact. It also extends the lifetime of objects the
+        # frame holds: with it on, a weakref callback on a value the frame
+        # captured does not fire when the caller drops its reference
+        # (test/dynamo/test_repros.py ReproTests.test_weakref_callback).
         try:
             stack.enter_context(torch._dynamo.config.patch(allow_empty_graphs=True))
         except BaseException:
@@ -1234,6 +1253,34 @@ def _environment_rooted(entries: Sequence[GuardFilterEntry]) -> set[str]:
     return rooted
 
 
+def _grad_snapshot(
+    fn: object, examples: Sequence[ExampleInput | tuple[object, ...]]
+) -> dict[torch.Tensor, torch.Tensor | None]:
+    """Every tensor an example could accumulate a gradient into, and its .grad.
+
+    Keyed by the tensor itself so one entry survives a tensor appearing in
+    several examples; Tensor hashes by identity, which is what is wanted here.
+    Only a leaf or a retained-grad tensor has a .grad; reading it off any other
+    warns.
+    """
+    found: dict[torch.Tensor, torch.Tensor | None] = {}
+
+    def visit(value: object) -> None:
+        if isinstance(value, torch.Tensor):
+            if value.is_leaf or value.retains_grad:
+                found.setdefault(value, value.grad)
+        elif isinstance(value, torch.nn.Module):
+            for tensor in itertools.chain(value.parameters(), value.buffers()):
+                visit(tensor)
+
+    visit(fn if isinstance(fn, torch.nn.Module) else getattr(fn, "__self__", None))
+    for example in examples:
+        # An nn.Module is a pytree leaf, so this reaches module arguments too.
+        for leaf in tree_leaves(_example_call(example)):
+            visit(leaf)
+    return found
+
+
 def _unrebuildable_guards(code_entry: Any, cause: Exception) -> PackageError:
     """The error for a frame whose serialized guards will not rebuild.
 
@@ -1336,6 +1383,9 @@ class PrecompileSession:
         training: bool = False,
         keep_graphs: bool = False,
         prune_invariant_guards: bool = False,
+        keep_example_grads: bool = False,
+        collect_results: bool = False,
+        resumable: bool = False,
     ) -> None:
         # Not `example_inputs or ()`: truth-testing the caller's object turns the
         # likeliest mistake -- passing the tensors themselves instead of a
@@ -1365,6 +1415,12 @@ class PrecompileSession:
         # variant of every frame. Off by default: the capture session API
         # serializes everything serializable, and precompile() turns it on.
         self._prune_invariant_guards = prune_invariant_guards
+        # Retain what each example call returned, for precompile()'s on-disk
+        # form to hand back. Off by default: a capture() session outlives the
+        # calls, and holding every result would pin the caller's output tensors
+        # for the life of the session.
+        self._collect_results = collect_results
+        self._example_results: list[object] = []
         # The leaves every live guard build produced, to compare a rebuild
         # against; see _report_guard_drift.
         self._live_guard_leaves: set[tuple[str, str]] = set()
@@ -1378,6 +1434,19 @@ class PrecompileSession:
         # Retaining a graph deepcopies it for the session; the guard probe and
         # captures whose graphs are never rendered leave it off.
         self._keep_graphs = keep_graphs
+        # Leave .grad exactly as the example calls left it, for a caller whose
+        # example IS their live training step. Off by default: the documented
+        # flow is a warmup step and then a capture, where restoring is what
+        # keeps the capture from doubling the gradients it finds.
+        self._keep_example_grads = keep_example_grads
+        # An accumulating capture re-enters this session once per caller-driven
+        # call, so __exit__ must not tear the region down: the compiled variants
+        # are filed under isolate_recompiles_id, and lookup matches that id with
+        # no fallback, so a fresh region would make every prior variant
+        # invisible and recompile the world. Nothing can hand an existing id to
+        # torch._dynamo.optimize either -- it mints its own from a private
+        # counter -- so the only way to keep them is to keep the region.
+        self._resumable = resumable
         self._backend_obj: _PrecompileBackend | None = None
         self._policy_dropped_guards: set[tuple[str, str]] = set()
         # slot -> the check it rendered as, for every slot dropped by any
@@ -1389,6 +1458,9 @@ class PrecompileSession:
         self._risky_dropped_guards: set[tuple[str, str]] = set()
         self._warned_unrebuildable: set[tuple[str, str]] = set()
         self._capture_errors: list[str] = []
+        # How many capture errors predate the current cycle. Always 0 for a
+        # one-shot capture, which has exactly one cycle.
+        self._gate_error_mark = 0
         self._recorded_exception_keys: set[tuple[type[BaseException], str]] = set()
         # (co_name, co_filename, co_firstlineno) -> one fact set per compilation
         self._guard_sets: dict[tuple[str, str, int], list[frozenset[_GuardFact]]] = {}
@@ -1421,12 +1493,25 @@ class PrecompileSession:
         self._finished = False
 
     def _take_backend_artifacts(self) -> None:
-        from torch._dynamo.precompile_context import PrecompileContext
+        from torch._dynamo.output_graph import noop_graph_call
+        from torch._dynamo.precompile_context import (
+            EagerCacheArtifact,
+            PrecompileContext,
+        )
 
         for backend_id in self._package.cache_entry().backend_ids:
             artifact = PrecompileContext.take_artifact(backend_id)
             if artifact is not None:
                 self._backend_artifacts[backend_id] = artifact
+            elif self._package.cached_backends.get(backend_id) is noop_graph_call:
+                # output_graph short-circuits an empty graph to noop_graph_call
+                # without filing anything under its id, which the bytecode still
+                # names. Record the no-op so the served frame dispatches to it
+                # rather than running eager. Here rather than in
+                # _collect_backends: teardown clears cached_backends first.
+                self._backend_artifacts[backend_id] = EagerCacheArtifact(
+                    key=backend_id, content=noop_graph_call
+                )
 
     def _record_capture_error(self, error: BaseException) -> None:
         message = str(error)
@@ -1470,6 +1555,33 @@ class PrecompileSession:
                 self._package.cached_backends.clear()
             self._pgo_state.clear()
 
+    def retire(self) -> None:
+        """Final teardown for a RESUMABLE session: drain, then give back the
+        compiled region.
+
+        The accumulating capture's close() ends the session between calls, but
+        "between calls" is a per-thread notion: another thread can still be
+        inside a capture call, compiling against the region this tears down.
+        Same drain handshake as __exit__, owned here so no caller has to reach
+        into _closing/_active_calls by hand.
+        """
+        with self._state:
+            self._resumable = False
+            self._closing = True
+            try:
+                while self._active_calls:
+                    self._state.wait()
+            except BaseException:
+                self._closing = False
+                self._state.notify_all()
+                raise
+        try:
+            self._clear_runtime_cache()
+        finally:
+            self._finished = True
+            with self._state:
+                self._state.notify_all()
+
     def _call(self, *args: object, **kwargs: object) -> object:
         with self._state:
             if self._compiled is None or self._closing:
@@ -1496,7 +1608,16 @@ class PrecompileSession:
         if self._finished:
             raise RuntimeError("PrecompileSession cannot be re-entered")
         if self._stack is not None:
-            raise RuntimeError("PrecompileSession is already active")
+            raise PackageError(
+                "PrecompileSession is already active: a session runs one capture "
+                "block at a time, so serialize concurrent entries."
+            )
+        # Set by every exit and, on the one-shot path, never read again. A
+        # resumable session does re-enter, and _call refuses to run while it is
+        # set, so clearing it here is what makes the second cycle work at all.
+        self._closing = False
+        self._gate_error_mark = len(self._capture_errors)
+        grads: dict[torch.Tensor, torch.Tensor | None] = {}
         stack = contextlib.ExitStack()
         stack.enter_context(_capture_config(self._training))
         # Unioned into _live_guard_leaves when the cycle ends, rather than
@@ -1531,6 +1652,22 @@ class PrecompileSession:
                 _register_explicit_compile_region(isolate_recompiles_id, self)
                 self._optimized = optimize_ctx(self._fn)
             self._compiled = self._optimized
+            # A training example runs a real backward, which ACCUMULATES into
+            # the caller's tensors. Snapshot and clear first, restore in the
+            # finally below: capturing a model must not leave its gradients
+            # changed, and on the documented warmup-step-then-capture flow it
+            # would otherwise double them. make_fx does the same; see the
+            # rationale at torch._precompile._capture.
+            #
+            # Unless the caller says the example call IS their training step, in
+            # which case its gradients are the point and restoring discards the
+            # backward they just paid for -- silently, since the artifact is
+            # produced either way. Then precompile touches .grad not at all, and
+            # a pre-existing grad accumulates exactly as it would in eager.
+            if not self._keep_example_grads:
+                grads = _grad_snapshot(self._fn, self._example_inputs)
+                for tensor in grads:
+                    tensor.grad = None
             # Automatic examples are the ordinary no_grad inference path.
             # inference_mode is a distinct guarded state and is disabled here
             # even when the caller entered it before starting capture.
@@ -1556,10 +1693,12 @@ class PrecompileSession:
                     # AOTAutograd builds its CompiledFunction and the joint
                     # graph, which it only does when the outputs require grad.
                     with torch.inference_mode(False), torch.enable_grad():
-                        self._call(*args, **kwargs)
+                        result = self._call(*args, **kwargs)
                 else:
                     with torch.inference_mode(False), torch.no_grad():
-                        self._call(*args, **kwargs)
+                        result = self._call(*args, **kwargs)
+                if self._collect_results:
+                    self._example_results.append(result)
         except BaseException as e:
             self._record_capture_error(e)
             # A __enter__ that raises never gets its __exit__, so without this
@@ -1567,16 +1706,38 @@ class PrecompileSession:
             # the session is wedged: save() reports the block as still open.
             self._stack = None
             self._compiled = None
+            # Drain in-flight calls FIRST, before any teardown, exactly as
+            # __exit__ does: a concurrent resumable-session call can still be
+            # compiling against a borrowed cache entry, and both stack.close()
+            # and the region clear below mutate state it reads. The cleanup
+            # chain sits in the drain's finally so an interrupt raised out of
+            # wait() (e.g. KeyboardInterrupt) still tears the region down
+            # rather than leaking it until process exit.
             try:
-                stack.close()
+                with self._state:
+                    self._closing = True
+                    while self._active_calls:
+                        self._state.wait()
             finally:
                 try:
-                    self._take_backend_artifacts()
+                    stack.close()
                 finally:
-                    self._clear_runtime_cache()
-                    self._finished = True
+                    try:
+                        self._take_backend_artifacts()
+                    finally:
+                        try:
+                            self._clear_runtime_cache()
+                            self._finished = True
+                        finally:
+                            with self._state:
+                                self._state.notify_all()
             raise
         finally:
+            # The SAME grad object, not a copy: a caller holding a prior p.grad
+            # reference, or optimizer state keyed on grad identity, must not be
+            # invalidated by having been used as an example.
+            for tensor, grad in grads.items():
+                tensor.grad = grad
             # Guard/backend state is already in the package. Do not retain the
             # caller's potentially large CPU/GPU example tensors with the session.
             self._example_inputs = ()
@@ -1608,15 +1769,16 @@ class PrecompileSession:
                 try:
                     self._take_backend_artifacts()
                 finally:
-                    self._clear_runtime_cache()
-                    self._finished = True
+                    if not self._resumable:
+                        self._clear_runtime_cache()
+                        self._finished = True
                     with self._state:
                         self._state.notify_all()
         self._recorded_exception_keys.clear()
         # Before the report, so that it describes the artifact actually written.
         # The rebuildability check for the other path is in artifact()/save(),
         # where a caller can catch it like every other artifact-quality gate.
-        if self._prune_invariant_guards and exc[0] is None:
+        if exc[0] is None and self._prune_invariant_guards and not self._resumable:
             self._apply_guard_policy()
         if self._invariants_path is None:
             return
@@ -2133,6 +2295,16 @@ class PrecompileSession:
 
         return filter_fn
 
+    def example_results(self) -> list[object]:
+        """
+        What each ``example_inputs`` call returned, in order.
+
+        Only populated when ``_collect_results`` was set before ``__enter__``;
+        otherwise empty, because a session that outlives its calls must not pin
+        the caller's output tensors.
+        """
+        return list(self._example_results)
+
     def invariants(self) -> tuple[FrameInvariants, ...]:
         """
         Per frame, the guards that held in EVERY compiled variant of it.
@@ -2305,10 +2477,15 @@ class PrecompileSession:
         if not self._prune_invariant_guards:
             self._drop_unrebuildable_guards()
         summary = self.summary()
-        if require_complete and summary.capture_errors:
+        # On a resumable session, only the errors THIS cycle raised. A call that
+        # failed already raised to the caller, who saw it and carried on; making
+        # every later render refuse over it would freeze the artifact at the
+        # last good call for the rest of the loop.
+        fresh_errors = list(summary.capture_errors)[self._gate_error_mark :]
+        if require_complete and fresh_errors:
             raise PackageError(
                 "Precompilation is incomplete because capture raised: "
-                f"{list(summary.capture_errors)}. Re-run every example successfully, "
+                f"{fresh_errors}. Re-run every example successfully, "
                 "or pass require_complete=False to save the partial artifact."
             )
         if require_no_dropped_guards and summary.dropped_guards:
@@ -2540,6 +2717,53 @@ class PrecompileSession:
         keys = list(rendered)
         namespaced = namespace_module_names([rendered[k] for k in keys])
         return dict(zip(keys, namespaced)), refused
+
+    def snapshot_artifact(
+        self,
+        *,
+        require_complete: bool = True,
+        require_no_risky_drops: bool = True,
+        require_no_dropped_guards: bool = False,
+    ) -> tuple[str, bytes]:
+        """Render everything captured SO FAR, leaving this session able to capture more.
+
+        Same gates and the same rendering as :meth:`artifact`, but derived from
+        policy-filtered COPIES of the code entries, so the accumulated guard
+        state and the facts it was derived from survive intact for the next
+        call. See :meth:`_policy_filtered_codes` for why applying the policy to
+        the session itself would quietly destroy the artifact.
+        """
+        # A serialization boundary like artifact()/save(): a CPU codegen
+        # target that drifted between accumulate() calls makes the inductor
+        # bundle mix native code for two ISA targets, which can crash (illegal
+        # instruction) on the loading machine -- refuse at write time instead.
+        self._package.refuse_unserializable()
+        # The policy FIRST: it is what populates policy_dropped_guards, and the
+        # gates below read them. Gating first leaves require_no_risky_drops
+        # judging the previous render's numbers -- inert on the first call, and
+        # a capture that renders once therefore reports POLICY_DROPPED_GUARDS =
+        # [] while that same pass dropped every invariant slot.
+        codes = self._policy_filtered_codes()
+        summary = self._gated_summary(
+            require_complete=require_complete,
+            require_no_risky_drops=require_no_risky_drops,
+            require_no_dropped_guards=require_no_dropped_guards,
+            caller="snapshot_artifact()",
+        )
+        from torch._precompile import _build_multigraph_artifact
+
+        backends = self._collect_backends()
+        entry = dataclasses.replace(self._package.cache_entry(), codes=codes)
+        rendered, refused = self.rendered_backends(list(backends))
+        return _build_multigraph_artifact(
+            entry,
+            backends,
+            summary,
+            self._backend,
+            _entry_fn_of(self._fn),
+            rendered,
+            refused,
+        )
 
     def _collect_backends(self) -> dict[str, Any]:
         """The compiled subgraphs this capture produced, keyed by backend id."""
@@ -2836,6 +3060,8 @@ def precompile_capture(
     training: bool = False,
     keep_graphs: bool = False,
     prune_invariant_guards: bool = False,
+    keep_example_grads: bool = False,
+    collect_results: bool = False,
 ) -> PrecompileSession:
     r"""Begin capturing ``fn`` into a multi-graph artifact.
 
@@ -2872,6 +3098,8 @@ def precompile_capture(
         training=training,
         keep_graphs=keep_graphs,
         prune_invariant_guards=prune_invariant_guards,
+        keep_example_grads=keep_example_grads,
+        collect_results=collect_results,
     )
 
 

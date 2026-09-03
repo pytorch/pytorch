@@ -633,6 +633,18 @@ class PrecompileSession:
     def __exit__(self, *exc: object) -> None:
         self._call(self._session.__exit__, *exc)
 
+    def example_results(self) -> list[object]:
+        r"""example_results() -> list
+
+        Return what each ``example_inputs`` call returned, in order.
+
+        Empty unless the session was configured to retain them, which
+        :func:`torch.compiler.precompile` does for its on-disk form; a session
+        the caller drives itself outlives its calls, so retaining every result
+        would pin the caller's output tensors for the life of the session.
+        """
+        return self._call(self._session.example_results)
+
     def summary(self) -> PrecompileSummary:
         r"""summary() -> PrecompileSummary
 
@@ -2875,6 +2887,7 @@ class _PrecompileApi:
         require_no_risky_drops: bool = True,
         require_no_dropped_guards: bool = False,
         training: bool = False,
+        keep_example_grads: bool = False,
     ) -> tuple[str, bytes]:
         """Ahead-of-time precompile ``fn`` against example inputs.
 
@@ -2893,6 +2906,14 @@ class _PrecompileApi:
             example call passed positionally -- still works and is read as
             ``example_inputs=[example_inputs]``, with a ``FutureWarning``. Passing
             both forms at once raises ``ValueError``.
+
+        By default precompile snapshots and clears the example model's
+        gradients before the calls and restores them afterwards, so a capture
+        cannot double the gradients of the documented warmup-step-then-capture
+        flow. Pass ``keep_example_grads=True`` when the example call IS your
+        live training step and its gradients are what you are going to
+        optimize on; otherwise the backward is discarded and the artifact is
+        produced either way, so nothing tells you a batch went missing.
 
         ``tracer`` picks the capture front-end. ``"make_fx"`` (the default) is one
         non-strict ATen trace, so it takes exactly one call and refuses a longer
@@ -3136,11 +3157,12 @@ class _PrecompileApi:
                 or not require_complete
                 or not require_no_risky_drops
                 or require_no_dropped_guards
+                or keep_example_grads
             ):
                 raise ValueError(
-                    "guard_filter_fn, recompile_limit, dynamic, invariants and the "
-                    "require_* gates describe a multi-variant capture and apply "
-                    "only to tracer='dynamo'"
+                    "guard_filter_fn, recompile_limit, dynamic, invariants, "
+                    "keep_example_grads and the require_* gates describe a "
+                    "multi-variant capture and apply only to tracer='dynamo'"
                 )
             from torch._dynamo.precompile_package import _example_call
 
@@ -3199,8 +3221,9 @@ class _PrecompileApi:
                     example_inputs=example_inputs,
                     invariants=invariants,
                     training=bool(training),
-                    # Only what rendered_backends renders: an eager "backend" is
-                    # an fx graph with no source to emit.
+                    keep_example_grads=bool(keep_example_grads),
+                    # Retain graphs only where they will actually be rendered: an
+                    # eager "backend" is an fx graph with no source to emit.
                     keep_graphs=backend != "eager",
                     prune_invariant_guards=True,
                 )
