@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
     from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.types import IntLikeType
 
 
 """
@@ -1135,13 +1136,12 @@ class TracingContext:
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
         # Per output, what the compiler specified stride of the output is,
-        # or None if no stride is known.  This is always the HINT, it
-        # is never a SymInt (it would be better if it was a SymInt, but
-        # I can't conveniently get this from Inductor atm.  Also, be
-        # careful not to accidentally induce guards on the SymInt if
-        # you ever do change this in aot_autograd.py; you should check
-        # on permutations preferentially.)
-        self.output_strides: list[tuple[int, ...] | None] | None = None
+        # or None if no stride is known.  An entry may be a SymInt: under
+        # dynamic shapes inductor reports strides symbolically, see
+        # set_tracing_context_output_strides.  Be careful not to induce
+        # guards on those SymInts when consuming this in aot_autograd.py;
+        # you should check on permutations preferentially.
+        self.output_strides: list[tuple[IntLikeType, ...] | None] | None = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of
@@ -1276,7 +1276,7 @@ class TracingContext:
     @staticmethod
     @contextlib.contextmanager
     def report_output_strides() -> Generator[
-        list[tuple[int, ...] | None] | None, None, None
+        list[tuple[IntLikeType, ...] | None] | None, None, None
     ]:
         tc = TracingContext.try_get()
         if tc is None:
