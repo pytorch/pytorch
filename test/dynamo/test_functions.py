@@ -938,6 +938,192 @@ partial_fn = functools.partial(fn, scale=2)
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         compiled_fn()
 
+    @parametrize("dynamic", (False, True))
+    @parametrize("reverse", (False, True))
+    def test_infer_size_with_size_inputs(self, dynamic, reverse):
+        def fn(x, y):
+            a, b = (y, x) if reverse else (x, y)
+            shape = torch._C._infer_size(a.shape[:-1], b.shape[:-1])
+            return shape, torch.ones(shape, device=x.device)
+
+        x = torch.randn(2, 1, 3)
+        y = torch.randn(4, 3)
+
+        expected = fn(x, y)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=dynamic)
+        actual = compiled_fn(x, y)
+        self.assertIsInstance(actual[0], torch.Size)
+        self.assertEqual(actual, expected)
+        if dynamic:
+            x = torch.randn(5, 1, 3)
+            y = torch.randn(7, 3)
+            self.assertEqual(compiled_fn(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_infer_size_with_negative_one_dynamic_size(self):
+        def fn(y):
+            shape = torch._C._infer_size(
+                torch.Size([-1, 1]), torch.Size([1]) + y.shape[:1]
+            )
+            return shape, y * shape[0] + shape[1]
+
+        y = torch.randn(3)
+        expected = fn(y)
+        actual = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(y)
+        self.assertIsInstance(actual[0], torch.Size)
+        self.assertEqual(actual[0], torch.Size([-1, 3]))
+        self.assertEqual(actual, expected)
+
+    @torch._dynamo.config.patch(specialize_int=True)
+    def test_infer_size_with_direct_size_inputs(self):
+        def fn(a, b):
+            shape = torch._C._infer_size(a, b)
+            return shape, torch.ones(shape)
+
+        args = (torch.Size([2, 1]), torch.Size([1, 3]))
+        expected = fn(*args)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        self.assertIsInstance(actual[0], torch.Size)
+        self.assertEqual(actual, expected)
+
+    @parametrize(
+        "case,exception_type,expected_message",
+        (
+            (
+                "incompatible_shapes",
+                RuntimeError,
+                "The size of tensor a (3) must match the size of tensor b (5) "
+                "at non-singleton dimension 1",
+            ),
+            ("first_arg_type", RuntimeError, "expected a torch.Size as argument 1"),
+            ("second_arg_type", RuntimeError, "expected a torch.Size as argument 2"),
+            ("arity", RuntimeError, "expected exactly 2 arguments"),
+            ("kwargs", TypeError, "_infer_size() takes no keyword arguments"),
+            ("mixed_overflow", ValueError, "Overflow when unpacking long long"),
+            ("constant_overflow", ValueError, "Overflow when unpacking long long"),
+        ),
+    )
+    def test_infer_size_error_parity(self, case, exception_type, expected_message):
+        def fn(x):
+            try:
+                if case == "incompatible_shapes":
+                    torch._C._infer_size(torch.Size([2, 3]), torch.Size([4, 5]))
+                elif case == "first_arg_type":
+                    torch._C._infer_size((1,), x.shape)
+                elif case == "second_arg_type":
+                    torch._C._infer_size(x.shape, (1,))
+                elif case == "arity":
+                    torch._C._infer_size(x.shape)
+                elif case == "mixed_overflow":
+                    torch._C._infer_size(x.shape, torch.Size([2**63, 1]))
+                elif case == "constant_overflow":
+                    torch._C._infer_size(torch.Size([1]), torch.Size([2**63]))
+                else:
+                    torch._C._infer_size(a=x.shape, b=x.shape)
+            except exception_type as exc:
+                return x + 1, str(exc)
+            return x, "no error"
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(x)
+        self.assertEqual(expected, (x + 1, expected_message))
+        self.assertEqual(actual, expected)
+
+    @parametrize("dynamic", (False, True))
+    @parametrize("value", (2, True, False))
+    def test_infer_size_with_tensor_backed_size(self, dynamic, value):
+        def fn(x):
+            shape = torch._C._infer_size(torch.Size([x]), torch.Size([1]))
+            return shape, x + shape[0]
+
+        x = torch.tensor(value)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True, dynamic=dynamic)(x)
+        self.assertIsInstance(actual[0], torch.Size)
+        self.assertEqual(actual, expected)
+
+    @parametrize(
+        "dtype,shape",
+        (
+            (torch.float32, ()),
+            (torch.complex64, ()),
+            (torch.int64, (2,)),
+        ),
+    )
+    def test_infer_size_with_invalid_tensor_backed_size(self, dtype, shape):
+        def fn(x):
+            try:
+                torch._C._infer_size(torch.Size([x]), torch.Size([1]))
+            except TypeError as exc:
+                return str(exc)
+            return "no error"
+
+        x = torch.ones(shape, dtype=dtype)
+        expected = "torch.Size() takes an iterable of 'int' (item 0 is 'Tensor')"
+        self.assertEqual(fn(x), expected)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(x),
+            expected,
+        )
+
+    @parametrize("value", (2**63 - 1, 2**63, 2**64 - 1))
+    def test_infer_size_with_uint64_tensor_backed_size(self, value):
+        def fn(x):
+            try:
+                torch._C._infer_size(torch.Size([x]), torch.Size([1]))
+            except TypeError as exc:
+                return torch.ones(()), str(exc)
+            return torch.zeros(()), ""
+
+        x = torch.tensor(value, dtype=torch.uint64)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(actual, expected)
+
+    def test_infer_size_with_symbolic_size_overflow(self):
+        def fn(x):
+            try:
+                torch._C._infer_size(torch.Size([x.item() * 2]), torch.Size([1]))
+            except ValueError as exc:
+                return torch.ones(()), str(exc)
+            return torch.zeros(()), ""
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for value in (2, 2**62, -(2**62) - 1):
+            with self.subTest(value=value):
+                x = torch.tensor(value, dtype=torch.int64)
+                self.assertEqual(compiled_fn(x), fn(x))
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_infer_size_with_unhinted_size(self):
+        def fn(x):
+            shape = torch._C._infer_size(
+                torch.Size([x.nonzero().shape[0]]), torch.Size([1])
+            )
+            return shape, torch.ones(shape)
+
+        x = torch.tensor([0, 1, 0, 2])
+        with self.assertRaisesRegex(
+            Unsupported, "Unhinted data-dependent torch.Size element"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_infer_size_symbolic_error(self):
+        def fn(x, y):
+            shape = torch._C._infer_size(x.shape, y.shape)
+            return x + shape[0]
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "invalid broadcast shape at dimension 1"
+        ):
+            compiled_fn(torch.randn(2, 3), torch.randn(2, 5))
+
     @make_test
     def test_is_in_onnx_export(x, y):
         if torch.onnx.is_in_onnx_export():

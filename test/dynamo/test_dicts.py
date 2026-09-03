@@ -2628,7 +2628,13 @@ class DictTests(torch._dynamo.test_case.TestCase):
         graph = fx.Graph()
         x = graph.placeholder("x")
 
-        pure_call = graph.call_function(torch.relu, (x,))
+        # Reorderable call_function nodes must carry a tensor or symbolic
+        # example_value/val, as Dynamo attaches to every data-producing node.
+        def pure(node):
+            node.meta["example_value"] = torch.empty(0)
+            return node
+
+        pure_call = pure(graph.call_function(torch.relu, (x,)))
         self.assertTrue(_is_safe_to_reorder(pure_call))
 
         inplace_method = graph.call_method("add_", (x, x))
@@ -2641,10 +2647,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(_is_safe_to_reorder(iadd_node))
 
         # operator.invert is pure despite starting with "i"
-        invert_node = graph.call_function(operator.invert, (x,))
+        invert_node = pure(graph.call_function(operator.invert, (x,)))
         self.assertTrue(_is_safe_to_reorder(invert_node))
 
-        index_node = graph.call_function(operator.index, (x,))
+        index_node = pure(graph.call_function(operator.index, (x,)))
         self.assertTrue(_is_safe_to_reorder(index_node))
 
         # out= kwarg makes a node unsafe
@@ -2659,11 +2665,32 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(_is_safe_to_reorder(no_input_node))
 
         # _add_batch_dim / _remove_batch_dim are barriers
-        add_batch = graph.call_function(torch._add_batch_dim, (x, x, x))
+        add_batch = pure(graph.call_function(torch._add_batch_dim, (x, x, x)))
         self.assertFalse(_is_safe_to_reorder(add_batch))
 
-        remove_batch = graph.call_function(torch._remove_batch_dim, (x, x, x, x))
+        remove_batch = pure(graph.call_function(torch._remove_batch_dim, (x, x, x, x)))
         self.assertFalse(_is_safe_to_reorder(remove_batch))
+
+        # State functions that consume the token produced by their enter node
+        # (so the no-node-arguments heuristic misses them) are barriers:
+        # inference_mode via _side_effectful_functions, arbitrary ones (e.g.
+        # _sdpa_kernel, _maybe_exchange_device) via the lack of a tensor or
+        # symbolic example_value/val.
+        enter_node = graph.call_function(
+            torch.autograd.grad_mode._enter_inference_mode, (True,)
+        )
+        self.assertFalse(_is_safe_to_reorder(enter_node))
+        exit_node = graph.call_function(
+            torch.autograd.grad_mode._exit_inference_mode, (enter_node,)
+        )
+        self.assertFalse(_is_safe_to_reorder(exit_node))
+
+        def _fake_exit_fn(token):
+            pass
+
+        token_consumer = graph.call_function(_fake_exit_fn, (no_input_node,))
+        self.assertFalse(_is_safe_to_reorder(token_consumer))
+        self.assertTrue(_is_safe_to_reorder(pure(token_consumer)))
 
         # Nodes binding unbacked symbols are barriers: reordering them changes
         # the order the ShapeEnv resolves replacements (compile-time blowup).
@@ -2684,15 +2711,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(
             _is_safe_to_reorder(graph.call_function(torch._C._increment_version, (x,)))
         )
-
-        # inference_mode brackets its body. The exit consumes the enter's token,
-        # so it has a Node argument and looks pure; hoisting it above the body
-        # silently drops inference mode.
-        grad_mode = torch.autograd.grad_mode
-        enter = graph.call_function(grad_mode._enter_inference_mode, (True,))
-        self.assertFalse(_is_safe_to_reorder(enter))
-        exit_ = graph.call_function(grad_mode._exit_inference_mode, (enter,))
-        self.assertFalse(_is_safe_to_reorder(exit_))
 
         # A HOP whose subgraphs cannot be resolved is a barrier: its effects
         # could live anywhere this pass cannot see.
@@ -2769,7 +2787,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
             cond = torch.ops.higher_order.cond
             return gm.graph.call_function(cond, (x, attr, attr, (x,)))
 
-        pure = make(lambda sub, s: sub.call_function(torch.sin, (s,)))
+        # aten overloads, not bare python callables: main's value heuristic
+        # barriers any non-OpOverload node lacking example_value/val meta,
+        # which synthetic test nodes do not carry.
+        pure = make(lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,)))
         self.assertTrue(_is_safe_to_reorder(pure))
 
         mutating = make(lambda sub, s: sub.call_method("add_", (s, s)))
@@ -2777,7 +2798,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         # Effects that do not live in a subgraph keep the HOP pinned even when
         # every subgraph it does carry is pure.
-        not_allowlisted = make(lambda sub, s: sub.call_function(torch.sin, (s,)))
+        not_allowlisted = make(
+            lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,))
+        )
         not_allowlisted.target = torch.ops.higher_order.auto_functionalized_v2
         self.assertFalse(_is_safe_to_reorder(not_allowlisted))
 
