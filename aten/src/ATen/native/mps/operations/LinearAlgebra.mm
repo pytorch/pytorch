@@ -1121,7 +1121,10 @@ static void lu_inv_small_encode(const Tensor& A, const Tensor& result, const Ten
       auto enc = stream->commandEncoder();
       [enc setComputePipelineState:pso];
       mtl_setArgs(enc, A_, X, info, params);
-      mtl_dispatch1DJob(enc, pso, threads);
+      // using mtl_dispatch1DJob would launch a single threadgroup of up to 1024 threads
+      // all of which would be pinned to one GPU core, which is not ideal for such work
+      [enc dispatchThreads:MTLSizeMake(threads, 1, 1)
+          threadsPerThreadgroup:MTLSizeMake(c10::metal::simdgroup_size, 1, 1)];
     }
   });
 }
