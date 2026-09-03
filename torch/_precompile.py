@@ -520,7 +520,7 @@ class _InstalledArtifact:
             if self._check_fn is not None:
                 try:
                     self._check_fn(fn)
-                except PackageError as e:
+                except (PackageError, TypeError) as e:
                     raise PrecompileError(str(e)) from e
             self._fn = fn
 

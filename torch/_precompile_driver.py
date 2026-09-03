@@ -486,7 +486,7 @@ def _build_multigraph_forward():
     for _module, _first, _last, _checksum in globals().get("INLINED_SOURCES", ()):
         try:
             _hash = _hash_sourcelines(importlib.import_module(_module), _first, _last)
-        except (ImportError, OSError):
+        except (ImportError, OSError, TypeError):
             # The module is absent, or importable but source-less (.pyc-only):
             # drift is UNVERIFIABLE here, not detected. The traced code is baked
             # into the compiled graphs, and a module the bytecode actually needs

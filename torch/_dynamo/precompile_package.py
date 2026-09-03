@@ -231,7 +231,11 @@ def _capture_config(training: bool) -> Iterator[None]:
         # frame holds: with it on, a weakref callback on a value the frame
         # captured does not fire when the caller drops its reference
         # (test/dynamo/test_repros.py ReproTests.test_weakref_callback).
-        stack.enter_context(torch._dynamo.config.patch(allow_empty_graphs=True))
+        try:
+            stack.enter_context(torch._dynamo.config.patch(allow_empty_graphs=True))
+        except BaseException:
+            stack.close()
+            raise
         _CAPTURE_CONFIG_STACK.set(stack)
     _CAPTURE_CONFIG_DEPTH.set(depth + 1)
     try:
@@ -1101,6 +1105,10 @@ _INVARIANT_DROPPABLE_GUARD_TYPES = frozenset(
         "BUILTIN_MATCH",
         "CLASS_MATCH",
         "CLOSURE_MATCH",
+        # Transient per-tensor storage-sharing flag: it materializes on the
+        # first write and is not stable across a capture/serve boundary, so
+        # keeping it would fail on a semantically identical non-COW input and
+        # force a spurious serve-time recompile.
         "COW_TENSOR_MATCH",
         "DICT_VERSION",
         "DUAL_LEVEL",
@@ -3323,7 +3331,7 @@ class PrecompiledCallable:
     def __call__(self, *args: object, **kwargs: object) -> object:
         with self._state:
             if not self._loaded or self._unloading:
-                raise RuntimeError("PrecompiledCallable has been unloaded")
+                raise PackageError("PrecompiledCallable has been unloaded")
             if self._package.installed_entries_dropped():
                 raise PackageError(
                     "torch._dynamo.reset() cleared the precompiled code this "
@@ -3375,7 +3383,7 @@ class PrecompiledCallable:
     def __enter__(self) -> Self:
         with self._state:
             if not self._loaded or self._unloading:
-                raise RuntimeError("PrecompiledCallable has been unloaded")
+                raise PackageError("PrecompiledCallable has been unloaded")
         return self
 
     def __exit__(self, *exc: object) -> None:
