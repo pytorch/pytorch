@@ -956,18 +956,25 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
 
 static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, int64_t k, int64_t Bnum, bool adjoint) {
   auto stream = getCurrentMPSStream();
-  const auto useMpp = has_mpp();
+  // simdgroup_matrix and MPP matmul2d are float-only hardware paths, so the
+  // complex Schur update routes to the threadgroup-tiled scalar kernel.
+  const bool isComplex = c10::isComplexType(W.scalar_type());
+  const auto tname = mps::scalarToMetalTypeString(W);
+  const auto useMpp = has_mpp() && !isComplex;
   const auto un = static_cast<uint32_t>(n);
   const auto uk = static_cast<uint32_t>(k);
   const auto uB = static_cast<uint32_t>(Bnum);
   const auto N = un + uk;
 
-  auto pivotPSO = lib.getPipelineStateForFunc("luApplyPivotsRHS");
-  auto fwdPSO = lib.getPipelineStateForFunc(adjoint ? "trsmDiagSolveLU_lower_nonunit" : "trsmDiagSolveLU_lower_unit");
-  auto backPSO = lib.getPipelineStateForFunc(adjoint ? "trsmDiagSolveLU_upper_unit" : "trsmDiagSolveLU_upper_nonunit");
+  auto pivotPSO = lib.getPipelineStateForFunc(fmt::format("luApplyPivotsRHS_{}", tname));
+  auto fwdPSO = lib.getPipelineStateForFunc(
+      fmt::format("trsmDiagSolveLU_{}_{}", tname, adjoint ? "lower_nonunit" : "lower_unit"));
+  auto backPSO = lib.getPipelineStateForFunc(
+      fmt::format("trsmDiagSolveLU_{}_{}", tname, adjoint ? "upper_unit" : "upper_nonunit"));
   auto gemmBigPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_64_64_4") : nil;
   auto gemmSmallPSO = useMpp ? lib.getPipelineStateForFunc("gemmLU_32_64_2") : nil;
-  auto gemmSimdPSO = useMpp ? nil : lib.getPipelineStateForFunc("gemmSimdLU");
+  auto gemmSimdPSO = (!useMpp && !isComplex) ? lib.getPipelineStateForFunc("gemmSimdLU") : nil;
+  auto gemmTiledPSO = isComplex ? lib.getPipelineStateForFunc(fmt::format("gemmTiledLU_{}", tname)) : nil;
 
   @autoreleasepool {
     dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -1000,6 +1007,12 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
         const auto Tm = re - rs;
         setP4(rs, re, un, N);
         setP5(kc, kw, 0, 0);
+        if (isComplex) {
+          [enc setComputePipelineState:gemmTiledPSO];
+          [enc dispatchThreadgroups:MTLSizeMake(at::ceil_div(uk, 16u), at::ceil_div(Tm, 16u), uB)
+              threadsPerThreadgroup:MTLSizeMake(16, 16, 1)];
+          return;
+        }
         if (!useMpp) {
           [enc setComputePipelineState:gemmSimdPSO];
           [enc dispatchThreadgroups:MTLSizeMake(at::ceil_div(uk, 64u), at::ceil_div(Tm, 32u), uB)
@@ -1038,7 +1051,9 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
 
 static void mps_lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
   using namespace mps;
-  TORCH_CHECK(LU.scalar_type() == kFloat, "linalg.lu_solve(): MPS only supports float32.");
+  TORCH_CHECK(LU.scalar_type() == kFloat || LU.scalar_type() == kComplexFloat,
+              "linalg.lu_solve(): MPS only supports float32 and complex64, got ",
+              LU.scalar_type());
   if (B.numel() == 0) {
     return;
   }
