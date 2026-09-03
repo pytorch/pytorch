@@ -651,6 +651,25 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         y = fn(t)
         self.assertEqual(y, t.sin() + 1 + 2.0)
 
+    @parametrize(
+        "exc_args, expected",
+        [((404,), "404"), (("code", 500), "('code', 500)")],
+    )
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_classdef_exception_nonstring_args(self, exc_args, expected):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+
+                class A:
+                    raise ValueError(*exc_args)
+            except ValueError as e:
+                return t.sin() + (1 if str(e) == expected else 0)
+            return t.cos()
+
+        t = torch.randn(2)
+        self.assertEqual(fn(t), t.sin() + 1)
+
     def test_nn_module_getattr(self):
         class A:
             def __init__(self) -> None:

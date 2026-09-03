@@ -551,12 +551,13 @@ def raise_observed_exception(
     args: list[VariableTracker] | list[str] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
+    from .variables.base import VariableTracker
     from .variables.builder import SourcelessBuilder
 
     if args:
         args_ = [
-            SourcelessBuilder.create(tx, arg) if isinstance(arg, str) else arg
-            for arg in args
+            a if isinstance(a, VariableTracker) else SourcelessBuilder.create(tx, a)
+            for a in args
         ]
     else:
         args_: list[VariableTracker] = []
