@@ -57,6 +57,17 @@ template <
     typename ReturnType,
     typename... Ts,
     typename Function,
+    typename Accessor,
+    size_t... Is>
+ReturnType unpack(
+    Function function,
+    Accessor accessor,
+    std::index_sequence<Is...> /*unused*/);
+
+template <
+    typename ReturnType,
+    typename... Ts,
+    typename Function,
     typename Accessor>
 ReturnType unpack(Function function, Accessor accessor) {
   return ReturnType(unpack<ReturnType, Ts...>(
