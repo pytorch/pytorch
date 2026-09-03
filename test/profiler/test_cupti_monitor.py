@@ -33,6 +33,7 @@ from torch.profiler._cupti.observers.observation_window import WindowFinalizerMi
 from torch.testing._internal.common_cuda import (
     SM100OrLater,
     TEST_CUDA,
+    TEST_CUDA_GRAPH_TOOLS_ID,
     TEST_CUPTI as TEST_CUPTI_PYTHON,
     TEST_CUPTI_V13_3,
 )
@@ -100,6 +101,16 @@ def _isolated(test_fn):
             )
 
     return wrapper
+
+
+def _fresh_event_node_recorder(test):
+    """The ``_EventNodeRecorder`` singleton, reset first (and again at teardown) so the test
+    starts from an unarmed recorder with an empty map and leaves none behind."""
+    from torch.profiler._cupti._event_nodes import _EventNodeRecorder, _reset_for_test
+
+    _reset_for_test()
+    test.addCleanup(_reset_for_test)
+    return _EventNodeRecorder()
 
 
 @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
@@ -216,6 +227,46 @@ class TestCuptiRecords(TestCase):
         self.assertFalse(m._started)
         self.assertIsNone(m.push_external_correlation_id())
         self.assertIsNone(m.pop_external_correlation_id())
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_kernel_latency_timestamps_track_the_field_union(self):
+        # The per-subscriber latency-timestamp attribute is only wanted while some
+        # observer selects the QUEUED kernel field. It used to latch on and never
+        # come back off, so one observer asking for QUEUED left the feature enabled
+        # for the rest of the process -- including after that observer unregistered.
+        from cupti.cupti import ActivityKind
+
+        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cupti.records import Kernel
+
+        m = CuptiMonitor()
+        calls = []
+
+        with patch.object(
+            type(m._cupti),
+            "enable_kernel_latency_timestamps",
+            lambda _self, _sub, enable: calls.append(enable) or True,
+        ):
+            timing = m.register(
+                {ActivityKind.CONCURRENT_KERNEL: [Kernel.START.id, Kernel.END.id]},
+                lambda columns: None,
+            )
+            self.assertEqual(calls, [], "no observer wants QUEUED yet")
+            self.assertFalse(m._latency_enabled)
+
+            queued = m.register(
+                {ActivityKind.CONCURRENT_KERNEL: [Kernel.START.id, Kernel.QUEUED.id]},
+                lambda columns: None,
+            )
+            self.assertEqual(calls, [True], "QUEUED selected -> enable once")
+            self.assertTrue(m._latency_enabled)
+
+            # Dropping the QUEUED observer must turn it back off, not leave it armed.
+            m.unregister(queued)
+            self.assertEqual(calls, [True, False])
+            self.assertFalse(m._latency_enabled)
+
+            m.unregister(timing)
 
     def test_external_correlation_id_mirror(self):
         # The native per-thread mirror of CUPTI's external-correlation stack lets
@@ -413,6 +464,414 @@ class TestCuptiRecords(TestCase):
             json.loads(both["kernel"]["metadata"][0]), {"func": "ReduceScatter"}
         )
 
+    def test_recorder_keeps_node_id_order_and_refuses_opaque_bodies(self):
+        # The recorder takes event nodes in the order get_graph_data() returns them (node-id
+        # == node-creation order) with no DAG-derived sorting: sync id follows node id, not
+        # execution order, so ordering by dependency depth mislabels nodes on any fork/join
+        # graph. Graphs with child/conditional bodies are refused outright -- get_graph_data()
+        # does not descend into them, so their event nodes are invisible here. Pure host-side.
+        def node(ntype, tid, deps):
+            return {"node_type": ntype, "tools_id": tid, "dependencies": deps}
+
+        class FakeGraph:
+            def __init__(self, nodes):
+                self._nodes = nodes
+                self._recorded_exec_ids: set[int] = set()
+
+            def get_graph_data(self):
+                return {"nodes": self._nodes, "exec_graph_id": 7}
+
+        # Fork/join: the deeper branch's event node is created FIRST (lower node id) but sits
+        # at greater dependency depth. Node-id order must win.
+        deep_first = [
+            node("kernel", (7 << 32) | 0, []),
+            node("kernel", (7 << 32) | 1, [0]),
+            node("kernel", (7 << 32) | 2, [1]),
+            node("event_record", (7 << 32) | 3, [2]),  # deep branch, created first
+            node("event_record", (7 << 32) | 4, [0]),  # shallow branch, created second
+        ]
+        r = _fresh_event_node_recorder(self)
+        r._on_instantiate(FakeGraph(deep_first))
+        self.assertEqual(
+            r.graph_event_nodes[7], [(7 << 32) | 3, (7 << 32) | 4]
+        )  # NOT depth order, which would invert these
+
+        # No event nodes -> nothing tracked at all.
+        r2 = _fresh_event_node_recorder(self)
+        r2._on_instantiate(FakeGraph([node("kernel", (7 << 32) | 0, [])]))
+        self.assertNotIn(7, r2.graph_event_nodes)
+
+        # Opaque bodies -> refuse, even though a top-level event node is present.
+        for opaque in ("child_graph", "conditional"):
+            r3 = _fresh_event_node_recorder(self)
+            r3._on_instantiate(
+                FakeGraph(
+                    [
+                        node("event_record", (7 << 32) | 0, []),
+                        node(opaque, (7 << 32) | 1, [0]),
+                    ]
+                )
+            )
+            self.assertNotIn(7, r3.graph_event_nodes, opaque)
+
+    def test_event_node_recorder_purge(self):
+        # The recorder holds each graph's ordered event nodes; purge drops a destroyed graph.
+        r = _fresh_event_node_recorder(self)
+        r.graph_event_nodes = {7: [11, 13], 8: None}
+        r.purge_exec_ids({7})
+        self.assertNotIn(7, r.graph_event_nodes)
+        self.assertIn(8, r.graph_event_nodes)
+
+    def test_graph_recorders_are_singletons(self):
+        # Both instantiate-hook recorders are process-wide singletons (like CuptiMonitor): a
+        # later construction hands back the one instance WITHOUT re-initializing it, which is
+        # what lets an observer created mid-run (at prepare_trace) share the map a recorder
+        # armed before warm-up capture has been filling.
+        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
+        from torch.profiler._cupti._graph_deps import (
+            _GraphDependencyRecorder,
+            _reset_for_test,
+        )
+
+        r = _fresh_event_node_recorder(self)
+        r.graph_event_nodes[7] = [11]
+        self.assertIs(_EventNodeRecorder(), r)
+        self.assertEqual(_EventNodeRecorder().graph_event_nodes[7], [11])
+
+        _reset_for_test()
+        self.addCleanup(_reset_for_test)
+        d = _GraphDependencyRecorder()
+        d.deps[9] = [8]
+        self.assertIs(_GraphDependencyRecorder(), d)
+        self.assertEqual(_GraphDependencyRecorder().deps[9], [8])
+
+    def test_resolve_window(self):
+        # The window orchestration: keys each launch by correlation id -> exec graph id (from a
+        # graphed work record's graph_node_id), orders that launch's event records by sync id,
+        # and resolves each record to its node POSITIONALLY. Pure (no numpy/CUDA).
+        from torch.profiler._cupti._event_nodes import resolve_window
+
+        exec_id = 7
+        n0, n1 = (exec_id << 32) | 11, (exec_id << 32) | 13
+        r = _fresh_event_node_recorder(self)
+        r.graph_event_nodes = {exec_id: [n0, n1]}
+
+        corr_exec_pairs = [
+            (900, (exec_id << 32) | 55)
+        ]  # a graphed kernel in launch 900
+        # Two event records for launch 900, delivered out of sync-id order.
+        event_rows = [(900, 2), (900, 1)]
+        resolved = resolve_window(r, corr_exec_pairs, event_rows)
+        self.assertEqual(resolved, [n1, n0])  # sync 2 -> node1, sync 1 -> node0
+
+        # A recycled CUDA event object would give both records the same event_id; positional
+        # resolution keys on sync-id order, not the object, so the two records still map to
+        # distinct nodes instead of collapsing onto the first.
+        second = resolve_window(r, corr_exec_pairs, [(900, 10), (900, 20)])
+        self.assertEqual(second, [n0, n1])
+
+        # A launch whose event-record count does not match the graph's stays unresolved.
+        self.assertEqual(resolve_window(r, corr_exec_pairs, [(900, 1)]), [None])
+
+        # Event records with no matching graphed work record (unknown launch) stay unresolved.
+        self.assertEqual(resolve_window(r, [], [(0, 0)]), [None])
+
+    def test_add_graph_event_node_spans(self):
+        # The window-bucketed event-node span frame keeps only rows resolved to a graph node
+        # (graph_node_id != 0) whose device timestamp is in [start, boundary), and builds point
+        # spans with graph_id = node_id >> 32. Pure host-side.
+        import numpy as np
+
+        from torch.profiler._cupti.observers.profiler import _add_graph_event_node_spans
+
+        node = (7 << 32) | 11
+        cols = {
+            "cuda_event": {
+                "event_id": np.array([5, 6, 7], dtype=np.int64),
+                # row 1 resolved+in-window; row 2 unresolved; row 3 resolved but out of window
+                "graph_node_id": np.array([node, 0, node], dtype=np.int64),
+                "start_ns": np.array([1500, 1500, 9999], dtype=np.int64),
+                "end_ns": np.array([1500, 1500, 9999], dtype=np.int64),
+                "device_id": np.array([0, 0, 0], dtype=np.int64),
+                "context_id": np.array([1, 1, 1], dtype=np.int64),
+                "stream_id": np.array([7, 7, 7], dtype=np.int64),
+                "correlation_id": np.array([900, 900, 901], dtype=np.int64),
+                "annotation": np.array([None, None, None], dtype=object),
+            }
+        }
+        _add_graph_event_node_spans(cols, start_ns=1000, boundary_ns=2000)
+        gen = cols["graph_event_node"]
+        self.assertEqual(
+            gen["graph_node_id"].tolist(), [node]
+        )  # only the first row survives
+        self.assertEqual(gen["graph_id"].tolist(), [7])
+        self.assertEqual(gen["start_ns"].tolist(), [1500])
+        self.assertEqual(gen["stream_id"].tolist(), [7])
+
+        # No resolved rows -> no frame added at all.
+        cols2 = {
+            "cuda_event": {
+                "graph_node_id": np.array([0], dtype=np.int64),
+                "start_ns": np.array([1500], dtype=np.int64),
+                "end_ns": np.array([1500], dtype=np.int64),
+                "device_id": np.array([0], dtype=np.int64),
+                "context_id": np.array([0], dtype=np.int64),
+                "stream_id": np.array([0], dtype=np.int64),
+                "correlation_id": np.array([0], dtype=np.int64),
+                "annotation": np.array([None], dtype=object),
+            }
+        }
+        _add_graph_event_node_spans(cols2, 1000, 2000)
+        self.assertNotIn("graph_event_node", cols2)
+
+    def test_add_graph_event_node_spans_attaches_lane_columns(self):
+        # The span frame is synthesized after the _COLUMN_BUILDERS lane pass has run, so it must
+        # attach its own (logical_lane, lane_name); without them the export's reassignment is
+        # gated off and the event node strands on its capture stream while the collective's
+        # kernel moves to the process-group lane.
+        import numpy as np
+
+        from torch.profiler._cupti.observers.profiler import (
+            _add_graph_event_node_spans,
+            LOGICAL_LANE_BASE,
+        )
+
+        node = (7 << 32) | 11
+
+        def cols_for():
+            return {
+                "cuda_event": {
+                    "event_id": np.array([5], dtype=np.int64),
+                    "graph_node_id": np.array([node], dtype=np.int64),
+                    "start_ns": np.array([1500], dtype=np.int64),
+                    "end_ns": np.array([1500], dtype=np.int64),
+                    "device_id": np.array([0], dtype=np.int64),
+                    "context_id": np.array([1], dtype=np.int64),
+                    "stream_id": np.array([377], dtype=np.int64),
+                    "correlation_id": np.array([900], dtype=np.int64),
+                    "annotation": np.array([None], dtype=object),
+                }
+            }
+
+        # A resolver moves the node off its capture stream onto the named logical lane.
+        cols = cols_for()
+        _add_graph_event_node_spans(
+            cols, 1000, 2000, lane_resolver=lambda g: (61, "DP")
+        )
+        gen = cols["graph_event_node"]
+        # the resolver's ordinal 61, placed in the reserved lane range at assignment time
+        self.assertEqual(gen["logical_lane"].tolist(), [LOGICAL_LANE_BASE + 61])
+        self.assertEqual(gen["lane_name"].tolist(), ["DP"])
+        self.assertEqual(gen["stream_id"].tolist(), [377])  # capture stream preserved
+
+        # No resolver -> no lane columns, and the export leaves the row on its CUDA stream.
+        plain = cols_for()
+        _add_graph_event_node_spans(plain, 1000, 2000)
+        self.assertNotIn("logical_lane", plain["graph_event_node"])
+
+    def test_attach_event_node_ids_uses_installed_resolver(self):
+        # The annotation column must come from the installed resolver (the same one the GPU-op
+        # column builders use), not a direct read of torch.cuda._graph_annotations -- an
+        # installed resolver may merge a node's annotation list into one dict, and only a dict
+        # gets spread into the exported event's args.
+        import numpy as np
+
+        from torch.profiler._cupti.observers.profiler import _attach_event_node_ids
+
+        exec_id = 7
+        n0 = (exec_id << 32) | 11
+        r = _fresh_event_node_recorder(self)
+        r.graph_event_nodes = {exec_id: [n0]}
+
+        columns = {
+            "kernel": {
+                "correlation_id": np.array([900], dtype=np.int64),
+                "graph_node_id": np.array([(exec_id << 32) | 55], dtype=np.int64),
+            },
+            "cuda_event": {
+                "event_id": np.array([5], dtype=np.int64),
+                "correlation_id": np.array([900], dtype=np.int64),
+                "cuda_event_sync_id": np.array([1], dtype=np.int64),
+            },
+        }
+        seen: list[int] = []
+
+        def resolver(g):
+            seen.append(g)
+            return {"roofline_id": "fsdp.all_gather_collective", "stream": 61}
+
+        _attach_event_node_ids(columns, r, resolver)
+        ce = columns["cuda_event"]
+        self.assertEqual(ce["graph_node_id"].tolist(), [n0])
+        self.assertEqual(seen, [n0])
+        self.assertEqual(
+            ce["annotation"].tolist(),
+            [{"roofline_id": "fsdp.all_gather_collective", "stream": 61}],
+        )
+
+    def test_graph_event_node_rendered_and_arrowed(self):
+        # A resolved graph event-record node renders as an "EventRecord" point span under cat
+        # "graph_event_node" on its stream lane, and (with graph_deps) is a dependency-arrow
+        # endpoint: an arrow flows from the producing kernel to the event node. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _FLOW_CATEGORY,
+            _trace_window_entries,
+        )
+
+        def i64(*v):
+            return np.array(v, dtype=np.int64)
+
+        KA = (1 << 32) | 101  # producing kernel node
+        EN = (1 << 32) | 102  # event-record node depending on it
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000),
+                "end_ns": i64(2000),
+                "device_id": i64(0),
+                "context_id": i64(1),
+                "stream_id": i64(7),
+                "correlation_id": i64(11),
+                "graph_id": i64(1),
+                "graph_node_id": i64(KA),
+                "name": np.array(["producer"], dtype=object),
+                "annotation": np.array([None], dtype=object),
+                "grid_x": i64(1),
+                "grid_y": i64(1),
+                "grid_z": i64(1),
+                "block_x": i64(1),
+                "block_y": i64(1),
+                "block_z": i64(1),
+                "registers_per_thread": i64(0),
+                "static_shared_memory": i64(0),
+                "dynamic_shared_memory": i64(0),
+                "priority": i64(0),
+                "queued": i64(0),
+                "channel": i64(0),
+                "channel_type": i64(0),
+            },
+            "graph_event_node": {
+                "start_ns": i64(2500),
+                "end_ns": i64(2500),
+                "device_id": i64(0),
+                "context_id": i64(1),
+                "stream_id": i64(7),
+                "correlation_id": i64(11),
+                "graph_id": i64(1),
+                "graph_node_id": i64(EN),
+                "annotation": np.array([None], dtype=object),
+            },
+        }
+        # The event-record node records cudaEvent 0xABC (from graph topology); the EventRecord
+        # span is tagged with it so, together with the arrow, the awaited event is visible.
+        window = {
+            "columns": columns,
+            "graph_deps": {EN: [KA]},
+            "graph_event_record_events": {EN: 0xABC},
+        }
+        _, events = _trace_window_entries(window, base_ns=0)
+        en = [e for e in events if e.get("cat") == "graph_event_node"]
+        self.assertEqual(len(en), 1)
+        self.assertEqual(en[0]["name"], "EventRecord")
+        self.assertEqual(en[0]["pid"], 0)  # device lane
+        self.assertEqual(en[0]["args"]["stream"], 7)
+        self.assertEqual(en[0]["args"]["graph node id"], 102)
+        self.assertEqual(en[0]["args"]["cuda event"], hex(0xABC))
+        # A dependency arrow terminates ON the event node: some flow-finish endpoint lands at
+        # the event node's start (kernel -> event_node). _FLOW_CATEGORY is shared by the
+        # CPU-launch and graph-dep flows, so match on the event node's timestamp.
+        finish_ts = {
+            e["ts"]
+            for e in events
+            if e.get("cat") == _FLOW_CATEGORY and e.get("ph") == "f"
+        }
+        self.assertIn(2500 / 1000.0, finish_ts)
+
+    def test_attach_event_node_ids(self):
+        # End-to-end host-side: given a window's kernel + cuda_event columns, learn the
+        # mapping (records ordered by sync id, launch keyed by correlation id -> exec graph id
+        # from the kernel's graph_node_id) and attach graph_node_id + annotation to the
+        # cuda_event frame.
+        import numpy as np
+
+        from torch.profiler._cupti.observers.profiler import _attach_event_node_ids
+
+        exec_id = 7
+        n0, n1 = (exec_id << 32) | 11, (exec_id << 32) | 13
+        r = _fresh_event_node_recorder(self)
+        r.graph_event_nodes = {exec_id: [n0, n1]}
+
+        columns = {
+            "kernel": {
+                "correlation_id": np.array([900], dtype=np.int64),
+                "graph_node_id": np.array([(exec_id << 32) | 55], dtype=np.int64),
+            },
+            # Records delivered out of execution order: sorting by sync id recovers it.
+            "cuda_event": {
+                "event_id": np.array([6, 5], dtype=np.int64),
+                "correlation_id": np.array([900, 900], dtype=np.int64),
+                "cuda_event_sync_id": np.array([2, 1], dtype=np.int64),
+            },
+        }
+        _attach_event_node_ids(columns, r)
+        ce = columns["cuda_event"]
+        # Rows arrive out of execution order; resolution is POSITIONAL by sync id, so the
+        # sync-1 row (event_id 5) takes the first ordered node n0 and the sync-2 row
+        # (event_id 6) takes n1 -- realigned to the input order [6, 5] -> [n1, n0].
+        # There is deliberately no event_id -> node lookup to assert against: a producer
+        # recycles one cudaEvent_t across nodes, so event_id is stable but not unique to a
+        # node, and keying on it would collapse every recycled record onto one node.
+        self.assertEqual(ce["graph_node_id"].tolist(), [n1, n0])
+        self.assertEqual(ce["annotation"].tolist(), [None, None])
+
+        # No recorder -> no-op (bridge disabled).
+        plain = {"cuda_event": {"event_id": np.array([1], dtype=np.int64)}}
+        _attach_event_node_ids(plain, None)
+        self.assertNotIn("graph_node_id", plain["cuda_event"])
+
+    def test_window_graph_deps_collapses_event_nodes(self):
+        # A dependency arrow must span a kernel -> event_record -> wait_event -> kernel chain
+        # (event/wait nodes never render as spans, so they can't be arrow endpoints). The window
+        # dep resolver collapses those non-present nodes to the nearest rendered ancestor.
+        import numpy as np
+
+        from torch.profiler._cupti.observers.profiler import (
+            _nearest_present_preds,
+            _window_graph_deps,
+        )
+
+        # kernelA -> event_record -> wait_event -> kernelB
+        KA, E, W, KB = 10, 11, 12, 13
+        # node -> predecessors, as the _graph_deps recorder stores them
+        raw = {E: [KA], W: [E], KB: [W]}
+        resolver = raw.get
+
+        # Direct: KB's predecessor collapses through W and E to the rendered kernel KA.
+        self.assertEqual(_nearest_present_preds(resolver, KB, {KA, KB}), [KA])
+        # A root kernel has no present predecessors.
+        self.assertEqual(_nearest_present_preds(resolver, KA, {KA, KB}), [])
+
+        # Through the window API: only kernels KA/KB are present (rendered); the arrow survives.
+        columns = {"kernel": {"graph_node_id": np.array([KA, KB], dtype=np.int64)}}
+        self.assertEqual(_window_graph_deps(resolver, columns), {KB: [KA]})
+
+        # Backward compat: a plain kernel->kernel edge (no event nodes) is unchanged.
+        self.assertEqual(
+            _window_graph_deps(
+                {KB: [KA]}.get,
+                {"kernel": {"graph_node_id": np.array([KA, KB], dtype=np.int64)}},
+            ),
+            {KB: [KA]},
+        )
+
+        # Fan-in: KB depends on two chains, each through an event node, to two kernels.
+        KA2 = 20
+        raw2 = {E: [KA], 21: [KA2], KB: [E, 21]}  # 21 is a second event_record
+        self.assertEqual(
+            sorted(_nearest_present_preds(raw2.get, KB, {KA, KA2, KB})), [KA, KA2]
+        )
+
     def test_metadata_blob_rendered_into_trace_args(self):
         # The comms descriptor blob attached as the "metadata" column is spread into the
         # chrome-trace kernel args (so func/count/... show up), the same way a dict
@@ -459,6 +918,53 @@ class TestCuptiRecords(TestCase):
         args = kernels[0]["args"]
         self.assertEqual(args["func"], "AllReduce")
         self.assertEqual(args["count"], 4096)
+
+    def test_graph_host_node_rendered_in_trace(self):
+        # A CUPTI GRAPH_HOST_NODE record (a CPU callback run as a CUDA-graph node) renders as a
+        # "HostNode" span under cat "graph_host_node" on the waiting stream's lane, with its
+        # graph id / node id and dict annotation patched on like the other graphed ops. When a
+        # host_fn name/address is resolved (recorded at graph instantiate), the span is named
+        # "HostNode: <fn>" and both surface in args. Drives the columnar merge directly (no CUDA).
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import _trace_window_entries
+
+        def col(v):
+            return np.array([v], dtype=np.int64)
+
+        columns = {
+            "graph_host_node": {
+                "start_ns": col(1000),
+                "end_ns": col(2000),
+                "device_id": col(0),
+                "context_id": col(1),
+                "stream_id": col(7),
+                "correlation_id": col(9),
+                "graph_id": col(1),
+                # graph id packed into the upper 32 bits; only the lower node id is surfaced
+                "graph_node_id": col((1 << 32) | 202),
+                "annotation": np.array([{"ann_id": "host"}], dtype=object),
+                "process_id": col(4321),
+                "thread_id": col(8765),
+                "host_fn": np.array(["free"], dtype=object),
+                "host_fn_addr": col(0x7FABCD),
+            }
+        }
+        _, events = _trace_window_entries({"columns": columns}, base_ns=0)
+        host = [e for e in events if e.get("cat") == "graph_host_node"]
+        self.assertEqual(len(host), 1)
+        ev = host[0]
+        self.assertEqual(ev["name"], "HostNode: free")
+        self.assertEqual(ev["pid"], 0)  # rendered on the device lane
+        args = ev["args"]
+        self.assertEqual(args["stream"], 7)
+        self.assertEqual(args["host process"], 4321)
+        self.assertEqual(args["host thread"], 8765)
+        self.assertEqual(args["graph id"], 1)
+        self.assertEqual(args["graph node id"], 202)
+        self.assertEqual(args["ann_id"], "host")  # dict annotation spread into args
+        self.assertEqual(args["host fn"], "free")
+        self.assertEqual(args["host fn addr"], hex(0x7FABCD))
 
     def test_graph_kernel_reassigned_to_logical_lane(self):
         # A graphed kernel the lane resolver maps to a logical lane is placed on that lane
@@ -542,6 +1048,177 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(names[(0, 8)], "side comms")
         self.assertEqual(names[(0, 7)].strip(), "stream 7")
 
+    def test_resolve_lane_columns_offsets_and_is_stable(self):
+        # Lanes are assigned into the reserved range by a CONSTANT offset -- not "next free id
+        # in this window" -- so one logical lane keeps one id whatever streams happen to be
+        # live, which is what lets a lane be compared across traces of a job. Covers a lane
+        # colliding with a live stream, one colliding with nothing, and a negative ordinal
+        # (which the chrome path would otherwise abs()-fold and pftrace would not).
+        import numpy as np
+
+        from torch.profiler._cupti.observers.profiler import (
+            _resolve_lane_columns,
+            LOGICAL_LANE_BASE,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        # node 101 -> lane 9, which stream 9's eager kernel already owns; node 202 -> lane 50,
+        # which nothing owns; node 303 -> a negative ordinal; plus an eager row.
+        resolver = {101: (9, "a"), 202: (50, "b"), 303: (-5, "c")}.get
+        frame = {
+            "graph_node_id": i64(101, 202, 303, 0),
+            "stream_id": i64(7, 40, 7, 9),
+        }
+        logical, names = _resolve_lane_columns(resolver, frame)
+        b = LOGICAL_LANE_BASE
+        self.assertEqual(logical.tolist(), [b + 9, b + 50, b - 5, 9])
+        self.assertEqual(names.tolist(), ["a", "b", "c", None])
+
+        # same resolver, wildly different stream occupancy -> same ids
+        for streams in ([7, 7, 7, 8], [26674, 1, 2, 3]):
+            other = dict(frame, stream_id=i64(*streams))
+            self.assertEqual(
+                _resolve_lane_columns(resolver, other)[0].tolist()[:3],
+                [b + 9, b + 50, b - 5],
+                msg=f"{streams}",
+            )
+
+        # an ordinal already in the reserved range is left alone, so the offset never stacks
+        again, _n = _resolve_lane_columns({101: (b + 9, "a")}.get, frame)
+        self.assertEqual(again.tolist()[0], b + 9)
+
+    def test_pftrace_lane_names_are_per_device(self):
+        # A lane is (gpu, stream), so the pftrace stream-lane names are interned on that pair,
+        # not on the bare stream id: one device's resolver name must not relabel another device's
+        # identically-numbered lane. Two collisions in one window -- dev 0's REAL stream 8 vs
+        # dev 1's lane 8 named "DP", and lane 9 named differently on each device. Lanes arrive
+        # in the reserved range, as _resolve_lane_columns assigns them. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _assign_render_event_ids,
+            _build_render_stages,
+            _STREAM_IID_BASE,
+        )
+        from torch.profiler._cupti.observers.profiler import LOGICAL_LANE_BASE
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        b = LOGICAL_LANE_BASE
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000, 5000, 7000),
+                "end_ns": i64(2000, 4000, 6000, 8000),
+                "device_id": i64(0, 1, 0, 1),
+                "stream_id": i64(8, 7, 7, 7),  # dev 0's eager row is on real stream 8
+                "graph_node_id": i64(0, 102, 103, 104),
+                "logical_lane": i64(8, b + 8, b + 9, b + 9),
+                "lane_name": np.array([None, "DP", "TP", "PP"], dtype=object),
+                "name": np.array(["eagerOnEight", "k1", "k2", "k3"], dtype=object),
+            },
+        }
+
+        event_id, _corr, wait_off, wait_ids = _assign_render_event_ids(columns, {})
+        specs, *_ = _build_render_stages(
+            columns, 1, {}, [], event_id, (wait_off, wait_ids)
+        )
+        lane_names = [name for iid, name, _cat in specs if iid >= _STREAM_IID_BASE]
+        # One lane per (device, lane id), ordered by that pair; dev 1's stream 7 is absent
+        # because both of its ops moved off it. Interning on the bare stream id would collapse
+        # this to 2 lanes, labelling dev 0's real stream 8 "DP" and its lane 9 "PP".
+        self.assertEqual(
+            lane_names,
+            [
+                "[000008] stream 8",
+                f"[{b + 9}] TP",
+                f"[{b + 8}] DP",
+                f"[{b + 9}] PP",
+            ],
+        )
+
+    def test_merge_renders_reserved_range_lane(self):
+        # End to end through the merge entry point, on a window shaped as the observer hands it
+        # over (lanes already in the reserved range): the graphed kernel gets its own lane, named
+        # by the resolver, and the stream whose id its ordinal shadows keeps its work and its
+        # name. No CUDA.
+        import tempfile
+
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            merge_trace_window_into_chrome_trace,
+        )
+        from torch.profiler._cupti.observers.profiler import LOGICAL_LANE_BASE
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000, 5000),
+                "end_ns": i64(2000, 4000, 6000),
+                "device_id": i64(0, 0, 0),
+                "context_id": i64(1, 1, 1),
+                # graphed replayed on stream 7 -> resolver ordinal 9, whose bare value
+                # eagerOnNine's stream already owns
+                "stream_id": i64(7, 7, 9),
+                "correlation_id": i64(11, 12, 13),
+                "graph_id": i64(0, 1, 0),
+                "graph_node_id": i64(0, 102, 0),
+                "logical_lane": i64(7, LOGICAL_LANE_BASE + 9, 9),
+                "lane_name": np.array([None, "side comms", None], dtype=object),
+                "name": np.array(
+                    ["eagerKernel", "graphKernel", "eagerOnNine"], dtype=object
+                ),
+                "annotation": np.array([None, None, None], dtype=object),
+                "grid_x": i64(1, 1, 1),
+                "grid_y": i64(1, 1, 1),
+                "grid_z": i64(1, 1, 1),
+                "block_x": i64(32, 32, 32),
+                "block_y": i64(1, 1, 1),
+                "block_z": i64(1, 1, 1),
+                "registers_per_thread": i64(0, 0, 0),
+                "static_shared_memory": i64(0, 0, 0),
+                "dynamic_shared_memory": i64(0, 0, 0),
+                "priority": i64(0, 0, 0),
+                "queued": i64(0, 0, 0),
+                "channel": i64(0, 0, 0),
+                "channel_type": i64(0, 0, 0),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {}}
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps({"baseTimeNanoseconds": 0, "traceEvents": []}).encode()
+                )
+            out_path = os.path.join(d, "out.json")
+            merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
+            with open(out_path, "rb") as f:
+                out = json.loads(f.read())
+
+        kernels = {e["name"]: e for e in out["traceEvents"] if e.get("cat") == "kernel"}
+        graphed = kernels["graphKernel"]
+        lane = LOGICAL_LANE_BASE + 9
+        self.assertEqual(graphed["tid"], lane)
+        self.assertEqual(graphed["args"]["stream"], lane)
+        self.assertEqual(graphed["args"]["original_stream"], 7)
+        self.assertEqual(kernels["eagerKernel"]["tid"], 7)
+        self.assertEqual(kernels["eagerOnNine"]["tid"], 9)
+
+        names = {
+            (e["pid"], e["tid"]): e["args"]["name"]
+            for e in out["traceEvents"]
+            if e.get("ph") == "M" and e.get("name") == "thread_name"
+        }
+        self.assertEqual(names[(0, lane)], "side comms")
+        self.assertEqual(names[(0, 9)].strip(), "stream 9")
+
     def test_gpu_user_annotation_stays_on_capture_stream(self):
         # A GPU-side user annotation stays on its kernels' real capture stream, never a lane the
         # resolver reassigned kernels onto. But when a capture stream has no work left to
@@ -590,6 +1267,340 @@ class TestCuptiRecords(TestCase):
         self.assertEqual(by_name["matmul"]["tid"], 9)
         # stream 5 still has non-reassigned work (k14), so its annotation is kept there
         self.assertEqual(by_name["reduce_scatter"]["tid"], 5)
+
+    def test_graph_dependency_flows_json(self):
+        # CUDA-graph node->node dependency arrows in the JSON export: one flow per edge from the
+        # predecessor's end to the successor's start, resolved within the same replay
+        # (correlation_id) so arrows never cross replays, on the ops' display lanes. No CUDA.
+        from torch.profiler._cupti.monitor_trace import _graph_dependency_flow_events
+
+        # replay 100: node 11 on lane 7 [1000,2000]; node 12 on lane 8 [3000,4000], 12 -> 11.
+        # replay 200 repeats the same nodes and stays self-contained.
+        node_rows = [
+            (100, 11, 0, 7, 1000, 2000),
+            (100, 12, 0, 8, 3000, 4000),
+            (200, 11, 0, 7, 5000, 6000),
+            (200, 12, 0, 8, 7000, 8000),
+        ]
+        events = _graph_dependency_flow_events(node_rows, {12: [11]}, base_ns=0)
+        starts = [e for e in events if e["ph"] == "s"]
+        fins = [e for e in events if e["ph"] == "f"]
+        self.assertEqual(len(starts), 2)  # one edge per replay
+        self.assertEqual(len(fins), 2)
+        s0 = starts[0]
+        f0 = next(f for f in fins if f["id"] == s0["id"])
+        # arrow leaves the predecessor's end on its lane and lands on the successor's start
+        self.assertEqual((s0["tid"], s0["ts"]), (7, 2.0))
+        self.assertEqual((f0["tid"], f0["ts"], f0["bp"]), (8, 3.0, "e"))
+        self.assertNotEqual(
+            starts[0]["id"], starts[1]["id"]
+        )  # replays don't share a flow
+        # no recorded dependencies -> no flows
+        self.assertEqual(_graph_dependency_flow_events(node_rows, {}, base_ns=0), [])
+
+        # Clock skew: predecessor 13 ends at 4400 -- AFTER successor 14 starts at 3500 -- so the
+        # flow goes end(4.4) -> start(3.5), i.e. backwards. The JSON export renders that oddly (a
+        # known limitation, see the function docstring); the .pftrace export does not.
+        skewed = [
+            (300, 13, 0, 7, 1000, 4400),
+            (300, 14, 0, 8, 3500, 4500),
+        ]
+        ev = _graph_dependency_flow_events(skewed, {14: [13]}, base_ns=0)
+        s = next(e for e in ev if e["ph"] == "s")
+        f = next(e for e in ev if e["ph"] == "f")
+        self.assertEqual(
+            (s["ts"], f["ts"]), (4.4, 3.5)
+        )  # end -> start, backwards under skew
+
+    def test_cpu_launch_flow_targets_only_graph_roots(self):
+        # With graph node->node arrows drawn (graph_deps present), the CPU-launch -> GPU-op flow
+        # links only to root graph nodes; a non-root node gets its incoming edge from the dep
+        # arrow, so the cudaGraphLaunch does not fan out to every replayed kernel. Diamond, one
+        # replay (shared correlation): A (root) -> B, A -> C, {B, C} -> D. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import _trace_window_entries
+
+        def i64(*v):
+            return np.array(v, dtype=np.int64)
+
+        A, B, C, D, corr = 1001, 1002, 1003, 1004, 77
+        kernel = {
+            "start_ns": i64(1000, 3000, 3000, 5000),  # A, B||C, D
+            "end_ns": i64(2000, 4000, 4000, 6000),
+            "device_id": i64(0, 0, 0, 0),
+            "context_id": i64(1, 1, 1, 1),
+            "stream_id": i64(7, 7, 7, 7),
+            "correlation_id": i64(corr, corr, corr, corr),
+            "graph_id": i64(1, 1, 1, 1),
+            "graph_node_id": i64(A, B, C, D),
+            "name": np.array(["A", "B", "C", "D"], dtype=object),
+            "annotation": np.array([None] * 4, dtype=object),
+            "grid_x": i64(1, 1, 1, 1),
+            "grid_y": i64(1, 1, 1, 1),
+            "grid_z": i64(1, 1, 1, 1),
+            "block_x": i64(1, 1, 1, 1),
+            "block_y": i64(1, 1, 1, 1),
+            "block_z": i64(1, 1, 1, 1),
+            "registers_per_thread": i64(0, 0, 0, 0),
+            "static_shared_memory": i64(0, 0, 0, 0),
+            "dynamic_shared_memory": i64(0, 0, 0, 0),
+            "priority": i64(0, 0, 0, 0),
+            "queued": i64(0, 0, 0, 0),
+            "channel": i64(0, 0, 0, 0),
+            "channel_type": i64(0, 0, 0, 0),
+        }
+        window = {
+            "columns": {"kernel": kernel},
+            "user_annotations": {},
+            "graph_deps": {B: [A], C: [A], D: [B, C]},
+        }
+        _, events = _trace_window_entries(window, base_ns=0)
+        # Launch flow = "f" events keyed by the correlation id; only the root A (ts 1.0us) keeps it.
+        launch_ts = [
+            e["ts"] for e in events if e.get("ph") == "f" and e.get("id") == corr
+        ]
+        self.assertEqual(launch_ts, [1.0])
+        # The four dep edges are drawn as arrows (1<<40 flow-id base): A->B, A->C, B->D, C->D.
+        dep_starts = [
+            e for e in events if e.get("ph") == "s" and e.get("id", 0) >= (1 << 40)
+        ]
+        self.assertEqual(len(dep_starts), 4)
+        # Deps OFF: every kernel keeps its launch flow (no suppression).
+        window["graph_deps"] = {}
+        _, ev_off = _trace_window_entries(window, base_ns=0)
+        off = [e for e in ev_off if e.get("ph") == "f" and e.get("id") == corr]
+        self.assertEqual(len(off), 4)
+
+    def test_pftrace_render_stages_reassign_lane(self):
+        # The pftrace render-stage builder reassigns a graphed kernel onto its logical lane
+        # (named by the resolver); a GPU annotation stays on its capture-stream lane (as
+        # _window_to_pftrace builds it), not the kernel's reassigned lane. An eager kernel
+        # keeps its "stream N" lane. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _assign_render_event_ids,
+            _build_render_stages,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000),
+                "end_ns": i64(2000, 4000),
+                "device_id": i64(0, 0),
+                "stream_id": i64(7, 9),  # graphed replayed on stream 7; eager on 9
+                "graph_node_id": i64(101, 0),
+                "logical_lane": i64(8, 9),  # graphed -> lane 8; eager unchanged
+                "lane_name": np.array(["side comms", None], dtype=object),
+                "name": np.array(["graphKernel", "eagerKernel"], dtype=object),
+            },
+            # annotation column as _window_to_pftrace builds it: on its capture stream (7).
+            "gpu_annotation": {
+                "start_ns": i64(900),
+                "end_ns": i64(4100),
+                "device_id": i64(0),
+                "stream_id": i64(7),
+                "name": np.array(["all_reduce"], dtype=object),
+            },
+        }
+        event_id, _corr, wait_off, wait_ids = _assign_render_event_ids(columns, {})
+        result = _build_render_stages(
+            columns, 1, {}, [], event_id, (wait_off, wait_ids)
+        )
+        self.assertIsNotNone(result)
+        specs, _gfx, stage_cols, *_ = result
+        name_by_iid = {iid: name for iid, name, _cat in specs}
+        # events follow _RENDER_STAGES order: [graphed kernel, eager kernel, annotation]
+        # Lane names carry a zero-padded lane-id prefix (for ordering), then the label.
+        lanes = [name_by_iid[int(q)] for q in stage_cols[4].tolist()]
+        self.assertTrue(
+            lanes[0].endswith("side comms")
+        )  # graphed kernel moved to named lane
+        self.assertNotEqual(
+            lanes[2], lanes[0]
+        )  # annotation stays off the reassigned lane
+        self.assertIn("stream", lanes[2])  # annotation on its capture-stream lane
+        self.assertNotEqual(lanes[1], lanes[0])  # eager kernel is elsewhere
+        self.assertIn("stream", lanes[1])  # eager kept its default "stream N" lane
+
+    def test_pftrace_graph_event_and_host_nodes_rendered(self):
+        # graph_event_node / graph_host_node are render stages too: an event-record node renders
+        # as an "EventRecord" stage and a host-callback node as a "HostNode" stage, both threaded
+        # through event-id assignment (so they are dependency-arrow endpoints) and the dependency
+        # DAG. One replay (shared correlation): kernel A -> event node -> host node. Only the root
+        # (A) links to the launch; the arrows carry the rest. The host callback name/address ride
+        # the per-row spread blob (they are string/pointer, not numeric extra_data). No CUDA.
+        import json as _json
+
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _assign_render_event_ids,
+            _build_render_stages,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        gnid_a, gnid_e, gnid_h, corr = 1001, 1002, 1003, 50
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000),
+                "end_ns": i64(2000),
+                "device_id": i64(0),
+                "stream_id": i64(7),
+                "correlation_id": i64(corr),
+                "graph_node_id": i64(gnid_a),
+                "name": np.array(["nodeA"], dtype=object),
+            },
+            "graph_event_node": {
+                "start_ns": i64(2100),
+                "end_ns": i64(2100),  # point span
+                "device_id": i64(0),
+                "stream_id": i64(7),
+                "correlation_id": i64(corr),
+                "graph_node_id": i64(gnid_e),
+            },
+            "graph_host_node": {
+                "start_ns": i64(2200),
+                "end_ns": i64(2300),
+                "device_id": i64(0),
+                "stream_id": i64(7),
+                "correlation_id": i64(corr),
+                "graph_node_id": i64(gnid_h),
+                "host_fn": np.array(["free"], dtype=object),
+                "host_fn_addr": i64(0x1234),
+            },
+        }
+        deps = {
+            gnid_e: [gnid_a],
+            gnid_h: [gnid_e],
+        }  # event waits on A; host waits on event
+        event_id, corr_to_eids, wait_off, wait_ids = _assign_render_event_ids(
+            columns, deps
+        )
+        result = _build_render_stages(
+            columns, 1, {}, [], event_id, (wait_off, wait_ids)
+        )
+        self.assertIsNotNone(result)
+        specs, _gfx, stage_cols, _extra, _launch, _tables, _panel, meta = result
+        name_by_iid = {iid: name for iid, name, _cat in specs}
+        self.assertEqual(name_by_iid[5], "EventRecord")
+        self.assertEqual(name_by_iid[6], "HostNode")
+        # Rows follow _RENDER_STAGES order: [kernel(1), event node(5), host node(6)].
+        self.assertEqual(stage_cols[5].tolist(), [1, 5, 6])
+        # Only the root A links to the launch; the event/host nodes are reached via arrows.
+        self.assertEqual(corr_to_eids[corr].tolist(), [1])
+        # Dependency arrows (event_wait_ids CSR): event node waits on A; host on the event node.
+        w_off, w_ids = stage_cols[8]
+
+        def waits(i):
+            return w_ids[w_off[i] : w_off[i + 1]].tolist()
+
+        self.assertEqual(waits(0), [])  # kernel A is the root
+        self.assertEqual(waits(1), [1])  # event node waits on A (event_id 1)
+        self.assertEqual(
+            waits(2), [2]
+        )  # host node waits on the event node (event_id 2)
+        # Host callback name/address ride the per-row spread blob (row 2).
+        meta_off, meta_bytes = meta
+        blob = bytes(meta_bytes[meta_off[2] : meta_off[3]])
+        self.assertEqual(_json.loads(blob)["host fn"], "free")
+        self.assertEqual(_json.loads(blob)["host fn addr"], hex(0x1234))
+        self.assertEqual(meta_off[1] - meta_off[0], 0)  # kernel row: no spread blob
+
+    def test_pftrace_lane_names_order_by_id(self):
+        # Perfetto sorts GPU stream lanes lexicographically by name, so lane names must
+        # be prefixed with the zero-padded lane id -> the lane order matches the chrome path's
+        # numeric lane-id order. A resolver-named lane must not sort ahead of a lower-id stream
+        # lane (regression: "aaa_comm" (lane 50) sorted before "stream 7"). No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _assign_render_event_ids,
+            _build_render_stages,
+            _STREAM_IID_BASE,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000),
+                "end_ns": i64(2000, 4000),
+                "device_id": i64(0, 0),
+                "stream_id": i64(7, 40),  # eager on stream 7; graphed replayed on 40
+                "graph_node_id": i64(0, 202),
+                "logical_lane": i64(7, 50),  # graphed reassigned to lane 50
+                # a name that alphabetically sorts before "stream" -- the regression trigger
+                "lane_name": np.array([None, "aaa_comm"], dtype=object),
+                "name": np.array(["k0", "k1"], dtype=object),
+            },
+        }
+        event_id, _corr, wait_off, wait_ids = _assign_render_event_ids(columns, {})
+        specs, *_ = _build_render_stages(
+            columns, 1, {}, [], event_id, (wait_off, wait_ids)
+        )
+        # hw-queue lanes are appended in ascending lane-id order; Perfetto re-sorts by name, so
+        # the names sorted lexicographically must equal that ascending-id order.
+        lane_names = [name for iid, name, _cat in specs if iid >= _STREAM_IID_BASE]
+        self.assertEqual(len(lane_names), 2)
+        self.assertEqual(
+            sorted(lane_names), lane_names
+        )  # lexicographic == lane-id order
+        self.assertIn("stream 7", lane_names[0])  # lane 7 first
+        self.assertIn("aaa_comm", lane_names[1])  # lane 50 second, despite the name
+
+    def test_pftrace_annotation_column_from_window(self):
+        # pftrace builds its GPU annotation render column from the columnar window (kineto emits
+        # no gpu_user_annotation in monitor mode), on the kernels' capture stream not the
+        # reassigned lane. Stream 7 keeps eager work, so the span stays there; one whose stream
+        # was fully reassigned is dropped (covered by the annotation commit's test). No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import _gpu_annotation_render_column
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        trace_window = {
+            "columns": {
+                "external_correlation": {
+                    "correlation_id": i64(11, 12),
+                    "user_external_id": i64(555, 999),
+                },
+                "kernel": {
+                    "correlation_id": i64(11, 12),
+                    "device_id": i64(0, 0),
+                    "stream_id": i64(7, 7),  # graphed + eager both on capture stream 7
+                    "start_ns": i64(1000, 1200),
+                    "end_ns": i64(2000, 2200),
+                    "graph_node_id": i64(101, 0),  # first graphed, second eager
+                    "logical_lane": i64(
+                        8, 7
+                    ),  # graphed moved to lane 8; eager stays on 7
+                },
+            },
+            "user_annotations": {555: "all_reduce"},
+        }
+        col = _gpu_annotation_render_column(trace_window, base_ns=0)
+        self.assertIsNotNone(col)
+        self.assertEqual(col["name"].tolist(), ["all_reduce"])
+        self.assertEqual(col["device_id"].tolist(), [0])
+        self.assertEqual(
+            col["stream_id"].tolist(), [7]
+        )  # on the capture stream, not the reassigned lane
+        # no annotations in the window -> no column
+        self.assertIsNone(
+            _gpu_annotation_render_column(
+                {"columns": {}, "user_annotations": {}}, base_ns=0
+            )
+        )
 
     def test_chrome_counter_events_from_pm(self):
         # PM counters render as chrome "C" (counter) events in a dedicated per-device
@@ -643,6 +1654,35 @@ class TestCuptiRecords(TestCase):
             )
         )
 
+    def test_chrome_counter_events(self):
+        # GPU counters render as chrome "C" (counter) events in a dedicated per-device
+        # "GPU N Counters" process row, separate from the GPU kernel work. No CUDA.
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _build_chrome_counters,
+            _gpu_counter_process,
+            _merge_counters,
+        )
+
+        name = "Power (W)"
+        n = 4
+        part = (
+            [(1, name)],
+            np.zeros(n, dtype=np.int32),  # device (gpu) id
+            np.arange(1000, 1000 + n * 100, 100, dtype=np.int64),  # start_ns
+            np.ones(n, dtype=np.int32),  # counter_id per sample
+            np.linspace(80.0, 95.0, n),  # values
+        )
+        events = _build_chrome_counters(_merge_counters(part), base_ns=0)
+        counters = [e for e in events if e["ph"] == "C"]
+        self.assertEqual(len(counters), n)
+        e = counters[0]
+        self.assertEqual(e["pid"], _gpu_counter_process(0))  # "GPU 0 Counters"
+        self.assertEqual(e["name"], name)
+        self.assertEqual(e["ts"], 1.0)  # (1000 - base_ns) / 1000
+        self.assertEqual(e["args"], {"": 80.0})
+
     def test_metadata_store_explicit_id(self):
         # put_external(blob, external_id): an explicit non-zero id targets a specific
         # collective rather than the current pushed one -- the seam for a backend to
@@ -661,6 +1701,910 @@ class TestCuptiRecords(TestCase):
         _, ext_meta = m.drain_decoded()
         self.assertEqual(set(ext_meta), {77})
         self.assertEqual(json.loads(ext_meta[77]), {"backend": "x", "extra": 1})
+
+    def test_pftrace_chrome_gpu_slice_parity(self):
+        # The .pftrace and chrome-JSON exports are slice-for-slice equivalent for the GPU
+        # ops both formats represent (kernels, memcpy, memset, and the GPU-side user
+        # annotation). Run the single merge entry point over one synthetic window down both
+        # branches and assert the GPU slices agree as a multiset of
+        # (name, device, lane, ts_ns, dur_ns): chrome builds event dicts, pftrace builds the
+        # native GPU render stages. The pftrace side is compared WITHOUT running (or building)
+        # the native encoder: encode_pftrace is stubbed to capture its args, so this stays
+        # pure host-side / CI-safe. Legitimate format differences excluded from the compare:
+        # chrome also emits CPU ops, ac2g flow (f/s) and metadata (M) events, which the
+        # render-stage view represents differently; timestamps are normalized (chrome ts/dur
+        # are microsecond floats, render is nanosecond ints -- ns == round(us * 1000)). No CUDA.
+        import tempfile
+
+        import numpy as np
+        from cupti.cupti import (  # pyrefly: ignore[missing-import]
+            Runtime_api_trace_cbid,
+        )
+
+        from torch.profiler._cupti.monitor_trace import (
+            _runtime_cbid_name,
+            merge_trace_window_into_chrome_trace,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        # base_ns 0 so chrome ts/dur (us) map to render ns by *1000 with no base offset.
+        base_ns = 0
+        # cbid of cudaLaunchKernel (the eager-launch runtime API), for the launch records
+        # that produce the CPU-launch -> GPU-op arrows down both export paths.
+        launch_cbid = next(
+            e.value
+            for e in Runtime_api_trace_cbid
+            if _runtime_cbid_name(e.value) == "cudaLaunchKernel"
+        )
+        columns = {
+            # eager kernel on stream 7; graphed kernel replayed on stream 7 but reassigned
+            # by the resolver to logical lane 8 (named "side comms").
+            "kernel": {
+                "start_ns": i64(1000, 3000),
+                "end_ns": i64(2000, 4000),
+                "device_id": i64(0, 0),
+                "context_id": i64(1, 1),
+                "stream_id": i64(7, 7),
+                "correlation_id": i64(11, 12),
+                "graph_id": i64(0, 1),
+                "graph_node_id": i64(0, 102),
+                "name": np.array(["eagerKernel", "graphKernel"], dtype=object),
+                "annotation": np.array([None, None], dtype=object),
+                "logical_lane": i64(7, 8),
+                "lane_name": np.array([None, "side comms"], dtype=object),
+                "grid_x": i64(1, 1),
+                "grid_y": i64(1, 1),
+                "grid_z": i64(1, 1),
+                "block_x": i64(32, 32),
+                "block_y": i64(1, 1),
+                "block_z": i64(1, 1),
+                "registers_per_thread": i64(0, 0),
+                "static_shared_memory": i64(0, 0),
+                "dynamic_shared_memory": i64(0, 0),
+                "priority": i64(0, 0),
+                "queued": i64(0, 0),
+                "channel": i64(0, 0),
+                "channel_type": i64(0, 0),
+            },
+            # memcpy + memset on stream 9, non-overlapping (so the render-stage per-lane
+            # end-clamp is a no-op and durations stay exact for the compare).
+            "gpu_memcpy": {
+                "start_ns": i64(5000),
+                "end_ns": i64(6000),
+                "device_id": i64(0),
+                "context_id": i64(1),
+                "stream_id": i64(9),
+                "correlation_id": i64(21),
+                "graph_id": i64(0),
+                "graph_node_id": i64(0),
+                "annotation": np.array([None], dtype=object),
+                "bytes": i64(4096),
+                "copy_kind": i64(1),
+                "src_kind": i64(1),
+                "dst_kind": i64(3),
+                "flags": i64(0),
+                "channel": i64(0),
+                "channel_type": i64(0),
+            },
+            "gpu_memset": {
+                "start_ns": i64(7000),
+                "end_ns": i64(8000),
+                "device_id": i64(0),
+                "context_id": i64(1),
+                "stream_id": i64(9),
+                "correlation_id": i64(22),
+                "graph_id": i64(0),
+                "graph_node_id": i64(0),
+                "annotation": np.array([None], dtype=object),
+                "bytes": i64(256),
+                "value": i64(0),
+                "memory_kind": i64(3),
+                "flags": i64(0),
+                "channel": i64(0),
+                "channel_type": i64(0),
+            },
+            # eager cudaLaunchKernel records on two distinct CPU threads, correlated to the
+            # two kernels (11 -> eager, 12 -> graphed) -> the ac2g / gpu_correlation arrows.
+            "cuda_runtime": {
+                "start_ns": i64(500, 2500),
+                "end_ns": i64(600, 2600),
+                "cbid": i64(launch_cbid, launch_cbid),
+                "process_id": i64(1000, 1000),
+                "thread_id": i64(1, 2),
+                "correlation_id": i64(11, 12),
+            },
+            # only corr 12 (the graphed kernel) maps to a named region -> one GPU annotation.
+            "external_correlation": {
+                "correlation_id": i64(11, 12),
+                "external_id": i64(777, 555),
+                "user_external_id": i64(777, 555),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {555: "all_reduce"}}
+        gpu_cats = {"kernel", "gpu_memcpy", "gpu_memset", "gpu_user_annotation"}
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            cpu = {"baseTimeNanoseconds": base_ns, "traceEvents": []}
+            with open(cpu_path, "wb") as f:
+                f.write(json.dumps(cpu).encode())
+
+            # chrome side: real merge, collect the GPU X events as (name, dev, lane, ts, dur)ns.
+            merge_trace_window_into_chrome_trace(
+                cpu_path, os.path.join(d, "out.json"), window
+            )
+            with open(os.path.join(d, "out.json"), "rb") as f:
+                chrome = json.loads(f.read())
+            chrome_slices = [
+                (
+                    e["name"],
+                    int(e["pid"]),
+                    int(e["tid"]),
+                    round(float(e["ts"]) * 1000),
+                    round(float(e["dur"]) * 1000),
+                )
+                for e in chrome["traceEvents"]
+                if e.get("ph") == "X" and e.get("cat") in gpu_cats
+            ]
+
+            # pftrace side: stub encode_pftrace to capture (name_table, render) and skip the
+            # native encode, then reconstruct the same GPU slices from the render stages.
+            captured: dict = {}
+
+            def _capture(
+                base_ns,
+                tracks,
+                name_table,
+                cat_table,
+                group_tuples,
+                render,
+                counters,
+                compression,
+            ):
+                captured["tracks"] = tracks
+                captured["name_table"] = name_table
+                captured["cat_table"] = cat_table
+                captured["group_tuples"] = group_tuples
+                captured["render"] = render
+                return b""
+
+            m = torch._C._profiler._cupti_monitor
+            with patch.object(m, "encode_pftrace", _capture, create=True):
+                merge_trace_window_into_chrome_trace(
+                    cpu_path, os.path.join(d, "out.pftrace"), window
+                )
+
+            name_table = captured["name_table"]
+            specs, _gfx, stage_cols, *_ = captured["render"]
+            ts, dur, event_id, gpu, stream_iid, stage, _context, name_iid, _wait = (
+                stage_cols
+            )
+            # specs maps every iid -> name: the stage iids (Kernel/Memcpy/Memset/Annotation)
+            # and the stream-lane iids (labeled "[<padded lane id>] <label>").
+            name_by_iid = {int(iid): name for iid, name, _cat in specs}
+            render_slices = []
+            render_lane_names = {}  # (device, lane_id) -> lane label, id prefix stripped
+            render_op_lane = {}  # correlation (render event_id) -> (device, lane_id)
+            for i in range(len(ts)):
+                niid = int(name_iid[i])
+                # kernels/annotations carry a name_iid into the global table; memcpy/memset
+                # fall back to the stage spec name ("Memcpy"/"Memset").
+                name = name_table[niid - 1] if niid else name_by_iid[int(stage[i])]
+                label = name_by_iid[int(stream_iid[i])]
+                lane_id = int(label[1 : label.index("]")])
+                render_lane_names[(int(gpu[i]), lane_id)] = label[
+                    label.index("]") + 1 :
+                ].strip()
+                eid = int(event_id[i])
+                if eid:
+                    render_op_lane[eid] = (int(gpu[i]), lane_id)
+                # render ts is absolute ns; chrome ts was (start - base) / 1000 us.
+                render_slices.append(
+                    (name, int(gpu[i]), lane_id, int(ts[i]) - base_ns, int(dur[i]))
+                )
+
+            # tracks -> (pid, tid) for the CPU launch (thread) tracks: the arrow's source.
+            track_pid_tid = {
+                t[0]: (int(t[3]), int(t[4])) for t in captured["tracks"] if not t[2]
+            }
+            # A launch group carries a per-slice gpu_corr CSR (offsets, event_ids) listing the
+            # render-stage event_ids it launched (an eager launch -> its one kernel). Build the
+            # set of (CPU (pid, tid) source -> (device, lane) target) arrows off those groups,
+            # mapping each event_id to its render stage's lane via render_op_lane.
+            pftrace_arrows = set()
+            for g in captured["group_tuples"]:
+                uu, gpu_corr = g[2], g[9]
+                if gpu_corr is None:
+                    continue
+                offsets = np.asarray(gpu_corr[0]).tolist()
+                ids = np.asarray(gpu_corr[1]).tolist()
+                for slc, u in enumerate(np.asarray(uu).tolist()):
+                    for j in range(offsets[slc], offsets[slc + 1]):
+                        eid = int(ids[j])
+                        pftrace_arrows.add((track_pid_tid[int(u)], render_op_lane[eid]))
+
+        # 2 kernels + memcpy + memset + 1 GPU annotation, identical down both export paths.
+        self.assertEqual(len(chrome_slices), 5)
+        self.assertEqual(sorted(chrome_slices), sorted(render_slices))
+
+        # Lane-name parity: chrome carries the lane name in thread_name metadata; pftrace in
+        # the hw-queue spec label ("[<id>] <name>"). Every lane with GPU slices must agree
+        # after stripping pftrace's id prefix and chrome's trailing space -- so the reassigned
+        # lane 8 is "side comms" and the default lanes are "stream N" in both.
+        gpu_lanes = {(dev, lane) for _n, dev, lane, _t, _d in render_slices}
+        chrome_lane_names = {
+            (int(e["pid"]), int(e["tid"])): str(e["args"]["name"]).strip()
+            for e in chrome["traceEvents"]
+            if e.get("ph") == "M" and e.get("name") == "thread_name"
+        }
+        self.assertEqual(
+            {k: chrome_lane_names[k] for k in gpu_lanes},
+            {k: render_lane_names[k] for k in gpu_lanes},
+        )
+
+        # Arrow (flow) parity: the CPU-launch -> GPU-op link, both endpoints. Chrome emits
+        # ac2g flow events -- ph s on the launching CPU thread (source), ph f on the GPU op's
+        # lane (target), keyed by id == correlation. pftrace carries the same link as
+        # gpu_correlation: the launch track_event's gpu_corr == correlation (source track ->
+        # CPU pid/tid) and the GPU render stage's event_id == correlation (target lane).
+        # Compare, per correlation, ((cpu_pid, cpu_tid), (gpu_device, gpu_lane)) across formats
+        # -- this confirms the arrow connects the same CPU op to the same GPU op in both.
+        flow_src = {
+            int(e["id"]): (int(e["pid"]), int(e["tid"]))
+            for e in chrome["traceEvents"]
+            if e.get("cat") == "ac2g" and e.get("ph") == "s"
+        }
+        flow_tgt = {
+            int(e["id"]): (int(e["pid"]), int(e["tid"]))
+            for e in chrome["traceEvents"]
+            if e.get("cat") == "ac2g" and e.get("ph") == "f"
+        }
+        chrome_arrows = {
+            c: (flow_src[c], flow_tgt[c]) for c in flow_src if c in flow_tgt
+        }
+        # both launches (corr 11 -> lane 7, 12 -> lane 8) link; not the un-launched memcpy/memset.
+        self.assertEqual(set(chrome_arrows), {11, 12})
+        self.assertEqual(set(chrome_arrows.values()), pftrace_arrows)
+
+    def test_pftrace_chrome_lane_order_parity(self):
+        # The GPU lane DISPLAY ORDER matches across formats -- both order by numeric lane id.
+        # Chrome orders lanes by tid (numeric); pftrace names its stream lanes
+        # "[<zero-padded id>] <label>" so that Perfetto's lexicographic sort of those labels
+        # reproduces the numeric id order. Assert the id sequences agree and are strictly
+        # ascending. The window mixes a low-id "stream" lane (7), a higher-id resolver-named
+        # lane (ordinal 17, "side comms" -- rendered in the reserved range as 100017), and a mid
+        # "stream" lane (9): the named high-id lane must NOT sort ahead of the low-id stream lane
+        # (the regression the id prefix fixes), and the differing digit counts lock the
+        # zero-padding -- without it "[100017]" would sort before "[7]". No CUDA.
+        import tempfile
+
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            _STREAM_IID_BASE,
+            merge_trace_window_into_chrome_trace,
+        )
+        from torch.profiler._cupti.observers.profiler import LOGICAL_LANE_BASE
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000, 5000),
+                "end_ns": i64(2000, 4000, 6000),
+                "device_id": i64(0, 0, 0),
+                "context_id": i64(1, 1, 1),
+                "stream_id": i64(7, 7, 9),  # graphed k1 replayed on stream 7
+                "correlation_id": i64(11, 12, 13),
+                "graph_id": i64(0, 1, 0),
+                "graph_node_id": i64(0, 202, 0),
+                "name": np.array(["k0", "k1", "k2"], dtype=object),
+                "annotation": np.array([None, None, None], dtype=object),
+                # k1 reassigned to resolver ordinal 17, i.e. the reserved-range id the
+                # observer assigns for it
+                "logical_lane": i64(7, LOGICAL_LANE_BASE + 17, 9),
+                "lane_name": np.array([None, "side comms", None], dtype=object),
+                "grid_x": i64(1, 1, 1),
+                "grid_y": i64(1, 1, 1),
+                "grid_z": i64(1, 1, 1),
+                "block_x": i64(1, 1, 1),
+                "block_y": i64(1, 1, 1),
+                "block_z": i64(1, 1, 1),
+                "registers_per_thread": i64(0, 0, 0),
+                "static_shared_memory": i64(0, 0, 0),
+                "dynamic_shared_memory": i64(0, 0, 0),
+                "priority": i64(0, 0, 0),
+                "queued": i64(0, 0, 0),
+                "channel": i64(0, 0, 0),
+                "channel_type": i64(0, 0, 0),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {}}
+        gpu_cats = {"kernel", "gpu_memcpy", "gpu_memset", "gpu_user_annotation"}
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps({"baseTimeNanoseconds": 0, "traceEvents": []}).encode()
+                )
+
+            merge_trace_window_into_chrome_trace(
+                cpu_path, os.path.join(d, "out.json"), window
+            )
+            with open(os.path.join(d, "out.json"), "rb") as f:
+                chrome = json.loads(f.read())
+            # chrome lane order == distinct GPU lanes sorted by tid ascending.
+            chrome_order = sorted(
+                {
+                    int(e["tid"])
+                    for e in chrome["traceEvents"]
+                    if e.get("ph") == "X" and e.get("cat") in gpu_cats
+                }
+            )
+
+            captured: dict = {}
+
+            def _capture(
+                base_ns,
+                tracks,
+                name_table,
+                cat_table,
+                group_tuples,
+                render,
+                counters,
+                compression,
+            ):
+                captured["render"] = render
+                return b""
+
+            m = torch._C._profiler._cupti_monitor
+            with patch.object(m, "encode_pftrace", _capture, create=True):
+                merge_trace_window_into_chrome_trace(
+                    cpu_path, os.path.join(d, "out.pftrace"), window
+                )
+
+        specs = captured["render"][0]
+        # hw-queue lane specs, sorted lexicographically by label as Perfetto would, then the
+        # lane id parsed back out of each "[<padded id>] ..." prefix.
+        lane_specs = sorted(
+            (name for iid, name, _cat in specs if iid >= _STREAM_IID_BASE)
+        )
+        pftrace_order = [int(name[1 : name.index("]")]) for name in lane_specs]
+
+        self.assertEqual(chrome_order, [7, 9, LOGICAL_LANE_BASE + 17])
+        self.assertEqual(chrome_order, pftrace_order)
+        self.assertEqual(pftrace_order, sorted(pftrace_order))  # strictly ascending
+        # zero-padding is load-bearing: labels are "[000007]"/"[000009]"/"[100017]", so
+        # lexicographic order == id order (unpadded "[100017]" would sort before "[7]").
+        self.assertTrue(
+            all("]" in name and name.startswith("[0") for name in lane_specs[:2])
+        )
+
+    def test_pftrace_categories_and_time_base(self):
+        # The pftrace export tags each CPU slice with an interned category (cpu_op /
+        # user_annotation / cuda_runtime / ...) so the viewer can total by kind, and
+        # threads the trace's base time through to the encoder (-> a ClockSnapshot).
+        # encode_pftrace is stubbed to capture its shaped inputs, so this is host-side.
+        import tempfile
+
+        import numpy as np
+        from cupti.cupti import (  # pyrefly: ignore[missing-import]
+            Runtime_api_trace_cbid,
+        )
+
+        from torch.profiler._cupti.monitor_trace import (
+            _runtime_cbid_name,
+            merge_trace_window_into_chrome_trace,
+        )
+
+        base_ns = 123_000_000_000
+        launch_cbid = next(
+            e.value
+            for e in Runtime_api_trace_cbid
+            if _runtime_cbid_name(e.value) == "cudaLaunchKernel"
+        )
+        columns = {
+            "cuda_runtime": {
+                "start_ns": np.array([500], dtype=np.int64),
+                "end_ns": np.array([600], dtype=np.int64),
+                "cbid": np.array([launch_cbid], dtype=np.int64),
+                "process_id": np.array([1000], dtype=np.int64),
+                "thread_id": np.array([1], dtype=np.int64),
+                "correlation_id": np.array([11], dtype=np.int64),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {}}
+        cpu = {
+            "baseTimeNanoseconds": base_ns,
+            "traceEvents": [
+                {
+                    "ph": "X",
+                    "cat": "cpu_op",
+                    "name": "aten::add",
+                    "pid": 1000,
+                    "tid": 1,
+                    "ts": 1.0,
+                    "dur": 5.0,
+                },
+                {
+                    "ph": "X",
+                    "cat": "user_annotation",
+                    "name": "my_region",
+                    "pid": 1000,
+                    "tid": 1,
+                    "ts": 0.0,
+                    "dur": 10.0,
+                },
+            ],
+        }
+
+        captured: dict = {}
+
+        def _capture(
+            base_ns_arg,
+            tracks,
+            name_table,
+            cat_table,
+            group_tuples,
+            render,
+            counters,
+            compression,
+        ):
+            captured["base_ns"] = base_ns_arg
+            captured["name_table"] = name_table
+            captured["cat_table"] = cat_table
+            captured["group_tuples"] = group_tuples
+            return b""
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(json.dumps(cpu).encode())
+            m = torch._C._profiler._cupti_monitor
+            with patch.object(m, "encode_pftrace", _capture, create=True):
+                merge_trace_window_into_chrome_trace(
+                    cpu_path, os.path.join(d, "out.pftrace"), window
+                )
+
+        # (2) the trace base time reaches the encoder verbatim (-> ClockSnapshot).
+        self.assertEqual(captured["base_ns"], base_ns)
+
+        # (1) every category is interned once and each slice references its own via cat_iid
+        # (group tuple index 10), so the (name -> category) mapping is exact.
+        name_table = captured["name_table"]
+        cat_table = captured["cat_table"]
+        self.assertEqual(set(cat_table), {"cpu_op", "user_annotation", "cuda_runtime"})
+        pairs = set()
+        for gt in captured["group_tuples"]:
+            name_iid, cat_iid = gt[3], gt[10]
+            if cat_iid is None:
+                continue
+            for ni, ci in zip(name_iid.tolist(), cat_iid.tolist()):
+                self.assertNotEqual(ci, 0)  # every CPU/runtime slice is categorized
+                pairs.add((name_table[ni - 1], cat_table[ci - 1]))
+        self.assertEqual(
+            pairs,
+            {
+                ("aten::add", "cpu_op"),
+                ("my_region", "user_annotation"),
+                ("cudaLaunchKernel", "cuda_runtime"),
+            },
+        )
+
+    def test_pftrace_kernel_carries_collective_metadata(self):
+        # The per-kernel collective descriptor (metadata column) is spread onto the GPU
+        # render stage as extra_data (name/value string pairs), mirroring the chrome path
+        # which spreads the same blob into the GPU op's args -- so consumers need no
+        # correlation-id join. Runs the REAL native encoder end-to-end, gunzips, and decodes
+        # the protobuf with a hand-rolled scanner (no perfetto python lib). No CUDA. Field
+        # numbers (perfetto.h): TracePacket.gpu_render_stage_event=53;
+        # GpuRenderStageEvent.extra_data=6; ExtraData.name=1, ExtraData.value=2.
+        import tempfile
+
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            merge_trace_window_into_chrome_trace,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        descriptor = {"Process Group Name": "0", "dtype": "bf16", "In msg nelems": 1024}
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000),
+                "end_ns": i64(2000),
+                "device_id": i64(0),
+                "context_id": i64(1),
+                "stream_id": i64(7),
+                "correlation_id": i64(50),
+                "graph_id": i64(0),
+                "graph_node_id": i64(0),
+                "name": np.array(["allreduce_kernel"], dtype=object),
+                "annotation": np.array([None], dtype=object),
+                "metadata": np.array([json.dumps(descriptor)], dtype=object),
+                "grid_x": i64(1),
+                "grid_y": i64(1),
+                "grid_z": i64(1),
+                "block_x": i64(32),
+                "block_y": i64(1),
+                "block_z": i64(1),
+                "registers_per_thread": i64(0),
+                "static_shared_memory": i64(0),
+                "dynamic_shared_memory": i64(0),
+                "priority": i64(0),
+                "queued": i64(0),
+                "channel": i64(0),
+                "channel_type": i64(0),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {}}
+
+        def rv(b, i):  # read a varint at offset i, return (value, next_offset)
+            s = r = 0
+            while True:
+                x = b[i]
+                i += 1
+                r |= (x & 0x7F) << s
+                if not x & 0x80:
+                    return r, i
+                s += 7
+
+        def flds(b):  # scan a message into [(field_no, wire_type, value)]
+            i = 0
+            o = []
+            while i < len(b):
+                k, i = rv(b, i)
+                fn, wt = k >> 3, k & 7
+                if wt == 0:
+                    v, i = rv(b, i)
+                    o.append((fn, 0, v))
+                elif wt == 2:
+                    n, i = rv(b, i)
+                    o.append((fn, 2, b[i : i + n]))
+                    i += n
+                elif wt == 5:
+                    i += 4
+                elif wt == 1:
+                    i += 8
+            return o
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps({"baseTimeNanoseconds": 0, "traceEvents": []}).encode()
+                )
+            out_path = os.path.join(d, "out.pftrace")
+            merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
+            with gzip.open(out_path, "rb") as f:
+                raw = f.read()
+
+        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
+
+        # Collect the extra_data (field 6) name/value pairs across all GPU render stages.
+        extra = {}
+        for pkt in packets:
+            for fn, _wt, v in flds(pkt):
+                if fn != 53:
+                    continue
+                for sfn, _swt, sv in flds(v):
+                    if sfn != 6:
+                        continue
+                    name = value = None
+                    for efn, _ewt, ev in flds(sv):
+                        if efn == 1:
+                            name = bytes(ev).decode()
+                        elif efn == 2:
+                            value = bytes(ev).decode()
+                    if name is not None:
+                        extra[name] = value
+
+        # Each descriptor field is spread as its own extra_data entry: JSON strings keep
+        # their raw value, numbers are stringified via dump().
+        self.assertEqual(extra["Process Group Name"], "0")
+        self.assertEqual(extra["dtype"], "bf16")
+        self.assertEqual(extra["In msg nelems"], "1024")
+
+    def test_pftrace_render_stage_spreads_graph_annotation(self):
+        # A graph-node annotation (mark_kernels region -- e.g. a collective's process-group
+        # name recorded at capture via annotate_barrier) is spread onto the GPU render stage as
+        # extra_data, the same way the collective metadata column is -- closing the parity gap
+        # where chrome spread annotations but the .pftrace render stage dropped them. Also
+        # checks annotation + metadata merge. Runs the REAL native encoder, gunzips, decodes
+        # the protobuf. No CUDA. Field numbers: gpu_render_stage_event=53, extra_data=6,
+        # ExtraData.name=1, ExtraData.value=2.
+        import tempfile
+
+        import numpy as np
+
+        from torch.profiler._cupti.monitor_trace import (
+            merge_trace_window_into_chrome_trace,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        # annotation column holds the graph annotation resolver's return: a list of dicts per
+        # row (as get_kernel_annotations()[node] yields). A second row also carries an eager
+        # metadata blob, to check the two channels merge onto one render stage.
+        ann = np.empty(2, dtype=object)
+        ann[0] = [{"Process Group Name": "5", "In msg nelems": 2048}]
+        ann[1] = [{"Process Group Name": "6"}]
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 3000),
+                "end_ns": i64(2000, 4000),
+                "device_id": i64(0, 0),
+                "context_id": i64(1, 1),
+                "stream_id": i64(7, 7),
+                "correlation_id": i64(50, 51),
+                "graph_id": i64(1, 1),
+                "graph_node_id": i64((1 << 32) | 10, (1 << 32) | 11),
+                "name": np.array(["ar_a", "ar_b"], dtype=object),
+                "annotation": ann,
+                "metadata": np.array(
+                    [None, json.dumps({"dtype": "bf16"})], dtype=object
+                ),
+                "grid_x": i64(1, 1),
+                "grid_y": i64(1, 1),
+                "grid_z": i64(1, 1),
+                "block_x": i64(32, 32),
+                "block_y": i64(1, 1),
+                "block_z": i64(1, 1),
+                "registers_per_thread": i64(0, 0),
+                "static_shared_memory": i64(0, 0),
+                "dynamic_shared_memory": i64(0, 0),
+                "priority": i64(0, 0),
+                "queued": i64(0, 0),
+                "channel": i64(0, 0),
+                "channel_type": i64(0, 0),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {}}
+
+        def rv(b, i):
+            s = r = 0
+            while True:
+                x = b[i]
+                i += 1
+                r |= (x & 0x7F) << s
+                if not x & 0x80:
+                    return r, i
+                s += 7
+
+        def flds(b):
+            i = 0
+            o = []
+            while i < len(b):
+                k, i = rv(b, i)
+                fn, wt = k >> 3, k & 7
+                if wt == 0:
+                    v, i = rv(b, i)
+                    o.append((fn, 0, v))
+                elif wt == 2:
+                    n, i = rv(b, i)
+                    o.append((fn, 2, b[i : i + n]))
+                    i += n
+                elif wt == 5:
+                    i += 4
+                elif wt == 1:
+                    i += 8
+            return o
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps({"baseTimeNanoseconds": 0, "traceEvents": []}).encode()
+                )
+            out_path = os.path.join(d, "out.pftrace")
+            merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
+            with gzip.open(out_path, "rb") as f:
+                raw = f.read()
+
+        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
+
+        # Per render stage (keyed by event_id), collect its extra_data pairs.
+        per_stage: dict[int, dict] = {}
+        for pkt in packets:
+            for fn, _wt, v in flds(pkt):
+                if fn != 53:
+                    continue
+                event_id = 0
+                pairs: dict = {}
+                for sfn, _swt, sv in flds(v):
+                    if sfn == 1:
+                        event_id = sv
+                    elif sfn == 6:
+                        name = value = None
+                        for efn, _ewt, ev in flds(sv):
+                            if efn == 1:
+                                name = bytes(ev).decode()
+                            elif efn == 2:
+                                value = bytes(ev).decode()
+                        if name is not None:
+                            pairs[name] = value
+                per_stage[event_id] = pairs
+
+        # Row order (from _render_stage_cols) is stable: row 0 == event_id 1, row 1 == 2.
+        # Row 0: annotation-only -> its fields spread (numbers stringified).
+        self.assertEqual(per_stage[1]["Process Group Name"], "5")
+        self.assertEqual(per_stage[1]["In msg nelems"], "2048")
+        # Row 1: annotation + metadata merge onto the one render stage.
+        self.assertEqual(per_stage[2]["Process Group Name"], "6")
+        self.assertEqual(per_stage[2]["dtype"], "bf16")
+        # graphNodeId is emitted with only its lower 32-bit node id; the graph id packed in the
+        # upper bits is dropped here (it rides along separately as "graph id").
+        self.assertEqual(per_stage[1]["graph node id"], "10")
+        self.assertEqual(per_stage[2]["graph node id"], "11")
+
+    def test_pftrace_graph_node_dependency_arrows(self):
+        # A CUDA-graph replay's node dependency DAG becomes GpuRenderStageEvent.event_wait_ids
+        # (node->node flow arrows) and the cudaGraphLaunch's GpuCorrelation lists only its
+        # replay's ROOT node event_ids (the rest are reached through the node->node arrows). Two
+        # graphed kernels share one correlation (one replay) with distinct graph_node_ids; B
+        # depends on A, so only A (the root) is linked. Runs the REAL native encoder end-to-end,
+        # gunzips, and decodes the protobuf with a minimal hand-rolled scanner (the perfetto
+        # python lib is not installed). No CUDA. Field numbers verified against perfetto.h:
+        # TracePacket.gpu_render_stage_event=53, .track_event=11; GpuRenderStageEvent.event_id=1,
+        # .event_wait_ids=18; GpuCorrelation is nested at field 3000 with its
+        # render_stage_submission_event_ids at field 1.
+        import tempfile
+
+        import numpy as np
+        from cupti.cupti import (  # pyrefly: ignore[missing-import]
+            Runtime_api_trace_cbid,
+        )
+
+        from torch.profiler._cupti.monitor_trace import (
+            _runtime_cbid_name,
+            merge_trace_window_into_chrome_trace,
+        )
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        base_ns = 0
+        graph_launch_cbid = next(
+            e.value
+            for e in Runtime_api_trace_cbid
+            if _runtime_cbid_name(e.value) == "cudaGraphLaunch"
+        )
+        gnid_a, gnid_b, corr = 1001, 1002, 50
+        columns = {
+            # Two graphed kernels of ONE replay: same correlation (one launch), distinct
+            # graph_node_ids, B depends on A. Same stream (CUPTI piles a replay on one stream).
+            "kernel": {
+                "start_ns": i64(1000, 3000),
+                "end_ns": i64(2000, 4000),
+                "device_id": i64(0, 0),
+                "context_id": i64(1, 1),
+                "stream_id": i64(7, 7),
+                "correlation_id": i64(corr, corr),
+                "graph_id": i64(1, 1),
+                "graph_node_id": i64(gnid_a, gnid_b),
+                "name": np.array(["nodeA", "nodeB"], dtype=object),
+                "annotation": np.array([None, None], dtype=object),
+                "grid_x": i64(1, 1),
+                "grid_y": i64(1, 1),
+                "grid_z": i64(1, 1),
+                "block_x": i64(32, 32),
+                "block_y": i64(1, 1),
+                "block_z": i64(1, 1),
+                "registers_per_thread": i64(0, 0),
+                "static_shared_memory": i64(0, 0),
+                "dynamic_shared_memory": i64(0, 0),
+                "priority": i64(0, 0),
+                "queued": i64(0, 0),
+                "channel": i64(0, 0),
+                "channel_type": i64(0, 0),
+            },
+            # One cudaGraphLaunch record sharing the replay's correlation -> its GpuCorrelation
+            # links only to the root node A (B is reached via the node->node dependency arrow).
+            "cuda_runtime": {
+                "start_ns": i64(500),
+                "end_ns": i64(600),
+                "cbid": i64(graph_launch_cbid),
+                "process_id": i64(1000),
+                "thread_id": i64(1),
+                "correlation_id": i64(corr),
+            },
+        }
+        window = {
+            "columns": columns,
+            "user_annotations": {},
+            "graph_deps": {gnid_b: [gnid_a]},  # B depends on A
+        }
+
+        def rv(b, i):  # read a varint at offset i, return (value, next_offset)
+            s = r = 0
+            while True:
+                x = b[i]
+                i += 1
+                r |= (x & 0x7F) << s
+                if not x & 0x80:
+                    return r, i
+                s += 7
+
+        def flds(b):  # scan a message into [(field_no, wire_type, value)]
+            i = 0
+            o = []
+            while i < len(b):
+                k, i = rv(b, i)
+                fn, wt = k >> 3, k & 7
+                if wt == 0:
+                    v, i = rv(b, i)
+                    o.append((fn, 0, v))
+                elif wt == 2:
+                    n, i = rv(b, i)
+                    o.append((fn, 2, b[i : i + n]))
+                    i += n
+                elif wt == 5:
+                    i += 4
+                elif wt == 1:
+                    i += 8
+            return o
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps(
+                        {"baseTimeNanoseconds": base_ns, "traceEvents": []}
+                    ).encode()
+                )
+            out_path = os.path.join(d, "out.pftrace")
+            merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
+            with gzip.open(out_path, "rb") as f:
+                raw = f.read()
+
+        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
+
+        # Collect the GPU render stages (field 53) as (event_id, [event_wait_ids]).
+        render_stages = []
+        for pkt in packets:
+            for fn, _wt, v in flds(pkt):
+                if fn != 53:
+                    continue
+                event_id = 0
+                waits = []
+                for sfn, _swt, sv in flds(v):
+                    if sfn == 1:
+                        event_id = sv
+                    elif sfn == 18:
+                        waits.append(sv)
+                render_stages.append((event_id, waits))
+
+        # Two kernel render stages; exactly one (node B) has event_wait_ids, pointing at the
+        # other (node A) -- the node->node dependency arrow.
+        self.assertEqual(len(render_stages), 2)
+        with_waits = [(e, w) for e, w in render_stages if w]
+        self.assertEqual(len(with_waits), 1)
+        node_b_event_id, node_b_waits = with_waits[0]
+        node_a_event_id = next(e for e, w in render_stages if not w)
+        self.assertEqual(node_b_waits, [node_a_event_id])
+        self.assertNotEqual(node_a_event_id, node_b_event_id)
+
+        # The cudaGraphLaunch track_event (field 11) carries a GpuCorrelation (nested field
+        # 3000) listing only the ROOT node event_id -- node A (render_stage_submission_event_ids
+        # at field 1). Node B is not linked from the launch; it is reached via its wait arrow.
+        submission_id_sets = []
+        for pkt in packets:
+            for fn, _wt, v in flds(pkt):
+                if fn != 11:
+                    continue
+                for sfn, _swt, sv in flds(v):
+                    if sfn == 3000:
+                        ids = [gv for gfn, _gwt, gv in flds(sv) if gfn == 1]
+                        submission_id_sets.append(set(ids))
+        self.assertEqual(len(submission_id_sets), 1)
+        self.assertEqual(submission_id_sets[0], {node_a_event_id})
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -697,6 +2641,149 @@ class TestCuptiMonitorCUDA(TestCase):
         monitor.flush(sync=True)
         self.assertLess(time.time() - start, 2.0)
         self.assertNotIn(sync, monitor._enabled)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_TOOLS_ID,
+        "requires cudaGraphNodeGetToolsId (cuda-bindings >= 13.1 and CUDA driver >= 13.1)",
+    )
+    def test_event_node_recorder_arm_before_capture(self):
+        # End-to-end usage, and the ordering contract it depends on: the recorder learns a
+        # graph's ordered event-record nodes from a graph-INSTANTIATE hook, so it has to be
+        # armed before the graph is captured. Arming afterwards is too late -- that graph's
+        # instantiate already fired, it is never recorded, and every CUDA_EVENT record from
+        # its launches then resolves to None (resolve_window refuses to guess).
+        def capture_graph_with_event_node():
+            x = torch.randn(8, 8, device="cuda")
+            # external=True is what makes capture emit an event-record NODE. A default
+            # (internal) event is folded into a plain cross-stream dependency edge and
+            # produces no node at all, so the bridge would have nothing to resolve. This
+            # is the same external form NCCL uses under NCCL_GRAPH_MIXING_SUPPORT=1.
+            ev = torch.cuda.Event(external=True)
+            # Warm up off the default stream before capture (allocator + kernels).
+            s = torch.cuda.Stream()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                for _ in range(3):
+                    (x @ x).relu()
+            torch.cuda.current_stream().wait_stream(s)
+
+            # keep_graph=True keeps the template alive so get_graph_data() can read it
+            # after capture; it also defers instantiate(), which is what fires the hook.
+            g = torch.cuda.CUDAGraph(keep_graph=True)
+            with torch.cuda.graph(g):
+                y = x @ x
+                ev.record()
+                y.relu()
+            g.instantiate()
+            return g
+
+        r = _fresh_event_node_recorder(self)
+
+        # Captured while unarmed: the hook never ran, so this graph is absent.
+        before = capture_graph_with_event_node()
+        before_exec_id = before.get_graph_data()["exec_graph_id"]
+        self.assertNotIn(before_exec_id, r.graph_event_nodes)
+
+        r.arm()
+        self.assertIsNotNone(r._handle)
+        r.arm()  # idempotent: a second arm must not stack a duplicate hook
+
+        after = capture_graph_with_event_node()
+        data = after.get_graph_data()
+        # Assert rather than skip: if capture stops emitting event-record nodes this test
+        # must fail loudly, not quietly pass while covering nothing.
+        self.assertTrue(
+            any(n["node_type"] == "event_record" for n in data["nodes"]),
+            "external event did not produce an event_record node",
+        )
+
+        exec_id = data["exec_graph_id"]
+        self.assertIn(exec_id, r.graph_event_nodes)
+        ordered = r.graph_event_nodes[exec_id]
+        # Totally ordered -> a list of tools_ids; each carries the exec graph id up top.
+        self.assertIsNotNone(ordered)
+        self.assertTrue(ordered)
+        for tools_id in ordered:
+            self.assertEqual(tools_id >> 32, exec_id)
+
+        # The earlier graph is still absent -- arming does not retroactively record it.
+        self.assertNotIn(before_exec_id, r.graph_event_nodes)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_TOOLS_ID,
+        "requires cudaGraphNodeGetToolsId (cuda-bindings >= 13.1 and CUDA driver >= 13.1)",
+    )
+    def test_event_nodes_on_concurrent_branches_use_node_id_order(self):
+        # The serial-chain case above is the one where every candidate ordering agrees. This
+        # is the case that separates them: two event nodes on CONCURRENT branches of differing
+        # depth. The recorder must report them in node-id (creation) order, which is what
+        # cuda_event_sync_id follows -- ordering by dependency depth inverts them here, and
+        # does so silently because the two depths are distinct.
+        x = torch.randn(8, 8, device="cuda")
+        s_deep, s_shallow = torch.cuda.Stream(), torch.cuda.Stream()
+        warm = torch.cuda.Stream()
+        warm.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(warm):
+            for _ in range(3):
+                (x @ x).relu()
+        torch.cuda.current_stream().wait_stream(warm)
+
+        ev_deep = torch.cuda.Event(external=True)
+        ev_shallow = torch.cuda.Event(external=True)
+        r = _fresh_event_node_recorder(self)
+        r.arm()
+
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(g):
+            y = x @ x
+            s_deep.wait_stream(torch.cuda.current_stream())
+            s_shallow.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s_deep):  # longer branch, event created FIRST
+                a = (y * 2).relu()
+                a = (a @ a).relu()
+                ev_deep.record()
+            with torch.cuda.stream(s_shallow):  # shorter branch, event created SECOND
+                b = y + 1
+                ev_shallow.record()
+            torch.cuda.current_stream().wait_stream(s_deep)
+            torch.cuda.current_stream().wait_stream(s_shallow)
+            (a + b).sum()
+        g.instantiate()
+
+        data = g.get_graph_data()
+        nodes = data["nodes"]
+        ev_nodes = [n for n in nodes if n["node_type"] == "event_record"]
+        self.assertEqual(len(ev_nodes), 2, "expected one event node per branch")
+
+        # get_graph_data() returns nodes in increasing node id -- the invariant the recorder
+        # relies on to skip sorting entirely.
+        ids = [n["tools_id"] for n in nodes]
+        self.assertEqual(ids, sorted(ids))
+
+        recorded = r.graph_event_nodes[data["exec_graph_id"]]
+        self.assertEqual(recorded, [n["tools_id"] for n in ev_nodes])
+        self.assertEqual(recorded, sorted(recorded))
+
+        # And the branches really are at different dependency depths, so a depth sort would
+        # have produced a different (wrong) order here rather than coincidentally agreeing.
+        by_index = {n["tools_id"]: i for i, n in enumerate(nodes)}
+        depth: dict[int, int] = {}
+
+        def node_depth(i):
+            if i in depth:
+                return depth[i]
+            deps = nodes[i]["dependencies"]
+            depth[i] = 0 if not deps else 1 + max(node_depth(j) for j in deps)
+            return depth[i]
+
+        d = [node_depth(by_index[t]) for t in recorded]
+        self.assertNotEqual(d[0], d[1], "branches should differ in depth")
+        if d[0] > d[1]:
+            self.assertNotEqual(
+                recorded, [t for _, t in sorted(zip(d, recorded))]
+            )  # depth order != node-id order
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_v2_columnar_collection(self):
@@ -1228,6 +3315,205 @@ class TestCuptiMonitorCUDA(TestCase):
         self.assertGreater(stats["buffers_completed"], 0)
 
 
+def _graph_node_created_key():
+    """The ``(domain, cbid)`` the registry tests exercise: RESOURCE / GRAPHNODE_CREATED.
+
+    Graph-node creation is the motivating consumer, and RESOURCE callbacks need no CUDA work
+    beyond building a graph. Resolved from cupti-python rather than hardcoded, and lazily
+    because this module must import without it.
+    """
+    from cupti.cupti import (  # pyrefly: ignore[missing-import]
+        CallbackDomain,
+        CallbackIdResource,
+    )
+
+    return int(CallbackDomain.RESOURCE), int(CallbackIdResource.GRAPHNODE_CREATED)
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA required")
+# setUp imports the monitor, which hard-imports the build-generated _cupti_stubs, so the
+# whole class has to be gated -- a method-level gate would still let setUp error out where
+# the stubs were not generated (see TEST_CUPTI in common_cuda).
+@unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+class TestCuptiCallbackRegistry(TestCase):
+    """The monitor's shared *subscriber-callback* registry -- a separate axis from activity
+    records: handlers fire synchronously on the application thread inside the CUDA call."""
+
+    def setUp(self):
+        from torch.profiler._cupti import monitor as _cupti_monitor
+
+        _cupti_monitor._reset_for_test()
+        self.addCleanup(_cupti_monitor._reset_for_test)
+
+    def _monitor(self):
+        from torch.profiler._cupti.monitor import CuptiMonitor
+
+        return CuptiMonitor()
+
+    def test_capability_flag_advertised(self):
+        # Consumers (e.g. an out-of-tree CUPTI subscriber) branch on this to stop taking a
+        # subscription of their own. Needs no CUDA/CUPTI.
+        from torch.profiler._cupti import monitor as _cupti_monitor
+
+        self.assertTrue(_cupti_monitor.get_config()["supports_callback_handlers"])
+
+    def test_register_unregister_handler(self):
+        monitor = self._monitor()
+        key = _graph_node_created_key()
+        first = monitor.register_callback_handler(*key, lambda *a: None)
+        second = monitor.register_callback_handler(*key, lambda *a: None)
+        self.addCleanup(monitor.unregister_callback_handler, second)
+        self.assertEqual(len(monitor._callback_handlers[key]), 2)
+
+        monitor.unregister_callback_handler(first)
+        self.assertEqual(monitor._callback_handlers[key], (second.fn,))
+        # Idempotent: removing an already-removed handler leaves the survivor alone.
+        monitor.unregister_callback_handler(first)
+        self.assertEqual(monitor._callback_handlers[key], (second.fn,))
+
+    def test_arm_refcount_disables_only_at_zero(self):
+        # Two consumers scoping the same callback to different windows must not disable
+        # each other, so cuptiEnableCallback is driven only on the 0->1 and 1->0 edges.
+        monitor = self._monitor()
+        key = _graph_node_created_key()
+        handler = monitor.register_callback_handler(*key, lambda *a: None)
+        self.addCleanup(monitor.unregister_callback_handler, handler)
+
+        calls = []
+        real = monitor._cupti.enable_callback
+
+        def recording(sub, domain, cbid, enable):
+            calls.append(enable)
+            return real(sub, domain, cbid, enable)
+
+        with patch.object(monitor._cupti, "enable_callback", recording):
+            monitor.arm_callback(*key)
+            monitor.arm_callback(*key)
+            self.assertEqual(calls, [True])
+            self.assertEqual(monitor._callback_armed[key], 2)
+
+            monitor.disarm_callback(*key)
+            self.assertEqual(calls, [True])
+            monitor.disarm_callback(*key)
+            self.assertEqual(calls, [True, False])
+            self.assertNotIn(key, monitor._callback_armed)
+            # Disarming when not armed is a no-op, not an error.
+            monitor.disarm_callback(*key)
+            self.assertEqual(calls, [True, False])
+
+    def test_handler_exception_is_isolated(self):
+        # A raise must not reach CUPTI's C dispatch, and one bad handler must not silence
+        # the others (order-independent, so check both orderings).
+        monitor = self._monitor()
+        key = _graph_node_created_key()
+        seen = []
+
+        def boom(*_args):
+            raise RuntimeError("handler blew up")
+
+        bad = monitor.register_callback_handler(*key, boom)
+        good = monitor.register_callback_handler(*key, lambda *a: seen.append("good"))
+        self.addCleanup(monitor.unregister_callback_handler, good)
+        self.addCleanup(monitor.unregister_callback_handler, bad)
+
+        monitor._dispatch_callback(0, *key, 0)
+        self.assertEqual(seen, ["good"])
+
+    def test_handler_alone_holds_subscription(self):
+        # A callback-only consumer must be able to bring CUPTI up and hold it with no
+        # activity observers -- the motivating case captures graphs before any profiling.
+        monitor = self._monitor()
+        self.assertIsNone(monitor._subscriber)
+
+        handler = monitor.register_callback_handler(
+            *_graph_node_created_key(), lambda *a: None
+        )
+        self.assertIsNotNone(monitor._subscriber)
+        # No user-defined records and no decode worker: the activity path stayed off.
+        self.assertFalse(monitor._started)
+        self.assertFalse(monitor._callbacks_registered)
+
+        monitor.unregister_callback_handler(handler)
+        self.assertIsNone(monitor._subscriber)
+
+    def test_subscription_survives_activity_session_either_way(self):
+        # The subscription is shared, so it must outlive whichever consumer leaves first.
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cupti.records import Kernel
+
+        monitor = self._monitor()
+        handler = monitor.register_callback_handler(
+            *_graph_node_created_key(), lambda *a: None
+        )
+        obs = monitor.register(
+            {ActivityKind.CONCURRENT_KERNEL: {Kernel.END}}, lambda c: None
+        )
+        self.assertTrue(monitor._started)
+        subscriber = monitor._subscriber
+
+        # Observer leaves first: stop() disarms user-defined records but must not
+        # unsubscribe from under the live handler.
+        monitor.unregister(obs)
+        self.assertFalse(monitor._started)
+        self.assertEqual(monitor._subscriber, subscriber)
+
+        # Handler leaves last -> released.
+        monitor.unregister_callback_handler(handler)
+        self.assertIsNone(monitor._subscriber)
+
+    def test_noop_cb_swap_does_not_clobber_dispatch(self):
+        # An out-of-tree consumer that swaps cupti_python._NOOP_CB (to route its own
+        # subscription to its own callback) must not steal the monitor's dispatch, so the
+        # monitor passes its switchboard to subscribe() explicitly.
+        from torch.profiler._cupti import cupti_python
+
+        other = cupti_python._CB_FUNC(lambda *a: None)
+        with patch.object(cupti_python, "_NOOP_CB", other):
+            monitor = self._monitor()
+            handler = monitor.register_callback_handler(
+                *_graph_node_created_key(), lambda *a: None
+            )
+            self.addCleanup(monitor.unregister_callback_handler, handler)
+            self.assertIsNotNone(monitor._callback_trampoline)
+            self.assertIsNot(monitor._callback_trampoline, other)
+
+    def test_graph_node_callback_fires_during_capture_only(self):
+        # End-to-end proof of the mechanism: GRAPHNODE_CREATED fires once per node while
+        # armed during a capture, and not at all once disarmed (so replay pays nothing).
+        key = _graph_node_created_key()
+        n_kernels = 4
+        monitor = self._monitor()
+        fired = []
+        handler = monitor.register_callback_handler(*key, lambda *a: fired.append(a))
+        self.addCleanup(monitor.unregister_callback_handler, handler)
+
+        x = torch.randn(64, 64, device="cuda")
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(3):
+                x = x + 1
+        torch.cuda.current_stream().wait_stream(s)
+
+        g = torch.cuda.CUDAGraph()
+        monitor.arm_callback(*key)
+        try:
+            with torch.cuda.graph(g):
+                for _ in range(n_kernels):
+                    x = x + 1
+        finally:
+            monitor.disarm_callback(*key)
+        self.assertGreaterEqual(len(fired), n_kernels)
+
+        # Disarmed: replay must not enter the dispatcher at all.
+        before = len(fired)
+        for _ in range(5):
+            g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(len(fired), before)
+
+
 class TestWindowFinalizer(TestCase):
     """Cover-and-finalize loop of WindowFinalizerMixin -- pure Python, no CUDA/CUPTI.
     A fake user supplies a settable native clock and a synthetic record buffer."""
@@ -1405,6 +3691,86 @@ _cupti_monitor.enable_hes_early()
         self.assertGreater(stats["buffers_completed"], 0)
         self.assertEqual(stats["buffers_pending"], 0)
         self.assertGreater(len(start), 0)
+
+        # obs.close() unregistered the last observer, stopping the monitor. The pool
+        # must survive that: CUPTI can still own buffers it never returned.
+        self.assertGreater(torch._C._profiler._cupti_monitor.allocated_buffers(), 0)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @_isolated
+    def test_graph_host_node_collected_on_device(self):
+        # End-to-end: a CUDA-graph host node (a CPU callback run as a graph node) is collected
+        # as a GRAPH_HOST_NODE record and rendered as a "graph_host_node" span in the exported
+        # trace. The graph is captured with torch.cuda.graph (keep_graph so the template stays
+        # live), then a host node is grafted onto it via cudaGraphAddHostNode -- stream capture
+        # never enqueues a host node, so the one node under test needs the runtime primitive --
+        # and the graph is re-instantiated before replay. The node is a libc free(NULL): a safe
+        # no-op on every replay. With enable_graph_dependencies (armed before instantiate, as a
+        # real early-arm would be), the callback's symbol name is recovered from the graph and
+        # the span is named "HostNode: free". Needs a driver new enough to emit the records
+        # (CUDA >= 13.2 / cuda-compat); the CUPTI enable succeeds on older drivers but yields
+        # nothing, so skip rather than falsely fail.
+        import ctypes
+
+        from torch.profiler._cupti._graph_deps import _GraphDependencyRecorder
+
+        try:
+            from cuda.bindings import runtime as cudart
+        except ImportError:
+            self.skipTest("cuda.bindings required")
+        drv = cudart.cudaDriverGetVersion()[1]
+        if drv < 13020:
+            self.skipTest(f"driver {drv} does not emit GRAPH_HOST_NODE (needs >= 13.2)")
+
+        def ck(ret):
+            if int(ret[0]) != int(cudart.cudaError_t.cudaSuccess):
+                raise RuntimeError(f"cuda err {ret[0]}")
+            return ret[1] if len(ret) > 1 else None
+
+        free_addr = ctypes.cast(ctypes.CDLL(None).free, ctypes.c_void_p).value
+        params = cudart.cudaHostNodeParams()
+        try:
+            params.fn = cudart.cudaHostFn_t(init_value=free_addr)
+        except TypeError:
+            params.fn = free_addr
+        params.userData = 0  # free(NULL): safe no-op on every replay
+
+        # Arm before instantiate so the recorder captures the host node's topology + fn name.
+        _GraphDependencyRecorder().arm()
+        x = torch.zeros(8, device="cuda")
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(graph):
+            x.add_(1.0)
+        # raw_cuda_graph() is an int handle; pass it straight to the binding (no typed wrapper).
+        ck(cudart.cudaGraphAddHostNode(graph.raw_cuda_graph(), [], 0, params))
+        graph.instantiate()
+
+        cfg = _ExperimentalConfig(
+            custom_profiler_config='{"backend":"cupti_monitor","enable_graph_dependencies":true}'
+        )
+        with TemporaryFileName(mode="w+") as trace_path:
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                experimental_config=cfg,
+            ) as prof:
+                for _ in range(5):
+                    graph.replay()
+                torch.cuda.synchronize()
+            prof.export_chrome_trace(trace_path)
+            gz = trace_path + ".gz"
+            if os.path.exists(gz):
+                with gzip.open(gz, "rt") as f:
+                    data = json.load(f)
+            else:
+                with open(trace_path) as f:
+                    data = json.load(f)
+
+        host = [e for e in data["traceEvents"] if e.get("cat") == "graph_host_node"]
+        self.assertGreater(len(host), 0)
+        self.assertIn("host thread", host[0]["args"])
+        # The grafted node is libc free; its symbol is recovered and names the span.
+        self.assertEqual(host[0]["name"], "HostNode: free")
+        self.assertEqual(host[0]["args"]["host fn"], "free")
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @_isolated

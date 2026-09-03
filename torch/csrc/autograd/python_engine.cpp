@@ -1,10 +1,11 @@
 #include <torch/csrc/autograd/python_engine.h>
 
+#include <torch/csrc/Exceptions.h>
+
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/LegacyVmapMode.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
@@ -13,6 +14,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/python_node_creation_hook.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -108,6 +110,11 @@ std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
 std::unique_ptr<SavedVariableHooks> PythonEngine::
     get_default_saved_variable_hooks() {
   return PyDefaultSavedVariableHooks::get_hooks();
+}
+
+std::vector<std::unique_ptr<NodeCreationHook>> PythonEngine::
+    get_node_creation_hooks() {
+  return PyDefaultNodeCreationHooks::get_hooks();
 }
 
 variable_list PythonEngine::execute(
@@ -389,23 +396,10 @@ static PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
     pybind11::gil_scoped_acquire gil;
     THPObjectPtr result{PyObject_CallFunctionObjArgs(callback.get(), nullptr)};
     if (!result) {
-      // Note [ Persisting PyErr state across autograd engine threads ]
-      //
-      // Since the autograd engine is multi-threaded, and Python error state is
-      // local to each thread, it must preserve the python error from the worker
-      // thread and rethrow it as-is in the calling thread. This is done via
-      // persisting the error in the two places that can encounter Python
-      // errors: (1) evaluate function and (2) queued callbacks.
-      //
-      // TODO: the engine is not actually responsible for persisting the error
-      // in the custom autograd Function case today! See the note above
-      // `raise_python_error()` function in python_function.cpp and
-      // python_hooks.cpp for more details. Persisting an extra time in the
-      // engine is fine because doing so is a no-op when the python_error has
-      // already been persisted.
-      python_error err;
-      err.persist();
-      throw std::move(err);
+      // See Note [ Persisting PyErr state across autograd engine threads ],
+      // above throw_python_error() in torch/csrc/Exceptions.h. Persisting an
+      // extra time here is a no-op if the error has already been persisted.
+      torch::throw_python_error();
     }
   });
   Py_RETURN_NONE;

@@ -30,7 +30,7 @@ from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping
 
 
 __all__ = [
@@ -176,8 +176,12 @@ class _KinetoProfile:
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exists, at the moment, only for TorchScript models
-            and not eager mode models.
+
+            .. deprecated::
+                ``with_modules`` is deprecated and will be removed in a future version.
+                It only collects data for TorchScript models, which are themselves
+                deprecated, and does nothing in eager mode. Use ``with_stack=True``,
+                which records ``nn.Module`` events for eager models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
         execution_trace_observer (ExecutionTraceObserver) : A PyTorch Execution Trace Observer object.
@@ -294,6 +298,20 @@ class _KinetoProfile:
             self._cupti_async_export = bool(
                 self._custom_profiler_config.get("cupti_monitor_async_export", False)
             )
+            # Arm graph-dependency recording now, at profiler construction -- before the
+            # training loop captures its CUDA graphs. The recording hook must observe each
+            # graph's one-time instantiate(); the per-window ProfilerObserver registers it
+            # too late (at prepare_trace, after warm-up capture) to catch replay-only graphs.
+            if self._custom_profiler_config.get("enable_graph_dependencies"):
+                from torch.profiler._cupti._graph_deps import _GraphDependencyRecorder
+
+                _GraphDependencyRecorder().arm()
+            # Same early-arm rationale for the CUDA_EVENT -> graph event-record node bridge:
+            # the recorder reads each graph's event nodes at its one-time instantiate().
+            if self._custom_profiler_config.get("enable_event_node_ids"):
+                from torch.profiler._cupti._event_nodes import _EventNodeRecorder
+
+                _EventNodeRecorder().arm()
         elif "cupti_monitor_async_export" in self._custom_profiler_config:
             raise ValueError(
                 "cupti_monitor_async_export is only supported with the cupti_monitor "
@@ -347,13 +365,33 @@ class _KinetoProfile:
                 enable_cuda_sync=bool(
                     self._custom_profiler_config.get("enable_cuda_sync_events")
                 ),
+                # GPU environment counters (power/clock/thermal/cooling) are periodically
+                # sampled; opt-in since the sampling adds overhead.
+                enable_environment_counters=bool(
+                    self._custom_profiler_config.get("enable_environment_counters")
+                ),
                 # PM sampling (true SM-active % + DRAM-throughput % counters) is a CUPTI-monitor
-                # feature, opt-in (not always-on like env counters). The metrics are per-profile
+                # feature, opt-in like the env counters. The metrics are per-profile
                 # (custom_profiler_config["pm_metrics"], a list of CUPTI metric names).
                 enable_pm_sampling=bool(
                     self._custom_profiler_config.get("enable_pm_sampling")
                 ),
                 pm_metrics=self._custom_profiler_config.get("pm_metrics"),
+                # Node->node CUDA-graph dependency arrows are opt-in (extra work at graph
+                # instantiate + arrow rendering); off unless the config requests them.
+                enable_graph_dependencies=bool(
+                    self._custom_profiler_config.get("enable_graph_dependencies")
+                ),
+                # Join CUDA_EVENT records (graph event-record nodes, e.g. NCCL under
+                # NCCL_GRAPH_MIXING_SUPPORT) back to their graph_node_id. Opt-in: pulls in the
+                # CUDA_EVENT record kind.
+                enable_event_node_ids=bool(
+                    self._custom_profiler_config.get("enable_event_node_ids")
+                ),
+                # gzip level for the native .pftrace encoder (0-9; 1 = fast, the default).
+                pftrace_compression_level=int(
+                    self._custom_profiler_config.get("pftrace_compression_level", 1)
+                ),
                 # Synchronous export finalizes on the calling thread, so skip the poll thread.
                 defer_export=self._cupti_async_export,
             )
@@ -428,10 +466,37 @@ class _KinetoProfile:
                 self._monitor_window_id = self._cupti_profiler_observer.close_window()
         self.profiler.__exit__(None, None, None)
 
-    def export_chrome_trace(self, path: str, use_python_export: bool = False):
+    def export_chrome_trace(
+        self,
+        path: str,
+        use_python_export: bool = False,
+        cuda_graph_annotations: Mapping[int, Any] | None = None,
+        graph_lanes: str = "none",
+        default_stream: int = 7,
+    ):
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
+
+        ``cuda_graph_annotations`` bakes CUDA-graph kernel annotations into the trace:
+        matching graphed work carries its annotation's fields in ``args``. Pass
+        :func:`torch.cuda.graph_annotations.get_kernel_annotations` to use what
+        :func:`~torch.cuda.graph_annotations.mark_kernels` recorded, or any mapping in
+        that shape -- a filtered or edited copy, or one unpickled from an earlier run.
+        An empty mapping is treated as no annotations at all. Passing it implies
+        ``use_python_export``, the export path able to inject (the ``cupti_monitor``
+        backend does its own injection and ignores this argument).
+
+        ``graph_lanes`` decides whether graphed events are moved onto display lanes.
+        ``"none"`` (default) leaves the trace's stream layout alone, reporting a recorded
+        lane as ``args["annotated_stream"]`` instead of acting on it. ``"all"`` moves each
+        graphed event to the lane its annotation names (as
+        :func:`~torch.cuda.graph_annotations.mark_stream` records) and the rest onto
+        ``default_stream`` -- what a replay scattered over many hardware streams needs,
+        at the cost of piling everything onto one lane when no annotation names a stream.
+        A moved event keeps the stream it ran on as ``args["original_stream"]``. ``"all"``
+        requires ``cuda_graph_annotations`` and raises without them, since on its own it
+        would only do the collapsing half.
         """
         if self.profiler is None:
             raise AssertionError(
@@ -472,9 +537,17 @@ class _KinetoProfile:
                 self._cupti_profiler_observer = None
                 self._monitor_window_id = None
             return
-        if use_python_export:
+        # graph_lanes moves events on its own (it only needs each event's graph node id,
+        # which kineto already reports), so anything but the "none" default has to reach
+        # the Python exporter -- including an invalid value, which it rejects.
+        if use_python_export or cuda_graph_annotations or graph_lanes != "none":
             self.profiler.export_chrome_trace(
-                path, self._trace_metadata, use_python_export=True
+                path,
+                self._trace_metadata,
+                use_python_export=True,
+                cuda_graph_annotations=cuda_graph_annotations,
+                graph_lanes=graph_lanes,
+                default_stream=default_stream,
             )
         elif path.endswith(".gz"):
             with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:
@@ -867,8 +940,12 @@ class profile(_KinetoProfile):
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exists, at the moment, only for TorchScript models
-            and not eager mode models.
+
+            .. deprecated::
+                ``with_modules`` is deprecated and will be removed in a future version.
+                It only collects data for TorchScript models, which are themselves
+                deprecated, and does nothing in eager mode. Use ``with_stack=True``,
+                which records ``nn.Module`` events for eager models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used for Kineto library features. Note, backward compatibility is not guaranteed.
         execution_trace_observer (ExecutionTraceObserver) : A PyTorch Execution Trace Observer object.
@@ -883,9 +960,6 @@ class profile(_KinetoProfile):
         custom_trace_id_callback (Callable[[], str], optional): User-supplied trace ID generator,
             invoked once per profiling cycle. Defaults to a random UUID; retrieve via
             :meth:`get_trace_id`.
-        use_cuda (bool):
-            .. deprecated:: 1.8.1
-                use ``activities`` instead.
 
     .. note::
         Use :func:`~torch.profiler.schedule` to generate the callable schedule.
@@ -997,31 +1071,13 @@ class profile(_KinetoProfile):
         experimental_config: _ExperimentalConfig | None = None,
         execution_trace_observer: _ITraceObserver | None = None,
         acc_events: bool = False,
-        # deprecated:
-        use_cuda: bool | None = None,
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
     ) -> None:
-        # Extract activities for the use_cuda deprecation check.
         if activities is not None:
-            activities_set: set[ProfilerActivity] = set()
-            for item in activities:
-                if isinstance(item, ProfilerActivity):
-                    activities_set.add(item)
-                elif isinstance(item, dict):
-                    activities_set.update(item.keys())
+            activities_set, _ = _parse_activities(activities)
         else:
             activities_set = supported_activities()
-        if use_cuda is not None:
-            warn(
-                "`use_cuda` is deprecated, use `activities` argument instead",
-                FutureWarning,
-                stacklevel=2,
-            )
-            if use_cuda:
-                activities_set.add(ProfilerActivity.CUDA)
-            elif ProfilerActivity.CUDA in activities_set:
-                activities_set.remove(ProfilerActivity.CUDA)
         if len(activities_set) == 0:
             raise AssertionError("No valid profiler activities found")
 
