@@ -202,7 +202,7 @@ def main(output_file="mm_shapes.csv"):
 
     # Convert to desired format and filter dtypes
     csv_rows = []
-    for m, k, n, dtype1, dtype2 in shapes:
+    for m, k, n, dtype1, _dtype2 in shapes:
         # Use the first dtype and convert to string
         if dtype1 in dtype_map:
             dtype_str = dtype_map[dtype1]
