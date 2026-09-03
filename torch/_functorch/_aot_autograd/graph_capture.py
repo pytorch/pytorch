@@ -212,6 +212,15 @@ def _detach_traced_inputs(flat_args: Any) -> Any:
     return pytree.tree_map_only(torch.Tensor, detach_tensor, flat_args)
 
 
+def _clone_traced_inputs_for_autograd(flat_args: Any) -> Any:
+    def clone_tensor(t: torch.Tensor) -> torch.Tensor:
+        detached = _detach_and_copy_item_memo(t) if detect_fake_mode() else t.detach()
+        detached.requires_grad_(t.requires_grad)
+        return detached
+
+    return pytree.tree_map_only(torch.Tensor, clone_tensor, flat_args)
+
+
 def _prepare_graph_capture_tracing(
     fn_to_trace: Callable[..., Any],
     flat_args: Any,

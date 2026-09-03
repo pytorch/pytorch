@@ -41,6 +41,17 @@ fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", "1") != "0"
 # but it is on by default for aot_eager.
 debug_assert = False
 
+# Preserve undefined user grad outputs and specialize AOTAutograd backward graphs
+# around them (retracing or structurally pruning the backward per observed
+# undefined-tangent pattern). Default OFF: the machinery trades per-call
+# overhead and backward-time compiles for specialized backwards, and is
+# consumed by torch.compiler.precompile (which enables it during capture);
+# ordinary torch.compile keeps the zero-materialization behavior. When ON, a
+# pruned backward output's grad is None on the structural/mask paths but a
+# real zero tensor on the retrace path -- see Note [Pruned-tangent grads:
+# None vs zeros] in _aot_autograd/runtime_wrappers.py.
+aot_autograd_prune_unused_outputs = False
+
 debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", "0") != "0"
 
 # See # NOTE [Export custom triton op]
