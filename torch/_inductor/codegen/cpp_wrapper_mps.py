@@ -101,7 +101,7 @@ class CppWrapperMps(CppWrapperGpu):
             raise NotImplementedError("No threads or group_size provided")
 
         # Check if threads is a single value or an array-like structure
-        threads_str = str(threads)
+        threads_str = threads
         is_single_value = (
             threads_str.startswith("{")
             and threads_str.endswith("}")
@@ -121,7 +121,7 @@ class CppWrapperMps(CppWrapperGpu):
                 )
             else:
                 # Extract group size value if it's also in braces
-                group_size_str = str(group_size)
+                group_size_str = group_size
                 if group_size_str.startswith("{") and group_size_str.endswith("}"):
                     group_size_value = group_size_str[1:-1].strip()
                 else:
@@ -168,7 +168,7 @@ class CppWrapperMps(CppWrapperGpu):
                 )
                 new_args.append("}")
             else:
-                group_size_str = str(group_size)
+                group_size_str = group_size
                 group_size_size = get_array_size(group_size_str)
                 new_args.append("{")
                 new_args.append(f"    uint64_t {threads_var}[] = {threads};")
