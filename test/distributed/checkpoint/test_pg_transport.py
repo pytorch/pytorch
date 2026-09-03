@@ -6,7 +6,6 @@ from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import (
     init_from_local_shards,
@@ -600,7 +599,7 @@ class TestPGTransportEdgeCases(TestCase):
     # `TEST_CUDA or TEST_HPU or TEST_XPU` and so does not recognise PrivateUse1.
     # No capability is declared in its place: the test mocks the process group
     # outright, so what it needs is an accelerator device to exist, not a working
-    # distributed backend. `instantiate_device_type_tests(..., except_for="cpu")`
+    # distributed backend. `instantiate_device_type_tests(..., except_for="cpu", allow_xpu=True)`
     # below already guarantees that, generating this test only for accelerator
     # device classes.
     @unittest.skipIf(not TEST_ACCELERATOR, "No accelerator")
@@ -630,9 +629,13 @@ class TestPGTransportEdgeCases(TestCase):
 
 
 instantiate_device_type_tests(PgTransportCPU, globals(), only_for="cpu")
-instantiate_device_type_tests(PgTransportGPU, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    PgTransportGPU, globals(), except_for="cpu", allow_xpu=True
+)
 instantiate_device_type_tests(TestPrepareStateDict, globals(), only_for="cpu")
 instantiate_device_type_tests(TestPGTransportMocked, globals(), only_for="cpu")
-instantiate_device_type_tests(TestPGTransportEdgeCases, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestPGTransportEdgeCases, globals(), except_for="cpu", allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
