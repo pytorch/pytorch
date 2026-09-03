@@ -157,7 +157,9 @@ def single_record_test(**kwargs):
     return multi_record_test(1, **kwargs)
 
 
-class LoggingTests(LoggingTestCase):
+class TestLogging(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     test_bytecode = multi_record_test(2, bytecode=True)
     test_output_code = multi_record_test(3, output_code=True)
     test_aot_graphs = multi_record_test(3, aot_graphs=True)
@@ -194,13 +196,13 @@ class LoggingTests(LoggingTestCase):
         self.assertIn(
             """\
     - User stack trace:
-    -   File [file_path], line 168, in outmost_fn
+    -   File [file_path], line 170, in outmost_fn
     -     return outer_fn(x, ys, zs)
-    -   File [file_path], line 171, in outer_fn
+    -   File [file_path], line 173, in outer_fn
     -     return fn(x, ys, zs)
-    -   File [file_path], line 174, in fn
+    -   File [file_path], line 176, in fn
     -     return inner(x, ys, zs)
-    -   File [file_path], line 177, in inner
+    -   File [file_path], line 179, in inner
     -     for y, z in zip(ys, zs):""",
             record_str,
         )
@@ -396,33 +398,6 @@ Found from :
         )
 
         exitstack.close()
-
-    @requires_distributed()
-    @requires_cuda_and_triton
-    @make_logging_test(ddp_graphs=True)
-    def test_ddp_graphs(self, records):
-        class ToyModel(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.layers = torch.nn.Sequential(
-                    torch.nn.Linear(1024, 1024),
-                    torch.nn.Linear(1024, 1024),
-                )
-
-            def forward(self, x):
-                return self.layers(x)
-
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = str(find_free_port())
-        dist.init_process_group("gloo", rank=0, world_size=1)
-
-        model = DDP(ToyModel().to("cuda:0"), device_ids=[0], bucket_cap_mb=4)
-        ddp_model = torch.compile(model, backend="inductor")
-
-        ddp_model(torch.randn(1024, 1024, device="cuda:0"))
-
-        dist.destroy_process_group()
-        self.assertEqual(len([r for r in records if "__ddp_graphs" in r.name]), 4)
 
     # check that logging to a child log of a registered logger
     # does not register it and result in duplicated records
@@ -1136,7 +1111,7 @@ print("arf")
         self.assertExpectedInline(
             msg0,
             """\
-TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_prefix.fn)
+TRACE FX call mul from test_logging.py:N in fn (TestLogging.test_trace_call_prefix.fn)
             return (x * 2) @ (y * 3)
                     ~~^~~""",
         )
@@ -1491,7 +1466,38 @@ TorchDynamo attempted to trace the following frames: [
         self.assertIn("fn", msg)
 
 
-class LoggingTestsDevice(LoggingTestCase):
+class TestLoggingCUDA(LoggingTestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @requires_distributed()
+    @requires_cuda_and_triton
+    @make_logging_test(ddp_graphs=True)
+    def test_ddp_graphs(self, records):
+        class ToyModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.Sequential(
+                    torch.nn.Linear(1024, 1024),
+                    torch.nn.Linear(1024, 1024),
+                )
+
+            def forward(self, x):
+                return self.layers(x)
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
+        dist.init_process_group("gloo", rank=0, world_size=1)
+
+        model = DDP(ToyModel().to("cuda:0"), device_ids=[0], bucket_cap_mb=4)
+        ddp_model = torch.compile(model, backend="inductor")
+
+        ddp_model(torch.randn(1024, 1024, device="cuda:0"))
+
+        dist.destroy_process_group()
+        self.assertEqual(len([r for r in records if "__ddp_graphs" in r.name]), 4)
+
+
+class TestLoggingDevice(LoggingTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_gpu_and_triton
@@ -1675,11 +1681,13 @@ exclusions = {
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
-        setattr(LoggingTests, f"test_{name}", single_record_test(**{name: True}))
+        setattr(TestLogging, f"test_{name}", single_record_test(**{name: True}))
 
+
+instantiate_device_type_tests(TestLoggingCUDA, globals(), only_for=("cuda",))
 
 instantiate_device_type_tests(
-    LoggingTestsDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    TestLoggingDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
 
 if __name__ == "__main__":
