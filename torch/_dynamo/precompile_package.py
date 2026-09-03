@@ -813,8 +813,8 @@ class _PrecompileBackend:
             inner, "backend_ctx_ctor", contextlib.nullcontext
         )
         # Rendering a subgraph as source needs the graph, which only exists
-        # here. Kept for the REAL capture only: the guard probe throws its
-        # graphs away, and rendering is a second full lowering.
+        # here. Kept only where it will be rendered: rendering is a second full
+        # lowering, and retaining deepcopies every compiled graph.
         self._keep_graphs = keep_graphs
         self.graphs: dict[str, tuple[torch.fx.GraphModule, list[Any]]] = {}
         # Serving an INSTALLED artifact answers a guard miss by compiling,
@@ -1658,8 +1658,8 @@ class PrecompileSession:
         # config __enter__ installs is context-local, so only that thread can
         # undo it; close() from any other thread waits for it instead.
         self._entered_thread: int | None = None
-        # On for the real capture; the guard probe leaves it off so it does not
-        # pay for a lowering whose source is thrown away.
+        # Off unless the subgraphs will be rendered: retaining them deepcopies
+        # every compiled graph for the life of the session.
         self._keep_graphs = keep_graphs
         self._backend_obj: _PrecompileBackend | None = None
         self._policy_dropped_guards: set[tuple[str, str]] = set()
@@ -1700,7 +1700,9 @@ class PrecompileSession:
 
         self._pgo_state = _new_code_state()
         self._state = threading.Condition()
-        self._active_calls = 0
+        # Thread ident -> calls in flight on it. __exit__ waits for this to
+        # empty, so a close() from a thread listed here would wait on itself.
+        self._calling_threads: collections.Counter[int] = collections.Counter()
         self._closing = False
         self._finished = False
 
@@ -1797,7 +1799,12 @@ class PrecompileSession:
         and then retires the region itself. It does not run __exit__ on the
         entering thread's behalf, so a block that thread never leaves is
         waited on forever.
+
+        Raises RuntimeError when called from inside a call the session is
+        running (from the captured function, or a hook it fires): the exit
+        waits for that call to return, which it then never would.
         """
+        self._refuse_from_inside_a_call("close()")
         with self._state:
             self._retired = True
             while self._entered_thread not in (None, threading.get_ident()):
@@ -1809,12 +1816,24 @@ class PrecompileSession:
         self._clear_runtime_cache()
         self._finished = True
 
+    def _refuse_from_inside_a_call(self, what: str) -> None:
+        with self._state:
+            inside = threading.get_ident() in self._calling_threads
+        if inside:
+            raise RuntimeError(
+                f"PrecompileSession {what} was called from inside a call the "
+                f"session is running (from the captured function, or a hook it "
+                f"fires). It waits for that call to finish, so it would never "
+                f"return; close the session after the call returns."
+            )
+
     def _call(self, *args: object, **kwargs: object) -> object:
+        ident = threading.get_ident()
         with self._state:
             if self._compiled is None or self._closing:
                 raise RuntimeError("PrecompileSession is not active")
             compiled = self._compiled
-            self._active_calls += 1
+            self._calling_threads[ident] += 1
         from .pgo import _use_code_state
 
         try:
@@ -1825,8 +1844,10 @@ class PrecompileSession:
             raise
         finally:
             with self._state:
-                self._active_calls -= 1
-                if self._active_calls == 0:
+                self._calling_threads[ident] -= 1
+                if self._calling_threads[ident] == 0:
+                    del self._calling_threads[ident]
+                if not self._calling_threads:
                     self._state.notify_all()
 
     def __enter__(self) -> Callable[..., object]:
@@ -1843,16 +1864,16 @@ class PrecompileSession:
         self._gate_error_mark = len(self._capture_errors)
         grads: dict[torch.Tensor, torch.Tensor | None] = {}
         stack = contextlib.ExitStack()
-        # Backends must serialize into the artifact rather than into the
-        # process-local inductor cache.
-        stack.enter_context(_capture_config(self._training))
-        # A fresh set per cycle, unioned into _live_guard_leaves when the cycle
-        # ends: _report_guard_drift compares EVERY frame in the package against
-        # it, so keeping only the last cycle's leaves would report every frame
-        # that cycle did not recompile as drifted.
-        self._cycle_guard_leaves = stack.enter_context(record_live_guard_leaves())
-        self._stack = stack
         try:
+            # Backends must serialize into the artifact rather than into the
+            # process-local inductor cache.
+            stack.enter_context(_capture_config(self._training))
+            # A fresh set per cycle, unioned into _live_guard_leaves when the
+            # cycle ends: _report_guard_drift compares EVERY frame in the
+            # package against it, so keeping only the last cycle's leaves would
+            # report every frame that cycle did not recompile as drifted.
+            self._cycle_guard_leaves = stack.enter_context(record_live_guard_leaves())
+            self._stack = stack
             if self._example_inputs:
                 module = (
                     self._fn
@@ -1963,12 +1984,13 @@ class PrecompileSession:
         return self._call
 
     def __exit__(self, *exc: object) -> None:
+        self._refuse_from_inside_a_call("__exit__")
         if isinstance(exc[1], BaseException):
             self._record_capture_error(exc[1])
         with self._state:
             self._closing = True
             try:
-                while self._active_calls:
+                while self._calling_threads:
                     self._state.wait()
             except BaseException:
                 self._closing = False
@@ -2494,7 +2516,7 @@ class PrecompileSession:
         """
         What each ``example_inputs`` call returned, in order.
 
-        Only populated when ``_collect_results`` was set before ``__enter__``;
+        Only populated when the session was built with ``collect_results=True``;
         otherwise empty, because a session that outlives its calls must not pin
         the caller's output tensors.
         """
@@ -2752,6 +2774,18 @@ class PrecompileSession:
                     f"This usually means their guards could not be serialized. Pass "
                     f"require_complete=False to accept a partial artifact."
                 )
+            if summary.variants_dropped_for_codegen_target:
+                raise PackageError(
+                    f"Precompilation is incomplete: "
+                    f"{summary.variants_dropped_for_codegen_target} variant(s) were "
+                    f"compiled after inductor's CPU codegen target (the vector ISA "
+                    f"and width its kernels are built for, from cpp.simdlen and the "
+                    f"toolchain) moved away from the one this capture recorded on "
+                    f"its first graph, and were left out of the artifact, so the "
+                    f"calls that exercised them are not served. Keep that "
+                    f"configuration fixed for the whole capture, or pass "
+                    f"require_complete=False to accept the gap."
+                )
         if summary.wont_generalize:
             log.warning(
                 "precompile: %d value(s) are pinned to what capture saw (%s). A call "
@@ -2916,7 +2950,7 @@ class PrecompileSession:
             backends,
             self._with_unrendered(summary),
             self._backend,
-            _entry_fn_of(self._fn),
+            self._entry_fn,
             rendered,
             grad_enabled=self._capture_grad_mode(),
         )
@@ -2990,7 +3024,7 @@ class PrecompileSession:
             backends,
             self._with_unrendered(summary),
             self._backend,
-            _entry_fn_of(self._fn),
+            self._entry_fn,
             rendered,
             grad_enabled=self._capture_grad_mode(),
         )
@@ -3544,6 +3578,13 @@ def _check_artifact_matches(
 def _entry_fn_of(fn: object) -> Callable[..., object]:
     if not callable(fn):
         raise TypeError(f"expected a callable or nn.Module, got {type(fn).__name__}")
+    from .eval_frame import innermost_fn
+
+    # A torch._dynamo.disable wrapper has the inner function's name on a
+    # (*args, **kwargs) signature of its own, and Dynamo compiles the inner
+    # function; the entry, its varargs check and the binding written into the
+    # artifact all have to be that same function.
+    fn = innermost_fn(fn)
     if not hasattr(fn, "__code__"):
         raise TypeError(
             f"expected a function or nn.Module, got {type(fn).__name__}, which "

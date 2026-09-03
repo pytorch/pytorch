@@ -33,42 +33,17 @@ uint64_t next_generation() {
   return ++next_strategy_generation;
 }
 
-// Acquiring a mutex while holding the GIL deadlocks against a thread that holds
-// the mutex and needs the GIL. Nothing under cache_mutex runs Python or drops
-// the GIL (see ExtraState), so contention should not arise; if it does anyway,
-// take the uncontended fast path without touching the GIL and release it before
-// blocking so the owner can finish rather than deadlock.
-class CacheLock {
- public:
-  explicit CacheLock(std::mutex& mutex) : lock_(mutex, std::try_to_lock) {
-    if (lock_.owns_lock()) {
-      return;
-    }
-    if (PyGILState_Check()) {
-      py::gil_scoped_release release;
-      lock_.lock();
-    } else {
-      lock_.lock();
-    }
-  }
-
-  CacheLock(const CacheLock&) = delete;
-  CacheLock& operator=(const CacheLock&) = delete;
-  CacheLock(CacheLock&&) = delete;
-  CacheLock& operator=(CacheLock&&) = delete;
-  ~CacheLock() = default;
-
- private:
-  std::unique_lock<std::mutex> lock_;
-};
-
 // What guard evaluation needs from an entry, copied under cache_mutex so the
-// lock can be dropped while guards run. guard_manager owns root_mgr and
-// diff_guard_root_mgr, and a concurrent invalidate() replaces it.
+// lock can be dropped while guards run. guard_manager owns root_mgr, which is
+// never rebound; a concurrent invalidate() replaces the entry's wrapper but
+// this copy keeps the old one alive. diff_guard_root_mgr is rebound on every
+// recompile of the same code (populate_diff_guard_manager), so the candidate
+// holds its own reference to the Python object that owns it.
 struct GuardCandidate {
   py::object guard_manager;
   py::object code;
   py::object backend;
+  py::object diff_guard_root;
   void* root_mgr;
   void* diff_guard_root_mgr;
 };
@@ -81,12 +56,13 @@ struct GuardCandidate {
 // That can run ~ExtraState, whose Python (weakref callbacks on the transformed
 // code) may reach this same code object while the holder is still in the slot
 // -- CPython nulls the slot only after the freefunc returns. During that window
-// nested reset_extra_state and freefunc calls are no-ops, and a writer that
-// needs a state (skip_code, a compile, a precompile load) gets one parked in
-// `pending` rather than in the slot; get_extra_state serves it too, so every
-// writer in one teardown shares it. Once the slot is cleared, reset_extra_state
-// installs `pending` under a fresh holder, so nothing written during teardown
-// is lost. From code_dealloc there is no code object left to install it on.
+// nested freefunc calls are no-ops, and a writer that needs a state (skip_code,
+// a compile, a precompile load) gets one parked in `pending` rather than in the
+// slot; get_extra_state serves it too, so every writer in one teardown shares
+// it, and a nested reset_extra_state discards it again. Once the slot is
+// cleared, reset_extra_state installs `pending` under a fresh holder, so what
+// the teardown last wrote is not lost. From code_dealloc there is no code
+// object left to install it on.
 struct ExtraStateHolder {
   ExtraStateRef state;
   ExtraStateRef pending;
@@ -412,7 +388,14 @@ void destroy_extra_state(void* obj) {
 
 void reset_extra_state(PyCodeObject* code) {
   ExtraStateHolder* holder = get_extra_state_holder(code);
-  if (holder == nullptr || holder->destroying) {
+  if (holder == nullptr) {
+    return;
+  }
+  if (holder->destroying) {
+    // Issued by the teardown's own Python: forget what earlier teardown Python
+    // parked, so the last writer wins. The slot is emptied before the state
+    // dies, since its destructor can run Python that parks a new one.
+    ExtraStateRef pending = std::move(holder->pending);
     return;
   }
   drop_extra_state(holder);
@@ -428,20 +411,27 @@ void reset_extra_state(PyCodeObject* code) {
 }
 
 ExtraStateRef init_and_set_extra_state(PyCodeObject* code) {
+  // Constructing the state runs PyDict_New, which before 3.12 can trigger a
+  // collection whose finalizers reach Dynamo on this same code object and
+  // install or park a state of their own. The slot is therefore read only
+  // after the allocation, and whatever is there by then wins; the fresh state
+  // is empty, so letting it die here runs no Python.
   ExtraStateRef state = std::make_shared<ExtraState>();
   ExtraStateHolder* holder = get_extra_state_holder(code);
-  if (holder != nullptr) {
-    // Only reachable mid-teardown (see ExtraStateHolder): a live holder, or a
-    // pending state already handed out, means the caller skipped
-    // get_extra_state.
-    CHECK(holder->destroying && holder->pending == nullptr);
-    holder->pending = state;
+  if (holder == nullptr) {
+    // freed by destroy_extra_state (since we need to pass these objects to C)
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    _PyCode_SetExtra((PyObject*)code, extra_index, new ExtraStateHolder{state});
     return state;
   }
-  // freed by destroy_extra_state (since we need to pass these objects to C)
-  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-  _PyCode_SetExtra((PyObject*)code, extra_index, new ExtraStateHolder{state});
-  return state;
+  if (!holder->destroying) {
+    return holder->state;
+  }
+  // Mid-teardown (see ExtraStateHolder): park ours unless a writer already did.
+  if (holder->pending == nullptr) {
+    holder->pending = state;
+  }
+  return holder->pending;
 }
 
 static bool backend_match(PyObject* saved_backend, PyObject* backend) {
@@ -519,25 +509,25 @@ static size_t match_in_list(
   return candidates.size();
 }
 
-// Runs under cache_mutex, so backends are compared by identity only: a
-// different object may still be __eq__-equal (two torch.compile() wrappers with
-// the same options), and deciding that is user Python, which lookup() runs with
-// the lock released. Such an entry is skipped -- a later entry with this very
-// backend and no guards is still a guard-free hit -- but it is not a miss
-// either, so reaching the end past one falls back to lookup().
+// The first live entry decides, as in lookup(): a hit when it has this very
+// backend and no guards, a fallback to lookup() otherwise. Runs under
+// cache_mutex, so backends are compared by identity only; a different object
+// may still be __eq__-equal (two torch.compile() wrappers with the same
+// options), and deciding that is user Python, which lookup() runs with the lock
+// released. Skipping past such an entry to a later guard-free one would serve
+// the later entry ahead of an earlier one whose guards lookup() would have
+// passed, which is the ordering the precompile branch below refuses too.
 static bool try_lookup_without_guard_eval_in_list(
     std::list<CacheEntry>& entries,
     PyObject* backend,
     bool is_skip_guard_eval_unsafe,
     CacheEntry** found) {
-  bool skipped = false;
   for (CacheEntry& cache_entry : entries) {
     if (!PyCode_Check(cache_entry.code.ptr())) {
       continue;
     }
     if (!Py_IsFalse(backend) && cache_entry.backend.ptr() != backend) {
-      skipped = true;
-      continue;
+      return false;
     }
     if (has_no_guards(
             cache_entry.root_mgr,
@@ -548,7 +538,7 @@ static bool try_lookup_without_guard_eval_in_list(
     }
     return false;
   }
-  return !skipped;
+  return true;
 }
 
 void lookup(
@@ -572,17 +562,19 @@ void lookup(
     // cache-entry fallback. The identity guards that would tell two artifacts
     // of one model apart are exactly the ones precompile has to drop, so a
     // fallback here serves another artifact's graph for a call this region
-    // does not cover, instead of the miss that serving() turns into a loud
-    // error. The cache-entry fallback is narrower than it looks but is not a
-    // precedent: match_in_list also requires backend_match, though note that
-    // short-circuits when the backend is Py_False, which is every frame under
-    // run-only. Callers that install for an isolated region must pass its id
-    // (see CompilePackage.install) rather than rely on the default bucket.
+    // does not cover, where a miss would at least be visible to the exec
+    // strategy the installer set. The cache-entry fallback is narrower than
+    // it looks but is not a precedent: match_in_list also requires
+    // backend_match, though note that short-circuits when the backend is
+    // Py_False, which is every frame under run-only. Callers that install for
+    // an isolated region must pass its id (see CompilePackage.install) rather
+    // than rely on the default bucket.
     for (const PrecompileEntry& entry : extra_state->precompile_entries) {
       if (entry.isolate_recompiles_id == isolate_recompiles_id) {
         precompile_candidates.push_back(
             {entry.guard_manager,
              entry.code,
+             py::object(),
              py::object(),
              entry.root_mgr,
              nullptr});
@@ -599,6 +591,7 @@ void lookup(
             {entry.guard_manager,
              entry.code,
              entry.backend,
+             entry.diff_guard_root,
              entry.root_mgr,
              entry.diff_guard_root_mgr});
       }
@@ -633,7 +626,8 @@ void lookup(
     {
       CacheLock lock(extra_state->cache_mutex);
       for (const PrecompileEntry& entry : extra_state->precompile_entries) {
-        if (entry.guard_manager.ptr() == winner) {
+        if (entry.guard_manager.ptr() == winner &&
+            entry.isolate_recompiles_id == isolate_recompiles_id) {
           code = entry.code;
           break;
         }

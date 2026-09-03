@@ -152,9 +152,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        capture. It applies only to ``tracer="make_fx"``; the dynamo tracer lowers through
        the backend instead and rejects it.
    :param guard_filter_fn: Multi-graph serialization filter; returns one boolean per guard
-       entry. Live capture retains all guards so later examples trigger their recompiles.
-       Risky dropped guards are rejected by default when saving, and every
-       custom-filter drop counts as risky.
+       entry, composed (AND) with the default that drops the guards which cannot be
+       serialized, so a custom filter can only drop more. Live capture retains all guards
+       so later examples trigger their recompiles. Risky dropped guards are rejected by
+       default when saving, and every custom-filter drop counts as risky.
    :param recompile_limit: Maximum multi-graph variants captured per frame; ``None``
        means 256, which overrides a lower ambient accumulated-recompile limit for this
        capture. Applies only to ``tracer="dynamo"``.
@@ -162,13 +163,19 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param invariants: Optional path receiving the multi-graph invariant report.
    :param artifact_path: Optional file to write ``python_code`` to. Pass it together with
        ``cache_path`` -- the two halves load only as a matched pair, so naming one without
-       the other raises. Parent directories are created.
+       the other raises. Parent directories are created. Each file is written to a
+       ``<name>.<random>.tmp`` beside it and renamed into place: a symlink here is replaced
+       by a regular file (its target is left as it was), an existing file keeps its mode, a
+       new one gets what ``open()`` would create under the process umask, and a process
+       killed mid-write can leave the ``.tmp`` behind.
    :param cache_path: Optional file to write ``cache`` to; see ``artifact_path``.
    :param require_complete: Refuse to produce an artifact whose capture was incomplete --
        a call raised, no frame produced compiled code at all, a frame hit
-       ``recompile_limit``, a frame exercised during capture produced no guarded code, or
-       a frame was bypassed (its guards could not be serialized, so it would serve
-       nothing). Applies only to ``tracer="dynamo"``.
+       ``recompile_limit``, a frame exercised during capture produced no guarded code, a
+       frame was bypassed (its guards could not be serialized, so it would serve
+       nothing), or a variant was left out because inductor's CPU codegen target changed
+       mid-capture (``PrecompileSummary.variants_dropped_for_codegen_target``). Applies
+       only to ``tracer="dynamo"``.
    :param require_no_risky_drops: Refuse to produce an artifact that dropped a guard which
        can affect dispatch. Nothing checks such a guard at load, so a different value can
        silently select the wrong graph instead of recompiling. Applies only to
@@ -277,6 +284,11 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        ``**kwargs`` entry is refused before any call runs: the served call binds the
        entry's named parameters.
    :param artifact_path: File to write ``python_code`` to, rewritten on every call. Required.
+       Each rewrite goes to a ``<name>.<random>.tmp`` beside the file and is renamed over it,
+       so a symlink here is replaced by a regular file on the first call (its target is left
+       as it was), an existing file keeps its mode (a read-only one included), a new one
+       gets what ``open()`` would create under the process umask, and a process killed
+       mid-write can leave a ``.tmp`` beside the artifact that nothing reclaims.
    :param cache_path: File to write the acceleration cache to. Required.
    :param backend: ``"inductor"`` (default) or ``"eager"``, as for
        :func:`torch.compiler.precompile`.
@@ -288,12 +300,15 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param recompile_limit: Maximum variants captured per frame across all calls; a frame
        that reaches it is reported as truncated.
    :param dynamic: Dynamic-shape policy forwarded to ``torch.compile``.
-   :param invariants: Optional path receiving the invariant report, written when the
-       capture closes.
+   :param invariants: Optional path receiving the invariant report, rewritten after every
+       call (whether or not a gate then refuses that call's render); ``close()`` does not
+       write it.
    :param require_complete: Refuse a render whose capture is incomplete -- a call raised
        during THIS render's cycle, no frame produced compiled code, a frame hit
-       ``recompile_limit``, or a frame was bypassed. A refused render leaves the files as
-       they were; see above for how the refusal surfaces.
+       ``recompile_limit``, a frame was bypassed, or a variant was left out because
+       inductor's CPU codegen target changed between calls
+       (``PrecompileSummary.variants_dropped_for_codegen_target``). A refused render leaves
+       the files as they were; see above for how the refusal surfaces.
    :param require_no_risky_drops: Refuse a render that dropped a guard which can affect
        dispatch, as for :func:`torch.compiler.precompile`.
    :param require_no_dropped_guards: Refuse a render that dropped ANY guard. Off by default,
@@ -303,7 +318,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :returns: A :class:`torch.compiler.AccumulatingCapture`. Call it like ``fn``; it also
        exposes ``summary()``, ``invariants()``, ``calls()`` and ``close()``. Calls from
        several threads run one at a time, and ``close()`` from any thread waits for a call
-       in flight and the rewrite it ends in.
+       in flight and the rewrite it ends in; called from inside the call (from ``fn``, or
+       a hook it fires) it raises ``RuntimeError`` rather than wait on itself.
    :raises PrecompileError: as :func:`torch.compiler.precompile` does, on the call that
        violates the contract.
 
@@ -361,12 +377,18 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        :class:`torch.compiler.PrecompiledCallable`, which additionally has ``unload()``
        and ``serve_time_compiles()`` and installs on entering or on the first call. A
        ``dynamo`` artifact of either type accepts keyword arguments; a ``make_fx`` one is
-       positional-only.
+       positional-only. Either kind has a ``cache_status`` attribute: ``"applied"`` when the
+       cache matched ``python_code`` and primed the kernel caches, else ``"stale"``,
+       ``"incompatible"``, ``"unreadable"`` or ``"prime_failed"`` saying why it was not
+       (see :attr:`torch.compiler.PrecompiledCallable.cache_status`); anything but
+       ``"applied"`` JITs at serve time where the cache would have primed.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
        fails to parse or is missing its calling-convention metadata), if ``cache`` is
        paired with a ``python_code`` of another ``backend`` or ``tracer``, if a ``dynamo``
        artifact was produced under another Python or torch version or its inlined sources
-       have changed, or if a runtime call violates the precompile contract. A cache whose
+       have changed (torch's own modules included, in both serving modes: the version
+       string does not see an edit to an editable install), or if a runtime call violates
+       the precompile contract. A cache whose
        ``code_hash`` is not this ``python_code``'s (a stale cache: a rewrite that died
        between its two files, or a pair from different calls) is not fatal -- ``load``
        warns and runs ``python_code`` alone.

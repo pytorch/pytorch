@@ -65,67 +65,67 @@ class PrecompileSummary:
     dropped_guards: tuple[tuple[str, str], ...] = ()
     kept_guards: tuple[tuple[str, str], ...] = ()
     risky_dropped_guards: tuple[tuple[str, str], ...] = ()
-    # Guards that COULD have been serialized and were not, because they held
-    # identically across every captured variant. Reported apart from
-    # dropped_guards, which is "could not be serialized", because the reason and
-    # the remedy differ -- but reported, because a capture that silently
-    # discards a precondition should not look like one that had none.
+    #: Guards that COULD have been serialized and were not, because they held
+    #: identically across every captured variant. Reported apart from
+    #: dropped_guards, which is "could not be serialized", because the reason and
+    #: the remedy differ -- but reported, because a capture that silently
+    #: discards a precondition should not look like one that had none.
     policy_dropped_guards: tuple[tuple[str, str], ...] = ()
-    # (guard_type, source, rendered check) for each dropped slot that HAS a
-    # rendered check. Some do not: EMPTY_NN_MODULE_HOOKS_DICT installs nothing
-    # under the default skip_nnmodule_hook_guards, and the global-state guards
-    # are checked in C++ against no source, so those appear in the drop lists
-    # with no entry here rather than with an empty one.
-    #
-    # A slot is identified by its type and its SOURCE (for HASATTR and the
-    # other sibling types, with the member spelled ``source{'member'}``), which
-    # is not always enough to judge the drop: a dropped
-    # ``('HASATTR', "counts['pixel']{'grad'}")`` may be the benign companion of
-    # a kept TENSOR_MATCH on ``counts['pixel']``, or the only thing standing
-    # between the artifact and an optional attribute going missing, and those
-    # want very different reactions. The rendered check shows what was
-    # compared and so tells them apart. Reported alongside the three lists
-    # rather than folded into them, so the slot tuples stay the identity the
-    # policy compares on.
+    #: (guard_type, source, rendered check) for each dropped slot that HAS a
+    #: rendered check. Some do not: EMPTY_NN_MODULE_HOOKS_DICT installs nothing
+    #: under the default skip_nnmodule_hook_guards, and the global-state guards
+    #: are checked in C++ against no source, so those appear in the drop lists
+    #: with no entry here rather than with an empty one.
+    #:
+    #: A slot is identified by its type and its SOURCE (for HASATTR and the
+    #: other sibling types, with the member spelled ``source{'member'}``), which
+    #: is not always enough to judge the drop: a dropped
+    #: ``('HASATTR', "counts['pixel']{'grad'}")`` may be the benign companion of
+    #: a kept TENSOR_MATCH on ``counts['pixel']``, or the only thing standing
+    #: between the artifact and an optional attribute going missing, and those
+    #: want very different reactions. The rendered check shows what was
+    #: compared and so tells them apart. Reported alongside the three lists
+    #: rather than folded into them, so the slot tuples stay the identity the
+    #: policy compares on.
     dropped_guard_code: tuple[tuple[str, str, str], ...] = ()
     capture_errors: tuple[str, ...] = ()
-    # Variants whose serialized guards, after every drop, keep NO guard whose
-    # source is rooted at a local of the frame (a call argument or a local it
-    # was traced with). Only global-state and unmodelled leaves survived, so
-    # the variant is served to any call that reaches its frame.
-    #
-    # Detects exactly that and no more: a variant counts as input-guarded if
-    # ANY kept, modelled guard is rooted at a local, whatever it checks. A
-    # frame whose only local-rooted guard is a TYPE_MATCH on the model, or an
-    # ID_MATCH on a callable argument, does NOT count here even though no
-    # tensor shape or value of its inputs is checked. Not a gate, because a
-    # frame with no tensor arguments legitimately looks like this; reported so
-    # a capture that lost its input checks is not mistaken for one that had
-    # none.
+    #: Variants whose serialized guards, after every drop, keep NO guard whose
+    #: source is rooted at a local of the frame (a call argument or a local it
+    #: was traced with). Only global-state and unmodelled leaves survived, so
+    #: the variant is served to any call that reaches its frame.
+    #:
+    #: Detects exactly that and no more: a variant counts as input-guarded if
+    #: ANY kept, modelled guard is rooted at a local, whatever it checks. A
+    #: frame whose only local-rooted guard is a TYPE_MATCH on the model, or an
+    #: ID_MATCH on a callable argument, does NOT count here even though no
+    #: tensor shape or value of its inputs is checked. Not a gate, because a
+    #: frame with no tensor arguments legitimately looks like this; reported so
+    #: a capture that lost its input checks is not mistaken for one that had
+    #: none.
     variants_without_input_guards: int = 0
-    # (leaf class, rendered check) for every guard that rebuilt from its own
-    # pickle into a check the live capture never made; see
-    # PrecompileSession._report_guard_drift. Each will miss at serve time.
-    # Describes the render this summary belongs to, like policy_dropped_guards:
-    # an accumulating capture re-renders after every call and this is the
-    # drift in the artifact being written now, not the union over all of them.
+    #: (leaf class, rendered check) for every guard that rebuilt from its own
+    #: pickle into a check the live capture never made; see
+    #: PrecompileSession._report_guard_drift. Each will miss at serve time.
+    #: Describes the render this summary belongs to, like policy_dropped_guards:
+    #: an accumulating capture re-renders after every call and this is the
+    #: drift in the artifact being written now, not the union over all of them.
     drifted_guards: tuple[tuple[str, str], ...] = ()
-    # (backend id, reason) for each compiled subgraph that could not be
-    # composed to readable source and so ships only in the pickled bundle. The
-    # reason is the exception class and message from the compose attempt. A
-    # subgraph is meant to render -- it is Inductor output, which has a source
-    # form -- so an entry here is a readable artifact that silently became an
-    # opaque one; empty for backend="eager", which has nothing to render.
-    # Populated by rendering, so it is filled in on the summary written into
-    # an artifact header and empty on a summary() taken before any render.
+    #: (backend id, reason) for each compiled subgraph that could not be
+    #: composed to readable source and so ships only in the pickled bundle. The
+    #: reason is the exception class and message from the compose attempt. A
+    #: subgraph is meant to render -- it is Inductor output, which has a source
+    #: form -- so an entry here is a readable artifact that silently became an
+    #: opaque one; empty for backend="eager", which has nothing to render.
+    #: Populated by rendering, so it is filled in on the summary written into
+    #: an artifact header and empty on a summary() taken before any render.
     unrendered_backends: tuple[tuple[str, str], ...] = ()
-    # Variants Dynamo compiled after inductor's CPU codegen configuration
-    # (the ISA and vector width its kernels are built for) moved away from
-    # the target the capture recorded on its first graph, and so were left
-    # out of the artifact: one artifact carries one codegen target, and a
-    # kernel built for another would fail or miscompute on a host matching the
-    # recorded one. Each was a call the capture ran and did not keep, so a
-    # nonzero count is coverage the summary otherwise does not show as missing.
+    #: Variants Dynamo compiled after inductor's CPU codegen configuration
+    #: (the ISA and vector width its kernels are built for) moved away from
+    #: the target the capture recorded on its first graph, and so were left
+    #: out of the artifact: one artifact carries one codegen target, and a
+    #: kernel built for another would fail or miscompute on a host matching the
+    #: recorded one. Each was a call the capture ran and does not serve, so a
+    #: nonzero count makes ``complete`` False and ``require_complete`` refuse.
     variants_dropped_for_codegen_target: int = 0
 
     @property
@@ -133,7 +133,9 @@ class PrecompileSummary:
         """Whether the capture covers everything it exercised.
 
         False if any frame produced NO guarded code at all, if any frame hit the
-        recompile limit, if any was bypassed, or if a capture call raised.
+        recompile limit, if any was bypassed, if a capture call raised, or if a
+        variant was dropped for a changed CPU codegen target
+        (``variants_dropped_for_codegen_target``).
 
         ``backend_graphs`` is checked too, because ``guarded_codes`` alone cannot
         tell a real capture from an empty one: ``allow_empty_graphs`` lets a frame
@@ -146,6 +148,7 @@ class PrecompileSummary:
             and not self.truncated
             and not self.uncovered_frames
             and not self.capture_errors
+            and not self.variants_dropped_for_codegen_target
             and self.guarded_codes > 0
             and self.backend_graphs > 0
         )
