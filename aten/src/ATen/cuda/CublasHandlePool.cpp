@@ -177,7 +177,7 @@ size_t parseChosenWorkspaceSize() {
   const size_t default_size = gfx942_950_1250 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
 #else
   /* :4096:2:16:8 default, 32MiB for Hopper and Blackwell */
-  cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
+  const cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
   const bool use32mb = properties != nullptr &&
       (properties->major == 9 || properties->major == 10 ||
        properties->major == 11 || properties->major == 12);

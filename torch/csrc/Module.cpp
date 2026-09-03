@@ -447,7 +447,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
   }
 
   if (Py_TYPE(obj) == &PyCFunction_Type) {
-    PyCFunctionObject* f = reinterpret_cast<PyCFunctionObject*>(obj);
+    const PyCFunctionObject* f = reinterpret_cast<PyCFunctionObject*>(obj);
     if (f->m_ml->ml_doc) {
       return PyErr_Format(
           PyExc_RuntimeError,
@@ -456,7 +456,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
     }
     f->m_ml->ml_doc = doc_str;
   } else if (strcmp(Py_TYPE(obj)->tp_name, "method_descriptor") == 0) {
-    PyMethodDescrObject* m = reinterpret_cast<PyMethodDescrObject*>(obj);
+    const PyMethodDescrObject* m = reinterpret_cast<PyMethodDescrObject*>(obj);
     if (m->d_method->ml_doc) {
       return PyErr_Format(
           PyExc_RuntimeError,
@@ -465,7 +465,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
     }
     m->d_method->ml_doc = doc_str;
   } else if (strcmp(Py_TYPE(obj)->tp_name, "getset_descriptor") == 0) {
-    PyGetSetDescrObject* m = reinterpret_cast<PyGetSetDescrObject*>(obj);
+    const PyGetSetDescrObject* m = reinterpret_cast<PyGetSetDescrObject*>(obj);
     if (m->d_getset->doc) {
       return PyErr_Format(
           PyExc_RuntimeError,

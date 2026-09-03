@@ -204,7 +204,7 @@ static inline Tensor asTensor(const Scalar& value, const Tensor& self) {
 }
 
 static void recordSliceTrace(PyObject* obj) {
-  PySliceObject* sliceobj = (PySliceObject*)obj;
+  const PySliceObject* sliceobj = (PySliceObject*)obj;
   if (THPVariable_Check(sliceobj->start)) {
     torch::jit::tracer::ArgumentStash::stashValue(
         std::string("start"),
