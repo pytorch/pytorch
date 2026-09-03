@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_keywordonlyarg.py b/test/cpython/v3_13/test_keywordonlyarg.py
-index 918f953cae5..1511e69caa2 100644
+index 918f953cae57023f9a874dbea5c668979d51bb19..1511e69caa2202c1e8c41244f69de35428f602f9 100644
 --- a/test/cpython/v3_13/test_keywordonlyarg.py
 +++ b/test/cpython/v3_13/test_keywordonlyarg.py
 @@ -1,3 +1,21 @@

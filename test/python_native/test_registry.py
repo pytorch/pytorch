@@ -371,14 +371,15 @@ class TestRegistry(TestCase):
         `_native` stands in for "not allowlisted" because it can never be
         allowlisted -- it holds the ops carrying the override impls.
         """
-
-        def impl(*a, **k):
-            return None
-
         self.assertNotIn("_native", self.registry._ALLOWED_LIB_SYMBOLS)
         with self.assertRaisesRegex(ValueError, "is not overridable"):
             self.registry.register_op_override(
-                "test_dsl", "_native", "some_op", "CPU", lambda *a, **k: True, impl
+                "test_dsl",
+                "_native",
+                "some_op",
+                "CPU",
+                lambda *a, **k: True,
+                lambda *a, **k: None,
             )
 
     def test_cond_none_without_unconditional_override_rejected(self):
@@ -1136,6 +1137,16 @@ class TestRegistryNonAtenNamespace(TestCase):
         self.registry.reenable_op_overrides(enable_op_symbols=["twice"])
         self.assertEqual(self.op(x), torch.full_like(x, 99.0))
         self.assertEqual(self.op2(x), torch.full_like(x, 7.0))
+
+    def test_get_dsl_operations_reports_one_namespace(self):
+        """Reporting is scoped: the throwaway namespace's op appears only when
+        asked for, and never in the default `aten` view."""
+        self._register(lambda *a, **k: True, lambda x: x)
+        self.assertEqual(
+            self.registry.get_dsl_operations("test_dsl", lib_symbol=self.NS),
+            ["twice"],
+        )
+        self.assertNotIn("twice", self.registry.get_dsl_operations("test_dsl"))
 
     def test_undefined_op_raises_on_install(self):
         """A namespace whose op is not in the dispatcher must fail loudly at

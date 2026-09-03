@@ -1146,3 +1146,5 @@ void f8f8bf16_rowwise(
 }
 
 } // namespace at::cuda::detail
+
+C10_DIAGNOSTIC_POP()

@@ -588,15 +588,16 @@ function(torch_optimize_layout_if_enabled tgt)
     target_link_options_if_supported(${tgt} "--emit-relocs")
     set(_profile "${LLVM_BOLT_PROFILES_DIR}/lib${tgt}.yaml")
     set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${_profile}")
-
+    set(_logfile "${CMAKE_BINARY_DIR}/logs/llvm-bolt-lib${tgt}.txt")
     set(_prebolt "$<TARGET_FILE_DIR:${tgt}>/prebolt/$<TARGET_FILE_NAME:${tgt}>")
     add_custom_command(
       TARGET ${tgt} POST_BUILD
-      COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:${tgt}>/prebolt"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "$<PATH:GET_PARENT_PATH,${_logfile}>"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "$<PATH:GET_PARENT_PATH,${_prebolt}>"
       COMMAND "${CMAKE_COMMAND}" -E rename "$<TARGET_FILE:${tgt}>" "${_prebolt}"
       COMMAND "${LLVM_BOLT_EXECUTABLE}" "${_prebolt}"
               -o "$<TARGET_FILE:${tgt}>"
-              "-data=${_profile}"
+              "-data=${_profile}" "-log-file=${_logfile}"
               -lite -infer-stale-profile
               -reorder-blocks=ext-tsp -reorder-functions=hfsort
               -split-functions -split-all-cold -split-eh -dyno-stats
