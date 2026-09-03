@@ -1099,12 +1099,12 @@ def forward(self, token, p_mod_list_0_linear1_weight, p_mod_list_0_linear1_bias,
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.mylib.record_memory.default, 'forward', 'N');  arg0_1 = None
     getitem = with_effects[0];  with_effects = None
-    permute = torch.ops.aten.permute.default(arg2_1, [1, 0]);  arg2_1 = None
-    addmm = torch.ops.aten.addmm.default(arg3_1, arg1_1, permute);  arg3_1 = arg1_1 = permute = None
-    relu = torch.ops.aten.relu.default(addmm);  addmm = None
-    permute_1 = torch.ops.aten.permute.default(arg4_1, [1, 0]);  arg4_1 = None
-    addmm_1 = torch.ops.aten.addmm.default(arg5_1, relu, permute_1);  arg5_1 = relu = permute_1 = None
-    return (getitem, addmm_1)""",
+    permute_default = torch.ops.aten.permute.default(arg2_1, [1, 0]);  arg2_1 = None
+    addmm_default = torch.ops.aten.addmm.default(arg3_1, arg1_1, permute_default);  arg3_1 = arg1_1 = permute_default = None
+    permute_default_1 = torch.ops.aten.permute.default(arg4_1, [1, 0]);  arg4_1 = None
+    relu_default = torch.ops.aten.relu.default(addmm_default);  addmm_default = None
+    addmm_default_1 = torch.ops.aten.addmm.default(arg5_1, relu_default, permute_default_1);  arg5_1 = relu_default = permute_default_1 = None
+    return (getitem, addmm_default_1)""",
             )
 
             recorded_list.clear()
