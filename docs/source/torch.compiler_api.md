@@ -56,7 +56,11 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    given as a tuple of positional arguments. ``example_inputs`` is required -- omitting it
    raises ``TypeError`` -- with one exception kept for compatibility: the 2.14 spelling
    ``precompile(fn, *example_args)`` still works, means
-   ``example_inputs=[tuple(example_args)]``, and emits a ``FutureWarning``.
+   ``example_inputs=[tuple(example_args)]``, and emits a ``FutureWarning``. Every
+   positional argument after ``fn`` is an argument of that one call, whatever its type --
+   a lone list or tuple is the call's single argument, not a sequence of calls -- except
+   a lone ``ExampleInput``, which describes a call and so raises ``TypeError`` pointing
+   at ``example_inputs=``.
    precompile makes those calls itself and
    produces a self-contained, runnable Python source string plus an acceleration cache as
    ``(python_code, cache)``. ``tracer`` picks the capture front-end: ``"make_fx"`` (the
@@ -117,9 +121,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        inlines the transformed bytecode Dynamo produces into ``python_code``, lowering the
        compiled subgraph through the same ``backend`` choices; it honors ``mark_unbacked``
        dynamic shapes (on either backend, though ``mark_unbacked(strict=True)`` raises --
-       Dynamo captures a strict mark as a guardable backed dim), ``decompositions``, and
+       Dynamo captures a strict mark as a guardable backed dim) and
        training steps (a ``.backward()`` / ``torch.autograd.grad`` is traced into the graph
-       and the parameter gradients are accumulated onto the runtime model like eager).
+       and the parameter gradients are accumulated onto the runtime model like eager); it
+       rejects ``decompositions``.
        ``make_fx`` requires one full graph; use ``tracer="dynamo"`` when Python
        graph-breaks or when several guarded/recompiled variants must be retained.
        The dynamo artifact carries one serialized guard tree per captured variant and
@@ -154,16 +159,33 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        capture. Applies only to ``tracer="dynamo"``.
    :param dynamic: Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
    :param invariants: Optional path receiving the multi-graph invariant report.
-   :returns: For positional input, ``(python_code, cache)`` -- a self-contained Python
-       source string and binary acceleration cache. For keyword ``example_inputs``, a
-       session exposing ``summary()``, ``save()``, and invariant reporting. Its
-       ``summary().complete`` covers the successful calls that ran, not every possible input.
+   :param require_complete: Refuse to produce an artifact whose capture was incomplete --
+       a call raised, no frame produced compiled code at all, a frame hit
+       ``recompile_limit``, a frame exercised during capture produced no guarded code, or
+       a frame was bypassed (its guards could not be serialized, so it would serve
+       nothing). Applies only to ``tracer="dynamo"``.
+   :param require_no_risky_drops: Refuse to produce an artifact that dropped a guard which
+       can affect dispatch. Nothing checks such a guard at load, so a different value can
+       silently select the wrong graph instead of recompiling. Applies only to
+       ``tracer="dynamo"``.
+   :param require_no_dropped_guards: Refuse to produce an artifact that dropped ANY guard.
+       Off by default and deliberately so: every real model drops the identity guards
+       precompile cannot serialize. Applies only to ``tracer="dynamo"``.
+   :param training: Run the example calls with grad enabled, for a capture whose ``fn``
+       performs a backward. The artifact serves under the captured mode, not the
+       caller's: a ``training=False`` artifact returns outputs with no autograd history
+       even inside ``torch.enable_grad()``, and a ``training=True`` artifact runs its
+       backward and accumulates ``.grad`` even inside the caller's ``torch.no_grad()``.
+   :returns: ``(python_code, cache)`` -- a self-contained Python source string and a
+       binary acceleration cache.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below).
 
    Example::
 
-       python_code, cache = torch.compiler.precompile(lambda m, x: m(x), model, x)
+       python_code, cache = torch.compiler.precompile(
+           lambda m, x: m(x), example_inputs=[(model, x)]
+       )
        f = torch.compiler.precompile.load(python_code, cache)
        out = f(model, x)   # pass the model again at runtime
 
@@ -172,8 +194,11 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
            scale = y.sum().item()  # a graph break
            return y * scale
 
+       # Graph breaks and several variants need the dynamo tracer; make_fx
+       # captures a single call as one graph.
        python_code, cache = torch.compiler.precompile(
            staged,
+           tracer="dynamo",
            example_inputs=[(example_a,), (example_b,)],
        )
        compiled = torch.compiler.precompile.load(python_code, cache)
@@ -182,7 +207,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 ```
 
 ```{eval-rst}
-.. py:method:: precompile.load(python_code, cache)
+.. py:method:: precompile.load(python_code, cache, *, fn=None)
 
    Reconstruct a runnable from the ``(python_code, cache)`` pair returned by
    ``precompile``. The calling convention is read from ``python_code`` (the single
@@ -201,20 +226,32 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    :param python_code: The self-contained Python source string returned by ``precompile``.
    :param cache: The binary acceleration cache returned by ``precompile``.
-   :returns: A runnable callable with the same calling convention as the captured ``fn``.
-       Arguments are matched positionally at both capture and load time; keyword-argument
-       calling conventions are not supported.
+   :param fn: The original callable, for an artifact that installs onto live code objects
+       rather than dispatching its own entry. Supply it before the first call; a
+       standalone artifact rejects it.
+   :returns: A runnable with the same calling convention as the captured ``fn``, of one of
+       two types decided by the artifact's ``SERVING_MODE``. A standalone artifact (every
+       ``make_fx`` artifact, and a ``dynamo`` artifact whose frames its own driver can all
+       reach) comes back as a plain callable that installs nothing; ``with`` on it is a
+       no-op, so ``with f, torch.no_grad():`` reads the same for either kind. A ``dynamo``
+       artifact that has to install onto the live code objects comes back as
+       :class:`torch.compiler.PrecompiledCallable`, which additionally has ``unload()``
+       and ``serve_time_compiles()`` and installs on entering or on the first call. A
+       ``dynamo`` artifact of either type accepts keyword arguments; a ``make_fx`` one is
+       positional-only.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
        fails to parse or is missing its calling-convention metadata), if ``cache`` is
        paired with a different ``python_code`` (mismatched ``backend`` tag, ``tracer``
-       tag, or ``code_hash``), or if a runtime call violates the precompile contract.
+       tag, or ``code_hash``), if a ``dynamo`` artifact was produced under another Python
+       or torch version or its inlined sources have changed, or if a runtime call
+       violates the precompile contract.
 
-.. py:class:: precompile.ExampleInput(args=(), kwargs={})
+.. autoclass:: torch.compiler.ExampleInput
 
    One capture call for ``example_inputs`` when positional arguments alone are not
    enough (``tracer="dynamo"`` only). A plain tuple in ``example_inputs`` is the
-   positional arguments of one
-   call; wrap a call that needs keyword arguments in this instead::
+   positional arguments of one call; wrap a call that needs keyword arguments in this
+   instead::
 
        torch.compiler.precompile(
            fn,
@@ -228,8 +265,6 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
 .. autoclass:: torch.compiler.PrecompiledCallable
    :members:
-
-.. autoclass:: torch.compiler.ExampleInput
 
 .. autoclass:: torch.compiler.PrecompileSummary
    :members:
