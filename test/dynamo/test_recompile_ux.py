@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import faulthandler
 import gc
 import operator
 import queue
@@ -611,6 +612,125 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(raised, [])
         self.assertEqual(opt(args[0]), f(args[0]))
 
+    def test_concurrent_install_and_reset_against_lookups(self):
+        """Eight threads look f up while two install and reset precompile
+        entries on its code object. lookup() walks precompile_entries under
+        the cache lock and runs their guards -- Python, so the GIL can drop --
+        while an installer takes the same lock to append to or splice the
+        list being walked; without the lock that is a use-after-free. A wedge
+        in the locking cannot fail an assertion, so faulthandler dumps every
+        thread's stack and exits at the deadline instead of letting the
+        harness time out silently. Stress test; not a deterministic
+        reproduction, and it passes on the lock-free parent as well: it
+        guards the locking against regressions.
+        """
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_cache_entry_list,
+            _debug_get_precompile_entries,
+            _load_precompile_entry,
+            _reset_precompile_entries_for_owner,
+        )
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        opt = torch.compile(f, backend="eager", dynamic=False)
+        args = [torch.randn(n) for n in (3, 4)]
+        expected = [f(arg) for arg in args]
+        for arg in args:
+            opt(arg)
+        # Each installer re-installs the compiled variants' own guard managers
+        # and code as precompile entries, so a hit serves the same graph.
+        installables = [
+            (e.guard_manager, e.code) for e in _debug_get_cache_entry_list(code)
+        ]
+        self.assertEqual(len(installables), 2)
+
+        errors = queue.SimpleQueue()
+        stop = threading.Event()
+        owners = [object(), object()]
+
+        def caller():
+            try:
+                while not stop.is_set():
+                    for arg, want in zip(args, expected):
+                        self.assertEqual(opt(arg), want)
+            except BaseException as e:
+                errors.put(e)
+
+        def installer(owner):
+            try:
+                for _ in range(300):
+                    for guard_manager, dynamo_code in installables:
+                        _load_precompile_entry(
+                            code, guard_manager, dynamo_code, -1, owner
+                        )
+                    _reset_precompile_entries_for_owner(code, -1, owner)
+            except BaseException as e:
+                errors.put(e)
+
+        callers = [threading.Thread(target=caller, daemon=True) for _ in range(8)]
+        installers = [
+            threading.Thread(target=installer, args=(owner,), daemon=True)
+            for owner in owners
+        ]
+        prior_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        # A real fd: under pytest's capture sys.stderr has no fileno.
+        faulthandler.dump_traceback_later(120, exit=True, file=sys.__stderr__)
+        try:
+            for thread in callers + installers:
+                thread.start()
+            for thread in installers:
+                thread.join()
+            stop.set()
+            for thread in callers:
+                thread.join()
+        finally:
+            faulthandler.cancel_dump_traceback_later()
+            sys.setswitchinterval(prior_interval)
+        raised = []
+        while not errors.empty():
+            raised.append(errors.get_nowait())
+        self.assertEqual(raised, [])
+        # A reset that arrived while a lookup held the lock was parked; the
+        # entry reader applies whatever is still parked, and nothing survives.
+        for owner in owners:
+            _reset_precompile_entries_for_owner(code, -1, owner)
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
+        self.assertEqual(opt(args[0]), expected[0])
+
+    def test_isolate_recompiles_id_is_thread_local(self):
+        """The current region is a property of the call in flight, so it is
+        per thread: a worker spawned from inside a region reads the default
+        (and compiles into the default bucket) unless it enters a region
+        itself, and a region the worker enters is invisible to its parent."""
+        from torch._C._dynamo.eval_frame import (
+            get_eval_frame_isolate_recompiles_id,
+            set_eval_frame_isolate_recompiles_id,
+        )
+
+        seen = []
+
+        def worker():
+            seen.append(get_eval_frame_isolate_recompiles_id())
+            set_eval_frame_isolate_recompiles_id(9)
+            seen.append(get_eval_frame_isolate_recompiles_id())
+
+        prior = set_eval_frame_isolate_recompiles_id(7)
+        try:
+            self.assertEqual(prior, -1)
+            self.assertEqual(get_eval_frame_isolate_recompiles_id(), 7)
+            thread = threading.Thread(target=worker)
+            thread.start()
+            thread.join()
+            self.assertEqual(get_eval_frame_isolate_recompiles_id(), 7)
+        finally:
+            set_eval_frame_isolate_recompiles_id(prior)
+        self.assertEqual(seen, [-1, 9])
+        self.assertEqual(get_eval_frame_isolate_recompiles_id(), -1)
+
     def test_reset_code_from_python_run_by_lookup_is_safe(self):
         """lookup() holds the recursive cache lock across guard evaluation
         and backend comparison, both of which run Python -- which can call
@@ -712,7 +832,6 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
             def invalidator():
                 wrapper.extra_state.invalidate(
-                    wrapper.cache_entry,
                     DeletedGuardManagerWrapper("test object"),
                     wrapper,
                 )
