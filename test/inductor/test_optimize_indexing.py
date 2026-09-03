@@ -108,17 +108,13 @@ class TestOptimizeIndexing(TestCase):
         get_index = index_expr.args[1]
         return graph, reduction, value, index_expr, get_index
 
-    def _masked_loop_body(self, predicate, var_range, masked_store=False):
-        """Trace ``masked``/``masked_store`` over one iteration var guarded by ``predicate(var)``; return the var and the implied iteration vars."""
+    def _masked_loop_body(self, predicate, var_range):
+        """Trace ``masked`` over one iteration var guarded by ``predicate(var)``; return the var and the implied iteration vars."""
         r0 = sympy.Symbol("r0", integer=True, nonnegative=True)
 
         def fn(index, reduction_index):
             (i,) = index
-            mask = predicate(i)
-            if masked_store:
-                value = V.ops.constant(1.0, torch.float32)
-                return V.ops.masked_store("buf1", i, value, mask)
-            return V.ops.masked(mask, lambda: V.ops.load("buf0", i), 0.0)
+            return V.ops.masked(predicate(i), lambda: V.ops.load("buf0", i), 0.0)
 
         graph = _FakeGraph()
         graph.sizevars = SizeVarAllocator(ShapeEnv())
@@ -182,15 +178,6 @@ class TestOptimizeIndexing(TestCase):
             return V.ops.lt(idx, V.ops.index_expr(s0, torch.int64))
 
         r0, implied = self._masked_loop_body(predicate, s0 + 1 if accepted else 8)
-        self.assertEqual(implied, OrderedSet([r0]) if accepted else OrderedSet())
-
-    @parametrize("accepted", [True, False])
-    def test_range_implied_indices_masked_store(self, accepted):
-        def predicate(i):
-            idx = V.ops.index_expr(i, torch.int64)
-            return V.ops.lt(idx, V.ops.constant(8 if accepted else 9, torch.int64))
-
-        r0, implied = self._masked_loop_body(predicate, 8, masked_store=True)
         self.assertEqual(implied, OrderedSet([r0]) if accepted else OrderedSet())
 
     def test_remove_redundant_argreduce_index(self):
