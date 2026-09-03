@@ -5638,9 +5638,10 @@ class LambdaFuture(CodeCacheFuture):
         if timeout is not None and self.future is not None:
             # Wait on the underlying cross-process future with the caller's
             # timeout; raises concurrent.futures.TimeoutError if it does not
-            # resolve in time. result_fn will then consume the completed
-            # future without blocking further.
-            self.future.result(timeout=timeout)
+            # resolve in time. Only wait: a worker failure is left for
+            # result_fn, which consumes the completed future and owns the
+            # error handling (it may fall back to an in-process compile).
+            self.future.exception(timeout=timeout)
         return self.result_fn()
 
 
