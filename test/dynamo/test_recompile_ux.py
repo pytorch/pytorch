@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import faulthandler
 import gc
 import operator
 import queue
@@ -516,12 +515,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         the GIL to finish. The lock therefore has to release the GIL before it
         waits. A short switch interval makes the handoff frequent.
 
-        The wedged thread holds the GIL, so nothing written in Python can
-        report this -- join() never returns, and a watchdog thread cannot help
-        either, since Event.wait must reacquire the GIL to run its next
-        bytecode. faulthandler's timeout runs on a C thread and needs no GIL,
-        so it is the only thing here that still fires. file= is required
-        because pytest's --capture=sys leaves sys.stderr without a fileno.
+        Stress test; not a deterministic reproduction. A wedge shows up as a
+        harness timeout, since join() never returns.
         """
 
         def f(x):
@@ -545,14 +540,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         threads = [threading.Thread(target=hammer, daemon=True) for _ in range(4)]
         prior_interval = sys.getswitchinterval()
         sys.setswitchinterval(1e-6)
-        faulthandler.dump_traceback_later(300, exit=True, file=sys.__stderr__)
         try:
             for thread in threads:
                 thread.start()
             for thread in threads:
                 thread.join()
         finally:
-            faulthandler.cancel_dump_traceback_later()
             sys.setswitchinterval(prior_interval)
         raised = []
         while not errors.empty():
@@ -567,6 +560,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         drives resets against concurrent lookups and the recompiles they
         force; every call must either serve the cache or recompile cleanly,
         and the emptied state must serve fresh compiles like a new one.
+        Stress test; not a deterministic reproduction.
         """
 
         def f(x):
@@ -604,14 +598,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         threads.append(threading.Thread(target=resetter, daemon=True))
         prior_interval = sys.getswitchinterval()
         sys.setswitchinterval(1e-6)
-        faulthandler.dump_traceback_later(300, exit=True, file=sys.__stderr__)
         try:
             for thread in threads:
                 thread.start()
             for thread in threads:
                 thread.join()
         finally:
-            faulthandler.cancel_dump_traceback_later()
             sys.setswitchinterval(prior_interval)
         raised = []
         while not errors.empty():
@@ -2366,9 +2358,11 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         _clear_cache_entries_for_region(code, region_a)
 
     def test_force_callback_on_cache_miss_marker_overrides_run_only(self):
-        """A RUN_ONLY strategy skips the callback on a cache miss unless the
-        installed callback object carries the marker. The precompile serving
-        callback sets it so that a miss becomes a loud error or a recapture
+        """Contract of the `_torchdynamo_force_callback_on_cache_miss` marker
+        (read by eval_frame_cpp.cpp): a RUN_ONLY frame whose installed callback
+        carries it still reaches the callback on a cache miss, and its callee
+        frames consult their own strategy instead of inheriting run-only. A
+        precompile serving callback sets it so a miss errors or recaptures
         instead of silently running eager."""
         from torch._dynamo.eval_frame import set_code_exec_strategy
 
