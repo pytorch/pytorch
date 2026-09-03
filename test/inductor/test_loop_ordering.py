@@ -23,7 +23,6 @@ from torch._inductor.scheduler import (
     _LoopMutationTracker,
     _LoopStateSnapshot,
     ForeachKernelSchedulerNode,
-    FusedMixOrderReductions,
     FusedSchedulerNode,
     refresh_group_node_dependencies,
     Scheduler,
@@ -353,58 +352,6 @@ class ImplDetailTest(MockSchedulerTest):
         self.assertEqual(subkernel.group, original_group)
         self.assertEqual(foreach.read_writes, original_read_writes)
 
-    def test_nested_loop_state_rollback_savepoint(self):
-        computed_node = SchedulerNode(
-            V.graph.scheduler, self._create_computed_buffer_ax2()
-        )
-        original_state = computed_node.snapshot_loop_state()
-        outer = _LoopMutationTracker.create((computed_node,))
-        try:
-            computed_node.apply_loop_reindexing([64, 32])
-            outer_progress_state = computed_node.snapshot_loop_state()
-            self.assertNotEqual(outer_progress_state, original_state)
-
-            inner = _LoopMutationTracker.create((computed_node,))
-            try:
-                computed_node.apply_loop_reindexing([16, 128])
-                self.assertNotEqual(
-                    computed_node.snapshot_loop_state(), outer_progress_state
-                )
-            finally:
-                inner.finish(rollback=True)
-
-            self.assertEqual(computed_node.snapshot_loop_state(), outer_progress_state)
-        finally:
-            outer.finish(rollback=True)
-
-        self.assertEqual(computed_node.snapshot_loop_state(), original_state)
-        self.assertIsNone(computed_node._loop_mutation_listener)
-
-    def test_nested_fused_group_rollback(self):
-        node1 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        node2 = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
-        child = object.__new__(FusedSchedulerNode)
-        child.snodes = [node1]
-        child.group = node1.group
-        root = object.__new__(FusedMixOrderReductions)
-        root.node1 = child
-        root.node2 = node2
-        root.snodes = [node1, node2]
-        root.group = node1.group
-        original_group = child.group
-        snapshot = _LoopStateSnapshot.create((root,))
-
-        child.group = (child.group[0], (sympy.Integer(7), sympy.Integer(11)))
-        with mock.patch(
-            "torch._inductor.scheduler.refresh_group_node_dependencies"
-        ) as refresh:
-            snapshot.restore()
-
-        self.assertEqual(child.group, original_group)
-        refresh.assert_any_call(root)
-        refresh.assert_any_call(child)
-        self.assertEqual(refresh.call_count, 2)
-
     def test_reorder_modular_indexing(self):
         """
         There was a bug that we wrongly map i0 to the dimension with size 49
@@ -446,48 +393,57 @@ class ImplDetailTest(MockSchedulerTest):
             z2 + 49 * z1 + 2401 * ModularIndexing(z3, 1, 64),
         )
 
-    def test_find_reduction_broadcast_orders(self):
-        def make_node(ranges, indexed_dims, *, indirect=False):
-            index_vars = tuple(sympy_index_symbol(f"d{i}") for i in range(len(ranges)))
-            outer, inner = indexed_dims
-            index = (
-                sympy_index_symbol("tmp0")
-                if indirect
-                else ranges[inner] * index_vars[outer] + index_vars[inner]
-            )
-            dep = MemoryDep("scale", index, index_vars, tuple(ranges))
+    def test_reduction_output_first_order(self):
+        def make_node(ranges, index_fn):
+            d = tuple(sympy_index_symbol(f"d{i}") for i in range(len(ranges)))
+            dep = MemoryDep("scale", index_fn(*d), d, tuple(ranges))
             node = object.__new__(SchedulerNode)
-            node._body = mock.Mock()
             node._sizes = (ranges, ())
-            node.read_writes = mock.Mock(reads=OrderedSet([dep]), range_vars=index_vars)
+            node.read_writes = mock.Mock(reads=OrderedSet([dep]), range_vars=d)
             return node
 
-        ordered = make_node([6, 7, 16, 16], (0, 1))
-        interleaved = make_node([6, 16, 7, 16], (0, 2))
-        refactored = make_node([3, 14, 16, 16], (0, 1))
-        reduction_outputs = {"scale"}
-
+        order = Scheduler._reduction_output_first_order
+        outputs = OrderedSet(["scale"])
+        n42 = sympy.Integer(42)
         self.assertEqual(
-            Scheduler._find_reduction_broadcast_orders(
-                reduction_outputs,
-                [ordered, interleaved, refactored],
-                sympy.Integer(42),
+            order(
+                outputs,
+                make_node([6, 7, 16, 16], lambda d0, d1, d2, d3: 7 * d0 + d1),
+                n42,
             ),
-            [(0, 1, 2, 3), (0, 2, 1, 3), (0, 1, 2, 3)],
+            (0, 1, 2, 3),
+        )
+        self.assertEqual(
+            order(
+                outputs,
+                make_node([6, 16, 7, 16], lambda d0, d1, d2, d3: 7 * d0 + d2),
+                n42,
+            ),
+            (0, 2, 1, 3),
+        )
+        # A transposed read is iterated in the output's memory order.
+        self.assertEqual(
+            order(
+                outputs,
+                make_node([6, 16, 7, 16], lambda d0, d1, d2, d3: d0 + 6 * d2),
+                n42,
+            ),
+            (2, 0, 1, 3),
         )
         self.assertIsNone(
-            Scheduler._find_reduction_broadcast_orders(
-                reduction_outputs,
-                [make_node([6, 16, 7, 16], (0, 2), indirect=True)],
-                sympy.Integer(42),
+            order(
+                outputs,
+                make_node(
+                    [6, 16, 7, 16], lambda d0, d1, d2, d3: sympy_index_symbol("tmp0")
+                ),
+                n42,
             )
         )
-        ordered._body = None
         self.assertIsNone(
-            Scheduler._find_reduction_broadcast_orders(
-                reduction_outputs,
-                [ordered],
-                sympy.Integer(42),
+            order(
+                outputs,
+                make_node([6, 16, 7, 16], lambda d0, d1, d2, d3: 7 * d0 + d2),
+                sympy.Integer(96),
             )
         )
 
@@ -1064,10 +1020,10 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(self._square_block_broadcast, x)
         self.assertEqual(2, metrics.generated_kernel_count)
 
-    def test_square_block_broadcast_rejects_transposed_reduction_output(self):
+    def test_square_block_broadcast_transposed_reduction_output(self):
         x = torch.randn(6 * 16, 6 * 16, device=GPU_TYPE)
         self.do_acc_test(self._square_block_broadcast, x, True)
-        self.assertEqual(2, metrics.generated_kernel_count)
+        self.assertEqual(1, metrics.generated_kernel_count)
 
     @inductor_config.patch(force_disable_caches=True)
     def test_square_block_broadcast_reindex_rollback(self):

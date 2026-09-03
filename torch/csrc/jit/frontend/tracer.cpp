@@ -85,7 +85,7 @@ void TracingState::delValue(const IValue& var) {
   }
 }
 
-// Given a IValue 'var', return the 'node' which represents the instruction
+// Given an IValue 'var', return the 'node' which represents the instruction
 // which computes the value of this variable in the IR.
 // Here, we interpret untraced variables as constants that are just embedded
 // in the graph.  This is useful to handle code which does things like this

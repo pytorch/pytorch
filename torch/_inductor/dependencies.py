@@ -652,22 +652,6 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     ) -> None:
         self._writes.add(MemoryDep(name, *self.canonicalize(index), mode=mode))
 
-    def masked_store(
-        self,
-        name: str,
-        index: sympy.Expr,
-        value: str,
-        mask: str,
-    ) -> None:
-        # Recorded as a full write over the *expanded* domain, so the dep can
-        # describe offsets past the buffer's numel and claims the masked-off
-        # elements are written. That over-approximation is the safe direction
-        # for ordering (no WAR/WAW edge is lost). Masked-off coordinates are
-        # outside the logical output domain and therefore unobservable. Byte
-        # estimates derived from this dep are upper bounds; see
-        # `masked_expansion_bytes` in scheduler.py.
-        self.store(name, index, value)
-
     def store_reduction(self, name: str, index: sympy.Expr, value: str) -> None:
         self.store(name, index, f"store_reduction({value})")
 
