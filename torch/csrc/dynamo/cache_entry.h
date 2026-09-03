@@ -50,7 +50,11 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   py::object compile_id;
   // root guard manager if exists
   void* root_mgr{nullptr};
-  // diff guard root guard manager if exists
+  // diff guard root guard manager if exists. guard_manager.diff_guard_root is
+  // rebound on every recompile of the same code, so the entry keeps its own
+  // reference to the object that owns the raw pointer; both are read under
+  // cache_mutex (lookup copies them, the fast path inspects the pointer).
+  py::object diff_guard_root;
   void* diff_guard_root_mgr{nullptr};
   // backend used to create this cache entry
   py::object backend;
@@ -77,12 +81,15 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
     py::object guard_manager;
     py::object code;
     py::object backend;
+    py::object diff_guard_root;
   };
   // Runs no Python. Points this entry at deleted_guard_manager and hands back
   // what it held; the caller clears the old guard_manager's cache_entry and
   // extra_state attributes after unlocking.
   Detached invalidate(py::object deleted_guard_manager);
-  // Called from the python side to update the diff guard root manager
+  // Called from the python side after guard_manager.diff_guard_root was
+  // rebound. Reads the attribute before taking cache_mutex, swaps under it and
+  // releases the old reference after it.
   void update_diff_guard_root_manager();
 } CacheEntry;
 C10_DIAGNOSTIC_POP()

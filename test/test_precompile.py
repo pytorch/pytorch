@@ -303,6 +303,12 @@ def _precompile_varargs_entry(*args):
 # A torch._dynamo.disable wrapper has the inner function's name on a
 # (*args, **kwargs) signature of its own; capture compiles the inner function.
 _precompile_disabled_entry = torch._dynamo.disable(_precompile_plus_one)
+# Wrapped like the above, but the inner function has a DEFAULTED parameter: the
+# entry binding and varargs check must come from the inner function's signature,
+# not the wrapper's (*args, **kwargs), or the served call cannot bind the default.
+_precompile_disabled_defaulted_entry = torch._dynamo.disable(
+    _precompile_scaled_with_break
+)
 
 
 class _PrecompileRebound:
@@ -909,6 +915,7 @@ _PRECOMPILE_MAIN_LOADER_SRC = textwrap.dedent(
         cache = fh.read()
     try:
         torch.compiler.precompile.load(code, cache)
+        print("LOADED_OK")
     except torch.compiler.PrecompileError as e:
         print("REFUSED:", e)
     """
@@ -1870,9 +1877,10 @@ class TestPrecompile(TestCase):
 
     def test_precompile_keeps_a_dict_membership_guard_under_default_gates(self):
         # `if key not in self._cache` is a branch, pinned by DICT_NOT_CONTAINS.
-        # It is module-rooted, so the policy classed it environment and, with
-        # one variant, dropped it: the artifact served the "not present" graph
-        # to a populated cache, 2.0 where eager says 101.0, on default gates.
+        # With one variant every slot looks invariant, so a policy that dropped
+        # whatever held identically dropped it: the artifact served the "not
+        # present" graph to a populated cache, 2.0 where eager says 101.0, on
+        # default gates. Branch-pinning types are never dropped now.
         from torch._precompile import _read_literal
 
         model = _PrecompileCacheModel()
@@ -4364,6 +4372,106 @@ class TestPrecompile(TestCase):
         path = _offending_value_path(state, holder.deep.it)
         self.assertIn("local_scope['p'].deep.it", path)
 
+    def test_unpicklable_value_reachable_only_through_a_global_is_named(self):
+        # pickle_guards_state empties global_scope before dumping, so a walk
+        # that reads the scope afterwards finds nothing and the error arrives as
+        # a bare type name. Capturing the roots first is what keeps a value
+        # reachable only through a global nameable -- which is how a real
+        # "cannot pickle '_thread.RLock' object" arrived with no path at all.
+        from torch._dynamo.guards import _offending_value_path, _scope_roots
+
+        class _Scope:
+            pass
+
+        holder = _Scope()
+        holder.cfg = _Scope()
+        holder.cfg.lock = threading.RLock()
+        state = _Scope()
+        state.output_graph = _Scope()
+        state.output_graph.local_scope = {}
+        state.output_graph.global_scope = {"CFG": holder}
+
+        roots = _scope_roots(state.output_graph)
+        state.output_graph.global_scope = {}  # what the pruning does
+
+        self.assertEqual(_offending_value_path(state, holder.cfg.lock), "")
+        self.assertIn(
+            "global_scope['CFG'].cfg.lock",
+            _offending_value_path(state, holder.cfg.lock, roots),
+        )
+
+    def test_a_served_handle_does_not_lose_the_frame(self):
+        # The pruning walks the top-level leaves of local_scope; the pickler
+        # walks everything under them. An artifact a previous load installed on
+        # a guarded object is therefore never pruned, and walking into it hits
+        # the session's condition variable -- "cannot pickle '_thread.RLock'",
+        # frame lost to eager. Seen on a real capture, where the path was
+        # local_scope['pipeline']._precompiled_fwd_loss_bwd._compiled._inner
+        # ._state._lock: precompile's own, and nothing the caller could change.
+        import io
+        import pickle as _pickle
+
+        from torch._dynamo.guards import (
+            _is_precompile_handle,
+            _Missing,
+            GuardsStatePickler,
+        )
+        from torch._precompile import PrecompiledCallable
+
+        handle = PrecompiledCallable.__new__(PrecompiledCallable)
+        handle._state = threading.Condition()
+        self.assertTrue(_is_precompile_handle(handle))
+        # Narrow on purpose: a lock in the CALLER's model still fails loudly
+        # with its path named, which the two tests above depend on.
+        self.assertFalse(_is_precompile_handle(threading.RLock()))
+
+        holder = _PrecompileLockHolder()
+        holder.installed = handle
+        holder.scale = 2.0
+
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump(holder)
+        back = _pickle.loads(buf.getvalue())
+        self.assertIsInstance(back.installed, _Missing)
+        # Everything around it survives, which is the point: the frame is kept.
+        self.assertEqual(back.scale, 2.0)
+
+    def test_unpicklable_value_outside_both_scopes_is_named(self):
+        # What gets pickled is `state`; the two scopes are a handful of objects
+        # off it. A real capture failed on a lock held by a compiler internal
+        # reachable from the guards, not from either scope, so preserving the
+        # scopes perfectly still found nothing. The walk has to start where the
+        # pickler starts.
+        from torch._dynamo.guards import _offending_value_path, _scope_roots
+
+        class _Scope:
+            pass
+
+        state = _Scope()
+        state.output_graph = _Scope()
+        state.output_graph.local_scope = {"x": _Scope()}
+        state.output_graph.global_scope = {"g": _Scope()}
+        internal = _Scope()
+        internal.lock = threading.RLock()
+        state.output_graph.guards = [internal]
+
+        roots = _scope_roots(state.output_graph)
+        self.assertEqual(len(roots), 2)
+        self.assertIn(
+            "state.output_graph.guards[0].lock",
+            _offending_value_path(state, internal.lock, roots),
+        )
+
+        # Reachable both ways: the short, readable scope path still wins, so
+        # rooting at state does not make the common report worse.
+        shared = threading.RLock()
+        state.output_graph.local_scope["x"].it = shared
+        state.output_graph.guards.append(shared)
+        self.assertIn(
+            "local_scope['x'].it",
+            _offending_value_path(state, shared, _scope_roots(state.output_graph)),
+        )
+
     def test_offending_value_path_never_masks_the_real_error(self):
         # It is a diagnostic appended to an error already being raised, so any
         # failure inside it must stay silent.
@@ -5819,6 +5927,124 @@ class TestPrecompile(TestCase):
             with _maybe_scoped(loaded):
                 self.assertEqual(loaded(m, x), _precompile_plus_one(m, x))
 
+    def test_disable_wrapped_entry_with_a_default_round_trips_and_serves(self):
+        # A torch._dynamo.disable wrapper carries the inner function's name on a
+        # (*args, **kwargs) signature of its own. The entry, its varargs check
+        # and the _ENTRY_BINDING must all come from the inner function, or a
+        # served call with the default omitted has no 'scale' to bind and every
+        # captured variant misses; the varargs check must not refuse it either.
+        m = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+        with torch.no_grad():
+            code, cache = torch.compiler.precompile(
+                _precompile_disabled_defaulted_entry,
+                example_inputs=[(m, x)],
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+                require_no_risky_drops=False,
+            )
+        loaded = torch.compiler.precompile.load(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            # Called without 'scale', so the served frame only binds it if the
+            # artifact carried the inner function's default.
+            self.assertEqual(loaded(m, x), _precompile_scaled_with_break(m, x))
+
+    def test_load_reports_cache_status_when_the_cache_is_incompatible(self):
+        # A cache from another torch build is acceleration load() cannot use:
+        # it runs python_code alone and says so on the handle, so a deployment
+        # that must not JIT can assert cache_status == "applied".
+        m, x, code, cache = self._dynamo_eager_artifact()
+        fresh = torch.compiler.precompile.load(code, cache)
+        self.assertEqual(fresh.cache_status, "applied")
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        blob["version"] = 999
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        with self.assertLogs("torch._precompile", level="WARNING"):
+            foreign = torch.compiler.precompile.load(code, buf.getvalue())
+        self.assertEqual(foreign.cache_status, "incompatible")
+        with _maybe_scoped(foreign), torch.no_grad():
+            self.assertEqual(foreign(m, x), _precompile_plus_one(m, x))
+
+    def test_inlined_sources_to_check_keeps_torch_modules(self):
+        # TORCH_VERSION is baked at build time and does not change when an
+        # editable install's module is edited, so a standalone artifact records
+        # torch's own inlined sources and re-checks them, exactly as the
+        # installed mode does.
+        import dataclasses
+
+        from torch._dynamo.package import InlinedSource, SourceInfo
+        from torch._precompile import _inlined_sources_to_check
+
+        source_info = SourceInfo(
+            inlined_sources={
+                InlinedSource("torch.nn.functional", 1, 3, "abc"),
+                InlinedSource("__main__", 1, 3, "def"),
+            }
+        )
+        entry = dataclasses.replace(self._dynamo_entry_stub(), source_info=source_info)
+        recorded = _inlined_sources_to_check(entry)
+        modules = {m for m, *_ in recorded}
+        self.assertIn("torch.nn.functional", modules)
+        self.assertNotIn("__main__", modules)
+
+    def _dynamo_entry_stub(self):
+        from torch._precompile import _capture_session, _SessionHandle
+
+        session = _SessionHandle(
+            _capture_session(_precompile_single_graph, backend="eager", dynamic=False)
+        )
+        with session as call:
+            call(torch.randn(3))
+        return session._session._package.cache_entry()
+
+    def test_torch_module_source_change_is_rejected_in_both_serving_modes(self):
+        # A torch-tree module whose recorded source no longer matches is refused
+        # by the standalone driver (from INLINED_SOURCES) and by the installed
+        # path (CompilePackage's inlined-source check), so the two modes give
+        # one answer to an editable-install edit.
+        import dataclasses
+        import importlib
+        import re
+
+        from torch._dynamo.package import (
+            _hash_sourcelines,
+            CompilePackage,
+            InlinedSource,
+            SourceInfo,
+        )
+
+        module = "torch.nn.functional"
+        good = _hash_sourcelines(importlib.import_module(module), 1, 3)
+        bad = ("0" if good[-1] != "0" else "1").join((good[:-1], ""))
+
+        _, x, code, cache = self._dynamo_eager_artifact()
+
+        def with_checksum(checksum):
+            line = f"INLINED_SOURCES = [({module!r}, 1, 3, {checksum!r})]"
+            return re.sub(r"INLINED_SOURCES = .*", line, code, count=1)
+
+        # Standalone: the correct checksum loads, a tampered one is refused. The
+        # rewritten code no longer matches the cache's code_hash, and the cache
+        # is acceleration only, so load without one.
+        torch.compiler.precompile.load(with_checksum(good), b"")
+        with self.assertRaisesRegex(
+            PrecompileError, f"source code changes detected for {module}"
+        ):
+            torch.compiler.precompile.load(with_checksum(bad), b"")
+
+        # Installed: CompilePackage runs the same check on the cache entry.
+        entry = self._dynamo_entry_stub()
+        tampered = dataclasses.replace(
+            entry,
+            source_info=SourceInfo(inlined_sources={InlinedSource(module, 1, 3, bad)}),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, f"Source code changes detected for {module}"
+        ):
+            CompilePackage(_precompile_single_graph, tampered)
+
     def test_serve_filter_cannot_readmit_identity_guards(self):
         # A serve-time recompile serializes its guards through the package's
         # filter under strict_error, so a custom filter that REPLACED the
@@ -5864,22 +6090,22 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "positional-only"):
             loaded(m, t=x)
 
-    @parametrize("example", ["example_input", "sequence"])
-    def test_positional_example_inputs_are_pointed_at_the_keyword(self, example):
+    def test_positional_example_input_is_pointed_at_the_keyword(self):
         # A lone ExampleInput passed positionally is example_inputs missing its
-        # keyword -- it describes a call, it is not an argument of one. A lone
-        # list or tuple is NOT second-guessed by its contents: a function that
-        # takes one sequence is legitimate, and it takes the FutureWarning path
-        # as the 2.14 spelling of that single-argument call.
+        # keyword -- it describes a call, it is not an argument of one.
         x = torch.randn(2, 4)
-        if example == "example_input":
-            with self.assertRaisesRegex(
-                TypeError, r"ExampleInput positionally.*example_inputs=\[ExampleInput"
-            ):
-                torch.compiler.precompile(
-                    _precompile_plus_one, torch.compiler.ExampleInput((x,))
-                )
-            return
+        with self.assertRaisesRegex(
+            TypeError, r"ExampleInput positionally.*example_inputs=\[ExampleInput"
+        ):
+            torch.compiler.precompile(
+                _precompile_plus_one, torch.compiler.ExampleInput((x,))
+            )
+
+    def test_positional_sequence_is_the_single_argument_of_one_call(self):
+        # A lone list or tuple is NOT second-guessed by its contents: a function
+        # that takes one sequence is legitimate, and it takes the FutureWarning
+        # path as the 2.14 spelling of that single-argument call.
+        x = torch.randn(2, 4)
         with self.assertWarnsRegex(FutureWarning, "example_inputs"):
             code, cache = torch.compiler.precompile(
                 lambda seq: seq[0] + seq[1], [x, x], backend="eager"
@@ -5931,13 +6157,9 @@ class TestPrecompile(TestCase):
     def test_package_dataclasses_load_from_a_pickle_without_newer_fields(self):
         # A field added after an artifact was written comes back at its
         # default. A plain default is a class attribute and needs nothing; a
-        # default_factory field (system_info) is not, and needs __setstate__.
-        from torch._dynamo.package import (
-            _DynamoCacheEntry,
-            InlinedSource,
-            SourceInfo,
-            SystemInfo,
-        )
+        # field whose absence check_versions() rejects (system_info) comes back
+        # None, since there is nothing to compare the host against.
+        from torch._dynamo.package import _DynamoCacheEntry, InlinedSource, SourceInfo
 
         source = InlinedSource("m", 1, 2, "abc", content="body")
         old = copy.copy(source)
@@ -5963,7 +6185,7 @@ class TestPrecompile(TestCase):
         for name in newer:
             old.__dict__.pop(name)
         loaded = pickle.loads(pickle.dumps(old))
-        self.assertIsInstance(loaded.system_info, SystemInfo)
+        self.assertIsNone(loaded.system_info)
         self.assertIsNone(loaded.device_types)
         self.assertTrue(loaded.requires_native_backend_compatibility)
         self.assertIsNone(loaded.fn_name)
@@ -6507,7 +6729,9 @@ class TestPrecompile(TestCase):
     def test_main_entry_loads_only_from_the_same_script(self):
         # __main__ is whichever script is running: a frame compiled in one
         # would read another's globals. Capture warns; the same script loads;
-        # any other script, and a __main__ with no file, are refused by name.
+        # another script is refused by name. A file-less __main__ (a REPL,
+        # `python -c`, a notebook) cannot be told apart from the capturing
+        # script, so it is accepted and reads the loader's globals.
         capture_src = textwrap.dedent(
             """
             import sys
@@ -6553,29 +6777,45 @@ class TestPrecompile(TestCase):
             )
             self.assertIn("SAME_SCRIPT_OK", captured.stdout)
             self.assertIn("defined in __main__, the script", captured.stderr)
-            self.assertIn("from a REPL, `python -c` or notebook", captured.stderr)
-            # Another script, and a __main__ with no file at all (a REPL,
-            # `python -c`, a notebook): both are a different program.
-            for argv in (
+            self.assertIn("cannot be told apart from this script", captured.stderr)
+            # Another script is a different program: refused by name.
+            other = subprocess.run(
                 [sys.executable, os.path.join(d, "other.py"), *paths],
+                capture_output=True,
+                text=True,
+                cwd=d,
+                timeout=300,
+            )
+            self.assertEqual(
+                other.returncode,
+                0,
+                f"stdout:\n{other.stdout}\nstderr:\n{other.stderr}",
+            )
+            self.assertIn("REFUSED:", other.stdout)
+            self.assertIn("compiled in __main__", other.stdout)
+            # A file-less __main__ (python -c) cannot be told apart from the
+            # capturing script, so it is accepted rather than refused.
+            noc = subprocess.run(
                 [sys.executable, "-c", load_src, *paths],
-            ):
-                other = subprocess.run(
-                    argv, capture_output=True, text=True, cwd=d, timeout=300
-                )
-                self.assertEqual(
-                    other.returncode,
-                    0,
-                    f"stdout:\n{other.stdout}\nstderr:\n{other.stderr}",
-                )
-                self.assertIn("REFUSED:", other.stdout)
-                self.assertIn("compiled in __main__", other.stdout)
+                capture_output=True,
+                text=True,
+                cwd=d,
+                timeout=300,
+            )
+            self.assertEqual(
+                noc.returncode,
+                0,
+                f"stdout:\n{noc.stdout}\nstderr:\n{noc.stderr}",
+            )
+            self.assertIn("LOADED_OK", noc.stdout)
+            self.assertNotIn("REFUSED:", noc.stdout)
 
     def test_main_entry_loads_where_main_has_no_file(self):
         # `python -c`, a REPL or a notebook has no __main__.__file__, and a
-        # frame compiled there records a placeholder filename. Another
-        # file-less __main__ cannot be told apart from the one that captured,
-        # so it loads; a script is a different program and is refused.
+        # frame compiled there records a placeholder filename. A __main__ with
+        # no file on either side cannot be told apart from the one that
+        # captured, so it is accepted: another file-less __main__ loads, and so
+        # does a script, since the capturing side was file-less and unknown.
         src = textwrap.dedent(
             """
             import sys
@@ -6621,6 +6861,8 @@ class TestPrecompile(TestCase):
             self.assertIn("NO_FILE_OK", proc.stdout)
             self.assertIn("a __main__ with no file", proc.stderr)
             self.assertIn("read the LOADER's globals", proc.stderr)
+            # The capturing side was file-less and so unknown; a script loading
+            # it cannot be ruled out as the same program, so it is accepted.
             script = subprocess.run(
                 [sys.executable, os.path.join(d, "loader.py"), *paths],
                 capture_output=True,
@@ -6633,108 +6875,8 @@ class TestPrecompile(TestCase):
                 0,
                 f"stdout:\n{script.stdout}\nstderr:\n{script.stderr}",
             )
-            self.assertIn("REFUSED:", script.stdout)
-            self.assertIn("no file: a REPL, python -c or notebook", script.stdout)
-
-    def test_unpicklable_value_reachable_only_through_a_global_is_named(self):
-        # pickle_guards_state empties global_scope before dumping, so a walk
-        # that reads the scope afterwards finds nothing and the error arrives as
-        # a bare type name. Capturing the roots first is what keeps a value
-        # reachable only through a global nameable -- which is how a real
-        # "cannot pickle '_thread.RLock' object" arrived with no path at all.
-        from torch._dynamo.guards import _offending_value_path, _scope_roots
-
-        class _Scope:
-            pass
-
-        holder = _Scope()
-        holder.cfg = _Scope()
-        holder.cfg.lock = threading.RLock()
-        state = _Scope()
-        state.output_graph = _Scope()
-        state.output_graph.local_scope = {}
-        state.output_graph.global_scope = {"CFG": holder}
-
-        roots = _scope_roots(state.output_graph)
-        state.output_graph.global_scope = {}  # what the pruning does
-
-        self.assertEqual(_offending_value_path(state, holder.cfg.lock), "")
-        self.assertIn(
-            "global_scope['CFG'].cfg.lock",
-            _offending_value_path(state, holder.cfg.lock, roots),
-        )
-
-    def test_unpicklable_value_outside_both_scopes_is_named(self):
-        # What gets pickled is `state`; the two scopes are a handful of objects
-        # off it. A real capture failed on a lock held by a compiler internal
-        # reachable from the guards, not from either scope, so preserving the
-        # scopes perfectly still found nothing. The walk has to start where the
-        # pickler starts.
-        from torch._dynamo.guards import _offending_value_path, _scope_roots
-
-        class _Scope:
-            pass
-
-        state = _Scope()
-        state.output_graph = _Scope()
-        state.output_graph.local_scope = {"x": _Scope()}
-        state.output_graph.global_scope = {"g": _Scope()}
-        internal = _Scope()
-        internal.lock = threading.RLock()
-        state.output_graph.guards = [internal]
-
-        roots = _scope_roots(state.output_graph)
-        self.assertEqual(len(roots), 2)
-        self.assertIn(
-            "state.output_graph.guards[0].lock",
-            _offending_value_path(state, internal.lock, roots),
-        )
-
-        # Reachable both ways: the short, readable scope path still wins, so
-        # rooting at state does not make the common report worse.
-        shared = threading.RLock()
-        state.output_graph.local_scope["x"].it = shared
-        state.output_graph.guards.append(shared)
-        self.assertIn(
-            "local_scope['x'].it",
-            _offending_value_path(state, shared, _scope_roots(state.output_graph)),
-        )
-
-    def test_a_served_handle_does_not_lose_the_frame(self):
-        # The pruning walks the top-level leaves of local_scope; the pickler
-        # walks everything under them. An artifact a previous load installed on
-        # a guarded object is therefore never pruned, and walking into it hits
-        # the session's condition variable -- "cannot pickle '_thread.RLock'",
-        # frame lost to eager. Seen on a real capture, where the path was
-        # local_scope['pipeline']._precompiled_fwd_loss_bwd._compiled._inner
-        # ._state._lock: precompile's own, and nothing the caller could change.
-        import io
-        import pickle as _pickle
-
-        from torch._dynamo.guards import (
-            _is_precompile_handle,
-            _Missing,
-            GuardsStatePickler,
-        )
-        from torch._precompile import PrecompiledCallable
-
-        handle = PrecompiledCallable.__new__(PrecompiledCallable)
-        handle._state = threading.Condition()
-        self.assertTrue(_is_precompile_handle(handle))
-        # Narrow on purpose: a lock in the CALLER's model still fails loudly
-        # with its path named, which the two tests above depend on.
-        self.assertFalse(_is_precompile_handle(threading.RLock()))
-
-        holder = _PrecompileLockHolder()
-        holder.installed = handle
-        holder.scale = 2.0
-
-        buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, buf).dump(holder)
-        back = _pickle.loads(buf.getvalue())
-        self.assertIsInstance(back.installed, _Missing)
-        # Everything around it survives, which is the point: the frame is kept.
-        self.assertEqual(back.scale, 2.0)
+            self.assertIn("LOADED_OK", script.stdout)
+            self.assertNotIn("REFUSED:", script.stdout)
 
 
 def _graph_devices_literal(code: str) -> str:
@@ -6746,12 +6888,12 @@ def _graph_devices_literal(code: str) -> str:
 
 
 class TestPrecompileNumerics(TestCase):
+    # Numeric-correctness tests run device-generically so the same coverage
+    # exercises the CUDA lowering, not just CPU.
+
     def setUp(self):
         _skip_make_fx_capture_under_dynamo(self)
         super().setUp()
-
-    # Numeric-correctness tests run device-generically so the same coverage
-    # exercises the CUDA lowering, not just CPU.
 
     def test_plain_function(self, device):
         def f(x, y):
