@@ -135,7 +135,11 @@ def _capture_config(training: bool) -> Iterator[None]:
             functorch_patch["force_non_lazy_backward_lowering"] = True
         stack = contextlib.ExitStack()
         stack.enter_context(functorch_config.patch(functorch_patch))
-        stack.enter_context(torch._dynamo.config.patch(allow_empty_graphs=True))
+        try:
+            stack.enter_context(torch._dynamo.config.patch(allow_empty_graphs=True))
+        except BaseException:
+            stack.close()
+            raise
         _CAPTURE_CONFIG_STACK.set(stack)
     _CAPTURE_CONFIG_DEPTH.set(depth + 1)
     try:
@@ -2270,7 +2274,7 @@ class PrecompiledCallable:
     def __call__(self, *args: object, **kwargs: object) -> object:
         with self._state:
             if not self._loaded or self._unloading:
-                raise RuntimeError("PrecompiledCallable has been unloaded")
+                raise PackageError("PrecompiledCallable has been unloaded")
             if self._package.installed_entries_dropped():
                 raise PackageError(
                     "torch._dynamo.reset() cleared the precompiled code this "
@@ -2306,7 +2310,7 @@ class PrecompiledCallable:
     def __enter__(self) -> Self:
         with self._state:
             if not self._loaded or self._unloading:
-                raise RuntimeError("PrecompiledCallable has been unloaded")
+                raise PackageError("PrecompiledCallable has been unloaded")
         return self
 
     def __exit__(self, *exc: object) -> None:
