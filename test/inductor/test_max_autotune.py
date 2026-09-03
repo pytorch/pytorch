@@ -60,9 +60,9 @@ from torch._inductor.heuristics.template.triton import (
 )
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.bmm import blackwell_ws_persistent_tma_bmm_template
+from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.lowering import lowerings
-from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
 from torch._inductor.scheduler import Scheduler
@@ -155,6 +155,7 @@ def tearDownModule():
 _DECOMPOSE_K_PATCH_ROCM = (
     {"triton.num_decompose_k_splits": 10} if torch.version.hip else {}
 )
+
 
 @torch.library.custom_op("inductor_test::blackwell_bmm", mutates_args={})
 def blackwell_bmm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -254,9 +255,7 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
         self.assertIn("make_tensor_descriptor", codes[0])
         self.assertNotIn("two_ctas=True", codes[0])
-        self.assertIn(
-            f"EPILOGUE_SUBTILE : tl.constexpr = {epilogue_subtile}", codes[0]
-        )
+        self.assertIn(f"EPILOGUE_SUBTILE : tl.constexpr = {epilogue_subtile}", codes[0])
 
     @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
     @parametrize("epilogue_subtile", (1, 2, 4))
