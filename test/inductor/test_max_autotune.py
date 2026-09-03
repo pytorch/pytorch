@@ -156,11 +156,6 @@ _DECOMPOSE_K_PATCH_ROCM = (
     {"triton.num_decompose_k_splits": 10} if torch.version.hip else {}
 )
 
-requires_sm100 = unittest.skipUnless(
-    HAS_GPU and SM100OrLater, "requires NVIDIA SM100+"
-)
-
-
 @torch.library.custom_op("inductor_test::blackwell_bmm", mutates_args={})
 def blackwell_bmm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return torch.bmm(a, b)
@@ -211,7 +206,7 @@ class TestMaxAutotune(TestCase):
         b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
         return a, b
 
-    @requires_sm100
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("broadcast_b", (False, True))
     @parametrize("data_partition_factor", (1, 2))
     @parametrize("epilogue_subtile", (1, 2, 4))
@@ -289,7 +284,7 @@ class TestMaxAutotune(TestCase):
         else:
             self.assertNotIn("data_partition_factor", codes[0])
 
-    @requires_sm100
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
     def test_blackwell_bmm_template_2cta_flat_output(self) -> None:
         bsz, m, k, n = 2, 256, 8193, 128
@@ -367,7 +362,7 @@ class TestMaxAutotune(TestCase):
         self.assertIn("ctas_per_cga=(2, 1, 1)", codes[0])
         self.assertIn("make_tensor_descriptor(out_ptr0", codes[0])
 
-    @requires_sm100
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_blackwell_bmm_template_choice(self) -> None:
         bsz, m, k, n = 3, 256, 8193, 128
         a_storage = torch.randn(bsz, k, m, device=GPU_TYPE, dtype=torch.bfloat16)
@@ -387,7 +382,7 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
 
-    @requires_sm100
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_blackwell_bmm_template_rejects_unaligned_batch_base(self) -> None:
         bsz, m, k, n = 3, 128, 1025, 128
         a = (
