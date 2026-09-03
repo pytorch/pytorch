@@ -17,7 +17,10 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+from torch._C._dynamo.eval_frame import (
+    _debug_get_precompile_entries,
+    get_code_exec_strategy,
+)
 from torch._dynamo.exc import PackageError
 from torch._dynamo.package import (
     _current_cpu_codegen_target,
@@ -31,6 +34,7 @@ from torch._dynamo.package import (
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
+from torch._dynamo.types import FrameAction
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor import cpu_vec_isa
@@ -989,6 +993,32 @@ def add(x, y):
                 sys.modules.pop("_package_stale_hit", None)
                 sys.modules.pop("_package_stale_hit_renamed", None)
                 _MODULE_KEY_BY_FILE.pop(path, None)
+
+    def test_abandoned_package_restores_skipped_frames_on_gc(self):
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x.sin()
+
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(backend="eager", package=package)(fn)(torch.randn(3))
+        # A frame with no guarded code is what install() skip_code()s.
+        entry = package.cache_entry().codes[0]
+        entry.guarded_codes.clear()
+        entry.backend_ids.clear()
+        package.cached_backends.clear()
+        ctx.save_package(package, self.path())
+        torch._dynamo.reset()
+        del package
+        gc.collect()
+
+        code = fn.__code__
+        pkg, backends = ctx.load_package(fn, self.path())
+        pkg.install(backends)
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.SKIP)
+        del pkg, backends
+        gc.collect()
+        self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
 
     def test_explicit_capture_is_not_inferred_from_the_serialization_filter(self):
         # The serialization filter and the capture mode are independent: a
