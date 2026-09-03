@@ -35,7 +35,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
      skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, onlyNativeDeviceTypes, dtypesIfCUDA,
-     onlyCUDA, onlyAccelerator, skipMeta, skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
+     onlyCUDA, onlyAccelerator, onlyOn, skipMeta, skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
      e4m3_type, e5m2_type)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -11477,6 +11477,151 @@ class TestGroupedMM(TestCase):
             if agrad is not None:
                 self.assertEqual(agrad, a.grad)
                 self.assertEqual(bgrad, b.grad)
+
+    def _make_grouped_mm_matrix(self, shape, layout, dtype, device, scale=1.0):
+        rows, cols = shape[-2:]
+        alignment = 16 // dtype.itemsize
+        padded_dim = cols if layout == "n" else rows
+        padded = max(alignment, math.ceil(padded_dim / alignment) * alignment)
+        stored_shape = (*shape[:-2], rows if layout == "n" else cols, padded)
+        result = torch.randn(stored_shape, device=device, dtype=dtype)
+        result = result[..., :cols] if layout == "n" else result.transpose(-2, -1)[..., :rows, :]
+        return result.mul_(scale)
+
+    def _grouped_mm_reference(self, a, b, offsets):
+        ends = offsets.tolist()
+        ranges = list(zip([0, *ends[:-1]], ends))
+        if a.dim() == 2 and b.dim() == 2:
+            return torch.stack([a[:, start:end] @ b[start:end] for start, end in ranges])
+        if a.dim() == 2:
+            return torch.cat([a[start:end] @ b[group] for group, (start, end) in enumerate(ranges)])
+        return torch.cat([a[group] @ b[:, start:end] for group, (start, end) in enumerate(ranges)], dim=1)
+
+    def _check_grouped_mm_layout_case(
+        self, device, a_shape, a_layout, b_shape, b_layout, dtype, offset_values, backward, scale
+    ):
+        if a_shape is None:
+            # A size-one row creates a large logical stride without a large allocation;
+            # its accessible offsets remain within the small backing storage.
+            storage = torch.randn(16, device=device, dtype=torch.bfloat16)
+            a = torch.as_strided(storage, (1, 1, 16), (16, 1 << 32, 1))
+        else:
+            a = self._make_grouped_mm_matrix(a_shape, a_layout, dtype, device, scale)
+        b = self._make_grouped_mm_matrix(b_shape, b_layout, dtype, device)
+        offsets = torch.tensor(offset_values, dtype=torch.int32)
+
+        a = a.detach().requires_grad_(backward)
+        b = b.detach().requires_grad_(backward)
+        actual = F.grouped_mm(a, b, offs=offsets.to(device), out_dtype=a.dtype)
+        a_ref = a.detach().cpu().float().requires_grad_(backward)
+        b_ref = b.detach().cpu().float().requires_grad_(backward)
+        expected = self._grouped_mm_reference(a_ref, b_ref, offsets)
+        covered = offsets[-1].item()
+        if a.dim() == 2 and b.dim() == 3 and covered < actual.size(0):
+            actual = actual[:covered]
+        elif a.dim() == 3 and b.dim() == 2 and covered < actual.size(1):
+            actual = actual[:, :covered]
+        tol = {torch.float32: 2e-4, torch.float16: 2e-2, torch.bfloat16: 6e-2}[a.dtype]
+        self.assertEqual(actual.detach().cpu().float(), expected.detach().to(a.dtype).float(), atol=tol, rtol=tol)
+        if backward:
+            grad = self._make_grouped_mm_matrix(actual.shape, "n", actual.dtype, device)
+            actual.backward(grad)
+            expected.backward(grad.cpu().float())
+            self.assertEqual(a.grad.cpu().float(), a_ref.grad.to(a.dtype).float(), atol=tol, rtol=tol)
+            self.assertEqual(b.grad.cpu().float(), b_ref.grad.to(b.dtype).float(), atol=tol, rtol=tol)
+
+    @onlyOn(["cuda", "mps"])
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @parametrize(
+        "case,a_shape,a_layout,b_shape,b_layout,dtype,offset_values,backward,scale",
+        [
+            ("2d_2d_bm16_nt", (24, 33), "n", (33, 69), "t", torch.float32, [0, 17, 17, 33], True, 1.0),
+            ("2d_2d_unequal_backing_k", (24, 40), "n", (32, 69), "t", torch.float32, [8, 20, 28], False, 1.0),
+            ("2d_2d_k0", (5, 0), "n", (0, 7), "n", torch.float32, [0, 0], False, 1.0),
+        ],
+        name_fn=lambda case, *_: case,
+    )
+    def test_grouped_mm_2d_2d_layouts_offsets(
+        self, device, case, a_shape, a_layout, b_shape, b_layout, dtype, offset_values, backward, scale
+    ):
+        self._check_grouped_mm_layout_case(
+            device, a_shape, a_layout, b_shape, b_layout, dtype, offset_values, backward, scale
+        )
+
+    @onlyOn(["cuda", "mps"])
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @parametrize(
+        "case,a_shape,a_layout,b_shape,b_layout,dtype,offset_values,backward,scale",
+        [
+            ("2d_3d_bm32_tn", (50, 19), "t", (2, 19, 67), "n", torch.float16, [0, 50], True, 1.0),
+            ("2d_3d_empty", (0, 8), "n", (2, 8, 7), "n", torch.float32, [0, 0], False, 1.0),
+            # BM switches at 24/25; the BN boundary is N=1024 with 32 MiB of weights.
+            ("2d_3d_bm32_bn128_nn", (25, 8192), "n", (1, 8192, 1024), "n", torch.float32, [1], False, 1 / math.sqrt(8192)),
+        ],
+        name_fn=lambda case, *_: case,
+    )
+    def test_grouped_mm_2d_3d_layouts_offsets(
+        self, device, case, a_shape, a_layout, b_shape, b_layout, dtype, offset_values, backward, scale
+    ):
+        self._check_grouped_mm_layout_case(
+            device, a_shape, a_layout, b_shape, b_layout, dtype, offset_values, backward, scale
+        )
+
+    @onlyOn(["cuda", "mps"])
+    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @parametrize(
+        "case,a_shape,a_layout,b_shape,b_layout,dtype,offset_values,backward,scale",
+        [
+            ("3d_2d_large_stride_fallback", None, None, (16, 17), "t", torch.bfloat16, [17], False, 1.0),
+            # BM switches at 48/49; the BN boundary is N=1024 with 32 MiB of weights.
+            ("3d_2d_bm64_bn256_tt", (2, 49, 8192), "t", (8192, 1024), "t", torch.float32, [257, 1024], True, 1 / math.sqrt(8192)),
+        ],
+        name_fn=lambda case, *_: case,
+    )
+    def test_grouped_mm_3d_2d_layouts_offsets(
+        self, device, case, a_shape, a_layout, b_shape, b_layout, dtype, offset_values, backward, scale
+    ):
+        self._check_grouped_mm_layout_case(
+            device, a_shape, a_layout, b_shape, b_layout, dtype, offset_values, backward, scale
+        )
+
+    @onlyOn(["cuda", "mps"])
+    @serialTest()
+    @largeTensorTest("6GB")
+    def test_grouped_mm_u64_indexing(self, device):
+        # mat_b spans just over 2^31 elements, so its accessible element offsets
+        # exceed signed 32-bit indexing. b is zero except every 4096th row,
+        # keeping the numerical reference computable from small slices.
+        n, step = 2**13, 2**12
+        k = 2**18 + 2 * step
+        a = torch.randn(64, k, device=device, dtype=torch.float16)
+        b = torch.zeros(k, n, device=device, dtype=torch.float16)
+        nonzero_rows = torch.arange(0, k, step, device=device)
+        row_values = torch.randn(nonzero_rows.numel(), n, device=device, dtype=torch.float16)
+        b[nonzero_rows] = row_values
+        offsets = torch.tensor([k // 2, k], dtype=torch.int32, device=device)
+        out = F.grouped_mm(a, b, offs=offsets, out_dtype=a.dtype)
+        a_sel = a[:, nonzero_rows].cpu().float()
+        rows_per_group = nonzero_rows.numel() // 2
+        for group in range(2):
+            group_slice = slice(group * rows_per_group, (group + 1) * rows_per_group)
+            expected = a_sel[:, group_slice] @ row_values[group_slice].cpu().float()
+            self.assertEqual(out[group].cpu().float(), expected, atol=2e-2, rtol=2e-2)
+
+    @onlyOn(["cuda", "mps"])
+    def test_grouped_mm_fake_tensor_stride(self, device):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        a = torch.randn(2, 5, 8, device=device)
+        b = torch.randn(2, 8, 8, device=device)[..., :7]
+        eager = F.grouped_mm(a, b)
+
+        with FakeTensorMode() as mode:
+            fake = F.grouped_mm(mode.from_tensor(a), mode.from_tensor(b))
+
+        self.assertEqual(eager.shape, fake.shape)
+        self.assertEqual(eager.stride(), fake.stride())
+        self.assertEqual(eager.stride(), (40, 8, 1))
 
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])

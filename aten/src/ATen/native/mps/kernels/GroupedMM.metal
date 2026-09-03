@@ -242,6 +242,7 @@ inline void grouped_mm_tile_gemm(
 // Jagged rows: A[m, k] is split into groups along dim 0, each multiplied with
 // its own batch of B[groups, k, n].
 template <typename T, int BM, int BN, int BK, int WM, int WN, typename idx_t>
+[[max_total_threads_per_threadgroup(WM * WN * simdgroup_size)]]
 kernel void grouped_mm_rows(
     device const T* mat_a [[buffer(0)]],
     device const T* mat_b [[buffer(1)]],
@@ -295,6 +296,7 @@ kernel void grouped_mm_rows(
 // Jagged contraction: A[m, k] and B[k, n] contract over per-group slices of
 // dim k, producing output[groups, m, n].
 template <typename T, int BM, int BN, int BK, int WM, int WN, typename idx_t>
+[[max_total_threads_per_threadgroup(WM * WN * simdgroup_size)]]
 kernel void grouped_mm_k(
     device const T* mat_a [[buffer(0)]],
     device const T* mat_b [[buffer(1)]],
@@ -408,6 +410,7 @@ inline void grouped_mm_mpp_gemm(
 }
 
 template <typename T, int BM, int BN, int NSG, bool RELAXED, bool TA, bool TB>
+[[max_total_threads_per_threadgroup(NSG * simdgroup_size)]]
 kernel void grouped_mm_rows_mpp(
     device T* mat_a [[buffer(0)]],
     device T* mat_b [[buffer(1)]],
@@ -449,6 +452,7 @@ kernel void grouped_mm_rows_mpp(
 }
 
 template <typename T, int BM, int BN, int NSG, bool RELAXED, bool TA, bool TB>
+[[max_total_threads_per_threadgroup(NSG * simdgroup_size)]]
 kernel void grouped_mm_k_mpp(
     device T* mat_a [[buffer(0)]],
     device T* mat_b [[buffer(1)]],
@@ -482,10 +486,11 @@ kernel void grouped_mm_k_mpp(
 }
 
 // Jagged columns: A[groups, m, k] times B[k, n] whose columns are split into
-// groups, writing the row-major output[m, n] directly (matmul2d cannot store
-// a transposed destination, so this mode cannot reuse the rows kernel via
+// groups, writing the row-major output[m, n] directly (mpp::matmul2d cannot
+// store a transposed destination, so this mode cannot reuse the rows kernel via
 // the transpose identity).
 template <typename T, int BM, int BN, int NSG, bool RELAXED, bool TA, bool TB>
+[[max_total_threads_per_threadgroup(NSG * simdgroup_size)]]
 kernel void grouped_mm_cols_mpp(
     device T* mat_a [[buffer(0)]],
     device T* mat_b [[buffer(1)]],

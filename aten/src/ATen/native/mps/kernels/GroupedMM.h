@@ -2,8 +2,10 @@
 
 #include <c10/metal/common.h>
 
-// Each threadgroup computes one (16|32|64)-row by kGroupedMMTileN-column
-// chunk of the output, using grouped_mm_simdgroups(rows) simdgroups.
+// kGroupedMMTileN and kGroupedMMTileK are used only by the
+// SIMD-group-matrix kernels grouped_mm_rows and grouped_mm_k. Each threadgroup
+// computes 16, 32 or 64 rows by 64 columns and advances through K in chunks
+// of 16; grouped_mm_*_mpp kernels use separate template tile sizes.
 C10_METAL_CONSTEXPR uint32_t kGroupedMMTileN = 64;
 C10_METAL_CONSTEXPR uint32_t kGroupedMMTileK = 16;
 
@@ -11,6 +13,9 @@ inline constexpr uint32_t grouped_mm_simdgroups(uint32_t tile_rows) {
   return tile_rows >= 64 ? 4 : 2;
 }
 
+// Tuned on M5 Pro, this two/four/eight SIMD-group launch uses eight groups for
+// the BN=256 tile to provide more cooperative parallelism across its wider
+// output; narrower tiles reuse the row-based two/four configuration.
 inline constexpr uint32_t grouped_mm_mpp_simdgroups(
     uint32_t tile_rows,
     uint32_t tile_cols) {

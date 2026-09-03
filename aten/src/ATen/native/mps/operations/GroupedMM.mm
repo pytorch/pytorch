@@ -30,7 +30,8 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/GroupedMM_metallib.h>
 #endif
 
-// Prefer the largest row tile that the typical group height keeps busy.
+// Prefer the largest row tile that the typical group height keeps busy; the
+// 48/24 cut points keep the picked tile at least 75% occupied.
 uint32_t grouped_mm_tile_rows(int64_t rows) {
   if (rows > 48) {
     return 64;
@@ -44,25 +45,27 @@ uint32_t grouped_mm_tile_rows(int64_t rows) {
 template <typename idx_t>
 GroupedMMParams<idx_t> grouped_mm_params(const Tensor& mat_a, const Tensor& mat_b, const Tensor& out, uint32_t groups) {
   return {
-      c10::checked_convert<uint32_t>(mat_a.size(-2), "mat_a.size(-2)"),
-      c10::checked_convert<uint32_t>(mat_b.size(-1), "mat_b.size(-1)"),
-      c10::checked_convert<uint32_t>(mat_a.size(-1), "mat_a.size(-1)"),
-      groups,
-      static_cast<idx_t>(mat_a.stride(-2)),
-      static_cast<idx_t>(mat_a.stride(-1)),
-      mat_a.dim() == 3 ? static_cast<idx_t>(mat_a.stride(0)) : idx_t(0),
-      static_cast<idx_t>(mat_b.stride(-2)),
-      static_cast<idx_t>(mat_b.stride(-1)),
-      mat_b.dim() == 3 ? static_cast<idx_t>(mat_b.stride(0)) : idx_t(0),
-      static_cast<idx_t>(out.stride(-2)),
-      static_cast<idx_t>(out.stride(-1)),
-      out.dim() == 3 ? static_cast<idx_t>(out.stride(0)) : idx_t(0),
+      .m = c10::checked_convert<uint32_t>(mat_a.size(-2), "mat_a.size(-2)"),
+      .n = c10::checked_convert<uint32_t>(mat_b.size(-1), "mat_b.size(-1)"),
+      .k = c10::checked_convert<uint32_t>(std::min(mat_a.size(-1), mat_b.size(-2)), "contraction dimension"),
+      .groups = groups,
+      .a_stride_m = static_cast<idx_t>(mat_a.stride(-2)),
+      .a_stride_k = static_cast<idx_t>(mat_a.stride(-1)),
+      .a_batch_stride = mat_a.dim() == 3 ? static_cast<idx_t>(mat_a.stride(0)) : idx_t(0),
+      .b_stride_k = static_cast<idx_t>(mat_b.stride(-2)),
+      .b_stride_n = static_cast<idx_t>(mat_b.stride(-1)),
+      .b_batch_stride = mat_b.dim() == 3 ? static_cast<idx_t>(mat_b.stride(0)) : idx_t(0),
+      .out_stride_m = static_cast<idx_t>(out.stride(-2)),
+      .out_stride_n = static_cast<idx_t>(out.stride(-1)),
+      .out_batch_stride = out.dim() == 3 ? static_cast<idx_t>(out.stride(0)) : idx_t(0),
   };
 }
 
 // Wider output tiles cut per-element DRAM traffic ((BM+BN)*k bytes per tile);
 // pick them once mat_b is too big to stay cache-resident, where the MPP
-// kernels are otherwise bandwidth-bound streaming it once per row tile.
+// kernels are otherwise bandwidth-bound streaming it once per row tile. The
+// 1024-column / 32 MiB cutoffs approximate the last-level cache of current
+// Apple GPUs.
 uint32_t grouped_mm_mpp_tile_cols(uint32_t n, uint64_t mat_b_bytes, uint32_t bm) {
   const bool streams_weights_from_dram = n >= 1024 && mat_b_bytes >= (32ull << 20);
   return streams_weights_from_dram ? (bm == 64 ? 256u : 128u) : kGroupedMMTileN;
@@ -115,10 +118,9 @@ void grouped_mm_out_mps(const Tensor& mat_a,
   const auto mode = jagged_rows ? "rows"sv : "k"sv;
   const auto bm = grouped_mm_tile_rows(jagged_rows ? mat_a.size(0) / groups : mat_a.size(0));
   const auto params = grouped_mm_params<uint64_t>(mat_a, mat_b, out, groups);
-  // Every validated operand is row- or column-major; matmul2d wants that
-  // orientation spelled out per operand ('n' row-major, 't' column-major) and
-  // a row-major output, so the transposed-output 3d x 2d fallback call lands
-  // on the simdgroup kernels.
+  // Every operand is either row or col major, because mpp matmul2d wants
+  // to know the orientation in advance per operand (`n` row-major, `t` column major)
+  // and output is always row-major, so the transposed-output 3d x 2d fallback call lands on the simdgroup kernels.
   const char a_layout = params.a_stride_k == 1 ? 'n' : 't';
   const char b_layout = params.b_stride_k == 1 ? 't' : 'n';
   const auto dtype = scalarToMetalTypeString(out);
@@ -211,27 +213,7 @@ Tensor _grouped_mm_mps(const Tensor& mat_a,
                        const std::optional<Tensor>& offs,
                        const std::optional<Tensor>& bias,
                        std::optional<c10::ScalarType> out_dtype) {
-  TORCH_CHECK(mat_a.device().is_mps() && mat_b.device().is_mps(),
-              "Expected mat_a and mat_b to be MPS tensors, but got ",
-              mat_a.device(),
-              " and ",
-              mat_b.device());
-  TORCH_CHECK(mat_a.device() == mat_b.device(),
-              "Expected mat_a and mat_b to be on the same device, but got ",
-              mat_a.device(),
-              " and ",
-              mat_b.device());
-  TORCH_CHECK(!offs.has_value() || offs->device() == mat_a.device(),
-              "Expected offsets to be on the same device as the inputs");
-  TORCH_CHECK(mat_a.scalar_type() == mat_b.scalar_type(),
-              "Expected mat_a and mat_b to have the same dtype, but got ",
-              mat_a.scalar_type(),
-              " and ",
-              mat_b.scalar_type());
   _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
-  // The shared validation skips this check when both operands are 2d (jagged
-  // contraction dims); without it the kernel silently truncates to the smaller.
-  TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
 
   const auto output_dtype = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   auto out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, output_dtype);
