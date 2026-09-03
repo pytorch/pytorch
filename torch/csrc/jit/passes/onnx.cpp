@@ -136,14 +136,20 @@ static void preprocessCaffe2Ops(Block* block) {
             }
             it->fs_(Symbol::attr(arg.name()), values);
           } else {
-            throw std::runtime_error(
-                "Unhandled scalar arg: " + arg.name() +
-                ", type: " + c10::typeKindToString(elem_type->kind()));
+            TORCH_CHECK(
+                false,
+                "Unhandled scalar arg: ",
+                arg.name(),
+                ", type: ",
+                c10::typeKindToString(elem_type->kind()));
           }
         } else {
-          throw std::runtime_error(
-              "Unsupported input type of arg " + arg.name() +
-              " in Caffe2 operator: " + c10::typeKindToString(type->kind()));
+          TORCH_CHECK(
+              false,
+              "Unsupported input type of arg ",
+              arg.name(),
+              " in Caffe2 operator: ",
+              c10::typeKindToString(type->kind()));
         }
       }
     }
@@ -173,7 +179,7 @@ std::shared_ptr<Graph> ToONNX(
         operator_export_type,
         env,
         values_in_env);
-  } catch (std::runtime_error&) {
+  } catch (const std::exception&) {
     ONNX_LOG(
         "ONNX graph being constructed during exception:\n",
         new_graph->toString());
@@ -290,7 +296,7 @@ void NodeToONNX(
       ss << "symbolic for " << op_name
          << " produced an incorrect number of outputs (expected ";
       ss << num_old_outputs << ", but got " << outputs.size() << ')';
-      throw std::runtime_error(std::move(ss).str());
+      TORCH_CHECK(false, std::move(ss).str());
     }
     // For const node, it does not need params_dict info, so set it to {}.
     const ParamMap empty_params_dict = {};
@@ -390,7 +396,7 @@ void NodeToONNX(
           ss << " (indicating conversion for that particular output is not supported), ";
           ss << "but the network uses this output later";
           // TODO: Say what actually used it
-          throw std::runtime_error(std::move(ss).str());
+          TORCH_CHECK(false, std::move(ss).str());
         }
       }
     }
@@ -449,7 +455,7 @@ void NodeToONNX(
          << ": expected to return list of op nodes, instead received type ''"
          << py::str(py::type::handle_of(raw_output))
          << "': " << py::str(raw_output);
-      throw std::runtime_error(std::move(ss).str());
+      TORCH_CHECK(false, std::move(ss).str());
     }
 
     setOutputs(op_name, n, outputs);
@@ -564,7 +570,7 @@ void NodeToONNX(
         TORCH_CHECK(node_it != inputs.end(), "expected too many inputs");
         obj = py::cast(envFn(*node_it++));
       } else {
-        throw std::runtime_error("unexpected calling convention");
+        TORCH_CHECK(false, "unexpected calling convention");
       }
       py_symbolic_args[input_nr++] = obj;
     }

@@ -295,9 +295,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         auto hi = p_node->Input(1).toInt();
         auto step = p_node->Input(2).toInt();
         // error handling when step_val == 0 during runtime
-        if (step == 0) {
-          throw std::runtime_error("range() arg 3 must not be zero");
-        }
+        TORCH_CHECK(step != 0, "range() arg 3 must not be zero");
         if (step > 0 && lo < hi) {
           p_node->Output(0) = 1 + (hi - 1 - lo) / step;
         } else if (step < 0 && lo > hi) {
@@ -1248,11 +1246,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto num_elems = std::ssize(elems);
         const auto idx = pnode->Input(1).toInt();
         const auto norm_idx = normalizeIndex(idx, num_elems);
-        if (norm_idx < 0 || norm_idx >= num_elems) {
-          // Use std::runtime_error instead of c10::Error to be consistent with
-          // JIT
-          throw std::out_of_range("Tuple index out of range");
-        }
+        TORCH_CHECK_INDEX(
+            norm_idx >= 0 && norm_idx < num_elems, "Tuple index out of range");
         pnode->Output(0) = elems[norm_idx];
       };
     })
@@ -1266,6 +1261,12 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       }
       return [](ProcessedNode* pnode) {
         const auto& message = pnode->Input(0).toStringRef();
+        // prim::RaiseException surfaces the message the scripted `raise` was
+        // given. test_static_runtime.cc catches this by name as
+        // std::runtime_error, which c10::Error does not derive from, and then
+        // asserts what() equals the message exactly - c10::Error::what()
+        // appends its backtrace.
+        // @allow-raw-throw: caught by name, and what() must equal the message
         throw std::runtime_error(message);
       };
     })
@@ -1481,15 +1482,14 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto& tensor = pnode->Input(0).toTensor();
         // JIT does a check for requires_grad, but we skip it here since SR is
         // inference only
-        if (!tensor.sizes().empty()) {
-          throw std::runtime_error(
-              "Cannot convert a tensor of dimension > 0 to scalar");
-        }
+        TORCH_CHECK(
+            tensor.sizes().empty(),
+            "Cannot convert a tensor of dimension > 0 to scalar");
         if (!isIntegralType(tensor.scalar_type(), /*includeBool=*/false)) {
           std::stringstream ss;
           ss << "Cannot input a tensor of type " << tensor.scalar_type()
              << " as an integral argument";
-          throw std::runtime_error(std::move(ss).str());
+          TORCH_CHECK(false, std::move(ss).str());
         }
         pnode->Output(0) = at::native::item(tensor).toInt();
       };
