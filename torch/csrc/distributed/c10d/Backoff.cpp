@@ -1,6 +1,6 @@
 #include <torch/csrc/distributed/c10d/Backoff.hpp>
 
-#include <stdexcept>
+#include <c10/util/Exception.h>
 
 namespace c10d {
 namespace {
@@ -16,22 +16,21 @@ ExponentialBackoffWithJitter::ExponentialBackoffWithJitter()
     : gen_(randSeed()) {}
 
 std::chrono::milliseconds ExponentialBackoffWithJitter::nextBackoff() {
-  if (initialInterval == kZeroInterval) {
-    throw std::out_of_range(
-        "ExponentialBackoffWithJitter requires non-zero initial interval");
-  }
-  if (initialInterval > maxInterval) {
-    throw std::out_of_range(
-        "ExponentialBackoffWithJitter requires initialInterval <= maxInterval");
-  }
-  if (randomizationFactor >= 1 || randomizationFactor < 0) {
-    throw std::out_of_range(
-        "ExponentialBackoffWithJitter requires randomization factor (0,1]");
-  }
-  if (multiplier < 1.0) {
-    throw std::out_of_range(
-        "ExponentialBackoffWithJitter requires multiplier >=1");
-  }
+  TORCH_CHECK_VALUE(
+      initialInterval != kZeroInterval,
+      "ExponentialBackoffWithJitter requires non-zero initial interval");
+  TORCH_CHECK_VALUE(
+      initialInterval <= maxInterval,
+      "ExponentialBackoffWithJitter requires initialInterval <= maxInterval");
+  // The two float guards below are negated rather than inverted, so that NaN
+  // keeps the behaviour it had here before: it satisfies none of these
+  // comparisons, so it did not raise and still does not.
+  TORCH_CHECK_VALUE(
+      !(randomizationFactor >= 1 || randomizationFactor < 0),
+      "ExponentialBackoffWithJitter requires randomization factor (0,1]");
+  TORCH_CHECK_VALUE(
+      !(multiplier < 1.0),
+      "ExponentialBackoffWithJitter requires multiplier >=1");
 
   // detect initial setup
   if (currentInterval_ == kZeroInterval) {
