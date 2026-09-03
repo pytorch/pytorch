@@ -118,9 +118,7 @@ class TORCH_API NCCLDevCommManager {
     return it->second;
   }
 
-  uint64_t get_comm_generation(
-      const std::string& group_name,
-      ncclComm_t comm) {
+  uint64_t get_comm_generation(const std::string& group_name, ncclComm_t comm) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto comm_it = group_to_comm_.find(group_name);
     auto generation_it = group_to_comm_generation_.find(group_name);
@@ -253,8 +251,7 @@ class TORCH_API NCCLDevCommManager {
     std::lock_guard<std::mutex> lock(mutex_);
 #ifdef USE_ROCM
     auto registered_comm = group_to_comm_.find(group_name);
-    const bool is_new_registration =
-        registered_comm == group_to_comm_.end() ||
+    const bool is_new_registration = registered_comm == group_to_comm_.end() ||
         registered_comm->second != comm;
     ncclCommProperties_t comm_props = NCCL_COMM_PROPERTIES_INITIALIZER;
     const bool device_api_support =
