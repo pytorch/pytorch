@@ -253,7 +253,7 @@ __host__ void scan_innermost_dim_with_indices(
 
   // assuming max_num_threads per block is 512
   const uint32_t num_threads = 512;
-  const uint32_t log_num_threads_x = get_log_num_threads_x_inner_scan<int64_t>(num_rows, row_size);
+  const uint32_t log_num_threads_x = get_log_num_threads_x_inner_scan<uint64_t>(num_rows, row_size);
   const uint32_t num_threads_x = (1 << log_num_threads_x);
   const uint32_t num_threads_y = num_threads / num_threads_x;
   dim3 threads(num_threads_x, num_threads_y);
