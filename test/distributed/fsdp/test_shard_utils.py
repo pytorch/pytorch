@@ -6,9 +6,7 @@ from torch.distributed.fsdp._shard_utils import (
     _create_chunk_dtensor,
     _create_chunk_sharded_tensor,
 )
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -83,9 +81,11 @@ class TestShardUtilsDistributedDTensor(DTensorTestBase):
                 self.assertEqual(self.rank >= len(tensor_chunks), True)
 
 
-instantiate_device_type_tests(TestShardUtilsDistributed, globals(), except_for="cpu")
 instantiate_device_type_tests(
-    TestShardUtilsDistributedDTensor, globals(), except_for="cpu"
+    TestShardUtilsDistributed, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestShardUtilsDistributedDTensor, globals(), except_for="cpu", allow_xpu=True
 )
 if __name__ == "__main__":
     run_tests()
