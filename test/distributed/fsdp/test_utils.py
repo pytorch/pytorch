@@ -36,6 +36,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+
 class TestUtils(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
