@@ -83,7 +83,9 @@ class TestLRScheduler(TestCase):
             super().step(epoch)
 
     class KwargsRecordingScheduler(LRScheduler):
-        """A third-party scheduler collecting its step arguments in ``**kwargs``."""
+        """A third-party scheduler collecting its step arguments in
+        ``**kwargs``.
+        """
 
         def __init__(self, optimizer):
             self.step_kwargs = []
@@ -1347,7 +1349,9 @@ class TestLRScheduler(TestCase):
         self._test_with_metrics(scheduler, targets, metrics, epochs)
 
     def test_composed_plateau_lr_without_metrics(self):
-        """Stepping a composer without a metric while PlateauLR is active is an error."""
+        """Stepping a composer without a metric while PlateauLR is active
+        is an error.
+        """
         scheduler = SequentialLR(
             self.opt,
             schedulers=[
@@ -1374,7 +1378,9 @@ class TestLRScheduler(TestCase):
             chained.step()
 
     def test_sequentiallr_with_plateau_lr_state_dict(self):
-        """Resuming from a checkpoint taken while the plateau stage is active."""
+        """Resuming from a checkpoint taken while the plateau stage is
+        active.
+        """
         base_lr = 0.1
         milestone = 2
         total_steps = 8

@@ -1129,7 +1129,8 @@ class SequentialLR(LRScheduler):
         >>>     scheduler.step()
 
         >>> # xdoctest: +SKIP
-        >>> # SequentialLR can pass extra keyword arguments to the schedulers it holds:
+        >>> # SequentialLR can pass extra keyword arguments to the schedulers it
+        >>> # holds:
         >>> scheduler1 = LinearLR(optimizer, total_iters=5)
         >>> scheduler2 = PlateauLR(optimizer)
         >>> scheduler = SequentialLR(
@@ -1654,20 +1655,20 @@ class ChainedScheduler(LRScheduler):
 class PlateauLR(LRScheduler):
     """Reduce learning rate when a metric has stopped improving.
 
-    Models often benefit from reducing the learning rate by a factor
-    of 2-10 once learning stagnates. This scheduler reads a metrics
-    quantity and if no improvement is seen for a 'patience' number
-    of epochs, the learning rate is reduced.
+    Models often benefit from reducing the learning rate by a factor of 2-10
+    once learning stagnates. This scheduler reads a metrics quantity and if
+    no improvement is seen for a 'patience' number of epochs, the learning
+    rate is reduced.
 
-    Unlike :class:`ReduceLROnPlateau`, this scheduler implements
-    :meth:`get_lr` and can be used as one of the schedulers inside
-    :class:`SequentialLR` or :class:`ChainedScheduler`.
+    Unlike :class:`ReduceLROnPlateau`, this scheduler implements :meth:`get_lr`
+    and can be used as one of the schedulers inside :class:`SequentialLR`
+    or :class:`ChainedScheduler`.
 
-    When :class:`SequentialLR` activates this scheduler at a milestone, it
-    performs its epoch-0 update as it does for every other scheduler. If that
-    call receives a metric, it establishes the initial best value; otherwise,
-    it leaves the learning rate and plateau state unchanged. The first later
-    call with a metric then establishes the initial best value.
+    When :class:`SequentialLR` activates this scheduler at a milestone,
+    it performs its epoch-0 update as it does for every other scheduler.
+    If that call receives a metric, it establishes the initial best value;
+    otherwise, it leaves the learning rate and plateau state unchanged. The
+    first later call with a metric then establishes the initial best value.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
@@ -1679,16 +1680,17 @@ class PlateauLR(LRScheduler):
             reduced. new_lr = lr * factor. Default: 0.1.
         patience (int): The number of allowed epochs with no improvement after
             which the learning rate will be reduced.
-            For example, consider the case of having no patience (`patience = 0`).
-            In the first epoch, a baseline is established and is always considered good as there's no previous baseline.
-            In the second epoch, if the performance is worse than the baseline,
-            we have what is considered an intolerable epoch.
-            Since the count of intolerable epochs (1) is greater than the patience level (0),
-            the learning rate is reduced at the end of this epoch.
-            From the third epoch onwards, the learning rate continues to be reduced at the end of each epoch
-            if the performance is worse than the baseline. If the performance improves or remains the same,
-            the learning rate is not adjusted.
-            Default: 10.
+            For example, consider the case of having no patience
+            (`patience = 0`). In the first epoch, a baseline is established
+            and is always considered good as there's no previous baseline.
+            In the second epoch, if the performance is worse than the
+            baseline, we have what is considered an intolerable epoch. Since
+            the count of intolerable epochs (1) is greater than the patience
+            level (0), the learning rate is reduced at the end of this epoch.
+            From the third epoch onwards, the learning rate continues to be
+            reduced at the end of each epoch if the performance is worse than
+            the baseline. If the performance improves or remains the same,
+            the learning rate is not adjusted. Default: 10.
         threshold (float): Threshold for measuring the new optimum,
             to only focus on significant changes. Default: 1e-4.
         threshold_mode (str): One of `rel`, `abs`.
@@ -1717,7 +1719,11 @@ class PlateauLR(LRScheduler):
 
     Example:
         >>> # xdoctest: +SKIP
-        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+        >>> optimizer = torch.optim.SGD(
+        ...     model.parameters(),
+        ...     lr=0.1,
+        ...     momentum=0.9,
+        ... )
         >>> scheduler = PlateauLR(optimizer, "min")
         >>> for epoch in range(10):
         >>>     train(...)
@@ -1729,7 +1735,10 @@ class PlateauLR(LRScheduler):
         >>> # Composed with a warmup schedule:
         >>> scheduler = SequentialLR(
         ...     optimizer,
-        ...     schedulers=[LinearLR(optimizer, total_iters=5), PlateauLR(optimizer)],
+        ...     schedulers=[
+        ...         LinearLR(optimizer, total_iters=5),
+        ...         PlateauLR(optimizer),
+        ...     ],
         ...     milestones=[5],
         ... )
         >>> for epoch in range(100):
@@ -1847,7 +1856,7 @@ class PlateauLR(LRScheduler):
 
     @override
     def get_lr(self) -> list[float | Tensor]:
-        r"""Compute the next learning rate for each of the optimizer's param groups.
+        r"""Compute the next learning rate for each optimizer parameter group.
 
         Without a metric for this update, the current learning rate is
         returned unchanged; no reduction is attempted.
