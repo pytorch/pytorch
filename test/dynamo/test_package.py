@@ -96,7 +96,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
     def test_cache_entry_loads_from_a_pickle_without_newer_fields(self):
         # A pickle written before these fields existed must still load and pass
-        # check_versions(), which reads them directly.
+        # check_versions(), which reads them directly. system_info is the
+        # exception: with nothing recorded there is nothing to compare the host
+        # against, and synthesizing one on load compared the host to itself.
         def fn(x):
             return x + 1
 
@@ -117,23 +119,24 @@ class TestPackage(torch._inductor.test_case.TestCase):
             source_info=dynamo_package.SourceInfo(set()),
             device_type="cpu",
             device_types=frozenset({"cpu"}),
+            system_info=SystemInfo.current(cpu_codegen=False),
         )
         old = copy.copy(entry)
-        for name in (
-            "device_types",
-            "requires_native_backend_compatibility",
-            "system_info",
-        ):
+        for name in ("device_types", "requires_native_backend_compatibility"):
             old.__dict__.pop(name)
 
         loaded = pickle.loads(pickle.dumps(old))
         self.assertIsNone(loaded.device_types)
         self.assertTrue(loaded.requires_native_backend_compatibility)
-        self.assertIsInstance(loaded.system_info, SystemInfo)
-        self.assertIsNone(loaded.system_info.cpu_codegen_target)
         self.assertFalse(loaded.codes[0].bypassed)
         loaded.check_versions()
         self.assertEqual(loaded.debug_info()["device_types"], ["cpu"])
+
+        old.__dict__.pop("system_info")
+        loaded = pickle.loads(pickle.dumps(old))
+        self.assertIsNone(loaded.system_info)
+        with self.assertRaisesRegex(RuntimeError, "records no system info"):
+            loaded.check_versions()
 
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self):
