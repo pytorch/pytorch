@@ -1,12 +1,12 @@
 {
   "autograd": [
-    "@soulitzer",
-    "@izaitsevfb"
+    "@soulitzer"
   ],
   "flex_attention": [
     "@drisspg"
   ],
   "nn": [
-    "@izaitsevfb"
+    "@albanD",
+    "@jbschlosser"
   ]
 }
