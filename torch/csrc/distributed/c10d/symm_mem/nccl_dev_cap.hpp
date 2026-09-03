@@ -6,8 +6,8 @@
 #include <torch/csrc/cuda/nccl.h>
 
 // RCCL symmetric memory requires the 2.30.4 API and an nccl_device.h that host
-// translation units can compile. CMake probes the header because preview builds
-// can carry compatibility fixes without updating NCCL_VERSION_CODE.
+// translation units can compile. Header presence and version macros alone do
+// not establish host compatibility, so CMake probes the installed header.
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0) &&   \
     (!defined(USE_ROCM) ||                           \
      (NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 4) && \
