@@ -253,10 +253,6 @@ _fail_on_recompile_override = DepthTLS()
 _force_eager_nested_compile = DepthTLS()
 
 
-def _fail_on_recompile_depth() -> int:
-    return _fail_on_recompile_override.depth
-
-
 _PRECOMPILE_ENTRIES_REPORTED = 5
 
 
@@ -302,12 +298,11 @@ def _precompile_no_match_message(
         # re-evaluation (the call raced an install, or the guard is not
         # deterministic) is named as such rather than rendered as a raw
         # multi-line GuardDebugInfo repr.
-        if getattr(reason, "result", False):
+        if reason.result:
             lines.append(f"  [{i}] <matched on re-check; not a rejection reason>")
             shown += 1
             continue
-        parts = getattr(reason, "verbose_code_parts", None) or [str(reason)]
-        lines.append(f"  [{i}] {'; '.join(str(p) for p in parts)}")
+        lines.append(f"  [{i}] {'; '.join(reason.verbose_code_parts)}")
         shown += 1
     if len(mine) > shown:
         lines.append(f"  ... and {len(mine) - shown} more variant(s) not shown.")
@@ -360,7 +355,7 @@ def _get_effective_stance() -> DynamoStance:
     compiling. Running eager instead would silently stop serving the artifact,
     which is the failure serving() exists to make loud.
     """
-    if _fail_on_recompile_depth():
+    if _fail_on_recompile_override.depth:
         # skip_guard_eval_unsafe is dropped deliberately: kept, an uncovered
         # call raises a bare RuntimeError from the skip-guard path instead of
         # the RecompileError serving() documents, so `except RecompileError`
@@ -372,11 +367,11 @@ def _get_effective_stance() -> DynamoStance:
 
 
 def _enter_fail_on_recompile_override() -> None:
-    _fail_on_recompile_override.depth = _fail_on_recompile_depth() + 1
+    _fail_on_recompile_override.depth += 1
 
 
 def _exit_fail_on_recompile_override() -> None:
-    depth = _fail_on_recompile_depth()
+    depth = _fail_on_recompile_override.depth
     if depth <= 0:
         raise AssertionError("fail_on_recompile override is not active")
     _fail_on_recompile_override.depth = depth - 1
@@ -488,13 +483,13 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
 
         # to prevent cache miss due to different backend
         fail_callback._torchdynamo_orig_backend = callback  # type: ignore[attr-defined]
-        if _fail_on_recompile_depth():
-            # Only for serving(): this marker makes the C++ frame eval ignore a
-            # RUN_ONLY pin, so an uncovered call raises instead of quietly
-            # running eager. Setting it for a plain
-            # set_stance("fail_on_recompile") would change that public stance
-            # for everyone -- a frame past its recompile limit would start
-            # raising where it used to run eager, and so would every callee.
+        if _fail_on_recompile_override.depth:
+            # Contract with eval_frame_cpp.cpp: a RUN_ONLY frame whose callback
+            # carries this marker still reaches the callback on a cache miss
+            # (so serving() raises instead of running eager), and its callees
+            # consult their own strategy rather than inheriting run-only. Only
+            # serving() sets it; a plain set_stance("fail_on_recompile") must
+            # keep running recompile-limited frames eager.
             fail_callback._torchdynamo_force_callback_on_cache_miss = True  # type: ignore[attr-defined]
 
         return fail_callback
@@ -555,7 +550,11 @@ def _create_delayed_compile_callback(
 
 
 def _is_skip_guard_eval_unsafe_stance() -> bool:
-    return _get_effective_stance().skip_guard_eval_unsafe
+    # Per-call hot path; serving()'s override forces this False (see
+    # _get_effective_stance), so skip building the replaced stance.
+    if _fail_on_recompile_override.depth:
+        return False
+    return _stance.skip_guard_eval_unsafe
 
 
 def _reset_guarded_backend_cache() -> None:
@@ -1112,6 +1111,11 @@ class _TorchDynamoContext:
                 return functools.partial(ctx.__exit__, None, None, None)
 
             self.enter_exit_hooks.append(call_backend_ctx)
+
+    @property
+    def isolate_recompiles_id(self) -> int:
+        """The cache region this context compiles into; -1 is the shared default bucket."""
+        return self._isolate_recompiles_id
 
     def __enter__(self) -> None:
         if config.raise_on_ctx_manager_usage:
@@ -2076,7 +2080,7 @@ def _optimize(
             dynamic_shapes=dynamic_shapes,
         )
 
-    emits_native_code = _backend_emits_native_code(backend)
+    native_backend = _backend_emits_native_code(backend)
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -2095,7 +2099,7 @@ def _optimize(
             fn=None,
             dynamo=None,
             ignore_inlined_sources=False,
-            requires_native_backend_compatibility=emits_native_code,
+            requires_native_backend_compatibility=native_backend,
         )
 
     return _optimize_catch_errors(
@@ -3026,7 +3030,7 @@ def _optimize_assert(
     Used for fullgraph=True and export, since we must always error on graph breaks and ignore
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
-    emits_native_code = _backend_emits_native_code(backend)
+    native_backend = _backend_emits_native_code(backend)
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -3044,7 +3048,7 @@ def _optimize_assert(
             fn=None,
             dynamo=None,
             ignore_inlined_sources=False,
-            requires_native_backend_compatibility=emits_native_code,
+            requires_native_backend_compatibility=native_backend,
         )
 
     return _optimize_catch_errors(

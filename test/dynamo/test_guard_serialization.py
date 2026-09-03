@@ -123,9 +123,7 @@ def keep_name(func):
 
 
 def keep_renamed_name(func):
-    # __name__ reassigned away from co_name, so a reconstruction that falls back
-    # to code.co_name reads "forward" where the real function says otherwise.
-    # keep_name alone cannot catch that: there the two agree.
+    # __name__ differs from co_name, so a co_name fallback reads "forward".
     func.__name__ = "renamed_forward"
 
     @functools.wraps(func)
@@ -140,8 +138,7 @@ def keep_renamed_name(func):
 def keep_module(func):
     @functools.wraps(func)
     def wrapper(self, x):
-        # Also roots a guard at __globals__ so the SNAPSHOT variant is used,
-        # the only one where __module__ has to be restored explicitly.
+        # Guarding __globals__ too forces the SNAPSHOT variant.
         if func.__module__ == func.__globals__["__name__"]:
             x = x + 1
         return func(self, x)
@@ -184,9 +181,7 @@ def _cell_is_empty(cell):
 
 
 class DecoratedForwardModule(torch.nn.Module):
-    # forward is the wrapper; the undecorated function it closes over has the
-    # same __qualname__ but is unreachable from the module, which is what makes
-    # it unpicklable by reference.
+    # The undecorated forward is unreachable by reference, so it is rebuilt by value.
     @keep_defaults
     def forward(self, x, scale=2.0, shift=1.0):
         return x * scale + shift
@@ -234,12 +229,7 @@ class DecoratedUnpicklableDefaultForwardModule(torch.nn.Module):
         return x * 2
 
 
-# --- module-scope wrappers that reach themselves through their own globals ---
-# `wrapped = deco(base)` at module scope: the wrapper is reachable from its own
-# __globals__, so the snapshot contains the very object being reduced, and two
-# such wrappers reach each other through it. Dynamo sources the module dict
-# once (through A), so what puts B in the guard tree is the CONSTANT_MATCH on
-# its own `const_name` cell; both are then rebuilt against the one snapshot.
+# Module-scope wrappers: the globals snapshot contains the wrappers themselves.
 MODULE_SCOPE_CONST = 2
 MODULE_SCOPE_CONST_B = 2
 
@@ -247,8 +237,6 @@ MODULE_SCOPE_CONST_B = 2
 def module_scope_wrapper(func, const_name):
     @functools.wraps(func)
     def wrapper(x):
-        # Roots a guard at func.__globals__, which forces the snapshot -- and
-        # the snapshot contains the wrappers themselves.
         if func.__globals__[const_name] == 2:
             x = x + 1
         return func(x)
@@ -268,13 +256,10 @@ MODULE_SCOPE_WRAPPED_A = module_scope_wrapper(_scope_base_a, "MODULE_SCOPE_CONST
 MODULE_SCOPE_WRAPPED_B = module_scope_wrapper(_scope_base_b, "MODULE_SCOPE_CONST_B")
 
 
-# --- a wrapper that reaches itself through its closure and its __dict__ -----
 def self_referencing_wrapper(func):
     @functools.wraps(func)
     def wrapper(x):
-        # Roots a guard at wrapper.flag. wrapper is a free variable of its own
-        # body, so the kept closure cell reaches back to the function being
-        # reduced, and so does wrapper.__dict__["me"].
+        # Reaches itself through both a closure cell and __dict__["me"].
         if wrapper.flag == 2.0:
             x = x + 1
         return func(x)
@@ -291,7 +276,6 @@ def _self_referencing_base(x):
 SELF_REFERENCING_WRAPPED = self_referencing_wrapper(_self_referencing_base)
 
 
-# --- a closure cell holding None, reached as a CELL through the wrapper ------
 def none_cell_wrapper(func):
     scale = None
 
@@ -311,7 +295,6 @@ def _none_cell_base(x):
 NONE_CELL_WRAPPED = none_cell_wrapper(_none_cell_base)
 
 
-# --- a guarded value whose own __reduce__ refuses to pickle -----------------
 class UnpicklableGuardedDefault:
     def __init__(self):
         self.flag = 2.0
@@ -336,7 +319,6 @@ class DecoratedUnpicklableGuardedDefaultForwardModule(torch.nn.Module):
         return x * 2
 
 
-# --- an empty closure cell -------------------------------------------------
 def keep_name_with_empty_cell(func):
     @functools.wraps(func)
     def wrapper(x):
@@ -359,7 +341,6 @@ def _empty_cell_base(x):
 EMPTY_CELL_WRAPPED = keep_name_with_empty_cell(_empty_cell_base)
 
 
-# --- a guarded default whose VALUE must survive, not just the tuple length --
 def keep_default_value(func):
     @functools.wraps(func)
     def wrapper(self, x):
@@ -376,7 +357,6 @@ class DecoratedDefaultValueForwardModule(torch.nn.Module):
         return x * scale
 
 
-# --- a value guard on the defaults TUPLE itself, not on an element ----------
 class GuardedDefaultsTupleModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -387,14 +367,12 @@ class GuardedDefaultsTupleModule(torch.nn.Module):
         self.fn = fn
 
     def forward(self, x):
-        # EQUALS_MATCH lands on __defaults__ / __kwdefaults__ themselves,
-        # registering the CONTAINER but no per-element source.
+        # EQUALS_MATCH on the containers themselves, with no per-element source.
         if self.fn.__defaults__ == (2.0, 1.0) and self.fn.__kwdefaults__ == {"c": 3.0}:
             x = x + 1
         return x + 2
 
 
-# --- a guard walking THROUGH __dict__ next to an unpicklable attribute ------
 def keep_dict_attribute(func):
     func.tag = 2.0
     func.cache = threading.Lock()  # unpicklable and unguarded
@@ -414,9 +392,7 @@ class DecoratedDictAttributeForwardModule(torch.nn.Module):
         return x * 2
 
 
-# Each case decorates forward with a wrapper whose body roots a guard at one
-# thing the undecorated function carries. mutation is what has to be changed on
-# that function for the guard to stop matching.
+# mutation: what to change on the undecorated function so the guard stops matching.
 FQN_MISMATCH_CASES = [
     subtest(
         ("SEQUENCE_LENGTH", DecoratedForwardModule, ("__defaults__", (2.0,))),
