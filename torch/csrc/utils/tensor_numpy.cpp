@@ -399,6 +399,7 @@ at::Tensor tensor_from_cuda_array_interface(
     PyObject* py_shape = nullptr;
     TORCH_CHECK_PYTHON(
         PyDict_GetItemStringRef(cuda_dict, "shape", &py_shape) >= 0);
+    THPObjectPtr py_shape_guard(py_shape);
     if (py_shape == nullptr) {
       TORCH_CHECK_TYPE(false, "attribute `shape` must exist");
     }
@@ -412,12 +413,14 @@ at::Tensor tensor_from_cuda_array_interface(
     PyObject* py_typestr = nullptr;
     TORCH_CHECK_PYTHON(
         PyDict_GetItemStringRef(cuda_dict, "typestr", &py_typestr) >= 0);
+    THPObjectPtr py_typestr_guard(py_typestr);
     if (py_typestr == nullptr) {
       TORCH_CHECK_TYPE(false, "attribute `typestr` must exist");
     }
     PyArray_Descr* descr = nullptr;
-    TORCH_CHECK_VALUE(
-        PyArray_DescrConverter(py_typestr, &descr), "cannot parse `typestr`");
+    const auto converted = PyArray_DescrConverter(py_typestr, &descr);
+    THPObjectPtr descr_guard(reinterpret_cast<PyObject*>(descr));
+    TORCH_CHECK_VALUE(converted, "cannot parse `typestr`");
     dtype = numpy_dtype_to_aten(descr->type_num);
 #if NPY_ABI_VERSION >= 0x02000000
     dtype_size_in_bytes = PyDataType_ELSIZE(descr);
@@ -433,6 +436,7 @@ at::Tensor tensor_from_cuda_array_interface(
     PyObject* py_data = nullptr;
     TORCH_CHECK_PYTHON(
         PyDict_GetItemStringRef(cuda_dict, "data", &py_data) >= 0);
+    THPObjectPtr py_data_guard(py_data);
     if (py_data == nullptr) {
       TORCH_CHECK_TYPE(false, "attribute `shape` data exist");
     }
@@ -455,6 +459,7 @@ at::Tensor tensor_from_cuda_array_interface(
     PyObject* py_strides = nullptr;
     TORCH_CHECK_PYTHON(
         PyDict_GetItemStringRef(cuda_dict, "strides", &py_strides) >= 0);
+    THPObjectPtr py_strides_guard(py_strides);
     if (py_strides != nullptr && !Py_IsNone(py_strides)) {
       if (PySequence_Length(py_strides) == -1 ||
           static_cast<size_t>(PySequence_Length(py_strides)) != sizes.size()) {
