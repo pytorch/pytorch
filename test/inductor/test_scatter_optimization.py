@@ -398,12 +398,12 @@ class TestPartitionedScatterOpt(TestCase):
             return out_a, out_b
 
         torch.manual_seed(15)
-        # Op A: index_size=100 < min_index_size → normally skipped by gate 6
+        # Op A: index_size=100 < min_index_size -> normally skipped by gate 6
         out_a = torch.zeros(10, device=device, dtype=torch.float32)
         idx_a = torch.randint(0, 5, (100,), device=device, dtype=torch.int64)
         vals_a = torch.randn(100, device=device, dtype=torch.float32)
 
-        # Op B: contention_ratio=0.25 < min_contention_ratio → normally skipped by gate 7
+        # Op B: contention_ratio=0.25 < min_contention_ratio -> normally skipped by gate 7
         out_b = torch.zeros(16384, device=device, dtype=torch.float32)
         idx_b = torch.randint(0, 16384, (4096,), device=device, dtype=torch.int64)
         vals_b = torch.randn(4096, device=device, dtype=torch.float32)
@@ -446,8 +446,8 @@ class TestPartitionedScatterOpt(TestCase):
         Contention gate uses index_size / scatter_dim_size, not index_size / output_numel.
 
         For [vocab=4096, dim=64] with N=50000 indices:
-          wrong: 50000 / (4096*64) = 0.19 → skip
-          right: 50000 / 4096 = 12.2 → apply
+          wrong: 50000 / (4096*64) = 0.19 -> skip
+          right: 50000 / 4096 = 12.2 -> apply
         """
         vocab, dim, N = 4096, 64, 50_000
 
@@ -471,7 +471,7 @@ class TestPartitionedScatterOpt(TestCase):
         self.assertGreater(
             counters["inductor"]["partitioned_scatter_applied"],
             0,
-            "pass skipped for [vocab, dim] output — contention gate likely still uses "
+            "pass skipped for [vocab, dim] output -- contention gate likely still uses "
             "output_numel instead of scatter_dim_size",
         )
 
@@ -486,12 +486,12 @@ class TestPartitionedScatterOpt(TestCase):
 
         Graph: out(40 MB) + idx(88 MB) + vals(44 MB) + persistent(400 MB) inputs.
         The budget is sized off the peak at the index_put *allocation* point, where
-        all four inputs plus the 40 MB output are live (612 MB) — idx/vals are only
+        all four inputs plus the 40 MB output are live (612 MB) -- idx/vals are only
         freed once the node completes. Headroom is derived from those sizes rather
         than hardcoded so it tracks any change to them.
 
-        Sub-test 1: headroom fits P-1 extra output buffers → P=4 applied.
-        Sub-test 2: floor = total_gpu → no headroom → pass skips.
+        Sub-test 1: headroom fits P-1 extra output buffers -> P=4 applied.
+        Sub-test 2: floor = total_gpu -> no headroom -> pass skips.
         """
         torch.manual_seed(12)
         N = 11_000_000
@@ -577,7 +577,7 @@ class TestPartitionedScatterOpt(TestCase):
 
         The memory profile describes the untransformed graph, so a candidate
         evaluated after an earlier rewrite has to be charged for that scatter's
-        expanded buffer — otherwise N scatters each commit the full budget.
+        expanded buffer -- otherwise N scatters each commit the full budget.
 
         Three 20 MB scatters here share room for one extra buffer, so exactly
         one may be rewritten.
@@ -637,8 +637,8 @@ class TestPartitionedScatterOpt(TestCase):
     def test_perf_atomic_contention(self, device):
         """
         Reproduce the PR benchmark: three index_put(accumulate=True) ops with
-        moderate contention (8 slots). CI on ROCm MI300X delivers ≈1.8×, so the
-        1.5× floor catches regressions with enough slack for hardware variance.
+        moderate contention (8 slots). CI on ROCm MI300X delivers ~1.8x, so the
+        1.5x floor catches regressions with enough slack for hardware variance.
         """
         torch.manual_seed(42)
         N, D, n = 1_000_000, 100, 501
@@ -684,19 +684,19 @@ class TestPartitionedScatterOpt(TestCase):
         print(
             f"\nbaseline={baseline_ms:.3f} ms  "
             f"partitioned={partitioned_ms:.3f} ms  "
-            f"speedup={speedup:.2f}×  applied={n_applied}"
+            f"speedup={speedup:.2f}x  applied={n_applied}"
         )
 
         self.assertGreater(
             n_applied,
             0,
-            "pass did not apply to any op — check gates/config",
+            "pass did not apply to any op -- check gates/config",
         )
         self.assertGreater(
             speedup,
             MIN_SPEEDUP,
-            f"expected ≥{MIN_SPEEDUP:.1f}× speedup (moderate contention, 8 slots), "
-            f"got {speedup:.2f}×  "
+            f"expected >={MIN_SPEEDUP:.1f}x speedup (moderate contention, 8 slots), "
+            f"got {speedup:.2f}x  "
             f"(baseline={baseline_ms:.3f} ms, partitioned={partitioned_ms:.3f} ms)",
         )
 
@@ -708,7 +708,7 @@ class TestPartitionedScatterOptGeneric(TestCase):
 
     def test_compute_num_partitions_tight_budget(self):
         """Memory constraint picks P=4: P=8 overhead (28 MB) exceeds 20 MB budget."""
-        # P=4: overhead = 1M * 4 * 3 = 12 MB ≤ 20 MB
+        # P=4: overhead = 1M * 4 * 3 = 12 MB <= 20 MB
         # P=8: overhead = 1M * 4 * 7 = 28 MB > 20 MB
         result = _compute_num_partitions(20_000_000, 1_000_000, 4, min_p=2, max_p=128)
         self.assertEqual(result, 4)
@@ -717,7 +717,7 @@ class TestPartitionedScatterOptGeneric(TestCase):
         """Diminishing-returns cap limits P when memory is not the bottleneck."""
         available = 10**12  # effectively unlimited
 
-        # writes_per_slot=64 → cap=256, min(256, max_p=128) = 128
+        # writes_per_slot=64 -> cap=256, min(256, max_p=128) = 128
         result = _compute_num_partitions(
             available,
             1024,
@@ -729,7 +729,7 @@ class TestPartitionedScatterOptGeneric(TestCase):
         )
         self.assertEqual(result, 128)
 
-        # writes_per_slot=4 → cap=16
+        # writes_per_slot=4 -> cap=16
         result = _compute_num_partitions(
             available,
             1024,
@@ -741,7 +741,7 @@ class TestPartitionedScatterOptGeneric(TestCase):
         )
         self.assertEqual(result, 16)
 
-        # writes_per_slot=0.5 → cap=max(2, 2)=2
+        # writes_per_slot=0.5 -> cap=max(2, 2)=2
         result = _compute_num_partitions(
             available,
             1024,
