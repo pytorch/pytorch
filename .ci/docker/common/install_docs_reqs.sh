@@ -15,10 +15,7 @@ if [ -n "$KATEX" ]; then
 
   apt-get update
   apt-get install -y --no-install-recommends yarn
-  # Pin to last 0.16.x: katex 0.18.5 (2026-08-31) pulls commander@15,
-  # which requires Node >=22.12. CI still installs Node 16.
-  # Matches sphinxcontrib.katex==0.9.11. Remove after Node is upgraded.
-  yarn global add katex@0.16.22 --prefix /usr/local
+  yarn global add katex --prefix /usr/local
 
   sudo apt-get -y install doxygen lcov
 
