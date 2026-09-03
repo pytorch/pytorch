@@ -42,7 +42,7 @@ If your security advisory is closed because it falls into one of these categorie
 ### Untrusted models
 Be careful when running untrusted models. This classification includes models created by unknown developers or utilizing data obtained from unknown sources[^data-poisoning-sources].
 
-`torch.compiler.precompile` artifacts are programs too. `torch.compiler.precompile.load` executes the artifact's Python source (and, for `tracer="dynamo"` artifacts, unpickles the Dynamo state it embeds and the compiled-kernel cache bundle), so loading an artifact runs code with the privileges of the user running PyTorch, and the `weights_only` protections of `torch.load` do not apply. Artifacts are meant to be produced by your own capture and stored where you control them; only load artifacts your own infrastructure produced.
+`torch.compiler.precompile` artifacts are programs too. `torch.compiler.precompile.load` executes the artifact's Python source, writes the compiled-kernel bundle it is given into the local compiler caches, and, for `tracer="dynamo"` artifacts, unpickles the Dynamo state the source embeds, so loading an artifact runs code with the privileges of the user running PyTorch, and the `weights_only` protections of `torch.load` do not apply. Artifacts are meant to be produced by your own capture and stored where you control them; only load artifacts your own infrastructure produced.
 
 **Prefer to execute untrusted models within a secure, isolated environment such as a sandbox** (e.g., containers, virtual machines). This helps protect your system from potentially malicious code. You can find further details and instructions in [this page](https://developers.google.com/code-sandboxing).
 

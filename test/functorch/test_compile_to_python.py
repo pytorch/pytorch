@@ -599,11 +599,23 @@ class TestAOTCompileToPython(TestCase):
         # AOTAutograd only through standalone_runtime, like the inference path.
         import re
 
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        surface = {"torch._functorch._aot_autograd.standalone_runtime"}
+        pattern = r"(?:from|import) (torch\._functorch\S*)"
         source, _cache = self._training_artifact()
-        aot_imports = set(re.findall(r"(?:from|import) (torch\._functorch\S*)", source))
-        self.assertEqual(
-            aot_imports, {"torch._functorch._aot_autograd.standalone_runtime"}
-        )
+        self.assertEqual(set(re.findall(pattern, source)), surface)
+        # Subclass tangents route through the subclass prologue/epilogue
+        # helpers, and output aliasing bakes ViewMetaSequence/MetadataKey
+        # metadata; both must come from the surface too.
+        tt = TwoTensor(torch.randn(4), torch.randn(4)).requires_grad_()
+        gm = make_fx(lambda flat: [flat[0].sin()])([tt])
+        subclass_source, _ = compile_to_python(gm, [tt], grad_enabled=True)
+        self.assertEqual(set(re.findall(pattern, subclass_source)), surface)
+        x = torch.randn(2, 3, requires_grad=True)
+        gm = make_fx(lambda flat: [flat[0].view(-1), flat[0][0]])([x])
+        alias_source, _ = compile_to_python(gm, [x], grad_enabled=True)
+        self.assertEqual(set(re.findall(pattern, alias_source)), surface)
 
     def test_training_artifact_loads_in_fresh_process(self):
         # Self-containment is only real if the artifact runs where nothing but
@@ -1282,18 +1294,28 @@ class TestComposerHelpers(TestCase):
     # _find_effectful_op scan. (Source-emission helper tests live in test_source_emit.py.)
 
     def test_known_helper_table_imports_are_stable_surface(self):
-        # Stability contract: every runtime helper the composer recognizes must emit an
-        # import via the stable standalone_runtime surface (or `import torch` for public
-        # torch paths), never a deep AOTAutograd-internal module. Lock the table so a new
-        # entry pointing at an unstable location is caught.
+        # Stability contract, both halves: the remaining helper-table rows use
+        # public torch paths, and every object standalone_runtime re-exports is
+        # emitted from that surface by identity (a wrapped or aliased re-export
+        # would silently route to the internal module instead).
+        import inspect
+
+        from torch._functorch._aot_autograd import standalone_runtime as rt
+        from torch._functorch._aot_autograd.source_emit import emit_value
+
         for import_stmt, _expr in _known_helper_table().values():
-            self.assertTrue(
-                import_stmt == "import torch"
-                or import_stmt.startswith(
-                    "from torch._functorch._aot_autograd.standalone_runtime import "
-                ),
-                f"helper import {import_stmt!r} bypasses the standalone_runtime surface",
-            )
+            self.assertEqual(import_stmt, "import torch")
+        surface_import = (
+            "from torch._functorch._aot_autograd.standalone_runtime import "
+        )
+        for name in rt.__all__:
+            obj = getattr(rt, name)
+            if not (isinstance(obj, type) or inspect.isfunction(obj)):
+                continue
+            imports = set()
+            expr = emit_value(obj, imports)
+            self.assertEqual(expr, name)
+            self.assertEqual(imports, {surface_import + name}, name)
 
     def test_module_level_names_excludes_deleted(self):
         # Inductor's inner module binds then dels a name (async_compile = AsyncCompile();

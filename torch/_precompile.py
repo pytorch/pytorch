@@ -179,7 +179,8 @@ it.
 #    PrecompileError on mismatch). load() feeds those bytes to
 #    torch.compiler.load_cache_artifacts to PRIME the inductor kernel caches, then always
 #    EXECs python_code -- with the caches primed the kernels load from the precompiled
-#    binaries instead of JIT-compiling. Both the cache priming (it unpickles) and the exec run
+#    binaries instead of JIT-compiling. Both the cache priming (it writes the bundle's
+#    compiled kernels into the local caches) and the exec run
 #    code you supplied; treat both python_code and the cache like code you are about to
 #    run. The code_hash binds the cache to its python_code:
 #    load() rejects a make_fx (code, cache) pair from different precompile() calls
@@ -2080,6 +2081,7 @@ def _validate_dynamo_capture(
 
         tensors = []
         component_owner = {}
+        seen_inner = set()
         for value in instance_values(values):
             if not isinstance(value, torch.Tensor):
                 continue
@@ -2091,13 +2093,19 @@ def _validate_dynamo_capture(
                 unsupported_layout(component)
                 if component.layout in sparse_layouts:
                     continue
-                # The same inner tensor reached from two DISTINCT wrappers is
-                # aliasing the serialized guards cannot express (the snapshot
-                # rebuilds each wrapper's inner tensors), unlike the same
-                # tensor object passed twice.
+                # The same inner tensor reached from two DISTINCT wrappers, or
+                # twice within one wrapper, is aliasing the serialized guards
+                # cannot express (the snapshot rebuilds each wrapper's inner
+                # tensors), unlike the same tensor object passed twice.
                 owner = component_owner.setdefault(id(component), id(value))
-                if owner != id(value):
+                if (
+                    owner != id(value)
+                    or component is not value
+                    and id(component) in seen_inner
+                ):
                     return True
+                if component is not value:
+                    seen_inner.add(id(component))
                 tensors.append(component)
         if len(tensors) < 2:
             return False
@@ -2530,40 +2538,67 @@ def _global_loads(code: types.CodeType) -> Iterator[str]:
 
 
 def _module_attribute_stores(code: types.CodeType) -> Iterator[tuple[str, str]]:
-    """Module-global mutations in a code object and its nested code objects:
-    ("", name) for a STORE_GLOBAL/DELETE_GLOBAL, and (global, attribute) for a
-    STORE_ATTR/DELETE_ATTR whose receiver was loaded directly from globals."""
+    """Mutations of state reachable from globals in a code object (recursively).
+
+    Yields ``("", name)`` for STORE_GLOBAL/DELETE_GLOBAL, and ``(receiver, attr)``
+    for an attribute store whose receiver is a global or an attribute chain off
+    one (``m.CONFIG`` for ``m.CONFIG.value = ...``), reached directly, through a
+    temp local Dynamo spilled it into, or through a stack COPY. Dynamo replays a
+    user object's attribute mutation not as STORE_ATTR but as a call
+    ``object_setattr_ignore_descriptor(receiver, "attr", value)`` (or
+    ``object.__setattr__`` for frozen dataclasses), so that form is recognized
+    too: after the helper is loaded, the next receiver path followed by a string
+    constant is the mutated attribute. Receivers that are plain locals (call
+    arguments) are not reported.
+    """
     import dis
 
-    # Dynamo's residual bytecode spills the module it loaded into a temp local
-    # (`LOAD_GLOBAL __import_m; STORE_FAST tmp; ... LOAD_FAST tmp; STORE_ATTR
-    # name`), so track which locals alias a global too.
-    loaded: str | None = None
-    local_alias: dict[str, str] = {}
+    loaded: list[str] | None = None  # receiver path being built on the stack
+    dup = False  # a COPY left the receiver on the stack past the next store
+    local_alias: dict[str, tuple[str, ...]] = {}
+    pending_setattr = False
     for instruction in dis.get_instructions(code):
         op, argval = instruction.opname, instruction.argval
         if op in _GLOBAL_LOAD_OPS and isinstance(argval, str):
-            loaded = argval
+            loaded, dup = [argval], False
         elif op in ("LOAD_FAST", "LOAD_FAST_CHECK", "LOAD_FAST_AND_CLEAR"):
-            loaded = local_alias.get(argval)
+            alias = local_alias.get(argval)
+            loaded, dup = (list(alias) if alias else None), False
         elif op == "LOAD_FAST_LOAD_FAST":
-            loaded = local_alias.get(argval[-1])
+            alias = local_alias.get(argval[-1])
+            loaded, dup = (list(alias) if alias else None), False
+        elif op == "LOAD_ATTR":
+            if loaded is not None:
+                if argval in ("object_setattr_ignore_descriptor", "__setattr__"):
+                    pending_setattr, loaded = True, None
+                else:
+                    loaded = [*loaded, argval]
+        elif op == "COPY":
+            dup = loaded is not None
         elif op in ("STORE_FAST", "STORE_FAST_STORE_FAST"):
             names = argval if isinstance(argval, tuple) else (argval,)
             for name in names:
                 if loaded is not None and len(names) == 1:
-                    local_alias[name] = loaded
+                    local_alias[name] = tuple(loaded)
                 else:
                     local_alias.pop(name, None)
-            loaded = None
+            if not dup:
+                loaded = None
+            dup = False
         elif op in ("STORE_GLOBAL", "DELETE_GLOBAL"):
             yield "", argval
             loaded = None
         elif op in ("STORE_ATTR", "DELETE_ATTR"):
             if loaded is not None:
-                yield loaded, argval
+                yield ".".join(loaded), argval
             loaded = None
-        elif op not in ("LOAD_ATTR", "COPY", "SWAP", "PUSH_NULL", "NOP", "CACHE"):
+        elif op == "LOAD_CONST":
+            if pending_setattr and loaded is not None and isinstance(argval, str):
+                yield ".".join(loaded), argval
+            if pending_setattr:
+                pending_setattr = False
+            loaded = None
+        elif op not in ("SWAP", "PUSH_NULL", "NOP", "CACHE"):
             loaded = None
     for constant in code.co_consts:
         if isinstance(constant, types.CodeType):
@@ -2600,22 +2635,25 @@ def _import_sources_for_residual_globals(
 
     for guarded in code.guarded_codes:
         code_obj = SerializedCode.to_code_object(guarded.dynamo_code)
-        # A global mutation inlined from a helper (`global COUNTER` inside a
-        # callee) reaches the residual bytecode as STORE_ATTR on the imported
-        # module and would write into the SERVING process's module; the entry
-        # frame's own STORE_GLOBALs were rejected at capture.
+        # A mutation of state reachable from a module (a helper's `global
+        # COUNTER`, or `m.CONFIG.value = ...` on an object the module holds)
+        # reaches the residual bytecode as a store through the imported module
+        # and would apply the capture-time value to the SERVING process's
+        # objects; the entry frame's own STORE_GLOBALs were rejected at capture.
         for receiver, attribute in _module_attribute_stores(code_obj):
-            if receiver == "" or is_module_global(receiver):
+            root = receiver.split(".", 1)[0]
+            if receiver == "" or is_module_global(root):
                 module_name = (
                     capture_target.__module__
                     if receiver == ""
-                    else import_sources.get(receiver) or fn_globals[receiver].__name__
+                    else import_sources.get(root) or fn_globals[root].__name__
                 )
+                path = module_name + receiver[len(root) :]
                 raise PrecompileError(
                     f"precompile tracer='dynamo' cannot serve {capture_target.__name__!r}: "
-                    f"its compiled bytecode assigns {module_name}.{attribute}, a module "
-                    "global; the artifact cannot reproduce that side effect. Return "
-                    "the value instead."
+                    f"its compiled bytecode assigns {path}.{attribute}, state reachable "
+                    "from a module global; the artifact cannot reproduce that side "
+                    "effect. Return the value instead."
                 )
         for name in _global_loads(code_obj):
             if name in bound or name in import_sources or name not in fn_globals:
@@ -2624,8 +2662,13 @@ def _import_sources_for_residual_globals(
             if isinstance(value, types.ModuleType):
                 # The driver rebinds the alias with importlib.import_module, so
                 # the module must be reachable under its own name in a fresh
-                # process (torch.ops namespaces and __main__ are not).
-                if sys.modules.get(value.__name__) is not value:
+                # process: torch.ops namespaces are not in sys.modules, and
+                # __main__ resolves to the SERVING process's script, not the
+                # module the capture read.
+                if (
+                    value.__name__ == "__main__"
+                    or sys.modules.get(value.__name__) is not value
+                ):
                     raise PrecompileError(
                         f"precompile tracer='dynamo' cannot serve "
                         f"{capture_target.__name__!r}: its compiled bytecode reads "
@@ -2635,7 +2678,10 @@ def _import_sources_for_residual_globals(
                     )
                 import_sources[name] = value.__name__
                 continue
-            if name.startswith("__"):
+            # Dynamo installs its helpers under `__<purpose>_<n>` names
+            # (e.g. __gen_rand_values_1 for Python-level random); a user's own
+            # dunder-prefixed global has no numeric suffix.
+            if callable(value) and re.fullmatch(r"__\w+?_\d+", name):
                 raise PrecompileError(
                     f"precompile tracer='dynamo' cannot serve {capture_target.__name__!r}: "
                     f"its compiled bytecode reads {name!r}, a helper Dynamo installed "
@@ -2646,7 +2692,7 @@ def _import_sources_for_residual_globals(
                 f"precompile tracer='dynamo' cannot serve {capture_target.__name__!r}: "
                 f"its compiled bytecode reads the global {name!r} (a "
                 f"{type(value).__name__}), which the artifact cannot reproduce. "
-                "Pass it as an argument or make it a module attribute instead."
+                "Pass it as an argument instead."
             )
     return import_sources
 
@@ -4044,16 +4090,18 @@ class _PrecompileApi:
         backend = cast(str, meta["BACKEND"])
         tracer = cast(str, meta.get("TRACER", "make_fx"))
 
-        # Both halves are untrusted EXECUTABLE input: priming below unpickles the
-        # cache's inductor bundle, and the exec of python_code runs whatever it
-        # contains (JIT-compiling inlined kernels or running the inlined graph).
-        # Warn per load (not warning_once), BEFORE either risk is taken.
+        # Both halves are untrusted EXECUTABLE input: priming below writes the
+        # cache's compiled-kernel bundle into the local compiler caches, and the
+        # exec of python_code runs whatever it contains (JIT-compiling inlined
+        # kernels, running the inlined graph, and for dynamo artifacts
+        # unpickling the embedded Dynamo state). Warn per load (not
+        # warning_once), BEFORE either risk is taken.
         log.warning(
-            "torch.compiler.precompile.load is about to unpickle the cache and EXEC "
-            "python_code, which are untrusted executable inputs (they run inlined "
-            "kernels / graph code). Only load a (python_code, cache) pair you "
-            "produced or otherwise trust (Note [precompile programming model], "
-            "invariant 7)."
+            "torch.compiler.precompile.load is about to prime the compiler caches "
+            "from `cache` and EXEC python_code, which are untrusted executable "
+            "inputs (they run inlined kernels / graph code). Only load a "
+            "(python_code, cache) pair you produced or otherwise trust (Note "
+            "[precompile programming model], invariant 7)."
         )
 
         # weights_only=True is safe (plain str/int/bytes dict). The inner artifact bytes

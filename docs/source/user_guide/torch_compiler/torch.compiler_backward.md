@@ -34,8 +34,8 @@ computation is pruned, and ``torch.autograd.grad(..., allow_unused=False)``
 raises the same error as it does in eager mode. One documented divergence
 remains: a custom ``autograd.Function`` whose backward is linear in the pruned
 tangent (eager runs it on materialized zeros and accumulates a zero gradient)
-yields ``.grad = None`` here unless the backward could be re-traced, in which
-case it yields a real zero tensor; the two are numerically equivalent. The setting is captured when
+yields ``.grad = None`` under ``torch.compile``; the two are numerically
+equivalent. The setting is captured when
 the function is compiled (the first call below), not when it runs, so enable it
 around the compile; toggling it afterwards does not change an already-compiled
 function, and Dynamo does not recompile on functorch config changes:

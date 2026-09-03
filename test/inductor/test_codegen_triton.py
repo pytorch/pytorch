@@ -1727,6 +1727,20 @@ def helper(x):
             ],
         ):
             self.assertFalse(_restore_degraded_kwargs({"MODE": 1, "BLOCK": 8}, order))
+        # Agreement is structural: (1, 2) and (1.0, 2) both serialize to the
+        # cached [1.0, 2] but Triton specializes int vs float, so a split inside
+        # a tuple re-autotunes too, in either order.
+        for order in (
+            [
+                SimpleNamespace(kwargs={"S": (1, 2)}),
+                SimpleNamespace(kwargs={"S": (1.0, 2)}),
+            ],
+            [
+                SimpleNamespace(kwargs={"S": (1.0, 2)}),
+                SimpleNamespace(kwargs={"S": (1, 2)}),
+            ],
+        ):
+            self.assertFalse(_restore_degraded_kwargs({"S": [1.0, 2]}, order))
         best = {"MODE": 1, "SHAPE": [2, 3], "BLOCK": 8, "num_warps": 4}
         agreeing = [
             SimpleNamespace(kwargs={"MODE": Mode.A, "SHAPE": (2, 3), "BLOCK": b})

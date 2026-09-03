@@ -78,6 +78,37 @@ def _precompile_dynamo_dynamic(x):
 _PRECOMPILE_GLOBAL_LIST = [1, 2]
 _PRECOMPILE_ATEN = torch.ops.aten
 _PRECOMPILE_COUNTER = 0
+__PRECOMPILE_DUNDER_LIST = [1, 2]
+
+try:
+    import precompile_test_helpers as _helpers
+except ImportError:
+    from test import precompile_test_helpers as _helpers
+
+
+def _precompile_dynamo_mutates_other_module_global(x):
+    _helpers.bump_a()
+    return x + 1
+
+
+def _precompile_dynamo_mutates_two_other_module_globals(x):
+    _helpers.bump_a_and_b()
+    return x + 1
+
+
+def _precompile_dynamo_mutates_object_on_module(x):
+    _helpers.CONFIG.value = _helpers.CONFIG.value + 1
+    return x + 1
+
+
+def _precompile_dynamo_mutates_object_then_global(x):
+    _helpers.bump_a()
+    _helpers.CONFIG.value = 5
+    return x + 1
+
+
+def _precompile_dynamo_returns_dunder_global(x):
+    return x + 1, __PRECOMPILE_DUNDER_LIST
 
 
 def _precompile_bump_counter():
@@ -1925,6 +1956,14 @@ class TestPrecompile(TestCase):
             )
         with self.assertRaisesRegex(PrecompileError, "overlap"):
             loaded(TwoTensor(a, b), TwoTensor(a, d))
+        # ... and the same inner tensor twice within ONE wrapper.
+        with self.assertRaisesRegex(PrecompileError, "overlap"):
+            torch.compiler.precompile(
+                lambda x: -x,
+                example_inputs=[(TwoTensor(a, a),)],
+                tracer="dynamo",
+                backend="eager",
+            )
         buf = torch.randn(8)
         d_off = torch.randn(8)[4:]  # TwoTensor requires equal storage offsets
         with self.assertRaisesRegex(PrecompileError, "overlap"):
@@ -1986,6 +2025,54 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "assigns .*_PRECOMPILE_COUNTER"):
             torch.compiler.precompile(
                 _precompile_dynamo_mutates_global_via_helper,
+                example_inputs=[(torch.randn(3),)],
+                tracer="dynamo",
+                backend="eager",
+            )
+
+    def test_tracer_dynamo_rejects_module_reachable_mutations(self):
+        # Every replay form Dynamo emits for state reached through a module:
+        # a helper's `global` in another module (STORE_ATTR through the import
+        # alias, possibly spilled through a temp and a stack COPY when two
+        # globals are assigned), and an attribute store on an object the
+        # module holds (replayed as an object_setattr_ignore_descriptor call).
+        # A served artifact would apply the capture-time values to the serving
+        # process's module, so all must be rejected at capture, with the path.
+        cases = (
+            (
+                _precompile_dynamo_mutates_other_module_global,
+                r"precompile_test_helpers\.A",
+            ),
+            (
+                _precompile_dynamo_mutates_two_other_module_globals,
+                r"precompile_test_helpers\.[AB]",
+            ),
+            (
+                _precompile_dynamo_mutates_object_on_module,
+                r"precompile_test_helpers\.CONFIG\.value",
+            ),
+            (
+                _precompile_dynamo_mutates_object_then_global,
+                r"precompile_test_helpers\.",
+            ),
+        )
+        for fn, pattern in cases:
+            with self.assertRaisesRegex(PrecompileError, "assigns " + pattern):
+                torch.compiler.precompile(
+                    fn,
+                    example_inputs=[(torch.randn(3),)],
+                    tracer="dynamo",
+                    backend="eager",
+                )
+
+    def test_tracer_dynamo_dunder_user_global_gets_generic_message(self):
+        # A user's own dunder-prefixed global is not a Dynamo helper; the
+        # rejection must describe it as what it is.
+        with self.assertRaisesRegex(
+            PrecompileError, r"'__PRECOMPILE_DUNDER_LIST' \(a list\)"
+        ):
+            torch.compiler.precompile(
+                _precompile_dynamo_returns_dunder_global,
                 example_inputs=[(torch.randn(3),)],
                 tracer="dynamo",
                 backend="eager",
@@ -2793,7 +2880,9 @@ class TestPrecompile(TestCase):
         self.assertEqual(summary_type.__qualname__, "precompile.StateSummary")
         summary = summary_type(1, 2, 3, 4, 0, ())
         self.assertTrue(repr(summary).startswith("StateSummary("))
-        self.assertEqual(pickle.loads(pickle.dumps(summary)), summary)
+        restored = pickle.loads(pickle.dumps(summary))
+        self.assertIs(type(restored), summary_type)
+        self.assertEqual(restored, summary)
 
     def test_tracer_dynamo_requires_grad_dispatch_under_no_grad(self):
         # requires_grad is guarded per input, and that holds under an ambient

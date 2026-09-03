@@ -1901,6 +1901,34 @@ def forward(self, primals_1):
         self.assertEqual(record["retrace"], [((2, 3), [])])
         self.assertEqual(record["donated"], [([1, 2], (2, 3), [0])])
 
+    @torch._functorch.config.patch(
+        aot_autograd_prune_unused_outputs=True, donated_buffer=False
+    )
+    @torch._inductor.config.patch(fx_graph_cache=True)
+    def test_unused_differentiable_outputs_retrace_survives_cache_save(self):
+        # With dynamic shapes the backward is compiled (and its cache entry
+        # saved) at forward time. Saving used to serialize the live bw_module,
+        # wiping every placeholder's desc/val, so the retrace could no longer
+        # bind and pruning degraded to zero grads; the retrace must still bind
+        # with the caches on.
+        from torch._inductor.utils import fresh_cache
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        x_grad, _ = self._eager_two_branch_grads(x, y)
+        with fresh_cache():
+            out = torch.compile(self._two_branch_fn, backend="inductor", dynamic=True)(
+                x, y
+            )
+            with self._spy_backward_specialization() as record:
+                out[0].sum().backward()
+        self.assertEqual(x.grad, x_grad)
+        self.assertIsNone(y.grad)
+        self.assertEqual(len(record["retrace"]), 1)
+        kept, reasons = record["retrace"][0]
+        self.assertEqual(reasons, [])
+        self.assertIsNotNone(kept)
+
     @torch._functorch.config.patch(aot_autograd_prune_unused_outputs=True)
     def test_unused_differentiable_outputs_do_not_fold_custom_backward_ops(self):
         # Only aten backward formulas are linear in their grad arguments; a

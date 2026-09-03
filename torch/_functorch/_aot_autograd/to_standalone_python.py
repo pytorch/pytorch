@@ -142,8 +142,11 @@ _COMPILE_LOCK = threading.RLock()
 # structures it consults, in order:
 #   - inner_call_id         -> the inner ``call`` becomes ``_inner_call``
 #   - fn_id_to_name         -> a sibling wrapper's fn becomes that wrapper's own name
-#   - _known_helper_table() -> an importable helper becomes (import, expr)
-#   - anything else: reconstruct field-by-field as source (_emit_value), or raise.
+#   - _known_helper_table() -> ``torch`` itself and public torch paths become (import, expr)
+#   - anything else: reconstruct as source via emit_value, which references any
+#     object re-exported by standalone_runtime from that surface (by identity,
+#     see source_emit._standalone_runtime_exports) and rebuilds the rest
+#     field-by-field, or raises.
 # Recognition is by id() (object identity), not value-equality: for "is this the EXACT
 # object the wrapper closed over," == is the wrong tool (functions don't compare by
 # value, and an equal-but-different object would mis-resolve). Value-equality IS used,
@@ -173,9 +176,10 @@ _COMPILE_LOCK = threading.RLock()
 # torch.autograd.graph.increment_version) or an import from the single small surface
 # standalone_runtime.py (for the AOTAutograd-area internals -- plus CUDARngStateHelper,
 # re-exported there for import-ordering -- whose locations are not themselves a stable
-# contract). That file's IDENTITY CONTRACT -- re-exports must preserve object id --
-# exists purely so the COMPOSER's id-lookup keeps matching; it is a compile-time
-# requirement, and the runtime artifact has no id dependency of its own.
+# contract), the latter routed by source_emit._emit_importable off the identities in
+# standalone_runtime.__all__. That file's IDENTITY CONTRACT -- re-exports must
+# preserve object id -- exists purely so that compile-time lookup keeps matching; the
+# runtime artifact has no id dependency of its own.
 # ======================================================================
 
 
@@ -183,11 +187,10 @@ _COMPILE_LOCK = threading.RLock()
 # import in the standalone module (rather than reconstructed field-by-field). Maps
 # object id -> (import_statement, expression). Built lazily to avoid import cycles.
 def _known_helper_table() -> dict[int, tuple[str, str]]:
-    # Generated artifacts import runtime helpers from the single stable surface
-    # ``standalone_runtime`` (not scattered AOTAutograd internals).
+    # Only objects that emit_value cannot route to standalone_runtime by
+    # identity live here; see source_emit._emit_importable for the rest.
     import torch
 
-    _RT = "from torch._functorch._aot_autograd.standalone_runtime import"
     table: dict[int, tuple[str, str]] = {
         # Modules have no __qualname__ and increment_version's import path is
         # not the stable ``import torch``; everything re-exported by

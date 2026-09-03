@@ -4706,7 +4706,10 @@ class _AutogradBackwardCompiler:
             if bw_compiler is None:
                 raise AssertionError("bw_compiler must not be None")
             compiled_bw = bw_compiler(copy.deepcopy(bw_module), placeholder_list)
-            # Maybe save cache entry
+            # Maybe save cache entry. Only the base backward is cached: a first
+            # backward served by a specialized variant leaves the entry unsaved
+            # until a full backward compiles the base (the variants are
+            # per-mask derivations the cache does not model).
             if self.try_save_cache_entry is not None and not specialization_key:
                 self.try_save_cache_entry(
                     compiled_bw,
@@ -4716,12 +4719,27 @@ class _AutogradBackwardCompiler:
                 )
 
         donated = bool(donated_idxs)
+        # Compare-and-publish: a concurrent retain_graph backward may have
+        # cleared the caches and emptied bw_donated_idxs while this compile
+        # ran. Publishing a donated entry after that would be the last write,
+        # and with the list empty the clear could never re-fire, so every later
+        # retained backward would trip the donated-buffer check. Serve the
+        # result to this call only and let the next backward recompile.
+        with self._prepare_lock:
+            publish = not donated or (
+                list(self.fw_metadata.bw_donated_idxs or []) == donated_snapshot
+            )
+            if publish and specialization_key:
+                if kept_arg_indices is None:
+                    raise AssertionError("kept_arg_indices must not be None")
+                self.specialized_compiled_bws[specialization_key] = _CompiledBackward(
+                    compiled_bw, donated, kept_arg_indices
+                )
+            elif publish:
+                self.compiled_bw = _CompiledBackward(compiled_bw, donated)
         if specialization_key:
             if kept_arg_indices is None:
                 raise AssertionError("kept_arg_indices must not be None")
-            self.specialized_compiled_bws[specialization_key] = _CompiledBackward(
-                compiled_bw, donated, kept_arg_indices
-            )
             log.info(
                 "Compiled specialized backward for undefined grad output mask %s "
                 "(%d specialized variant(s) total)",
@@ -4731,7 +4749,6 @@ class _AutogradBackwardCompiler:
             _prune_runtime_args_in_place(all_args, kept_arg_indices)
             return compiled_bw, all_args, (), donated
 
-        self.compiled_bw = _CompiledBackward(compiled_bw, donated)
         return (
             compiled_bw,
             all_args,
