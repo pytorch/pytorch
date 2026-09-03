@@ -3091,6 +3091,8 @@ class CUDAMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
 class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
     """Bounded configs for the Blackwell persistent-TMA BMM template."""
 
+    bmm_configs = BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -3129,8 +3131,9 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             "tma_store": False,
         }
         use_meta_ws = meta_ws_enabled()
-        for candidate in BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS:
-            yield {
+        for candidate in self.bmm_configs:
+            two_ctas = use_meta_ws and candidate.two_ctas
+            template_kwargs = {
                 "BLOCK_M": candidate.block_m,
                 "BLOCK_N": candidate.block_n,
                 "BLOCK_K": candidate.block_k,
@@ -3143,9 +3146,12 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
                 "FLATTEN": not use_meta_ws,
                 "DATA_PARTITION_FACTOR": candidate.data_partition_factor,
                 "SEPARATE_EPILOGUE_STORE": candidate.separate_epilogue_store,
-                "TWO_CTAS": False,
+                "TWO_CTAS": two_ctas,
                 **tma_options,
             }
+            if two_ctas:
+                template_kwargs["ctas_per_cga"] = (2, 1, 1)
+            yield template_kwargs
 
     def get_extra_kwargs(
         self,
