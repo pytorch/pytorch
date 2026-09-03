@@ -668,7 +668,7 @@ class GraphModule(torch.nn.Module):
                 out_graph,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[s77]", s77: "Sym(s77)"):
+    def forward(self, s77: "Sym(s77)", L_x_: "f32[s77]"):
         l_x_ = L_x_
 
         sum_1: "f32[]" = l_x_.sum()
@@ -4552,11 +4552,11 @@ class GraphModule(torch.nn.Module):
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         expected = """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_: "f32[1, 1]", L_model_buffers_buffer_: "f32[1]", L_model_modules_l1_parameters_bias_: "f32[1]", L_model_modules_l1_parameters_weight_: "f32[1, 1]"):
+    def forward(self, L_inputs_: "f32[1, 1]", L_model_modules_l1_parameters_weight_: "f32[1, 1]", L_model_modules_l1_parameters_bias_: "f32[1]", L_model_buffers_buffer_: "f32[1]"):
         l_inputs_ = L_inputs_
-        l_model_buffers_buffer_ = L_model_buffers_buffer_
-        l_model_modules_l1_parameters_bias_ = L_model_modules_l1_parameters_bias_
         l_model_modules_l1_parameters_weight_ = L_model_modules_l1_parameters_weight_
+        l_model_modules_l1_parameters_bias_ = L_model_modules_l1_parameters_bias_
+        l_model_buffers_buffer_ = L_model_buffers_buffer_
         linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_model_modules_l1_parameters_weight_, l_model_modules_l1_parameters_bias_);  l_inputs_ = l_model_modules_l1_parameters_weight_ = l_model_modules_l1_parameters_bias_ = None
         add: "f32[1, 1]" = linear + l_model_buffers_buffer_;  linear = l_model_buffers_buffer_ = None
         return (add,)
