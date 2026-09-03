@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import logging
-import math
 from typing import TYPE_CHECKING
 
 import torch
@@ -11,7 +10,6 @@ from torch._inductor.kernel.mm_common import load_kernel_template
 from torch.utils._triton import has_triton_stable_tma_api
 
 from .. import config as inductor_config, ir, lowering as L
-from ..autows_utils import meta_ws_enabled
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import lowerings, make_pointwise, make_reduction, transform_args
 from ..runtime.runtime_utils import get_max_y_grid
@@ -23,7 +21,7 @@ from ..select_algorithm import (
 )
 from ..utils import (
     _use_cutlass_for_op,
-    get_num_sms,
+    get_dtype_size,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_cpp_bmm_template,
@@ -99,83 +97,24 @@ class BlackwellBMMConfig:
     block_n: int
     block_k: int
     num_stages: int
+    num_warps: int
     epilogue_subtile: int = 1
+    data_partition_factor: int = 1
+    separate_epilogue_store: bool = True
     two_ctas: bool = False
 
 
-def append_blackwell_bmm_choice(
-    choices,
-    input_nodes,
-    layout,
-    *,
-    config: BlackwellBMMConfig,
-):
-    mat1, mat2 = input_nodes
-    if len(mat1.get_size()) != 3 or len(mat2.get_size()) != 3:
-        raise NotImplementedError("Blackwell BMM requires rank-3 operands")
-    batch, m, k = map(int, mat1.get_size())
-    batch_b, k_b, n = map(int, mat2.get_size())
-    if batch != batch_b or k != k_b:
-        raise NotImplementedError("Blackwell BMM does not broadcast logical batches")
-    output_size = list(map(int, layout.size))
-    flattened_output = output_size == [batch * m, n]
-    if output_size != [batch, m, n] and not flattened_output:
-        raise NotImplementedError("unexpected Blackwell BMM output layout")
-    a_row_major = mat1.get_stride()[2] == 1
-    a_col_major = mat1.get_stride()[1] == 1
-    b_row_major = mat2.get_stride()[2] == 1
-    b_col_major = mat2.get_stride()[1] == 1
-    if not (a_row_major or a_col_major) or not (b_row_major or b_col_major):
-        raise NotImplementedError(
-            "Blackwell BMM requires one contiguous matrix dimension"
-        )
-    m_tiles = math.ceil(m / config.block_m)
-    if config.two_ctas:
-        if not meta_ws_enabled():
-            raise NotImplementedError("2CTA Blackwell BMM requires MetaWS")
-        if not flattened_output:
-            raise NotImplementedError(
-                "2CTA Blackwell BMM requires a flattened rank-2 output descriptor"
-            )
-        if m_tiles % 2:
-            raise NotImplementedError("2CTA Blackwell BMM requires two useful M peers")
-    use_meta_ws = meta_ws_enabled()
-    kwargs = {
-        "BLOCK_M": config.block_m,
-        "BLOCK_N": config.block_n,
-        "BLOCK_K": config.block_k,
-        "GROUP_M": 8,
-        "NUM_SMS": get_num_sms(),
-        "A_ROW_MAJOR": a_row_major,
-        "B_ROW_MAJOR": b_row_major,
-        "ALLOW_TF32": False,
-        "USE_META_WS": use_meta_ws,
-        "WARP_SPECIALIZE": True,
-        "FLATTEN": not use_meta_ws,
-        "DATA_PARTITION_FACTOR": 1,
-        "SEPARATE_EPILOGUE_STORE": True,
-        "EPILOGUE_SUBTILE": config.epilogue_subtile,
-        "TWO_CTAS": config.two_ctas,
-        "FLATTEN_OUTPUT": flattened_output,
-        "DECOMPOSE_K": False,
-        "K_SPLIT": 1,
-        "M_PAD": m,
-        # Keep the output a normal logical rank-3 tensor.  Until 2CTA output
-        # transformation supports rank-3 descriptors, use the generic pointer
-        # store emitted by store_output.
-        "tma_store": flattened_output,
-    }
-    if config.two_ctas:
-        kwargs["ctas_per_cga"] = (2, 1, 1)
-    blackwell_ws_persistent_tma_bmm_template.maybe_append_choice(
-        choices,
-        input_nodes=input_nodes,
-        layout=layout,
-        call_sizes=[batch, m, n],
-        num_stages=config.num_stages,
-        num_warps=8,
-        **kwargs,
-    )
+BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
+    BlackwellBMMConfig(64, 64, 128, 5, 4),
+    BlackwellBMMConfig(128, 128, 128, 3, 8),
+    BlackwellBMMConfig(128, 256, 64, 4, 8),
+)
+
+
+def _has_tma_aligned_batch_bases(node: ir.IRNode) -> bool:
+    batch = int(node.get_size()[0])
+    batch_stride = int(node.get_stride()[0])
+    return batch <= 1 or batch_stride * get_dtype_size(node.get_dtype()) % 16 == 0
 
 
 def can_use_blackwell_bmm_template(mat1, mat2, layout) -> bool:
@@ -188,8 +127,21 @@ def can_use_blackwell_bmm_template(mat1, mat2, layout) -> bool:
     ):
         return False
     try:
-        tuple(map(int, (*mat1.get_size(), *mat2.get_size(), *layout.size)))
+        tuple(
+            map(
+                int,
+                (
+                    *mat1.get_size(),
+                    *mat1.get_stride(),
+                    *mat2.get_size(),
+                    *mat2.get_stride(),
+                    *layout.size,
+                ),
+            )
+        )
     except (TypeError, ValueError):
+        return False
+    if not all(_has_tma_aligned_batch_bases(node) for node in (mat1, mat2)):
         return False
     from ..codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 
@@ -361,6 +313,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
 
+    if can_use_blackwell_bmm_template(mat1, mat2, layout):
+        templates_to_use.append(blackwell_ws_persistent_tma_bmm_template)
+
     # Single unified call for all templates
     choices.extend(
         V.choices.get_template_configs(
@@ -370,21 +325,6 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             kwarg_overrides=kwarg_overrides,
         )
     )
-    if can_use_blackwell_bmm_template(mat1, mat2, layout):
-        # Keep candidate growth bounded while the generic template's cost model
-        # is being validated.  2CTA is a separate flattened-output subgraph
-        # choice and is not silently mixed into this direct rank-3 route.
-        append_blackwell_bmm_choice(
-            choices,
-            (mat1, mat2),
-            layout,
-            config=BlackwellBMMConfig(
-                block_m=128,
-                block_n=128,
-                block_k=128,
-                num_stages=3,
-            ),
-        )
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest_or_zero = is_batch_stride_largest_or_zero(mat1, mat2, layout)
     if (

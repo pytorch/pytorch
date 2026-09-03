@@ -6,7 +6,6 @@ from typing import Any, TYPE_CHECKING
 import sympy
 
 from torch._inductor import config
-from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.heuristics.registry import register_template_heuristic
 
 from ...ir import get_free_symbols
@@ -122,7 +121,7 @@ class BlackwellDecomposeKConfigHeuristics(TemplateConfigHeuristics):
         m, n, k = int(m_sym), int(n_sym), int(k_sym)
 
         config_indices = [0]
-        if m > 128 and meta_ws_enabled():
+        if m > 128:
             config_indices.append(1 if n <= 128 else 2)
 
         for config_index in config_indices:

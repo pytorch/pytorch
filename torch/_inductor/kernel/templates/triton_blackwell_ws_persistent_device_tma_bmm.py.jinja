@@ -96,20 +96,12 @@
             b = b_desc.load(
                 [offs_k, offs_bn] if B_ROW_MAJOR else [offs_bn, offs_k],
             )
-            {%- if TWO_CTAS %}
             accumulator += tl.dot(
                 a if A_ROW_MAJOR else a.T,
                 b if B_ROW_MAJOR else b.T,
                 allow_tf32=ALLOW_TF32,
-                two_ctas=True,
+                two_ctas=TWO_CTAS,
             )
-            {%- else %}
-            accumulator += tl.dot(
-                a if A_ROW_MAJOR else a.T,
-                b if B_ROW_MAJOR else b.T,
-                allow_tf32=ALLOW_TF32,
-            )
-            {%- endif %}
 
         tile_id_c += NUM_SMS
         pid_m, pid_n = _blackwell_bmm_pid(
