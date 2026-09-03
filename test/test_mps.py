@@ -2741,8 +2741,8 @@ class TestMPS(TestCaseMPS):
             check(input_cpu, input_mps)
             check(input_cpu.mT, input_mps.mT)
 
-        # test with different even/odd matrix sizes
-        matrix_sizes = [1, 2, 3, 4]
+        # even/odd matrix sizes plus both sides of the n <= 8 register-kernel cutoff
+        matrix_sizes = [1, 2, 3, 4, 8, 9]
         # even/odd batch sizes
         batch_sizes = [1, 2, 4]
 
@@ -2827,8 +2827,9 @@ class TestMPS(TestCaseMPS):
                 X_mps_t = torch.linalg.solve(A_mps.mT, b_mps, left=left)
                 self.assertEqual(X_cpu_t, X_mps_t)
 
-        # test with different even/odd matrix sizes
-        matrix_sizes = [1, 2, 3, 4]
+        # even/odd matrix sizes plus both sides of the register-kernel cutoffs
+        # (lu_factor n <= 8, lu_solve n <= 16)
+        matrix_sizes = [1, 2, 3, 4, 8, 9, 16, 17]
         # even/odd batch sizes
         batch_sizes = [1, 2, 4]
 
@@ -2949,7 +2950,10 @@ class TestMPS(TestCaseMPS):
                     mat = (n, k) if left else (k, n)
                     check(A, make_B(*b_batch, *mat), left, adjoint)
 
-        # multi-block (n > 32) path
+        # both sides of the n <= 16 register-kernel cutoff, then the multi-block (n > 32) path
+        for size in (16, 17):
+            for adjoint in [True, False]:
+                check(make_A(2, size, size), make_B(2, size, k), left=True, adjoint=adjoint)
         check(make_A(2, 40, 40), make_B(2, 40, 5), left=True, adjoint=False)
 
     def test_linalg_lu_backed_complex_backward(self):
@@ -9201,7 +9205,11 @@ class TestMPS(TestCaseMPS):
         helper(2)
         helper(6)
         helper(3)
+        # register-kernel cutoffs: inv n <= 8, then lu_factor panel + lu_solve n <= 16
         helper(8)
+        helper(9)
+        helper(16)
+        helper(17)
         helper(1025, atol=1e-4)
 
     # Test tril

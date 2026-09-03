@@ -67,6 +67,54 @@ struct EighParams {
   float tol;
 };
 
+// Per-thread small-matrix LU kernels: up to these sizes one thread
+// factors/inverts a whole matrix (solves a whole right-hand-side column) from
+// registers. LinearAlgebra.metal instantiates NMAX buckets {4, 8} for
+// luFactorSmall, exact sizes 1..8 for luInvSmall and {4, 8, 16} for
+// luSolveSmall, and static_asserts those lists against these constants.
+C10_METAL_CONSTEXPR int64_t kLUSmallFactorMax = 8;
+C10_METAL_CONSTEXPR int64_t kLUSmallSolveMax = 16;
+
+// Strides are in elements; for the adjoint solve the host swaps
+// LU_rstride/LU_cstride so the kernel walks LU^T and only has to conjugate.
+template <typename index_t = int64_t>
+struct LUSmallFactorParams {
+  index_t A_bstride;
+  index_t A_rstride;
+  index_t A_cstride;
+  index_t LU_bstride;
+  index_t LU_rstride;
+  index_t LU_cstride;
+  uint32_t batch;
+  uint32_t m;
+  uint32_t n;
+};
+
+template <typename index_t = int64_t>
+struct LUSmallInvParams {
+  index_t A_bstride;
+  index_t A_rstride;
+  index_t A_cstride;
+  index_t X_bstride;
+  index_t X_rstride;
+  index_t X_cstride;
+  uint32_t batch;
+};
+
+template <typename index_t = int64_t>
+struct LUSmallSolveParams {
+  index_t LU_bstride;
+  index_t LU_rstride;
+  index_t LU_cstride;
+  index_t X_bstride;
+  index_t X_rstride;
+  index_t X_cstride;
+  uint32_t batch;
+  uint32_t n;
+  uint32_t k;
+  bool adjoint;
+};
+
 // for LU streaming-panel kernels
 C10_METAL_CONSTEXPR unsigned kLUStreamNT = 256;
 C10_METAL_CONSTEXPR unsigned kLUStreamWarpsPerTG =

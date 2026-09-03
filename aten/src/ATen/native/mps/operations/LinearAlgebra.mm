@@ -62,6 +62,7 @@
 #include <c10/util/TypeCast.h>
 #include <c10/util/env.h>
 #include <algorithm>
+#include <bit>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -896,6 +897,37 @@ static void lu_factor_panel_encode(const Tensor& LU,
   }
 }
 
+static void lu_factor_small_encode(const Tensor& A, const Tensor& LU, const Tensor& pivots, const Tensor& info) {
+  const auto m = A.size(-2);
+  const auto n = A.size(-1);
+  const auto batch = c10::multiply_integers(A.sizes().begin(), A.sizes().end() - 2);
+  const auto A_ = A.reshape({batch, m, n});
+  const auto LU_ = LU.reshape({batch, m, n});
+  const LUSmallFactorParams<> params{.A_bstride = A_.stride(0),
+                                     .A_rstride = A_.stride(1),
+                                     .A_cstride = A_.stride(2),
+                                     .LU_bstride = LU_.stride(0),
+                                     .LU_rstride = LU_.stride(1),
+                                     .LU_cstride = LU_.stride(2),
+                                     .batch = c10::checked_convert<uint32_t>(batch, "uint32_t"),
+                                     .m = static_cast<uint32_t>(m),
+                                     .n = static_cast<uint32_t>(n)};
+  const auto nmax = std::bit_ceil(static_cast<uint32_t>(std::max({m, n, int64_t{4}})));
+  auto pso = lib.getPipelineStateForFunc(fmt::format("luFactorSmall_{}_{}", mps::scalarToMetalTypeString(A), nmax));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+      mtl_setArgs(enc, A_, LU_, pivots, info, params);
+      mtl_dispatch1DJob(enc, pso, batch);
+    }
+  });
+  if (!LU_.is_alias_of(LU)) {
+    LU.copy_(LU_);
+  }
+}
+
 static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
                                              bool pivot,
                                              const Tensor& LU,
@@ -922,26 +954,29 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
     return;
   }
 
-  // kernels factor row-major, the LU output is column-major: square factors
-  // in the LU.mT() view and transposes in place, the rest go via a scratch
   resize_output(LU, A.sizes());
-  const bool inPlace = aRows == aCols && !LU.is_same(A) && LU.mT().is_contiguous();
-  Tensor work_full;
-  if (inPlace) {
-    work_full = LU.mT();
-  } else {
-    work_full = at::empty(A.sizes(), A.options());
-  }
-  work_full.copy_(A);
-  Tensor work = work_full.dim() > 3 ? work_full.flatten(0, -3) : work_full;
-  TORCH_INTERNAL_ASSERT(work.is_contiguous())
-  int64_t batchSize = work.dim() > 2 ? work.size(0) : 1;
-
   Tensor pivots_ = pivots.is_contiguous() ? pivots : at::empty(pivots.sizes(), pivots.options());
   Tensor info_ = info.is_contiguous() ? info : at::empty(info.sizes(), info.options());
-  lu_factor_panel_encode(work, pivots_, info_, aRows, aCols, batchSize, inPlace);
-  if (!inPlace) {
-    LU.copy_(work_full);
+  if (std::max(aRows, aCols) <= kLUSmallFactorMax) {
+    lu_factor_small_encode(A, LU, pivots_, info_);
+  } else {
+    // kernels factor row-major, the LU output is column-major: square factors
+    // in the LU.mT() view and transposes in place, the rest go via a scratch
+    const bool inPlace = aRows == aCols && !LU.is_same(A) && LU.mT().is_contiguous();
+    Tensor work_full;
+    if (inPlace) {
+      work_full = LU.mT();
+    } else {
+      work_full = at::empty(A.sizes(), A.options());
+    }
+    work_full.copy_(A);
+    Tensor work = work_full.dim() > 3 ? work_full.flatten(0, -3) : work_full;
+    TORCH_INTERNAL_ASSERT(work.is_contiguous())
+    int64_t batchSize = work.dim() > 2 ? work.size(0) : 1;
+    lu_factor_panel_encode(work, pivots_, info_, aRows, aCols, batchSize, inPlace);
+    if (!inPlace) {
+      LU.copy_(work_full);
+    }
   }
   if (!pivots_.is_same(pivots)) {
     pivots.copy_(pivots_);
@@ -1049,6 +1084,41 @@ static void lu_solve_encode(const Tensor& W, const Tensor& pivots, int64_t n, in
   }
 }
 
+static void lu_solve_small_encode(const Tensor& LU,
+                                  const Tensor& pivots,
+                                  const Tensor& B,
+                                  int64_t Bnum,
+                                  int64_t n,
+                                  int64_t k,
+                                  bool adjoint) {
+  const auto X = B.reshape({Bnum, n, k});
+  const auto threads = c10::checked_convert<uint32_t>(Bnum * k, "uint32_t");
+  const LUSmallSolveParams<> params{.LU_bstride = LU.stride(0),
+                                    .LU_rstride = adjoint ? LU.stride(2) : LU.stride(1),
+                                    .LU_cstride = adjoint ? LU.stride(1) : LU.stride(2),
+                                    .X_bstride = X.stride(0),
+                                    .X_rstride = X.stride(1),
+                                    .X_cstride = X.stride(2),
+                                    .batch = static_cast<uint32_t>(Bnum),
+                                    .n = static_cast<uint32_t>(n),
+                                    .k = static_cast<uint32_t>(k),
+                                    .adjoint = adjoint};
+  const auto nmax = std::bit_ceil(static_cast<uint32_t>(std::max<int64_t>(n, 4)));
+  auto pso = lib.getPipelineStateForFunc(fmt::format("luSolveSmall_{}_{}", mps::scalarToMetalTypeString(B), nmax));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+      mtl_setArgs(enc, LU, pivots, X, params);
+      mtl_dispatch1DJob(enc, pso, threads);
+    }
+  });
+  if (!X.is_alias_of(B)) {
+    B.copy_(X);
+  }
+}
+
 static void mps_lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
   using namespace mps;
   TORCH_CHECK(LU.scalar_type() == kFloat || LU.scalar_type() == kComplexFloat,
@@ -1072,6 +1142,10 @@ static void mps_lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Te
   auto piv_shape = batch;
   piv_shape.push_back(n);
   auto piv_b = pivots.expand(piv_shape).contiguous().reshape({Bnum, n});
+  if (n <= kLUSmallSolveMax) {
+    lu_solve_small_encode(LU.expand(with_mat(n, n)).reshape({Bnum, n, n}), piv_b, B, Bnum, n, k, adjoint);
+    return;
+  }
 
   auto W = at::empty({Bnum, n, n + k}, LU.options());
   auto factor = adjoint ? LU.expand(with_mat(n, n)).mH() : LU.expand(with_mat(n, n));
@@ -1102,13 +1176,51 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
   at::linalg_lu_solve_out(result_, LU, pivots, B_, left, false);
 }
 
+static void lu_inv_small_encode(const Tensor& A, const Tensor& result, const Tensor& info) {
+  const auto n = A.size(-1);
+  const auto batch = c10::multiply_integers(A.sizes().begin(), A.sizes().end() - 2);
+  const auto A_ = A.reshape({batch, n, n});
+  const auto X = result.reshape({batch, n, n});
+  const LUSmallInvParams<> params{.A_bstride = A_.stride(0),
+                                  .A_rstride = A_.stride(1),
+                                  .A_cstride = A_.stride(2),
+                                  .X_bstride = X.stride(0),
+                                  .X_rstride = X.stride(1),
+                                  .X_cstride = X.stride(2),
+                                  .batch = c10::checked_convert<uint32_t>(batch, "uint32_t")};
+  auto pso = lib.getPipelineStateForFunc(fmt::format("luInvSmall_{}_{}", mps::scalarToMetalTypeString(A), n));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+      mtl_setArgs(enc, A_, X, info, params);
+      mtl_dispatch1DJob(enc, pso, batch);
+    }
+  });
+  if (!X.is_alias_of(result)) {
+    result.copy_(X);
+  }
+}
+
 static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
   using namespace mps;
   TORCH_CHECK(result.is_mps(), "Output tensor is not MPS");
   TORCH_CHECK(!A.is_complex(), "linalg_inv: not supported for complex types yet!");
 
-  info.zero_();
   if (A.numel() == 0) {
+    info.zero_();
+    return;
+  }
+  if (A.size(-1) <= kLUSmallFactorMax) {
+    Tensor info_ = info.is_contiguous() ? info : at::empty(info.sizes(), info.options());
+    lu_inv_small_encode(A, result, info_);
+    if (!info_.is_same(info)) {
+      info.copy_(info_);
+    }
+    if (check_errors) {
+      at::_linalg_check_errors(info, "linalg.inv_ex", A.dim() == 2);
+    }
     return;
   }
 
