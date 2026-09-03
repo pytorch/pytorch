@@ -530,7 +530,7 @@ class BaseListVariable(VariableTracker):
         # CPython has a series of checks to optimize list.extend for different data types
         # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
         from .dicts import ConstDictVariable
-        from .sets import FrozensetVariable, SetVariable
+        from .sets import DictKeySetVariable, FrozensetVariable, SetVariable
         from .user_defined import UserDefinedObjectVariable
 
         sz = len(self.items)
@@ -538,7 +538,10 @@ class BaseListVariable(VariableTracker):
             self.items.extend(args[0].items)
         elif isinstance(args[0], UserDefinedObjectVariable):
             self.items.extend(unpack_iterable(tx, args[0]))
-        elif isinstance(args[0], (ConstDictVariable, SetVariable, FrozensetVariable)):
+        elif isinstance(
+            args[0],
+            (ConstDictVariable, SetVariable, FrozensetVariable, DictKeySetVariable),
+        ):
             items = [item.vt for item in args[0].items]
             self.items.extend(items)
         elif isinstance(args[0], ConstantVariable):
@@ -1463,8 +1466,10 @@ class DequeVariable(BaseListVariable):
             )
         self.maxlen = maxlen
         items = list(items)
-        if self.maxlen.as_python_constant() is not None:
-            items = items[-maxlen.as_python_constant() :]
+        maxlen_val = self.maxlen.as_python_constant()
+        if maxlen_val is not None:
+            # maxlen == 0 must empty the deque; items[-0:] would keep everything.
+            items = items[-maxlen_val:] if maxlen_val != 0 else items[:0]
         super().__init__(items, **kwargs)
         # Mirrors CPython deque->state: bumped on every structural mutation so
         # deque iterators can detect mutation during iteration.
@@ -1659,8 +1664,12 @@ class DequeVariable(BaseListVariable):
         # on the left (appendleft/extendleft).
         maxlen = self.maxlen.as_python_constant()
         if maxlen is not None and len(self.items) > maxlen:
+            # side == "right" and maxlen == 0 must empty; items[-0:] keeps all,
+            # so fall through to items[:0] in that case.
             self.items[:] = (
-                self.items[-maxlen:] if side == "right" else self.items[:maxlen]
+                self.items[-maxlen:]
+                if side == "right" and maxlen != 0
+                else self.items[:maxlen]
             )
 
     def append(
@@ -1781,6 +1790,10 @@ class DequeVariable(BaseListVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
+        # list_pop raises the list message ("pop from empty list"); deque uses
+        # its own, so check emptiness here before delegating.
+        if self.is_mutable() and not self.items:
+            raise_observed_exception(IndexError, tx, args=["pop from an empty deque"])
         result = BaseListVariable.list_pop(self, tx, args, kwargs)
         if result is None:
             return None
@@ -2388,9 +2401,9 @@ class SliceVariable(VariableTracker):
 
 
 class BaseListIteratorVariable(IteratorVariable):
-    # In CPython list_iterator, tuple_iterator, and _deque_iterator are siblings,
-    # not subclasses of one another, so the concrete VTs share this base rather
-    # than each other.
+    # In CPython list_iterator, tuple_iterator, _deque_iterator, and
+    # _deque_reverse_iterator are siblings, not subclasses of one another, so
+    # the concrete VTs share this base rather than each other.
 
     _nonvar_fields = {
         "index",
@@ -2515,8 +2528,37 @@ class DequeIteratorVariable(BaseListIteratorVariable):
         return type(iter(collections.deque()))
 
 
-class DequeReverseIteratorVariable(DequeIteratorVariable):
+class DequeReverseIteratorVariable(BaseListIteratorVariable):
+    # Sibling of DequeIteratorVariable. Mutation snapshot is copied, not
+    # inherited, so isinstance(..., DequeIteratorVariable) stays false.
     _cpython_type = type(reversed(collections.deque()))
+
+    _nonvar_fields = {
+        "saved_state",
+        *BaseListIteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        items: list[VariableTracker],
+        source_deque: "DequeVariable",
+        saved_state: int,
+        index: int = 0,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(items, index=index, **kwargs)
+        self.source_deque = source_deque
+        self.saved_state = saved_state
+
+    def _check_mutation(self, tx: "InstructionTranslatorBase") -> None:
+        if self.source_deque.state != self.saved_state:
+            raise_observed_exception(
+                RuntimeError, tx, args=["deque mutated during iteration"]
+            )
+
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_mutation(tx)
+        return super().tp_iternext_impl(tx)
 
     def python_type(self) -> type:
         return type(reversed(collections.deque()))

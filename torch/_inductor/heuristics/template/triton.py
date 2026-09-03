@@ -1653,13 +1653,15 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             ROCmGemmConfig(256, 256, 64, self.default_num_stages, 8, group_m=4),
         ]
 
-        # Exhaustive search for mm configs
+        # Exhaustive search for mm configs. num_stages is deliberately not an axis
+        # here: _filter_configs forces every config to self.default_num_stages, so
+        # enumerating it would only produce duplicates that get deduped later.
         self.exhaustive_configs: list[BaseConfig] = [
             ROCmGemmConfig(
                 BLOCK_M,
                 BLOCK_N,
                 BLOCK_K,
-                num_stages,
+                self.default_num_stages,
                 num_warps,
                 group_m=group_m,
                 matrix_instr_nonkdim=matrix_instr_nonkdim,
@@ -1669,7 +1671,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
             )
-            for num_stages in [1, self.default_num_stages]
             for num_warps in [4, 8]
             for group_m in [4, 8, 16]
             for matrix_instr_nonkdim in [0, 16]

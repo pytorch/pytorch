@@ -522,6 +522,22 @@ cmake_dependent_option(
 cmake_dependent_option(BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
                        OFF "USE_CUDA" OFF)
+cmake_dependent_option(
+  USE_CMAKE_INSTRUMENTATION
+  "Use cmake-instrumentation to collect build metrics"
+  OFF # disabled by default because it causes CI timeouts
+  "CMAKE_VERSION VERSION_GREATER_EQUAL 4.3"
+  OFF
+)
+if(USE_CMAKE_INSTRUMENTATION)
+  cmake_instrumentation(
+    API_VERSION 1
+    DATA_VERSION 1.0
+    HOOKS postCMakeBuild
+    OPTIONS trace
+    CALLBACK "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_trace_summary.py" --root "${CMAKE_CURRENT_SOURCE_DIR}" --index
+  )
+endif()
 cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
                         "CPU_AARCH64" OFF)
 # prioritized text linker, ON by default for AArch64+Linux, option visible to all AArch64, x86 and ppc64le.
@@ -1146,23 +1162,6 @@ cmake_dependent_option(
   Will be disabled if not supported by the platform" ON
   "USE_CUDA OR USE_ROCM" OFF)
 
-cmake_dependent_option(
-  USE_CMAKE_INSTRUMENTATION
-  "Use cmake-instrumentation to collect build metrics"
-  OFF # disabled by default because it causes CI timeouts
-  "CMAKE_VERSION VERSION_GREATER_EQUAL 4.3"
-  OFF
-)
-if(USE_CMAKE_INSTRUMENTATION)
-  cmake_instrumentation(
-    API_VERSION 1
-    DATA_VERSION 1.0
-    HOOKS postCMakeBuild
-    OPTIONS trace
-    CALLBACK "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_trace_summary.py" --root "${CMAKE_CURRENT_SOURCE_DIR}" --index
-  )
-endif()
-
 #
 # Cannot be put into Dependencies.cmake due circular dependency:
 # USE_FLASH_ATTENTION -> USE_ROCM -> Dependencies.cmake -> aotriton.cmake
@@ -1253,15 +1252,6 @@ endif()
 
 # ---[ Allowlist file if allowlist is specified
 include(cmake/Allowlist.cmake)
-
-# ---[ Set link flag, handle additional deps for gcc 4.8 and above
-if(CMAKE_COMPILER_IS_GNUCXX AND NOT ANDROID)
-  message(
-    STATUS
-      "GCC ${CMAKE_CXX_COMPILER_VERSION}: Adding gcc and gcc_s libs to link line"
-  )
-  list(APPEND Caffe2_DEPENDENCY_LIBS gcc_s gcc)
-endif()
 
 # ---[ Build flags Re-include to override append_cxx_flag_if_supported from
 # third_party/FBGEMM
