@@ -5922,6 +5922,7 @@ def _associative_scan_combine(combine_mode, lhs, rhs):
 def _associative_scan_tree(xs, combine_mode, dim):
     # Blelloch-style inclusive scan tree built from pointwise ops. Used as a
     # fallback for backends without scan codegen support.
+    dim = utils.canonicalize_dim(xs[0].dim(), dim)
     n = xs[0].size(dim)
     if n < 2:
         return [x.clone() for x in xs]
@@ -5958,18 +5959,30 @@ def _associative_scan_tree(xs, combine_mode, dim):
     even_elems = [
         torch.cat([x[idx + (slice(0, 1),)], e], dim) for x, e in zip(xs, even_elems)
     ]
-    return [
-        torch.flatten(
-            torch.stack([ev, od], dim=dim + 1),
-            start_dim=dim,
-            end_dim=dim + 1,
-        )
-        for ev, od in zip(even_elems, odd_elems)
-    ]
+    res = []
+    for ev, od in zip(even_elems, odd_elems):
+        if n % 2 == 0:
+            interleaved = torch.flatten(
+                torch.stack([ev, od], dim=dim + 1),
+                start_dim=dim,
+                end_dim=dim + 1,
+            )
+        else:
+            interleaved_prefix = torch.flatten(
+                torch.stack([ev[idx + (slice(0, -1),)], od], dim=dim + 1),
+                start_dim=dim,
+                end_dim=dim + 1,
+            )
+            interleaved = torch.cat(
+                [interleaved_prefix, ev[idx + (slice(-1, None),)]], dim=dim
+            )
+        res.append(interleaved)
+    return res
 
 
 @register_decomposition(aten.associative_scan.default)
 def associative_scan(self, combine_mode, dim=0, reverse=False):
+    dim = utils.canonicalize_dim(self.dim(), dim)
     if reverse:
         self = torch.flip(self, [dim])
     out = _associative_scan_tree([self], combine_mode, dim)
@@ -5980,6 +5993,7 @@ def associative_scan(self, combine_mode, dim=0, reverse=False):
 
 @register_decomposition(aten.associative_scan.TensorList)
 def associative_scan_tensor_list(xs, combine_mode, dim=0, reverse=False):
+    dim = utils.canonicalize_dim(xs[0].dim(), dim)
     if reverse:
         xs = [torch.flip(x, [dim]) for x in xs]
     out = _associative_scan_tree(list(xs), combine_mode, dim)
