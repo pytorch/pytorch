@@ -227,12 +227,12 @@ class PolicyLoadingTest(unittest.TestCase):
     def test_shadow_policy_matches_native_codeowners(self) -> None:
         repository_root = Path(__file__).resolve().parents[2]
         native = (repository_root / "CODEOWNERS").read_bytes()
-        shadow = (
-            repository_root / ".github/auto-pr-triage/codepath_owners.txt"
-        ).read_bytes()
+        shadow_path = repository_root / ".github/auto-pr-triage/codepath_owners.txt"
+        shadow = shadow_path.read_bytes()
 
         self.assertEqual(shadow, native)
-        rules = parse_rules(shadow.decode("utf-8"), strict=True)
+        snapshot = load_codepath_owners(shadow_path, "pytorch/ciforge", COMMIT_SHA)
+        rules = snapshot["rules"]
         self.assertTrue(rules)
         self.assertTrue(
             all(
@@ -240,6 +240,31 @@ class PolicyLoadingTest(unittest.TestCase):
                 and all(owner.startswith("@") for owner in rule["owners"])
                 for rule in rules
             )
+        )
+
+    def test_normalizes_and_deduplicates_github_handle_casing(self) -> None:
+        snapshot = self.load(
+            b"/one/ @Chillee @chillee @PyTorch/Core @pytorch/core\n"
+            b"/two/ @CHILLEE @PYTORCH/CORE\n"
+        )
+
+        self.assertEqual(
+            [rule["owners"] for rule in snapshot["rules"]],
+            [
+                ["@chillee", "@pytorch/core"],
+                ["@chillee", "@pytorch/core"],
+            ],
+        )
+        artifact = build_codepath_owners(["one/a.py", "two/b.py"], snapshot)
+        self.assertEqual(artifact["owners"], ["@chillee", "@pytorch/core"])
+        self.assertEqual(
+            artifact["matched_path_groups"],
+            [
+                {
+                    "owners": ["@chillee", "@pytorch/core"],
+                    "paths": ["one/a.py", "two/b.py"],
+                }
+            ],
         )
 
     def test_builds_exact_dynamic_codepath_owners_contract(self) -> None:

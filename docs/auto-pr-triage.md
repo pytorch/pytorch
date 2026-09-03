@@ -45,8 +45,8 @@ otherwise leaves the pull request unchanged; live can request reviewers, add
 routing labels, comment, or close.
 
 Who sends codepath review requests is a separate rollout choice. The current
-`pytorch/pytorch` deployment mirrors the codepath rules into native CODEOWNERS,
-so GitHub sends those requests, and runs Auto PR Triage in shadow mode. An
+deployment mirrors the codepath rules into native CODEOWNERS, so GitHub sends
+those requests, and runs Auto PR Triage in shadow mode. An
 already-implemented alternative has Auto PR Triage send codepath requests
 itself and does not rely on native CODEOWNERS for routing.
 
@@ -162,9 +162,9 @@ attempt. GitHub's native CODEOWNERS integration supplies the independent
 path-review baseline, while the LLM may suggest only additional semantic owners.
 The apply job derives the result and selects shadow or live effects.
 
-The current implementation is a `pytorch/pytorch` prototype triggered when the
-`open source` label is applied to a non-draft pull request targeting `main`, or
-when a draft carrying that label is first marked ready for review.
+The workflow is triggered when the `open source` label is applied to a non-draft
+pull request targeting `main`, or when a draft carrying that label is first
+marked ready for review.
 The workflow passes its trusted `${{ github.repository }}` context through both
 jobs; the scripts contain no repository-name constant. The prepared ownership
 artifacts are bound to that identity, and both jobs use it to scope GitHub calls.
@@ -760,7 +760,7 @@ The remaining behavior depends on the checked-in mode:
 | Eligible, completed, with routing destinations, uncovered concerns, and a submitted-review handoff | Log exact reviewer choices and add `bot-shadow-triaged` | Request any remaining selected reviewers, add applicable `owner:` markers, and add `triaged` plus `bot-triaged` |
 | Eligible, completed, with no destinations and no submitted-review handoff | Keep open | Keep open |
 | Eligible, completed, with no destinations but with a submitted-review handoff | Add `bot-shadow-triaged` | Add `triaged` plus `bot-triaged` |
-| Eligible but analysis or semantic routing is incomplete | Add `bot-triage-error` | Add `bot-triage-error` |
+| Eligible but analysis or reviewer routing is incomplete | Log any safely resolved reviewers and add `bot-triage-error` | Request any safely resolved reviewers, add their applicable `owner:` markers, and add `bot-triage-error` |
 
 Every eligible result also receives the applicable CODEOWNERS diagnostic label.
 A mismatch does not repair or block native path routing. Shadow mode never
@@ -801,12 +801,13 @@ limitations are printed in the analysis log and do not apply
 the PR untriaged unless an eligible configured-roster member has already
 submitted a review; any owners that were found are still routed.
 
-Apply-time failure to resolve optional additional owners also changes the final
-label to `bot-triage-error`. Native CODEOWNERS remains responsible for the
-path baseline, while the unavailable semantic additions are left for human
-follow-up.
-The normalized analysis may say `completed`, but the final routing was not
-complete.
+If one or more owner IDs has no eligible roster member, apply retains any other
+resolved reviewer choices, lists the unresolved owners in the plan, and adds
+`bot-triage-error`. Live mode still requests the resolved reviewers and adds
+their applicable `owner:` markers. An apply-time failure while resolving
+optional semantic owners can instead discard those optional choices and fall
+back to the native or direct codepath baseline. The normalized analysis may say
+`completed`, but the final routing was not complete.
 
 A separate write-only reporter job also attempts to add `bot-triage-error` when
 the analyze or apply job itself fails, or when an admitted analysis unexpectedly
@@ -853,14 +854,16 @@ includes custom codepath owners in its reviewer-request payload. A match,
 mismatch, or inconclusive result is logged and labeled independently of the
 semantic result.
 
-For additional owners, apply binds every owner ID to the trusted roster, takes
-one pass over pending reviews, submitted reviews, and round-robin history, and
-chooses the exact people. It logs those choices. Shadow mode writes only fixed
-diagnostic or outcome labels. Live mode requests only users absent from that
-read and adds labels without a follow-up confirmation read. A new or
-already-pending live assignment receives the routing label; a rerun can repair
-an earlier request-without-label partial failure. A submitted-review handoff
-adds the result labels selected by the mode.
+For additional owners, apply resolves each owner ID through the trusted roster,
+taking one pass over pending reviews, submitted reviews, and round-robin
+history. An ID with no eligible member remains unresolved without discarding
+choices made for other IDs. Apply logs both the choices and unresolved IDs.
+Shadow mode writes only fixed diagnostic or outcome labels. Live mode requests
+only users absent from that read and adds labels without a follow-up
+confirmation read. A new or already-pending live assignment receives the
+routing label; a rerun can repair an earlier request-without-label partial
+failure. A submitted-review handoff adds the result labels selected by the
+mode.
 
 All configured status, routing, and diagnostic labels needed by the selected
 effect are resolved before the first write. Live semantic reviewer requests

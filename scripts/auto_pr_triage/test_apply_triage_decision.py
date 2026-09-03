@@ -2061,13 +2061,15 @@ class ApplyTriageTest(unittest.TestCase):
     ) -> None:
         github = FakeGitHub(unavailable_labels=["owner: autograd"])
 
-        result = run_apply(
-            github,
-            codepath_owners=("@codepath-owner",),
-            additional_owners=("autograd",),
-        )
+        with mock.patch("builtins.print") as output:
+            result = run_apply(
+                github,
+                codepath_owners=("@codepath-owner",),
+                additional_owners=("autograd",),
+            )
 
         self.assertEqual(result, ControllerOutcome("incomplete"))
+        self.assertEqual(printed_plan(output)["unresolved_owners"], ["autograd"])
         self.assertEqual(
             mutations(github),
             [
@@ -2098,13 +2100,15 @@ class ApplyTriageTest(unittest.TestCase):
                 return super().json(endpoint, method=method, payload=payload)
 
         github = UnavailableReviewersGitHub()
-        result = run_apply(
-            github,
-            codepath_owners=("@codepath-owner",),
-            additional_owners=("autograd",),
-        )
+        with mock.patch("builtins.print") as output:
+            result = run_apply(
+                github,
+                codepath_owners=("@codepath-owner",),
+                additional_owners=("autograd",),
+            )
 
         self.assertEqual(result, ControllerOutcome("incomplete"))
+        self.assertEqual(printed_plan(output)["unresolved_owners"], ["autograd"])
         self.assertEqual(
             mutations(github)[0][2],
             {
@@ -2265,10 +2269,101 @@ class ApplyTriageTest(unittest.TestCase):
                 return_value=config["team_members"],
             ),
             mock.patch("apply_triage_decision.NATIVE_CODEOWNERS_SHADOW", False),
-            self.assertRaisesRegex(RuntimeError, "no eligible"),
+            mock.patch("builtins.print") as output,
         ):
-            apply_controller_action(args, github)
-        self.assertEqual(mutations(github), [])
+            result = apply_controller_action(args, github)
+
+        self.assertEqual(result, ControllerOutcome("incomplete"))
+        self.assertEqual(
+            mutations(github),
+            [
+                (
+                    "POST",
+                    "repos/pytorch/ciforge/issues/123/labels",
+                    {"labels": [BOT_TRIAGE_ERROR_LABEL]},
+                )
+            ],
+        )
+        plan = printed_plan(output)
+        self.assertEqual(plan["owner_choices"], {})
+        self.assertEqual(plan["planned_reviewer_requests"], [])
+        self.assertEqual(plan["unresolved_owners"], ["autograd"])
+
+    def test_unresolved_owner_preserves_other_owner_selection(self) -> None:
+        team_members = copy.deepcopy(ownership_config()["team_members"])
+        team_members["members"]["autograd"] = ["@external-author"]
+        for native_codeowners_shadow, mode in (
+            (True, "shadow"),
+            (True, "live"),
+            (False, "shadow"),
+            (False, "live"),
+        ):
+            github = FakeGitHub()
+            with (
+                self.subTest(
+                    native_codeowners_shadow=native_codeowners_shadow,
+                    mode=mode,
+                ),
+                tempfile.TemporaryDirectory() as directory,
+                mock.patch("builtins.print") as output,
+            ):
+                summary = Path(directory) / "summary.md"
+                result = run_apply(
+                    github,
+                    codepath_owners=(),
+                    additional_owners=("autograd", "compiler"),
+                    native_codeowners_shadow=native_codeowners_shadow,
+                    mode=mode,
+                    team_members=team_members,
+                    github_step_summary=summary,
+                )
+
+                expected = (
+                    ControllerOutcome("incomplete")
+                    if mode == "shadow"
+                    else ControllerOutcome("incomplete", 1, 1)
+                )
+                self.assertEqual(result, expected)
+                plan = printed_plan(output)
+                self.assertEqual(set(plan["owner_choices"]), {"compiler"})
+                self.assertEqual(
+                    plan["owner_choices"]["compiler"]["reviewer"], "@reviewer"
+                )
+                self.assertEqual(plan["planned_reviewer_requests"], ["@reviewer"])
+                self.assertEqual(plan["unresolved_owners"], ["autograd"])
+                self.assertIn("- Unresolved owners: `autograd`", summary.read_text())
+
+            writes = mutations(github)
+            expected_labels = [BOT_TRIAGE_ERROR_LABEL]
+            if native_codeowners_shadow:
+                expected_labels.append(CODEOWNERS_SHADOW_LABELS["match"])
+            if mode == "shadow":
+                self.assertEqual(
+                    writes,
+                    [
+                        (
+                            "POST",
+                            "repos/pytorch/ciforge/issues/123/labels",
+                            {"labels": expected_labels},
+                        )
+                    ],
+                )
+            else:
+                self.assertEqual(
+                    writes,
+                    [
+                        (
+                            "POST",
+                            "repos/pytorch/ciforge/pulls/123/requested_reviewers",
+                            {"reviewers": ["reviewer"]},
+                        ),
+                        (
+                            "POST",
+                            "repos/pytorch/ciforge/issues/123/labels",
+                            {"labels": [*expected_labels, "owner: compiler"]},
+                        ),
+                    ],
+                )
 
     def test_author_codepath_match_does_not_cover_additional_owner(self) -> None:
         github = FakeGitHub(actionable_issue=True)

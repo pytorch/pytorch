@@ -669,8 +669,6 @@ def select_owner_reviewers(
         if needs_round_robin
         else {}
     )
-    if set(selected) != set(needs_round_robin):
-        raise RuntimeError("owner has no eligible round-robin reviewer")
     for owner_id, selection in selected.items():
         choices[owner_id] = {
             "reviewer": selection["reviewer"],
@@ -692,7 +690,8 @@ def select_owner_reviewers(
         dict.fromkeys(
             owner_label(owner_id)
             for owner_id in owner_ids
-            if choices[owner_id]["state"] in {"pending", "selected"}
+            if owner_id in choices
+            and choices[owner_id]["state"] in {"pending", "selected"}
         )
     )
     return choices, request_users, team_labels
@@ -709,6 +708,7 @@ def log_routing_plan(
     analyzed_head_sha: str,
     has_uncovered_concerns: bool,
     owner_provenance_truncated: bool,
+    unresolved_owners: tuple[str, ...] = (),
     submitted_handoff: str | None = None,
     comparison: dict[str, Any] | None = None,
 ) -> None:
@@ -725,6 +725,7 @@ def log_routing_plan(
         "owner_choices": owner_choices or {},
         "owner_provenance_truncated": owner_provenance_truncated,
         "planned_reviewer_requests": list(planned_reviewer_requests),
+        "unresolved_owners": list(unresolved_owners),
         "run_attempt": args.run_attempt,
         "submitted_handoff": submitted_handoff,
     }
@@ -736,6 +737,7 @@ def log_routing_plan(
     reviewer_names = ", ".join(
         f"`{reviewer.removeprefix('@')}`" for reviewer in planned_reviewer_requests
     )
+    unresolved_names = ", ".join(f"`{owner}`" for owner in unresolved_owners)
     try:
         with Path(summary).open("a", encoding="utf-8") as output:
             output.write("## Auto PR Triage decision plan\n\n")
@@ -745,6 +747,7 @@ def log_routing_plan(
                 f"- Has uncovered concerns: `{str(has_uncovered_concerns).lower()}`\n"
             )
             output.write(f"- Planned reviewer requests: {reviewer_names or 'none'}\n")
+            output.write(f"- Unresolved owners: {unresolved_names or 'none'}\n")
             for owner, choice in sorted((owner_choices or {}).items()):
                 reviewer = choice["reviewer"].removeprefix("@")
                 output.write(f"- Owner `{owner}`: `{reviewer}` ({choice['state']})\n")
@@ -969,6 +972,7 @@ def apply_controller_action(
         if NATIVE_CODEOWNERS_SHADOW
         else tuple(sorted({*codepath.owner_ids, *additional_owners}))
     )
+    unresolved_owners = () if reviewer_state_available else owner_ids
     if owner_ids and reviewer_state_available:
         try:
             team_members = load_team_members(
@@ -991,6 +995,11 @@ def apply_controller_action(
                     require_repository_label(
                         github, args.repository, owner_label(owner_id)
                     )
+            unresolved_owners = tuple(
+                owner_id for owner_id in owner_ids if owner_id not in owner_choices
+            )
+            if unresolved_owners:
+                triage_incomplete = True
         except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
             if not NATIVE_CODEOWNERS_SHADOW and (
                 codepath.owner_ids or not codepath.github_handles
@@ -1009,6 +1018,7 @@ def apply_controller_action(
             owner_choices = {}
             selected_users = ()
             team_labels = ()
+            unresolved_owners = owner_ids
     submitted_handoff = None
     if (
         analysis.has_uncovered_concerns
@@ -1135,6 +1145,7 @@ def apply_controller_action(
         analyzed_head_sha=analysis.analyzed_head_sha,
         has_uncovered_concerns=analysis.has_uncovered_concerns,
         owner_provenance_truncated=analysis.owner_provenance_truncated,
+        unresolved_owners=unresolved_owners,
         submitted_handoff=submitted_handoff,
         comparison=shadow_comparison,
     )

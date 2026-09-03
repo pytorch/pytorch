@@ -20,7 +20,7 @@ flowchart TB
   HANDOFF["Mark as triaged<br/>No new reviewer request"]
   HUMAN_TRIAGE["Do not mark as triaged<br/>Defer to a human triager"]
   ANALYSIS_INCOMPLETE["Do not mark as triaged<br/>Report incomplete ownership analysis<br/>Defer to a human triager"]
-  ROUTING_INCOMPLETE["Do not mark as triaged<br/>Continue with any safely resolved codepath reviewers<br/>Report incomplete routing for human follow-up"]
+  ROUTING_INCOMPLETE["Do not mark as triaged<br/>Continue with any safely resolved reviewers<br/>Report incomplete routing for human follow-up"]
   PARTIAL_ROUTING["Request any selected reviewers<br/>Do not mark as triaged<br/>Defer uncovered concerns to a human triager"]
 
   ROUTED["Mark as triaged<br/>Request the selected reviewers"]

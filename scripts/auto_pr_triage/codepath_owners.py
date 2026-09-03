@@ -141,14 +141,19 @@ def parse_rule(raw: str, line_number: int) -> dict[str, Any]:
 
     pattern = "".join(pattern_characters)
     glob_regex(pattern)
-    owners = line[owner_start:].split()
+    raw_owners = line[owner_start:].split()
     invalid_owner = next(
-        (owner for owner in owners if not OWNER_RE.fullmatch(owner)), None
+        (owner for owner in raw_owners if not OWNER_RE.fullmatch(owner)), None
     )
     if invalid_owner:
         raise ValueError(
             f"invalid codepath owner {invalid_owner!r} on line {line_number}"
         )
+    owners = list(
+        dict.fromkeys(
+            owner.casefold() if owner.startswith("@") else owner for owner in raw_owners
+        )
+    )
     return {
         "line": line_number,
         "pattern": pattern,
@@ -302,7 +307,6 @@ def load_codepath_owners(
     diagnostics: list[dict[str, Any]] = []
     rules = parse_rules(text, blob_sha, diagnostics, strict=True)
     target_org = repo.split("/", 1)[0].casefold()
-    canonical_owners: dict[str, str] = {}
     for rule in rules:
         for owner in rule["owners"]:
             if (
@@ -313,11 +317,6 @@ def load_codepath_owners(
                 raise RuntimeError(
                     "codepath-owner policy names a team outside the target organization"
                 )
-            key = owner.casefold()
-            previous = canonical_owners.get(key)
-            if previous is not None and previous != owner:
-                raise RuntimeError("codepath-owner casing is inconsistent")
-            canonical_owners[key] = owner
     return {
         "source": {
             "repository": repo,
