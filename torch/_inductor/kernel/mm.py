@@ -61,6 +61,7 @@ from ..utils import (
     use_nv_universal_gemm_template,
     use_triton_blackwell_tma_template,
     use_triton_scaling_template,
+    use_triton_tdm_template,
     use_triton_template,
     use_triton_tma_template,
 )
@@ -106,6 +107,14 @@ mm_template = TritonTemplate(
 
 persistent_tma_mm_template = TritonTemplate(
     name="mm_persistent_tma",
+    grid=persistent_mm_grid,
+    source=load_kernel_template("triton_persistent_tma_mm"),
+)
+
+# AMD TDM uses Triton's stable tensor descriptor branch from the same maintained
+# persistent template source, with ROCm-specific options supplied by its heuristic.
+persistent_tdm_mm_template = TritonTemplate(
+    name="mm_persistent_tdm",
     grid=persistent_mm_grid,
     source=load_kernel_template("triton_persistent_tma_mm"),
 )
@@ -602,13 +611,21 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
                 mat1, mat2, output_layout=layout, add_guards=True
             ):
                 templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            elif use_triton_tma_template(
-                mat1, mat2, output_layout=layout, add_guards=True
-            ):
-                if torch.version.hip is None:
-                    templates_to_use.append(persistent_tma_mm_template)
-                else:
-                    templates_to_use.append(persistent_mm_template)
+            else:
+                # TDM is an additional ROCm candidate, not a replacement for the
+                # ordinary persistent template. Descriptor block filtering can
+                # empty the TDM config pool, and displacing the ordinary
+                # candidate would then leave autotuning worse off than with TDM
+                # switched off entirely.
+                if use_triton_tdm_template(mat1, mat2):
+                    templates_to_use.append(persistent_tdm_mm_template)
+                if use_triton_tma_template(
+                    mat1, mat2, output_layout=layout, add_guards=True
+                ):
+                    if torch.version.hip is None:
+                        templates_to_use.append(persistent_tma_mm_template)
+                    else:
+                        templates_to_use.append(persistent_mm_template)
 
         templates_to_use.append(mm_contiguous_subgraph_template)
 
@@ -898,11 +915,18 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             mat1, mat2, output_layout=layout, add_guards=True
         ):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-        elif use_triton_tma_template(mat1, mat2, output_layout=layout, add_guards=True):
-            if torch.version.hip is None:
-                templates_to_use.append(persistent_tma_mm_template)
-            else:
-                templates_to_use.append(persistent_mm_template)
+        else:
+            # See tuned_mm: TDM is additive, it does not displace the ordinary
+            # persistent candidate.
+            if use_triton_tdm_template(mat1, mat2):
+                templates_to_use.append(persistent_tdm_mm_template)
+            if use_triton_tma_template(
+                mat1, mat2, output_layout=layout, add_guards=True
+            ):
+                if torch.version.hip is None:
+                    templates_to_use.append(persistent_tma_mm_template)
+                else:
+                    templates_to_use.append(persistent_mm_template)
 
         # Manually call get_template_configs as use 1-D bias if possible
         choices.extend(
