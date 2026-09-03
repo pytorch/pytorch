@@ -663,6 +663,10 @@ class AccumulatingCapture:
                 result = call(*args, **kwargs)
         except (PackageError, RecompileError) as e:
             raise PrecompileError(str(e)) from e
+        if self._closed:
+            # Closed while the call ran: the region is gone, so there is
+            # nothing to render from. The files keep the previous artifact.
+            return result
         try:
             python_code, cache = self._call_session(
                 self._session.snapshot_artifact,
@@ -726,12 +730,17 @@ class AccumulatingCapture:
         Give back the compiled region. The artifact on disk is unaffected.
         Closing twice is a no-op. Raises the ``PrecompileError`` a gate raised
         on the last call, if that call's artifact was refused.
+
+        Safe to call from any thread while a call is in flight on another: it
+        waits for that call AND the artifact rewrite it ends in, so the files
+        on disk describe every call that ran. It does not interrupt the call.
         """
-        if self._closed:
-            return
-        self._closed = True
-        self._session.close()
-        error, self._gate_error = self._gate_error, None
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._session.close()
+            error, self._gate_error = self._gate_error, None
         if error is not None:
             raise error
 
@@ -739,10 +748,12 @@ class AccumulatingCapture:
         return self
 
     def __exit__(self, exc_type: object, *exc: object) -> None:
-        if exc_type is not None and not self._closed:
+        if exc_type is not None:
             # Another exception is propagating; do not mask it with the gate's.
-            self._closed = True
-            self._session.close()
+            with self._lock:
+                if not self._closed:
+                    self._closed = True
+                    self._session.close()
             return
         self.close()
 
@@ -1269,8 +1280,6 @@ def _capture(
     interning/order established here for params then buffers is the calling
     convention the runtime model must reproduce (invariant 2).
     """
-    import contextlib
-
     args = tuple(args)
     module_positions = [i for i, a in enumerate(args) if isinstance(a, torch.nn.Module)]
     module_pos_set = set(module_positions)
@@ -1779,6 +1788,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "DRIFTED_GUARDS",
         "UNRENDERED_BACKENDS",
         "VARIANTS_WITHOUT_INPUT_GUARDS",
+        "VARIANTS_DROPPED_FOR_CODEGEN_TARGET",
         "CAPTURE_GRAD_ENABLED",
     }
     for node in tree.body:
@@ -2105,8 +2115,7 @@ def _build_multigraph_python_source(
     parts.append("# nothing. Not checked at serve time either: a call outside the")
     parts.append("# captured domain along one of these is served, not refused.")
     parts.append(
-        f"POLICY_DROPPED_GUARDS = "
-        f"{[list(g) for g in getattr(summary, 'policy_dropped_guards', ())]!r}"
+        f"POLICY_DROPPED_GUARDS = {[list(g) for g in summary.policy_dropped_guards]!r}"
     )
     parts.append("")
     parts.append("# What a dropped slot above actually checked, where it renders one.")
@@ -2117,8 +2126,7 @@ def _build_multigraph_python_source(
     parts.append("# thing pinning an optional attribute. The rendered check names the")
     parts.append("# attribute and tells the two apart.")
     parts.append(
-        f"DROPPED_GUARD_CODE = "
-        f"{[list(g) for g in getattr(summary, 'dropped_guard_code', ())]!r}"
+        f"DROPPED_GUARD_CODE = {[list(g) for g in summary.dropped_guard_code]!r}"
     )
     parts.append("")
     parts.append("# Values pinned to exactly what capture saw; any other value misses.")
@@ -2131,6 +2139,16 @@ def _build_multigraph_python_source(
     parts.append(f"DRIFTED_GUARDS = {[list(g) for g in summary.drifted_guards]!r}")
     parts.append(
         f"VARIANTS_WITHOUT_INPUT_GUARDS = {summary.variants_without_input_guards!r}"
+    )
+    parts.append("")
+    parts.append("# Variants compiled after inductor's CPU codegen configuration moved")
+    parts.append("# away from the target this artifact records, and so left out of it;")
+    parts.append(
+        "# the calls that produced them are served by a recompile, or refused."
+    )
+    parts.append(
+        f"VARIANTS_DROPPED_FOR_CODEGEN_TARGET = "
+        f"{summary.variants_dropped_for_codegen_target!r}"
     )
     parts.append("")
     parts.append("# (backend id, reason) for each compiled subgraph that could not be")
@@ -2362,15 +2380,21 @@ def _reject_varargs_entry(fn: object) -> None:
 
     _reject_uninstallable_entry makes the same check at render time, which on
     the accumulate path surfaces only at close(), after every call has run and
-    moved its gradients. Resolve the code object the way capture does (a
-    module's forward, a bound method's function); anything capture itself
-    would refuse is left to it.
+    moved its gradients. Resolve the code object the way capture does: unwind
+    the Dynamo decorator chain (a torch._dynamo.disable wrapper has the inner
+    function's name on a (*args, **kwargs) signature of its own, and capture
+    compiles the inner function, not the wrapper), then a module's forward or
+    a bound method's function. Anything capture itself would refuse is left
+    to it.
     """
+    from torch._dynamo.eval_frame import innermost_fn
     from torch._dynamo.precompile_package import _entry_fn_of
 
+    if not callable(fn):
+        return
     try:
-        entry_fn = _entry_fn_of(fn)
-    except TypeError:
+        entry_fn = _entry_fn_of(innermost_fn(fn))
+    except (TypeError, AssertionError):
         return
     _reject_varargs(entry_fn.__code__, getattr(entry_fn, "__qualname__", repr(fn)))
 
@@ -2435,13 +2459,29 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
         code.co_filename not in _WARNED_MAIN_ENTRIES
     ):
         _WARNED_MAIN_ENTRIES.add(code.co_filename)
+        # The load-time rule is in the drivers: a script's artifact loads only
+        # from that script; a file-less __main__'s (REPL, python -c, notebook)
+        # only from a file-less __main__, which the loader cannot tell apart
+        # from the one that captured.
+        if os.path.isfile(code.co_filename):
+            where = (
+                f"the script {code.co_filename}, so the artifact loads only from "
+                f"that same script; load() refuses it from any other script and "
+                f"from a REPL, `python -c` or notebook."
+            )
+        else:
+            where = (
+                "a __main__ with no file (a REPL, `python -c` or a notebook), so "
+                "load() refuses the artifact from any script. A load from another "
+                "file-less __main__ cannot be told apart from this one: it is "
+                "accepted, and the frames read the LOADER's globals."
+            )
         log.warning(
-            "precompile: %r is defined in __main__ (%s). Its frames read that "
-            "module's globals, and __main__ is whichever script is running, so the "
-            "artifact loads only from this same script; load() refuses it anywhere "
-            "else. Define the entry in an importable module to ship the artifact.",
+            "precompile: %r is defined in __main__, %s Its frames read that "
+            "module's globals, and __main__ is whichever program is running. "
+            "Define the entry in an importable module to ship the artifact.",
             entry.fn_name,
-            code.co_filename,
+            where,
         )
 
 
@@ -2985,12 +3025,20 @@ def _write_artifact(
                 dir=parent or ".", prefix=os.path.basename(path) + ".", suffix=".tmp"
             )
             written.append((tmp, path))
-            # mkstemp opens 0600; keep an existing target's mode, else the 0644
-            # a plain open() gets under the default umask.
+            # mkstemp opens 0600; keep an existing regular file's mode, else
+            # what a plain open() would create under the current umask. A
+            # symlink's own mode says nothing about what it points at, so a
+            # symlinked target is replaced as if new.
             try:
-                perm = stat.S_IMODE(os.stat(path).st_mode)
+                target = os.lstat(path)
             except OSError:
-                perm = 0o644
+                target = None
+            if target is not None and stat.S_ISREG(target.st_mode):
+                perm = stat.S_IMODE(target.st_mode)
+            else:
+                umask = os.umask(0)
+                os.umask(umask)
+                perm = 0o666 & ~umask
             os.close(fd)
             os.chmod(tmp, perm)
             mode, encoding = (
@@ -3113,7 +3161,11 @@ class _PrecompileApi:
         form below raises ``TypeError``. The 2.14 spelling
         ``precompile(fn, *example_args)`` -- one example call, positionally -- still
         works and means ``example_inputs=[tuple(example_args)]``, under a
-        ``FutureWarning``; giving both raises ``TypeError``.
+        ``FutureWarning``; giving both raises ``TypeError``. Every positional
+        argument after ``fn`` is an argument of that one call, whatever its type
+        -- a lone list or tuple is the call's single argument, not a sequence
+        of calls -- except a lone ``ExampleInput``, which describes a call and
+        so raises ``TypeError`` pointing at ``example_inputs=``.
 
         There are two forms, chosen by whether you name the output files:
 
@@ -3359,17 +3411,16 @@ class _PrecompileApi:
                     f"argument(s) AND example_inputs; the example call goes in one "
                     f"place: precompile(fn, example_inputs=[(arg0, arg1)])."
                 )
-            # A list of tuples or an ExampleInput passed positionally is
-            # example_inputs missing its keyword, not a 2.14-style example call.
-            only = example_args[0] if len(example_args) == 1 else None
-            if isinstance(only, ExampleInput) or (
-                isinstance(only, (list, tuple))
-                and len(only) > 0
-                and all(isinstance(call, (tuple, ExampleInput)) for call in only)
-            ):
+            # A lone ExampleInput passed positionally is example_inputs missing
+            # its keyword, not a 2.14-style example call: it is precompile's
+            # own type and describes a call rather than being an argument of
+            # one. A lone list or tuple is NOT read that way -- a function that
+            # takes one sequence argument is legitimate, and second-guessing it
+            # by its contents would refuse a real call.
+            if len(example_args) == 1 and isinstance(example_args[0], ExampleInput):
                 raise TypeError(
-                    f"precompile got a {type(only).__name__} of example calls "
-                    f"positionally; pass it as example_inputs=... instead."
+                    "precompile got an ExampleInput positionally; it describes a "
+                    "call, so pass it as example_inputs=[ExampleInput(...)]."
                 )
             warnings.warn(
                 "precompile(fn, *example_args) is deprecated; pass the example call "

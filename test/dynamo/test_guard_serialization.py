@@ -373,6 +373,30 @@ class ReconstructedByNewargs:
         return (self.payload,)
 
 
+class Point(NamedTuple):
+    x: int
+    y: int
+
+
+class TaggedPoint(Point):
+    # No __slots__, so an instance carries a __dict__ alongside its items, and
+    # namedtuple's __getnewargs__ returns only the items.
+    pass
+
+
+class StandInOn:
+    # Reduces the way GuardsStatePickler reduces a type-guarded Generator or
+    # Stream, for a device the pickling host need not have.
+    def __init__(self, cls, device):
+        self.cls = cls
+        self.device = device
+
+    def __reduce__(self):
+        from torch._dynamo.guards import _rebuild_type_stand_in
+
+        return _rebuild_type_stand_in, (self.cls, self.device)
+
+
 # --- an empty closure cell -------------------------------------------------
 def keep_name_with_empty_cell(func):
     @functools.wraps(func)
@@ -1147,6 +1171,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
                     ref, loaded, {"x": torch.randn(3), "obj": obj}, True
                 )
 
+    def test_guard_on_a_namedtuple_subclass_with_an_unpicklable_extra(self):
+        # Every namedtuple has a __getnewargs__, but it returns the ITEMS, which
+        # pruning never touches, so a subclass carrying __dict__ extras is pruned
+        # like any other user object rather than pickled whole.
+        from torch._dynamo.guards import _builds_its_own_pickle
+
+        self.assertFalse(_builds_its_own_pickle(TaggedPoint))
+        pt = TaggedPoint(1, 2)
+        pt.scratch = (i for i in ())
+
+        def fn(x):
+            if pt.x == 1:
+                return x + 1
+            return x - 1
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "pt": pt}, True)
+
     def test_a_guarded_unsupported_type_is_refused(self):
         # Substituting the sentinel for a value a guard READS is not a pruning:
         # a TYPE_MATCH rebuilds against type(_Missing()) and then never matches,
@@ -1172,6 +1214,18 @@ class TestGuardSerialization(TestGuardSerializationBase):
         stand_in = pickle.loads(buf.getvalue())["gen"]
         self.assertIs(type(stand_in), torch.Generator)
         self.assertEqual(stand_in.device, gen.device)
+
+    def test_a_stand_in_this_host_cannot_build_fails_the_load_by_name(self):
+        # The stand-in is built at load, so a device the loading host lacks
+        # raised the constructor's own error out of pickle.loads, with nothing
+        # to say which type or device the artifact was captured with. A Stream
+        # rather than a Generator: the Generator binds its device lazily.
+        payload = pickle.dumps(StandInOn(torch.Stream, torch.device("cuda:99")))
+        with self.assertRaisesRegex(
+            PackageError,
+            r"captured with a torch.Stream on cuda:99 that this host cannot create",
+        ):
+            pickle.loads(payload)
 
     def test_a_type_matched_generator_rebuilds_as_a_stand_in(self):
         # Dynamo guards a Generator with TYPE_MATCH, which needs the type alone,
@@ -1276,9 +1330,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
         def g(x, y):
             return x + y
 
-        outer, inner = set(), set()
-        with record_live_guard_leaves(outer):
-            with record_live_guard_leaves(inner):
+        with record_live_guard_leaves() as outer:
+            with record_live_guard_leaves() as inner:
                 self._test_serialization("TENSOR_MATCH", f, torch.randn(3))
             self.assertTrue(inner)
             self.assertEqual(inner, outer)
@@ -1288,13 +1341,12 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         # Closed by identity: a and b are EQUAL while both are empty, so removing
         # b by equality would close a instead and the wrong sink would fill.
-        a, b = set(), set()
         recording_a, recording_b = (
-            record_live_guard_leaves(a),
-            record_live_guard_leaves(b),
+            record_live_guard_leaves(),
+            record_live_guard_leaves(),
         )
-        recording_a.__enter__()
-        recording_b.__enter__()
+        a = recording_a.__enter__()
+        b = recording_b.__enter__()
         recording_b.__exit__(None, None, None)
         try:
             self._test_serialization("TENSOR_MATCH", f, torch.randn(3))
@@ -1303,8 +1355,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertTrue(a)
         self.assertFalse(b)
 
-        # With nothing recording, a build records nowhere; a fresh set is
-        # handed out when the caller brings none.
+        # A fresh set on every entry, so a new recording starts empty.
         with record_live_guard_leaves() as leaves:
             self._test_serialization("TENSOR_MATCH", f, torch.randn(3))
         self.assertEqual(leaves, a)

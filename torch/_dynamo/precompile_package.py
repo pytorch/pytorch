@@ -1517,6 +1517,7 @@ def _summarize(
     variants_without_input_guards: int,
     drifted: set[tuple[str, str]],
     unrendered: Mapping[str, str],
+    variants_dropped_for_codegen_target: int,
 ) -> PrecompileSummary:
     wont_generalize = _wont_generalize(kept, guard_sets)
     return PrecompileSummary(
@@ -1541,6 +1542,7 @@ def _summarize(
         variants_without_input_guards=variants_without_input_guards,
         drifted_guards=tuple(sorted(drifted)),
         unrendered_backends=tuple(sorted(unrendered.items())),
+        variants_dropped_for_codegen_target=variants_dropped_for_codegen_target,
     )
 
 
@@ -1645,7 +1647,17 @@ class PrecompileSession:
         # invisible and recompile the world. Nothing can hand an existing id to
         # torch._dynamo.optimize either -- it mints its own from a private
         # counter -- so the only way to keep them is to keep the region.
+        # Fixed at construction: __exit__ reads it to decide whether the
+        # one-shot policy pass runs, and close() must not be able to turn a
+        # resumable session into a one-shot one under a call in flight.
         self._resumable = resumable
+        # Set by close(): the next __exit__ retires the region even on a
+        # resumable session, and __enter__ refuses.
+        self._retired = False
+        # The thread that entered, until its __exit__ completes. The capture
+        # config __enter__ installs is context-local, so only that thread can
+        # undo it; close() from any other thread waits for it instead.
+        self._entered_thread: int | None = None
         # On for the real capture; the guard probe leaves it off so it does not
         # pay for a lowering whose source is thrown away.
         self._keep_graphs = keep_graphs
@@ -1778,12 +1790,18 @@ class PrecompileSession:
 
         Safe against a call still in flight. A call can only be running while
         the block is entered, and closing then IS the exit, for good: __exit__
-        refuses new calls, waits out the running ones, and, with the session no
-        longer resumable, retires the region. Like __exit__, it must run on the
-        thread that entered.
+        refuses new calls, waits out the running ones, and retires the region.
+        The thread that entered is the only one that can run that __exit__ --
+        the capture configuration it undoes is context-local -- so from any
+        other thread this waits for the entering thread's __exit__ to complete
+        and then retires the region itself. It does not run __exit__ on the
+        entering thread's behalf, so a block that thread never leaves is
+        waited on forever.
         """
-        self._resumable = False
         with self._state:
+            self._retired = True
+            while self._entered_thread not in (None, threading.get_ident()):
+                self._state.wait()
             entered = self._stack is not None
         if entered:
             self.__exit__(None, None, None)
@@ -1812,25 +1830,26 @@ class PrecompileSession:
                     self._state.notify_all()
 
     def __enter__(self) -> Callable[..., object]:
-        if self._finished:
-            raise RuntimeError("PrecompileSession cannot be re-entered")
+        with self._state:
+            if self._finished or self._retired:
+                raise RuntimeError("PrecompileSession cannot be re-entered")
+            if self._stack is not None or self._entered_thread is not None:
+                raise RuntimeError("PrecompileSession is already active")
+            self._entered_thread = threading.get_ident()
         # Set by every exit and, on the one-shot path, never read again. A
         # resumable session does re-enter, and _call refuses to run while it is
         # set, so clearing it here is what makes the second cycle work at all.
         self._closing = False
         self._gate_error_mark = len(self._capture_errors)
-        if self._stack is not None:
-            raise RuntimeError("PrecompileSession is already active")
         grads: dict[torch.Tensor, torch.Tensor | None] = {}
         stack = contextlib.ExitStack()
         # Backends must serialize into the artifact rather than into the
         # process-local inductor cache.
         stack.enter_context(_capture_config(self._training))
-        # Unioned into _live_guard_leaves when the cycle ends, rather than
-        # replacing it: record_live_guard_leaves rebinds a fresh set on every
-        # entry, and _report_guard_drift compares EVERY frame in the package
-        # against it. Keeping only the last cycle's leaves would report every
-        # frame that cycle did not recompile as drifted.
+        # A fresh set per cycle, unioned into _live_guard_leaves when the cycle
+        # ends: _report_guard_drift compares EVERY frame in the package against
+        # it, so keeping only the last cycle's leaves would report every frame
+        # that cycle did not recompile as drifted.
         self._cycle_guard_leaves = stack.enter_context(record_live_guard_leaves())
         self._stack = stack
         try:
@@ -1928,6 +1947,9 @@ class PrecompileSession:
                 finally:
                     self._clear_runtime_cache()
                     self._finished = True
+                    with self._state:
+                        self._entered_thread = None
+                        self._state.notify_all()
             raise
         finally:
             # The SAME grad object, not a copy: a caller holding a prior p.grad
@@ -1966,10 +1988,11 @@ class PrecompileSession:
                 try:
                     self._take_backend_artifacts()
                 finally:
-                    if not self._resumable:
+                    if not self._resumable or self._retired:
                         self._clear_runtime_cache()
                         self._finished = True
                     with self._state:
+                        self._entered_thread = None
                         self._state.notify_all()
         self._recorded_exception_keys.clear()
         # Before the report, so that it describes the artifact actually written.
@@ -2315,7 +2338,7 @@ class PrecompileSession:
                 keep = entry.name not in environment or survives(
                     entry.guard_type,
                     slot[1],
-                    tuple(getattr(entry, "derived_guard_types", ()) or ()),
+                    tuple(entry.derived_guard_types),
                 )
                 if not keep:
                     dropped.add(slot)
@@ -2636,6 +2659,7 @@ class PrecompileSession:
             len(self._variants_without_input_guards),
             self._drifted_guards,
             self._unrendered_backends,
+            self._package.variants_dropped_for_codegen_target,
         )
 
     def _gated_summary(
@@ -3152,8 +3176,13 @@ def serve_cache_entry(
     package = prepared or CompilePackage(
         entry_fn,
         cache_entry.dynamo,
+        # Composed, as capture composes: a serve-time recompile serializes its
+        # guards through this filter under strict_error, so a custom filter
+        # that re-admitted an identity guard would fail the recompile.
         serialization_guard_filter_fn=(
-            default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
+            default_guard_filter_fn
+            if guard_filter_fn is None
+            else _compose_with_default(guard_filter_fn)
         ),
     )
     backend_obj = _PrecompileBackend(backend)

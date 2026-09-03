@@ -56,7 +56,11 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    given as a tuple of positional arguments. ``example_inputs`` is required -- omitting it
    raises ``TypeError`` -- with one exception kept for compatibility: the 2.14 spelling
    ``precompile(fn, *example_args)`` still works, means
-   ``example_inputs=[tuple(example_args)]``, and emits a ``FutureWarning``.
+   ``example_inputs=[tuple(example_args)]``, and emits a ``FutureWarning``. Every
+   positional argument after ``fn`` is an argument of that one call, whatever its type --
+   a lone list or tuple is the call's single argument, not a sequence of calls -- except
+   a lone ``ExampleInput``, which describes a call and so raises ``TypeError`` pointing
+   at ``example_inputs=``.
    precompile makes those calls itself and
    produces a self-contained, runnable Python source string plus an acceleration cache as
    ``(python_code, cache)`` -- returned in memory, or written to ``artifact_path`` and
@@ -118,9 +122,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        inlines the transformed bytecode Dynamo produces into ``python_code``, lowering the
        compiled subgraph through the same ``backend`` choices; it honors ``mark_unbacked``
        dynamic shapes (on either backend, though ``mark_unbacked(strict=True)`` raises --
-       Dynamo captures a strict mark as a guardable backed dim), ``decompositions``, and
+       Dynamo captures a strict mark as a guardable backed dim) and
        training steps (a ``.backward()`` / ``torch.autograd.grad`` is traced into the graph
-       and the parameter gradients are accumulated onto the runtime model like eager).
+       and the parameter gradients are accumulated onto the runtime model like eager); it
+       rejects ``decompositions``.
        ``make_fx`` requires one full graph; use ``tracer="dynamo"`` when Python
        graph-breaks or when several guarded/recompiled variants must be retained.
        The dynamo artifact carries one serialized guard tree per captured variant and
@@ -268,13 +273,37 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    warns and runs the code alone).
 
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
-       positionally, exactly as :func:`torch.compiler.precompile` does.
+       positionally, exactly as :func:`torch.compiler.precompile` does. A ``*args`` or
+       ``**kwargs`` entry is refused before any call runs: the served call binds the
+       entry's named parameters.
    :param artifact_path: File to write ``python_code`` to, rewritten on every call. Required.
    :param cache_path: File to write the acceleration cache to. Required.
+   :param backend: ``"inductor"`` (default) or ``"eager"``, as for
+       :func:`torch.compiler.precompile`.
    :param tracer: ``"dynamo"``, and nothing else -- a make_fx trace is a single graph of a
        single call and has nothing to accumulate.
+   :param guard_filter_fn: Serialization filter, composed (AND) with the default that drops
+       the guards which cannot be serialized; a custom filter can only drop more. Every
+       custom-filter drop counts as risky.
+   :param recompile_limit: Maximum variants captured per frame across all calls; a frame
+       that reaches it is reported as truncated.
+   :param dynamic: Dynamic-shape policy forwarded to ``torch.compile``.
+   :param invariants: Optional path receiving the invariant report, written when the
+       capture closes.
+   :param require_complete: Refuse a render whose capture is incomplete -- a call raised
+       during THIS render's cycle, no frame produced compiled code, a frame hit
+       ``recompile_limit``, or a frame was bypassed. A refused render leaves the files as
+       they were; see above for how the refusal surfaces.
+   :param require_no_risky_drops: Refuse a render that dropped a guard which can affect
+       dispatch, as for :func:`torch.compiler.precompile`.
+   :param require_no_dropped_guards: Refuse a render that dropped ANY guard. Off by default,
+       since every real model drops the identity guards precompile cannot serialize.
+   :param training: Run the calls with grad enabled, for an ``fn`` that performs a backward;
+       the artifact serves under the captured grad mode, not the caller's.
    :returns: A :class:`torch.compiler.AccumulatingCapture`. Call it like ``fn``; it also
-       exposes ``summary()``, ``invariants()``, ``calls()`` and ``close()``.
+       exposes ``summary()``, ``invariants()``, ``calls()`` and ``close()``. Calls from
+       several threads run one at a time, and ``close()`` from any thread waits for a call
+       in flight and the rewrite it ends in.
    :raises PrecompileError: as :func:`torch.compiler.precompile` does, on the call that
        violates the contract.
 
@@ -342,12 +371,12 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        between its two files, or a pair from different calls) is not fatal -- ``load``
        warns and runs ``python_code`` alone.
 
-.. py:class:: precompile.ExampleInput(args=(), kwargs={})
+.. autoclass:: torch.compiler.ExampleInput
 
    One capture call for ``example_inputs`` when positional arguments alone are not
    enough (``tracer="dynamo"`` only). A plain tuple in ``example_inputs`` is the
-   positional arguments of one
-   call; wrap a call that needs keyword arguments in this instead::
+   positional arguments of one call; wrap a call that needs keyword arguments in this
+   instead::
 
        torch.compiler.precompile(
            fn,
@@ -364,8 +393,6 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
 .. autoclass:: torch.compiler.AccumulatingCapture
    :members:
-
-.. autoclass:: torch.compiler.ExampleInput
 
 .. autoclass:: torch.compiler.PrecompileSummary
    :members:

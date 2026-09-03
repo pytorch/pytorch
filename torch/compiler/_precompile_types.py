@@ -119,6 +119,14 @@ class PrecompileSummary:
     # Populated by rendering, so it is filled in on the summary written into
     # an artifact header and empty on a summary() taken before any render.
     unrendered_backends: tuple[tuple[str, str], ...] = ()
+    # Variants Dynamo compiled after inductor's CPU codegen configuration
+    # (the ISA and vector width its kernels are built for) moved away from
+    # the target the capture recorded on its first graph, and so were left
+    # out of the artifact: one artifact carries one codegen target, and a
+    # kernel built for another would fail or miscompute on a host matching the
+    # recorded one. Each was a call the capture ran and did not keep, so a
+    # nonzero count is coverage the summary otherwise does not show as missing.
+    variants_dropped_for_codegen_target: int = 0
 
     @property
     def complete(self) -> bool:
@@ -179,6 +187,11 @@ class PrecompileSummary:
             base += f", {len(self.drifted_guards)} DRIFTED guard(s)"
         if self.unrendered_backends:
             base += f", {len(self.unrendered_backends)} UNRENDERED subgraph(s)"
+        if self.variants_dropped_for_codegen_target:
+            base += (
+                f", {self.variants_dropped_for_codegen_target} variant(s) DROPPED "
+                f"for a changed CPU codegen target"
+            )
         return base
 
 
