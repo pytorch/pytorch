@@ -3,13 +3,19 @@ import importlib
 import os
 import sys
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 
 import torch
+from torch._inductor.codegen.mps import MetalKernel
+from torch._inductor.virtualized import V
 from torch.testing import FileCheck, make_tensor
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     MACOS_VERSION,
     parametrize,
@@ -498,6 +504,87 @@ class MPSBasicTestsAOTI(TestCase):
                 target_count,
                 exactly=True,
             ).run(src_code)
+
+
+class _MetalKernelCallHarness:
+    """Shared harness that drives MetalKernel.call_kernel() with the minimum
+    state it reads. Not a TestCase, so it is not collected and carries no
+    classification; subclasses do."""
+
+    def _stub_kernel(self, kernel_cls):
+        # Build a real MetalKernel subclass instance without running __init__,
+        # providing only the state call_kernel() reads. This exercises the
+        # production call_kernel() code path, not a copy of it.
+        kernel = kernel_cls.__new__(kernel_cls)
+        kernel.args = SimpleNamespace(
+            sizevars=[],
+            output_buffers={},
+            input_buffers={},
+            python_argdefs=lambda: (None, [], None, []),
+        )
+        kernel.removed_buffers = set()
+        kernel.range_trees = []
+        kernel.inside_reduction = False
+        kernel.headers = set()
+        kernel.active_range_trees = list
+        return kernel
+
+    def _capture_generate_kernel_call(self, kernel):
+        wrapper = mock.MagicMock()
+        graph = mock.MagicMock(wrapper_code=wrapper, cpp_wrapper=False)
+        with V.set_graph_handler(graph):
+            kernel.call_kernel("generated_kernel")
+        self.assertTrue(wrapper.generate_kernel_call.called)
+        return wrapper.generate_kernel_call.call_args
+
+
+class TestMetalKernelDeviceType(_MetalKernelCallHarness, TestCase):
+    """MetalKernel.call_kernel() must bind the launch device from the
+    class-level ``device_type`` attribute, so that subclasses reusing the
+    Metal-style call plumbing can retarget it without copying the function.
+    Pure codegen plumbing: no device is ever allocated or initialized."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_default_device_type_is_mps(self):
+        # Contract: the in-tree Metal backend keeps launching on "mps".
+        self.assertEqual(MetalKernel.device_type, "mps")
+
+    def test_call_kernel_follows_class_device_type(self):
+        # "meta" is a core device type present in every build and carries no
+        # accelerator semantics, so the retarget value flows through
+        # call_kernel() as data only.
+        class _RetargetedMetalKernel(MetalKernel):
+            device_type = "meta"
+
+        call = self._capture_generate_kernel_call(
+            self._stub_kernel(_RetargetedMetalKernel)
+        )
+        self.assertEqual(call.args[0], "generated_kernel")
+        self.assertEqual(call.kwargs["device"], torch.device("meta"))
+        self.assertFalse(call.kwargs["triton"])
+
+
+@unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
+class TestMetalKernelDefaultDevice(_MetalKernelCallHarness, TestCase):
+    """On MPS builds, the default launch device bound by call_kernel() must
+    be the instantiated device type."""
+
+    hw_classification = HardwareClassification.MPS
+
+    def test_default_kernel_binds_primary_device(self, device):
+        # ``instantiate_device_type_tests`` passes the primary device with an
+        # index (e.g. "mps:0"), while call_kernel() binds the bare
+        # ``MetalKernel.device_type`` string. Compare types, and pin the
+        # index-free contract of the kernel-side default.
+        call = self._capture_generate_kernel_call(self._stub_kernel(MetalKernel))
+        self.assertEqual(call.kwargs["device"].type, torch.device(device).type)
+        self.assertIsNone(call.kwargs["device"].index)
+
+
+instantiate_device_type_tests(
+    TestMetalKernelDefaultDevice, globals(), only_for=("mps",), allow_mps=True
+)
 
 
 if __name__ == "__main__":
