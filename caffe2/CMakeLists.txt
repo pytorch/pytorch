@@ -1246,6 +1246,14 @@ if(USE_XPU)
       ${TORCH_SRC_DIR}/csrc/api/include
       ${Caffe2_CPU_INCLUDE}
       ${Caffe2_XPU_INCLUDE})
+  # Keep torch-xpu-ops compile flags Python-ABI-agnostic so unified manywheel
+  # jobs can reuse SYCL/C++ objects across per-Python wheel iterations.
+  if(DEFINED Python_INCLUDE_DIRS)
+    list(REMOVE_ITEM TORCH_XPU_OPS_INCLUDE_DIRS ${Python_INCLUDE_DIRS})
+  endif()
+  if(DEFINED Python3_INCLUDE_DIRS)
+    list(REMOVE_ITEM TORCH_XPU_OPS_INCLUDE_DIRS ${Python3_INCLUDE_DIRS})
+  endif()
   # Pass the target as a dependency so that ATen headers generation
   # could be followed by torch-xpu-ops build.
   # 1. Sources in torch-xpu-ops depend on generated ATen headers.
