@@ -45,6 +45,7 @@ directory so you don't force a rebuild against the broken state.
 
 Always check local memory for build configuration (env vars, incremental-build shortcuts, etc.) before running the build, and apply what you find. If nothing applicable is in memory, ask the user.
 All build (both codegen, C++ and python) is done via `pip install -e . -v --no-build-isolation`.
+Unless otherwise instructed, _only_ build for compute capabilities of GPUs present on the local machine by setting `TORCH_CUDA_ARCH_LIST` explicitly.
 You should NEVER run any other command to build PyTorch.
 
 # Testing
