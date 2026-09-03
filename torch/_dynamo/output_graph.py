@@ -1440,13 +1440,16 @@ class OutputGraph(OutputGraphCommon):
         # pending event reachable from either is observable outside.
         roots.extend(self.side_effects.store_attr_mutations.keys())
         roots.extend(self.side_effects._get_modified_vars())
-        # These additional roots can keep objects alive across the
-        # subgraph boundary; include them so the escape scan sees any
-        # event reachable from them.
+        # backward_state and tensor_hooks can also keep objects alive
+        # across the subgraph boundary; include them so the escape
+        # scan sees any event reachable from them.  local_generators is
+        # deliberately excluded: a paused generator's own stack/locals
+        # are not themselves externally visible, and every SideEffects
+        # entry point that makes a value externally visible (store_attr,
+        # store_cell, store_global, container mutations) already routes
+        # through store_attr_mutations or _get_modified_vars() above.
         roots.append(self.backward_state)
         roots.append(self.side_effects.tensor_hooks)
-        for gen in self.local_generators:
-            roots.extend([gen.inline_tracer.stack, gen.inline_tracer.symbolic_locals])
         # visit_keys=True so events stored as set elements or dict
         # keys (wrapped in HashableTracker) are reached; the default
         # visit walks dicts via .values() only.
@@ -2568,12 +2571,12 @@ class OutputGraph(OutputGraphCommon):
                         f"Here are the list of potential sources you can double check: {side_effect_refs}"
                     )
 
-        # close_local_generators traces generator finally bytecode after
-        # the escape scan and can append new violations.  Catch them here.
-        if self._pending_event_record_violations:
-            msgs = [msg for _, msg in self._pending_event_record_violations]
-            self._pending_event_record_violations.clear()
-            raise RuntimeError("\n\n".join(msgs))
+        # close_local_generators and generator reconstruction during
+        # codegen_suffix trace generator finally bytecode after the
+        # scan above and can append new violations.  Re-run the escape
+        # scan (rather than raising unconditionally) so a non-escaping
+        # event recorded in a finally block still compiles.
+        self.raise_pending_event_record_violations_if_escaping(all_stack_values)
 
         return all_stack_locals_metas
 

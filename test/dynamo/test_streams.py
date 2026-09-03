@@ -2224,11 +2224,13 @@ class GraphModule(torch.nn.Module):
             torch.ones(2, 2, device=device)
         )
 
-    def test_event_record_after_input_mutation_in_generator_finally(self, device):
-        # A generator's finally block records an event on a stream that
-        # already has an input mutation.  close_local_generators traces
-        # the finally bytecode after the escape scan, so this exercises
-        # the end-of-compile_subgraph check.
+    def test_event_record_after_input_mutation_non_escaping_generator_finally(
+        self, device
+    ):
+        # The event is created and recorded inside a generator's finally
+        # block and never escapes -- close_local_generators traces the
+        # finally bytecode after the first escape scan, so this exercises
+        # the second scan at the end of compile_subgraph.
         def gen(s):
             try:
                 yield
@@ -2244,9 +2246,34 @@ class GraphModule(torch.nn.Module):
                 next(g)
             return x + 1
 
+        torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.ones(2, 2, device=device)
+        )
+
+    def test_event_record_after_input_mutation_escapes_via_generator_finally(
+        self, device
+    ):
+        # Same as above, but the finally block appends the event to a
+        # pre-existing list argument -- it does escape and must error.
+        def gen(s, holder):
+            try:
+                yield
+            finally:
+                e = torch.Event(device=device)
+                e.record(s)
+                holder.append(e)
+
+        def fn(x, holder):
+            s = torch.Stream(device=device)
+            with s:
+                x.add_(1)
+                g = gen(s, holder)
+                next(g)
+            return x + 1
+
         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
             torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.ones(2, 2, device=device)
+                torch.ones(2, 2, device=device), []
             )
 
     def test_event_record_before_input_mutation_no_error(self, device):
