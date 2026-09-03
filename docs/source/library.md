@@ -165,6 +165,7 @@ relationships.
 
 ```{eval-rst}
 .. autofunction:: custom_op
+.. autofunction:: flydsl_op
 .. autofunction:: triton_op
 .. autofunction:: wrap_triton
 .. autofunction:: wrap_flydsl

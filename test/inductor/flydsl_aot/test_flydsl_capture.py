@@ -18,6 +18,7 @@ from torch._higher_order_ops.flydsl_kernel_wrap import (
     TraceableFlyDSLLauncher,
 )
 from torch._inductor.codegen.flydsl.flydsl_utils import runtime_available
+from torch._library.utils import get_layout_constraint_tag
 from torch.testing._internal.common_utils import TestCase
 
 
@@ -472,6 +473,196 @@ class FlyDSLCaptureTest(TestCase):
                 (0, 1),
                 (0,),
             )
+
+    def test_flydsl_op_is_opaque_to_symbolic_trace(self):
+        captured_launcher = torch.library.wrap_flydsl(
+            _launcher,
+            mutates_args={"out"},
+        )
+
+        @torch.library.flydsl_op(
+            "test_flydsl_capture::symbolic_trace",
+            mutates_args=(),
+        )
+        def flydsl_add(inp: torch.Tensor) -> torch.Tensor:
+            if inp.shape[1] != 8:
+                raise ValueError("expected width eight")
+            out = torch.empty_like(inp)
+            captured_launcher(out=out, inp=inp, rows=inp.numel())
+            return out
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                return flydsl_add(inp)
+
+        traced = torch.fx.symbolic_trace(Model())
+
+        nodes = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops.test_flydsl_capture.symbolic_trace.default,
+        )
+        self.assertEqual(1, len(nodes))
+
+    def test_flydsl_op_preserves_exact_strides_by_default(self):
+        captured_launcher = torch.library.wrap_flydsl(
+            _launcher,
+            mutates_args={"out"},
+        )
+
+        @torch.library.flydsl_op(
+            "test_flydsl_capture::exact_strides",
+            mutates_args=(),
+        )
+        def flydsl_add(inp: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(inp)
+            captured_launcher(out=out, inp=inp, rows=inp.numel())
+            return out
+
+        self.assertEqual(
+            torch._C.Tag.needs_exact_strides,
+            get_layout_constraint_tag(
+                torch.ops.test_flydsl_capture.exact_strides.default
+            ),
+        )
+
+        example = torch.randn(8, 4).t()
+        self.assertEqual((1, 4), example.stride())
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                return flydsl_add(inp)
+
+        exported = torch.export.export(Model(), (example,))
+        custom_op_node = exported.graph_module.graph.find_nodes(
+            op="call_function",
+            target=torch.ops.test_flydsl_capture.exact_strides.default,
+        )[0]
+        input_node = custom_op_node.args[0]
+        self.assertIsInstance(input_node, torch.fx.Node)
+        self.assertEqual(example.stride(), input_node.meta["val"].stride())
+
+    def test_flydsl_op_decomposes_for_export(self):
+        captured_launcher = torch.library.wrap_flydsl(
+            _launcher,
+            mutates_args={"out"},
+        )
+
+        @torch.library.flydsl_op(
+            "test_flydsl_capture::export",
+            mutates_args=(),
+        )
+        def flydsl_add(inp: torch.Tensor) -> torch.Tensor:
+            if inp.shape[1] != 8:
+                raise ValueError("expected width eight")
+            out = torch.empty_like(inp)
+            captured_launcher(out=out, inp=inp, rows=inp.numel())
+            return out
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                return flydsl_add(inp)
+
+        batch = torch.export.Dim("batch", min=1, max=32)
+        exported = torch.export.export(
+            Model(),
+            (torch.randn(4, 8),),
+            dynamic_shapes=({0: batch},),
+        )
+
+        custom_op_nodes = exported.graph_module.graph.find_nodes(
+            op="call_function",
+            target=torch.ops.test_flydsl_capture.export.default,
+        )
+        self.assertEqual(1, len(custom_op_nodes))
+
+        decomposed = exported.run_decompositions()
+        flydsl_nodes = decomposed.graph_module.graph.find_nodes(
+            op="call_function",
+            target=flydsl_kernel_wrapper_functional,
+        )
+        self.assertEqual(1, len(flydsl_nodes))
+
+    def test_flydsl_op_preserves_mutation_when_decomposed(self):
+        captured_launcher = torch.library.wrap_flydsl(
+            _launcher,
+            mutates_args={"out"},
+        )
+
+        @torch.library.flydsl_op(
+            "test_flydsl_capture::mutation",
+            mutates_args={"out"},
+        )
+        def flydsl_copy(out: torch.Tensor, inp: torch.Tensor) -> None:
+            captured_launcher(out=out, inp=inp, rows=inp.numel())
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                out = torch.empty_like(inp)
+                flydsl_copy(out, inp)
+                return out
+
+        exported = torch.export.export(Model(), (torch.randn(8),))
+        decomposed = exported.run_decompositions()
+
+        nodes = decomposed.graph_module.graph.find_nodes(
+            op="call_function",
+            target=flydsl_kernel_wrapper_functional,
+        )
+        self.assertEqual(1, len(nodes))
+        self.assertEqual((0,), nodes[0].kwargs["mutated_arg_indices"])
+
+    def test_flydsl_op_decomposes_multiple_launchers_and_aten(self):
+        captured_launcher = torch.library.wrap_flydsl(
+            _launcher,
+            mutates_args={"out"},
+        )
+
+        @torch.library.flydsl_op(
+            "test_flydsl_capture::composed",
+            mutates_args=(),
+        )
+        def composed(inp: torch.Tensor) -> torch.Tensor:
+            intermediate = torch.empty_like(inp)
+            captured_launcher(
+                out=intermediate,
+                inp=inp,
+                rows=inp.numel(),
+            )
+            shifted = intermediate + 1
+            out = torch.empty_like(inp)
+            captured_launcher(
+                out=out,
+                inp=shifted,
+                rows=shifted.numel(),
+            )
+            return out
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                return composed(inp)
+
+        batch = torch.export.Dim("batch", min=1, max=32)
+        exported = torch.export.export(
+            Model(),
+            (torch.randn(4, 8),),
+            dynamic_shapes=({0: batch},),
+        )
+        decomposed = exported.run_decompositions()
+
+        flydsl_nodes = decomposed.graph_module.graph.find_nodes(
+            op="call_function",
+            target=flydsl_kernel_wrapper_functional,
+        )
+        aten_nodes = decomposed.graph_module.graph.find_nodes(
+            op="call_function",
+            target=torch.ops.aten.add.Tensor,
+        )
+        self.assertEqual(2, len(flydsl_nodes))
+        self.assertEqual(1, len(aten_nodes))
+        for node in flydsl_nodes:
+            rows = node.kwargs["args"][2]
+            self.assertIsInstance(rows, torch.fx.Node)
+            self.assertIsInstance(rows.meta["val"], torch.SymInt)
 
 
 if __name__ == "__main__":
