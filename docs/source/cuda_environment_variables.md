@@ -17,7 +17,6 @@ For more information on CUDA runtime environment variables, see [CUDA Environmen
 | `TORCH_CUBLAS_WORKSPACE_CACHE` | If set to `1`, retains ATen's cuBLAS and cuBLASLt workspaces per handle and stream instead of allocating them for each ATen operation, which is the default. This is separate from the CUDA allocator's caching of freed device memory. Persistent ATen workspaces should not be used when capturing multiple CUDA graphs on the same stream. Handles returned by `torch.cuda.current_blas_handle()` use cuBLAS's default workspace when this variable is unset. |
 | `TORCH_CUBLASLT_UNIFIED_WORKSPACE` | Controls whether cached cuBLAS and cuBLASLt workspaces share an allocation. This only takes effect when `TORCH_CUBLAS_WORKSPACE_CACHE=1`. |
 | `TORCH_NCCL_USE_COMM_NONBLOCKING` | If set to `1`, enables non-blocking error handling in NCCL. |
-| `TORCH_NCCL_AVOID_RECORD_STREAMS` | If set to `0`, enables fallback to record streams-based synchronization behavior in NCCL. |
 | `TORCH_CUDNN_V8_API_DEBUG` | If set to `1`, sanity check whether cuDNN V8 is being used. |
 
 **CUDA Runtime and Libraries Environment Variables**
