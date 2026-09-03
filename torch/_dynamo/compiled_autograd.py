@@ -45,10 +45,18 @@ from torch._functorch._aot_autograd.runtime_wrappers import (
     _pruned_backward_output_indices_for_undefined_grad_outputs,
     _specializable_user_grad_output_mask,
     _specialize_bw_module_for_undefined_grad_outputs,
+    _tracing_context_compile_lock,
     AutogradLazyBackwardCompileInfo,
     CachedAutogradLazyBackwardCompileInfo,
 )
-from torch._guards import compile_context, CompileContext, CompileId, Source, tracing
+from torch._guards import (
+    compile_context,
+    CompileContext,
+    CompileId,
+    Source,
+    tracing,
+    TracingContext,
+)
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
@@ -586,7 +594,17 @@ class AutogradCompilerInstance:
                 retrace_decline_reasons: list[str] = []
 
                 def _retrace() -> Any:
+                    # Same per-context lock as the runtime path: the retrace
+                    # re-runs the joint trace under the shared TracingContext's
+                    # fake mode, which is not safe to use from two threads.
+                    saved_context = lazy_backward_info.saved_context
+                    retrace_lock = (
+                        _tracing_context_compile_lock(saved_context)
+                        if isinstance(saved_context, TracingContext)
+                        else contextlib.nullcontext()
+                    )
                     with (
+                        retrace_lock,
                         _disable(),
                         tracing(lazy_backward_info.saved_context),
                         compile_context(lazy_backward_info.saved_compile_context),
