@@ -2983,15 +2983,42 @@ class TestSDPACudaOnly(NNTestCase):
             torch.backends.cuda.preferred_rocm_fa_library("ck")
         try:
             shape = (0, num_heads, seqlen, head_dim)
-            q, k, v = (torch.randn(shape, device=device, dtype=dtype) for _ in range(3))
+            q, k, v = (torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+                       for _ in range(3))
 
             out, lse = torch.ops.aten._scaled_dot_product_flash_attention(q, k, v)[:2]
             self.assertEqual(out.shape, torch.Size(shape))
             self.assertEqual(out.dtype, dtype)
             self.assertEqual(lse.shape, torch.Size((0, num_heads, seqlen)))
 
+            # An empty forward must also produce empty grads rather than abort in mha_bwd.
+            # Both grad shapes matter: a dense grad, and the stride-0 expanded grad that
+            # out.sum().backward() produces -- the latter used to trip mha_bwd_ck's dout
+            # contiguity check before it ever reached the empty-batch path.
+            for label, reduce_fn in (
+                ("dense grad", lambda t: t.backward(torch.randn_like(t))),
+                ("scalar reduction", lambda t: t.sum().backward()),
+            ):
+                grad_q, grad_k, grad_v = (
+                    torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+                    for _ in range(3)
+                )
+                grad_out = torch.ops.aten._scaled_dot_product_flash_attention(
+                    grad_q, grad_k, grad_v)[0]
+                reduce_fn(grad_out)
+                for name, tensor in (("query", grad_q), ("key", grad_k), ("value", grad_v)):
+                    self.assertIsNotNone(tensor.grad, f"{name} got no grad from {label}")
+                    self.assertEqual(tensor.grad.shape, torch.Size(shape))
+
+            # The remaining entries are ROCm-only. CUDA implements the empty-batch early
+            # return in mha_fwd and mha_bwd but not in mha_varlen_fwd, whose
+            # TORCH_CHECK(batch_size > 0) still aborts (flash_api.cpp), and its
+            # mem-efficient path is separate code that makes no such guarantee.
+            if not TEST_WITH_ROCM:
+                return
+
             eff_out = torch.ops.aten._scaled_dot_product_efficient_attention(
-                q, k, v, None, False)[0]
+                q.detach(), k.detach(), v.detach(), None, False)[0]
             self.assertEqual(eff_out.shape, torch.Size(shape))
 
             # Varlen entry: zero sequences, so cu_seqlens degenerates to a single 0.
