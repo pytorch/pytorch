@@ -367,6 +367,22 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x).dtype, torch.float32)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_autocast_object_from_constant_source(self):
+        # A ConstantSource has no guardable expression, so the value guards must
+        # be skipped rather than raise from AttrSource.make_guard.
+        @torch._dynamo.assume_constant_result
+        def get_ctx():
+            return torch.amp.autocast("cpu", dtype=torch.bfloat16)
+
+        weight = torch.randn(4, 4)
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            with get_ctx():
+                return x @ weight
+
+        self.assertEqual(fn(torch.randn(4, 4)).dtype, torch.bfloat16)
+
     def test_autocast_cpu(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -767,6 +783,7 @@ class GraphModule(torch.nn.Module):
             torch.set_autocast_enabled("cpu", True)
             torch.set_autocast_dtype("cpu", torch.bfloat16)
             torch.set_autocast_cache_enabled(True)
+            torch.autocast_increment_nesting()
             x = x @ y
             torch.autocast_decrement_nesting()
             torch.clear_autocast_cache()
@@ -776,6 +793,8 @@ class GraphModule(torch.nn.Module):
         prev_enabled = torch.is_autocast_enabled("cpu")
         prev_dtype = torch.get_autocast_dtype("cpu")
         prev_cache = torch.is_autocast_cache_enabled()
+        nesting_before = torch.autocast_increment_nesting() - 1
+        torch.autocast_decrement_nesting()
 
         try:
             opt_f = torch.compile(f, backend="eager", fullgraph=True)
@@ -786,6 +805,9 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(out, opt_out)
             self.assertEqual(out.dtype, opt_out.dtype)
             self.assertFalse(torch.is_autocast_enabled("cpu"))
+            nesting_after = torch.autocast_increment_nesting() - 1
+            torch.autocast_decrement_nesting()
+            self.assertEqual(nesting_after, nesting_before)
         finally:
             torch.set_autocast_enabled("cpu", prev_enabled)
             torch.set_autocast_dtype("cpu", prev_dtype)
