@@ -10,6 +10,7 @@ import os
 import pickle
 import sys
 import sysconfig
+import textwrap
 import types
 from unittest import mock
 
@@ -586,6 +587,41 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         for (a_name, a), (b_name, b) in itertools.combinations(sets.items(), 2):
             self.assertEqual(sorted(a & b), [], f"{a_name} overlaps {b_name}")
+
+    def test_subgraph_renaming_leaves_lookalikes_alone(self):
+        # Per-subgraph renaming is driven by AST positions. An attribute
+        # (runner.call), a nested def (call inside class Runner) and a dotted
+        # import path (torch._inductor.async_compile) each contain a renamed
+        # name as text and must not be rewritten.
+        from torch._dynamo.precompile_package import _namespace_module_names
+
+        source = textwrap.dedent(
+            """
+            import torch._inductor.async_compile
+            from torch._inductor import async_compile
+
+
+            class Runner:
+                def call(self, x):
+                    return x
+
+
+            runner = Runner()
+
+
+            def call(x):
+                return runner.call(x) + torch._inductor.async_compile.__name__
+            """
+        )
+        (renamed,) = _namespace_module_names({"b0": source}).values()
+        self.assertIn("class Runner_s0:", renamed)
+        self.assertIn("runner_s0 = Runner_s0()", renamed)
+        self.assertIn("def call_s0(x):", renamed)
+        self.assertIn("    def call(self, x):", renamed)
+        self.assertIn(
+            "return runner_s0.call(x) + torch._inductor.async_compile.__name__", renamed
+        )
+        self.assertIn("import torch._inductor.async_compile\n", renamed)
 
     # Every shape found to split a compilation while the report called it an
     # invariant. The fingerprint has failed open three times -- shapes, then
