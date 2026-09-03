@@ -2049,16 +2049,18 @@ static void svd_kernel_mps(const Tensor& A,
   const int64_t v_staging_bytes = k * k * elem_size;
   const bool stage_v = compute_uv && (staging_bytes + v_staging_bytes <= tg_limit);
   const bool too_large = (staging_bytes > tg_limit);
-  const bool too_small = (batch * m * n < 8192);
 
-  if (too_large || too_small) {
-    if (too_large) {
-      TORCH_WARN_ONCE("linalg.svd: matrix too large to stage in MPS threadgroup memory (",
-                      staging_bytes,
-                      " > ",
-                      tg_limit,
-                      " bytes); falling back to CPU.");
-    }
+  // Only matrices too big to stage in threadgroup memory fall back to CPU. The
+  // native kernel wins at every batch size for a tensor already on-device: the
+  // CPU fallback pays two data transfers on top of the linalg.svd convergence
+  // check's mandatory device->host sync, so gating small inputs to CPU was 3-6x
+  // slower, not faster.
+  if (too_large) {
+    TORCH_WARN_ONCE("linalg.svd: matrix too large to stage in MPS threadgroup memory (",
+                    staging_bytes,
+                    " > ",
+                    tg_limit,
+                    " bytes); falling back to CPU.");
     auto [U_cpu, S_cpu, Vh_cpu] = at::linalg_svd(A.to(at::kCPU), full_matrices, driver);
     if (compute_uv) {
       const_cast<Tensor&>(U).copy_(U_cpu.to(at::kMPS));
