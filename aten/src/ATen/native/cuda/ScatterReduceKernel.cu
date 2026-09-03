@@ -265,9 +265,6 @@ void scatter_reduce_minmax_kernel_launch(
       scalar_t*, const scalar_t*, index_t*, int, int, int64_t, int64_t, int64_t); \
   template void scatter_reduce_minmax_kernel_launch<                        \
       scalar_t, index_t, is_max, 4>(                                         \
-      scalar_t*, const scalar_t*, index_t*, int, int, int64_t, int64_t, int64_t); \
-  template void scatter_reduce_minmax_kernel_launch<                        \
-      scalar_t, index_t, is_max, 2>(                                         \
       scalar_t*, const scalar_t*, index_t*, int, int, int64_t, int64_t, int64_t);
 
 #define INSTANTIATE_SCATTER_REDUCE_MINMAX_INDEX(scalar_t, index_t) \

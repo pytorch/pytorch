@@ -272,26 +272,6 @@ struct _cuda_scatter_gather_internal_kernel {
             }
             return;
           }
-          if (D % 2 == 0 &&
-              at::native::fast_scatter_reduce_kernel_eligible<4>(
-                  iter, self_ptr, src_ptr, self_stride_bytes, element_size)) {
-            if constexpr (std::is_same_v<func_t, ReduceMaximum>) {
-              at::native::scatter_reduce_minmax_kernel_launch<
-                  scalar_t, index_t, true, 2>(
-                  reinterpret_cast<scalar_t*>(self_ptr),
-                  reinterpret_cast<const scalar_t*>(src_ptr),
-                  reinterpret_cast<index_t*>(index_ptr), num_ind, D, index_size,
-                  self_stride_bytes, src_stride_bytes);
-            } else {
-              at::native::scatter_reduce_minmax_kernel_launch<
-                  scalar_t, index_t, false, 2>(
-                  reinterpret_cast<scalar_t*>(self_ptr),
-                  reinterpret_cast<const scalar_t*>(src_ptr),
-                  reinterpret_cast<index_t*>(index_ptr), num_ind, D, index_size,
-                  self_stride_bytes, src_stride_bytes);
-            }
-            return;
-          }
         }
 #endif
       }
