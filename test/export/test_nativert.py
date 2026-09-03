@@ -396,9 +396,7 @@ class TestNativeRTAccelerator(TestNativeRT):
 
 
 instantiate_device_type_tests(TestNativeRT, globals(), only_for="cpu")
-instantiate_device_type_tests(
-    TestNativeRTAccelerator, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(TestNativeRTAccelerator, globals(), except_for="cpu")
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
