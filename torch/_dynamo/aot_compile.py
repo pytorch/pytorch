@@ -541,24 +541,36 @@ class AOTCompiledModel:
 
     @classmethod
     def deserialize(cls, model: torch.nn.Module, data: bytes) -> "AOTCompiledModel":
+        """Rebuild the compiled forward of ``model`` from ``serialize()`` output.
+
+        Guards on globals are evaluated, by reference, against the live
+        ``__globals__`` of the function ``model.forward`` resolves to. That dict
+        is mutated: the ``__import_*`` aliases the artifact recorded at capture
+        are inserted (never overwriting an existing key) so guards rooted at
+        them resolve in a process that never traced. A guarded global the dict
+        lacks fails the guard; there is no fallback to the serialized scope.
+        The compiled bytecode itself still reads the globals serialized with
+        the artifact, not this dict. Only when ``model.forward`` is neither a
+        function nor a bound method is there no live scope to use, and guards
+        then resolve against the reconstructed one, with a warning.
+        """
         from torch._dynamo.utils import get_metrics_context
         from torch._guards import compile_context, CompileContext
 
-        # Global guards need the traced function's live scope, which the
-        # serialized bytecode cannot reconstruct. Resolve from model.forward, not
-        # the model: for a hooked module get_traced_fn would return
-        # Module._wrapped_call_impl and nn.Module's namespace. A forward that is
-        # not a plain function or bound method has no such scope; fall back to
-        # the reconstructed one so an artifact without global guards still loads.
+        # Resolve from model.forward, not the model: for a hooked module
+        # get_traced_fn would return Module._wrapped_call_impl and nn.Module's
+        # namespace.
         try:
             traced_fn, _ = convert_frame.get_traced_fn(model.forward)
             guard_globals = traced_fn.__globals__
         except RuntimeError:
-            log.info(
-                "Could not resolve a guard scope from %s.forward; global guards "
-                "will resolve against the reconstructed scope instead",
+            log.warning(
+                "%s.forward is %r, not a function or bound method, so no live "
+                "guard scope could be resolved; global guards on this artifact "
+                "resolve against the scope reconstructed from the serialized "
+                "bytecode instead",
                 type(model).__name__,
-                exc_info=True,
+                model.forward,
             )
             guard_globals = None
 

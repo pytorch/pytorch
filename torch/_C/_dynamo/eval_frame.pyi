@@ -43,6 +43,7 @@ class _CacheEntry:
     guard_manager: GuardManagerWrapper
     backend: Callable
     isolate_recompiles_id: int
+    trace_annotation: str
 
 class _PrecompileEntry:
     guard_manager: GuardManagerWrapper
@@ -51,7 +52,6 @@ class _PrecompileEntry:
 class _ExtraState:
     def invalidate(
         self,
-        cache_entry: _CacheEntry,
         guard_manager: GuardManagerWrapper,
         live_guard_manager: GuardManagerWrapper,
     ) -> None: ...

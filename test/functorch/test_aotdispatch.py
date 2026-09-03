@@ -5332,6 +5332,24 @@ def forward(self, tangents_1):
         outs[0].sum().backward()
         self.assertEqual(x.grad, x_ref.grad)
 
+    def test_dealias_marked_returns_rebinds_only_colliding_marked_slots(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _dealias_marked_returns,
+        )
+
+        y, z, w = torch.randn(4), torch.randn(4), torch.randn(4)
+        raw = [y, y, z, w, w, 7]
+        _dealias_marked_returns(raw, [1, 3, 4, 5])
+        # Only a marked slot sharing its TensorImpl with an UNMARKED slot is rebound.
+        self.assertIsNot(raw[1], y)
+        self.assertEqual(raw[1].data_ptr(), y.data_ptr())
+        self.assertIs(raw[0], y)
+        self.assertIs(raw[2], z)
+        # Two marked slots holding one object both get marked anyway: keep identity.
+        self.assertIs(raw[3], w)
+        self.assertIs(raw[4], w)
+        self.assertEqual(raw[5], 7)
+
     def test_input_mutation_on_custom_function_view_diverges_from_eager_with_warning(
         self,
     ):
@@ -5339,12 +5357,10 @@ def forward(self, tangents_1):
         # IN_CUSTOM_FUNCTION; eager refuses an autograd-visible in-place op on
         # it. Compile cannot tell that write from a .data one at the region
         # boundary, so it replays the mutation invisibly (warning once per
-        # process and input): the values land, but a later use of the view
-        # differentiates through its pre-mutation history -- the custom
+        # compiled graph and input): the values land, but a later use of the
+        # view differentiates through its pre-mutation history -- the custom
         # Function's backward runs on the post-mutation values and the
         # mutating op contributes nothing (x gets no gradient).
-        from torch._functorch._aot_autograd import runtime_wrappers as rw
-
         class Scale(torch.autograd.Function):
             @staticmethod
             def forward(ctx, t):
@@ -5370,7 +5386,6 @@ def forward(self, tangents_1):
             torch.randn(4, requires_grad=True) * 1.0, torch.randn(4, requires_grad=True)
         )
 
-        rw._warn_replayed_custom_function_view.cache_clear()
         base = torch.randn(4, requires_grad=True)
         x = torch.randn(4, requires_grad=True)
         w = Scale.apply(base * 1.0)
@@ -5466,6 +5481,111 @@ def forward(self, tangents_1):
         ref = run(body)
         torch._dynamo.reset()
         self.assertEqual(run(torch.compile(body, backend="aot_eager")), ref)
+
+    def test_input_mutation_under_no_grad_on_custom_function_view_matches_eager(
+        self,
+    ):
+        # Autograd only refuses the in-place write to an IN_CUSTOM_FUNCTION view
+        # under grad mode; with grad mode off eager writes it tracked and bumps
+        # the version counter, which is what later catches the stale saved
+        # tensor. The replay has to keep that copy_ rather than hide the write,
+        # or the backward silently differentiates through stale values.
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, t):
+                return t
+
+            @staticmethod
+            def backward(ctx, g):
+                return g * 3
+
+        def body(w, x):
+            w.add_(x)
+            return w + 1
+
+        def run(f):
+            base = torch.randn(4, requires_grad=True)
+            w = Scale.apply(base * 1.0)
+            loss = (w * w).sum()
+            with torch.no_grad():
+                f(w, torch.randn(4))
+            self.assertEqual(w._version, 1)
+            with self.assertRaises(RuntimeError) as cm:
+                loss.backward()
+            return str(cm.exception)
+
+        self.assertEqual(run(aot_function(body, nop)), run(body))
+
+    def test_custom_function_view_warning_is_per_compiled_graph(self):
+        # torch._dynamo.reset() restarts the compile id counter, so the second
+        # graph is handed the id the first one warned under. The warning is
+        # gated by state each graph's epilogue owns, so it still fires once for
+        # the second graph, and once only across repeated replays.
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, t):
+                return t
+
+            @staticmethod
+            def backward(ctx, g):
+                return g * 3
+
+        def add(w, x):
+            w.add_(x)
+            return (w * x).sum()
+
+        def sub(w, x):
+            w.sub_(x)
+            return (w * x).sum()
+
+        messages = []
+        for body in (add, sub):
+            torch._dynamo.reset()
+            compiled = torch.compile(body, backend="aot_eager")
+            compiled(torch.randn(4, requires_grad=True) * 1.0, torch.randn(4))
+            w = Scale.apply(torch.randn(4, requires_grad=True) * 1.0)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                compiled(w, torch.randn(4))
+                compiled(w, torch.randn(4))
+            hits = [c for c in caught if "without autograd tracking" in str(c.message)]
+            self.assertEqual(len(hits), 1)
+            messages.append(str(hits[0].message))
+        self.assertIn("mutated input 0 of compiled graph [", messages[0])
+        self.assertEqual(messages[0], messages[1])
+
+    def test_input_mutation_hidden_from_autograd_replays_without_warning(self):
+        # The traced write happened under no_grad, so autograd never saw it and
+        # replaying it invisibly onto an IN_CUSTOM_FUNCTION view is the write
+        # that actually happened, not the divergence the warning describes.
+        # aot_function keeps the mutation out of the graph, so it still reaches
+        # the epilogue.
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, t):
+                return t
+
+            @staticmethod
+            def backward(ctx, g):
+                return g * 3
+
+        def body(w, x):
+            with torch.no_grad():
+                w.add_(x)
+            return x * 2
+
+        f = aot_function(body, nop)
+        f(torch.randn(4, requires_grad=True) * 1.0, torch.randn(4))
+        base = torch.randn(4, requires_grad=True)
+        w = Scale.apply(base * 1.0)
+        version = w._version
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            f(w, torch.ones(4))
+        hits = [c for c in caught if "without autograd tracking" in str(c.message)]
+        self.assertEqual(hits, [])
+        self.assertEqual(w.detach(), base.detach() + 1)
+        self.assertEqual(w._version, version)
 
     def test_none_tangent_in_kept_slot_names_the_forward_output(self):
         # Disabling the marking dedup puts a None back in the kept
