@@ -307,24 +307,22 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       unset(_omp_clang_lib)
     endif()
 
-    if (NOT OpenMP_libomp_LIBRARY)
-      find_library(OpenMP_libomp_LIBRARY
-        NAMES omp gomp iomp5
-        HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
-        DOC "libomp location for OpenMP"
-      )
-      mark_as_advanced(OpenMP_libomp_LIBRARY)
-    endif()
-
     # Use OpenMP_PREFIX if defined
-    if (NOT OpenMP_libomp_LIBRARY AND NOT "${OpenMP_PREFIX}" STREQUAL "")
+    if (NOT "${OpenMP_PREFIX}" STREQUAL "")
       find_library(OpenMP_libomp_LIBRARY
         NAMES omp gomp iomp5
         HINTS "${OpenMP_PREFIX}/lib"
         DOC "libomp location for OpenMP"
+        NO_DEFAULT_PATH
       )
-      mark_as_advanced(OpenMP_libomp_LIBRARY)
     endif()
+
+    find_library(OpenMP_libomp_LIBRARY
+      NAMES omp gomp iomp5 NAMES_PER_DIR
+      HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
+      DOC "libomp location for OpenMP"
+    )
+    mark_as_advanced(OpenMP_libomp_LIBRARY)
 
     if(OpenMP_libomp_LIBRARY MATCHES "iomp5")
       set(OpenMP_libiomp5_LIBRARY "${MKL_OPENMP_LIBRARY}" CACHE STRING "libiomp5 location for OpenMP")
