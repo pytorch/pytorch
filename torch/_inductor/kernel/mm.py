@@ -440,7 +440,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         if use_decompose_k_choice(m, n, k):
             templates_to_use.append(decompose_k_subgraph_template)
             if (
-                inductor_config.triton.enable_blackwell_decompose_k_partial
+                inductor_config.triton.enable_blackwell_decompose_k
                 and use_triton_blackwell_tma_template(
                     mat1, mat2, output_layout=layout, add_guards=True
                 )
