@@ -5332,6 +5332,24 @@ def forward(self, tangents_1):
         outs[0].sum().backward()
         self.assertEqual(x.grad, x_ref.grad)
 
+    def test_dealias_marked_returns_rebinds_only_colliding_marked_slots(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _dealias_marked_returns,
+        )
+
+        y, z, w = torch.randn(4), torch.randn(4), torch.randn(4)
+        raw = [y, y, z, w, w, 7]
+        _dealias_marked_returns(raw, [1, 3, 4, 5])
+        # Only a marked slot sharing its TensorImpl with an UNMARKED slot is rebound.
+        self.assertIsNot(raw[1], y)
+        self.assertEqual(raw[1].data_ptr(), y.data_ptr())
+        self.assertIs(raw[0], y)
+        self.assertIs(raw[2], z)
+        # Two marked slots holding one object both get marked anyway: keep identity.
+        self.assertIs(raw[3], w)
+        self.assertIs(raw[4], w)
+        self.assertEqual(raw[5], 7)
+
     def test_none_tangent_in_kept_slot_names_the_forward_output(self):
         # Disabling the marking dedup puts a None back in the kept
         # intermediate-base slot (tangent 1; tangent 0 is x * 3).
