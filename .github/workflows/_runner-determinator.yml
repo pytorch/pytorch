@@ -67,6 +67,11 @@ on:
       amd-do-label-type:
         description: Deprecated no-op alias; removed by the amd-do cleanup PR.
         value: ${{ '' }}
+      # Empty until runner_determinator.py emits an amd-dpx- prefix (same pattern
+      # as amd-sandbox-label-type). Trunk.yml already consumes this output.
+      amd-dpx-label-type:
+        description: Runner prefix for the amd-dpx experiment (empty until wired)
+        value: ${{ '' }}
       ci-docker-hash:
         description: "Git tree hash of .ci/docker, used as the suffix of CI docker image tags"
         value: ${{ jobs.runner-determinator.outputs.ci-docker-hash }}
