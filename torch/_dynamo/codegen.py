@@ -49,7 +49,6 @@ from .variables.functions import (
     LocalGeneratorObjectVariable,
 )
 from .variables.lazy import ComputedLazyConstantVariable
-from .variables.nn_module import NNModuleVariable
 from .variables.script_object import CustomClassObjectVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -234,7 +233,7 @@ class PyCodegen:
            `value` based on source.
         2. `self.uses[value]` will increment, unless (a). we codegen via
             `top_of_stack` or cached `tempvars`, or (b). `value` has special VT
-            types like `NNModuleVariable`, etc.
+            types with their own reconstruction handling.
         """
         if value is None:
             raise AssertionError("value must not be None")
@@ -418,17 +417,6 @@ class PyCodegen:
                     self.load_graph_output(graph_outputs[graph_outputs_key].index)
             else:
                 self.load_graph_output(graph_outputs[graph_outputs_key].index)
-        elif isinstance(value, NNModuleVariable):
-            parts = value.module_key.split(".")
-            if parts[0] in self.code_options["co_varnames"]:
-                output.append(self.create_load(parts[0]))
-                parts = parts[1:]
-            else:
-                if self.root is None:
-                    raise AssertionError("self.root must not be None")
-                output.append(self.create_load_const_unchecked(self.root))
-            for part in parts:
-                output.append(self.create_load_attr(part))
         else:
             self.uses[value] += 1
             try:

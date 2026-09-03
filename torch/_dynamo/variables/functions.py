@@ -1804,33 +1804,7 @@ class UserMethodVariable(UserFunctionVariable):
             )
             return var.call_function(tx, call_args, kwargs)
 
-        # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
-        # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
-        # since we ensure `forward` of allowed modules can be traced by AOT safely.
-        # Note this is not only for allowed modules, as user customized modules can extend from
-        # allowed modules but using parent's `forward` method, which is also covered by this branch.
-
-        # If we are tracing the higher order op, we want Dynamo to step inside
-        # the module call so that Dynamo can see the underlying parameters and
-        # buffers and raise them as inputs to the graph. The is_root_tracer
-        # check bypasses the if condition for non-root tracers and directly
-        # calls the super().call_function at the end, which is basically
-        # equivalent of inlining the method.
-        if tx.output.is_root_tracer() and isinstance(
-            self.obj, variables.NNModuleVariable
-        ):
-            module_attr = getattr(self.fn, "__module__", "")
-            # inline torch.nn.utils.parametrize
-            if (
-                module_attr is not None
-                and module_attr.startswith("torch.nn.")
-                and module_attr != "torch.nn.utils.parametrize"
-                or self.is_constant
-            ):
-                return self.obj.call_method(
-                    tx, self.fn.__name__, list(args), kwargs, constant=self.is_constant
-                )
-        elif (
+        if (
             _fsdp_param_group is not None
             and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state  # type: ignore[attr-defined]
         ):

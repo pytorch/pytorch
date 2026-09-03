@@ -770,7 +770,6 @@ class BuiltinVariable(BaseBuiltinVariable):
         # match. They are expected to have the signature:
         # fn(tx, arg0: VariableTracker, arg1: VariableTracker) -> VariableTracker
         from .functions import BaseUserFunctionVariable
-        from .nn_module import NNModuleVariable
         from .tensor import supported_const_comparison_ops
         from .torch import BaseTorchVariable
 
@@ -954,7 +953,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                 types_that_are_never_none = (
                     TensorVariable,
                     SymNodeVariable,
-                    NNModuleVariable,
                     BaseListVariable,
                     UserDefinedVariable,
                     BaseUserFunctionVariable,
@@ -3776,42 +3774,6 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
 
             tx.output.side_effects.store_attr(obj, name, val)
             return val
-        elif isinstance(obj, variables.NNModuleVariable):
-            if not tx.output.is_root_tracer():
-                unimplemented(
-                    gb_type="nn.Module mutation in HigherOrderOp",
-                    context=f"nn.Module: {obj}",
-                    explanation="Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
-                    hints=[
-                        "Remove the mutation or move it outside of the HigherOrderOp.",
-                        *graph_break_hints.FUNDAMENTAL,
-                    ],
-                )
-            if name_var.is_python_constant() and isinstance(
-                val, variables.TensorVariable
-            ):
-                assigning_fake_val = get_fake_value(val.as_proxy().node, tx)
-
-                try:
-                    getattr_var = obj.tp_getattro_impl(
-                        tx, name_var.as_python_constant()
-                    )
-                except (AttributeError, ObservedAttributeError):
-                    getattr_var = None
-
-                if getattr_var is not None and getattr_var.is_tensor():
-                    # get_fake_val will get the same fake tensor
-                    existing_fake_attr = get_fake_value(getattr_var.as_proxy().node, tx)
-
-                    # same tensor identity, setattr is a no-op
-                    mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
-                    if (
-                        existing_fake_attr is assigning_fake_val
-                        and mod_setattr is torch.nn.Module.__setattr__
-                    ):
-                        return getattr_var
-
-            obj.convert_to_unspecialized(tx)
         return None
 
 

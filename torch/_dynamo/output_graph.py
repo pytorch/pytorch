@@ -177,7 +177,6 @@ from .variables.ctx_manager import ContextWrappingVariable
 from .variables.functions import ClosureConversionError, VariableTracker
 from .variables.lists import BaseListVariable
 from .variables.misc import NullVariable
-from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -1698,21 +1697,9 @@ class OutputGraph(OutputGraphCommon):
                     f"target must be a torch.nn.Module, got {type(target)}"
                 )
 
-            if source:
-                install_guard(source.make_guard(GuardBuilder.NN_MODULE))
-
-                def wrap_name(module_key: str) -> VariableTracker:
-                    # pyrefly: ignore [bad-argument-type]
-                    return NNModuleVariable(type(target), module_key, target, **options)
-
-            else:
-                # This is Dynamo created graph module, e.g., graph module coming
-                # from higher order ops. NNModuleVariable tracker can't be
-                # sourceless, so let's return a unspecializedNNModule variable
-                # tracker.
-                def wrap_name(module_key: str) -> VariableTracker:
-                    # pyrefly: ignore[bad-argument-type]
-                    return variables.UnspecializedNNModuleVariable(target, **options)
+            def wrap_name(module_key: str) -> VariableTracker:
+                # pyrefly: ignore[bad-argument-type]
+                return variables.UnspecializedNNModuleVariable(target, **options)
 
         elif isinstance(target, (torch.SymInt, torch.SymFloat)):
             # HACKY CODE REGION BEGIN

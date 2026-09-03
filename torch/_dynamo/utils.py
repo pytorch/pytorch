@@ -4776,7 +4776,7 @@ all_hook_names = forward_hook_names + backward_hook_names + state_dict_hook_name
 
 
 def nn_module_has_global_hooks() -> bool:
-    # This is limited to backward hooks for now because NNModuleVariable
+    # This is limited to backward hooks for now because module tracing
     # supports fwd hooks underneath.
     return bool(
         len(torch.nn.modules.module._global_backward_hooks)

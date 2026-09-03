@@ -3769,13 +3769,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).call_function(tx, [variables.ConstantVariable.create(name)], {})
 
             if self.source and getattr_fn is torch.nn.Module.__getattr__:
-                if isinstance(
-                    out,
-                    (
-                        variables.UnspecializedNNModuleVariable,
-                        variables.NNModuleVariable,
-                    ),
-                ):
+                if isinstance(out, variables.UnspecializedNNModuleVariable):
                     out.set_nn_module_stack_source(  # type: ignore[attr-defined]
                         AttrSource(self.get_nn_module_stack_source(), name)  # type: ignore[attr-defined]
                     )

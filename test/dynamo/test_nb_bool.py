@@ -306,7 +306,7 @@ class NbBoolTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), compiled(x))
 
-    # --- nn.Module (NNModuleVariable path) ---
+    # --- nn.Module truthiness ---
 
     def test_nn_module_nonempty(self):
         mod = torch.nn.ModuleList([torch.nn.Linear(4, 4)])

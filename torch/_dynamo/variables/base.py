@@ -2601,8 +2601,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Return id() of the underlying Python object, or None if unavailable.
 
         The base implementation uses source resolution for sourceful VTs.
-        Subclasses override for special cases (e.g. NNModuleVariable uses
-        get_submodule, ConstantVariable handles singletons).
+        Subclasses override for special cases (e.g. ConstantVariable handles
+        singletons).
 
         Returns None for sourceless VTs — callers use FakeIdVariable in
         that case (see generic_id in object_protocol.py).
