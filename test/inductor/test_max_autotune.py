@@ -48,6 +48,7 @@ from torch._inductor.heuristics.template.triton import (
     CUDAAddmmPersistentTMATemplateConfigHeuristic,
     CUDAAddMMTemplateConfigHeuristic,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+    CUDABlackwellBMMTemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAMMTemplateConfigHeuristic,
     CUDAPersistentTMATemplateConfigHeuristic,
@@ -58,10 +59,8 @@ from torch._inductor.heuristics.template.triton import (
     XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
-from torch._inductor.kernel.bmm import (
-    append_blackwell_bmm_choice,
-    BlackwellBMMConfig,
-)
+from torch._inductor.kernel.bmm import blackwell_ws_persistent_tma_bmm_template
+from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.lowering import lowerings
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.runtime.hints import DeviceProperties
@@ -217,28 +216,37 @@ class TestMaxAutotune(TestCase):
         else:
             b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
 
-        template_config = BlackwellBMMConfig(
-            block_m=128,
-            block_n=128,
-            block_k=128,
-            num_stages=3,
-            epilogue_subtile=epilogue_subtile,
-        )
+        class TestBlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
+            def _get_template_configs_impl(self, kernel_inputs, op_name):
+                for template_config in super()._get_template_configs_impl(
+                    kernel_inputs, op_name
+                ):
+                    if (
+                        template_config["BLOCK_M"] == 128
+                        and template_config["BLOCK_N"] == 128
+                    ):
+                        yield {
+                            **template_config,
+                            "EPILOGUE_SUBTILE": epilogue_subtile,
+                        }
+                        return
 
         def lowering(a_node, b_node):
-            layout = FixedLayout(
-                a_node.get_device(),
-                a_node.get_dtype(),
-                [bsz, m, n],
-                [m * n, n, 1],
-            )
-            choices = []
-            append_blackwell_bmm_choice(
-                choices, (a_node, b_node), layout, config=template_config
+            choices = V.choices.get_template_configs(
+                MMKernelInputs([a_node, b_node]),
+                [blackwell_ws_persistent_tma_bmm_template],
+                "bmm",
             )
             return choices[0].output_node()
 
         with (
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[
+                    (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
+                ],
+                override_heuristic_class=TestBlackwellBMMHeuristic,
+            ),
             mock.patch.dict(
                 lowerings,
                 {torch.ops.inductor_test.blackwell_bmm.default: lowering},
@@ -254,6 +262,9 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
         self.assertIn("make_tensor_descriptor", codes[0])
         self.assertNotIn("two_ctas=True", codes[0])
+        self.assertIn(
+            f"EPILOGUE_SUBTILE : tl.constexpr = {epilogue_subtile}", codes[0]
+        )
 
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
