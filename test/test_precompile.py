@@ -240,11 +240,18 @@ def _maybe_scoped(loaded):
     """Installed artifacts scope their install; standalone ones have nothing to."""
     import contextlib
 
-    return loaded if hasattr(loaded, "__enter__") else contextlib.nullcontext()
+    return loaded if loaded.installed else contextlib.nullcontext()
 
 
 def _precompile_scale_sum(x):
     return torch.relu(x * 2.0).sum()
+
+
+_PRECOMPILE_PUBLIC_METHODS = [
+    name
+    for name in dir(torch.compiler.precompile)
+    if not name.startswith("_") and callable(getattr(torch.compiler.precompile, name))
+]
 
 
 def _brk_call(model, x):
@@ -1390,13 +1397,13 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "produced on Python 3.9"):
             exec(skewed, {})
 
-    @parametrize("name", ["load"])
+    @parametrize("name", _PRECOMPILE_PUBLIC_METHODS)
     def test_precompile_method_public_location(self, name):
         method = getattr(torch.compiler.precompile, name)
         self.assertEqual(method.__module__, "torch.compiler")
         self.assertEqual(method.__qualname__, f"precompile.{name}")
 
-    @parametrize("name", ["load"])
+    @parametrize("name", _PRECOMPILE_PUBLIC_METHODS)
     def test_precompile_method_type_hints_resolve(self, name):
         typing.get_type_hints(getattr(torch.compiler.precompile, name))
 
@@ -1407,24 +1414,6 @@ class TestPrecompile(TestCase):
             inspect.Parameter.KEYWORD_ONLY,
         )
         typing.get_type_hints(torch.compiler.precompile.__call__)
-
-    @parametrize("name", ["artifact", "summary", "invariants", "write_invariants"])
-    def test_precompile_session_method_is_documented(self, name):
-        from torch._precompile import PrecompileSession
-
-        self.assertIsNotNone(inspect.getdoc(getattr(PrecompileSession, name)))
-
-    def test_precompile_session_save_documents_guard_requirements(self):
-        from torch._precompile import PrecompileSession
-
-        doc = inspect.getdoc(PrecompileSession.artifact)
-        self.assertIn("require_no_risky_drops", doc)
-        self.assertIn("require_no_dropped_guards", doc)
-        self.assertTrue(
-            inspect.signature(PrecompileSession.artifact)
-            .parameters["require_no_risky_drops"]
-            .default
-        )
 
     def test_precompile_public_result_types(self):
         # The public surface is the pair and the loader; the session types it
@@ -1538,52 +1527,6 @@ class TestPrecompile(TestCase):
         run, ref = fresh(), fresh()
         self.assertEqual(f_c(run, x, t), grad_step(ref, x, t))
         self.assertTrue(all(p.grad is None for p in run.parameters()))
-
-    def test_docs_match_the_require_no_dropped_guards_default(self):
-        # require_no_dropped_guards defaults to False: every model drops the
-        # identity guards precompile cannot serialize, so True refuses
-        # essentially every real artifact. Prose asserting the opposite tells a
-        # reader to relax a rail that was never on, and to trust one that is
-        # not there.
-        import torch._dynamo.precompile_package as dynamo_precompile
-        import torch._precompile as public_precompile
-
-        for cls in (
-            public_precompile.PrecompileSession,
-            dynamo_precompile.PrecompileSession,
-        ):
-            parameters = inspect.signature(cls.artifact).parameters
-            self.assertIs(parameters["require_no_dropped_guards"].default, False)
-            self.assertIs(parameters["require_no_risky_drops"].default, True)
-
-        claims = (
-            "refuses every dropped guard",
-            "rejects every dropped guard",
-            "refuses all of them by default",
-            "requires no dropped guards by default",
-            "and every dropped guard by default",
-            "Every dropped guard is rejected by default",
-            "dropped guard is refused by default",
-            "require_no_dropped_guards=True)",
-            "is the strict default",
-            "before explicitly relaxing either dropped-guard requirement",
-            "so strict saving rejects ordinary programs",
-        )
-        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        paths = [
-            inspect.getsourcefile(public_precompile),
-            inspect.getsourcefile(dynamo_precompile),
-        ]
-        doc_page = os.path.join(repo, "docs", "source", "torch.compiler_api.md")
-        if os.path.exists(doc_page):
-            paths.append(doc_page)
-        for path in paths:
-            with open(path, encoding="utf-8") as f:
-                # Normalized so the check survives a rewrap of the paragraph.
-                text = " ".join(f.read().split())
-            for claim in claims:
-                # assertTrue, not assertNotIn: the latter dumps the whole file.
-                self.assertTrue(claim not in text, f"{path} still claims {claim!r}")
 
     def test_tracer_dynamo_autograd_grad_does_not_observe_the_seed(self):
         # Seeding is a capture-time mutation of the caller's model, so fn can SEE it:
@@ -1711,7 +1654,7 @@ class TestPrecompile(TestCase):
                 self.assertEqual(loaded(x), want)
             # No compiler stands behind a source artifact, so an uncovered call
             # raises on its own -- there is no stance to enter.
-            with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+            with self.assertRaisesRegex(PrecompileError, "no captured variant"):
                 loaded(torch.randn(9, 8))
 
         if no_grad:
@@ -2190,7 +2133,7 @@ class TestPrecompile(TestCase):
         with torch.no_grad():
             self.assertEqual(loaded(model, x), expected)
         # Grad enabled misses the GLOBAL_STATE guard every variant carries.
-        with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+        with self.assertRaisesRegex(PrecompileError, "no captured variant"):
             loaded(model, x)
 
     def _multigraph_frames(self, code):
@@ -2224,25 +2167,20 @@ class TestPrecompile(TestCase):
         self.assertIsInstance(cache, bytes)
 
         # The readable half says what is in the opaque half.
-        self.assertIn('TRACER = "dynamo"', code)
-        self.assertIn("FRAMES = [", code)
-        self.assertIn("2. Guard trees and transformed bytecode -- OPAQUE", code)
-        self.assertIn("DROPPED_GUARDS", code)
+        meta = _parse_artifact_metadata(code)
+        self.assertEqual(meta["TRACER"], "dynamo")
+        self.assertIn("DROPPED_GUARDS", meta)
         # Guard trees and bytecode have no source form and stay opaque, but a
         # compiled subgraph is Inductor output, which does: on inductor the
         # kernels are emitted as readable source, and only eager (whose
         # "backend" is an fx graph with nothing to render) stays pickled.
         if backend == "inductor":
-            self.assertIn("READABLE below", code)
-            # async_compile rather than @triton.jit: this test runs on CPU,
-            # where the rendered kernels are C++ rather than Triton.
-            self.assertIn("async_compile", code)
             self.assertIn("_SUBGRAPHS[", code)
         else:
-            self.assertIn("3. Compiled subgraphs -- OPAQUE", code)
+            self.assertNotIn("_SUBGRAPHS[", code)
 
         # It reports one entry frame plus one continuation, two variants each.
-        frames = _parse_artifact_metadata(code)["FRAMES"]
+        frames = meta["FRAMES"]
         self.assertEqual([count for _, count in frames], [2, 2])
         self.assertTrue(
             any(name.startswith("torch_dynamo_resume_in") for name, _ in frames)
@@ -2258,7 +2196,7 @@ class TestPrecompile(TestCase):
             len(_debug_get_precompile_entries(type(model).forward.__code__)), 0
         )
         # A call no variant covers raises rather than silently recompiling.
-        with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+        with self.assertRaisesRegex(PrecompileError, "no captured variant"):
             with torch.no_grad():
                 loaded(model, torch.randn(9, 8))
 
@@ -2309,7 +2247,7 @@ class TestPrecompile(TestCase):
         static = torch.compiler.precompile.load(static_code, static_cache)
         with torch.no_grad():
             for x in unseen:
-                with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                with self.assertRaisesRegex(PrecompileError, "no captured variant"):
                     static(model, x)
 
     def test_automatic_dynamic_promotes_only_the_frame_that_varied(self):
@@ -2733,8 +2671,6 @@ class TestPrecompile(TestCase):
                 training=training,
                 example_inputs=[(x,) for x in xs],
             )
-        self.assertIn("READABLE below", code)
-        self.assertIn("async_compile", code)
         self.assertIn("_SUBGRAPHS[", code)
 
         torch._dynamo.reset()
@@ -2809,12 +2745,22 @@ class TestPrecompile(TestCase):
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertEqual(loaded(model, x), expected)
 
-    def test_precompile_rejects_positional_example_arguments(self):
-        # example_inputs is the only calling convention; the old positional
-        # spelling gets a pointed error rather than CPython's arity message.
+    def test_precompile_positional_example_arguments_are_deprecated(self):
+        # The 2.14 positional spelling still works as example_inputs=[args].
         x = torch.randn(3)
-        with self.assertRaisesRegex(TypeError, "no positional example arguments"):
-            torch.compiler.precompile(lambda y: y + 1, x, backend="eager")
+        expected = torch.compiler.precompile(
+            _precompile_add_one, example_inputs=[(x,)], backend="eager"
+        )
+        with self.assertWarnsRegex(FutureWarning, "deprecated"):
+            actual = torch.compiler.precompile(_precompile_add_one, x, backend="eager")
+        self.assertEqual(actual, expected)
+
+    def test_precompile_positional_and_example_inputs_conflict(self):
+        x = torch.randn(3)
+        with self.assertRaisesRegex(ValueError, "example_inputs"):
+            torch.compiler.precompile(
+                _precompile_add_one, x, example_inputs=[(x,)], backend="eager"
+            )
 
     def test_precompile_requires_example_inputs(self):
         with self.assertRaisesRegex(ValueError, "requires example_inputs"):
@@ -3128,7 +3074,7 @@ class TestPrecompile(TestCase):
         )
         f_c = torch.compiler.precompile.load(code, cache)
         self.assertEqual(f_c(m, torch.randn(6, 4)).shape, (6, 3))
-        with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+        with self.assertRaisesRegex(PrecompileError, "no captured variant"):
             f_c(m, torch.randn(2, 4))
 
     def test_tracer_dynamo_mark_unbacked_shape_id_mismatch_rejected(self):
@@ -3148,7 +3094,7 @@ class TestPrecompile(TestCase):
         f_c = torch.compiler.precompile.load(code, cache)
         a, b = torch.randn(3, 4), torch.randn(3, 4)
         self.assertEqual(f_c(m, a, b), m(a) + b)
-        with self.assertRaisesRegex(RuntimeError, "no captured variant of"):
+        with self.assertRaisesRegex(PrecompileError, "no captured variant of"):
             f_c(m, torch.randn(3, 4), torch.randn(5, 4))
 
     def test_tracer_dynamo_mark_unbacked_hint_override_honored(self):

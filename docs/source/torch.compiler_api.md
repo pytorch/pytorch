@@ -57,7 +57,13 @@ releases without a deprecation cycle.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *, backend="inductor", tracer="make_fx", decompositions=None, example_inputs, guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, training=False)
+.. py:function:: precompile(fn, *, backend="inductor", tracer="make_fx", decompositions=None, example_inputs, guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False)
+
+   .. deprecated:: 2.15
+
+      The 2.14 spelling ``precompile(fn, *example_inputs, ...)``, with the one example
+      call passed positionally, still works and is read as ``example_inputs=[(...)]``,
+      with a ``FutureWarning``. Passing both forms at once raises ``ValueError``.
 
    Ahead-of-time precompile ``fn`` against ``example_inputs``, a sequence of calls each
    given as a tuple of positional arguments. precompile makes those calls itself and
@@ -149,9 +155,20 @@ releases without a deprecation cycle.
        and overrides a lower ambient accumulated-recompile limit for this capture.
    :param dynamic: Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
    :param invariants: Optional path receiving the multi-graph invariant report.
+   :param require_complete: ``tracer="dynamo"`` only; defaults to ``True``. Refuse to
+       produce an artifact whose capture summary is not complete -- a frame that produced
+       no guarded code, hit the recompile limit, or was bypassed, or an example call that
+       raised.
+   :param require_no_risky_drops: ``tracer="dynamo"`` only; defaults to ``True``. Refuse
+       to produce an artifact that dropped a guard whose loss could change the answer
+       (every drop made by a custom ``guard_filter_fn`` counts as risky).
+   :param require_no_dropped_guards: ``tracer="dynamo"`` only; defaults to ``False``.
+       Refuse to produce an artifact that dropped any guard at all. Off by default because
+       every model drops identity guards that cannot be serialized.
+   :param training: Run the example calls with grad enabled and lower a backward into the
+       artifact; defaults to ``False`` (calls run under ``torch.no_grad()``).
    :returns: ``(python_code, cache)`` -- a self-contained Python source string and a
-       binary acceleration cache. Positional example arguments are rejected with a
-       ``TypeError``; ``example_inputs`` is the only calling convention.
+       binary acceleration cache.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below).
 
@@ -189,8 +206,10 @@ releases without a deprecation cycle.
 
    .. warning::
 
-      ``load`` runs the artifact as code: it executes ``python_code`` (via ``exec``) and,
-      for the inductor backend, primes the kernel caches from the ``cache``. Treat
+      ``load`` runs the artifact as code: it executes ``python_code`` (via ``exec``) and
+      unpickles the ``cache`` bytes (and, for the inductor backend, primes the kernel
+      caches from them). Both are arbitrary code execution -- a crafted ``python_code``
+      runs whatever it contains, and a crafted pickle runs code as it is loaded. Treat
       ``(python_code, cache)`` as trusted, executable input -- only load a pair you
       produced yourself or otherwise trust, exactly as you would any code you are about to
       run (see Note [precompile programming model], invariant 7). ``load`` also emits a
@@ -208,8 +227,10 @@ releases without a deprecation cycle.
        or recompiled serves by INSTALLING onto the captured code objects: the returned
        callable mutates process state on first call (or on ``__enter__``) and supports
        ``with`` / ``unload()`` to take that back out. An artifact that captured a single
-       whole graph is standalone: a plain callable, no installation and no ``unload``.
-       Which one you get is a property of the capture, not a load-time choice.
+       whole graph is standalone: it installs nothing, and its ``with`` / ``unload()``
+       are no-ops. Both expose the same surface, and ``installed`` (``True`` for the
+       installing shape, ``False`` for standalone) tells them apart. Which one you get
+       is a property of the capture, not a load-time choice.
    :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
        fails to parse or is missing its calling-convention metadata), if ``cache`` is
        paired with a different ``python_code`` (mismatched ``backend`` tag, ``tracer``
