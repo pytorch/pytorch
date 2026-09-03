@@ -5760,6 +5760,25 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(cpu_x.grad, mps_x.grad.to('cpu'))
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("shape,dim", [((3, 8192), -1), ((4100, 7), 0), ((600, 3000), -1)])
+    def test_log_softmax_metal_paths(self, dtype, shape, dim):
+        # Shapes pin the non-row Metal kernels: the split partial/finalize pair
+        # (dim > 2048, few rows), the 2D kernel (dim not innermost), and the 2D
+        # fallback for long rows (num_rows > 256 disables the split).
+        cpu_x = torch.randn(shape, dtype=dtype)
+        mps_out = F.log_softmax(cpu_x.to('mps'), dim=dim)
+        self.assertEqual(mps_out.cpu(), F.log_softmax(cpu_x, dim=dim))
+
+    def test_log_softmax_split_inf_chunk(self):
+        # A 2048-wide all -inf chunk must not poison the split-path logsumexp;
+        # a fully -inf row stays NaN to match CPU.
+        cpu_x = torch.randn(3, 8192)
+        cpu_x[1, 2048:6144] = -math.inf
+        cpu_x[2] = -math.inf
+        mps_out = F.log_softmax(cpu_x.to('mps'), dim=-1)
+        self.assertEqual(mps_out.cpu(), F.log_softmax(cpu_x, dim=-1))
+
     def test_eq(self):
         values1 = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
         values2 = [[[1.0, 2.0, 15.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [0.0, 11.0, 12.0]]]
