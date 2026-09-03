@@ -855,13 +855,15 @@ def _load_cached_autotuning(
         if matching_configs:
             first = matching_configs[0]
             if all(
-                _config_identity(cfg) == _config_identity(first)
+                _same_typed_value(_config_identity(cfg), _config_identity(first))
                 for cfg in matching_configs[1:]
             ):
-                # A unique match, or duplicates that are interchangeable (equal
-                # before JSON serialization too, so no tuple/Enum degradation
-                # is hidden behind the match). Return the real candidate so
-                # non-JSON kwarg values (tuples, Enum members) survive.
+                # A unique match, or duplicates that are interchangeable: the
+                # same typed values, not merely == (1 vs 1.0 and True vs 1
+                # compare equal but Triton specializes on the type, and the
+                # pick would otherwise depend on candidate order). Return the
+                # real candidate so non-JSON kwarg values (tuples, Enum
+                # members) survive.
                 # pyrefly: ignore [missing-attribute]
                 first.extra_options = extra_options
                 return first
@@ -877,8 +879,9 @@ def _load_cached_autotuning(
                 # the Enum member, so re-autotune. IntEnum/str-mixin members
                 # ==-match their unwrapped values and are not degraded.
                 return None
-            # Subset-kwarg matches with JSON-stable values fall through to
-            # reconstruction, as before the Enum guard.
+            # Subset-kwarg matches and int/float or bool/int splits with
+            # JSON-stable values fall through to reconstruction from the cached
+            # value, which keeps the type the winner was saved with.
     if not _restore_degraded_kwargs(best_config, configs):
         # A kwarg that degrades under the JSON round-trip (tuple -> list, plain
         # Enum -> raw value) has no candidate value that serializes to the
