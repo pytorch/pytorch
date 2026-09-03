@@ -5,6 +5,7 @@ import functools
 import sys
 import warnings
 from typing import Any, TYPE_CHECKING
+from unittest import mock
 
 import torch
 import torch._inductor.test_case
@@ -14,7 +15,10 @@ from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import _testing_capture_invoke_subgraph_inductor_compile_gms
 from torch._functorch._aot_autograd.autograd_cache import BundledCompiledForward
 from torch._guards import detect_fake_mode
-from torch._higher_order_ops.invoke_subgraph import get_invoke_subgraph_compile_options
+from torch._higher_order_ops.invoke_subgraph import (
+    get_invoke_subgraph_compile_options,
+    NestedCompileRegionOptions,
+)
 from torch._inductor.output_code import RegionalOutputCode
 from torch._inductor.test_case import run_tests
 from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
@@ -592,53 +596,33 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch("enable_invoke_subgraph_regional_compile", True)
 @instantiate_parametrized_tests
 class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    def test_normal_inductor_hop_subgraph_uses_nested_post_grad_config(self):
-        outer_pass_targets = []
-        inner_pass_targets = []
+    @staticmethod
+    def _empty_graph_module():
+        graph = torch.fx.Graph()
+        graph.output(())
+        return torch.fx.GraphModule({}, graph)
 
-        def outer_pass(graph):
-            outer_pass_targets.append(
-                [node.target for node in graph.nodes if node.op == "call_function"]
-            )
-
-        def inner_pass(graph):
-            inner_pass_targets.append(
-                [node.target for node in graph.nodes if node.op == "call_function"]
-            )
-
-        nested_config = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"post_grad_custom_pre_pass": inner_pass}
+    @classmethod
+    def _configured_region_graph_module(cls, nested_config, body=None):
+        if body is None:
+            body = cls._empty_graph_module()
+        root = torch.nn.Module()
+        root.add_module("body", body)
+        graph = torch.fx.Graph()
+        body_node = graph.get_attr("body")
+        region = graph.call_function(
+            torch.ops.higher_order.invoke_subgraph, (body_node,)
         )
+        region.meta["custom"] = {"nested_region_config": nested_config}
+        graph.output(())
+        return torch.fx.GraphModule(root, graph)
 
-        @torch.compiler.nested_compile_region(options=nested_config)
-        def g(x):
-            return torch.sin(x)
-
-        def fn(x):
-            return g(torch.cos(x)) + 1
-
-        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        x = torch.randn(10)
-
-        with torch._inductor.config.patch(
-            {
-                "post_grad_custom_pre_pass": outer_pass,
-            }
-        ):
-            result, codes = run_and_get_code(lambda: opt_fn(x))
-
-        self.assertEqual(result, fn(x))
-        self.assertEqual(len(codes), 1)
-        self.assertEqual(len(inner_pass_targets), 1)
-        self.assertEqual(len(outer_pass_targets), 1)
-
-        inner_target_names = [str(target) for target in inner_pass_targets[0]]
-        outer_target_names = [str(target) for target in outer_pass_targets[0]]
-        self.assertTrue(any("aten.sin.default" in name for name in inner_target_names))
-        self.assertFalse(any("invoke_subgraph" in name for name in inner_target_names))
-        self.assertTrue(any("invoke_subgraph" in name for name in outer_target_names))
-        self.assertFalse(any("aten.sin.default" in name for name in outer_target_names))
+    @staticmethod
+    def _reference_submodule(gm, target):
+        output = next(iter(gm.graph.find_nodes(op="output")))
+        with gm.graph.inserting_before(output):
+            gm.graph.get_attr(target)
+        gm.recompile()
 
     @staticmethod
     def _generated_fn_body(code, signature):
@@ -653,37 +637,6 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
                 break
             body.append(line)
         return "\n".join(body)
-
-    @requires_gpu_and_triton
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    @torch._inductor.config.patch(fx_graph_cache=False, fx_graph_remote_cache=False)
-    def test_nested_region_inductor_config_multi_kernel_codegen(self):
-        # triton.multi_kernel set only on the region must change the region's
-        # generated code, not the parent's. The region body is emitted as
-        # `repeated_subgraph0` and the parent as `call`. fx_graph_cache is off to
-        # dodge a triton multi-kernel cache-reload issue unrelated to threading.
-        nested_config = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"triton.multi_kernel": True}
-        )
-
-        @torch.compiler.nested_compile_region(options=nested_config)
-        def g(x):
-            return torch.softmax(x, dim=-1) + 1
-
-        def fn(x):
-            y = torch.softmax(x, dim=-1) * 2
-            return g(y)
-
-        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        x = torch.randn(4096, 256, device=device_type)
-        result, codes = run_and_get_code(lambda: opt_fn(x))
-
-        self.assertEqual(result, fn(x))
-        self.assertEqual(len(codes), 1)
-        region_code = self._generated_fn_body(codes[0], "def repeated_subgraph0(")
-        parent_code = self._generated_fn_body(codes[0], "def call(self, args):")
-        self.assertIn("multi_kernel", region_code)
-        self.assertNotIn("multi_kernel", parent_code)
 
     @requires_gpu_and_triton
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
@@ -1221,69 +1174,6 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 ignore_empty_lines=True,
             )
 
-    @parametrize("serialize", [False])  # , True
-    def test_max_autotune_no_cudagraphs(self, serialize):
-        """Test that max-autotune-no-cudagraphs options are properly applied inductor_config_patches."""
-        import torch._inductor.config as inductor_config
-
-        nested_config = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={
-                "max_autotune": True,
-                "triton.cudagraphs": False,
-            }
-        )
-
-        @torch.compiler.nested_compile_region(options=nested_config)
-        def g(sin, y):
-            mul = sin * y
-            add = mul + 1
-            return add
-
-        def fn(x, y):
-            sin = torch.sin(x)
-            add = g(sin, y)
-            return torch.sin(add)
-
-        # Hook to verify options
-        original_compile = torch._inductor.compile_fx._compile_fx_inner
-        captured_options = []
-
-        def verify_options(*args, **kwargs):
-            options = kwargs.get("inductor_config_patches", {})
-            captured_options.append(options)
-
-            # Verify config is set as expected from explicit options
-            if not torch._inductor.config.max_autotune:
-                raise AssertionError("max_autotune should be True")
-            if inductor_config.triton.cudagraphs:
-                raise AssertionError("triton.cudagraphs should be False")
-
-            return original_compile(*args, **kwargs)
-
-        torch._inductor.compile_fx._compile_fx_inner = verify_options
-
-        try:
-            # Use backend without options - they come from annotations
-            backend = aot_eager_regional_inductor(
-                serialize=serialize, on_invoke_subgraph=True
-            )
-
-            opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
-            x = torch.randn(10, requires_grad=True)
-            y = torch.randn(10, requires_grad=True)
-
-            # Run and check that options were passed
-            _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, y))
-            self.assertEqual(len(codes), 2)
-
-            # Verify that compilation happened
-            self.assertTrue(
-                len(captured_options) > 0, "Compilation should have occurred"
-            )
-
-        finally:
-            torch._inductor.compile_fx._compile_fx_inner = original_compile
-
     def test_invalid_inductor_config(self):
         """Test that invalid inductor config keys are caught with a clear error."""
 
@@ -1296,6 +1186,229 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                     "invalid_config_key": True,
                 }
             )
+
+    def test_default_inductor_config_keeps_autotune_compiler_local(self):
+        nested_config = get_invoke_subgraph_compile_options()
+        self.assertEqual(nested_config.inductor_config_patches, {})
+        nested_config.inductor_config_patches["triton.persistent_reductions"] = False
+        observed_configs = []
+
+        def compile_fx_inner(gm, example_inputs):
+            observed_configs.append(
+                (
+                    torch._inductor.config.triton.autotune_at_compile_time,
+                    torch._inductor.config.triton.persistent_reductions,
+                )
+            )
+
+            def compiled(args):
+                return ()
+
+            compiled._boxed_call = True
+            return compiled
+
+        with (
+            mock.patch.object(
+                torch._inductor.compile_fx, "compile_fx_inner", compile_fx_inner
+            ),
+            torch._inductor.config.patch(
+                {
+                    "triton.autotune_at_compile_time": False,
+                    "triton.persistent_reductions": True,
+                }
+            ),
+        ):
+            for compiler in (nested_config.fw_compiler, nested_config.bw_compiler):
+                if compiler is None:
+                    raise AssertionError("Expected an Inductor compiler")
+                compiler(self._empty_graph_module(), [])
+
+        self.assertEqual(observed_configs, [(True, False), (True, False)])
+
+    @parametrize("direction", ("forward", "backward"))
+    @parametrize(
+        "config_key,config_value",
+        (
+            ("cpp_wrapper", True),
+            ("cudagraph_unsafe_unbacked_ops", []),
+            ("graph_partition", True),
+            ("max_autotune", True),
+            ("post_grad_custom_post_pass", lambda _: None),
+            ("post_grad_custom_pre_pass", lambda _: None),
+            ("triton.autotune_at_compile_time", True),
+            ("triton.cudagraph_min_partition_size", 1),
+            ("triton.cudagraph_skip_dynamic_graphs", True),
+            ("triton.cudagraphs", True),
+            ("triton.cudagraph_trees", True),
+            ("triton.multi_kernel", True),
+        ),
+    )
+    def test_unsupported_nested_region_inductor_config(
+        self, direction, config_key, config_value
+    ):
+        config_arg = (
+            "fw_inductor_config_patches"
+            if direction == "forward"
+            else "bw_inductor_config_patches"
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            f"Inductor config key '{config_key}' is not supported in {direction}",
+        ):
+            get_invoke_subgraph_compile_options(
+                **{config_arg: {config_key: config_value}}
+            )
+
+    def test_nested_region_options_validate_direct_construction(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Inductor config key 'graph_partition' is not supported in forward",
+        ):
+            NestedCompileRegionOptions(
+                inductor_config_patches={"graph_partition": True}
+            )
+
+    @parametrize("direction", ("forward", "backward"))
+    def test_nested_region_options_revalidate_mutated_config(self, direction):
+        patches = {}
+        config_arg = (
+            "fw_inductor_config_patches"
+            if direction == "forward"
+            else "bw_inductor_config_patches"
+        )
+        nested_config = get_invoke_subgraph_compile_options(**{config_arg: patches})
+        patches["cudagraph_unsafe_unbacked_ops"] = []
+
+        graph = torch.fx.Graph()
+        node = graph.call_function(torch.ops.higher_order.invoke_subgraph)
+        node.meta["custom"] = {"nested_region_config": nested_config}
+        graph.output(())
+        gm = torch.fx.GraphModule({}, graph)
+
+        from torch._inductor.compile_fx import create_compiler_config_extra
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Inductor config key 'cudagraph_unsafe_unbacked_ops' "
+            f"is not supported in {direction}",
+        ):
+            create_compiler_config_extra(gm)
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(fx_graph_cache=False, fx_graph_remote_cache=False)
+    def test_nested_region_options_revalidate_lazy_backward(self):
+        backward_patches = {}
+        nested_config = get_invoke_subgraph_compile_options(
+            bw_inductor_config_patches=backward_patches
+        )
+        pass_calls = []
+
+        def forbidden_pass(graph):
+            pass_calls.append(graph)
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def region(x):
+            return torch.sin(x)
+
+        x = torch.randn(10, requires_grad=True)
+        result = torch.compile(region, backend="inductor", fullgraph=True)(x)
+
+        backward_patches["post_grad_custom_post_pass"] = forbidden_pass
+        with self.assertRaisesRegex(
+            ValueError,
+            "Inductor config key 'post_grad_custom_post_pass' "
+            "is not supported in backward",
+        ):
+            result.sum().backward()
+        self.assertEqual(pass_calls, [])
+
+    @torch._inductor.config.patch(
+        freezing=True,
+        fx_graph_cache=False,
+        fx_graph_remote_cache=False,
+        pre_grad_pass_timing="early",
+    )
+    def test_nested_region_options_revalidate_freezing_after_pre_grad(self):
+        from torch._dynamo.exc import BackendCompilerFailed
+
+        patches = {}
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches=patches
+        )
+        pass_calls = []
+
+        def forbidden_pass(graph):
+            pass_calls.append(graph)
+
+        def mutate_config(_graph):
+            patches["post_grad_custom_post_pass"] = forbidden_pass
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def region(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return region(torch.cos(x)) + 1
+
+        with (
+            torch.no_grad(),
+            torch._inductor.config.patch(pre_grad_custom_pass=mutate_config),
+            self.assertRaisesRegex(
+                BackendCompilerFailed,
+                "Inductor config key 'post_grad_custom_post_pass' is not supported",
+            ),
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(torch.randn(10))
+        self.assertEqual(pass_calls, [])
+
+    def test_nested_region_options_ignore_unreferenced_graph_module(self):
+        patches = {}
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches=patches
+        )
+        patches["cudagraph_unsafe_unbacked_ops"] = []
+        unused = self._configured_region_graph_module(nested_config)
+        gm = self._empty_graph_module()
+        gm.add_module("unused", unused)
+
+        from torch._inductor.compile_fx import create_compiler_config_extra
+
+        create_compiler_config_extra(gm)
+        self._reference_submodule(gm, "unused")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Inductor config key 'cudagraph_unsafe_unbacked_ops' "
+            "is not supported in forward",
+        ):
+            create_compiler_config_extra(gm)
+
+    @parametrize("target", ("live_alias", "container.region"))
+    def test_nested_region_options_validate_referenced_graph_module(self, target):
+        patches = {}
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches=patches
+        )
+        patches["cudagraph_unsafe_unbacked_ops"] = []
+        region = self._configured_region_graph_module(nested_config)
+        gm = self._empty_graph_module()
+        if target == "live_alias":
+            gm.add_module("unused_alias", region)
+            gm.add_module(target, region)
+        else:
+            container = torch.nn.Module()
+            container.add_module("region", region)
+            gm.add_module("container", container)
+        self._reference_submodule(gm, target)
+
+        from torch._inductor.compile_fx import create_compiler_config_extra
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Inductor config key 'cudagraph_unsafe_unbacked_ops' "
+            "is not supported in forward",
+        ):
+            create_compiler_config_extra(gm)
 
     @requires_gpu_and_triton
     @parametrize("serialize", [False])  # , True
@@ -1476,10 +1589,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         else:
             partitioner = test_partitioner
 
-        config_patches = {
-            "max_autotune": True,
-            "triton.cudagraphs": False,
-        }
+        config_patches = {}
         decompositions = {}
         nested_config = get_invoke_subgraph_compile_options(
             config_patches, decompositions, partitioner

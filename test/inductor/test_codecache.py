@@ -3569,15 +3569,15 @@ class TestFxGraphCacheHashing(TestCase):
         # A region's inductor_config_patches must be part of the cache key,
         # otherwise two regions differing only in their patches would collide
         # and reuse a stale compiled artifact.
-        same1 = self._nested_region_gm({"max_autotune": True})
-        same2 = self._nested_region_gm({"max_autotune": True})
-        different = self._nested_region_gm({"max_autotune": False})
+        same1 = self._nested_region_gm({"triton.persistent_reductions": True})
+        same2 = self._nested_region_gm({"triton.persistent_reductions": True})
+        different = self._nested_region_gm({"triton.persistent_reductions": False})
 
         self.assertEqual(
             FxGraphHashDetails(
                 same1, [], cast(Any, {}), []
             ).nested_inductor_config_patches,
-            (("", (("max_autotune", True),)),),
+            (("", (("triton.persistent_reductions", True),)),),
         )
         self.assertEqual(
             self._fx_graph_cache_key(same1, []),
@@ -3593,24 +3593,28 @@ class TestFxGraphCacheHashing(TestCase):
         def custom_pass(graph):
             return graph
 
+        def with_unvalidated_patches(patches):
+            gm = self._nested_region_gm({})
+            gm.meta["nested_region_config"].inductor_config_patches = patches
+            return gm
+
         with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
             CacheabilityValidator(
-                self._nested_region_gm({"post_grad_custom_pre_pass": custom_pass}),
+                with_unvalidated_patches({"post_grad_custom_pre_pass": custom_pass}),
                 require_shape_env=False,
             ).validate()
 
         # A non-callable value under a custom-pass key is uncacheable too.
         with self.assertRaisesRegex(BypassFxGraphCache, "custom pass"):
             CacheabilityValidator(
-                self._nested_region_gm({"post_grad_custom_pre_pass": "sentinel"}),
+                with_unvalidated_patches({"post_grad_custom_pre_pass": "sentinel"}),
                 require_shape_env=False,
             ).validate()
 
-        # A callable hidden inside a list value (e.g.
-        # _fuse_ddp_communication_passes) is uncacheable too.
+        # Keep the cacheability check defensive against unvalidated metadata.
         with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
             CacheabilityValidator(
-                self._nested_region_gm(
+                with_unvalidated_patches(
                     {"_fuse_ddp_communication_passes": [custom_pass]}
                 ),
                 require_shape_env=False,
@@ -3618,7 +3622,7 @@ class TestFxGraphCacheHashing(TestCase):
 
         # A list of non-callables stays cacheable.
         CacheabilityValidator(
-            self._nested_region_gm(
+            with_unvalidated_patches(
                 {"_fuse_ddp_communication_passes": ["fuse_ddp_with_concat_op"]}
             ),
             require_shape_env=False,
@@ -3656,17 +3660,17 @@ class TestFxGraphCacheHashing(TestCase):
         # Backward config replaces (does not merge with) the forward config.
         bw_config = get_backward_nested_region_config(
             get_invoke_subgraph_compile_options(
-                bw_inductor_config_patches={"max_autotune": True}
+                bw_inductor_config_patches={"triton.persistent_reductions": True}
             )
         )
         self.assertEqual(
             bw_config.inductor_config_patches,
-            {"max_autotune": True},
+            {"triton.persistent_reductions": True},
         )
 
-        same1 = self._nested_region_bw_gm({"max_autotune": True})
-        same2 = self._nested_region_bw_gm({"max_autotune": True})
-        different = self._nested_region_bw_gm({"max_autotune": False})
+        same1 = self._nested_region_bw_gm({"triton.persistent_reductions": True})
+        same2 = self._nested_region_bw_gm({"triton.persistent_reductions": True})
+        different = self._nested_region_bw_gm({"triton.persistent_reductions": False})
         self.assertEqual(
             self._fx_graph_cache_key(same1, []),
             self._fx_graph_cache_key(same2, []),
