@@ -57,6 +57,7 @@ from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -4369,39 +4370,8 @@ class TestOpaqueGeneratorDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
-    def test_make_fx_randn_with_generator(self, device):
-        """make_fx should trace torch.randn with a Generator input."""
-
-        def fn(a, generator):
-            return torch.randn([20, 20], generator=generator, device=a.device)
-
-        gen = torch.Generator(device)
-        gm = make_fx(fn, tracing_mode="real")(torch.randn(4, device=device), gen)
-
-        # Generator is baked in as a get_attr constant (not a placeholder input)
-        # because torch.randn passes it directly to C++ without going through
-        # proxy dispatch. The generator placeholder has 0 users.
-        device_type = torch.device(device).type
-        self.assertExpectedInline(
-            normalize_gm(gm.print_readable(False)),
-            f"""\
-class fn(torch.nn.Module):
-    def forward(self, a_1: "f32[4]", generator_1):
-        _opaque_obj0 = self._opaque_obj0
-        randn: "f32[20, 20]" = torch.ops.aten.randn.generator([20, 20], generator = _opaque_obj0, device = device(type='{device_type}', index=0), pin_memory = False);  _opaque_obj0 = None
-        return randn
-""",
-        )
-
-
-instantiate_device_type_tests(TestOpaqueGeneratorDevice, globals(), allow_xpu=True)
-
-
-class TestOpaqueGeneratorCUDA(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_make_fx_with_generator(self):
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5200")
+    def test_make_fx_with_generator(self, device):
         """make_fx should trace through Generator inputs as opaque values."""
         from torch._prims.rng_prims import graphsafe_run_with_rng_state
 
@@ -4420,10 +4390,12 @@ class TestOpaqueGeneratorCUDA(TestCase):
                 )
                 return out[0]
 
-        q = torch.randn(2, 8, 64, 32, device="cuda", dtype=torch.float16)
-        k = torch.randn(2, 8, 64, 32, device="cuda", dtype=torch.float16)
-        v = torch.randn(2, 8, 64, 32, device="cuda", dtype=torch.float16)
-        gen = torch.cuda.default_generators[0].clone_state()
+        device_type = torch.device(device).type
+
+        q = torch.randn(2, 8, 64, 32, device=device, dtype=torch.float16)
+        k = torch.randn(2, 8, 64, 32, device=device, dtype=torch.float16)
+        v = torch.randn(2, 8, 64, 32, device=device, dtype=torch.float16)
+        gen = torch.get_device_module(device_type).default_generators[0].clone_state()
 
         gm = make_fx(M(), tracing_mode="real")(q, k, v, gen)
 
@@ -4451,13 +4423,41 @@ class TestOpaqueGeneratorCUDA(TestCase):
                 )
                 return out[0]
 
-        gen1 = torch.cuda.default_generators[0].clone_state()
-        gen2 = torch.cuda.default_generators[0].clone_state()
+        gen1 = torch.get_device_module(device_type).default_generators[0].clone_state()
+        gen2 = torch.get_device_module(device_type).default_generators[0].clone_state()
         gm0 = make_fx(M0(), tracing_mode="real")(q, k, v, gen1)
         expected = M0()(q, k, v, gen2)
-        gen3 = torch.cuda.default_generators[0].clone_state()
+        gen3 = torch.get_device_module(device_type).default_generators[0].clone_state()
         actual = gm0(q, k, v, gen3)
         self.assertEqual(actual, expected)
+
+    @onlyAccelerator
+    def test_make_fx_randn_with_generator(self, device):
+        """make_fx should trace torch.randn with a Generator input."""
+
+        def fn(a, generator):
+            return torch.randn([20, 20], generator=generator, device=a.device)
+
+        gen = torch.Generator(device)
+        gm = make_fx(fn, tracing_mode="real")(torch.randn(4, device=device), gen)
+
+        # Generator is baked in as a get_attr constant (not a placeholder input)
+        # because torch.randn passes it directly to C++ without going through
+        # proxy dispatch. The generator placeholder has 0 users.
+        device_type = torch.device(device).type
+        self.assertExpectedInline(
+            normalize_gm(gm.print_readable(False)),
+            f"""\
+class fn(torch.nn.Module):
+    def forward(self, a_1: "f32[4]", generator_1):
+        _opaque_obj0 = self._opaque_obj0
+        randn: "f32[20, 20]" = torch.ops.aten.randn.generator([20, 20], generator = _opaque_obj0, device = device(type='{device_type}', index=0), pin_memory = False);  _opaque_obj0 = None
+        return randn
+""",
+        )
+
+
+instantiate_device_type_tests(TestOpaqueGeneratorDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
