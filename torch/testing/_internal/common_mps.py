@@ -23,17 +23,10 @@ if torch.backends.mps.is_available():
         # ops below are xfailed for complex32/complex64. Drill this list down as
         # complex support is added.
         UNSUPPORTED_COMPLEX_OPS = {
-            "__rpow__",
             "addr",
-            "as_stridedpartial_views",
             "cholesky_inverse",
             "float_power",
             "geqrf",
-            "jiterator_2inputs_2outputs",
-            "jiterator_4inputs_with_extra_args",
-            "jiterator_binary",
-            "jiterator_binary_return_by_ref",
-            "jiterator_unary",
             "linalg.eig",
             "linalg.eigvals",
             "linalg.inv",
@@ -46,16 +39,10 @@ if torch.backends.mps.is_available():
             "linalg.solve_triangular",
             "linalg.tensorinv",
             "log_softmaxwith_dtype",
-            "nn.functional.alpha_dropout",
             "nn.functional.channel_shuffle",
             "nn.functional.conv3d",
-            "nn.functional.dropout",
-            "nn.functional.dropout2d",
-            "nn.functional.dropout3d",
-            "nn.functional.feature_alpha_dropoutwith_train",
             "nn.functional.padreplicate_negative",
             "ormqr",
-            "pow",
             "renorm",
             "sparse.sampled_addmm",
             "to_sparse",
@@ -79,7 +66,6 @@ if torch.backends.mps.is_available():
             # Failures due to lack of op implementation on MPS backend
             "linalg.eig": None,
             "linalg.eigvals": None,
-            "frexp": None,
             "hash_tensor": None,
             "heaviside": None,
             # "kthvalue": None,
@@ -367,18 +353,12 @@ if torch.backends.mps.is_available():
             # logcumsumexp on complex inputs disagrees with CPU at branch
             # cuts (off by 2*pi); shifted RNG exposed a sample on the cut.
             "logcumsumexp": [torch.complex64],
-            # `nn.functional.dropout` keeps a complex64 entry because the
-            # MPS dropout kernel doesn't support complex inputs at all (the
-            # shape comparison would fail to even run).
-            "nn.functional.dropout": [torch.complex64],
             # See https://github.com/pytorch/pytorch/issues/111479
             "nn.functional.multi_head_attention_forward": [
                 torch.float32,
                 torch.float16,
                 torch.bfloat16,
             ],
-            # zero to negative integer powers are undefined
-            "__rpow__": [torch.int8, torch.int16, torch.int32, torch.int64],
             # CPU Errors:
             "addr": [
                 torch.bool,
