@@ -1,14 +1,16 @@
 # Owner(s): ["module: inductor"]
 
 import os
+import pathlib
 import re
+import tempfile
 import unittest
 
 import torch
 from torch import nn
 from torch._dynamo.testing import reset_rng_state
 from torch._inductor import config, test_operators
-from torch._inductor.codegen.multi_kernel import MultiKernelCall
+from torch._inductor.codegen.multi_kernel import MultiKernelCall, MultiKernelPlanCall
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
@@ -92,6 +94,67 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
 )
 @instantiate_parametrized_tests
 class MultiKernelTest(TestCase):
+    def test_multi_kernel_plan_call(self):
+        class FakeKernel:
+            def __init__(self, name, fn):
+                self.fn = unittest.mock.Mock(arg_names=["arg"], cache_key=name)
+                self.size_hints = []
+                self.triton_meta = {}
+                self.inductor_meta = {"kernel_name": name}
+                self.mutated_arg_names = set()
+                self.device_props = unittest.mock.Mock(type="cuda")
+                self._fn = fn
+
+            def run(self, *args, **kwargs):
+                self._fn(*args)
+
+        calls = []
+        one_pass = FakeKernel("one_pass", lambda x: calls.append(("one", x)))
+        partial = FakeKernel("partial", lambda x: calls.append(("partial", x)))
+        final = FakeKernel("final", lambda x: calls.append(("final", x)))
+        with (
+            unittest.mock.patch.dict(
+                os.environ, {"TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE": "1"}
+            ),
+            unittest.mock.patch.object(
+                MultiKernelPlanCall, "benchmark_plans", return_value=[2.0, 1.0]
+            ),
+        ):
+            plan = MultiKernelPlanCall(
+                "multi_kernel_plan_0",
+                [[one_pass], [partial, final]],
+                [[[0]], [[0], [0]]],
+            )
+            plan.run("value")
+        self.assertEqual(plan.picked_plan, 1)
+        self.assertEqual(calls, [("partial", "value"), ("final", "value")])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = pathlib.Path(tmpdir) / "picked_plan"
+            with (
+                unittest.mock.patch.dict(
+                    os.environ, {"TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE": "0"}
+                ),
+                unittest.mock.patch.object(
+                    MultiKernelPlanCall,
+                    "cache_file_path",
+                    return_value=cache_path,
+                ),
+            ):
+                first = MultiKernelPlanCall(
+                    "multi_kernel_plan_0",
+                    [[one_pass], [partial, final]],
+                    [[[0]], [[0], [0]]],
+                )
+                first.picked_plan = 1
+                first.store_cache()
+                reloaded = MultiKernelPlanCall(
+                    "multi_kernel_plan_0",
+                    [[one_pass], [partial, final]],
+                    [[[0]], [[0], [0]]],
+                )
+                self.assertEqual(reloaded.picked_plan, 1)
+
     def test_softmax(self, expect_multi_kernel=True):
         x = torch.rand(2, 1024).to(GPU_TYPE)
         ref = torch.softmax(x, -1)
