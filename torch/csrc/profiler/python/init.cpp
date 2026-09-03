@@ -11,6 +11,7 @@
 #include <torch/csrc/profiler/cupti/monitor_python.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/utils/pybind.h>
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -755,6 +756,18 @@ void initPythonBindings(PyObject* module) {
       tb_ptrs.emplace_back(((THPCapturedTraceback*)tb.ptr())->data.get());
     }
     return py_symbolize(tb_ptrs);
+  });
+  // effective TORCH_SYMBOLIZE_MODE / TORCH_DISABLE_ADDR2LINE choice, for tests
+  m.def("_get_symbolize_mode", []() -> std::string {
+    switch (torch::get_symbolize_mode()) {
+      case torch::unwind::Mode::addr2line:
+        return "addr2line";
+      case torch::unwind::Mode::fast:
+        return "fast";
+      case torch::unwind::Mode::dladdr:
+        return "dladdr";
+    }
+    TORCH_CHECK(false, "unknown symbolize mode");
   });
   // directly convert address pointers to frames, used for testing symbolize
   m.def(
