@@ -41,4 +41,15 @@ TORCH_API void nccl_all_to_all_nd(
     int64_t scatter_dim,
     int64_t gather_dim,
     const std::string& group_name);
+// All-gather a rank-local bucket of parameter shards from a shared symmetric
+// memory buffer into a parameter-contiguous output, fusing the gather with the
+// copy-out reorder. Parameter i is described by split_sizes[i] (per-rank shard
+// size) and split_offsets[i] (start offset in `input`, defaulting to the
+// exclusive prefix sum of split_sizes).
+TORCH_API void nccl_all_gather_offset(
+    const at::Tensor& input,
+    at::Tensor& out,
+    const std::string& group_name,
+    at::IntArrayRef split_sizes,
+    std::optional<at::IntArrayRef> split_offsets);
 } // namespace c10d::nccl_extension
