@@ -362,6 +362,34 @@ class AOTInductorTestsTemplate:
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
             )
 
+    def test_invoke_subgraph_nested_region(self):
+        # Two call sites, so the region is not single-use: it has to be emitted twice
+        # and each copy scoped, and it survives inlining on its own merits rather than
+        # only because of the config patch below.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.cos(gn(x * 2)) + gn(x * 3)
+
+        with torch._dynamo.config.patch(
+            enable_invoke_subgraph_regional_compile=True,
+            inline_single_use_invoke_subgraph=False,
+        ):
+
+            @torch.compiler.nested_compile_region
+            def gn(x):
+                return torch.sin(x) + 1
+
+            example_inputs = (torch.randn(8, 8, device=self.device),)
+            model = Model()
+            # check_model covers the round trip including dlopen; the FileCheck pins
+            # that the region reached codegen_invoke_subgraph, which a correctness-only
+            # assertion would keep passing without.
+            self.check_model(model, example_inputs)
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            FileCheck().check_count("// subgraph: ", 2).run(code)
+
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     def test_loaded_modules_tracking(self, embed_kernel_binary):
         # Verify that AOTI codegen on CUDA/HIP passes &kernels_.loaded_modules_
@@ -6030,20 +6058,20 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, *inputs):
-                result = inputs[0]
-                for i in range(1, len(inputs)):
-                    result = result + inputs[i]
-                return result
+                # Export preserves unused user inputs and generates runtime checks for them.
+                return inputs[0]
 
+        num_inputs = 100 if self.use_minimal_arrayref_interface else 1000
         inputs = []
-        for _ in range(1000):
+        for _ in range(num_inputs):
             inputs.append(torch.ones(8, 8, 8, dtype=torch.float16, device=self.device))
         inputs = tuple(inputs)
         model = Model()
         with torch.no_grad():
             # This test calls compile directly rather than self.check_model, so
             # propagate the copied test class' ArrayRef settings explicitly.
-            AOTIRunnerUtil.compile(
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile,
                 model,
                 inputs,
                 inductor_configs={
@@ -6051,6 +6079,7 @@ class AOTInductorTestsTemplate:
                     "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
                 },
             )
+        FileCheck().check(f"check_input_{num_inputs - 1}(input_handles);").run(code)
 
     def test_runtime_checks_complex(self):
         class Model(torch.nn.Module):
@@ -8322,6 +8351,9 @@ class AOTInductorTestsTemplate:
             "L__self___weight": torch.randn(N, K, device=self.device),
             "L__self___bias": torch.randn(N, device=self.device),
         }
+        external_weight_use_counts = {
+            name: tensor._use_count() for name, tensor in external_weights.items()
+        }
 
         if self.device == "cpu":
             normal_runner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
@@ -8351,16 +8383,18 @@ class AOTInductorTestsTemplate:
                 so_path, 1, self.device, "", external_weights
             )
         self.assertFalse(runner.did_call_load_constants())
+        for name, tensor in external_weights.items():
+            self.assertEqual(tensor._use_count(), external_weight_use_counts[name] + 1)
 
-        def runner_call(*args, **kwargs):
+        def runner_call(aoti_runner, *args, **kwargs):
             import torch.fx._pytree as fx_pytree
 
-            call_spec = runner.get_call_spec()
+            call_spec = aoti_runner.get_call_spec()
             in_spec = pytree.treespec_loads(call_spec[0])
             out_spec = pytree.treespec_loads(call_spec[1])
             flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
             flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
-            flat_outputs = runner.run(flat_inputs)
+            flat_outputs = aoti_runner.run(flat_inputs)
             return pytree.tree_unflatten(flat_outputs, out_spec)
 
         test_inputs = torch.randn(M, K, device=self.device)
@@ -8374,9 +8408,66 @@ class AOTInductorTestsTemplate:
             external_weights["L__self___weight"],
             external_weights["L__self___bias"],
         )
-        output = runner_call(test_inputs)
+        output = runner_call(runner, test_inputs)
         self.assertEqual(expected, output)
         self.assertFalse(runner.did_call_load_constants())
+
+        del runner
+        for name, tensor in external_weights.items():
+            self.assertEqual(tensor._use_count(), external_weight_use_counts[name])
+
+    def test_user_managed_buffer_tensor_handle_lifetime(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(6, 16, device=device)
+                self.bias = torch.randn(6, device=device)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(8, 16, device=self.device),)
+        with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+        weights = {
+            "L__self___weight": torch.randn(6, 16, device=self.device),
+            "L__self___bias": torch.randn(6, device=self.device),
+        }
+        weight_use_counts = {
+            name: tensor._use_count() for name, tensor in weights.items()
+        }
+
+        runner.update_constant_buffer(weights, True, True, True)
+        for name, tensor in weights.items():
+            self.assertEqual(tensor._use_count(), weight_use_counts[name] + 1)
+
+        # Preserve the existing free behavior: non-folded map entries remain.
+        runner.free_inactive_constant_buffer()
+        for name, tensor in weights.items():
+            self.assertEqual(tensor._use_count(), weight_use_counts[name] + 1)
+
+        replacement_weights = {
+            "L__self___weight": torch.randn(6, 16, device=self.device),
+            "L__self___bias": torch.randn(6, device=self.device),
+        }
+        replacement_use_counts = {
+            name: tensor._use_count() for name, tensor in replacement_weights.items()
+        }
+        runner.update_constant_buffer(replacement_weights, True, True, True)
+        for name, tensor in weights.items():
+            self.assertEqual(tensor._use_count(), weight_use_counts[name])
+        for name, tensor in replacement_weights.items():
+            self.assertEqual(tensor._use_count(), replacement_use_counts[name] + 1)
+
+        del runner
+        for name, tensor in replacement_weights.items():
+            self.assertEqual(tensor._use_count(), replacement_use_counts[name])
 
     def test_update_user_managed_buffer(self):
         if self.device not in ["cuda", "xpu"]:
@@ -8414,20 +8505,20 @@ class AOTInductorTestsTemplate:
             free_memory, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
             return -free_memory
 
-        def runner_call(*args, **kwargs):
+        def runner_call(aoti_runner, *args, **kwargs):
             import torch.fx._pytree as fx_pytree
 
-            call_spec = runner.get_call_spec()
+            call_spec = aoti_runner.get_call_spec()
             in_spec = pytree.treespec_loads(call_spec[0])
             out_spec = pytree.treespec_loads(call_spec[1])
             flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
             flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
-            flat_outputs = runner.run(flat_inputs)
+            flat_outputs = aoti_runner.run(flat_inputs)
             return pytree.tree_unflatten(flat_outputs, out_spec)
 
         test_inputs = torch.randn(M, K, device=self.device)
         expected = model(test_inputs)
-        output = runner_call(test_inputs)
+        output = runner_call(runner, test_inputs)
         self.assertEqual(expected, output, atol=1e-3, rtol=1e-3)
 
         new_weights = {
@@ -8441,7 +8532,7 @@ class AOTInductorTestsTemplate:
         self.assertGreater(mem_after, mem_before)
 
         runner.swap_constant_buffer()
-        new_output = runner_call(test_inputs)
+        new_output = runner_call(runner, test_inputs)
         new_expected = torch.nn.functional.linear(
             test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
         )
@@ -8451,7 +8542,7 @@ class AOTInductorTestsTemplate:
         new_weights["L__self___weight"].add_(1)
         new_weights["L__self___bias"].add_(1)
 
-        new_output = runner_call(test_inputs)
+        new_output = runner_call(runner, test_inputs)
         # Same as the previous result
         self.assertEqual(new_expected, new_output, atol=1e-3, rtol=1e-3)
         new_expected = torch.nn.functional.linear(
@@ -8469,14 +8560,17 @@ class AOTInductorTestsTemplate:
             "L__self___weight": torch.randn(N, K, device=self.device),
             "L__self___bias": torch.randn(N, device=self.device),
         }
+        retained_weight = new_weights["L__self___weight"]
+        retained_weight_use_count = retained_weight._use_count()
         mem_before = constant_buffer_memory_used()
         # Try user managed_buffer, should not allocate an owned constant buffer.
         runner.update_constant_buffer(new_weights, True, False, True)
+        self.assertEqual(retained_weight._use_count(), retained_weight_use_count + 1)
         mem_after = constant_buffer_memory_used()
         self.assertEqual(mem_before, mem_after, atol=1e-3, rtol=1e-3)
 
         runner.swap_constant_buffer()
-        new_output = runner_call(test_inputs)
+        new_output = runner_call(runner, test_inputs)
         new_expected = torch.nn.functional.linear(
             test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
         )
@@ -8486,7 +8580,7 @@ class AOTInductorTestsTemplate:
         new_weights["L__self___weight"].add_(1)
         new_weights["L__self___bias"].add_(1)
 
-        new_output = runner_call(test_inputs)
+        new_output = runner_call(runner, test_inputs)
         new_expected = torch.nn.functional.linear(
             test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
         )
@@ -8499,6 +8593,8 @@ class AOTInductorTestsTemplate:
 
         runner.update_constant_buffer(new_weights, True, False, True)
         runner.swap_constant_buffer()
+        runner.free_inactive_constant_buffer()
+        self.assertEqual(retained_weight._use_count(), retained_weight_use_count + 1)
 
         model.weight = torch.nn.Parameter(new_weights["L__self___weight"])
         model.bias = torch.nn.Parameter(new_weights["L__self___bias"])
@@ -8510,12 +8606,15 @@ class AOTInductorTestsTemplate:
 
         model.load_state_dict(updated_state_dict)
 
-        new_output = runner_call(test_inputs)
+        new_output = runner_call(runner, test_inputs)
         expected_output = model(test_inputs)
         torch.testing.assert_close(new_output, expected_output, atol=1e-3, rtol=1e-3)
 
         with self.assertRaises(AssertionError):
             torch.testing.assert_close(new_expected, new_output, atol=1e-3, rtol=1e-3)
+
+        del runner
+        self.assertEqual(retained_weight._use_count(), retained_weight_use_count)
 
     def test_load_constants_allow_h2d_copy(self):
         # End-to-end check that AOTICompiledModel.load_constants(allow_h2d_copy=True)
