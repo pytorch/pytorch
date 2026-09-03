@@ -5357,6 +5357,10 @@ def construct_sum_pyop():
     def mysum_autograd_cuda(x, dim):
         return torch.sum(x, dim)
 
+    @mysum.py_impl(torch._C.DispatchKey.AutogradXPU)
+    def mysum_autograd_xpu(x, dim):
+        return torch.sum(x, dim)
+
     return mysum
 
 
@@ -5762,7 +5766,8 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestHigherOrderOperatorInteraction,
     globals(),
-    only_for=only_for,
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestFunctionalize,
