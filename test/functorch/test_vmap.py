@@ -2353,7 +2353,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
             in_dims=(None, 0, 0),
         )
 
-        # Empty indices are a no-op, while invalid indices still raise.
+        # Empty indices are a no-op.
         test(
             copy,
             (
@@ -2363,6 +2363,14 @@ class TestVmapOperators(Namespace.TestVmapBase):
             ),
             in_dims=(None, 0, 0),
         )
+
+    @skipIfTorchDynamo()
+    def test_index_copy_out_of_bounds(self):
+        def copy(x, index, source):
+            return torch.index_copy(x, 1, index, source)
+
+        x = torch.randn(3, 4)
+        source = torch.randn(3, 1)
         with self.assertRaisesRegex(RuntimeError, "out of bounds"):
             vmap(copy, in_dims=(None, 0, None))(x, torch.tensor([0, 4]), source)
 

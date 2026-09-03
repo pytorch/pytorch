@@ -5625,12 +5625,13 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
 
         yield SampleInput(t, args=args, kwargs=kwargs)
 
-    # index_select and index_copy accept a scalar index as a length-1 vector.
-    if copy or not (add or fill):
+    # index_select, index_copy, and index_add accept a scalar index as a
+    # length-1 vector.
+    if not fill:
         t = make_arg((S, S))
         idx = make_idx(1).squeeze(0)
         args = [-1, idx]
-        if copy:
+        if copy or add:
             args.append(make_arg((S, 1)))
         yield SampleInput(t, args=tuple(args))
 
