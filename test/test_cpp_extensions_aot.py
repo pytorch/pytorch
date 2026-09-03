@@ -13,6 +13,7 @@ import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -67,6 +68,8 @@ class TestCppExtensionAOT(common.TestCase):
     failed.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_extension_function(self):
         x = torch.randn(4, 4)
         y = torch.randn(4, 4)
@@ -97,6 +100,31 @@ class TestCppExtensionAOT(common.TestCase):
         expected_tensor_grad = torch.ones([4, 4], dtype=torch.double).mm(weights.t())
         self.assertEqual(tensor.grad, expected_tensor_grad)
 
+    @unittest.skipIf(IS_WINDOWS, "Not available on Windows")
+    def test_no_python_abi_suffix_sets_the_correct_library_name(self):
+        # For this test, run_test.py will call
+        # `python -m pip install . -v --no-build-isolation` in the
+        # cpp_extensions/no_python_abi_suffix_test folder, where the
+        # `BuildExtension` class has a `no_python_abi_suffix` option set to
+        # `True`. This *should* mean that on Python 3, the produced shared
+        # library does not have an ABI suffix like
+        # "cpython-37m-x86_64-linux-gnu" before the library suffix, e.g. "so".
+        root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "build")
+        matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith("so")]
+        self.assertEqual(len(matches), 1, msg=str(matches))
+        self.assertEqual(matches[0], "no_python_abi_suffix_test.so", msg=str(matches))
+
+    def test_optional(self):
+        has_value = cpp_extension.function_taking_optional(torch.ones(5))
+        self.assertTrue(has_value)
+        has_value = cpp_extension.function_taking_optional(None)
+        self.assertFalse(has_value)
+
+
+@torch.testing._internal.common_utils.markDynamoStrictTest
+class TestCppExtensionAOTDevice(common.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize("device_type", list(_SIGMOID_ADD_BACKENDS))
     def test_sigmoid_add_extension(self, device_type):
         module_name = _SIGMOID_ADD_BACKENDS[device_type]
@@ -111,18 +139,10 @@ class TestCppExtensionAOT(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
-    @unittest.skipIf(not torch.backends.mps.is_available(), "MPS not found")
-    def test_mps_extension(self):
-        import torch_test_cpp_extension.mps as mps_extension
 
-        tensor_length = 100000
-        x = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
-        y = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
-
-        cpu_output = mps_extension.get_cpu_add_output(x, y)
-        mps_output = mps_extension.get_mps_add_output(x.to("mps"), y.to("mps"))
-
-        self.assertEqual(cpu_output, mps_output.to("cpu"))
+@torch.testing._internal.common_utils.markDynamoStrictTest
+class TestCppExtensionAOTCUDA(common.TestCase):
+    hw_classification = HardwareClassification.CUDA
 
     @common.skipIfRocm
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
@@ -144,26 +164,6 @@ class TestCppExtensionAOT(common.TestCase):
         z = cusolver_extension.noop_cusolver_function(x)
         self.assertEqual(z, x)
 
-    @unittest.skipIf(IS_WINDOWS, "Not available on Windows")
-    def test_no_python_abi_suffix_sets_the_correct_library_name(self):
-        # For this test, run_test.py will call
-        # `python -m pip install . -v --no-build-isolation` in the
-        # cpp_extensions/no_python_abi_suffix_test folder, where the
-        # `BuildExtension` class has a `no_python_abi_suffix` option set to
-        # `True`. This *should* mean that on Python 3, the produced shared
-        # library does not have an ABI suffix like
-        # "cpython-37m-x86_64-linux-gnu" before the library suffix, e.g. "so".
-        root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "build")
-        matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith("so")]
-        self.assertEqual(len(matches), 1, msg=str(matches))
-        self.assertEqual(matches[0], "no_python_abi_suffix_test.so", msg=str(matches))
-
-    def test_optional(self):
-        has_value = cpp_extension.function_taking_optional(torch.ones(5))
-        self.assertTrue(has_value)
-        has_value = cpp_extension.function_taking_optional(None)
-        self.assertFalse(has_value)
-
     @common.skipIfRocm
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
@@ -182,6 +182,24 @@ class TestCppExtensionAOT(common.TestCase):
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
+class TestCppExtensionAOTMPS(common.TestCase):
+    hw_classification = HardwareClassification.MPS
+
+    @unittest.skipIf(not torch.backends.mps.is_available(), "MPS not found")
+    def test_mps_extension(self):
+        import torch_test_cpp_extension.mps as mps_extension
+
+        tensor_length = 100000
+        x = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
+        y = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
+
+        cpu_output = mps_extension.get_cpu_add_output(x, y)
+        mps_output = mps_extension.get_mps_add_output(x.to("mps"), y.to("mps"))
+
+        self.assertEqual(cpu_output, mps_output.to("cpu"))
+
+
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPybindTypeCasters(common.TestCase):
     """Pybind tests for ahead-of-time cpp extensions
 
@@ -194,6 +212,8 @@ class TestPybindTypeCasters(common.TestCase):
     second argument to `PYBIND11_TYPE_CASTER` should be the type we expect to
     receive in python, in these tests we verify this at run-time.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @staticmethod
     def expected_return_type(func):
@@ -296,6 +316,8 @@ class TestPybindTypeCasters(common.TestCase):
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMAIATensor(common.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_unregistered(self):
         torch.arange(0, 10, device="cpu")
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
@@ -380,6 +402,8 @@ class TestMAIATensor(common.TestCase):
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRNGExtension(common.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
 
@@ -417,6 +441,8 @@ class TestRNGExtension(common.TestCase):
 @torch.testing._internal.common_utils.markDynamoStrictTest
 @unittest.skipIf(not TEST_CUDA, "CUDA not found")
 class TestTorchLibrary(common.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_torch_library(self):
         import torch_test_cpp_extension.torch_library  # noqa: F401
 
@@ -435,7 +461,7 @@ class TestTorchLibrary(common.TestCase):
         self.assertIn("torch_library::logical_and", str(s.graph))
 
 
-instantiate_parametrized_tests(TestCppExtensionAOT)
+instantiate_parametrized_tests(TestCppExtensionAOTDevice)
 
 if __name__ == "__main__":
     common.run_tests()
