@@ -76,17 +76,20 @@ struct GuardCandidate {
 // What the code object's extra slot points at. Slot reads and writes are
 // serialized by the GIL; this design is not free-threading safe.
 //
-// Teardown protocol: destroy_extra_state marks the holder `destroying`, drops
-// its reference, and deletes the holder only in that outermost call. Dropping
-// the last reference runs ~ExtraState, whose Python (weakref callbacks on the
-// transformed code) can reach this same code object while CPython still has
-// the holder in the slot -- CPython nulls the slot only after the freefunc
-// returns. During that window get_extra_state reads "no state", a nested
-// reset_extra_state or freefunc call is a no-op, and init_and_set_extra_state
-// hands out a detached state without touching the slot: anything installed
-// there would be dropped unfreed when the outer freefunc returns.
+// Teardown protocol: reset_extra_state, or the freefunc when code_dealloc
+// reaches it first, marks the holder `destroying` and drops its reference.
+// That can run ~ExtraState, whose Python (weakref callbacks on the transformed
+// code) may reach this same code object while the holder is still in the slot
+// -- CPython nulls the slot only after the freefunc returns. During that window
+// nested reset_extra_state and freefunc calls are no-ops, and a writer that
+// needs a state (skip_code, a compile, a precompile load) gets one parked in
+// `pending` rather than in the slot; get_extra_state serves it too, so every
+// writer in one teardown shares it. Once the slot is cleared, reset_extra_state
+// installs `pending` under a fresh holder, so nothing written during teardown
+// is lost. From code_dealloc there is no code object left to install it on.
 struct ExtraStateHolder {
   ExtraStateRef state;
+  ExtraStateRef pending;
   bool destroying{false};
 };
 } // namespace
@@ -183,8 +186,10 @@ void ExtraState::invalidate(
     // return False.
     this->move_to_back(live_entry);
   }
-  // Keep the current pointer alive but make the fields as if no-op. The
-  // detached code and backend die with `detached`, after the lock.
+  // The entry now points at deleted_guard_manager with None code and backend;
+  // what it held came back in `detached` and dies here, after the lock. The old
+  // guard manager's back-references are cleared here too: both attribute
+  // stores run Python.
   detached.guard_manager.attr("cache_entry") = py::none();
   detached.guard_manager.attr("extra_state") = py::none();
 }
@@ -373,9 +378,20 @@ static ExtraStateHolder* get_extra_state_holder(PyCodeObject* code) {
 
 ExtraStateRef get_extra_state(PyCodeObject* code) {
   ExtraStateHolder* holder = get_extra_state_holder(code);
-  // A destroying holder's state has already been moved out, so it reads as
-  // "no ExtraState" rather than as a state mid-destruction.
-  return holder == nullptr ? nullptr : holder->state;
+  if (holder == nullptr) {
+    return nullptr;
+  }
+  // A destroying holder's state has already been moved out; what it has is
+  // whatever a writer parked during the teardown (see ExtraStateHolder).
+  return holder->destroying ? holder->pending : holder->state;
+}
+
+// Drops the slot's reference. When it was the last one this runs ~ExtraState,
+// and through it Python that can re-enter on this code object.
+static void drop_extra_state(ExtraStateHolder* holder) {
+  holder->destroying = true;
+  ExtraStateRef state = std::move(holder->state);
+  state.reset();
 }
 
 void destroy_extra_state(void* obj) {
@@ -385,12 +401,12 @@ void destroy_extra_state(void* obj) {
     return;
   }
   ExtraStateHolder* holder = static_cast<ExtraStateHolder*>(obj);
+  // reset_extra_state has already dropped the state and deletes the holder
+  // itself once _PyCode_SetExtra returns.
   if (holder->destroying) {
     return;
   }
-  holder->destroying = true;
-  ExtraStateRef state = std::move(holder->state);
-  state.reset();
+  drop_extra_state(holder);
   delete holder;
 }
 
@@ -399,21 +415,32 @@ void reset_extra_state(PyCodeObject* code) {
   if (holder == nullptr || holder->destroying) {
     return;
   }
+  drop_extra_state(holder);
+  ExtraStateRef pending = std::move(holder->pending);
+  // The freefunc sees `destroying` and leaves the holder to us.
   _PyCode_SetExtra((PyObject*)code, extra_index, nullptr);
+  delete holder;
+  if (pending != nullptr) {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    _PyCode_SetExtra(
+        (PyObject*)code, extra_index, new ExtraStateHolder{std::move(pending)});
+  }
 }
 
 ExtraStateRef init_and_set_extra_state(PyCodeObject* code) {
   ExtraStateRef state = std::make_shared<ExtraState>();
   ExtraStateHolder* holder = get_extra_state_holder(code);
   if (holder != nullptr) {
-    // A live holder means the caller skipped get_extra_state.
-    CHECK(holder->destroying);
+    // Only reachable mid-teardown (see ExtraStateHolder): a live holder, or a
+    // pending state already handed out, means the caller skipped
+    // get_extra_state.
+    CHECK(holder->destroying && holder->pending == nullptr);
+    holder->pending = state;
     return state;
   }
   // freed by destroy_extra_state (since we need to pass these objects to C)
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-  _PyCode_SetExtra(
-      (PyObject*)code, extra_index, new ExtraStateHolder{state, false});
+  _PyCode_SetExtra((PyObject*)code, extra_index, new ExtraStateHolder{state});
   return state;
 }
 
@@ -495,17 +522,21 @@ static size_t match_in_list(
 // Runs under cache_mutex, so backends are compared by identity only: a
 // different object may still be __eq__-equal (two torch.compile() wrappers with
 // the same options), and deciding that is user Python, which lookup() runs with
-// the lock released.
+// the lock released. Such an entry is skipped -- a later entry with this very
+// backend and no guards is still a guard-free hit -- but it is not a miss
+// either, so reaching the end past one falls back to lookup().
 static bool try_lookup_without_guard_eval_in_list(
     std::list<CacheEntry>& entries,
     PyObject* backend,
     bool is_skip_guard_eval_unsafe,
     CacheEntry** found) {
+  bool skipped = false;
   for (CacheEntry& cache_entry : entries) {
-    if (!Py_IsFalse(backend) && cache_entry.backend.ptr() != backend) {
-      return false;
-    }
     if (!PyCode_Check(cache_entry.code.ptr())) {
+      continue;
+    }
+    if (!Py_IsFalse(backend) && cache_entry.backend.ptr() != backend) {
+      skipped = true;
       continue;
     }
     if (has_no_guards(
@@ -517,7 +548,7 @@ static bool try_lookup_without_guard_eval_in_list(
     }
     return false;
   }
-  return true;
+  return !skipped;
 }
 
 void lookup(
@@ -598,12 +629,19 @@ void lookup(
       break;
     }
     PyObject* winner = precompile_candidates[index++].guard_manager.ptr();
-    CacheLock lock(extra_state->cache_mutex);
-    for (const PrecompileEntry& entry : extra_state->precompile_entries) {
-      if (entry.guard_manager.ptr() == winner) {
-        result->code = entry.code;
-        return;
+    py::object code;
+    {
+      CacheLock lock(extra_state->cache_mutex);
+      for (const PrecompileEntry& entry : extra_state->precompile_entries) {
+        if (entry.guard_manager.ptr() == winner) {
+          code = entry.code;
+          break;
+        }
       }
+    }
+    if (code) {
+      result->code = std::move(code);
+      return;
     }
   }
 
@@ -625,16 +663,20 @@ void lookup(
         break;
       }
       PyObject* winner = candidates[i][index++].guard_manager.ptr();
-      CacheLock lock(extra_state->cache_mutex);
-      CacheEntry* live = extra_state->find_entry(ids_to_search[i], winner);
-      if (live == nullptr) {
-        continue;
+      py::object code;
+      {
+        CacheLock lock(extra_state->cache_mutex);
+        CacheEntry* live = extra_state->find_entry(ids_to_search[i], winner);
+        if (live == nullptr) {
+          continue;
+        }
+        if (use_lru) {
+          extra_state->move_to_front(live);
+        }
+        code = live->code;
+        result->trace_annotation = live->trace_annotation;
       }
-      if (use_lru) {
-        extra_state->move_to_front(live);
-      }
-      result->code = live->code;
-      result->trace_annotation = live->trace_annotation;
+      result->code = std::move(code);
       return;
     }
   }
@@ -647,50 +689,52 @@ bool try_lookup_without_guard_eval(
     int64_t isolate_recompiles_id,
     LookupResult* result,
     bool is_skip_guard_eval_unsafe) {
-  CacheLock lock(extra_state->cache_mutex);
-  // Own region only, matching lookup().
-  const PrecompileEntry* first_precompile_entry = nullptr;
-  for (const auto& entry : extra_state->precompile_entries) {
-    if (entry.isolate_recompiles_id == isolate_recompiles_id) {
-      first_precompile_entry = &entry;
-      break;
+  // Filled under the lock, stored into result after it: storing decrefs
+  // whatever result held, and the lock admits no Python.
+  py::object code;
+  {
+    CacheLock lock(extra_state->cache_mutex);
+    // Own region only, matching lookup().
+    const PrecompileEntry* first_precompile_entry = nullptr;
+    for (const auto& entry : extra_state->precompile_entries) {
+      if (entry.isolate_recompiles_id == isolate_recompiles_id) {
+        first_precompile_entry = &entry;
+        break;
+      }
     }
-  }
-  std::array<int64_t, 2> ids_to_search = {isolate_recompiles_id, -1};
-  size_t num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
-  if (first_precompile_entry != nullptr) {
-    // Only the first precompile entry can be safely fast-pathed: a later
-    // guardless entry must not preempt an earlier guarded entry whose guards
-    // may pass.
-    if (torch::dynamo::root_guard_manager_has_no_guards(
-            first_precompile_entry->root_mgr)) {
-      result->code = first_precompile_entry->code;
-      return true;
-    }
-    return false;
-  }
-
-  CacheEntry* found = nullptr;
-  for (size_t i = 0; i < num_ids && found == nullptr; i++) {
-    auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
-    if (it != extra_state->cache_entry_map.end()) {
-      if (!try_lookup_without_guard_eval_in_list(
-              it->second, backend, is_skip_guard_eval_unsafe, &found)) {
+    if (first_precompile_entry != nullptr) {
+      // Only the first precompile entry can be safely fast-pathed: a later
+      // guardless entry must not preempt an earlier guarded entry whose guards
+      // may pass.
+      if (!torch::dynamo::root_guard_manager_has_no_guards(
+              first_precompile_entry->root_mgr)) {
         return false;
+      }
+      code = first_precompile_entry->code;
+    } else {
+      std::array<int64_t, 2> ids_to_search = {isolate_recompiles_id, -1};
+      size_t num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
+      CacheEntry* found = nullptr;
+      for (size_t i = 0; i < num_ids && found == nullptr; i++) {
+        auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
+        if (it != extra_state->cache_entry_map.end() &&
+            !try_lookup_without_guard_eval_in_list(
+                it->second, backend, is_skip_guard_eval_unsafe, &found)) {
+          return false;
+        }
+      }
+      if (found == nullptr) {
+        code = py::none();
+      } else {
+        if (use_lru) {
+          extra_state->move_to_front(found);
+        }
+        code = found->code;
+        result->trace_annotation = found->trace_annotation;
       }
     }
   }
-
-  if (found) {
-    if (use_lru) {
-      extra_state->move_to_front(found);
-    }
-    result->code = found->code;
-    result->trace_annotation = found->trace_annotation;
-    return true;
-  }
-
-  result->code = py::none();
+  result->code = std::move(code);
   return true;
 }
 
