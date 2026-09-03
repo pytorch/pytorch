@@ -669,9 +669,6 @@ class ConfigModule(ModuleType):
         config = self._get_dict(
             ignored_prefixes=prefixes, readonly_values=readonly_values
         )
-        serializer = getattr(self, "_cache_config_serializer", None)
-        if serializer is not None:
-            serializer(config)
         factory_keys = getattr(self, "_cache_config_factory_keys", [])
         if factory_keys:
             for key in factory_keys:

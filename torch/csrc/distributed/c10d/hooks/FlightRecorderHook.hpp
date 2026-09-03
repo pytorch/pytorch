@@ -112,15 +112,19 @@ class TORCH_API FlightRecorderHook
     std::chrono::milliseconds timeout{kBackendDefaultTimeout};
   };
 
-  // A recorded op whose collective the hook is still waiting on. workKey is
-  // empty between the pre-hook and the post-hook, and stays empty if the
-  // backend threw in between -- such an entry is never retired, which is the
-  // honest report: it was issued and never seen to finish.
+  // A recorded op whose collective the hook is still waiting on. work is null
+  // between the pre-hook and the post-hook, and stays null if the backend threw
+  // in between -- such an entry is never retired, which is the honest report:
+  // it was issued and never seen to finish.
+  //
+  // The Work reference is what makes the pointer in CompletionHookArgs a safe
+  // key: an address can only be reused once its Work is freed, and this holds
+  // one for as long as work_ids_ can resolve it.
   struct InflightOp {
     FlightRecorder<c10::Event>::TraceIdentifier trace_id;
     FlightRecorder<c10::Event>* recorder = nullptr;
     HookOpName name = HookOpName::UNKNOWN;
-    std::optional<uint64_t> workKey;
+    c10::intrusive_ptr<Work> work;
   };
 
   FlightRecorderHook(
@@ -141,7 +145,7 @@ class TORCH_API FlightRecorderHook
   // already retired: the entry is claimed out of inflight_ under mutex_, so
   // the backend's completion hook and the post-hook's own check retire it
   // exactly once between them however they race.
-  void retireCompleted(uint64_t completion_key, std::optional<float> duration);
+  void retireCompleted(const Work* work, std::optional<float> duration);
   // The backend's own measurement, or nullopt if it cannot time collectives.
   std::optional<float> workDuration(const Work& work);
   // Dumps the trace to disk, at most once per process. Deliberately takes no
@@ -188,9 +192,12 @@ class TORCH_API FlightRecorderHook
   // Ordered by op_id, which is monotonic per process group, so the front is the
   // oldest op still awaited and eviction is in issue order.
   std::map<int64_t, InflightOp> inflight_;
-  // The reverse index a completion needs. Numeric keys do not extend Work
-  // lifetimes and are never reused by a backend.
-  std::unordered_map<uint64_t, int64_t> work_ids_;
+  // The reverse index a completion needs: CompletionHookArgs identifies the op
+  // by its Work, since op_id is assigned above the backend and a Work does not
+  // carry it, and the post-hook is where the two are seen together. Kept in
+  // step with inflight_ -- every entry here has a live entry there holding the
+  // Work.
+  std::unordered_map<const Work*, int64_t> work_ids_;
 };
 
 } // namespace c10d

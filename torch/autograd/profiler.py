@@ -545,36 +545,17 @@ class profile:
 
     table.__doc__ = EventList.table.__doc__
 
-    def export_chrome_trace(
-        self,
-        path,
-        metadata=None,
-        use_python_export=False,
-        cuda_graph_annotations=None,
-        graph_lanes="none",
-        default_stream=7,
-    ):
+    def export_chrome_trace(self, path, metadata=None, use_python_export=False):
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
         """
-        # graph_lanes is only honored by the Python exporter, so route there for anything
-        # but the "none" default rather than dropping it on the floor.
-        if (
-            use_python_export or cuda_graph_annotations or graph_lanes != "none"
-        ) and kineto_available():
+        if use_python_export and kineto_available():
             from torch.profiler._chrome_trace_export import (
                 export_chrome_trace as _export,
             )
 
-            _export(  # type: ignore[union-attr]
-                self.kineto_results,
-                path,
-                metadata,
-                cuda_graph_annotations,
-                graph_lanes,
-                default_stream,
-            )
+            _export(self.kineto_results, path, metadata)  # type: ignore[union-attr]
         elif kineto_available():
             self.kineto_results.save(path)  # type: ignore[union-attr]
         else:
@@ -789,10 +770,7 @@ class profile:
                     device_corr_map[corr_id] = []
                 device_corr_map[corr_id].append(fe)
             elif corr_id == 0:
-                # Skip OVERHEAD events (profiler-internal host cost):
-                # they do no device work and would otherwise inflate reported device time.
-                if fe.activity_type != "overhead":
-                    frontend_function_events.append(fe)
+                frontend_function_events.append(fe)
             else:
                 raise RuntimeError(
                     f"Got negative correlation id {corr_id} in profiler post processing"
@@ -1220,7 +1198,7 @@ class emit_nvtx:
 
 
 def load_nvprof(path):
-    """Open an nvprof trace file and parse autograd annotations.
+    """Open an nvprof trace file and parses autograd annotations.
 
     Args:
         path (str): path to nvprof trace

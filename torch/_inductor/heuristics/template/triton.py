@@ -19,7 +19,11 @@ from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
 from ...autows_utils import meta_ws_enabled
-from ...kernel.bmm import bmm_template
+from ...kernel.bmm import (
+    BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS,
+    blackwell_ws_persistent_tma_bmm_template,
+    bmm_template,
+)
 from ...kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
     get_scaling_options,
@@ -44,21 +48,24 @@ from ...utils import (
     using_rocm_rdna3,
 )
 from ...virtualized import V
+from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .triton_addmm import AddMMConfigMixin
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Sequence
+    from collections.abc import Callable, Generator
 
     from triton import Config as TritonConfig
-
-    from ...ir import IRNode
-    from ...utils import _IntLike
 
 else:
     from torch._inductor.runtime.triton_compat import Config as TritonConfig
 log = logging.getLogger(__name__)
+
+
+def _origami_enabled() -> bool:
+    """Check if origami GEMM optimization is enabled."""
+    return config.rocm.origami
 
 
 USE_META_WS = meta_ws_enabled()
@@ -73,30 +80,12 @@ def _use_template_autows() -> bool:
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
 
-_rocm_str: str | None = getattr(torch.version, "rocm", None) or torch.version.hip
-_rocm_version = (
-    tuple(int(v) for v in _rocm_str.split(".")[:2]) if _rocm_str is not None else (0, 0)
-)
-# First ROCm version where origami is not supported.
-ORIGAMI_UNSUPPORTED_ROCM_VERSION = (10, 0)
-
-
-def _origami_enabled() -> bool:
-    """Check if origami GEMM optimization is enabled."""
-    return config.rocm.origami and _rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
-
 
 # rocm-origami pip pkg is only available on ROCm builds and is only used when
 # both max_autotune and config.rocm.origami are enabled (env-var driven, set once
 # at config import). Cache the import here so the hot path never pays an exception
 # and CUDA/CPU/origami-disabled processes never attempt the import.
-# origami is not supported on ROCm 10.0+.
-if (
-    IS_ROCM
-    and _rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
-    and config.max_autotune
-    and config.rocm.origami
-):
+if IS_ROCM and config.max_autotune and config.rocm.origami:
     try:
         import origami  # type: ignore[import-not-found]
     except ImportError:
@@ -107,17 +96,6 @@ if (
         )
 else:
     origami = None
-    if (
-        IS_ROCM
-        and config.rocm.origami
-        and _rocm_version >= ORIGAMI_UNSUPPORTED_ROCM_VERSION
-    ):
-        log.warning(
-            "ROCm origami GEMM selection is not supported on ROCm %d.%d+ "
-            "(detected %d.%d); origami disabled.",
-            *ORIGAMI_UNSUPPORTED_ROCM_VERSION,
-            *_rocm_version,
-        )
 
 
 # TODO(rocm-origami): replace these wrappers with public accessors when the
@@ -416,6 +394,11 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(64, 64, 64, 3, 8),
             GemmConfig(128, 256, 128, 3, 8),
             GemmConfig(256, 128, 128, 3, 8),
+        ]
+
+        self.mixed_mm_configs: list[BaseConfig] = [
+            GemmConfig(16, 128, 256, 3, 4),
+            GemmConfig(16, 128, 256, 5, 8),
         ]
 
         self.persistent_mm_configs: list[BaseConfig] = [
@@ -1653,15 +1636,13 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             ROCmGemmConfig(256, 256, 64, self.default_num_stages, 8, group_m=4),
         ]
 
-        # Exhaustive search for mm configs. num_stages is deliberately not an axis
-        # here: _filter_configs forces every config to self.default_num_stages, so
-        # enumerating it would only produce duplicates that get deduped later.
+        # Exhaustive search for mm configs
         self.exhaustive_configs: list[BaseConfig] = [
             ROCmGemmConfig(
                 BLOCK_M,
                 BLOCK_N,
                 BLOCK_K,
-                self.default_num_stages,
+                num_stages,
                 num_warps,
                 group_m=group_m,
                 matrix_instr_nonkdim=matrix_instr_nonkdim,
@@ -1671,6 +1652,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
             )
+            for num_stages in [1, self.default_num_stages]
             for num_warps in [4, 8]
             for group_m in [4, 8, 16]
             for matrix_instr_nonkdim in [0, 16]
@@ -2872,15 +2854,13 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             # Need to unsqueeze bias from [N] -> [1, N]
             bias = L[aten.unsqueeze](bias, 0)
 
-        def is_tensorwise_scale(scale: IRNode) -> bool:
+        def is_tensorwise_scale(scale: Any) -> bool:
             size = scale.get_size()
             return len(size) == 0 or all(
                 V.graph.sizevars.statically_known_equals(dim, 1) for dim in size
             )
 
-        def normalize_tensorwise_scale(
-            scale: IRNode, *, allow_high_rank: bool
-        ) -> IRNode:
+        def normalize_tensorwise_scale(scale: Any, *, allow_high_rank: bool) -> Any:
             if not is_tensorwise_scale(scale):
                 return scale
             if not allow_high_rank and len(scale.get_size()) > 2:
@@ -2929,9 +2909,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         scale_b = input_nodes[3]
 
         # Scale compatibility assertion from mm_common.scaled_mm_options
-        def are_compatible_scales(
-            size_a: Sequence[_IntLike], size_b: Sequence[_IntLike]
-        ) -> bool:
+        def are_compatible_scales(size_a: Any, size_b: Any) -> bool:
             # Same sized scales are compatible
             if len(size_a) == len(size_b):
                 return True
@@ -3102,6 +3080,98 @@ class ScaledBlackwellTMAConfigMixin(
 )
 class CUDAMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
     """Standard MM template heuristic for CUDA"""
+
+
+@register_template_heuristic(
+    blackwell_ws_persistent_tma_bmm_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+    op_name="bmm",
+)
+class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
+    """Bounded configs for the Blackwell persistent-TMA BMM template."""
+
+    bmm_configs = BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
+
+        mat1, mat2 = kernel_inputs.mat1mat2()
+        if len(mat1.get_size()) != 3 or len(mat2.get_size()) != 3:
+            raise NotImplementedError("Blackwell BMM requires rank-3 operands")
+
+        batch, m, k = map(int, mat1.get_size())
+        batch_b, k_b, n = map(int, mat2.get_size())
+        if batch != batch_b or k != k_b:
+            raise NotImplementedError(
+                "Blackwell BMM does not broadcast logical batches"
+            )
+
+        a_row_major = mat1.get_stride()[2] == 1
+        a_col_major = mat1.get_stride()[1] == 1
+
+        b_row_major = mat2.get_stride()[2] == 1
+        b_col_major = mat2.get_stride()[1] == 1
+
+        if not (a_row_major or a_col_major) or not (b_row_major or b_col_major):
+            raise NotImplementedError(
+                "Blackwell BMM requires one contiguous matrix dimension"
+            )
+
+        descriptor_options = {
+            "BATCH_SIZE": batch,
+            "LOGICAL_M": m,
+            "LOGICAL_N": n,
+            "DESCRIPTOR_K": k,
+            "A_BATCH_STRIDE": int(mat1.get_stride()[0]),
+            "B_BATCH_STRIDE": int(mat2.get_stride()[0]),
+            "K_BATCH_OFFSET": 0,
+            "A_M_STRIDE": int(mat1.get_stride()[1]),
+            "A_K_STRIDE": int(mat1.get_stride()[2]),
+            "B_K_STRIDE": int(mat2.get_stride()[1]),
+            "B_N_STRIDE": int(mat2.get_stride()[2]),
+            "OUTPUT_BATCH_ROWS": m,
+            "NUM_SMS": get_num_sms(),
+            "A_ROW_MAJOR": a_row_major,
+            "B_ROW_MAJOR": b_row_major,
+            "FLATTEN_OUTPUT": False,
+            "tma_store": False,
+        }
+        use_meta_ws = meta_ws_enabled()
+        for candidate in self.bmm_configs:
+            two_ctas = use_meta_ws and candidate.two_ctas
+            template_kwargs = {
+                "BLOCK_M": candidate.block_m,
+                "BLOCK_N": candidate.block_n,
+                "BLOCK_K": candidate.block_k,
+                "K_TILES": math.ceil(k / candidate.block_k),
+                "GROUP_M": 8,
+                "num_stages": candidate.num_stages,
+                "num_warps": candidate.num_warps,
+                "EPILOGUE_SUBTILE": candidate.epilogue_subtile,
+                "USE_META_WS": use_meta_ws,
+                "WARP_SPECIALIZE": True,
+                "FLATTEN": not use_meta_ws,
+                "DATA_PARTITION_FACTOR": candidate.data_partition_factor,
+                "SEPARATE_EPILOGUE_STORE": candidate.separate_epilogue_store,
+                "TWO_CTAS": two_ctas,
+                **descriptor_options,
+            }
+            if two_ctas:
+                template_kwargs["ctas_per_cga"] = (2, 1, 1)
+            yield template_kwargs
+
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> dict[str, Any]:
+        return {"ALLOW_TF32": False}
 
 
 @register_template_heuristic(

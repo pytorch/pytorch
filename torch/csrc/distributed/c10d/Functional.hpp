@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/Types.hpp>
 
 namespace c10d {
 
@@ -12,7 +11,7 @@ C10_EXPORT at::Tensor& all_reduce_(
 
 C10_EXPORT at::Tensor& all_reduce_(
     at::Tensor& input,
-    c10::intrusive_ptr<ReduceOp> reduce_op,
+    std::string reduce_op,
     c10::intrusive_ptr<ProcessGroup> group);
 
 C10_EXPORT at::Tensor all_reduce(
@@ -22,13 +21,13 @@ C10_EXPORT at::Tensor all_reduce(
 
 C10_EXPORT at::Tensor all_reduce(
     const at::Tensor& input,
-    c10::intrusive_ptr<ReduceOp> reduce_op,
+    std::string reduce_op,
     c10::intrusive_ptr<ProcessGroup> group);
 
 C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced_(
     std::vector<at::Tensor> inputs,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    c10::intrusive_ptr<ReduceOp> reduce_op,
+    std::string reduce_op,
     c10::intrusive_ptr<ProcessGroup> group);
 
 C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced_(
@@ -40,7 +39,7 @@ C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced_(
 
 C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced(
     std::vector<at::Tensor> inputs,
-    c10::intrusive_ptr<ReduceOp> reduce_op,
+    std::string reduce_op,
     c10::intrusive_ptr<ProcessGroup> group);
 
 C10_EXPORT std::vector<at::Tensor> all_reduce_coalesced(

@@ -6,6 +6,7 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/python_headers.h>
+#include <initializer_list>
 #include <tuple>
 
 #include <torch/csrc/Dtype.h>
@@ -84,7 +85,8 @@ inline PyObject* wrap(at::QScheme qscheme) {
 
 inline PyObject* wrap(at::TensorList tl) {
   auto r = THPObjectPtr{PyTuple_New(static_cast<Py_ssize_t>(tl.size()))};
-  TORCH_CHECK_PYTHON(r);
+  if (!r)
+    throw python_error();
   for (const auto i : c10::irange(tl.size())) {
     PyTuple_SET_ITEM(r.get(), i, wrap(tl[i]));
   }
@@ -93,7 +95,8 @@ inline PyObject* wrap(at::TensorList tl) {
 
 inline PyObject* wrap(at::IntArrayRef list) {
   auto r = THPObjectPtr{PyTuple_New(static_cast<Py_ssize_t>(list.size()))};
-  TORCH_CHECK_PYTHON(r);
+  if (!r)
+    throw python_error();
   for (const auto i : c10::irange(list.size())) {
     PyTuple_SET_ITEM(r.get(), i, wrap(list[i]));
   }
@@ -110,7 +113,7 @@ void apply_with_idx_impl(
     const F& f,
     Tuple& t,
     std::index_sequence<Is...> /*indices*/) {
-  (f(std::get<Is>(t), Is), ...);
+  (void)std::initializer_list<int>{(f(std::get<Is>(t), Is), 0)...};
 }
 
 // For tuple(a, b, c), calls f(a, 0), f(b, 1), f(c, 2)
@@ -123,7 +126,8 @@ void apply_with_idx(const F& f, std::tuple<Ts...>& t) {
 template <typename... Ts>
 PyObject* wrap(std::tuple<Ts...> values) {
   auto r = THPObjectPtr{PyTuple_New(sizeof...(Ts))};
-  TORCH_CHECK_PYTHON(r);
+  if (!r)
+    throw python_error();
   detail::apply_with_idx(
       [&](auto& value, size_t idx) {
         PyTuple_SET_ITEM(r.get(), idx, wrap(std::move(value)));
@@ -135,7 +139,8 @@ PyObject* wrap(std::tuple<Ts...> values) {
 template <typename... Ts>
 PyObject* wrap(PyTypeObject* type, std::tuple<Ts...> values) {
   auto r = THPObjectPtr{PyStructSequence_New(type)};
-  TORCH_CHECK_PYTHON(r);
+  if (!r)
+    throw python_error();
   detail::apply_with_idx(
       [&](auto& value, size_t idx) {
         PyStructSequence_SET_ITEM(r.get(), idx, wrap(std::move(value)));

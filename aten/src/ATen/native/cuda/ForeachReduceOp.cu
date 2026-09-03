@@ -177,7 +177,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
         options.memory_format_opt()));
   }
 
-  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
+  auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
 
   AT_DISPATCH_ALL_TYPES_AND3(
       kHalf,
@@ -245,15 +245,6 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
     }
   }
   return result;
-}
-
-template <NormType norm_type, typename T>
-__device__ T block_reduce_norm(T val, T* shared) {
-  if constexpr (norm_type == NormType::LInf) {
-    return at::native::cuda_utils::BlockReduceMax(val, shared);
-  } else {
-    return at::native::cuda_utils::BlockReduceSum(val, shared);
-  }
 }
 
 template <
@@ -334,7 +325,10 @@ struct LpNormFunctor {
         val += vals[i];
       }
     }
-    const auto final_val = block_reduce_norm<norm_type>(val, s_vals);
+    auto final_val = norm_type == NormType::L0 || norm_type == NormType::L1 ||
+            norm_type == NormType::L2
+        ? at::native::cuda_utils::BlockReduceSum(val, s_vals)
+        : at::native::cuda_utils::BlockReduceMax(val, s_vals);
 
     if (threadIdx.x == 0) {
       output_per_tensor_ptr
@@ -366,7 +360,10 @@ __global__ void lpnorm_cleanup(
       val += output_this_tensor[i];
     }
   }
-  const auto final_val = block_reduce_norm<norm_type>(val, vals);
+  out_opmath_t final_val = norm_type == NormType::L0 ||
+          norm_type == NormType::L1 || norm_type == NormType::L2
+      ? at::native::cuda_utils::BlockReduceSum<out_opmath_t>(val, vals)
+      : at::native::cuda_utils::BlockReduceMax(val, vals);
   if (threadIdx.x == 0) {
     out_opmath_t result = final_val;
     if constexpr (apply_root && norm_type == NormType::L2) {
@@ -480,7 +477,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
         res_option.memory_format_opt()));
   }
 
-  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
+  auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,

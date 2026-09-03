@@ -14,21 +14,26 @@ static std::array<PyObject*, at::COMPILE_TIME_NUM_QSCHEMES> thp_qscheme_array;
 
 void initializeQSchemes() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
-  TORCH_CHECK_PYTHON(torch_module);
+  if (!torch_module) {
+    throw python_error();
+  }
 
   for (const auto i : c10::irange(at::COMPILE_TIME_NUM_QSCHEMES)) {
     auto qscheme = static_cast<at::QScheme>(i);
     THPObjectPtr qscheme_obj(THPQScheme_New(qscheme, toString(qscheme)));
-    TORCH_CHECK_PYTHON(
-        PyModule_AddObjectRef(
-            torch_module, toString(qscheme).c_str(), qscheme_obj.get()) == 0);
+    if (PyModule_AddObjectRef(
+            torch_module, toString(qscheme).c_str(), qscheme_obj.get()) != 0) {
+      throw python_error();
+    }
     thp_qscheme_array[static_cast<int>(qscheme)] = qscheme_obj.release();
   }
 }
 
 PyObject* getTHPQScheme(at::QScheme qscheme) {
   auto qscheme_ = thp_qscheme_array[static_cast<int>(qscheme)];
-  TORCH_CHECK_VALUE(qscheme_, "unsupported QScheme");
+  if (!qscheme_) {
+    throw std::invalid_argument("unsupported QScheme");
+  }
   return qscheme_;
 }
 } // namespace torch::utils

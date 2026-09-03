@@ -1,3 +1,4 @@
+#include <ATen/Context.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cuda/linalg/CUDASolver.h>
 #include <c10/cuda/CUDACachingAllocator.h>

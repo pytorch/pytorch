@@ -21,6 +21,7 @@
 #include <unordered_set>
 #include <variant>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>

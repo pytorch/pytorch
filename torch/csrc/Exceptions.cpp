@@ -281,9 +281,11 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       }
     }
     warning_buffer.clear();
-    /// If a warning raised an error, force the parent function to return an
-    /// error code.
-    TORCH_CHECK_PYTHON(result >= 0 || in_exception_);
+    if ((result < 0) && (!in_exception_)) {
+      /// A warning raised an error, we need to force the parent
+      /// function to return an error code.
+      throw python_error();
+    }
     if (in_exception_) {
       PyErr_Restore(type, value, traceback);
     }

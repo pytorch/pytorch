@@ -185,7 +185,7 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(is_initialized())
         self.destroy_pg(self.rank)
 
-    @with_comms(backend="nccl-legacy")
+    @with_comms()
     def test_2d_mesh_non_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(self.device_type, mesh_shape)
@@ -685,7 +685,7 @@ class InitDeviceMeshTest(DTensorTestBase):
         def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
             return (
                 mesh.get_group(dim_idx)
-                ._get_backend(torch.device(self.device_type))
+                ._get_backend(torch.device(f"{self.device_type}:{self.rank}"))
                 .options
             )
 
@@ -731,7 +731,7 @@ class InitDeviceMeshTest(DTensorTestBase):
         def get_opts(mesh: DeviceMesh, dim_idx: int) -> C10dBackend.Options:
             return (
                 mesh.get_group(dim_idx)
-                ._get_backend(torch.device(self.device_type))
+                ._get_backend(torch.device(f"{self.device_type}:{self.rank}"))
                 .options
             )
 
@@ -1602,7 +1602,9 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         )
         # This API directly calls the pybind API, so we need to manually track the comm for finalization.
         _world.comms.append(
-            split_group_2._get_backend(torch.device(self.device_type)).get_comm()
+            split_group_2._get_backend(
+                torch.device(f"{self.device_type}:{self.rank}")
+            ).get_comm()
         )
         gpu_tensor = torch.ones(3, 3, device=self.device_type)
         dist.all_reduce(gpu_tensor, group=split_group_2)

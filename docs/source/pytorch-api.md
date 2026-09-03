@@ -47,7 +47,6 @@ torch.distributed.checkpoint <distributed.checkpoint>
 torch.distributions <distributions>
 torch.compiler <torch.compiler_api>
 torch.fft <fft>
-torch.foreach <foreach>
 torch.func <func>
 futures
 fx

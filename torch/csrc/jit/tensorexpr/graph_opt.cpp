@@ -245,14 +245,13 @@ std::vector<int64_t> makeShapesSymbolic(
     }
     std::vector<at::ShapeSymbol> shape_vec = *tt->symbolic_sizes().sizes();
 
-    auto new_sizes =
-        c10::fmap(std::move(shape_vec), [&](const at::ShapeSymbol& shape) {
-          auto value = shape.value();
-          if (shape_to_sym_shape.contains(value)) {
-            return shape_to_sym_shape.at(value);
-          }
-          return value;
-        });
+    auto new_sizes = c10::fmap(shape_vec, [&](const at::ShapeSymbol& shape) {
+      auto value = shape.value();
+      if (shape_to_sym_shape.contains(value)) {
+        return shape_to_sym_shape.at(value);
+      }
+      return value;
+    });
     v->setType(tt->withSymbolicShapes(c10::SymbolicShape(new_sizes)));
   }
 

@@ -104,8 +104,8 @@ Weights::Weights(
     // /extra/xl_weights/<model_name>_model_param_config.json
     // Currently, we only use the metadata from model definition.
     std::optional<TensorMeta> tensorMeta;
-    if (auto it = weightsMeta_.find(tensorName); it != weightsMeta_.end()) {
-      tensorMeta = it->second;
+    if (weightsMeta_.contains(tensorName)) {
+      tensorMeta = weightsMeta_.at(tensorName);
     } else {
       TORCH_CHECK(
           false,
@@ -115,15 +115,13 @@ Weights::Weights(
     }
     std::optional<TensorMeta> newTensorMeta;
     if (maybeNewWeightsMeta) {
-      auto it = stateDictPaths.find(tensorName);
-      if (it == stateDictPaths.end()) {
+      if (!stateDictPaths.contains(tensorName)) {
         TORCH_CHECK(false, "Tensor name not found in state dict paths");
       }
 
-      std::string paramName = it->second;
-      if (auto metaIt = maybeNewWeightsMeta->find(paramName);
-          metaIt != maybeNewWeightsMeta->end()) {
-        newTensorMeta = *metaIt->second;
+      std::string paramName = stateDictPaths.at(tensorName);
+      if (maybeNewWeightsMeta->contains(paramName)) {
+        newTensorMeta = *maybeNewWeightsMeta->at(paramName);
       } else {
         TORCH_CHECK(
             false,
@@ -441,14 +439,13 @@ void Weights::setValue(
     const std::string& name,
     const at::Tensor& newValue,
     bool skipDeviceCheck) {
-  auto it = allValues_.find(name);
-  if (it != allValues_.end()) {
+  if (allValues_.contains(name)) {
     validateValue(name, newValue, skipDeviceCheck);
-    it->second = newValue;
   } else {
     LOG(WARNING) << name << " is not found in the registered weights";
-    allValues_.emplace(name, newValue);
   }
+
+  allValues_[name] = newValue;
 }
 
 void Weights::updateValue(const std::string& name, const at::Tensor& newValue) {

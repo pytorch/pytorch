@@ -54,6 +54,8 @@ bool is_numpy_dlpack_deleter_bugged() {
 
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
+#include <memory>
+#include <stdexcept>
 
 using namespace at;
 using namespace torch::autograd;
@@ -111,10 +113,12 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject* py_seq) {
   auto result = std::vector<int64_t>(ndim);
   for (const auto i : c10::irange(ndim)) {
     auto item = THPObjectPtr(PySequence_GetItem(py_seq, i));
-    TORCH_CHECK_PYTHON(item);
+    if (!item)
+      throw python_error();
 
     result[i] = PyLong_AsLongLong(item);
-    TORCH_CHECK_PYTHON(result[i] != -1 || !PyErr_Occurred());
+    if (result[i] == -1 && PyErr_Occurred())
+      throw python_error();
   }
   return result;
 }
@@ -194,7 +198,8 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
   // This is not sufficient. For example, the tensor's storage may be changed
   // via Tensor.set_, which can free the underlying memory.
   PyObject* py_tensor = THPVariable_Wrap(prepared_tensor);
-  TORCH_CHECK_PYTHON(py_tensor);
+  if (!py_tensor)
+    throw python_error();
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
     return nullptr;
   }
@@ -357,7 +362,8 @@ ScalarType numpy_dtype_to_aten(int dtype) {
       }
   }
   auto pytype = THPObjectPtr(PyArray_TypeObjectFromType(dtype));
-  TORCH_CHECK_PYTHON(pytype);
+  if (!pytype)
+    throw python_error();
   TORCH_CHECK_TYPE(
       false,
       fmt::format(
@@ -397,8 +403,9 @@ at::Tensor tensor_from_cuda_array_interface(
   std::vector<int64_t> sizes;
   {
     PyObject* py_shape = nullptr;
-    TORCH_CHECK_PYTHON(
-        PyDict_GetItemStringRef(cuda_dict, "shape", &py_shape) >= 0);
+    if (PyDict_GetItemStringRef(cuda_dict, "shape", &py_shape) < 0) {
+      throw python_error();
+    }
     if (py_shape == nullptr) {
       TORCH_CHECK_TYPE(false, "attribute `shape` must exist");
     }
@@ -410,8 +417,9 @@ at::Tensor tensor_from_cuda_array_interface(
   int64_t dtype_size_in_bytes = 0;
   {
     PyObject* py_typestr = nullptr;
-    TORCH_CHECK_PYTHON(
-        PyDict_GetItemStringRef(cuda_dict, "typestr", &py_typestr) >= 0);
+    if (PyDict_GetItemStringRef(cuda_dict, "typestr", &py_typestr) < 0) {
+      throw python_error();
+    }
     if (py_typestr == nullptr) {
       TORCH_CHECK_TYPE(false, "attribute `typestr` must exist");
     }
@@ -431,8 +439,9 @@ at::Tensor tensor_from_cuda_array_interface(
   void* data_ptr = nullptr;
   {
     PyObject* py_data = nullptr;
-    TORCH_CHECK_PYTHON(
-        PyDict_GetItemStringRef(cuda_dict, "data", &py_data) >= 0);
+    if (PyDict_GetItemStringRef(cuda_dict, "data", &py_data) < 0) {
+      throw python_error();
+    }
     if (py_data == nullptr) {
       TORCH_CHECK_TYPE(false, "attribute `shape` data exist");
     }
@@ -440,9 +449,13 @@ at::Tensor tensor_from_cuda_array_interface(
       TORCH_CHECK_TYPE(false, "`data` must be a 2-tuple of (int, bool)");
     }
     data_ptr = PyLong_AsVoidPtr(PyTuple_GET_ITEM(py_data, 0));
-    TORCH_CHECK_PYTHON(data_ptr != nullptr || !PyErr_Occurred());
+    if (data_ptr == nullptr && PyErr_Occurred()) {
+      throw python_error();
+    }
     int read_only = PyObject_IsTrue(PyTuple_GET_ITEM(py_data, 1));
-    TORCH_CHECK_PYTHON(read_only != -1);
+    if (read_only == -1) {
+      throw python_error();
+    }
     if (read_only) {
       TORCH_CHECK_TYPE(
           false, "the read only flag is not supported, should always be False");
@@ -453,8 +466,9 @@ at::Tensor tensor_from_cuda_array_interface(
   std::vector<int64_t> strides;
   {
     PyObject* py_strides = nullptr;
-    TORCH_CHECK_PYTHON(
-        PyDict_GetItemStringRef(cuda_dict, "strides", &py_strides) >= 0);
+    if (PyDict_GetItemStringRef(cuda_dict, "strides", &py_strides) < 0) {
+      throw python_error();
+    }
     if (py_strides != nullptr && !Py_IsNone(py_strides)) {
       if (PySequence_Length(py_strides) == -1 ||
           static_cast<size_t>(PySequence_Length(py_strides)) != sizes.size()) {

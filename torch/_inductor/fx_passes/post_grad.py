@@ -55,7 +55,6 @@ from ..utils import (
     decode_device,
     get_all_devices,
     get_gpu_type,
-    is_bf16x9_matmul,
     is_gpu,
     is_pointwise_use,
     OPTIMUS_EXCLUDE_POST_GRAD,
@@ -896,10 +895,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
             # which cause hangs. Once we have SPMD mode, we can safely reorder them.
             # However, increasing the locality between a collective and its wait node
             # is generally worse for performance.
-            return node.target not in (
-                torch.ops._c10d_functional.wait_tensor.default,
-                torch.ops._c10d_functional.wait_tensors.default,
-            )
+            return node.target != torch.ops._c10d_functional.wait_tensor.default
     else:
 
         def check():
@@ -913,16 +909,9 @@ def reorder_for_locality(graph: torch.fx.Graph):
         )
 
     def visit(other_node):
-        is_wait_tensors_getitem = (
-            other_node.target is operator.getitem
-            and torch.distributed.is_available()
-            and isinstance(other_node.args[0], torch.fx.Node)
-            and other_node.args[0].target
-            is torch.ops._c10d_functional.wait_tensors.default
-        )
         if (
             other_node.op == "call_function"
-            and (other_node.target is not operator.getitem or is_wait_tensors_getitem)
+            and other_node.target != operator.getitem
             and all((n in seen_nodes) for n in other_node.users)
             and get_mutation_region_id(graph, node)
             == get_mutation_region_id(graph, other_node)
@@ -999,10 +988,6 @@ def is_valid_mm_plus_mm(match: Match):
 
     if mat1_val is None or mat2_val is None or mat3_val is None or mat4_val is None:
         return False
-    if is_bf16x9_matmul(mat1_val.device.type, mat1_val.dtype) or is_bf16x9_matmul(
-        mat3_val.device.type, mat3_val.dtype
-    ):
-        return False
 
     *_b1, m1, k1 = mat1_val.shape
     *_b2, k2, n1 = mat2_val.shape
@@ -1032,21 +1017,6 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
-def pointless_cumsum_check(match: Match) -> bool:
-    # Scalar cumsum is already handled directly by lowering.cumsum.
-    if len(match.kwargs["shape"]) == 0:
-        return False
-    # A symbolic fill_value arrives as an fx Node, which the replacement's int() and
-    # * both reject. A boolean full stays folded: bool(Node) is True, the right
-    # saturation for every nonzero fill and the wrong one for a zero fill, but
-    # declining is worse today - inductor's own full(..., dtype=bool) lowering drops
-    # the bool cast for a symbolic int fill (#194062). Drop the exemption when that
-    # lands.
-    return is_boolean_dtype(match.kwargs["dtype"]) or not isinstance(
-        match.kwargs["fill_value"], torch.fx.Node
-    )
-
-
 @register_graph_pattern(
     CallFunction(
         aten.cumsum.default,
@@ -1063,7 +1033,6 @@ def pointless_cumsum_check(match: Match) -> bool:
         KeywordArg("dim"),
         _users=MULTIPLE,
     ),
-    extra_check=pointless_cumsum_check,
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
 )

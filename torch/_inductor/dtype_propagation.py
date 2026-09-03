@@ -485,8 +485,6 @@ class DtypePropagationOpsHandler:
         is_pure=True,
         pack=1,
         input_dtypes=None,
-        output_dtypes=None,
-        output_index=0,
     ):
         return dtype
 

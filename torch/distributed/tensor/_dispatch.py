@@ -409,11 +409,9 @@ class OpDispatcher:
                     and not first_local_arg.is_meta
                     and random._rng_tracker.distribute_region_enabled
                 ):
-                    accelerator = torch.accelerator.current_accelerator()
                     if (
                         maybe_user_generator is not None
-                        or accelerator is None
-                        or first_local_arg.device.type != accelerator.type
+                        or first_local_arg.device.type != "cuda"
                         or (
                             not _are_we_tracing()
                             and type(first_local_arg) is not torch.Tensor
@@ -429,7 +427,7 @@ class OpDispatcher:
                                     *local_tensor_args, **op_info.local_kwargs
                                 )
                     else:
-                        # Accelerator device without user generator, use HOP for traceability
+                        # CUDA device without user generator, use HOP for traceability
                         if not isinstance(
                             random._rng_tracker, random.OffsetBasedRNGTracker
                         ):

@@ -21,8 +21,6 @@ import torch.testing._internal.common_utils as common
 PRINT_CPP_SOURCE = False
 
 devices = ["cpu", "cuda"]
-if common.TEST_PRIVATEUSE1:
-    devices.append(common.TEST_PRIVATEUSE1_DEVICE_TYPE)
 
 PARITY_TABLE_PATH = os.path.join(
     os.path.dirname(__file__), "cpp_api_parity", "parity-tracker.md"
@@ -77,21 +75,19 @@ if _test_torch_nn_count != _expected_count:
     )
 
 # Assert that there exists auto-generated tests for `SampleModule` and `sample_functional`.
-# 2 == number of test dicts that are not skipped
-_expected_sample_count = 2 * len(devices)
+# 4 == 2 (number of test dicts that are not skipped) * 2 (number of devices)
 _sample_module_count = len(
     [name for name in TestCppApiParity.__dict__ if "SampleModule" in name]
 )
-if _sample_module_count != _expected_sample_count:
-    raise AssertionError(
-        f"expected {_expected_sample_count} SampleModule tests, got {_sample_module_count}"
-    )
+if _sample_module_count != 4:
+    raise AssertionError(f"expected 4 SampleModule tests, got {_sample_module_count}")
+# 4 == 2 (number of test dicts that are not skipped) * 2 (number of devices)
 _sample_functional_count = len(
     [name for name in TestCppApiParity.__dict__ if "sample_functional" in name]
 )
-if _sample_functional_count != _expected_sample_count:
+if _sample_functional_count != 4:
     raise AssertionError(
-        f"expected {_expected_sample_count} sample_functional tests, got {_sample_functional_count}"
+        f"expected 4 sample_functional tests, got {_sample_functional_count}"
     )
 
 module_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)

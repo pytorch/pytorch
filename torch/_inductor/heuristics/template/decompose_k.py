@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+import math
 from typing import Any, TYPE_CHECKING
 
 import sympy
 
+from torch._inductor import config
 from torch._inductor.heuristics.registry import register_template_heuristic
 
 from ...ir import get_free_symbols
+from ...kernel.decompose_k import BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS
 from ...kernel.mm import decompose_k_subgraph_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
-from ...utils import get_k_splits
+from ...utils import (
+    get_k_splits,
+    use_aten_gemm_kernels,
+    use_triton_blackwell_tma_template,
+    use_triton_template,
+)
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
@@ -64,21 +72,72 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             return
 
         m, n, k = kernel_inputs.mnk_symbolic()
-        device_properties = DeviceProperties.create(kernel_inputs.device())
-        if device_properties.type == "cuda" and device_properties.major == 10:
-            k_splits = get_k_splits(
-                m,
-                n,
-                k,
-                num_sms=device_properties.multi_processor_count,
-                ctas_per_tile=2,
-                max_workspace_bytes=128 * 1024 * 1024,
+        if use_aten_gemm_kernels():
+            device_properties = DeviceProperties.create(kernel_inputs.device())
+            if device_properties.type == "cuda" and device_properties.major == 10:
+                aten_k_splits = get_k_splits(
+                    m,
+                    n,
+                    k,
+                    num_sms=device_properties.multi_processor_count,
+                    ctas_per_tile=2,
+                    max_workspace_bytes=128 * 1024 * 1024,
+                )
+            else:
+                aten_k_splits = get_k_splits(m, n, k)
+
+            for k_split in aten_k_splits:
+                if V.graph.sizevars.statically_known_true(
+                    sympy.Eq(sympy.Mod(k, k_split), 0)
+                ):
+                    yield {"k_split": k_split, "bmm_backend": "aten"}
+
+        mat1, mat2 = kernel_inputs.mat1mat2()
+        layout = kernel_inputs.output_layout()
+        if not (
+            config.triton.enable_blackwell_decompose_k
+            and use_triton_template(layout, check_max_autotune=True)
+            and use_triton_blackwell_tma_template(
+                mat1,
+                mat2,
+                output_layout=layout,
+                add_guards=True,
             )
-        else:
-            k_splits = get_k_splits(m, n, k)
-        for k_split in k_splits:
-            if not V.graph.sizevars.statically_known_true(
+        ):
+            return
+
+        # Keep Triton's split policy separate from the ATen-oriented occupancy
+        # ranking above. A follow-up can use Triton's known tile geometry and
+        # support uneven aligned partitions.
+        triton_k_splits = [
+            k_split
+            for k_split in get_k_splits(m, n, k)
+            if V.graph.sizevars.statically_known_true(
                 sympy.Eq(sympy.Mod(k, k_split), 0)
-            ):
-                continue
-            yield {"k_split": k_split}
+            )
+        ]
+
+        m_hint, n_hint, k_hint = map(int, (m, n, k))
+        config_indices = [0, 3]
+        if m_hint > 128:
+            config_indices.extend((1, 4) if n_hint <= 128 else (2, 5))
+
+        for k_split in triton_k_splits:
+            for config_index in config_indices:
+                partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
+                m_tiles = math.ceil(m_hint / partial_config.block_m)
+                if partial_config.two_ctas:
+                    m_tiles = math.ceil(m_tiles / 2) * 2
+                k_part = (
+                    math.ceil(math.ceil(k_hint / k_split) / partial_config.block_k)
+                    * partial_config.block_k
+                )
+                workspace_bytes = (
+                    k_split * m_tiles * partial_config.block_m * n_hint * 4
+                )
+                if (k_split - 1) * k_part < k_hint and workspace_bytes <= 128 * 1024**2:
+                    yield {
+                        "k_split": k_split,
+                        "bmm_backend": "triton",
+                        "bmm_config_index": config_index,
+                    }

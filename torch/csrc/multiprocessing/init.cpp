@@ -1,4 +1,3 @@
-#include <c10/util/error.h>
 #include <c10/util/thread_name.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/multiprocessing/init.h>
@@ -8,13 +7,16 @@
 #include <torch/csrc/utils/python_strings.h>
 
 #include <initializer_list>
+#include <stdexcept>
 
 #if defined(__linux__)
 #include <sys/prctl.h>
 #endif
 
-#define SYSASSERT(rv, ...) \
-  TORCH_CHECK((rv) >= 0, ##__VA_ARGS__, ": ", c10::utils::str_error(errno))
+#define SYSASSERT(rv, ...)                                                 \
+  if ((rv) < 0) {                                                          \
+    throw std::system_error(errno, std::system_category(), ##__VA_ARGS__); \
+  }
 
 namespace torch::multiprocessing {
 
@@ -23,7 +25,9 @@ namespace {
 PyObject* multiprocessing_init(PyObject* _unused, PyObject* noargs) {
   auto multiprocessing_module =
       THPObjectPtr(PyImport_ImportModule("torch.multiprocessing"));
-  TORCH_CHECK_PYTHON(multiprocessing_module);
+  if (!multiprocessing_module) {
+    throw python_error();
+  }
 
   auto module = py::handle(multiprocessing_module).cast<py::module>();
 

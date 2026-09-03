@@ -1599,7 +1599,7 @@ class OutputGraph(OutputGraphCommon):
         return name
 
     def register_static_attr_and_return_proxy(
-        self, attr_prefix: str, attr_value: object
+        self, attr_prefix: str, attr_value: Any
     ) -> fx.Proxy:
         # Check if the module already exists, if it does, return the already
         # added proxy. This is important for executorch tests.
@@ -3276,12 +3276,8 @@ class OutputGraph(OutputGraphCommon):
                 context=f"Backend: {name}\nException:{str(e)}\nTraceback:\n{self.root_tx.format_frame_summary()}",
                 explanation=f"Backend compiler `{name}` failed with {str(e)}. Adding a graph break.",
                 hints=[
-                    "Set `fullgraph=False` to allow this backend fallback to run eagerly.",
+                    "Report an issue to the backend compiler repo.",
                 ],
-                # These exceptions are allowed backend fallbacks, not hard
-                # backend failures. Keep graph-break debug artifacts without
-                # warning users for every fallback graph.
-                log_warning=False,
             )
         except SkipFrame:
             # The backend compiler has requested that we skip the frame, instead of
@@ -3564,7 +3560,7 @@ class OutputGraph(OutputGraphCommon):
                 types.FunctionType(code, f_globals, name),
             )
 
-    def install_global_unsafe(self, name: str, value: object) -> None:
+    def install_global_unsafe(self, name: str, value: Any) -> None:
         """
         WARNING: prefer the safer `install_global_by_id/install_global`.
         torch.compile instances should be independent of each other;
@@ -3577,7 +3573,7 @@ class OutputGraph(OutputGraphCommon):
         self.installed_globals.add(name)
         self.cleanups.append(CleanupHook.create(self.global_scope, name, value))
 
-    def install_global_by_id(self, prefix: str, value: object) -> str:
+    def install_global_by_id(self, prefix: str, value: Any) -> str:
         """
         Installs a global if it hasn't been installed already.
         This is determined by (prefix, id(value)) pair.
@@ -3592,7 +3588,7 @@ class OutputGraph(OutputGraphCommon):
         self.install_global_unsafe(name, value)
         return name
 
-    def install_global(self, prefix: str, value: object) -> str:
+    def install_global(self, prefix: str, value: Any) -> str:
         """
         Installs a global, generating a unique name for it.
 
@@ -4408,9 +4404,6 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy: fx.Proxy) -> LazyProxy | fx.Proxy:
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        # (A stale cross-tracer cached proxy used to reach this via
-        # wrap_symfloat; see the fix in
-        # https://github.com/pytorch/pytorch/issues/193194.)
         if self.parent is None:
             raise AssertionError(
                 "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"

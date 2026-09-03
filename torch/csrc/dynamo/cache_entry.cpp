@@ -1,6 +1,7 @@
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/guards.h>
 
+#include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/extra_state.h>
 
 CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)

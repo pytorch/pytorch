@@ -23,11 +23,13 @@ static PyObject* recursive_to_list(
   }
   auto n = sizes[dim];
   auto list = THPObjectPtr(PyList_New(n));
-  TORCH_CHECK_PYTHON(list);
+  if (!list)
+    throw python_error();
   for (const auto i : c10::irange(n)) {
     PyObject* obj = recursive_to_list(
         data, sizes, strides, dim + 1, scalarType, elementSize);
-    TORCH_CHECK_PYTHON(obj);
+    if (!obj)
+      throw python_error();
     PyList_SET_ITEM(list.get(), i, obj);
     auto advance_data_ptr = strides[dim] * elementSize;
     TORCH_INTERNAL_ASSERT(data || (advance_data_ptr == 0));

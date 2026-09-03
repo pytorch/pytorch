@@ -449,7 +449,7 @@ cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
   // FP32 data type calculations based on the value of the allow_tf32 flag.
   // To enable TF32, set the math mode of the handle to CUBLAS_TF32_TENSOR_OP_MATH.
-  if (!NoTF32Guard::should_disable_fp32_reduced_precision() &&
+  if (!NoTF32Guard::should_disable_tf32() &&
       at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
   } else {

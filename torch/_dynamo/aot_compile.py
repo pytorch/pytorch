@@ -474,9 +474,9 @@ class ModelInput:
 
     """
 
-    args: tuple[object, ...]
-    kwargs: dict[str, object]
-    contexts: Sequence[AbstractContextManager[object]]
+    args: tuple[Any]
+    kwargs: dict[str, Any]
+    contexts: list[AbstractContextManager[Any]]
 
 
 @dataclass

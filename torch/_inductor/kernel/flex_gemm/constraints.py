@@ -9,16 +9,11 @@ from torch._inductor.kernel.flex_gemm.output_layout import (
     FlexGemmOutputStorageLayout,
     output_layout_supports_config,
 )
-from torch._inductor.kernel.gemm_epilogue import (
-    GEMM_REDUCTION_FRAGMENT_WIDTH,
-    GemmReductionGeometry,
-)
+from torch._inductor.kernel.gemm_epilogue import GemmReductionGeometry
 from torch._inductor.kernel.gemm_epilogue_utils import (
     statically_known,
     statically_known_shape_equal,
 )
-from torch._inductor.utils import _IntLike
-from torch.types import IntLikeType
 
 
 LOCAL_REDUCE_FEED_MAIN_ARG_NAME: Final = "local_reduce0"
@@ -32,7 +27,7 @@ LOCAL_REDUCE_FINALIZE_KEY_SUFFIX: Final = ":local_reduce_finalize"
 # group; cross-warp M stitching needs the two-phase/replay path used by
 # compressed aux reductions. Axis-1 feeds whose groups fit in one TensorSSA
 # fragment lower as plain generated TensorSSA without a feed plan.
-LOCAL_REDUCE_FRAGMENT_WIDTH = GEMM_REDUCTION_FRAGMENT_WIDTH
+LOCAL_REDUCE_FRAGMENT_WIDTH = 32
 LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only axis 0"
 )
@@ -167,18 +162,13 @@ FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = (
 )
 
 
-def statically_known_multiple(value: _IntLike | IntLikeType, divisor: _IntLike) -> bool:
-    """Return whether a symbolic shape value is known divisible without guards.
-
-    ``value`` spans both worlds: inductor sizes reach it as ``int``/``sympy.Expr``,
-    while the local-reduce validators below pass ``torch.Size``-derived dims whose
-    dynamic entries are ``SymInt``.
-    """
+def statically_known_multiple(value: Any, divisor: int) -> bool:
+    """Return whether a symbolic shape value is known divisible without guards."""
     return statically_known(value % divisor == 0)
 
 
 def is_flex_gemm_partial_reduction_shape(
-    aux_size: Sequence[_IntLike], output_size: Sequence[_IntLike]
+    aux_size: Sequence[Any], output_size: Sequence[Any]
 ) -> bool:
     """Recognize aux shapes that imply a final PyTorch reduction, not local reduce.
 
@@ -233,7 +223,7 @@ def validate_local_reduce_group_axis(group: int, axis: int) -> None:
 
 
 def validate_local_reduce_selected_dim_divisible(
-    shape: Sequence[IntLikeType], group: int, axis: int
+    shape: Sequence[Any], group: int, axis: int
 ) -> None:
     """Reject selected M/N dimensions known not to have an integral compressed shape."""
     validate_local_reduce_group_axis(group, axis)
@@ -261,6 +251,11 @@ def validate_local_reduce_tensorssa_group_size(axis: int, group: int) -> None:
         and LOCAL_REDUCE_FRAGMENT_WIDTH % group != 0
     ):
         raise NotImplementedError(LOCAL_REDUCE_TENSORSSA_FRAGMENT_DIVISIBLE_ERROR)
+
+
+def local_reduce_needs_physical_callbacks(axis: int, group: int) -> bool:
+    """Return whether QuACK must merge TensorSSA partials outside the fragment path."""
+    return axis == 0 or group > LOCAL_REDUCE_FRAGMENT_WIDTH
 
 
 def validate_local_reduce_runtime_dense_mm(ndim: int) -> None:
@@ -306,8 +301,8 @@ def validate_local_reduce_feed_main_capability(axis: int, group: int) -> None:
 
 
 def local_reduce_compressed_shape(
-    shape: Sequence[IntLikeType], group: int, axis: int
-) -> tuple[IntLikeType, ...]:
+    shape: Sequence[Any], group: int, axis: int
+) -> tuple[Any, ...]:
     """Compute the explicit aux shape that mirrors QuACK's grouped store."""
     validate_local_reduce_selected_dim_divisible(shape, group, axis)
     result = list(shape)
@@ -357,9 +352,8 @@ def validate_flex_gemm_local_reduce_config(
         return False
     swapped = config.swap_ab
     if swapped:
-        if (
-            not allow_swap_ab
-            or not GemmReductionGeometry(group, 1 - axis).needs_physical_callbacks
+        if not allow_swap_ab or not local_reduce_needs_physical_callbacks(
+            1 - axis, group
         ):
             return False
         axis = 1 - axis
@@ -500,7 +494,7 @@ def output_contraction_capture_supported(kind: str, is_boolean: bool) -> bool:
     return kind in ("scalar", "col") and not is_boolean
 
 
-def output_contraction_config_supported(config: Any, n: _IntLike) -> bool:
+def output_contraction_config_supported(config: Any, n: Any) -> bool:
     """Return whether a config has validated output-contraction store ownership.
 
     Keep the physical M/N orientation, one CTA per cluster along N, and require
@@ -525,7 +519,7 @@ FlexGemmLocalReduceGeometry = GemmReductionGeometry
 
 def flex_gemm_output_config_supported(
     config: Any,
-    n: _IntLike,
+    n: Any,
     local_reduce_geometries: Sequence[FlexGemmLocalReduceGeometry],
     output_contraction: FlexGemmOutputContraction | None,
     output_layout: FlexGemmOutputStorageLayout | None,

@@ -67,9 +67,4 @@ TORCH_API bool PeepholeOptimizeListIdioms(
     const std::shared_ptr<Graph>& graph,
     bool refine_list_len = false);
 
-TORCH_API bool PeepholeOptimizeListIdioms(
-    const std::shared_ptr<Graph>& graph,
-    bool refine_list_len,
-    const AliasDb& alias_db);
-
 } // namespace torch::jit

@@ -12,14 +12,10 @@ from torch.distributed.pipelining.microbatch import (
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyAccelerator,
+    skipCPUIf,
     skipXPUIf,
 )
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 d_hid = 512
@@ -27,8 +23,6 @@ torch.manual_seed(0)
 
 
 class MicrobatchTests(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_split_and_merge(self):
         x0 = torch.randn(128, d_hid)
         x1 = torch.randn(256, d_hid)
@@ -90,11 +84,7 @@ class MicrobatchTests(TestCase):
         torch.testing.assert_close(merged_kwargs, kwargs)
         print("Microbatch test passed")
 
-
-class MicrobatchTestsDevices(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @onlyAccelerator
+    @skipCPUIf(True, "Flex attention backward is not supported on CPU")
     def test_split_block_mask(self, device):
         B = 6
         H = 1
@@ -145,7 +135,11 @@ class MicrobatchTestsDevices(TestCase):
             KV_LEN=SEQ_LEN,
             device=device,
         )
-        flex_fn = torch.compile(flex_attention)
+        if device == "cuda":
+            flex_fn = torch.compile(flex_attention)
+        else:
+            # It's unclear why CPU + torch.compile + flex_attention can cause an issue.
+            flex_fn = flex_attention
         out = flex_fn(q, k, v, block_mask=block_mask)
         out.sum().backward()
 
@@ -251,11 +245,11 @@ class MicrobatchTestsDevices(TestCase):
             KV_LEN=SEQ_LEN,
             device=device,
         )
-        if device == "cpu":
+        if device == "cuda":
+            flex_fn = torch.compile(flex_attention)
+        else:
             # It's unclear why CPU + torch.compile + flex_attention can cause an issue.
             flex_fn = flex_attention
-        else:
-            flex_fn = torch.compile(flex_attention)
         out = flex_fn(q, k, v, block_mask=block_mask)
 
         q_clone, k_clone, v_clone = (target.clone().detach() for target in (q, k, v))
@@ -337,7 +331,10 @@ class MicrobatchTestsDevices(TestCase):
         print(f"equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
 
-instantiate_device_type_tests(MicrobatchTestsDevices, globals(), allow_xpu=True)
+devices = ["cpu", "cuda", "hpu", "xpu"]
+instantiate_device_type_tests(
+    MicrobatchTests, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

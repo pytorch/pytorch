@@ -6,7 +6,7 @@ CUDA + libcupti >= 13.3 (gated the same way as the rest of the monitor suite).""
 import unittest
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUPTI, TEST_CUPTI_V13_3
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUPTI_V13_3
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -207,11 +207,7 @@ class TestCuptiNodeTimerCUDA(TestCase):
 
         obs = NodeTimerObserver(
             annotations=ObserverAnnotationSettings(
-                # The registry's own resolver hands back the node's annotation; the
-                # bucket is its "name".
-                graph_annotation_resolver=lambda nid: (
-                    {"name": "graphregion", "stream": 61} if nid else None
-                )
+                graph_annotation_resolver=lambda nid: "graphregion" if nid else None
             )
         )
         if not obs.available:
@@ -266,22 +262,6 @@ class TestCuptiNodeTimerCUDA(TestCase):
         self.assertEqual(len(gnode), len(start))
         self.assertEqual(len(stream), len(start))
         self.assertTrue(bool((end >= start).all()))
-
-
-@unittest.skipIf(not TEST_CUPTI, "requires cupti bindings + generated _cupti_stubs")
-class TestNodeTimerBucketName(TestCase):
-    """``_bucket_name`` normalizes whatever a graph annotation resolver returns; no CUDA
-    or libcupti at runtime, but importing it pulls in ``records`` -> the build-generated
-    ``_cupti_stubs``, which is what TEST_CUPTI gates on."""
-
-    def test_shapes(self):
-        from torch.profiler._cupti.observers.node_timer import _bucket_name
-
-        self.assertEqual(_bucket_name({"name": "region", "stream": 61}), "region")
-        self.assertEqual(_bucket_name("region"), "region")
-        # No "name" means no named region: the unnamed bucket, not a rendered dict.
-        for unnamed in (None, {}, {"stream": 61}, ""):
-            self.assertEqual(_bucket_name(unnamed), "")
 
 
 if __name__ == "__main__":

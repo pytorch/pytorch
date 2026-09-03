@@ -1,9 +1,12 @@
 #include <ATen/ATen.h>
+#include <ATen/NestedTensorImpl.h>
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/nested.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/torch.h>
+#include <stdexcept>
 #include <vector>
 
 namespace torch::utils {

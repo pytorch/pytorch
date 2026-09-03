@@ -69,7 +69,9 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
     return false;
 
   PyObject* tuple = PyTuple_New(1);
-  TORCH_CHECK_PYTHON(tuple);
+  if (!tuple)
+    // NOLINTNEXTLINE(hicpp-exception-baseclass)
+    throw python_error();
   PyTuple_SET_ITEM(tuple, 0, obj.release());
   obj = tuple;
   return true;

@@ -271,7 +271,10 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
     return t.get_device();
   };
   device_list devices = fmap(inputs, get_device);
-  auto [it, _] = _communicators.try_emplace(devices, devices);
+  auto it = _communicators.find(devices);
+  if (it == _communicators.end()) {
+    it = _communicators.emplace(devices, devices).first;
+  }
   return it->second.ref();
 }
 

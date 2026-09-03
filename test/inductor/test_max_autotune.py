@@ -24,7 +24,7 @@ from torch._dynamo import reset
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
-from torch._dynamo.utils import counters, identity, same
+from torch._dynamo.utils import counters, same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
@@ -40,6 +40,7 @@ from torch._inductor.autotune_process import (
     TuningProcessPool,
     use_pipelined_autotuning,
 )
+from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.registry import override_template_heuristics
@@ -48,6 +49,7 @@ from torch._inductor.heuristics.template.triton import (
     CUDAAddmmPersistentTMATemplateConfigHeuristic,
     CUDAAddMMTemplateConfigHeuristic,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+    CUDABlackwellBMMTemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAMMTemplateConfigHeuristic,
     CUDAPersistentTMATemplateConfigHeuristic,
@@ -58,7 +60,13 @@ from torch._inductor.heuristics.template.triton import (
     XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
+from torch._inductor.kernel.bmm import (
+    blackwell_ws_persistent_tma_bmm_template,
+    BlackwellBMMConfig,
+)
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
+from torch._inductor.kernel_inputs import MMKernelInputs
+from torch._inductor.lowering import lowerings
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
 from torch._inductor.scheduler import Scheduler
@@ -70,12 +78,15 @@ from torch._inductor.select_algorithm import (
     clear_feedback_savers,
     clear_preprocessing_fns,
     ExternKernelCaller,
-    GeneratedCodeCache,
     NoValidChoicesError,
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FP8,
+    SM100OrLater,
+    SM90OrLater,
+)
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -150,6 +161,26 @@ _DECOMPOSE_K_PATCH_ROCM = (
 )
 
 
+@torch.library.custom_op("inductor_test::blackwell_bmm", mutates_args={})
+def blackwell_bmm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return torch.bmm(a, b)
+
+
+@blackwell_bmm.register_fake
+def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return a.new_empty((a.shape[0], a.shape[1], b.shape[2]))
+
+
+@torch.library.custom_op("inductor_test::blackwell_bmm_flat", mutates_args={})
+def blackwell_bmm_flat(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return torch.bmm(a, b).flatten(0, 1)
+
+
+@blackwell_bmm_flat.register_fake
+def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return a.new_empty((a.shape[0] * a.shape[1], b.shape[2]))
+
+
 def benchmark_choice(choice, args, out, expected_out, timings):
     result = choice.benchmark(*args, out=out)
     if expected_out is not None:
@@ -179,6 +210,163 @@ class TestMaxAutotune(TestCase):
         a = make_matrix(M, K, *batch_dims, reduction_dim=-1)
         b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
         return a, b
+
+    def _run_blackwell_bmm_template(
+        self,
+        broadcast_b: bool,
+        data_partition_factor: int,
+        epilogue_subtile: int,
+    ) -> None:
+        bsz, m, k, n = 3, 256, 8193, 128
+        a_storage = torch.randn(bsz, k, m, device=GPU_TYPE, dtype=torch.bfloat16)
+        a = a_storage.transpose(1, 2)
+        if broadcast_b:
+            b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+            b = b.unsqueeze(0).expand(bsz, -1, -1)
+        else:
+            b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        class TestBlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
+            def _get_template_configs_impl(self, kernel_inputs, op_name):
+                for template_config in super()._get_template_configs_impl(
+                    kernel_inputs, op_name
+                ):
+                    if (
+                        template_config["BLOCK_M"] == 128
+                        and template_config["BLOCK_N"] == 128
+                    ):
+                        yield {
+                            **template_config,
+                            "DATA_PARTITION_FACTOR": data_partition_factor,
+                            "EPILOGUE_SUBTILE": epilogue_subtile,
+                        }
+                        return
+
+        def lowering(a_node, b_node):
+            choices = V.choices.get_template_configs(
+                MMKernelInputs([a_node, b_node]),
+                [blackwell_ws_persistent_tma_bmm_template],
+                "bmm",
+            )
+            return choices[0].output_node()
+
+        with (
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[
+                    (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
+                ],
+                override_heuristic_class=TestBlackwellBMMHeuristic,
+            ),
+            mock.patch.dict(
+                lowerings,
+                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
+            ),
+            config.patch(compile_threads=1),
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(lambda x, y: blackwell_bmm(x, y), fullgraph=True),
+                a,
+                b,
+            )
+
+        torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
+        self.assertIn("make_tensor_descriptor", codes[0])
+        self.assertNotIn("two_ctas=True", codes[0])
+        self.assertIn(f"EPILOGUE_SUBTILE : tl.constexpr = {epilogue_subtile}", codes[0])
+        if meta_ws_enabled():
+            self.assertIn(
+                f"DATA_PARTITION_FACTOR : tl.constexpr = {data_partition_factor}",
+                codes[0],
+            )
+            self.assertIn("SEPARATE_EPILOGUE_STORE : tl.constexpr = True", codes[0])
+        else:
+            self.assertNotIn("data_partition_factor", codes[0])
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @parametrize("data_partition_factor", (1, 2))
+    @parametrize("epilogue_subtile", (1, 2, 4))
+    def test_blackwell_bmm_template(
+        self,
+        data_partition_factor: int,
+        epilogue_subtile: int,
+    ) -> None:
+        self._run_blackwell_bmm_template(
+            broadcast_b=False,
+            data_partition_factor=data_partition_factor,
+            epilogue_subtile=epilogue_subtile,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    def test_blackwell_bmm_template_broadcast_b(self) -> None:
+        self._run_blackwell_bmm_template(
+            broadcast_b=True,
+            data_partition_factor=1,
+            epilogue_subtile=1,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
+    def test_blackwell_bmm_template_2cta_flat_output(self) -> None:
+        bsz, m, k, n = 2, 256, 8193, 128
+        a_storage = torch.randn(bsz, k, m, device=GPU_TYPE, dtype=torch.bfloat16)
+        a = a_storage.transpose(1, 2)
+        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        class FlatBMMKernelInputs(MMKernelInputs):
+            def output_layout(self, flexible=True):
+                return FixedLayout(
+                    self.device(), self.out_dtype(), [bsz * m, n], [n, 1]
+                )
+
+        class Test2CTABlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
+            bmm_configs = (BlackwellBMMConfig(128, 128, 64, 4, 8, two_ctas=True),)
+
+            def _get_template_configs_impl(self, kernel_inputs, op_name):
+                for template_config in super()._get_template_configs_impl(
+                    kernel_inputs, op_name
+                ):
+                    yield {
+                        **template_config,
+                        "FLATTEN_OUTPUT": True,
+                        "tma_store": True,
+                    }
+
+        def lowering(a_node, b_node):
+            choices = V.choices.get_template_configs(
+                FlatBMMKernelInputs([a_node, b_node]),
+                [blackwell_ws_persistent_tma_bmm_template],
+                "bmm",
+            )
+            return choices[0].output_node()
+
+        with (
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[
+                    (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
+                ],
+                override_heuristic_class=Test2CTABlackwellBMMHeuristic,
+            ),
+            mock.patch.dict(
+                lowerings,
+                {torch.ops.inductor_test.blackwell_bmm_flat.default: lowering},
+            ),
+            config.patch(
+                compile_threads=1,
+                **{"triton.enable_template_tma_store": True},
+            ),
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(blackwell_bmm_flat, fullgraph=True), a, b
+            )
+
+        torch.testing.assert_close(
+            actual.view(bsz, m, n), torch.bmm(a, b), atol=1e-2, rtol=1e-2
+        )
+        self.assertIn("TWO_CTAS : tl.constexpr = True", codes[0])
+        self.assertIn("ctas_per_cga=(2, 1, 1)", codes[0])
+        self.assertIn("make_tensor_descriptor(out_ptr0", codes[0])
 
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
@@ -400,62 +588,6 @@ class TestMaxAutotune(TestCase):
                     _descriptor_shape_fits_in_int32(
                         [128, size0, size1], add_guards=True
                     )
-                )
-                guard_or_false.assert_called_once_with(condition)
-                statically_known_true.assert_not_called()
-
-    def test_tma_descriptor_max_offset_fits_in_int32(self):
-        from torch._inductor.utils import _tma_descriptor_max_offset_fits_in_int32
-
-        # G=128, N=16384, K=5120: reported to overflow when selecting
-        # the TMA grouped-mm path -- (G - 1) * (N * K) exceeds int32
-        # even though G, N, and K each individually fit.
-        mat = mock.Mock()
-        mat.get_size.return_value = [128, 16384, 5120]
-        mat.get_stride.return_value = [16384 * 5120, 5120, 1]
-        self.assertFalse(_tma_descriptor_max_offset_fits_in_int32(mat))
-
-        mat.get_size.return_value = [16, 16384, 5120]
-        mat.get_stride.return_value = [16384 * 5120, 5120, 1]
-        self.assertTrue(_tma_descriptor_max_offset_fits_in_int32(mat))
-
-    def test_tma_descriptor_max_offset_fits_in_int32_uses_expected_guarding(self):
-        from torch._inductor.utils import _tma_descriptor_max_offset_fits_in_int32
-
-        gm = make_fx(lambda: torch.zeros(2, 3))()
-        graph = GraphLowering(gm)
-        size0 = sympy.Symbol("s0", integer=True, nonnegative=True)
-        stride0 = sympy.Symbol("st0", integer=True, nonnegative=True)
-        mat = mock.Mock()
-        mat.get_size.return_value = [size0]
-        mat.get_stride.return_value = [stride0]
-        condition = sympy.Le((size0 - 1) * stride0, torch.iinfo(torch.int32).max)
-
-        with V.set_graph_handler(graph):
-            with (
-                mock.patch.object(
-                    V.graph.sizevars, "statically_known_true", return_value=True
-                ) as statically_known_true,
-                mock.patch.object(
-                    V.graph.sizevars, "guard_or_false", return_value=True
-                ) as guard_or_false,
-            ):
-                self.assertTrue(
-                    _tma_descriptor_max_offset_fits_in_int32(mat, add_guards=False)
-                )
-                statically_known_true.assert_called_once_with(condition)
-                guard_or_false.assert_not_called()
-
-            with (
-                mock.patch.object(
-                    V.graph.sizevars, "statically_known_true", return_value=True
-                ) as statically_known_true,
-                mock.patch.object(
-                    V.graph.sizevars, "guard_or_false", return_value=True
-                ) as guard_or_false,
-            ):
-                self.assertTrue(
-                    _tma_descriptor_max_offset_fits_in_int32(mat, add_guards=True)
                 )
                 guard_or_false.assert_called_once_with(condition)
                 statically_known_true.assert_not_called()
@@ -1938,58 +2070,6 @@ class TestMaxAutotune(TestCase):
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
-    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
-    def test_decompose_k_shape_keeps_mm_template_when_exhaustive(self, search_space):
-        """On a shape where decompose_k applies even at threshold_multiple=2, tuned_mm
-        drops the plain mm template to save autotuning time -- except under EXHAUSTIVE,
-        where the user asked for every choice."""
-        a, b = self._make_matrices(
-            M=32,
-            K=32768,
-            N=64,
-            dtype=torch.bfloat16,
-            device=GPU_TYPE,
-            requires_grad=False,
-        )
-
-        names: list[str] = []
-
-        def record(choices):
-            names.extend(c.name for c in choices)
-            return choices
-
-        torch._dynamo.reset()
-        add_preprocessing_fn(record)
-        try:
-            with config.patch(
-                {
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": "ATEN,TRITON",
-                    "max_autotune_gemm_search_space": search_space,
-                    # keeps the exhaustive space from dominating test runtime
-                    "test_configs.max_mm_configs": 1,
-                    **_DECOMPOSE_K_PATCH_ROCM,
-                }
-            ):
-                torch.compile(lambda x, y: x @ y)(a, b)
-        finally:
-            clear_preprocessing_fns(clear_defaults=False)
-
-        # the shape must actually be in decompose_k territory, else the test is vacuous
-        self.assertTrue(any(n.startswith("decompose_k") for n in names), names)
-        plain_mm = [n for n in names if n.startswith("triton_mm")]
-        if search_space == "EXHAUSTIVE":
-            self.assertTrue(plain_mm, f"mm_template dropped under EXHAUSTIVE: {names}")
-        else:
-            self.assertFalse(plain_mm, f"mm_template should be skipped: {names}")
-
-    @unittest.skipIf(
-        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
-    )
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "ignore decompose_k when native matmul codegen",
-    )
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
@@ -2558,7 +2638,6 @@ class TestMaxAutotune(TestCase):
                         'input_nodes':[
                             "[[10,22],[22,1],torch.float32,device(type='cuda',index=0),0]",
                             "[[22,30],[30,1],torch.float32,device(type='cuda',index=0),0]"],
-                        'input_aliasing':(0,1),
                         'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[10,30],
                         'layout':"[[10,30],[30,1],torch.float32,device(type='cuda',index=0),0]",
                         'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
@@ -2601,7 +2680,6 @@ class TestMaxAutotune(TestCase):
                     'input_nodes':[
                         "[[s77,s27],[s27,1],torch.float32,device(type='cuda',index=0),0]",
                         "[[s27,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]"],
-                    'input_aliasing':(0,1),
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
@@ -2769,82 +2847,6 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(compile_results, eager_results, atol=0.05, rtol=0.05)
             self.assertEqual(hits(), 4)
             self.assertEqual(misses(), 4)
-
-    def test_generated_code_cache_key_input_aliasing(self):
-        """make_key must distinguish aliased inputs, e.g. mm(x, x), from
-        distinct inputs with identical layouts, and stay name-insensitive."""
-
-        def make_layout():
-            return FixedLayout(torch.device("cpu"), torch.float32, [8, 8], [8, 1])
-
-        a = Buffer(name="buf_a", layout=make_layout())
-        b = Buffer(name="buf_b", layout=make_layout())
-
-        def key(*input_nodes):
-            return GeneratedCodeCache().make_key(
-                input_nodes=input_nodes,
-                num_stages=1,
-                num_warps=4,
-                call_sizes=[8, 8],
-                prefix_args=0,
-                suffix_args=0,
-                epilogue_fn=identity,
-                epilogue_fn_hash=None,
-                tma_store=False,
-                tma_load_for_template_epilogue=False,
-                transpose_discontiguous_tensor_descriptors_override=None,
-                subgraphs=None,
-                workspace_arg=None,
-                layout=make_layout(),
-                num_consumer_groups=0,
-                num_buffers_warp_spec=0,
-                kwargs={},
-            )
-
-        # Identical layouts but different aliasing must not collide.
-        self.assertNotEqual(key(a, a), key(a, b))
-        # The aliasing pattern is insensitive to buffer names.
-        self.assertEqual(key(a, a), key(b, b))
-        self.assertEqual(key(a, b), key(b, a))
-        self.assertIn("'input_aliasing': (0, 1)", key(a, b))
-
-    @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
-    @config.patch(
-        {
-            "test_configs.max_mm_configs": 4,
-            "max_autotune_gemm_backends": "TRITON",
-        }
-    )
-    def test_bmm_template_cache_aliased_then_distinct_inputs(self):
-        """A bmm whose operands alias one buffer must not share generated-code
-        cache entries with a bmm over distinct operands of identical layouts.
-
-        def_kernel collapses aliased operands into a single kernel argument,
-        so before the aliasing-aware cache key the distinct-operand bmm
-        reused the one-argument cached kernels; the class-level
-        TritonTemplate.test_cache patch turns that reuse into a hard error.
-        See https://github.com/pytorch/pytorch/issues/188069.
-        """
-
-        def f(x, a, b):
-            return torch.bmm(x, x), torch.bmm(a, b)
-
-        B, N = 2, 128
-        with fresh_cache():
-            x = torch.randn(B, N, N, device=GPU_TYPE)
-            a = torch.randn(B, N, N, device=GPU_TYPE)
-            b = torch.randn(B, N, N, device=GPU_TYPE)
-
-            compiled = torch.compile(
-                f,
-                fullgraph=True,
-                dynamic=False,
-                mode="max-autotune-no-cudagraphs",
-            )
-            aliased, distinct = compiled(x, a, b)
-
-            self.assertEqual(aliased, torch.bmm(x, x), atol=0.1, rtol=0.05)
-            self.assertEqual(distinct, torch.bmm(a, b), atol=0.1, rtol=0.05)
 
     @fresh_cache()
     @unittest.skipIf(
@@ -3510,70 +3512,6 @@ class TestMaxAutotune(TestCase):
             result = torch.compile(mm)(a, b)
 
         torch.testing.assert_close(result, torch.mm(a, b), rtol=1e-2, atol=1e-2)
-
-    @fresh_cache()
-    @skipIfXpu
-    @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
-    @unittest.skipIf(
-        not SM90OrLater, "Requires SM90+ (H100/B200) for sufficient GPU memory"
-    )
-    @largeTensorTest("6 GB", device=GPU_TYPE)
-    def test_max_autotune_grouped_mm_large_input_tensor_int64_indexing(self):
-        def grouped_mm(a, b, offs):
-            return torch._grouped_mm(a, b.transpose(-2, -1), offs=offs)
-
-        # G*N*K == 2**31: smallest size triggering int64 INDEX_DTYPE
-        # while max_offset (== numel - 1) still fits int32, so TMA
-        # stays enabled.
-        G, M, N, K = 8, 128, 16384, 16384
-        a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(G, N, K, device=GPU_TYPE, dtype=torch.bfloat16)
-        offs = torch.arange(M // G, M + 1, M // G, device=GPU_TYPE, dtype=torch.int32)
-
-        self.assertEqual(b.numel(), 2**31)
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-                "test_configs.autotune_choice_name_regex": r"^triton_grouped_mm",
-            }
-        ):
-            result = torch.compile(grouped_mm)(a, b, offs)
-
-        torch.testing.assert_close(result, grouped_mm(a, b, offs), rtol=1e-2, atol=1e-2)
-
-    @fresh_cache()
-    @skipIfXpu
-    @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
-    @unittest.skipIf(
-        not SM90OrLater, "Requires SM90+ (H100/B200) for sufficient GPU memory"
-    )
-    @largeTensorTest("6 GB", device=GPU_TYPE)
-    def test_max_autotune_grouped_mm_large_input_tensor_tma_disabled(self):
-        # Grouped mm whose TMA descriptor max offset exceeds
-        # int32_max; USE_TMA_LOAD must be disabled and the non-TMA
-        # fallback still correct.
-        def grouped_mm(a, b, offs):
-            return torch._grouped_mm(a, b.transpose(-2, -1), offs=offs)
-
-        G, M, N, K = 8, 128, 16384, 16512
-        a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(G, N, K, device=GPU_TYPE, dtype=torch.bfloat16)
-        offs = torch.arange(M // G, M + 1, M // G, device=GPU_TYPE, dtype=torch.int32)
-
-        self.assertGreater(b.numel(), 2**31)
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-                "test_configs.autotune_choice_name_regex": r"^triton_grouped_mm",
-            }
-        ):
-            result = torch.compile(grouped_mm)(a, b, offs)
-
-        torch.testing.assert_close(result, grouped_mm(a, b, offs), rtol=1e-2, atol=1e-2)
 
     @fresh_cache()
     @skipIfXpu
@@ -6131,16 +6069,6 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
         "test_persistent_tma_epilogue_fusion_store_cache": "Epilogue fusion disabled in async pipelining",
-        # grouped_mm's input_gen_fns forces
-        # return_multi_template=False, so do_autotuning() takes its
-        # pipelined-only branch and returns None instead of timings,
-        # crashing min(timings, ...). Pre-existing bug, not test-
-        # specific -- hits any input_gen_fns op under
-        # pipeline_max_autotune_gemm=True.
-        "test_max_autotune_grouped_mm_large_input_tensor_int64_indexing": "grouped_mm's input_gen_fns forces return_multi_template=False, "
-        "which do_autotuning's pipelined branch does not handle",
-        "test_max_autotune_grouped_mm_large_input_tensor_tma_disabled": "grouped_mm's input_gen_fns forces return_multi_template=False, "
-        "which do_autotuning's pipelined branch does not handle",
     }
 
     @classmethod

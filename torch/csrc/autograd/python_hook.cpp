@@ -11,6 +11,9 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#include <iostream>
+#include <sstream>
+
 using torch::autograd::Variable;
 using torch::autograd::variable_list;
 
@@ -69,7 +72,8 @@ bool _call_hooks(PyObject* dict, PyObject* args) {
     const auto hook = PyList_GetItem(hooks, idx);
 
     THPObjectPtr res(PyObject_CallObject(hook, args));
-    TORCH_CHECK_PYTHON(res);
+    if (!res)
+      throw python_error();
     if (Py_IsNone(res))
       continue;
 
@@ -111,7 +115,8 @@ auto PyFunctionTensorPreHook::operator()(const variable_list& values)
     -> variable_list {
   pybind11::gil_scoped_acquire gil;
   THPObjectPtr value(THPVariable_Wrap(values.at(value_idx)));
-  TORCH_CHECK_PYTHON(value);
+  if (!value)
+    throw python_error();
   THPObjectPtr tup(PyTuple_New(1));
   PyTuple_SET_ITEM(tup.get(), 0, value.release());
   bool is_tup_modified = _call_hooks(dict, tup.get());
@@ -255,7 +260,9 @@ void PyFunctionTensorPostAccGradHooks::apply_with_saved(
         "Oi",
         py_var.get(),
         hook));
-    TORCH_CHECK_PYTHON(res);
+    if (!res) {
+      throw python_error();
+    }
   }
 }
 
@@ -264,10 +271,12 @@ void PyFunctionTensorPostAccGradHooks::apply_with_saved(
 static PyObject* wrap_variables(const variable_list& c_variables) {
   size_t num_vars = c_variables.size();
   THPObjectPtr tuple(PyTuple_New(static_cast<Py_ssize_t>(num_vars)));
-  TORCH_CHECK_PYTHON(tuple);
+  if (!tuple)
+    throw python_error();
   for (const auto i : c10::irange(num_vars)) {
     THPObjectPtr var(THPVariable_Wrap(c_variables[i]));
-    TORCH_CHECK_PYTHON(var);
+    if (!var)
+      throw python_error();
     PyTuple_SET_ITEM(tuple.get(), i, var.release());
   }
   return tuple.release();
@@ -295,7 +304,6 @@ static void check_result(PyObject* prev, PyObject* result, PyObject* hook) {
         PyExc_TypeError,
         "expected tuple, but hook returned '%s'",
         THPUtils_typename(result));
-    // @allow-raw-throw: raises the TypeError set immediately above
     throw python_error();
   }
 
@@ -334,7 +342,6 @@ static void check_single_result(
         PyExc_TypeError,
         "expected Variable, but hook returned '%s'",
         THPUtils_typename(_result));
-    // @allow-raw-throw: raises the TypeError set immediately above
     throw python_error();
   }
 
@@ -347,7 +354,8 @@ static void check_single_result(
 static std::string hook_name(PyObject* hook) {
   if (PyObject_HasAttrString(hook, "__name__")) {
     THPObjectPtr name(PyObject_GetAttrString(hook, "__name__"));
-    TORCH_CHECK_PYTHON(name);
+    if (!name)
+      throw python_error();
 
     if (name && THPUtils_checkString(name.get())) {
       return THPUtils_unpackString(name.get());

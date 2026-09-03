@@ -3,7 +3,7 @@ import functools
 
 import torch
 from torch._inductor.compile_fx import fake_tensor_prop
-from torch._inductor.utils import _device_is_available, GPU_TYPES
+from torch._inductor.utils import GPU_TYPES
 
 from ..._dynamo.utils import counters
 from .. import config
@@ -43,7 +43,7 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
 
     lazy_init()
     # We need a few rounds of binary folding to get rid of all the
-    # unnecessary nodes, but may need a good method to choose the rounds number.
+    # unnecessary nodes, but may need a good method to chose the rounds number.
     # works like: conv+binary+binary.
     binary_folding = counters["inductor"]["binary_folding"]
     fake_tensor_prop(gm, aot_example_inputs, True)
@@ -121,20 +121,15 @@ def register_binary_folding_pattern(pattern, extra_check=_return_true):
     )
 
 
-def _addmm_pattern_device() -> str:
-    # Resolve availability through the DeviceInterface registry rather than
-    # getattr(torch, gpu): GPU_TYPES may include out-of-tree PrivateUse1
-    # backends that register an interface but expose no torch.<name> module.
-    return next((gpu for gpu in GPU_TYPES if _device_is_available(gpu)), "cpu")
-
-
 @functools.cache
 def addmm_patterns_init():
     """
     addmm related patterns.
     To avoid duplication, also includes int8 WoQ GEMM pattern without bias.
     """
-    device = _addmm_pattern_device()
+    device = next(
+        (gpu for gpu in GPU_TYPES if getattr(torch, gpu).is_available()), "cpu"
+    )
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
     scale = functools.partial(torch.empty, (10,), device=device, requires_grad=False)
 

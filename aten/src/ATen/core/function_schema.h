@@ -219,7 +219,9 @@ struct TORCH_API SchemaArgument {
   SchemaArgType type;
   size_t index;
   SchemaArgument(SchemaArgType tpe, size_t idx) : type(tpe), index(idx) {}
-  bool operator==(const SchemaArgument& rhs) const = default;
+  bool operator==(const SchemaArgument& rhs) const {
+    return type == rhs.type && index == rhs.index;
+  }
 };
 
 bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs);
