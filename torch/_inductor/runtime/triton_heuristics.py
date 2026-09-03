@@ -1,13 +1,13 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import builtins
 import copy
 import dataclasses
 import enum
 import functools
 import hashlib
-import importlib
 import inspect
 import itertools
 import logging
@@ -43,7 +43,6 @@ from torch.utils._triton import get_triton_version, has_triton_stable_tma_api
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
-    get_importable_constexpr_types,
     GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
     tlx_only_cuda_options,
@@ -2927,10 +2926,10 @@ class CompileResult(Generic[_T]):
 
     def _get_arg_lists(
         self, arg_names, constexprs
-    ) -> tuple[list[str], list[str], OrderedSet[str]]:
+    ) -> tuple[list[str], list[str], OrderedSet[str], dict[str, Any]]:
         """
         Return a bunch of intermediate lists of args needed for generating
-        launcher code.
+        launcher code, plus objects referenced directly by that code.
         """
         compile_meta = self.compile_meta
         cfg = self.config
@@ -2959,11 +2958,33 @@ class CompileResult(Generic[_T]):
         )
         none_args = none_args.difference(OrderedSet(compile_meta["signature"].keys()))
 
+        constant_scope: dict[str, Any] = {}
+        reserved_names = OrderedSet(
+            [*arg_names, *self.inductor_meta.get("extra_launcher_args", ())]
+        )
+        constant_names = itertools.count()
+
+        def _bind_constant(constant):
+            while (name := f"_constexpr_{next(constant_names)}") in reserved_names:
+                pass
+            reserved_names.add(name)
+            constant_scope[name] = constant
+            return name
+
         def _convert_constant(constant):
-            if isinstance(constant, str):
-                return "r'" + constant + "'"
-            else:
-                return repr(constant)
+            source = repr(constant)
+            try:
+                reconstructed = ast.literal_eval(source)
+                matches = (
+                    type(reconstructed) is type(constant) and reconstructed == constant
+                )
+            except Exception:
+                # literal_eval can also raise TypeError/RecursionError/MemoryError
+                # on pathological reprs; binding the object is always safe.
+                return _bind_constant(constant)
+            if matches is not True:
+                return _bind_constant(constant)
+            return source
 
         if triton_version_uses_attrs_dict():
             call_args = arg_names
@@ -3001,7 +3022,7 @@ class CompileResult(Generic[_T]):
         if "extra_launcher_args" in self.inductor_meta:
             def_args = [*def_args, *self.inductor_meta["extra_launcher_args"]]
 
-        return call_args, def_args, none_args
+        return call_args, def_args, none_args, constant_scope
 
 
 _KernelCompileResult: TypeAlias = (
@@ -3166,7 +3187,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
         # want only a subset of the arguments passed to triton.
         # Here, arg_names is exactly fn.src.arg_names and declared_constexprs is exactly fn.src.constexprs,
         # which matches behavior with regular TritonCompileResult
-        _, def_args, none_args = self._get_arg_lists(
+        _, def_args, none_args, constant_scope = self._get_arg_lists(
             self.kernel.arg_names, self.kernel.declared_constexprs
         )
 
@@ -3182,6 +3203,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
             self._host_tma_static_pre_runner_lines(runner_args, call_args)
         )
         scope.update(tma_scope)
+        scope.update(constant_scope)
         launcher = self._gen_launcher_code(
             scope, def_args, runner_args, pre_runner_lines=pre_runner_lines
         )
@@ -3285,7 +3307,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
         binary = self.kernel
         fn = binary.src.fn
         binary._init_handles()
-        (call_args, def_args, none_args) = self._get_arg_lists(
+        (call_args, def_args, none_args, constant_scope) = self._get_arg_lists(
             fn.arg_names, get_constexprs(fn)
         )
         binary_shared = (
@@ -3341,6 +3363,8 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             "torch": torch_lib,
             "triton": triton_lib,
         }
+        scope.update(constant_scope)
+
         if not hasattr(binary, "launch_metadata"):
             # launch args before CompiledKernel.launch_metadata is added.
             # TODO(jansel): delete this branch in mid-2025
@@ -3390,20 +3414,6 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
 
             scope["_host_tma_aligned"] = _host_tma_aligned
             scope["TensorDescriptor"] = TensorDescriptor
-
-        for type_spec in get_importable_constexpr_types(
-            compile_meta.get("constants", {}).values()
-        ):
-            if type_spec.root_name in scope:
-                raise ImportError(
-                    "Triton constexpr value type "
-                    f"{type_spec.module}.{type_spec.qualname} requires import name "
-                    f"{type_spec.root_name}, which would shadow an existing "
-                    "generated launcher binding. Rename the root type."
-                )
-            scope[type_spec.root_name] = getattr(
-                importlib.import_module(type_spec.module), type_spec.root_name
-            )
 
         launcher = self._gen_launcher_code(
             scope, def_args, runner_args, pre_runner_lines=pre_runner_lines
