@@ -179,15 +179,29 @@ static void check_mx_swizzle(const at::Tensor& t, SwizzleType swizzle_a, Swizzle
 }
 #endif
 
-// Number of 1x32 e8m0 block scales for `t`. v1 `_scaled_mm` has no swizzle
-// argument, so it only ever accepts this one layout. The count alone cannot
-// identify a layout: at shapes where the padding coincides (e.g. M=128, K=256)
-// a 32x8-tiled buffer has exactly this many elements, and v1 will read it as
-// unswizzled and produce wrong numerics. Callers who need the gfx950 32x8
-// layout must use `_scaled_mm_v2` and pass SWIZZLE_32_8 explicitly.
-int64_t blockwise_1x32_numel(const at::Tensor& t, int64_t k_unpacked) {
-  return round_up<int64_t>(t.size(0), 128) *
+// Number of 1x32 e8m0 block scales in the layout v1 `_scaled_mm` accepts: rows
+// padded to 128, K blocks padded to 4. v1 has no swizzle argument, so this is
+// the only layout it takes, and it is not ROCm's NO_SWIZZLE v2 count, which
+// pads differently (see `_scaled_mxfp8_mxfp8`). The count alone cannot identify
+// a layout either: where the paddings coincide (e.g. rows=128, k_unpacked=256)
+// a 32x8-tiled buffer has exactly this many elements and v1 reads it in the
+// wrong order. Callers who need the gfx950 32x8 layout must use `_scaled_mm_v2`
+// and pass SWIZZLE_32_8 explicitly.
+int64_t blockwise_1x32_numel(int64_t rows, int64_t k_unpacked) {
+  return round_up<int64_t>(rows, 128) *
       round_up<int64_t>(ceil_div<int64_t>(k_unpacked, 32), 4);
+}
+
+// K in elements for 1x32 block scaling: fp4 packs two values per element, and
+// v1 takes packed fp4 for this recipe only on ROCm (NVIDIA fp4 arrives as
+// 1x16 nvfp4 instead).
+int64_t blockwise_1x32_k_unpacked(const at::Tensor& t, int64_t k_packed) {
+#ifdef USE_ROCM
+  if (t.scalar_type() == ScalarType::Float4_e2m1fn_x2) {
+    return k_packed * 2;
+  }
+#endif
+  return k_packed;
 }
 
 // 1x32 blocks for microscaled fp8/fp4 data and fp8_e8m0fnu scales
@@ -205,8 +219,7 @@ bool is_blockwise_1x32_scaling(const at::Tensor& t, const at::Tensor& scale) {
   if (!isFloat8Type(t.scalar_type()) && !is_packed_fp4) {
     return false;
   }
-  const int64_t k_unpacked = is_packed_fp4 ? t.size(1) * 2 : t.size(1);
-  return scale.numel() == blockwise_1x32_numel(t, k_unpacked);
+  return scale.numel() == blockwise_1x32_numel(t.size(0), blockwise_1x32_k_unpacked(t, t.size(1)));
 }
 
 bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
@@ -270,7 +283,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
     "- For RowWise scaling, a and b should be float8, scales should be float, scale_a should be (", a.size(0), ", 1) and scale_b should be (1, ", b.size(1), "), and both should be contiguous.\n"
     "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float, scale_a should be (", a.size(0), ", ", ceil_div<int64_t>(a.size(1), 128), ") and scale_b should be (", ceil_div<int64_t>(b.size(0), 128), ", ", b.size(1), "), and both should be outer-dim-major.\n"
     "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (", ceil_div<int64_t>(a.size(0), 128), ", ", ceil_div<int64_t>(a.size(1), 128), ") and scale_b should be (", ceil_div<int64_t>(b.size(0), 128), ", ", ceil_div<int64_t>(b.size(1), 128), "), and both should be near-inner-dim-major (with 16-byte aligned strides).\n"
-    "- For Blockwise 1x32 scaling, a and b should be float8, scales should be float8_e8m0fnu, scale_a should have ", blockwise_1x32_numel(a, a.size(1)), " elements and scale_b should have ", blockwise_1x32_numel(b.t(), b.size(0)), " elements, and both should be contiguous.\n"
+    "- For Blockwise 1x32 scaling, a and b should be float8, scales should be float8_e8m0fnu, scale_a should have ", blockwise_1x32_numel(a.size(0), blockwise_1x32_k_unpacked(a, a.size(1))), " elements and scale_b should have ", blockwise_1x32_numel(b.size(1), blockwise_1x32_k_unpacked(b, b.size(0))), " elements, and both should be contiguous.\n"
     "- For Blockwise 1x16 scaling, a and b should be float4 (packed 2x), scales should be float8_e4m3fn, scale_a should have ", round_up<int64_t>(a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(a.size(1) * 2, 16), 4), " elements and scale_b should have ", round_up<int64_t>(b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(b.size(0) * 2, 16), 4), " elements, and both should be contiguous.\n"
     "Got a.dtype()=", a.scalar_type(), ", scale_a.dtype()=", scale_a.scalar_type(), ", scale_a.size()=", scale_a.sizes(), ", scale_a.stride()=", scale_a.strides(), ", ",
     "b.dtype()=", b.scalar_type(), ", scale_b.dtype()=", scale_b.scalar_type(), ", scale_b.size()=", scale_b.sizes(), " and scale_b.stride()=", scale_b.strides()

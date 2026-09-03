@@ -203,6 +203,18 @@ def round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
 
 
+def mx_swizzle_for(device, mat_dtype) -> SwizzleType:
+    """The MX block-scale layout to request for `mat_dtype` on this device.
+
+    gfx950 takes either ROCm layout, so tests have to name the one they built
+    instead of relying on `infer_scale_swizzle`, whose element counts do not
+    distinguish the two where their paddings coincide.
+    """
+    if not torch.version.hip and "xpu" not in device:
+        return SwizzleType.SWIZZLE_32_4_4
+    return SwizzleType.SWIZZLE_32_8 if rocm_mx_swizzle(mat_dtype) else SwizzleType.NO_SWIZZLE
+
+
 wrap: bool = True
 
 def scaled_mm_wrap(
@@ -2342,11 +2354,18 @@ class TestFP8Matmul(TestCase):
             A_scale = to_blocked(A_scale, swizzle_32_8=rocm_mx_swizzle(A.dtype))
             B_scale = to_blocked(B_scale, swizzle_32_8=rocm_mx_swizzle(B.dtype))
 
+        block_recipe = ScalingType.BlockWise1x16 if recipe == "nvfp4" else ScalingType.BlockWise1x32
+        swizzle = mx_swizzle_for(device, A.dtype)
+
         C = scaled_mm_wrap(
             A,
             B.t(),
             A_scale,
             B_scale,
+            scale_recipe_a=block_recipe,
+            scale_recipe_b=block_recipe,
+            swizzle_a=swizzle,
+            swizzle_b=swizzle,
             out_dtype=torch.bfloat16,
             use_fast_accum=fast_accum,
         )
@@ -2761,12 +2780,18 @@ class TestFP8Matmul(TestCase):
 
         C_ref = A_ref @ B_ref.t()
 
+        swizzle = mx_swizzle_for(device, A.dtype)
+
         compiled_scaled_mm = torch.compile(scaled_mm_wrap, backend="inductor")
         C = compiled_scaled_mm(
             A,
             B.t(),
             A_scale,
             B_scale,
+            scale_recipe_a=ScalingType.BlockWise1x32,
+            scale_recipe_b=ScalingType.BlockWise1x32,
+            swizzle_a=swizzle,
+            swizzle_b=swizzle,
             out_dtype=torch.bfloat16,
             use_fast_accum=False,
         )
@@ -2795,13 +2820,20 @@ class TestFP8Matmul(TestCase):
 
         C_ref = A_ref @ B_ref.t()
 
+        # ROCm runs this as MX FP4 (1x32 e8m0 scales), NVIDIA as NVFP4 (1x16).
+        block_recipe = ScalingType.BlockWise1x32 if torch.version.hip else ScalingType.BlockWise1x16
+        swizzle = mx_swizzle_for(device, A.dtype)
+
         compiled_scaled_mm = torch.compile(scaled_mm_wrap, backend="inductor")
-        # C = scaled_mm_wrap(
         C = compiled_scaled_mm(
             A,
             B.t(),
             A_scale,
             B_scale,
+            scale_recipe_a=block_recipe,
+            scale_recipe_b=block_recipe,
+            swizzle_a=swizzle,
+            swizzle_b=swizzle,
             out_dtype=torch.bfloat16,
             use_fast_accum=False,
         )
@@ -2874,6 +2906,36 @@ class TestFP8Matmul(TestCase):
                 A_scale, ScalingType.BlockWise1x32,
                 B_scale, ScalingType.BlockWise1x32,
                 swizzle_a=SwizzleType.SWIZZLE_32_4_4, swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+                output_dtype=torch.bfloat16,
+            )
+
+    @onlyAccelerator
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @unittest.skipIf(not torch.version.hip, "The MX scale layout is fixed by arch and ROCm version only on ROCm")
+    @runOnRocmArch(MI350_ARCH)
+    def test_rocm_mx_swizzle_size_error_names_arch(self, device) -> None:
+        # This size check runs before the kernel's arch gate, so on an arch
+        # without SWIZZLE_32_8 it is the first thing a caller hits and has to
+        # name the requirement itself. gfx950 reaches it only by mis-sizing the
+        # scales, as here: default-layout scales with SWIZZLE_32_8 requested.
+        M, K, N = 128, 128, 128
+        BLOCK_SIZE = 32
+        A = (torch.randn((M, K), device=device, dtype=torch.bfloat16)).to(torch.float8_e4m3fn)
+        B = (torch.randn((N, K), device=device, dtype=torch.bfloat16)).to(torch.float8_e4m3fn)
+        A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+        B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+
+        expected = round_up(M, 32) * round_up(ceil_div(K, BLOCK_SIZE), 8)
+        with self.assertRaisesRegex(
+            ValueError,
+            f"SWIZZLE_32_8 scale_a should have {expected} elements.*"
+            r"require gfx950 with ROCm 7\.13 \(MX FP4\) or ROCm 7\.14 \(MX FP8\)",
+        ):
+            scaled_mm(
+                A, B.t(),
+                A_scale, ScalingType.BlockWise1x32,
+                B_scale, ScalingType.BlockWise1x32,
+                swizzle_a=SwizzleType.SWIZZLE_32_8, swizzle_b=SwizzleType.SWIZZLE_32_8,
                 output_dtype=torch.bfloat16,
             )
 
