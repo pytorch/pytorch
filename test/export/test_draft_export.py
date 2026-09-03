@@ -735,13 +735,13 @@ class TestDraftExport(TestCase):
 class TestDraftExportDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(
-        not torch.accelerator.is_available(),
-        "Requires an accelerator",
-    )
     def test_memory_usage(self, device):
         # This used to OOM
-        if torch.accelerator.get_memory_info(device)[1] < 2**28:
+        try:
+            total_memory = torch.accelerator.get_memory_info(device)[1]
+        except NotImplementedError:
+            self.skipTest(f"{device} allocator does not implement getMemoryInfo")
+        if total_memory < 2**28:
             self.skipTest(
                 "Requires 16 MB accelerator memory to pass the test; setting it higher to catch violations"
             )
@@ -752,7 +752,8 @@ class TestDraftExportDevice(TestCase):
                     x = x + 1e-3
                 return x
 
-        # measure base usage
+        # Touch the device so the allocator is initialized before baseline stats.
+        torch.empty(1, device=device)
         torch.accelerator.reset_peak_memory_stats(device)
         base_usage = torch.accelerator.memory_allocated(device)
 
@@ -762,9 +763,13 @@ class TestDraftExportDevice(TestCase):
 
         # draft export peak memory usage
         draft_export(Foo(), (x,), strict=False)
-        peak_mem_usage = torch.accelerator.memory_stats(device)[
+        peak_mem_usage = torch.accelerator.memory_stats(device).get(
             "allocated_bytes.all.peak"
-        ]
+        )
+        if peak_mem_usage is None:
+            self.skipTest(
+                f"{device} memory_stats() does not report allocated_bytes.all.peak"
+            )
 
         # right now it's actually exactly 4x;
         # I guess original tensor, 2 tensors per add op, 1 for clone stored in node.meta["val"]

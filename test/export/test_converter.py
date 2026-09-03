@@ -30,7 +30,7 @@ requires_prepacked_linear = unittest.skipIf(
 )
 
 
-class _ConverterCheckMixin(TestCase):
+class _ConverterCheckMixin:
     def _check_equal_ts_ep_converter(
         self,
         M,
@@ -111,7 +111,7 @@ class _ConverterCheckMixin(TestCase):
                 self.assertEqual(x, y)
 
 
-class TestConverter(_ConverterCheckMixin):
+class TestConverter(_ConverterCheckMixin, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
@@ -380,6 +380,15 @@ class TestConverter(_ConverterCheckMixin):
                 return d_int[0], d_str["0"], d_bool[True], d_float[0.1]
 
         inp = (torch.rand((3, 2)),)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_prim_device(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                device = x.device
+                return torch.ones(2, 3, device=device)
+
+        inp = (torch.rand(3, 4),)
         self._check_equal_ts_ep_converter(Module(), inp)
 
     def test_prim_dtype(self):
@@ -1496,7 +1505,7 @@ class TestConverter(_ConverterCheckMixin):
         self._check_equal_ts_ep_converter(m, inp, ["script"])
 
 
-class TestConverterPrimDevice(_ConverterCheckMixin):
+class TestConverterPrimDevice(_ConverterCheckMixin, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_prim_device(self, device):
@@ -1509,7 +1518,7 @@ class TestConverterPrimDevice(_ConverterCheckMixin):
         self._check_equal_ts_ep_converter(Module(), inp)
 
 
-instantiate_device_type_tests(TestConverterPrimDevice, globals())
+instantiate_device_type_tests(TestConverterPrimDevice, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
