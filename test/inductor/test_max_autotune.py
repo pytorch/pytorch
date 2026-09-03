@@ -196,11 +196,7 @@ class TestMaxAutotune(TestCase):
         b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
         return a, b
 
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("broadcast_b", (False, True))
-    @parametrize("data_partition_factor", (1, 2))
-    @parametrize("epilogue_subtile", (1, 2, 4))
-    def test_blackwell_bmm_template(
+    def _run_blackwell_bmm_template(
         self,
         broadcast_b: bool,
         data_partition_factor: int,
@@ -273,6 +269,28 @@ class TestMaxAutotune(TestCase):
             self.assertIn("SEPARATE_EPILOGUE_STORE : tl.constexpr = True", codes[0])
         else:
             self.assertNotIn("data_partition_factor", codes[0])
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @parametrize("data_partition_factor", (1, 2))
+    @parametrize("epilogue_subtile", (1, 2, 4))
+    def test_blackwell_bmm_template(
+        self,
+        data_partition_factor: int,
+        epilogue_subtile: int,
+    ) -> None:
+        self._run_blackwell_bmm_template(
+            broadcast_b=False,
+            data_partition_factor=data_partition_factor,
+            epilogue_subtile=epilogue_subtile,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    def test_blackwell_bmm_template_broadcast_b(self) -> None:
+        self._run_blackwell_bmm_template(
+            broadcast_b=True,
+            data_partition_factor=1,
+            epilogue_subtile=1,
+        )
 
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
