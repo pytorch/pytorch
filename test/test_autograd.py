@@ -7350,6 +7350,142 @@ Done""",
         check(fast_mode=True)
         check(fast_mode=False)
 
+    @parametrize("fast_mode", [True, False])
+    def test_gradcheck_dependent_inputs_hint(self, fast_mode):
+        # https://github.com/pytorch/pytorch/issues/121842: when one checked input is
+        # an autograd ancestor of another, the analytical Jacobian wrt the ancestor
+        # picks up chain rule terms that finite differences do not see.
+        hint = "potential dependency from this input to another"
+
+        def mismatch_wrt_first(*args):
+            out = args[0].clone()
+            out.register_hook(lambda grad: grad + 1e-2)
+            return out + sum(args[1:])
+
+        x = torch.ones(1, dtype=torch.double, requires_grad=True)
+        y = 3 * x
+        with self.assertRaisesRegex(RuntimeError, hint):
+            gradcheck(torch.dot, (x, y), fast_mode=fast_mode)
+        self.assertFalse(
+            gradcheck(torch.dot, (x, y), raise_exception=False, fast_mode=fast_mode)
+        )
+
+        # The dependency does not have to be direct.
+        x = torch.randn(3, dtype=torch.double, requires_grad=True)
+        z = x.sin() * 3
+        with self.assertRaisesRegex(RuntimeError, hint):
+            gradcheck(lambda x, z: x * z, (x, z), fast_mode=fast_mode)
+
+        # A shared ancestor is not a dependency between the checked inputs: neither
+        # q nor k is reachable from the other, so gradcheck still passes.
+        h = torch.randn(3, dtype=torch.double, requires_grad=True)
+        q, k = 2 * h, 3 * h
+        self.assertTrue(gradcheck(lambda q, k: q * k, (q, k), fast_mode=fast_mode))
+
+        # A wrong backward for an input that is not an ancestor gets no hint.
+        a = torch.randn(3, dtype=torch.double, requires_grad=True)
+        with self.assertRaises(RuntimeError) as cm:
+            gradcheck(mismatch_wrt_first, (a,), fast_mode=fast_mode)
+        self.assertNotIn(hint, str(cm.exception))
+
+        # The hint is scoped to the input that actually mismatched. Here x is an
+        # ancestor of y, but the mismatch is wrt a, so that dependency cannot
+        # explain it. y is unused so it contributes no chain rule term to x either.
+        x = torch.randn(3, dtype=torch.double, requires_grad=True)
+        y = 3 * x
+        with self.assertRaises(RuntimeError) as cm:
+            gradcheck(
+                lambda a, x, y: mismatch_wrt_first(a, x),
+                (a, x, y),
+                fast_mode=fast_mode,
+            )
+        self.assertIn("with respect to input 0", str(cm.exception))
+        self.assertNotIn(hint, str(cm.exception))
+
+        # Two outputs of the same node are different gradient edges, not an
+        # ancestor-descendant pair, so an unrelated mismatch gets no hint.
+        x = torch.randn(4, dtype=torch.double, requires_grad=True)
+        p, r = (3 * x).split(2)
+        self.assertIs(p.grad_fn, r.grad_fn)
+        self.assertNotEqual(p.output_nr, r.output_nr)
+        with self.assertRaises(RuntimeError) as cm:
+            gradcheck(mismatch_wrt_first, (p, r), fast_mode=fast_mode)
+        self.assertNotIn(hint, str(cm.exception))
+
+        # Forward AD builds its duals from detached inputs, so it is unaffected by
+        # the dependency that makes the backward check above fail.
+        x = torch.ones(1, dtype=torch.double, requires_grad=True)
+        y = 3 * x
+        self.assertTrue(
+            gradcheck(
+                torch.dot,
+                (x, y),
+                fast_mode=fast_mode,
+                check_forward_ad=True,
+                check_backward_ad=False,
+                check_batched_grad=False,
+            )
+        )
+
+        # gradgradcheck delegates to gradcheck, so it inherits the diagnostic.
+        x = torch.randn(3, dtype=torch.double, requires_grad=True)
+        y = 3 * x
+        with self.assertRaisesRegex(RuntimeError, hint):
+            gradgradcheck(lambda p, q: p * q, (x, y), fast_mode=fast_mode)
+        a = torch.randn(3, dtype=torch.double, requires_grad=True)
+        b = torch.randn(3, dtype=torch.double, requires_grad=True)
+        self.assertTrue(gradgradcheck(lambda p, q: p * q, (a, b), fast_mode=fast_mode))
+
+    def test_gradcheck_potential_dependency_predicate(self):
+        from torch.autograd.gradcheck import (
+            _has_potential_dependency_to_other_checked_input as has_dependency,
+        )
+
+        x = torch.randn(4, dtype=torch.double, requires_grad=True)
+        y = 3 * x
+        self.assertTrue(has_dependency((x, y), x))
+        # The relationship is directed: nothing was computed from y.
+        self.assertFalse(has_dependency((x, y), y))
+
+        # Sharing an ancestor is not a dependency between the checked inputs.
+        h = torch.randn(4, dtype=torch.double, requires_grad=True)
+        q, k = 2 * h, 3 * h
+        self.assertFalse(has_dependency((q, k), q))
+
+        # Distinct outputs of one node share a Node but not a gradient edge.
+        p, r = y.split(2)
+        self.assertFalse(has_dependency((p, r), p))
+
+        # An input passed twice resolves to the same gradient edge.
+        self.assertFalse(has_dependency((x, x), x))
+
+        # Nested inputs are flattened the same way the analytical path flattens them.
+        self.assertTrue(has_dependency((x, [y]), x))
+
+        # The predicate reports a potential dependency, not a proven one.
+        # next_functions belongs to a Node rather than to one of its outputs, so the
+        # two outputs below cannot be told apart by their upstream edges even though
+        # each depends on only one input, and u is reported for out_v despite
+        # d(out_v)/du being zero.
+        class SplitDependency(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                return a.clone(), b.clone()
+
+            @staticmethod
+            def backward(ctx, grad_a, grad_b):
+                return grad_a, grad_b
+
+        u = torch.randn(4, dtype=torch.double, requires_grad=True)
+        v = torch.randn(4, dtype=torch.double, requires_grad=True)
+        out_u, out_v = SplitDependency.apply(u, v)
+        self.assertIs(out_u.grad_fn, out_v.grad_fn)
+        self.assertEqual(
+            torch.autograd.grad(out_v.sum(), u, allow_unused=True)[0],
+            torch.zeros_like(u),
+        )
+        self.assertTrue(has_dependency((u, out_v), u))
+
     def test_gradcheck_dense_and_sparse_inputs(self):
         def check(fast_mode):
             def fn(x, y):
