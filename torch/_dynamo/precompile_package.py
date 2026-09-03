@@ -42,6 +42,7 @@ import collections
 import contextlib
 import contextvars
 import copy
+import dataclasses
 import functools
 import hashlib
 import importlib.machinery
@@ -79,6 +80,7 @@ from .package import (
     DynamoStore,
     PrecompileCacheEntry,
 )
+from .pgo import _use_code_state
 from .source import AttrSource, DictGetItemSource, GlobalSource
 
 
@@ -1466,7 +1468,6 @@ class PrecompileSession:
                 raise RuntimeError("PrecompileSession is not active")
             compiled = self._compiled
             self._active_calls += 1
-        from .pgo import _use_code_state
 
         try:
             with _capture_config(self._training), _use_code_state(self._pgo_state):
@@ -1593,6 +1594,129 @@ class PrecompileSession:
                     with self._state:
                         self._state.notify_all()
         self._recorded_exception_keys.clear()
+        # Before the report, so that it describes the artifact actually written.
+        if self._prune_invariant_guards and exc[0] is None:
+            self._apply_guard_policy()
+        if self._invariants_path is None:
+            return
+        if exc[0] is None:
+            self.write_invariants(self._invariants_path)
+        else:
+            # A partial capture's report reads exactly like a complete one, so
+            # it is not written; say why rather than leaving the user looking
+            # for a file that never appeared.
+            log.warning(
+                "precompile: the capture block raised %s, so no invariants "
+                "report was written to %s. Call write_invariants() for the "
+                "partial one.",
+                getattr(exc[0], "__name__", exc[0]),
+                self._invariants_path,
+            )
+
+    def _apply_guard_policy(self) -> None:
+        """
+        Drop every guard slot whose fact was identical in every variant of every
+        frame. Such a slot discriminates nothing, and most of an artifact's
+        guards are of that kind: on a 62-frame ranking model, 738 of 1207 slots.
+
+        Which slots those are is only knowable once every variant exists, but
+        guards are serialized per compilation, as each one is produced. So the
+        policy is applied afterwards, by re-serializing each frame's guards from
+        the pickle the capture already made. The pickle rather than the live
+        guards: it IS the value snapshot taken at compile time, and a guarded
+        attribute that the model mutates has moved on since.
+        """
+        from torch._dynamo.guards import CheckFunctionManager
+        from torch._dynamo.output_graph import OutputGraphCommon
+        from torch._dynamo.package import load_guards_state, SerializedCode
+
+        keep_only = varying_guard_slots(self._guard_sets)
+        dropped: set[tuple[str, str]] = set()
+
+        def survives(guard_type: str, name: str) -> bool:
+            # Fail closed: only an explicitly droppable type can be dropped.
+            # Shape-bearing types stay because dropping a value/shape pin
+            # silently widens the artifact's domain; unmodelled types stay
+            # because they never enter _guard_sets, so they were never shown
+            # to be constant -- only never analyzed (SHAPE_ENV is the one that
+            # matters: it carries symbolic shape constraints no TENSOR_MATCH
+            # repeats); a type in NO set is one GuardBuilder grew after the
+            # classification, kept until someone triages it; and a type whose
+            # builder emits nothing under the current config has no check to
+            # drop, so dropping it would only report a drop that never was.
+            return (
+                guard_type not in _INVARIANT_DROPPABLE_GUARD_TYPES
+                or _is_noop_guard_type(guard_type)
+                or (guard_type, _normalize(name)) in keep_only
+            )
+
+        def policy(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+            decisions = []
+            for entry in entries:
+                keep = survives(entry.guard_type, entry.name)
+                if not keep:
+                    dropped.add((entry.guard_type, entry.name))
+                decisions.append(keep)
+            return decisions
+
+        for code_entry in self._package.code_entries():
+            # A bypassed frame has no guards to re-serialize.
+            f_code = None
+            for guarded in code_entry.guarded_codes:
+                if f_code is None:
+                    f_code = SerializedCode.to_code_object(code_entry.python_code)
+                try:
+                    # Inside the try: unpickling the capture's own guard state
+                    # can fail too, and that must surface as the same
+                    # PackageError as a re-serialization failure, not escape
+                    # raw out of artifact()/__exit__.
+                    loaded = load_guards_state(guarded.guards_state)
+                    pruned = CheckFunctionManager(
+                        f_code,
+                        OutputGraphCommon(loaded.output_graph),
+                        shape_code_parts=loaded.shape_code_parts,
+                        runtime_global_scope=None,
+                        guard_build_local_state=loaded.local_state,
+                        save_guards=True,
+                        explicit_capture=True,
+                        # The pickle holds only guards that already survived the
+                        # default and user filters, so the policy is the whole
+                        # filter here; and a failure is an internal bug, not
+                        # something to bypass silently.
+                        serialization_guard_filter_fn=policy,
+                        strict_error=True,
+                    ).guards_state
+                    if pruned is None:
+                        raise AssertionError("save_guards produced no guards_state")
+                except Exception as e:
+                    raise PackageError(
+                        f"precompile: could not re-serialize the guards of "
+                        f"{code_entry.python_code.co_name} while dropping "
+                        f"invariant ones: {type(e).__name__}: {e}"
+                    ) from e
+                guarded.guards_state = pruned
+
+        self._policy_dropped_guards |= dropped
+        # Not "risky": the policy is the caller stating that the environment is
+        # fixed and every variation is in the inputs, so a slot that never
+        # varied is out of the artifact's declared domain rather than an
+        # unchecked hazard.
+        self._kept_guards -= dropped
+        # Re-mark the dropped facts rather than deleting them: the invariants
+        # report written from _guard_sets promises that a dropped line is "a
+        # precondition NOTHING checks", and a policy-dropped slot is exactly
+        # that -- omitting it would show an auditor a validity domain far wider
+        # than the artifact's true one.
+        for key, variants in self._guard_sets.items():
+            self._guard_sets[key] = [
+                frozenset(
+                    f
+                    if not f.enforced or survives(f.guard_type, f.source)
+                    else dataclasses.replace(f, enforced=False)
+                    for f in facts
+                )
+                for facts in variants
+            ]
 
     def _recording_filter(
         self,
@@ -1712,6 +1836,73 @@ class PrecompileSession:
                 )
             )
         return tuple(out)
+
+    def write_invariants(self, path: str) -> None:
+        """
+        Write :meth:`invariants` to ``path`` in human-readable form.
+
+        ``path`` is a FILE, written exactly as given, with parent directories
+        created -- ``snapshots/invariants.txt`` is a text file. Same contract as
+        :meth:`save`.
+
+        Output is stable across runs of the same capture: object ids and
+        Dynamo's per-process counters are normalized away, so the file can be
+        committed and diffed to see what a model change did to its guards.
+        """
+        frames = self.invariants()
+        target = getattr(self._fn, "__qualname__", None) or type(self._fn).__qualname__
+        lines = [
+            f"# precompile invariants for {target}",
+            "#",
+            "# Conditions that held in EVERY compiled variant of a frame. A call",
+            "# violating one cannot be served by any graph in this artifact, so",
+            "# these are the preconditions the artifact is only valid under.",
+            "# 'varies' lists what differed between variants -- those are what",
+            "# distinguish one compiled graph from another, not preconditions.",
+            "# 'unknown' lists guards whose check this report cannot model, so it",
+            "# cannot say whether they held across variants. Treat them as",
+            "# neither: they may or may not be preconditions.",
+            "#",
+            "# enforced = the guard is serialized and rechecked when the artifact",
+            "#            is loaded.",
+            "# dropped  = it was not serialized, so it is a precondition",
+            "#            NOTHING checks at serving time. See",
+            "#            PrecompileSummary.dropped_guards.",
+            "#",
+            f"# {len(frames)} frame(s), "
+            f"{sum(f.variants for f in frames)} compilation(s)",
+        ]
+        if any(f.variants < 2 for f in frames):
+            lines.append(
+                "# NOTE: some frames were compiled once, so their invariants are"
+                " just every guard. Exercise more variants for a real diff."
+            )
+        for f in frames:
+            where = f"{os.path.basename(f.filename)}:{f.lineno}"
+            lines.append("")
+            lines.append(
+                f"frame {f.frame} ({where})  {f.variants} variant(s), "
+                f"{len(f.invariant)} invariant, {len(f.varying)} varying, "
+                f"{len(f.undetermined)} undetermined"
+            )
+            if not f.invariant:
+                lines.append("  invariant: (none)")
+            for fact in f.invariant:
+                lines.append(f"  invariant {fact.render()}")
+            for fact in f.varying:
+                lines.append(f"  varies    {fact.render()}")
+            for fact in f.undetermined:
+                lines.append(f"  unknown   {fact.render()}")
+        os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+        # UTF-8 explicitly: the report renders user identifiers (module, class and
+        # parameter names) and the ambient locale can be ASCII in a container, where
+        # a non-ASCII name would raise UnicodeEncodeError and leave a truncated file
+        # behind -- from the one call that exists to explain the artifact.
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+        log.info(
+            "precompile: wrote invariants for %d frame(s) to %s", len(frames), path
+        )
 
     def summary(self) -> PrecompileSummary:
         # Risky only when the SAME source held DIFFERENT values across variants;

@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import copy
+import gc
 import io
 import os
 import pickle
@@ -7,8 +8,10 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import types
 import unittest
+import weakref
 
 import torch
 import torch.utils._pytree as _pytree
@@ -29,6 +32,50 @@ from torch.testing._internal.common_utils import (
 # A module-level (global) model + a function referencing it, to exercise the
 # constant-tensor guard against a baked global.
 _GLOBAL_TENSOR = torch.randn(3)
+
+
+def _precompile_capture(fn, **kwargs):
+    """What the removed public ``precompile.capture`` did, for tests that need
+    to drive a capture directly rather than through ``precompile()``."""
+    from torch._precompile import _capture_session, PrecompileSession
+
+    return PrecompileSession(_capture_session(fn, **kwargs))
+
+
+@torch._dynamo.disable
+def _brk_disabled_fn(t):
+    """A disabled callee: calling it breaks the graph (gb0098)."""
+    return t * 1.0
+
+
+def _precompile_only_disabled(x):
+    return _brk_disabled_fn(x)
+
+
+def _precompile_multi_graph(x):
+    x = x * 2
+    torch._dynamo.graph_break()
+    x = x + 3
+    torch._dynamo.graph_break()
+    return x.sum()
+
+
+def _precompile_empty_resume(x, flag):
+    y = x + 1
+    torch._dynamo.graph_break()
+    if flag:
+        return y
+    return y.cos() * 100
+
+
+def _precompile_single_graph(x):
+    return x.sin()
+
+
+def _precompile_raises_on_flag(x, fail):
+    if fail:
+        raise KeyError("automatic example failed")
+    return x + 1
 
 
 # A custom pytree node whose context (a set) is not JSON-dumpable and which has no
@@ -859,6 +906,217 @@ class TestPrecompile(TestCase):
         # enforces this for every torch.compiler.__all__ member.
         self.assertEqual(torch.compiler.precompile.__module__, "torch.compiler")
 
+    @parametrize("how", ["raise_in_block", "caught_call"])
+    def test_a_failed_capture_is_incomplete(self, how):
+        x = torch.randn(4)
+        if how == "raise_in_block":
+            session = _precompile_capture(
+                _precompile_multi_graph, backend="eager", dynamic=False
+            )
+            with self.assertRaisesRegex(KeyError, "capture failed"):
+                with session as compiled:
+                    compiled(torch.randn(4, 8))
+                    raise KeyError("capture failed")
+        else:
+            session = _precompile_capture(
+                _precompile_raises_on_flag, backend="eager", dynamic=False
+            )
+            with session as compiled:
+                compiled(x, False)
+                with self.assertRaisesRegex(KeyError, "automatic example failed"):
+                    compiled(x, True)
+
+        summary = session.summary()
+        self.assertGreater(summary.guarded_codes, 0)
+        self.assertFalse(summary.complete)
+        self.assertEqual(len(summary.capture_errors), 1)
+        with self.assertRaisesRegex(PrecompileError, "capture raised"):
+            session.artifact()
+        session.artifact(require_complete=False, require_no_dropped_guards=False)
+
+    def test_sessions_restore_the_capture_config(self):
+        # Entering a session flips two config flags; leaving it must restore
+        # them whether sessions nest on one thread, overlap across threads, or
+        # fail in __enter__ (an invalid backend).
+        import torch._functorch.config as functorch_config
+
+        def flags():
+            return (
+                functorch_config.bundled_autograd_cache,
+                torch._dynamo.config.allow_empty_graphs,
+            )
+
+        with (
+            functorch_config.patch("bundled_autograd_cache", False),
+            torch._dynamo.config.patch(allow_empty_graphs=False),
+        ):
+            first = _precompile_capture(_precompile_multi_graph, backend="eager")
+            second = _precompile_capture(_precompile_multi_graph, backend="eager")
+            first.__enter__()
+            second.__enter__()
+            first.__exit__(None, None, None)
+            self.assertEqual(flags(), (True, True))
+            second.__exit__(None, None, None)
+            self.assertEqual(flags(), (False, False))
+
+            entered, release, errors = threading.Event(), threading.Event(), []
+
+            def hold():
+                try:
+                    held = _precompile_capture(
+                        _precompile_single_graph, backend="eager"
+                    )
+                    held.__enter__()
+                    entered.set()
+                    self.assertTrue(release.wait(10))
+                    held.__exit__(None, None, None)
+                except BaseException as error:
+                    errors.append(error)
+
+            holder = threading.Thread(target=hold)
+            holder.start()
+            self.assertTrue(entered.wait(10))
+            session = _precompile_capture(_precompile_single_graph, backend="eager")
+            session.__enter__()
+            self.assertEqual(flags(), (True, True))
+            release.set()
+            holder.join(10)
+            self.assertFalse(holder.is_alive())
+            self.assertEqual(errors, [])
+            # The earlier session left on its own thread while this one is open.
+            self.assertEqual(flags(), (True, True))
+            session.__exit__(None, None, None)
+            self.assertEqual(flags(), (False, False))
+
+            session = _precompile_capture(
+                _precompile_multi_graph,
+                backend="definitely_missing_backend",
+                dynamic=False,
+            )
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.InvalidBackend, "Invalid backend"
+            ):
+                with session:
+                    pass
+            self.assertEqual(flags(), (False, False))
+            self.assertFalse(session.summary().complete)
+            self.assertIn("InvalidBackend", session.summary().capture_errors[0])
+            with self.assertRaisesRegex(PrecompileError, "capture raised"):
+                session.artifact()
+
+    def test_exit_waits_for_a_worker_thread_call(self):
+        # A worker thread's call inherits the capture, and __exit__ waits for it.
+        from torch._dynamo.backends.registry import register_backend
+        from torch._dynamo.eval_frame import _get_total_cache_entry_count
+
+        entered = threading.Event()
+        release = threading.Event()
+        worker_done = threading.Event()
+        errors = []
+        outputs = []
+
+        def blocking_backend(gm, example_inputs):
+            entered.set()
+            self.assertTrue(release.wait(20))
+            return gm.forward
+
+        backend_name = f"precompile_exit_waits_{id(entered)}"
+        register_backend(blocking_backend, name=backend_name)
+        session = _precompile_capture(
+            _precompile_single_graph, backend=backend_name, dynamic=False
+        )
+        compiled = session.__enter__()
+        x = torch.randn(2)
+
+        def run():
+            try:
+                outputs.append(compiled(x))
+            except BaseException as e:
+                errors.append(e)
+            finally:
+                worker_done.set()
+
+        worker = threading.Thread(target=run)
+        worker.start()
+        self.assertTrue(entered.wait(20))
+
+        def release_call():
+            self.assertFalse(worker_done.wait(0.1))
+            release.set()
+
+        releaser = threading.Thread(target=release_call)
+        releaser.start()
+        session.__exit__(None, None, None)
+        worker.join(20)
+        releaser.join(20)
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(releaser.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(outputs, [_precompile_single_graph(x)])
+        self.assertTrue(session.summary().complete)
+        self.assertEqual(session.summary().guarded_codes, 1)
+        self.assertEqual(
+            _get_total_cache_entry_count(_precompile_single_graph.__code__), 0
+        )
+
+    def test_session_is_one_shot_and_releases_its_examples(self):
+        example = torch.randn(1024)
+        example_ref = weakref.ref(example)
+        session = _precompile_capture(
+            _precompile_multi_graph,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(example,)],
+        )
+        with session as compiled:
+            pass
+        self.assertTrue(session.summary().complete)
+        with self.assertRaisesRegex(RuntimeError, "not active"):
+            compiled(example)
+        with self.assertRaisesRegex(RuntimeError, "cannot be re-entered"):
+            with session:
+                pass
+        del example
+        torch._dynamo.reset()
+        gc.collect()
+        self.assertIsNone(example_ref())
+
+        # A failed call's traceback must not keep its example alive either.
+        failed = torch.randn(1024)
+        failed_ref = weakref.ref(failed)
+        session = _precompile_capture(
+            _precompile_raises_on_flag, backend="eager", dynamic=False
+        )
+        with session as compiled:
+            with self.assertRaisesRegex(KeyError, "automatic example failed"):
+                compiled(failed, True)
+        del failed
+        torch._dynamo.reset()
+        gc.collect()
+        self.assertIsNone(failed_ref())
+
+    def test_a_capture_without_compiled_code_is_not_complete(self):
+        # allow_empty_graphs keeps a frame that compiled nothing as one guarded
+        # code, so guarded_codes alone cannot tell a real capture from one whose
+        # whole body sits behind torch._dynamo.disable. Such a capture carries
+        # no compiled compute: complete says so, and require_complete gates
+        # exactly complete.
+        from torch._precompile import _parse_artifact_metadata
+
+        session = _precompile_capture(
+            _precompile_only_disabled, backend="eager", dynamic=False
+        )
+        with session as compiled, torch.no_grad():
+            compiled(torch.randn(3))
+        summary = session.summary()
+        self.assertEqual(summary.guarded_codes, 1)
+        self.assertEqual(summary.backend_graphs, 0)
+        self.assertFalse(summary.complete)
+        with self.assertRaisesRegex(PrecompileError, "compiled no graph"):
+            session.artifact()
+        code, _cache = session.artifact(require_complete=False)
+        self.assertEqual(_parse_artifact_metadata(code)["TRACER"], "dynamo")
+
     def test_no_dispatchable_graph_names_the_cause(self):
         # An entry frame with no variants has two very different causes. If
         # Dynamo BYPASSED the frame it recorded why, and saying so beats the
@@ -899,6 +1157,114 @@ class TestPrecompile(TestCase):
             _reject_uninstallable_entry(
                 frames, types.SimpleNamespace(fn_name="step", codes=[])
             )
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_capture_limits_and_frame_state_are_scoped_to_the_session(self):
+        # Neither recompile limits nor automatic-dynamic frame state cross
+        # between a session and ordinary compiles of the same code.
+        from torch._C._dynamo.eval_frame import get_code_exec_strategy
+        from torch._dynamo.types import FrameAction
+
+        def ordinary_frame_count():
+            counter = torch._dynamo.testing.CompileCounter()
+            compiled = torch.compile(
+                _precompile_single_graph, backend=counter, dynamic=None
+            )
+            for n in (4, 5):
+                x = torch.randn(n)
+                self.assertEqual(compiled(x), _precompile_single_graph(x))
+            return counter.frame_count
+
+        torch._dynamo.reset()
+        self.assertEqual(ordinary_frame_count(), 2)
+        torch._dynamo.reset()
+        with torch._dynamo.config.patch(
+            accumulated_recompile_limit=2, recompile_limit=8
+        ):
+            inputs = [torch.randn(n) for n in (2, 3, 4)]
+            session = _precompile_capture(
+                _precompile_single_graph,
+                backend="eager",
+                dynamic=False,
+                recompile_limit=20,
+            )
+            with session as captured:
+                for x in inputs:
+                    self.assertEqual(captured(x), _precompile_single_graph(x))
+                during = torch._dynamo.testing.CompileCounter()
+                ordinary = torch.compile(
+                    _precompile_single_graph, backend=during, dynamic=False
+                )
+                x = torch.randn(5)
+                self.assertEqual(ordinary(x), _precompile_single_graph(x))
+                self.assertEqual(during.frame_count, 1)
+            summary = session.summary()
+            self.assertTrue(summary.complete)
+            self.assertEqual(summary.truncated, ())
+            self.assertEqual(summary.guarded_codes, len(inputs))
+            after = torch._dynamo.testing.CompileCounter()
+            ordinary = torch.compile(
+                _precompile_single_graph, backend=after, dynamic=False
+            )
+            x = torch.randn(6)
+            self.assertEqual(ordinary(x), _precompile_single_graph(x))
+            self.assertEqual(after.frame_count, 1)
+            strategy = get_code_exec_strategy(_precompile_single_graph.__code__)
+            self.assertEqual(strategy.cur_action, FrameAction.DEFAULT)
+            self.assertEqual(strategy.recursive_action, FrameAction.DEFAULT)
+
+        torch._dynamo.reset()
+        warm = torch.compile(_precompile_multi_graph, backend="eager", dynamic=False)
+        for n in (2, 3):
+            x = torch.randn(n, 8)
+            self.assertEqual(warm(x), _precompile_multi_graph(x))
+        x = torch.randn(4, 8)
+        session = _precompile_capture(
+            _precompile_multi_graph,
+            backend="eager",
+            dynamic=False,
+            recompile_limit=2,
+        )
+        with session as compiled:
+            self.assertEqual(compiled(x), _precompile_multi_graph(x))
+        summary = session.summary()
+        self.assertTrue(summary.complete)
+        self.assertEqual(summary.truncated, ())
+        self.assertEqual(summary.uncovered_frames, ())
+        self.assertEqual(summary.guarded_codes, 3)
+
+        session = _precompile_capture(
+            _precompile_single_graph, backend="eager", dynamic=None
+        )
+        with session as compiled:
+            for n in (2, 3):
+                x = torch.randn(n)
+                self.assertEqual(compiled(x), _precompile_single_graph(x))
+        self.assertEqual(ordinary_frame_count(), 2)
+
+    @parametrize("backend", ["eager", "inductor"])
+    def test_multi_graph_round_trip_exercised_empty_resume(self, backend):
+        x = torch.arange(3.0)
+        expected = [_precompile_empty_resume(x, flag) for flag in (False, True)]
+        session = _precompile_capture(
+            _precompile_empty_resume,
+            backend=backend,
+            dynamic=False,
+            example_inputs=[(x, False), (x, True)],
+        )
+        with session:
+            pass
+        self.assertTrue(session.summary().complete)
+
+        code, cache = session.artifact(require_no_dropped_guards=False)
+        torch._dynamo.reset()
+        with self.assertLogs("torch._precompile", level="WARNING"):
+            loaded = torch.compiler.precompile.load(code, cache)
+        with torch.no_grad():
+            for flag, want in zip((False, True), expected):
+                self.assertEqual(loaded(x, flag), want)
 
     def test_load_cache_without_tracer_key(self):
         # BC: a cache produced before the dynamo tracer existed carries no "tracer" key in
