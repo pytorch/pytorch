@@ -328,6 +328,16 @@ class CustomConstantType(torch._custom_class_base.CustomClassBase):
 torch._library.opaque_object.register_custom_class(CustomConstantType, typ="constant")
 
 
+class SymbolicOpaqueBase(torch._custom_class_base.CustomClassBase):
+    # Registered as a symbolic opaque type: Dynamo guards values of this type
+    # (and FakeScriptObject wrappers around them) with FAKE_SCRIPT_TYPE_MATCH.
+    def __init__(self, a):
+        self.a = a
+
+
+torch._library.opaque_object.register_custom_class(SymbolicOpaqueBase, typ="symbolic")
+
+
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
     def setUp(self):
         super().setUp()
@@ -628,6 +638,33 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with self.assertRaisesRegex(PackageError, "_thread.lock") as cm:
             self._test_serialization("TYPE_MATCH", fn, torch.randn(3), threading.Lock())
         self.assertIsInstance(cm.exception.__cause__, TypeError)
+
+    def test_fake_script_type_match_local_type_raises_typed(self):
+        # FAKE_SCRIPT_TYPE_MATCH marks itself unserializable for a local-scope
+        # opaque type just as TYPE_MATCH does, and the typed error must name
+        # the user's type -- also when the guarded source resolved to the
+        # FakeScriptObject wrapper the guard type exists for.
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        class LocalOpaque(SymbolicOpaqueBase):
+            pass
+
+        def fn(x, o):
+            return x + len(type(o).__name__)
+
+        for value in (
+            LocalOpaque(1),
+            FakeScriptObject(LocalOpaque(1), "LocalOpaque", LocalOpaque(1)),
+        ):
+            with self.assertRaisesRegex(PackageError, "LocalOpaque") as cm:
+                self._test_serialization(
+                    "FAKE_SCRIPT_TYPE_MATCH", fn, torch.randn(3), value
+                )
+            self.assertIsInstance(
+                cm.exception, torch._dynamo.exc.GuardSerializationError
+            )
+            self.assertEqual(cm.exception.guard_type, "FAKE_SCRIPT_TYPE_MATCH")
+            self.assertNotIn("FakeScriptObject", str(cm.exception))
 
     def test_symint_guard_value_raises_typed(self):
         # The SymInt reducer arm raises the typed PackageError directly (pickle
