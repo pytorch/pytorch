@@ -71,3 +71,15 @@ struct EighParams {
 C10_METAL_CONSTEXPR unsigned kLUStreamNT = 256;
 C10_METAL_CONSTEXPR unsigned kLUStreamWarpsPerTG =
     kLUStreamNT / c10::metal::simdgroup_size;
+
+// Per-batch streaming LU scratch: argmax value partials (float magnitudes),
+// argmax index partials (uint), then the U row in the element type. Shared
+// host/device so the host allocates B * sizeof(LUStreamScratch<T>) bytes and
+// binds it untyped; the kernel indexes scratch[batch] and the compiler owns the
+// stride. T is float or c10::metal::complex<float> (float2 on Metal).
+template <typename T>
+struct LUStreamScratch {
+  ::c10::metal::array<float, kLUStreamNT> vpart;
+  ::c10::metal::array<uint32_t, kLUStreamNT> ipart;
+  ::c10::metal::array<T, c10::metal::simdgroup_size> uRow;
+};

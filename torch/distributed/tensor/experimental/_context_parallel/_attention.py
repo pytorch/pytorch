@@ -909,7 +909,7 @@ def _sdpa_handler(
     args: tuple[object, ...],
     kwargs: dict[str, object],
 ) -> object:
-    # extract local tensor and sharding infos to a OpInfo
+    # extract local tensor and sharding infos to an OpInfo
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     logger.debug("Dispatching op_call: %s", op_info.schema or op_call)
 
@@ -1264,7 +1264,18 @@ def _create_cp_block_mask(
                 if (
                     qkv_rearrange_indices.size(0) == 1
                 ):  # identical load-balance in batch
-                    idx_pre_rearrange = qkv_rearrange_indices[0][idx_post_rearrange]
+                    # Use squeeze(0) instead of [0] to drop the singleton batch dim.
+                    # An integer index like [0] is rewritten by TransformGetItemToIndex
+                    # into a torch.tensor(0). Under a functionalized make_fx trace
+                    # (e.g. the TorchTitan graph_trainer aot_fx_trace path) that
+                    # constant is captured as a FunctionalTensor and baked into the
+                    # mask subgraph.
+                    # When regional Inductor later re-traces that subgraph outside
+                    # FunctionalTensorMode, lift_fresh_copy on the functional constant
+                    # raises. squeeze(0) achieves the same goal without the issue.
+                    idx_pre_rearrange = qkv_rearrange_indices.squeeze(0)[
+                        idx_post_rearrange
+                    ]
                 else:
                     idx_pre_rearrange = qkv_rearrange_indices[b][idx_post_rearrange]
             else:
@@ -1479,7 +1490,14 @@ def _context_parallel_shard(
             "`seq_dims` must have the same number of elements as `buffers`."
         )
 
-    flat_buffers, spec = tree_flatten(buffers)
+    # Treat BlockMask as an atomic leaf. A BlockMask carries one seq_dim entry.
+    # Callers such as TorchTitan's graph_trainer register BlockMask as a pytree
+    # node so make_fx can trace through the mask; without is_leaf that
+    # registration would make tree_flatten explode each BlockMask into its
+    # component tensors and break the seq_dims count match below.
+    flat_buffers, spec = tree_flatten(
+        buffers, is_leaf=lambda x: isinstance(x, BlockMask)
+    )
     flat_seq_dims, _ = tree_flatten(seq_dims)
     if len(flat_buffers) != len(flat_seq_dims):
         raise ValueError("`seq_dims` must have the pytree structure as `buffers`.")
