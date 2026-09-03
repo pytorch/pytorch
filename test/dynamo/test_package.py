@@ -223,6 +223,29 @@ def staged_with_builtin_calls(x, cfg):
     return x.sum() * n * len(sorted(cfg))
 
 
+class _PackageDescriptorHolder:
+    """Code defined under descriptors, which getattr on the class hides."""
+
+    @property
+    def getter_only(self):
+        def inner(x):
+            return x + 1
+
+        return inner(2)
+
+    @functools.cached_property
+    def cached(self):
+        return 3
+
+    @property
+    def pair(self):
+        return 1
+
+    @pair.setter
+    def pair(self, v):
+        self._v = v
+
+
 def _precompile_house_op(t):
     return t * 5.0
 
@@ -6560,6 +6583,42 @@ def staged(x):
         first.uninstall()
         self.assertNotIn("g", module.__dict__)
         self.assertEqual(dynamo_package._GLOBAL_BINDINGS.get(module, {}), {})
+
+    def test_code_under_a_descriptor_resolves(self):
+        # getattr on the CLASS returns the descriptor, not the function inside
+        # it, so a frame defined under @property had no resolvable name and the
+        # whole frame silently fell back to eager. Real capture of a large model
+        # lost four frames to one such property.
+        import ast as _ast
+
+        holder = _PackageDescriptorHolder
+        nested = next(
+            c
+            for c in holder.getter_only.fget.__code__.co_consts
+            if isinstance(c, types.CodeType)
+        )
+        cases = {
+            "getter": holder.getter_only.fget.__code__,
+            "nested in getter": nested,
+            "cached_property": holder.cached.func.__code__,
+            "setter": holder.pair.fset.__code__,
+        }
+        for label, code in cases.items():
+            qualname, source = dynamo_package._get_code_source(code)
+            # Replay exactly what the loader does, so the path round-trips
+            # rather than merely being produced.
+            obj = sys.modules[holder.__module__]
+            for part in qualname.split("."):
+                obj = getattr(obj, part)
+            for part in source.split("."):
+                if not part:
+                    continue
+                if part.endswith("]"):
+                    at = part.rfind("[")
+                    obj = getattr(obj, part[:at])[_ast.literal_eval(part[at + 1 : -1])]
+                else:
+                    obj = getattr(obj, part)
+            self.assertIs(obj, code, f"{label}: {qualname!r} + {source!r}")
 
 
 if __name__ == "__main__":

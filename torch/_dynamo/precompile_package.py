@@ -1508,6 +1508,7 @@ class PrecompileSession:
         invariants: str | None = None,
         training: bool = False,
         prune_invariant_guards: bool = False,
+        collect_results: bool = False,
         keep_graphs: bool = False,
     ) -> None:
         # Not `example_inputs or ()`: truth-testing the caller's object turns the
@@ -1538,6 +1539,12 @@ class PrecompileSession:
         # variant of every frame. Off by default: the capture session API
         # serializes everything serializable, and precompile() turns it on.
         self._prune_invariant_guards = prune_invariant_guards
+        # Retain what each example call returned, for precompile()'s on-disk
+        # form to hand back. Off by default: a capture() session outlives the
+        # calls, and holding every result would pin the caller's output tensors
+        # for the life of the session.
+        self._collect_results = collect_results
+        self._example_results: list[object] = []
         # The leaves every live guard build produced, to compare a rebuild
         # against; see _report_guard_drift.
         self._live_guard_leaves: set[tuple[str, str]] = set()
@@ -1763,10 +1770,12 @@ class PrecompileSession:
                     # AOTAutograd builds its CompiledFunction and the joint
                     # graph, which it only does when the outputs require grad.
                     with torch.inference_mode(False), torch.enable_grad():
-                        self._call(*args, **kwargs)
+                        result = self._call(*args, **kwargs)
                 else:
                     with torch.inference_mode(False), torch.no_grad():
-                        self._call(*args, **kwargs)
+                        result = self._call(*args, **kwargs)
+                if self._collect_results:
+                    self._example_results.append(result)
         except BaseException as e:
             self._record_capture_error(e)
             # A __enter__ that raises never gets its __exit__, so without this
@@ -2205,6 +2214,16 @@ class PrecompileSession:
         modes = self._compile_grad_modes
         return next(iter(modes)) if len(modes) == 1 else None
 
+    def example_results(self) -> list[object]:
+        """
+        What each ``example_inputs`` call returned, in order.
+
+        Only populated when the session was built with ``collect_results=True``;
+        otherwise empty, because a session that outlives its calls must not pin
+        the caller's output tensors.
+        """
+        return list(self._example_results)
+
     def invariants(self) -> tuple[FrameInvariants, ...]:
         """
         Per frame, the guards that held in EVERY compiled variant of it.
@@ -2406,10 +2425,7 @@ class PrecompileSession:
                 f"require_no_risky_drops=False to accept the risk explicitly."
             )
         elif summary.risky_dropped_guards:
-            # The caller explicitly accepted the risk. Measured on stock models: torchvision
-            # resnet18 and mobilenet_v3 report none, timm's ViT reports one (a
-            # re-exported torch._assert) and transformers' Qwen2 reports 33,
-            # nearly all of them library internals that no deployment swaps.
+            # The caller explicitly accepted the risk.
             _warn_risky_drops(summary.risky_dropped_guards)
         if require_complete:
             if summary.guarded_codes == 0:
@@ -2863,6 +2879,7 @@ def precompile_capture(
     invariants: str | None = None,
     training: bool = False,
     prune_invariant_guards: bool = False,
+    collect_results: bool = False,
     keep_graphs: bool = False,
 ) -> PrecompileSession:
     r"""Begin capturing ``fn`` into a multi-graph artifact.
@@ -2886,6 +2903,11 @@ def precompile_capture(
     same recompilation behavior as ordinary ``torch.compile``. ``save()`` refuses
     the risky subset by default rather than every drop, and every guard a custom
     filter drops counts as risky.
+
+    ``prune_invariant_guards`` applies the invariant-guard policy on exit,
+    ``collect_results`` retains what each example call returned for
+    :meth:`PrecompileSession.example_results`, and ``keep_graphs`` retains each
+    compiled graph so the artifact can render it as source.
     """
     return PrecompileSession(
         fn,
@@ -2897,6 +2919,7 @@ def precompile_capture(
         invariants=invariants,
         training=training,
         prune_invariant_guards=prune_invariant_guards,
+        collect_results=collect_results,
         keep_graphs=keep_graphs,
     )
 
