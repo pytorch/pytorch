@@ -6131,12 +6131,20 @@ def max_pool2d_with_indices_backward(
     dilation = to_pair(dilation)
 
     nonoverlap = (
-        self.dim() == 4
+        self.dim() in (3, 4)
         and all(p == 0 for p in padding)
         and all(d == 1 for d in dilation)
         and all(s >= k for s, k in zip(stride, kernel_size))
     )
     if nonoverlap:
+        # Add a temporary batch dim for unbatched (3D) inputs so the 4D-style
+        # indexing below works uniformly.
+        unbatched = self.dim() == 3
+        if unbatched:
+            self = self.unsqueeze(0)
+            grad_output = grad_output.unsqueeze(0)
+            indices = indices.unsqueeze(0)
+
         in_height, in_width = self.shape[-2:]
         out_height, out_width = grad_output.shape[-2:]
         h = torch.arange(in_height, device=self.device)
@@ -6158,7 +6166,12 @@ def max_pool2d_with_indices_backward(
             selected_grads,
             0,
         )
-        return grad_input.contiguous(memory_format=utils.suggest_memory_format(self))
+        grad_input = grad_input.contiguous(
+            memory_format=utils.suggest_memory_format(self)
+        )
+        if unbatched:
+            grad_input = grad_input.squeeze(0)
+        return grad_input
 
     if grad_output.is_xpu:
         return NotImplemented
