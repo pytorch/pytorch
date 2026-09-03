@@ -48,8 +48,8 @@ hop_export_failures = {
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
-class TestHOPDevice(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+class TestHOP(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def _compare(self, eager_model, export, args, kwargs):
         eager_args = copy.deepcopy(args)
@@ -150,7 +150,21 @@ class TestHOPDevice(TestCase):
         torchdynamo._reset_guarded_backend_cache()
 
 
-instantiate_device_type_tests(TestHOPDevice, globals(), allow_xpu=True)
+@unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestHOPDevice(TestHOP):
+    hw_classification = HardwareClassification.ACCELERATOR
+    # instantiate_device_type_tests only sees tests on the class __dict__.
+    test_aot_export = TestHOP.test_aot_export
+    test_pre_dispatch_export = TestHOP.test_pre_dispatch_export
+    test_retrace_export = TestHOP.test_retrace_export
+    test_serialize_export = TestHOP.test_serialize_export
+
+
+instantiate_device_type_tests(TestHOP, globals(), only_for="cpu")
+instantiate_device_type_tests(
+    TestHOPDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
