@@ -77,6 +77,7 @@ GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
 GH_OUTPUT_KEY_AMI = "runner-ami"
 GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
 GH_OUTPUT_KEY_AMD_SANDBOX_LABEL_TYPE = "amd-sandbox-label-type"
+GH_OUTPUT_KEY_AMD_DPX_LABEL_TYPE = "amd-dpx-label-type"
 OPT_OUT_LABEL = "no-runner-experiments"
 
 SETTING_EXPERIMENTS = "experiments"
@@ -94,6 +95,8 @@ LF_LABEL_PREFIX = "lf-"
 
 AMD_SANDBOX_EXPERIMENT = "amd-sandbox"
 AMD_SANDBOX_LABEL_PREFIX = "amd-sandbox-"
+AMD_DPX_EXPERIMENT = "amd-dpx"
+AMD_DPX_LABEL_PREFIX = "amd-dpx-"
 
 
 class Experiment(NamedTuple):
@@ -119,9 +122,8 @@ class Experiment(NamedTuple):
 
 class RunnerPrefixResult(NamedTuple):
     prefix: str
-    # Dedicated prefix for the amd-sandbox experiment, exposed via its own output
-    # (amd-sandbox-label-type) instead of being folded into ``prefix``.
     amd_sandbox_prefix: str = ""
+    amd_dpx_prefix: str = ""
 
 
 class Settings(NamedTuple):
@@ -531,6 +533,7 @@ def get_runner_prefix(
 
     lf_enabled = False
     amd_sandbox_prefix = ""
+    amd_dpx_prefix = ""
     for experiment_name, experiment_settings in settings.experiments.items():
         if not experiment_settings.all_branches and is_exception_branch(branch):
             log.info(
@@ -642,12 +645,14 @@ def get_runner_prefix(
 
         if enabled:
             if experiment_name == AMD_SANDBOX_EXPERIMENT:
-                # The amd-sandbox experiment is exposed through its own
-                # amd-sandbox-label-type output rather than being mixed into the
-                # shared label-type prefix, so it can be applied per-job.
                 amd_sandbox_prefix = AMD_SANDBOX_LABEL_PREFIX
                 log.info(
                     "amd-sandbox experiment enabled. Exposing 'amd-sandbox-' prefix via the amd-sandbox-label-type output."
+                )
+            elif experiment_name == AMD_DPX_EXPERIMENT:
+                amd_dpx_prefix = AMD_DPX_LABEL_PREFIX
+                log.info(
+                    "amd-dpx experiment enabled. Exposing 'amd-dpx-' prefix via the amd-dpx-label-type output."
                 )
             elif experiment_name == LF_FLEET_EXPERIMENT:
                 lf_enabled = True
@@ -664,7 +669,11 @@ def get_runner_prefix(
         prefix = LF_LABEL_PREFIX
     else:
         prefix = META_CANARY_LABEL_PREFIX if is_canary else META_LABEL_PREFIX
-    return RunnerPrefixResult(prefix=prefix, amd_sandbox_prefix=amd_sandbox_prefix)
+    return RunnerPrefixResult(
+        prefix=prefix,
+        amd_sandbox_prefix=amd_sandbox_prefix,
+        amd_dpx_prefix=amd_dpx_prefix,
+    )
 
 
 def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -> str:
@@ -728,6 +737,7 @@ def main() -> None:
 
     runner_label_prefix = META_LABEL_PREFIX
     amd_sandbox_label_prefix = ""
+    amd_dpx_label_prefix = ""
 
     # no-runner-experiments means "use Meta, not LF": opt out of the lf
     # experiment, so the run stays on the default Meta fleet.
@@ -770,6 +780,7 @@ def main() -> None:
         )
         runner_label_prefix = result.prefix
         amd_sandbox_label_prefix = result.amd_sandbox_prefix
+        amd_dpx_label_prefix = result.amd_dpx_prefix
 
     except Exception as e:
         log.error(
@@ -778,6 +789,7 @@ def main() -> None:
 
     set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
     set_github_output(GH_OUTPUT_KEY_AMD_SANDBOX_LABEL_TYPE, amd_sandbox_label_prefix)
+    set_github_output(GH_OUTPUT_KEY_AMD_DPX_LABEL_TYPE, amd_dpx_label_prefix)
 
 
 if __name__ == "__main__":
