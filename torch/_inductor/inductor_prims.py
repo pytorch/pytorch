@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch import _prims, Tensor
-from torch.nn import functional as F
 from torch._utils import _get_device_index
+from torch.nn import functional as F
 
 
 if TYPE_CHECKING:
@@ -24,21 +24,13 @@ def _blackwell_decompose_k_partial_impl(
     b: Tensor,
     k_split: int,
     config_index: int,
+    m_pad: int,
+    k_part: int,
 ) -> Tensor:
     """Reference for the internal aligned decompose-K partial operation."""
-    configs = (
-        (128, 128, False),
-        (128, 64, True),
-        (128, 64, True),
-    )
-    block_m, block_k, two_ctas = configs[config_index]
+    del config_index
     m, k = a.shape
     n = b.shape[1]
-    m_tiles = (m + block_m - 1) // block_m
-    if two_ctas:
-        m_tiles = (m_tiles + 1) // 2 * 2
-    m_pad = m_tiles * block_m
-    k_part = ((k + k_split - 1) // k_split + block_k - 1) // block_k * block_k
     partials = []
     for split in range(k_split):
         start = split * k_part
@@ -131,7 +123,7 @@ randint = make_prim(
 # Internal plan component for the Blackwell aligned decompose-K prototype.
 # Its lowering is a dedicated TMA template over the original rank-2 operands.
 blackwell_decompose_k_partial = make_prim(
-    "blackwell_decompose_k_partial(Tensor a, Tensor b, int k_split, int config_index) -> Tensor",
+    "blackwell_decompose_k_partial(Tensor a, Tensor b, int k_split, int config_index, int m_pad, int k_part) -> Tensor",
     _blackwell_decompose_k_partial_impl,
 )
 

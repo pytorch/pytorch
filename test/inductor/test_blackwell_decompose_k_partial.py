@@ -8,8 +8,8 @@ from torch._inductor import config, ir
 from torch._inductor.kernel.decompose_k import (
     append_blackwell_decompose_k_partial_choice,
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
+    blackwell_decomposeK,
 )
-from torch._inductor.kernel.mm import blackwell_decomposeK
 from torch._inductor.lowering import lowerings
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
