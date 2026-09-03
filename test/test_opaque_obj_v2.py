@@ -54,6 +54,10 @@ from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -63,9 +67,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
     has_cpp_wrapper_for_device,
-    HAS_GPU,
+    requires_triton,
 )
 from torch.utils._import_utils import import_dill
 
@@ -4078,22 +4081,6 @@ class GraphModule(torch.nn.Module):
         result = compiled([x, m, y])
         self.assertEqual(result, (x + y,))
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_benchmark_harness_no_pickle_for_opaque_inputs(self):
-        """Opaque graph inputs must not be pickled in the benchmark harness."""
-        a = torch.randn(4, 4, device=GPU_TYPE)
-        b = torch.randn(4, 4, device=GPU_TYPE)
-        twc = TensorWithCounter(a, b, Counter(0, 10), SizeStore(4))
-
-        def fn(x):
-            return x + 1
-
-        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        _, codes = run_and_get_code(compiled_fn, twc)
-        self.assertGreater(len(codes), 0)
-        for code in codes:
-            self.assertNotIn("pickle", code)
-
     def test_opaque_object_state_in_graph_output(self):
         """When compile_fx_inner receives a graph where a raw opaque reference
         type appears in the outputs (not just inputs), inductor must handle it.
@@ -4335,7 +4322,30 @@ class GraphModule(torch.nn.Module):
 instantiate_parametrized_tests(TestOpaqueObject)
 
 
-@unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+class TestOpaqueObjectDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    @requires_triton()
+    def test_benchmark_harness_no_pickle_for_opaque_inputs(self, device):
+        """Opaque graph inputs must not be pickled in the benchmark harness."""
+        a = torch.randn(4, 4, device=device)
+        b = torch.randn(4, 4, device=device)
+        twc = TensorWithCounter(a, b, Counter(0, 10), SizeStore(4))
+
+        def fn(x):
+            return x + 1
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        _, codes = run_and_get_code(compiled_fn, twc)
+        self.assertGreater(len(codes), 0)
+        for code in codes:
+            self.assertNotIn("pickle", code)
+
+
+instantiate_device_type_tests(TestOpaqueObjectDevice, globals(), allow_xpu=True)
+
+
 class TestOpaqueGenerator(TestCase):
     def test_make_fx_with_generator(self):
         """make_fx should trace through Generator inputs as opaque values."""
