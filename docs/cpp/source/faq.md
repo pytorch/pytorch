@@ -234,7 +234,6 @@ references to PyTorch symbols.
 find_package(Torch REQUIRED)
 add_executable(my_app main.cpp)
 target_link_libraries(my_app "${TORCH_LIBRARIES}")
-set_property(TARGET my_app PROPERTY CXX_STANDARD 17)
 ```
 
 Also ensure that the compiler flags are set correctly:
