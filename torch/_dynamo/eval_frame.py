@@ -975,6 +975,31 @@ class _TorchDynamoContext:
         self.prior = unset
         return None
 
+    def _load_package(self, fn_key: Callable[..., Any]) -> None:
+        from .package import DynamoCache
+
+        if self._package is None:
+            raise AssertionError("_load_package needs a package")
+        result = DynamoCache.load(fn_key)
+        if result is None:
+            # Create a fresh CompilePackage
+            self._package.initialize(fn_key, None, ignore_inlined_sources=False)
+            return
+        try:
+            self._package.initialize(
+                fn_key, result.dynamo, ignore_inlined_sources=False
+            )
+            # Install into the SAME region this context looks up in. Precompile
+            # entries match their own region only, so a default-bucket install
+            # here would never be found by an isolate_recompiles=True context --
+            # the cache would load and then silently serve nothing.
+            self._package.install(
+                result.backends, isolate_recompiles_id=self._isolate_recompiles_id
+            )
+        except RuntimeError:
+            log.warning("Failed to load entry from dynamo cache", exc_info=True)
+            self._package.initialize(fn_key, None, ignore_inlined_sources=False)
+
     def __call__(self, fn: Any) -> Any:
         if isinstance(fn, staticmethod):
             return staticmethod(self(fn.__func__))
@@ -983,29 +1008,41 @@ class _TorchDynamoContext:
         def get_compiler_config() -> CompilerConfig | None:
             return self.compiler_config
 
-        from .package import DynamoCache
+        from .package import (
+            acquire_live_package,
+            drain_pending_releases,
+            live_package_key,
+        )
 
+        # A package every wrapper dropped may still hold a process-wide skip on
+        # this frame if its finalizer fired under a lock; release it before the
+        # new wrapper's first call would run that frame eager.
+        drain_pending_releases()
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
             if self._package is not None and not self._package.is_initialized():
                 fn_key = fn.forward if isinstance(fn, torch.nn.Module) else fn
-                result = DynamoCache.load(fn_key)
-                if result is None:
-                    # Create a fresh CompilePackage
-                    self._package.initialize(fn_key, None, ignore_inlined_sources=False)
-                else:
-                    try:
-                        self._package.initialize(
-                            fn_key, result.dynamo, ignore_inlined_sources=False
+                # Joins the package another live wrapper with the SAME settings
+                # already loaded and installed into this region; a second
+                # install would stack a duplicate precompile entry per wrap.
+                shared = acquire_live_package(
+                    live_package_key(
+                        fn_key,
+                        self._isolate_recompiles_id,
+                        innermost_backend(self.callback),  # type: ignore[arg-type]
+                        self._package,
+                        self._hooks.guard_filter_fn if self._hooks else None,
+                    ),
+                    self._package,
+                    functools.partial(self._load_package, fn_key),
+                )
+                if shared is not self._package:
+                    if not isinstance(self.callback, convert_frame.CatchErrorsWrapper):
+                        raise AssertionError(
+                            f"unexpected callback {type(self.callback)}"
                         )
-                        self._package.install(result.backends)
-                    except RuntimeError:
-                        log.warning(
-                            "Failed to load entry from dynamo cache", exc_info=True
-                        )
-                        self._package.initialize(
-                            fn_key, None, ignore_inlined_sources=False
-                        )
+                    self.callback.set_package(shared)
+                    self._package = shared
 
         fn = innermost_fn(fn)
 

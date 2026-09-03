@@ -150,6 +150,7 @@ def reset() -> None:
 
     log = logging.getLogger(__name__)
     log.info("torch._dynamo.reset")
+
     with convert_frame.compile_lock:
         reset_code_caches()
         convert_frame.input_codes.clear()
@@ -207,6 +208,8 @@ def reset_code_caches() -> None:
     log = logging.getLogger(__name__)
     log.info("torch._dynamo.reset_code_caches")
     """Clear compile caches that are keyed by code objects"""
+    from .package import reset_live_packages
+
     with convert_frame.compile_lock:
         reset_code_state()
         for weak_code in (
@@ -216,6 +219,9 @@ def reset_code_caches() -> None:
             if code:
                 reset_code(code)
         code_context.clear()
+        # The precompile entries just went with the code caches; a package
+        # left registered would be joined and compiled cold instead of reloaded.
+        reset_live_packages()
 
 
 def get_recursion_limit() -> int:

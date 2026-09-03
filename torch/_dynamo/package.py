@@ -10,7 +10,9 @@ from a different process or host.
 
 import abc
 import ast
+import collections
 import contextlib
+import copy
 import dataclasses
 import functools
 import hashlib
@@ -24,8 +26,11 @@ import pickle
 import platform
 import shutil
 import sys
+import threading
 import types
-from collections.abc import Callable, Generator, Iterator
+import uuid
+import weakref
+from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import nullcontext
 from typing import Any, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
@@ -40,6 +45,7 @@ from .bytecode_transformation import (
     get_code_keys,
     is_compiled_fn_name,
 )
+from .types import FrameAction, FrameExecStrategy
 from .utils import CleanupHook, counters, dynamo_timed, increment_frame
 
 
@@ -51,6 +57,465 @@ if TYPE_CHECKING:
 
 
 _CODE_CACHE = WeakIdKeyDictionary()
+
+# code object -> the live _RegionInstalls that skip_code()d it. Weak on both
+# sides: a package dropped without unloading must not block a later one.
+_SKIP_INSTALLERS: WeakIdKeyDictionary = WeakIdKeyDictionary()
+
+
+class _OwnedRLock:
+    """A reentrant lock that knows which thread holds it. RLock.acquire(
+    blocking=False) succeeds for the owning thread, so a finalizer fired by gc
+    inside install() could not tell "free" from "held by me" and released into
+    the middle of the caller's critical section."""
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._owner: int | None = None
+        self._depth = 0
+
+    def acquire(self, blocking: bool = True) -> bool:
+        if not self._lock.acquire(blocking):
+            return False
+        self._owner = threading.get_ident()
+        self._depth += 1
+        return True
+
+    def release(self) -> None:
+        self._depth -= 1
+        if self._depth == 0:
+            self._owner = None
+        self._lock.release()
+
+    def __enter__(self) -> None:
+        self.acquire()
+
+    def __exit__(self, *exc: object) -> None:
+        self.release()
+
+    def held_by_this_thread(self) -> bool:
+        # Only the owner writes _owner while it holds the lock, so a reader
+        # that sees its own ident is the owner; any other value means "not us".
+        return self._owner == threading.get_ident()
+
+
+# When both are needed, acquire the operation lock before the registry lock.
+_PACKAGE_INSTALL_LOCK = _OwnedRLock()
+_INSTALLER_REGISTRY_LOCK = threading.Lock()
+
+
+@dataclasses.dataclass
+class _SkipInstallerState:
+    owners: weakref.WeakSet["_RegionInstall"]
+    prior_strategy: FrameExecStrategy
+    generation: int
+
+
+_PACKAGE_SKIP_STRATEGY = FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
+_DEFAULT_STRATEGY = FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+
+
+# Distinguishes "the name is unbound" from "it is bound to None", so uninstall()
+# can tell whether the binding it wrote is still the one there.
+_ABSENT_GLOBAL = object()
+
+
+@dataclasses.dataclass(frozen=True)
+class _InstalledGlobal:
+    """A global install() wrote into a module, and the value it wrote."""
+
+    name: str
+    value: object
+
+
+@dataclasses.dataclass
+class _GlobalBinding:
+    """One value bound under a name, and the live installs that wrote it."""
+
+    value: object
+    owners: weakref.WeakSet["_RegionInstall"]
+
+
+# module -> name -> STACK of _GlobalBinding, oldest first.
+#
+# Several live packages can need one name at once. Two loads of the SAME
+# artifact write the same value and share a binding; two loads of different
+# artifacts displace each other and get separate ones. Either way the name must
+# survive until its last owner leaves, and an unload that pops the top has to
+# REBIND to whatever is underneath rather than delete -- an earlier package is
+# still serving and still reads that name from this module. Deleting is only
+# right when the stack empties.
+_GLOBAL_BINDINGS: WeakIdKeyDictionary = WeakIdKeyDictionary()
+
+# Installs whose finalizer ran while a lock below was held, by another thread or
+# by this one: gc can fire on any allocation, including one made inside
+# install() or _release(), so the finalizer can neither block there nor run
+# inline. Drained under _PACKAGE_INSTALL_LOCK at both ends of every install and
+# release, on reset, and every time a function is wrapped.
+_PENDING_RELEASES: collections.deque["_RegionInstall"] = collections.deque()
+
+
+class _RegionInstall:
+    """
+    Everything install() writes outside the package: the globals bound into
+    served modules, the skip strategy of every frame with no guarded code, and
+    the precompile entries of a region. Kept off the package so a finalizer can
+    release ALL of it after the package is gone. State left on the package
+    outlived the last wrapper: a process-wide skip that survived made a later
+    plain torch.compile of that frame silently run eager.
+
+    ``owner`` is stamped onto every precompile entry the package installs, so
+    release() removes exactly those and leaves a neighbour package's entries on
+    a shared code object alone. ``codes`` covers resume functions and any frame
+    reached through code_source, not just the entry frame.
+    ``skipped_codes`` are region-local skips; ``process_skipped_codes`` are the
+    default region's, shared with plain torch.compile via _SKIP_INSTALLERS.
+    """
+
+    def __init__(self) -> None:
+        self.owner = object()
+        self.region_id = -1
+        self.codes: list[types.CodeType] = []
+        self.skipped_codes: list[types.CodeType] = []
+        self.process_skipped_codes: list[types.CodeType] = []
+        self.installed_globals: dict[types.ModuleType, list[_InstalledGlobal]] = {}
+        # One of the installed codes that actually received entries, used to
+        # notice a torch._dynamo.reset() wiping the install out from under us. A
+        # frame with no guarded code is installed but gets no entries, so it
+        # cannot serve as the probe.
+        self.precompile_probe: types.CodeType | None = None
+
+    def claim_global(self, module: types.ModuleType, name: str, value: Any) -> None:
+        self.installed_globals.setdefault(module, []).append(
+            _InstalledGlobal(name, value)
+        )
+        with _INSTALLER_REGISTRY_LOCK:
+            by_name = _GLOBAL_BINDINGS.setdefault(module, {})
+            stack = by_name.setdefault(name, [])
+            if not stack or stack[-1].value is not value:
+                stack.append(_GlobalBinding(value=value, owners=weakref.WeakSet()))
+            stack[-1].owners.add(self)
+
+    def skip_code(self, code: types.CodeType) -> None:
+        """Skip ``code`` process-wide, joining the packages already holding the
+        skip so release() can restore the frame without un-skipping it under one
+        that still needs it."""
+        from torch._C._dynamo.eval_frame import (
+            get_code_exec_strategy_token,
+            set_code_exec_strategy_with_token,
+        )
+
+        self.process_skipped_codes.append(code)
+        with _INSTALLER_REGISTRY_LOCK:
+            state = _SKIP_INSTALLERS.get(code)
+            current_generation = None
+            if state is not None:
+                _, current_generation = get_code_exec_strategy_token(code)
+            if state is None or current_generation != state.generation:
+                prior_strategy, generation = set_code_exec_strategy_with_token(
+                    code, _PACKAGE_SKIP_STRATEGY
+                )
+                state = _SkipInstallerState(
+                    owners=weakref.WeakSet() if state is None else state.owners,
+                    prior_strategy=prior_strategy,
+                    generation=generation,
+                )
+                _SKIP_INSTALLERS[code] = state
+            state.owners.add(self)
+
+    def release(self) -> None:
+        with _PACKAGE_INSTALL_LOCK:
+            self._release()
+            _drain_pending_releases()
+
+    def release_from_finalizer(self) -> None:
+        # Never block or run inline under a held lock: this runs wherever gc
+        # happened to fire. The registry lock is not reentrant, and the install
+        # lock is, so a thread inside install() or _release() can take it again
+        # -- but a release in the middle of that critical section deletes or
+        # rebinds the very name the caller is claiming. Defer in both cases.
+        if _PACKAGE_INSTALL_LOCK.held_by_this_thread():
+            _PENDING_RELEASES.append(self)
+            return
+        if not _PACKAGE_INSTALL_LOCK.acquire(blocking=False):
+            _PENDING_RELEASES.append(self)
+            return
+        try:
+            if not _INSTALLER_REGISTRY_LOCK.acquire(blocking=False):
+                _PENDING_RELEASES.append(self)
+                return
+            _INSTALLER_REGISTRY_LOCK.release()
+            self._release()
+            _drain_pending_releases()
+        finally:
+            _PACKAGE_INSTALL_LOCK.release()
+
+    def _release(self) -> None:
+        from torch._C._dynamo.eval_frame import (
+            _reset_precompile_entries_for_owner,
+            compare_and_set_code_exec_strategy,
+            set_code_region_exec_strategy,
+        )
+
+        # This namespace is shared with plain torch.compile and with any other
+        # package loaded for the same module, so a name goes only when BOTH
+        # hold: it is still bound to what we wrote (something that has rebound
+        # since owns it now, and popping it leaves live consumers with a
+        # NameError), and we are its last live owner. Two packages loaded from
+        # one artifact -- the ordinary replica shape -- write the same value
+        # under the same name, and dropping it on the first unload broke the
+        # one still serving. Deliberately no attempt to put back what we
+        # displaced: a writer that displaced this name orphaned our value when
+        # it did so, and restoring it later would leave a compiled backend
+        # bound in the module forever.
+        for module, installed in self.installed_globals.items():
+            for installed_global in installed:
+                name = installed_global.name
+                # Deregister FIRST, unconditionally. Whether our value is still
+                # the one bound decides what to do with the namespace, not
+                # whether we are still an owner: a package whose binding was
+                # displaced by a later load must still drop its claim, or the
+                # last unload finds a phantom owner and leaves the name behind.
+                with _INSTALLER_REGISTRY_LOCK:
+                    by_name = _GLOBAL_BINDINGS.get(module) or {}
+                    stack = by_name.get(name) or []
+                    for binding in stack:
+                        # The frame we actually joined, not merely the first one
+                        # holding this value: a later load can stack a value an
+                        # earlier one already installed, and deregistering from
+                        # that earlier frame leaves us an owner of ours forever.
+                        if binding.value is installed_global.value:
+                            if self in binding.owners:
+                                binding.owners.discard(self)
+                                break
+                    stack[:] = [b for b in stack if b.owners]
+                    survivor = stack[-1].value if stack else _ABSENT_GLOBAL
+                    if not stack:
+                        by_name.pop(name, None)
+                current = module.__dict__.get(name, _ABSENT_GLOBAL)
+                if survivor is _ABSENT_GLOBAL:
+                    # Nobody left. Remove it only if what is bound is still
+                    # ours; anything else belongs to whoever wrote it.
+                    if current is installed_global.value:
+                        del module.__dict__[name]
+                elif current is not survivor and (
+                    current is installed_global.value or current is _ABSENT_GLOBAL
+                ):
+                    # An owner remains; put the name back to THEIR value. Only
+                    # when what is bound is ours or gone, though: a bystander
+                    # that rebound it owns it now, exactly as in the delete case
+                    # above, and overwriting it would hand a package's value to
+                    # whatever else in this module reads the name.
+                    module.__dict__[name] = survivor
+        self.installed_globals = {}
+
+        for code in self.process_skipped_codes:
+            with _INSTALLER_REGISTRY_LOCK:
+                state = _SKIP_INSTALLERS.get(code)
+                if state is None:
+                    continue
+                state.owners.discard(self)
+                if state.owners:
+                    continue
+                del _SKIP_INSTALLERS[code]
+                # The generation check and write happen in one C++ call. A
+                # same-valued skip or a different strategy installed after us
+                # therefore wins, including a write racing with this unload.
+                compare_and_set_code_exec_strategy(
+                    code, state.generation, state.prior_strategy
+                )
+        self.process_skipped_codes = []
+
+        for code in self.skipped_codes:
+            set_code_region_exec_strategy(code, self.region_id, _DEFAULT_STRATEGY)
+        self.skipped_codes = []
+        for code in self.codes:
+            _reset_precompile_entries_for_owner(code, self.region_id, self.owner)
+        self.codes = []
+        self.region_id = -1
+        self.precompile_probe = None
+
+
+def _drain_pending_releases() -> None:
+    """Run the finalizer releases that could not take the locks. Caller holds
+    _PACKAGE_INSTALL_LOCK. A release that raises is kept for the next drain
+    rather than dropped -- its skips and globals would otherwise stay behind
+    for the life of the process -- and does not stop the others. Only the
+    releases queued at entry are attempted, so a retried failure cannot spin."""
+    for _ in range(len(_PENDING_RELEASES)):
+        try:
+            pending = _PENDING_RELEASES.popleft()
+        except IndexError:
+            return
+        try:
+            pending._release()
+        except Exception:
+            _PENDING_RELEASES.append(pending)
+            logger.exception(
+                "Failed to release a package dropped without uninstall(); "
+                "retrying on the next install"
+            )
+
+
+def drain_pending_releases() -> None:
+    """Release what dropped packages left behind, if anything is waiting.
+    Called on every wrap so a skip a dead package installed does not make the
+    next plain torch.compile of that frame run eager until something else
+    happens to install."""
+    if not _PENDING_RELEASES:
+        return
+    with _PACKAGE_INSTALL_LOCK:
+        _drain_pending_releases()
+
+
+# The package serving a function under caching_precompile, keyed on the
+# function and on every wrapper setting the package bakes into what it records
+# or installs: the region, the backend, whether that backend's artifacts carry
+# a CPU codegen target, and the guard filter the wrapper applies, which under
+# caching_precompile filters the guards that get serialized. Re-wrapping with
+# the same settings joins this package instead of loading and installing the
+# artifact again, which stacked one precompile entry per wrap on the code
+# object; a wrapper with other settings gets its own, or an inductor variant
+# recorded through an adopted eager package would ship without the codegen
+# target the ISA gate reads. Weak, so the entries go with the last wrapper.
+class _SettingKey:
+    """A wrapper setting as a dict key. Compared with the setting's own ``==``
+    -- torch.compile hands over a fresh _TorchCompileWrapper per call, equal to
+    the last one by backend, mode and options but never identical -- and held
+    strongly, so an identity hash stays unique while the key is registered.
+    _TorchCompileWrapper defines __eq__ and so has no hash; its compiler_name
+    is the stable proxy equal wrappers share.
+
+    A setting with no ``==`` of its own (a lambda, a functools.partial, a
+    fresh callable instance) therefore compares by identity, and each fresh
+    one gets its own package. That is deliberate: the package bakes the
+    backend's output into what it records, and two distinct callables are
+    only known to agree when they are the same object. It is also exactly the
+    line _TorchCompileWrapper.__eq__ draws, comparing compiler_fn with ``==``."""
+
+    __slots__ = ("obj",)
+
+    def __init__(self, obj: Any) -> None:
+        self.obj = obj
+
+    def __hash__(self) -> int:
+        try:
+            return hash(self.obj)
+        except TypeError:
+            return hash(getattr(self.obj, "compiler_name", None))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _SettingKey):
+            return False
+        return self.obj is other.obj or bool(self.obj == other.obj)
+
+
+_LivePackageKey = tuple[str, int, _SettingKey, bool, _SettingKey]
+_LIVE_PACKAGES: "weakref.WeakValueDictionary[_LivePackageKey, CompilePackage]" = (
+    weakref.WeakValueDictionary()
+)
+
+
+@dataclasses.dataclass
+class _InFlightLoad:
+    """A load acquire_live_package() is running outside the registry lock."""
+
+    thread: int
+    done: threading.Event
+
+
+# Guards the registry, the in-flight loads and the generation only; never held
+# across a load. load() imports the artifact's modules and deserializes its
+# backends, and a module that runs a compiled function at import time needs
+# convert_frame.compile_lock, which torch._dynamo.reset() holds while it comes
+# here to clear the registry.
+_LIVE_PACKAGES_LOCK = threading.Lock()
+_LOADING: dict[_LivePackageKey, _InFlightLoad] = {}
+# Bumped by reset_live_packages(). A load that started before a reset must not
+# register after it: reset() wiped the entries it installed, and a later wrap
+# joining it would compile cold instead of reloading the artifact.
+_LIVE_PACKAGES_GENERATION = 0
+
+
+def live_package_key(
+    fn: Callable[..., Any],
+    isolate_recompiles_id: int,
+    backend: Callable[..., Any],
+    package: "CompilePackage",
+    guard_filter_fn: Callable[..., Any] | None,
+) -> _LivePackageKey:
+    """``guard_filter_fn`` is the wrapper's Hooks.guard_filter_fn: under
+    caching_precompile it is the filter the serialized guards went through (see
+    CheckFunctionManager)."""
+    return (
+        CompilePackage.source_id_from_fn(fn),
+        isolate_recompiles_id,
+        _SettingKey(backend),
+        package._requires_native_backend_compatibility,
+        _SettingKey(guard_filter_fn),
+    )
+
+
+def acquire_live_package(
+    key: _LivePackageKey, package: "CompilePackage", load: Callable[[], None]
+) -> "CompilePackage":
+    """Return the live package under ``key``, or ``load()`` this one and
+    register it. A second wrapper arriving during the load waits for it and
+    joins the result, so two concurrent wrappers never each install the
+    artifact; a wrapper re-entering from the load itself (a module the artifact
+    imports wraps the same function at import time) cannot wait for itself and
+    loads its own."""
+    while True:
+        with _LIVE_PACKAGES_LOCK:
+            shared = _LIVE_PACKAGES.get(key)
+            if shared is not None:
+                return shared
+            in_flight = _LOADING.get(key)
+            if in_flight is None:
+                in_flight = _LOADING[key] = _InFlightLoad(
+                    threading.get_ident(), threading.Event()
+                )
+                generation = _LIVE_PACKAGES_GENERATION
+                break
+        if in_flight.thread == threading.get_ident():
+            load()
+            return package
+        in_flight.done.wait()
+    try:
+        load()
+        with _LIVE_PACKAGES_LOCK:
+            if generation == _LIVE_PACKAGES_GENERATION:
+                _LIVE_PACKAGES[key] = package
+    finally:
+        with _LIVE_PACKAGES_LOCK:
+            del _LOADING[key]
+        in_flight.done.set()
+    return package
+
+
+def live_packages(
+    fn: Callable[..., Any], isolate_recompiles_id: int
+) -> list["CompilePackage"]:
+    """Every live package serving ``fn`` in the region, one per distinct
+    wrapper setting. For tests."""
+    source_id = CompilePackage.source_id_from_fn(fn)
+    with _LIVE_PACKAGES_LOCK:
+        return [
+            package
+            for key, package in _LIVE_PACKAGES.items()
+            if key[:2] == (source_id, isolate_recompiles_id)
+        ]
+
+
+def reset_live_packages() -> None:
+    """reset_code_caches() cleared the entries these packages installed, so a
+    later wrap must load the artifact afresh rather than join them."""
+    global _LIVE_PACKAGES_GENERATION
+    with _LIVE_PACKAGES_LOCK:
+        _LIVE_PACKAGES.clear()
+        _LIVE_PACKAGES_GENERATION += 1
+    with _PACKAGE_INSTALL_LOCK:
+        _drain_pending_releases()
 
 
 def _code_cache(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -251,6 +716,61 @@ def _restore_missing_fields(obj: Any, state: dict[str, Any]) -> None:
     for field in dataclasses.fields(obj):
         if field.name not in state and field.default is not dataclasses.MISSING:
             setattr(obj, field.name, field.default)
+
+
+def _resume_global_renames(
+    entries: Iterable[_DynamoCodeCacheEntry], install_token: str
+) -> dict[str, str]:
+    """
+    Pick a global name for every resume function that is unique to the code it
+    names and to the package installing it, rather than to the process that
+    captured it.
+
+    ``__resume_at_<offset>_<n>`` comes from a counter that restarts in every
+    capture process, so two artifacts captured separately both claim, say,
+    ``__resume_at_16_3``. A serving process installs both into the same module
+    dict: the second one wins and the first model silently runs the second's
+    continuation. Unlike ``__compiled_fn`` names, which carry a uuid, these
+    names carry nothing that distinguishes the artifact.
+
+    The digest alone does not settle it: the shape that mints the same name
+    usually mints the same code with it -- one script captured in two
+    processes, or one artifact loaded twice to serve two model instances --
+    and both then hash to a single name. The token, unique to the loaded
+    package, is what separates those; the digest stays so the name still says
+    which code it belongs to. It hashes the bytecode and the name tables only:
+    pickling the whole SerializedCode is not reproducible across processes
+    (frozenset constants pickle in hash order).
+    """
+    renames: dict[str, str] = {}
+    for entry in entries:
+        if not entry.install_to_global:
+            continue
+        code = entry.python_code
+        projection = code.co_code + "\0".join(code.co_names + code.co_varnames).encode()
+        digest = hashlib.sha256(projection).hexdigest()[:16]
+        for name in entry.function_names:
+            renames[name] = f"{name}_{digest}_{install_token}"
+    return renames
+
+
+def _rename_globals(code: types.CodeType, renames: dict[str, str]) -> types.CodeType:
+    """
+    Rewrite ``co_names`` so LOAD_GLOBAL follows the renamed bindings. Indices
+    into ``co_names`` are preserved, so the bytecode itself is untouched.
+    """
+    if not renames:
+        return code
+    consts = tuple(
+        _rename_globals(c, renames) if isinstance(c, types.CodeType) else c
+        for c in code.co_consts
+    )
+    names = tuple(renames.get(name, name) for name in code.co_names)
+    if names == code.co_names and all(
+        new is old for new, old in zip(consts, code.co_consts)
+    ):
+        return code
+    return code.replace(co_names=names, co_consts=consts)
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
@@ -789,7 +1309,14 @@ class CompilePackage:
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
-        self._installed_globals: dict[types.ModuleType, list[str]] = {}
+        self._region_install = _RegionInstall()
+        # A package dropped without uninstall() -- every torch.compile wrapper
+        # that used it went away -- must not leave what it installed behind.
+        # Bound to the state object, not to self, or it would never run.
+        self._release_on_collect = weakref.finalize(
+            self, self._region_install.release_from_finalizer
+        )
+        self._release_on_collect.atexit = False
         # Every device the captured graphs name; the cache entry records the
         # set, so an accelerator capture with a CPU epilogue is checked as both.
         self._device_types: set[str] = set()
@@ -804,10 +1331,14 @@ class CompilePackage:
         self._cached_backends: dict[_BackendId, Any] = {}
         self._source_info: SourceInfo = SourceInfo(inlined_sources=set())
         self._resume_codes: set[types.CodeType] = set()
+        # Resume functions install under a global name carrying this token, so
+        # two packages holding byte-identical resume code -- two loads of one
+        # artifact, or two artifacts of one script captured in separate
+        # processes -- do not take each other's name. See _resume_global_renames.
+        self._install_token = uuid.uuid4().hex
         self._initialized = False
         if fn is not None:
             self.initialize(fn, dynamo, ignore_inlined_sources)
-            self.uninstall()
             self.validate()
 
     def is_initialized(self) -> bool:
@@ -829,11 +1360,17 @@ class CompilePackage:
         if self._innermost_fn is None:
             raise AssertionError("innermost_fn returned None")
         if dynamo is not None:
+            # self._codes binds the entry's own per-code records and a later
+            # recompile appends to them, so a caller that keeps the entry (a
+            # store, or a second serve of one artifact) would see the new
+            # backend ids written back into it. bytes are atomic to deepcopy,
+            # so this copies the record structure, not the guard payloads.
             if not isinstance(dynamo, _DynamoCacheEntry):
                 raise AssertionError(f"Expected _DynamoCacheEntry, got {type(dynamo)}")
-            dynamo.check_versions()
+            entry = copy.deepcopy(dynamo)
+            entry.check_versions()
             if not ignore_inlined_sources:
-                for code in dynamo.source_info.inlined_sources:
+                for code in entry.source_info.inlined_sources:
                     m = importlib.import_module(code.module)
                     checksum = _hash_sourcelines(m, code.firstlineno, code.lastlineno)
                     if checksum != code.checksum:
@@ -841,13 +1378,13 @@ class CompilePackage:
                             f"Source code changes detected for {code.module} (line {code.firstlineno} - line {code.lastlineno})"
                         )
 
-                self._source_info = dynamo.source_info
+                self._source_info = entry.source_info
 
-            main, *codes = dynamo.codes
+            main, *codes = entry.codes
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
-            self._device_types = set(dynamo.device_types or (dynamo.device_type,))
+            self._device_types = set(entry.device_types or (entry.device_type,))
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
@@ -1029,34 +1566,49 @@ class CompilePackage:
         # so that hook must not delete it once its code object is collected.
         CleanupHook.disown(module.__dict__, name)
         module.__dict__[name] = value
-        self._installed_globals.setdefault(module, []).append(name)
+        self._region_install.claim_global(module, name, value)
 
     def uninstall(self) -> None:
-        from torch._C._dynamo.eval_frame import _reset_precompile_entries
+        with _PACKAGE_INSTALL_LOCK:
+            self._uninstall()
 
+    def _uninstall(self) -> None:
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in uninstall")
-        for module, names in self._installed_globals.items():
-            for name in names:
-                module.__dict__.pop(name, None)
+        self._region_install.release()
 
-        self._installed_globals = {}
-
-        _reset_precompile_entries(self._innermost_fn.__code__)
-
-    def install(self, backends: dict[_BackendId, Any]) -> None:
+    def install(
+        self,
+        backends: dict[_BackendId, Any],
+        *,
+        isolate_recompiles_id: int = -1,
+    ) -> None:
         """
         Sync the package states to the compiled function. This includes the following actions:
           1. Clean up the previously installed states.
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
+        with _PACKAGE_INSTALL_LOCK:
+            _drain_pending_releases()
+            self._uninstall()
+            self._region_install.region_id = isolate_recompiles_id
+            self._install_codes(backends)
+            # A finalizer that fired on this thread during the install deferred
+            # to here.
+            _drain_pending_releases()
+
+    def _install_codes(self, backends: dict[_BackendId, Any]) -> None:
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
 
-        self.uninstall()
+        # Resume functions are bound under a name unique to their code and to
+        # this package, not under the name the capture process happened to
+        # mint. Every reference to them lives in some frame's dynamo bytecode,
+        # remapped below.
+        renames = _resume_global_renames(self._codes.values(), self._install_token)
         for code, entry in self._codes.items():
             context = (
                 _compile_frame_context(code)
@@ -1072,6 +1624,7 @@ class CompilePackage:
                 target_code = code
                 if entry.install_to_global:
                     for function_name in entry.function_names:
+                        function_name = renames.get(function_name, function_name)
                         if code.co_freevars:
                             # Resume functions with freevars need a factory
                             # that takes a closure tuple, matching
@@ -1104,6 +1657,23 @@ class CompilePackage:
                     continue
 
                 input_codes.add(target_code)
+                if target_code not in self._region_install.codes:
+                    # Deliberately NOT clearing the region here. A frame reached
+                    # through code_source is shared -- a library block two
+                    # loaded models both call -- and several packages may hold
+                    # entries for it in one region, which lookup handles by
+                    # evaluating each entry's guards. Clearing the region would
+                    # evict a live neighbour, and since lookup is region-exact
+                    # the neighbour cannot be served by what is left. This
+                    # package's own stale entries are already gone: install()
+                    # runs uninstall() first, which removes exactly the ones it
+                    # owns.
+                    self._region_install.codes.append(target_code)
+                if (
+                    entry.guarded_codes
+                    and self._region_install.precompile_probe is None
+                ):
+                    self._region_install.precompile_probe = target_code
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
                         raise RuntimeError(
@@ -1120,9 +1690,25 @@ class CompilePackage:
                         )
 
                 if len(entry.guarded_codes) == 0:
-                    # Dynamo generates empty graph for trivial functions, should just skip them
-                    # in these cases.
-                    torch._dynamo.eval_frame.skip_code(target_code)
+                    # Legacy and transparent-cache artifacts can contain a frame
+                    # with no guarded code. It must run eager so covered child
+                    # frames can still dispatch.
+                    # Remember it, and register as one of the packages holding
+                    # the skip, so uninstall() can restore the frame without
+                    # un-skipping it under another package that still needs it.
+                    if self._region_install.region_id >= 0:
+                        from torch._C._dynamo.eval_frame import (
+                            set_code_region_exec_strategy,
+                        )
+
+                        self._region_install.skipped_codes.append(target_code)
+                        set_code_region_exec_strategy(
+                            target_code,
+                            self._region_install.region_id,
+                            _PACKAGE_SKIP_STRATEGY,
+                        )
+                        continue
+                    self._region_install.skip_code(target_code)
 
                 for guarded_code in entry.guarded_codes:
                     with dynamo_timed("precompile_load_guards"):
@@ -1161,7 +1747,12 @@ class CompilePackage:
                     _load_precompile_entry(
                         target_code,
                         guard_manager,
-                        SerializedCode.to_code_object(guarded_code.dynamo_code),
+                        _rename_globals(
+                            SerializedCode.to_code_object(guarded_code.dynamo_code),
+                            renames,
+                        ),
+                        self._region_install.region_id,
+                        self._region_install.owner,
                     )
 
     def cache_entry(self) -> _DynamoCacheEntry:
@@ -1462,16 +2053,25 @@ class DiskDynamoCache(DiskDynamoStore):
         counters["dynamo_cache"]["dynamo_cache_miss"] += 1
         return None
 
-    def load_and_install_package(self, fn: Callable[..., Any]) -> CompilePackage | None:
+    def load_and_install_package(
+        self, fn: Callable[..., Any], isolate_recompiles_id: int
+    ) -> CompilePackage | None:
         """
-        Load directly into a package and install backends
+        Load directly into a package and install backends.
+
+        ``isolate_recompiles_id`` must be the region the caller will look up in:
+        precompile entries match their own region only, so installing into the
+        default bucket for an isolated caller loads the artifact and then serves
+        nothing from it.
         """
         results = self.load(fn)
         if results is None:
             return None
         else:
             package = CompilePackage(fn, results.dynamo)
-            package.install(results.backends)
+            package.install(
+                results.backends, isolate_recompiles_id=isolate_recompiles_id
+            )
             return package
 
     def path_prefix(self) -> str:
