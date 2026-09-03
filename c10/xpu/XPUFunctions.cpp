@@ -314,4 +314,64 @@ void device_synchronize(c10::DeviceIndex device) {
 #endif
 }
 
+void register_host_memory(void* ptr, size_t size) {
+#if SYCL_COMPILER_VERSION >= 20260200
+  TORCH_CHECK_VALUE(ptr, "ptr is an invalid pointer.");
+  TORCH_CHECK_VALUE(size > 0, "size must be greater than 0.");
+  static size_t page_size = []() -> size_t {
+    TORCH_CHECK(
+        get_device_context().get_platform().has(
+            sycl::aspect::ext_oneapi_register_host_memory),
+        "Requires the ext_oneapi_register_host_memory extension, "
+        "which is not supported on this device. ",
+        "Please upgrade to a newer driver.");
+#ifdef _WIN32
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return static_cast<size_t>(si.dwPageSize);
+#else
+    auto ret = sysconf(_SC_PAGESIZE);
+    TORCH_CHECK_VALUE(ret > 0, "Failed to query the system page size.");
+    return static_cast<size_t>(ret);
+#endif
+  }();
+  TORCH_CHECK_VALUE(
+      (reinterpret_cast<uintptr_t>(ptr) % page_size) == 0,
+      "ptr must be aligned to the system page size.");
+  TORCH_CHECK_VALUE(
+      (size % page_size) == 0,
+      "size must be a multiple of the system page size.");
+
+  sycl::ext::oneapi::experimental::register_host_memory(
+      ptr, size, get_device_context());
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "register_host_memory is not supported for the current SYCL compiler version. ",
+      "Please upgrade to SYCL compiler version 2026.2 or newer.");
+#endif
+}
+
+void unregister_host_memory(void* ptr) {
+#if SYCL_COMPILER_VERSION >= 20260200
+  TORCH_CHECK_VALUE(ptr, "ptr is an invalid pointer.");
+  static bool _ [[maybe_unused]] = []() -> bool {
+    TORCH_CHECK(
+        get_device_context().get_platform().has(
+            sycl::aspect::ext_oneapi_register_host_memory),
+        "Requires the ext_oneapi_register_host_memory extension, "
+        "which is not supported on this device. ",
+        "Please upgrade to a newer driver.");
+    return true;
+  }();
+  sycl::ext::oneapi::experimental::unregister_host_memory(
+      ptr, get_device_context());
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "unregister_host_memory is not supported for the current SYCL compiler version. ",
+      "Please upgrade to SYCL compiler version 2026.2 or newer.");
+#endif
+}
+
 } // namespace c10::xpu
