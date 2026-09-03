@@ -1,12 +1,9 @@
 """AOT-export DSL kernels for native-AOT declarations.
 
-Stage 2 of the two-stage build (build torch -> build the AOT lib): runs
-with the BUILT torch importable, so kernel builder modules are ordinary
-package imports (``torch._native.ops.<op>.<module>``) and may freely
-share code with their JIT wrappers -- the same-kernel property is then
-by construction, not by parallel restatement. Only the aot.py
-DECLARATION modules stay torch-free at module scope (torchgen loads
-those during stage 1, before torch exists).
+Stage 2 of the two-stage build, with the built torch importable, so kernel builder
+modules are ordinary package imports (``torch._native.ops.<op>.<module>``) and share
+code with their JIT wrappers. Only the aot.py DECLARATION modules stay torch-free at
+module scope, since torchgen loads those during stage 1.
 
 For each ``torch/_native/ops/<op>/aot.py``, expands the spec grid (list
 fields cross-multiply) and for every grid point runs the toolchain's
@@ -15,23 +12,19 @@ compile + export into ``<out-dir>/<op>/``, writing:
     <prefix>.h / <prefix>.o    C-ABI header + kernel object
     <prefix>.json              marshalling sidecar {spec, tensor_args}
 
-The builder module must expose ``build(spec)`` returning a dict whose
-``kind`` selects the toolchain; see tools/native_aot/toolchains.py for
-the per-toolchain contracts (required keys, emitted artifacts). Builder
-results are validated up front so a malformed one fails with a message
-naming the missing keys.
+The builder module exposes ``build(spec)`` returning a dict whose ``kind`` selects
+the toolchain; tools/native_aot/toolchains.py holds the per-kind contracts. Existing
+artifacts are skipped unless --force.
 
-Idempotent: existing artifacts are skipped unless --force.
+Spec points compile on a forkserver pool, one job per (point, arch), so results do
+not depend on --jobs, which follows the torch build's parallelism (MAX_JOBS, then
+CMAKE_BUILD_PARALLEL_LEVEL, then half the CPU count). Plain fork is unusable: the
+parent may have initialized CUDA, and forked workers inherit a dead context silently.
 
-Spec points compile on a forkserver process pool. Each point is
-independent, so results do not depend on --jobs. --jobs follows the
-torch build's parallelism (MAX_JOBS, then CMAKE_BUILD_PARALLEL_LEVEL,
-then half the CPU count); --jobs 1 forces serial. Plain fork is
-unusable: the parent has initialized CUDA and forked workers inherit a
-dead context, silently -- they report is_initialized() False and cannot
-allocate. forkserver forks from a pre-CUDA server process instead, and
-pays the torch import once there rather than per worker. Only torch is
-preloaded; cutlass or triton would build state in that fork parent.
+With --arch (one or more sm strings) export never touches the CUDA driver, so kernels
+build on GPU-less machines, and the arch is per-compile rather than per-process --
+CuTeDSL takes --gpu-arch, which outranks CUTE_DSL_ARCH. CuTeDSL needs one warmup
+compile per process for that; see tools/native_aot/cutedsl_warmup.py.
 
 With --arch (one or more sm strings) export never touches the CUDA
 driver, so kernels build on GPU-less machines. The arch is per-COMPILE
@@ -60,21 +53,16 @@ import sys
 REPO = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 )
-# Run as a script (`python tools/native_aot/export.py`), sys.path[0] is this
-# directory, so `tools.native_aot` is importable only when the cwd happens to
-# be the repo root. Put the root on the path explicitly instead of loading
-# siblings by file path, which also keeps the imports legible to type checkers.
+# Run as a script, sys.path[0] is this directory, so `tools.native_aot` imports only
+# when the cwd is the repo root; put the root on the path instead.
 #
-# APPEND, never insert(0): stage 2 runs against the INSTALLED wheel, and the
-# repo root contains a torch/ source tree with no compiled extension. Ahead of
-# site-packages it shadows the real torch, so every worker's `import torch`
-# dies with "loaded the torch/_C folder of the PyTorch repository". Invisible
-# in a `pip install -e .` checkout, where that tree IS the installed torch.
+# APPEND, never insert(0): stage 2 runs against the INSTALLED wheel, and the repo root
+# holds a torch/ source tree with no compiled extension. Ahead of site-packages it
+# shadows the real torch and every worker's `import torch` fails.
 sys.path.append(REPO)
 
-# torchgen is pure Python and imports with no built torch, which this
-# module scope requires: stage-1 codegen and the linter image that runs
-# the tools tests both lack torch.
+# torchgen is pure Python and imports without a built torch, which this module scope
+# needs: stage-1 codegen and the linter image that runs the tools tests both lack it.
 from tools.native_aot import toolchains
 
 from torchgen import native_aot_decl as decl
@@ -83,29 +71,26 @@ from torchgen.native_aot_spec_grid import expand_specs
 
 OPS_DIR = os.path.join(REPO, "torch", "_native", "ops")
 
-# Sidecar schema version. Bump on any change to the sidecar layout or
-# to the launcher-generation contract that reads it; gen_aot_lib refuses
-# mismatched sidecars (re-export rather than debugging a garbled .cpp).
+# Bump on any change to the sidecar layout or to the launcher-generation contract
+# that reads it; gen_aot_lib refuses mismatched sidecars.
 SIDECAR_VERSION = 1
 
-# Pool start method: forkserver, never "fork" (the parent has initialized
-# CUDA, and forked workers inherit a dead context that fails silently).
-# forkserver forks from a pre-CUDA server process, so it is as safe as
-# spawn while paying the torch import once instead of per worker.
-# TODO(native-aot): forkserver does not exist on Windows. Nothing calls
-# this from the build there yet (stage 2 targets libtorch_cuda.so only),
-# so fall back to "spawn" when Windows CUDA builds start exporting.
+# forkserver, never "fork": a fork parent that has initialized CUDA gives workers a
+# dead context, silently. forkserver is as safe as spawn and pays the torch import
+# once rather than per worker.
+# TODO(native-aot): forkserver does not exist on Windows; fall back to "spawn" when
+# Windows CUDA builds start exporting.
 POOL_START_METHOD = "forkserver"
 
-# Preloaded in the forkserver's server process, so every worker inherits
-# it already imported. Only modules that are safe in a fork PARENT belong
-# here: importing torch neither initializes CUDA nor builds any DSL state.
+# Preloaded in the forkserver's server process, so workers inherit it imported. Only
+# modules safe in a fork PARENT belong here: importing torch neither initializes CUDA
+# nor builds DSL state.
 POOL_PRELOAD = ("torch",)
 
 
 def load_builder(op: str, kernel_module: str):
-    # Package import (not file-path load): builders may use relative
-    # imports and torch machinery -- stage 2 runs against built torch.
+    # A package import, not a file-path load: builders may use relative imports and
+    # torch machinery.
     name = f"torch._native.ops.{op}.{kernel_module.removesuffix('.py')}"
     return importlib.import_module(name).build
 
@@ -129,27 +114,22 @@ _CLOSURE_PREFIXES = ("torch._native", "torchgen.native_aot")
 
 
 def source_closure(decl_path: str | None = None) -> dict[str, str]:
-    """{repo-relative path: content hash} for every loaded source file
-    that can change what an artifact MEANS: the builder's import closure,
-    the shared declaration machinery (_CLOSURE_PREFIXES), this tool's own
-    sources (a launcher-template edit in toolchains.py counts), and the
-    op's own aot.py.
+    """{repo-relative path: content hash} for every loaded source that can change
+    what an artifact means: the builder's import closure, the declaration machinery
+    (_CLOSURE_PREFIXES), this tool's own sources, and the op's aot.py.
 
-    Recorded per sidecar; gen_aot_lib re-hashes from disk and refuses to
-    pair edited sources with stale artifacts. Deliberately
-    over-approximates -- staleness must err toward re-export.
+    Recorded per sidecar; gen_aot_lib re-hashes from disk and refuses to pair edited
+    sources with stale artifacts, so this over-approximates on purpose.
 
-    Only IMPORTED modules appear in sys.modules, which is why the tools/
-    sources are globbed from disk instead -- and why decl_path is passed
-    explicitly: declarations are loaded by file path and never enter
-    sys.modules, so KERNEL_MODULE or kernel_precompile_grid() edits would
-    otherwise reuse artifacts built from the old grid."""
+    Only imported modules appear in sys.modules, hence the glob for tools/ sources
+    and the explicit decl_path: declarations load by file path and never enter
+    sys.modules, so a KERNEL_MODULE or grid edit would otherwise go unnoticed."""
     import glob
     import sys
 
     out = {}
-    # Snapshot: hashing can trigger imports, and mutating sys.modules
-    # mid-iteration raises "dictionary changed size during iteration".
+    # A snapshot, because hashing can trigger imports and mutating sys.modules
+    # mid-iteration raises.
     for name, mod in list(sys.modules.items()):
         if not name.startswith(_CLOSURE_PREFIXES):
             continue
@@ -169,10 +149,9 @@ def source_closure(decl_path: str | None = None) -> dict[str, str]:
 
 
 def _json_normal(value):
-    """The spec as a sidecar reads it back: tuples become lists, since
-    JSON has no tuple type. Skip detection compares a live grid point
-    against a recorded spec, so a tuple-valued field must be converted
-    or it never matches its own sidecar and re-exports on every run."""
+    """The spec as a sidecar reads it back: tuples become lists, JSON having no tuple
+    type. Skip detection compares a live grid point against a recorded spec, so
+    without this a tuple-valued field never matches and re-exports every run."""
     if isinstance(value, (tuple, list)):
         return [_json_normal(v) for v in value]
     if isinstance(value, dict):
@@ -201,20 +180,16 @@ def _effective_arch(arch: str | None, tc: toolchains.Toolchain) -> str | None:
 def export_point(
     op_pkg: str, kernel_module: str, point: dict, out_dir: str, arch: str | None = None
 ) -> str:
-    """Compile + export ONE spec point and write its sidecar. Self-
-    contained (module-level function, picklable args) so it runs
-    identically inline and as a pool job. ``arch`` is an explicit sm
-    string, passed through to the toolchain (CuTeDSL takes it as
-    --gpu-arch, Triton as a fixed GPUTarget); no process-global state, so
-    one process may serve any mix of arches.
+    """Compile and export one spec point, and write its sidecar.
 
-    A missing DSL runtime is FATAL here, not a skip: a declaration that
-    reaches this point targets this build's backend (build_stage2 filtered
-    on Toolchain.BACKENDS), so its kernels were asked for, and exporting
-    only some of them would ship a wheel that silently underperforms.
-    Build without the DSL wheels via TORCH_NATIVE_AOT=0 instead. The
-    ImportError arm exists because a builder cannot be asked its kind
-    without importing its runtime -- build() constructs the kernel."""
+    Module-level with picklable arguments, so it runs identically inline and as a pool
+    job, and holds no process-global state, so one process serves any mix of arches.
+
+    A missing DSL runtime is fatal here rather than a skip: a declaration reaching
+    this point targets this build's backend, so its kernels were asked for, and
+    exporting only some of them ships a wheel that silently underperforms. Use
+    TORCH_NATIVE_AOT=0 to build without them. The ImportError arm exists because a
+    builder cannot be asked its kind without importing its runtime."""
     try:
         build = load_builder(op_pkg, kernel_module)
         b = build(point)
@@ -289,10 +264,9 @@ def _collect_jobs(ops_filter, out_root: str, archs):
     return jobs
 
 
-# Every "this tree is inconsistent" error ends the same way. `spin clean`
-# does clear the default --out-dir (build/ sits above .gitignore's
-# NOT-CLEAN-FILES marker), but it takes the whole build tree with it, so
-# name the surgical command first.
+# Every "this tree is inconsistent" error ends the same way. `spin clean` clears the
+# default --out-dir too, but takes the whole build tree with it, so name the surgical
+# command first.
 _CLEAN_HINT = (
     "run `rm -rf {d}` and re-export (`spin clean` also clears it, "
     "along with the rest of the build tree)"
@@ -302,12 +276,10 @@ _CLEAN_HINT = (
 def _read_sidecar(path: str) -> dict:
     """A sidecar's JSON. Unreadable sidecars are fatal.
 
-    The sidecar is written LAST, so its presence marks a completed
-    export. One that exists but will not parse means the tree is
-    corrupted and the .o/.h beside it are of unknown provenance.
-    Re-exporting would just make the directory look consistent again.
-    Reached even under --force, via the orphan scan in _collect_jobs, so
-    gen_aot_lib never links artifacts nothing validated.
+    The sidecar is written last, so its presence marks a completed export; one that
+    exists but will not parse means the .o/.h beside it are of unknown provenance.
+    Reached even under --force, via the orphan scan, so generation never links
+    artifacts nothing validated.
     """
     try:
         with open(path) as f:
@@ -428,8 +400,9 @@ def _run_job(job) -> str:
 
 
 def archs_from_cuda_arch_list(arch_list: str) -> list[str]:
-    """TORCH_CUDA_ARCH_LIST -> the sm strings from it that are
-    EXPORTABLE_ARCHES, order-preserving and deduplicated.
+    """TORCH_CUDA_ARCH_LIST -> the sm strings in it that are EXPORTABLE_ARCHES,
+    order-preserving and deduplicated. "9.0a;10.0a" (or space-separated) ->
+    ["sm_90a", "sm_100a"].
 
     "9.0a;10.0a" (or space-separated) -> ["sm_100a"]. A +PTX suffix is
     stripped; named entries ("Hopper") are not translated -- callers
