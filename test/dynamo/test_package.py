@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import dataclasses
 import gc
 import importlib
 import os
@@ -14,7 +15,12 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
+from torch._dynamo.package import (
+    CompilePackage,
+    DiskDynamoStore,
+    DynamoCache,
+    SystemInfo,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
@@ -78,6 +84,37 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(debug_info["backends"]), expected_backends)
         torch._dynamo.reset()
         PrecompileContext.clear()
+
+    def test_mixed_device_capture_records_cpu_codegen_target(self):
+        # A mixed cpu+accelerator capture still holds native CPU code, so the
+        # codegen target must be recorded and compared even though the
+        # collapsed device_type reads as the accelerator. The graph is
+        # fabricated (never run), so no accelerator is needed.
+        if SystemInfo.current().cpu_codegen_target is None:
+            self.skipTest("no CPU codegen target on this host")
+
+        def fn(x):
+            return x + 1
+
+        package = CompilePackage(fn)
+        graph = torch.fx.Graph()
+        node = graph.placeholder("x")
+        node.meta["val"] = torch.empty(2)
+        graph.call_function(torch.ops.aten.add.Tensor, (node, torch.device("cuda")))
+        package.update_device_type(graph)
+        self.assertEqual(package._device_types, {"cpu", "cuda"})
+
+        entry = package.cache_entry()
+        self.assertEqual(entry.device_type, "cuda")
+        self.assertEqual(entry.device_types, frozenset(("cpu", "cuda")))
+        self.assertIsNotNone(entry.system_info.cpu_codegen_target)
+
+        stale = ("mips", "DEFAULT", None, "INVALID")
+        entry.system_info = dataclasses.replace(
+            entry.system_info, cpu_codegen_target=stale
+        )
+        with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
+            entry.check_versions()
 
     def test_guarded_code_records_backend_ids_from_bytecode(self):
         def fn(x):
