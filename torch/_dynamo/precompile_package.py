@@ -37,7 +37,6 @@ Before relying on an artifact:
 
 from __future__ import annotations
 
-import ast
 import collections
 import contextlib
 import contextvars
@@ -1056,80 +1055,6 @@ def _summarize(
     )
 
 
-def _namespace_module_names(rendered: dict[str, str]) -> dict[str, str]:
-    """Suffix every top-level name a rendered subgraph DEFINES, per subgraph.
-
-    The blocks are spliced sequentially into ONE namespace, and their code
-    resolves siblings as late-bound globals: a block's ``call`` looks up
-    ``_runtime_wrapper`` and ``_inner_call`` when invoked, and its ``Runner``
-    looks up the Triton kernels. Two variants of one frame are the same
-    computation at different shapes, so they define the SAME names -- without
-    renaming, the first variant silently runs the second variant's code.
-    Snapshotting ``call`` after each block is not enough, because what a block
-    resolves is decided at call time, not at definition time.
-
-    Rewriting is driven by AST positions rather than a text match, which is what
-    keeps three lookalikes out of it: an attribute (``runner.call`` is an
-    ``Attribute``, not a ``Name``), a nested binding (``def call`` inside
-    ``class Runner`` is not module-level), and an import (``async_compile`` is
-    both a local binding and part of ``torch._inductor.async_compile``).
-    """
-    out: dict[str, str] = {}
-    for slot, (backend_id, source) in enumerate(rendered.items()):
-        tree = ast.parse(source)
-        imported: set[str] = set()
-        defined: set[str] = set()
-        headers: list[tuple[int, str]] = []
-        for node in tree.body:
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                for alias in node.names:
-                    imported.add((alias.asname or alias.name).split(".")[0])
-            elif isinstance(
-                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-            ):
-                defined.add(node.name)
-                headers.append((node.lineno, node.name))
-            elif isinstance(node, ast.Assign):
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        defined.add(target.id)
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                defined.add(node.target.id)
-        targets = defined - imported
-        if not targets:
-            out[backend_id] = source
-            continue
-
-        suffix = f"_s{slot}"
-        edits: dict[int, list[tuple[int, int, str]]] = {}
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Name)
-                and node.id in targets
-                and node.end_col_offset is not None
-            ):
-                edits.setdefault(node.lineno, []).append(
-                    (node.col_offset, node.end_col_offset, node.id + suffix)
-                )
-        lines = source.split("\n")
-        for lineno, name in headers:
-            if name not in targets:
-                continue
-            line = lines[lineno - 1]
-            col = re.search(rf"\b{re.escape(name)}\b", line)
-            if col is not None:
-                edits.setdefault(lineno, []).append(
-                    (col.start(), col.end(), name + suffix)
-                )
-        for lineno, spans in edits.items():
-            line = lines[lineno - 1]
-            for begin, finish, text in sorted(spans, reverse=True):
-                line = line[:begin] + text + line[finish:]
-            lines[lineno - 1] = line
-        out[backend_id] = "\n".join(lines)
-    return out
-
-
 class PrecompileSession:
     """
     A capture in progress. Use as a context manager to get the callable to
@@ -1944,13 +1869,6 @@ class PrecompileSession:
 
         if self._backend_obj is None or self._backend == "eager":
             return {}
-        if self._training:
-            # compile_to_python pins AOTAutograd to the INFERENCE path, so a
-            # training graph renders as a forward with the backward silently
-            # dropped -- the served output would lose its grad_fn. That is a
-            # wrong answer rather than a failed render, so it cannot be left to
-            # the except below; refuse up front and keep the bundle.
-            return {}
         rendered: dict[str, str] = {}
         for backend_id in backend_ids:
             held = self._backend_obj.graphs.get(str(backend_id))
@@ -1958,12 +1876,23 @@ class PrecompileSession:
                 continue
             gm, fakes = held
             try:
-                source, _ = aot_autograd.compile_to_python(gm, fakes)
+                # grad_enabled is what makes AOTAutograd emit the joint
+                # forward+backward for a training capture; without it the
+                # backward is silently absent and the served output loses its
+                # grad_fn.
+                source, _ = aot_autograd.compile_to_python(
+                    gm, fakes, grad_enabled=self._training
+                )
             except Exception as e:
                 log.debug("precompile: %s stays pickled (%s)", backend_id, e)
                 continue
             rendered[str(backend_id)] = source
-        return _namespace_module_names(rendered)
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        keys = list(rendered)
+        return dict(zip(keys, namespace_module_names([rendered[k] for k in keys])))
 
     def _collect_backends(self) -> dict[str, Any]:
         """The compiled subgraphs this capture produced, keyed by backend id."""

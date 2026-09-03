@@ -2656,9 +2656,9 @@ class TestPrecompile(TestCase):
     def test_dynamo_tracer_renders_kernels_as_source(self, training):
         # A compiled subgraph is Inductor output, which has a source form -- so
         # the dynamo tracer emits it rather than pickling it, leaving only the
-        # guard trees and bytecode opaque. A TRAINING capture is the exception:
-        # compile_to_python pins the inference path, so rendering there would
-        # drop the backward, and the bundle is kept instead.
+        # guard trees and bytecode opaque. This holds for a TRAINING capture
+        # too: its forward and backward are both rendered and bridged by an
+        # emitted autograd.Function.
         model = _PrecompileBreakingModule().eval()
         xs = [torch.randn(3, 8), torch.randn(5, 8)]
         ctx = torch.enable_grad() if training else torch.no_grad()
@@ -2671,10 +2671,7 @@ class TestPrecompile(TestCase):
                 training=training,
                 example_inputs=[(x,) for x in xs],
             )
-        if training:
-            self.assertNotIn("_SUBGRAPHS[", code)
-        else:
-            self.assertIn("_SUBGRAPHS[", code)
+        self.assertIn("_SUBGRAPHS[", code)
 
         torch._dynamo.reset()
         loaded = torch.compiler.precompile.load(code, cache)

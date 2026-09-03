@@ -2936,9 +2936,9 @@ class _PrecompileApi:
                 invariants=invariants,
                 keep_only=keep_only,
                 training=bool(training),
-                # Only what rendered_backends renders: not eager fx graphs, and
-                # not training graphs (compile_to_python would drop the backward).
-                keep_graphs=backend != "eager" and not training,
+                # Only what rendered_backends renders: an eager "backend" is an
+                # fx graph with no source to emit.
+                keep_graphs=backend != "eager",
             )
         )
         with session:

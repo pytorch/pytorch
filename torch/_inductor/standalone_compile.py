@@ -698,6 +698,11 @@ def compile_to_python(
     example_inputs: Sequence[InputType],
     *,
     options: dict[str, Any] | None = None,
+    is_inference: bool = True,
+    is_backward: bool = False,
+    # The entries are CompiledFxGraph.output_strides: PRINTED stride
+    # expressions (strings), symbolic under dynamic shapes -- not ints.
+    output_strides: list[tuple[str, ...] | None] | None = None,
 ) -> tuple[str, bytes | None]:
     """Compile ``gm`` and return ``(inner_python, cache)`` -- the INNER half of the
     backend contract behind ``torch.compiler.precompile``.
@@ -853,10 +858,21 @@ def compile_to_python(
             fake_inputs,
             static_input_idxs=(),
             cudagraphs=BoxedBool(False),
-            is_inference=True,
+            is_inference=is_inference,
+            # Gates GraphLowering's backward-only require_contiguous safeguard
+            # for untagged implicit-fallback aten ops (see #140452); a training
+            # backward must lower the way torch.compile's backward does.
+            is_backward=is_backward,
             boxed_forward_device_index=BoxedDeviceIndex(None),
         )
         artifacts = torch.compiler.save_cache_artifacts()
+    if output_strides is not None:
+        # The strides Inductor CHOSE for this graph's outputs, which only exist
+        # once it has lowered. A training backward has to be compiled against
+        # the forward's actual choices -- layout optimization is free to hand
+        # back channels-last saved activations -- and this is the only channel
+        # for that, since the caller cannot see the CompiledFxGraph.
+        output_strides.extend(getattr(compiled_graph, "output_strides", None) or [])
     inner_python = _runnable_source(compiled_graph)
     cache = _acceleration_cache_bytes(artifacts)
     return inner_python, cache
