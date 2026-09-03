@@ -174,8 +174,9 @@ void TuningResultsManager::AddImpl(const std::string& op_signature,
     const std::string& params_signature,
     ResultEntry best,
     KernelMap& kernel_map) {
-  auto it = kernel_map.find(params_signature);
-  if (it != kernel_map.end()) {
+  auto [it, inserted] =
+      kernel_map.try_emplace(params_signature, std::move(best));
+  if (!inserted) {
     if (it->second != best) {
       TUNABLE_LOG1(op_signature, "(", params_signature, ") already has a best kernel ",
           "id=", it->second, " selected, want to add a different best kernel ", best,
@@ -184,8 +185,7 @@ void TuningResultsManager::AddImpl(const std::string& op_signature,
     return;
   }
 
-  TUNABLE_LOG2(op_signature, "(", params_signature, ") -> ", best);
-  kernel_map.emplace(params_signature, std::move(best));
+  TUNABLE_LOG2(op_signature, "(", params_signature, ") -> ", it->second);
 }
 
 void TuningResultsManager::Add(const std::string& op_signature, const std::string& params_signature, ResultEntry best) {
@@ -510,6 +510,7 @@ static bool CheckKeysMatching(
   std::sort(provided_keys.begin(), provided_keys.end());
 
   std::unordered_set<std::string> intersection;
+  intersection.reserve(std::min(required_keys.size(), provided_keys.size()));
   std::set_intersection(required_keys.cbegin(), required_keys.cend(),
                         provided_keys.cbegin(), provided_keys.cend(),
                         std::inserter(intersection, intersection.end()));
