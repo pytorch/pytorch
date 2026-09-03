@@ -3901,6 +3901,22 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(model, backend="eager", fullgraph=True)(x)
         self.assertEqual(eager, compiled)
 
+    def test_batchnorm_momentum_none_fullgraph(self):
+        module = torch.nn.BatchNorm1d(4, momentum=None).train()
+        x = torch.randn(3, 4)
+        compiled = torch.compile(module, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(RuntimeError, "BatchNorm\\(momentum=None\\)"):
+            compiled(x)
+
+        m_eager = torch.nn.BatchNorm1d(4, momentum=None).train()
+        m_compiled = torch.nn.BatchNorm1d(4, momentum=None).train()
+        ref = m_eager(x)
+        out = torch.compile(m_compiled, backend="eager", fullgraph=False)(x)
+        self.assertEqual(ref, out)
+        self.assertEqual(m_eager.running_mean, m_compiled.running_mean)
+        self.assertEqual(m_eager.running_var, m_compiled.running_var)
+        self.assertEqual(m_eager.num_batches_tracked, m_compiled.num_batches_tracked)
+
 
 instantiate_device_type_tests(
     NNModuleTestsDevice, globals(), except_for="cpu", allow_xpu=True
