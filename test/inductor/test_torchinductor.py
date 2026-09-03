@@ -19143,12 +19143,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if torch.cuda.get_device_capability()[0] < 10:
             self.skipTest("experimental large OUTER plan is restricted to SM100+")
 
-        x = torch.randn(
-            5247, 96, 128, device=self.device, dtype=torch.bfloat16
-        )
-        y = torch.randn(
-            5247, 96, 128, device=self.device, dtype=torch.bfloat16
-        )
+        x = torch.randn(5247, 96, 128, device=self.device, dtype=torch.bfloat16)
+        y = torch.randn(5247, 96, 128, device=self.device, dtype=torch.bfloat16)
         stats = torch.rand(5247, 96, 1, device=self.device, dtype=torch.float32)
 
         def f(x, y, stats):
@@ -19179,6 +19175,108 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         simple_code = simple_source_codes[0]
         self.assertIn("ReductionHint.OUTER_NO_SPLIT", simple_code)
         self.assertEqual(simple_code.count("@triton_heuristics.reduction("), 1)
+
+    @config.patch(
+        {
+            "max_autotune": True,
+            "compile_threads": 1,
+            "force_disable_caches": True,
+            "triton.autotune_experimental_large_output_outer_reductions": True,
+        }
+    )
+    @unittest.mock.patch.dict(
+        os.environ, {"TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE": "1"}
+    )
+    @skipIfRocm
+    @skipIfXpu
+    @xfail_if_mps
+    def test_autotune_large_outer_reduction_plans(self):
+        if self.device == "cpu":
+            self.skipTest("Skip for CPU device")
+        if torch.cuda.get_device_capability()[0] < 10:
+            self.skipTest("experimental large OUTER plans are restricted to SM100+")
+
+        x = torch.randn(5247, 96, 128, device=self.device, dtype=torch.bfloat16)
+        y = torch.randn_like(x)
+        stats = torch.rand(5247, 96, 1, device=self.device, dtype=torch.float32)
+
+        def f(x, y, stats):
+            return (x.float() * y.float() * torch.rsqrt(stats + 1e-5)).sum(dim=0)
+
+        expected = f(x, y, stats)
+        actual, source_codes = run_and_get_code(
+            torch.compile(f, fullgraph=True), x, y, stats
+        )
+        self.assertEqual(expected, actual, atol=0.125, rtol=0.01)
+        code = source_codes[0]
+        self.assertIn("async_compile.multi_kernel_plan(", code)
+        self.assertIn("ReductionHint.OUTER_NO_SPLIT", code)
+        self.assertGreaterEqual(code.count("ReductionHint.OUTER"), 3)
+        # Exactly one one-pass kernel competes with one partial+final plan.
+        # Do not accidentally expand this into a split/config cross-product.
+        self.assertEqual(code.count("async_compile.triton("), 3)
+
+        def multi_output(x, y, stats):
+            producer = x.float() * y.float() * torch.rsqrt(stats + 1e-5)
+            return producer.sum(dim=0), (producer * y.float()).sum(dim=0)
+
+        multi_expected = multi_output(x, y, stats)
+        with config.patch({"triton.multi_kernel": 3}):
+            multi_actual, multi_source_codes = run_and_get_code(
+                torch.compile(multi_output, fullgraph=True), x, y, stats
+            )
+        self.assertEqual(multi_expected, multi_actual, atol=0.125, rtol=0.01)
+        self.assertEqual(
+            multi_source_codes[0].count("async_compile.multi_kernel_plan("), 1
+        )
+        # Both logical outputs remain fused in the partial and final stages, so
+        # the two-output case is still exactly three kernels total.
+        self.assertEqual(multi_source_codes[0].count("async_compile.triton("), 3)
+
+        # OUTER also names pre-existing split-reduction schedules.  Do not
+        # accidentally wrap those in the experimental whole-plan selector.
+        ordinary_x = torch.randn(16384, 128, device=self.device, dtype=torch.bfloat16)
+
+        def ordinary_outer(x):
+            return x.float().sum(dim=0)
+
+        ordinary_expected = ordinary_outer(ordinary_x)
+        ordinary_actual, ordinary_source_codes = run_and_get_code(
+            torch.compile(ordinary_outer, fullgraph=True), ordinary_x
+        )
+        self.assertEqual(ordinary_expected, ordinary_actual, atol=0.125, rtol=0.01)
+        ordinary_code = ordinary_source_codes[0]
+        self.assertIn("ReductionHint.OUTER", ordinary_code)
+        self.assertNotIn("async_compile.multi_kernel_plan(", ordinary_code)
+
+        # A graph-192-like trailing reduction must remain outside this leading-
+        # dimension schedule family even when it has the same large R/X extents.
+        trailing_x = torch.randn(12288, 5247, device=self.device, dtype=torch.bfloat16)
+
+        def trailing_reduction(x):
+            return x.float().sum(dim=1)
+
+        trailing_expected = trailing_reduction(trailing_x)
+        trailing_actual, trailing_source_codes = run_and_get_code(
+            torch.compile(trailing_reduction, fullgraph=True), trailing_x
+        )
+        self.assertEqual(trailing_expected, trailing_actual, atol=0.125, rtol=0.01)
+        self.assertNotIn("async_compile.multi_kernel_plan(", trailing_source_codes[0])
+
+        # Whole-plan selection replaces the direct mode's producer-complexity
+        # profitability guess.  A simple but shape-eligible producer must still
+        # receive the bounded choice so runtime timing can keep one-pass.
+        simple_x = torch.randn(5247, 12288, device=self.device, dtype=torch.bfloat16)
+
+        def simple_large_outer(x):
+            return x.float().sum(dim=0)
+
+        simple_expected = simple_large_outer(simple_x)
+        simple_actual, simple_source_codes = run_and_get_code(
+            torch.compile(simple_large_outer, fullgraph=True), simple_x
+        )
+        self.assertEqual(simple_expected, simple_actual, atol=0.125, rtol=0.01)
+        self.assertIn("async_compile.multi_kernel_plan(", simple_source_codes[0])
 
     @config.patch(force_disable_caches=True)
     @xfail_if_mps  # MPS codegen does not emit ReductionHint.OUTER
