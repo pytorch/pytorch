@@ -9,6 +9,7 @@ import multiprocessing as mp
 import os
 import pickle
 import tempfile
+import threading
 import unittest
 from collections import namedtuple
 from collections.abc import Callable
@@ -653,10 +654,32 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         (cell,) = compiled_fn._artifacts.runtime_env.closure
         loaded = cell.cell_contents
         cells = dict(zip(loaded.__code__.co_freevars, loaded.__closure__))
-        self.assertRaises(ValueError, lambda: cells["unset"].cell_contents)
+        with self.assertRaisesRegex(ValueError, "empty"):
+            cells["unset"].cell_contents
         self.assertIsNone(cells["scale"].cell_contents)
         self.assertEqual(loaded.__kwdefaults__, {"k": 2})
         self.assertEqual(loaded.tag, 2.0)
+
+    def test_aot_compile_rejects_a_helper_with_an_unpicklable_attribute(self):
+        # A helper's __dict__ travels with it now, so an attribute that cannot
+        # pickle fails the save instead of being silently dropped.
+        def outer():
+            def helper(x):
+                return x * 2
+
+            helper.lock = threading.Lock()
+            return helper
+
+        helper = outer()
+
+        def fn(x):
+            return helper(x) + 1
+
+        inputs = (torch.randn(3),)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        compiled_fn = compiled_fn.aot_compile((inputs, {}))
+        with self.assertRaisesRegex(TypeError, "cannot pickle '_thread.lock' object"):
+            compiled_fn.save_compiled_function(self.path())
 
     def test_aot_compile_autocast_guard_reload(self):
         def fn(x):
@@ -1881,7 +1904,8 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
 
         fn = outer()
         cells = dict(zip(fn.__code__.co_freevars, fn.__closure__))
-        self.assertRaises(ValueError, lambda: cells["unset"].cell_contents)
+        with self.assertRaisesRegex(ValueError, "empty"):
+            cells["unset"].cell_contents
         buf = io.BytesIO()
         AOTCompilePickler({}, buf).dump(fn)
         out = AOTCompileUnpickler({}, io.BytesIO(buf.getvalue())).load()
@@ -1890,7 +1914,8 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.__kwdefaults__, {"k": 1})
         self.assertEqual(out.tag, 2.0)
         cells = dict(zip(out.__code__.co_freevars, out.__closure__))
-        self.assertRaises(ValueError, lambda: cells["unset"].cell_contents)
+        with self.assertRaisesRegex(ValueError, "empty"):
+            cells["unset"].cell_contents
         self.assertIsNone(cells["scale"].cell_contents)
 
 
