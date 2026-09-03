@@ -13087,7 +13087,6 @@ _hop_schema_test_schema_types = [
 
 
 @skipIfTorchDynamo("We don't expect users to torch.compile hop schema generation.")
-@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 class TestHopSchema(TestCase):
     def _get_example_val(self, ty: str):
         from torch.fx.experimental.sym_node import SymNode
