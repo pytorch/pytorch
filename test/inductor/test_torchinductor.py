@@ -12007,6 +12007,84 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(y_eager, y_compiled)
             self.assertEqual(out_eager, out_compiled)
 
+    def test_reinplace_result_escapes_via_input_alias(self):
+        # https://github.com/pytorch/pytorch/pull/195484
+        # The scatter input can reach the graph input through a view chain or
+        # through an op the pass already reinplaced onto the input, and the
+        # result can reach the output through an op the pass reinplaces later.
+        # A returned result must not become an alias of the input in any case.
+        def view_of_input(x, weight, src):
+            view = x.permute(1, 0)
+            before = view @ weight
+            updated = torch.slice_scatter(view, src, 0, 0, 1)
+            x.copy_(updated.permute(1, 0))
+            return before, updated
+
+        def reinplaced_chain(x, diag, idx, val):
+            a = torch.diagonal_scatter(x, diag)
+            b = torch.index_put(a, (idx,), val)
+            x.copy_(b)
+            return b
+
+        def reinplaced_then_scatter(x, idx, val, diag):
+            a = torch.index_put(x, (idx,), val)
+            b = torch.diagonal_scatter(a, diag)
+            x.copy_(b)
+            return b
+
+        device = self.device
+        cases = [
+            (
+                view_of_input,
+                lambda: (
+                    torch.arange(24.0, device=device).reshape(4, 6),
+                    torch.arange(12.0, device=device).reshape(4, 3),
+                    torch.full((1, 4), 10.0, device=device),
+                ),
+            ),
+            (
+                reinplaced_chain,
+                lambda: (
+                    torch.arange(16.0, device=device).reshape(4, 4),
+                    torch.full((4,), -1.0, device=device),
+                    torch.tensor([0, 2], device=device),
+                    torch.full((2, 4), 10.0, device=device),
+                ),
+            ),
+            (
+                reinplaced_then_scatter,
+                lambda: (
+                    torch.arange(16.0, device=device).reshape(4, 4),
+                    torch.tensor([0, 2], device=device),
+                    torch.full((2, 4), 10.0, device=device),
+                    torch.full((4,), -1.0, device=device),
+                ),
+            ),
+        ]
+        for fn, make_inputs in cases:
+            with self.subTest(fn=fn.__name__):
+                eager_args = make_inputs()
+                compiled_args = make_inputs()
+                outs_eager = fn(*eager_args)
+                outs_compiled = torch.compile(fn, fullgraph=True)(*compiled_args)
+                self.assertEqual(outs_eager, outs_compiled)
+                x = compiled_args[0]
+                self.assertEqual(eager_args[0], x)
+                outs = (
+                    outs_compiled
+                    if isinstance(outs_compiled, tuple)
+                    else (outs_compiled,)
+                )
+                x_after_call = x.clone()
+                for out in outs:
+                    self.assertIsNot(out, x)
+                    self.assertNotEqual(
+                        out.untyped_storage().data_ptr(),
+                        x.untyped_storage().data_ptr(),
+                    )
+                    out.add_(100)
+                self.assertEqual(x, x_after_call)
+
     def test_slice_scatter_dtype_consistency(self):
         # Test dtype consistency of slice_scatter
         def fn(x, y):
