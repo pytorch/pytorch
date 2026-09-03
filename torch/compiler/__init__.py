@@ -281,21 +281,21 @@ def substitute_in_graph(
     Example::
 
         >>> import binascii
-        >>> binascii.b2a_base64(b"abc")
-        b'YWJj\n'
+        >>> binascii.crc32(b"abc")
+        891568578
         >>> torch.compile(
-        ...     binascii.b2a_base64, fullgraph=True
+        ...     binascii.crc32, fullgraph=True
         ... )(b"abc")  # xdoctest: +SKIP("Long tracebacks")
         ...
         Traceback (most recent call last):
         ...
         torch._dynamo.exc.Unsupported: ...
-        >>> @torch.compiler.substitute_in_graph(binascii.b2a_base64)
-        ... def b2a_base64(data, /, *, newline=True):
-        ...     return b"YWJj\n"
+        >>> @torch.compiler.substitute_in_graph(binascii.crc32)
+        ... def crc32(data, crc=0, /):
+        ...     return 891568578
         ...
-        >>> torch.compile(binascii.b2a_base64, fullgraph=True)(b"abc")
-        b'YWJj\n'
+        >>> torch.compile(binascii.crc32, fullgraph=True)(b"abc")
+        891568578
 
     """
     import torch._dynamo

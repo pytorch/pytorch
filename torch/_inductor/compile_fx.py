@@ -120,7 +120,11 @@ from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .exc import InductorError
 from .fx_passes.joint_graph import joint_graph_passes
-from .fx_passes.post_grad import post_grad_passes, view_to_reshape
+from .fx_passes.post_grad import (
+    decompose_triton_kernel_wrapper_functional,
+    post_grad_passes,
+    view_to_reshape,
+)
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
@@ -463,11 +467,7 @@ def _step_logger() -> Callable[..., None]:
 
 @functools.cache
 def _warn_tf32_disabled() -> None:
-    if (
-        torch.cuda.is_available()
-        and torch.backends.cuda.matmul.fp32_precision != "tf32"
-        and torch.cuda.get_device_capability() >= (8, 0)
-    ):
+    if torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0):
         perf_hint_log.info(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
@@ -778,6 +778,31 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         _propagate_invoke_subgraph_nested_region_config(gm)
         with _patch_nested_region_inductor_config(gm):
             if not config.use_post_grad_passes:
+                # triton_kernel_wrapper_functional (a user-defined Triton kernel already
+                # in the model) has no inductor lowering; post_grad_passes normally
+                # decomposes it into its mutation form, which lowers to a
+                # UserDefinedTritonKernel and compiles into the AOT artifact. With
+                # post-grad passes disabled (e.g. lite mode / fallback_by_default), still
+                # run just that decomposition -- it is a correctness pass, not an
+                # optimization -- so such kernels keep compiling instead of hard-erroring
+                # at lowering (the functional HOP is neither an OpOverload with a lowering
+                # nor serializable by the proxy executor). Gated on the graph actually
+                # containing one so a lite-mode graph without user Triton kernels -- the
+                # common case -- pays neither the pattern match nor the recompile.
+                #
+                # Reinplacing must run FIRST: the decomposition emits "clone(s) + the
+                # mutation node" and relies on it to mark which clones are unnecessary,
+                # so without it every user Triton kernel pays a device-to-device copy.
+                if gm.graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops.higher_order.triton_kernel_wrapper_functional,
+                ):
+                    from .fx_passes.reinplace import reinplace_inplaceable_ops
+                    from .fx_utils import FakeTensorUpdater
+
+                    reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
+                    decompose_triton_kernel_wrapper_functional(gm.graph)
+                    gm.recompile()
                 return
 
             for subgraph_name in _get_subgraph_names(gm):
@@ -1550,7 +1575,10 @@ class _InProcessFxCompile(FxCompile):
                 )
                 time.sleep(sleep_sec)
 
-            if is_tf32_warning_applicable(gm):
+            if torch.backends.cuda.matmul.fp32_precision not in (
+                "tf32",
+                "bfx9",
+            ) and is_tf32_warning_applicable(gm):
                 _warn_tf32_disabled()
 
             inductor_counters = counters["inductor"].copy()
@@ -2570,8 +2598,11 @@ def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]
     autotune_at_compile_time = (
         config.triton.autotune_at_compile_time
         if config.triton.autotune_at_compile_time is not None
-        # Default to True for AOTI. Subject to change in future.
-        else has_triton() and V.aot_compilation
+        # Default to True for AOTI when an accelerator or the selected CPU
+        # Triton backend is available. Subject to change in future.
+        else (
+            has_triton(include_cpu=config.cpu_backend == "triton") and V.aot_compilation
+        )
     )
     return {
         "triton.autotune_at_compile_time": autotune_at_compile_time,
@@ -3304,6 +3335,12 @@ def _compile_fx_main(
 
         compiler_config_extra = create_compiler_config_extra(model_)
 
+        # Load device backends (privateuse1 vendors) before the decomposition
+        # table is snapshotted below: _inductor_backend_init may register
+        # decompositions, custom passes, and codegen backends, all of which are
+        # consumed from this point on.
+        init_backend_registration()
+
         decompositions = get_decomp_fn()
         inner_compile = functools.partial(inner_compile, get_decomp_fn=get_decomp_fn)
 
@@ -3475,7 +3512,7 @@ def _compile_fx_main(
             except ShortenTraceback as e:
                 # We will also shorten the traceback inside dynamo.
                 # This is only useful if inductor is called directly with an FX graph.
-                raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+                raise e.remove_dynamo_frames() from None
 
 
 def graph_returns_tuple(gm: GraphModule) -> bool:
