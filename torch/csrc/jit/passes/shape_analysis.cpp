@@ -361,8 +361,9 @@ class ShapePropagator : public PropertyPropBase {
   // know whether the dependency has been executed.
   std::unordered_map<Node*, bool> dependsOnMutationMemo_;
   bool dependsOnMutation(Node* node) {
-    if (dependsOnMutationMemo_.contains(node)) {
-      return dependsOnMutationMemo_[node];
+    if (auto it = dependsOnMutationMemo_.find(node);
+        it != dependsOnMutationMemo_.end()) {
+      return it->second;
     }
 
     if (aliasDb_.hasWriters(node)) {
@@ -1067,7 +1068,7 @@ class ShapePropagator : public PropertyPropBase {
         }};
 
     // aten::where is special in that its return type is the second argument's
-    // (self) type rather than the that of condition
+    // (self) type rather than that of condition
     static const register_formula_for where_op{
         {
             "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
