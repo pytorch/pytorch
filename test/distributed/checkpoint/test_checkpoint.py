@@ -313,8 +313,7 @@ class TestDistributedFailure(_FailureTestMixin, ShardedTensorTestBase):
         return ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:{r}/{self.device_type}:{r}"
-                for r in range(dist.get_world_size())
+                f"rank:{r}/{self.device_type}:{r}" for r in range(dist.get_world_size())
             ],
         )
 
@@ -434,7 +433,11 @@ class TestNoDistFailure(_FailureTestMixin, TestCase):
         self._test_load(state_dict, fail_read_data_async=[0])
 
 
-instantiate_device_type_tests(TestDistributedCheckpointing, globals(), except_for="cpu")
-instantiate_device_type_tests(TestDistributedFailure, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestDistributedCheckpointing, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestDistributedFailure, globals(), except_for="cpu", allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
