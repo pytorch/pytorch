@@ -768,9 +768,9 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
     with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, tq, 'pop');  token = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
-    add_tensor = torch.ops.aten.add.Tensor(getitem_1, 1.0);  getitem_1 = None
     with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.call_torchbind, tq, 'float_size');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
+    add_tensor = torch.ops.aten.add.Tensor(getitem_1, 1.0);  getitem_1 = None
     linear_default = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  p_linear_weight = p_linear_bias = None
     add_tensor_1 = torch.ops.aten.add.Tensor(add_tensor, linear_default);  add_tensor = linear_default = None
     with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops.higher_order.call_torchbind, tq, 'is_empty');  getitem_2 = None
@@ -778,10 +778,10 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
     with_effects_3 = torch.ops.higher_order.with_effects(getitem_3, torch.ops.higher_order.call_torchbind, tq, 'pop');  getitem_3 = None
     getitem_4 = with_effects_3[0]
     getitem_5 = with_effects_3[1];  with_effects_3 = None
-    add_tensor_2 = torch.ops.aten.add.Tensor(getitem_5, 0);  getitem_5 = None
-    add_tensor_3 = torch.ops.aten.add.Tensor(add_tensor_2, x);  add_tensor_2 = x = None
     with_effects_4 = torch.ops.higher_order.with_effects(getitem_4, torch.ops.higher_order.call_torchbind, tq, 'size');  getitem_4 = None
     getitem_6 = with_effects_4[0];  with_effects_4 = None
+    add_tensor_2 = torch.ops.aten.add.Tensor(getitem_5, 0);  getitem_5 = None
+    add_tensor_3 = torch.ops.aten.add.Tensor(add_tensor_2, x);  add_tensor_2 = x = None
     return (getitem_6, add_tensor_3, add_tensor_1, tq)""",
         )
         self.assertEqual(tq.size(), 2)
@@ -1431,9 +1431,9 @@ def forward(self, token, obj, x):
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add_tensor = torch.ops.aten.add.Tensor(getitem_1, x);  getitem_1 = x = None
-    add_tensor_1 = torch.ops.aten.add.Tensor(add_tensor, 3);  add_tensor = None
     with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.call_torchbind, obj, 'get');  getitem = obj = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
+    add_tensor_1 = torch.ops.aten.add.Tensor(add_tensor, 3);  add_tensor = None
     return (getitem_2, add_tensor_1)""",
         )
         self.assertEqual(eager_out, compiled_out)
