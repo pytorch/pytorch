@@ -29,6 +29,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda,
@@ -50,6 +51,8 @@ from torch.utils._triton import has_triton_package
 
 
 class TestDebugModeLogSerialization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _run_hashed_debug_mode(self, x):
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
             x.sin().sum()
@@ -204,6 +207,8 @@ class TestDebugModeLogSerialization(TestCase):
 
 @requires_cuda
 class TestDTensorDebugMode(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -1295,6 +1300,8 @@ class TestDTensorDebugMode(TestCase):
 class TestDebugModeUtils(TestCase):
     """Test DebugMode with NCCL backend without using DTensor."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_hash_empty_tensor(self):
         t = torch.tensor([])
         # hash tensor fn should not error out with empty tensor
@@ -1305,6 +1312,9 @@ class TestDebugModeUtils(TestCase):
 
 
 class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+    hw_required_devices = 2
+
     @property
     def world_size(self):
         return 2  # Need at least 2 ranks for collectives
