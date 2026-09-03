@@ -912,6 +912,36 @@ class Model(torch.nn.Module):
         return y.sum() * f(cfg)
 """
 
+_SHARED_FRAME_SRC = """\
+import torch
+
+class SharedBlock(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.scale = scale
+
+    def forward(self, x):
+        y = x * 2
+        marker = y.sum().item()
+        return y * self.scale + marker * 0.0
+
+class ModelOne(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.block = SharedBlock(scale)
+
+    def forward(self, x):
+        return self.block(x).sum()
+
+class ModelTwo(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.block = SharedBlock(scale)
+
+    def forward(self, x):
+        return self.block(x).sum() + 0.0
+"""
+
 
 class PrecompileBreakOnlyWhenFalse(torch.nn.Module):
     """The uncovered branch breaks AGAIN, so a fallback compile mints new globals."""
@@ -2429,6 +2459,46 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 second.unload()
             first.unload()
 
+    def test_two_artifacts_sharing_an_inner_frame_both_serve(self):
+        # The shared entry frame has no scale guard; scale is checked only by
+        # its resume. Region-scoped dispatch must keep each entry paired with
+        # the continuation from the same artifact instead of taking the first
+        # globally matching entry.
+        shared = self._import_module(
+            self._write_module("shared_frame", "shared_frame", _SHARED_FRAME_SRC),
+            "shared_frame",
+        )
+        x = torch.ones(3, 4)
+        paths = []
+        for cls, scale in ((shared.ModelOne, 3.0), (shared.ModelTwo, 7.0)):
+            torch._dynamo.reset()
+            session = precompile_capture(
+                cls(scale),
+                backend="eager",
+                dynamic=False,
+                example_inputs=[(x,)],
+            )
+            with session:
+                pass
+            self.assertTrue(session.summary().complete)
+            self.assertEqual(session.summary().risky_dropped_guards, ())
+            path = self.path(f"shared_{cls.__name__}.pt")
+            session.save(path, require_no_dropped_guards=False)
+            paths.append(path)
+
+        torch._dynamo.reset()
+        model_a, model_b = shared.ModelOne(3.0), shared.ModelTwo(7.0)
+        with torch.no_grad():
+            want_a, want_b = model_a(x), model_b(x)
+        with (
+            self._load(model_a, paths[0]) as a,
+            self._load(model_b, paths[1]) as b,
+            torch.no_grad(),
+            serving(),
+        ):
+            self.assertEqual(a(x), want_a)
+            self.assertEqual(b(x), want_b)
+
     @torch.compiler.set_stance("default")
     def test_overlapping_serving_contexts_keep_compilation_disabled(self):
         torch._dynamo.reset()
@@ -2809,6 +2879,40 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         finally:
             package.uninstall()
 
+    def test_concurrent_calls_do_not_deadlock_on_the_cache_lock(self):
+        # Stress test: lookup() holds the ExtraState cache lock across guard
+        # evaluation, which can drop the GIL, so the lock must release the GIL
+        # before it waits or a second thread wedges the first. A deadlock here
+        # shows up as the harness timeout.
+        x = torch.randn(3, 4)
+        model = PrecompileSelfAct(torch.relu)
+        self._capture(model, x).save(self.path(), require_no_risky_drops=False)
+
+        torch._dynamo.reset()
+        loaded = self._load(model)
+        errors = queue.SimpleQueue()
+
+        def hammer():
+            try:
+                with torch.no_grad():
+                    for _ in range(200):
+                        loaded(x)
+            except BaseException as e:
+                errors.put(e)
+
+        threads = [threading.Thread(target=hammer, daemon=True) for _ in range(4)]
+        self.addCleanup(sys.setswitchinterval, sys.getswitchinterval())
+        sys.setswitchinterval(1e-6)
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        raised = []
+        while not errors.empty():
+            raised.append(errors.get_nowait())
+        self.assertEqual(raised, [])
+        loaded.unload()
+
     @parametrize("interference", sorted(_SKIP_INTERFERENCE))
     def test_unload_restores_the_skip_strategy_a_legacy_frame_had(self, interference):
         from torch._C._dynamo.eval_frame import (
@@ -2873,6 +2977,60 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(region_action(), FrameAction.SKIP)
         second.unload()
         self.assertEqual(region_action(), FrameAction.DEFAULT)
+
+    def test_concurrent_compile_does_not_change_region_skip(self):
+        from torch._C._dynamo.eval_frame import (
+            get_code_exec_strategy,
+            get_code_region_exec_strategy,
+        )
+
+        self._save_legacy_empty_graph_package()
+        torch._dynamo.reset()
+
+        entered = threading.Event()
+        release = threading.Event()
+        errors = []
+
+        def backend(gm, example_inputs):
+            entered.set()
+            if not release.wait(20):
+                raise AssertionError("timed out waiting to release backend")
+            return gm.forward
+
+        model = PrecompileEmptyGraph()
+        compiled = torch.compile(model, backend=backend, dynamic=False)
+
+        def run_compile():
+            try:
+                compiled(torch.randn(3, 4))
+            except BaseException as e:
+                errors.append(e)
+
+        code = PrecompileEmptyGraph.forward.__code__
+
+        def region_action():
+            return get_code_region_exec_strategy(
+                code, loaded._isolate_recompiles_id
+            ).cur_action
+
+        thread = threading.Thread(target=run_compile)
+        thread.start()
+        try:
+            self.assertTrue(entered.wait(20))
+            loaded = precompile_load(model, self.path(), backend="eager")
+            self.assertEqual(region_action(), FrameAction.SKIP)
+        finally:
+            release.set()
+        thread.join(20)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(region_action(), FrameAction.SKIP)
+        strategy = get_code_exec_strategy(code)
+
+        loaded.unload()
+        after_unload = get_code_exec_strategy(code)
+        self.assertEqual(after_unload.cur_action, strategy.cur_action)
+        self.assertEqual(after_unload.recursive_action, strategy.recursive_action)
 
     @parametrize("pair", sorted(_COLLIDING_RESUME_PAIRS))
     def test_resume_names_from_other_captures_do_not_collide(self, pair):
