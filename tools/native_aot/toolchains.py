@@ -21,28 +21,7 @@ The contract, in order of flow:
      Everything above the launcher is kind-blind, so the shared contract names no
      CUDA type; each launcher narrows the stream to the handle its own C ABI takes.
 
-Properties consumed by the driver scripts:
-  * ``artifact_exts``: extensions written next to the sidecar; used to
-    spot artifacts left with no sidecar (export._check_no_orphan_artifacts).
-    The idempotency skip keys on the sidecar itself, not on these.
-  * ``link_exts``: which of ``artifact_exts`` go to the LINKER. The
-    generator names exactly these files, for the sidecars that survived
-    the arch tie-break, in the CMake it emits -- exact paths rather than a
-    glob, so an artifact no launcher references cannot ride along into
-    libtorch_cuda. Empty for a kind that embeds its artifact in the
-    generated source instead (Triton's cubin bytes); it must be a subset
-    of ``artifact_exts``, which _assert_link_exts_are_exportable checks
-    at import -- along with the attribute being declared at all, since the
-    inherited default cannot be told from a deliberate empty.
-  * ``launcher_includes``: per-kind includes for the generated .cpp.
-  * ``kernel_includes(sidecar)``: per-kernel includes for that same file,
-    for toolchains whose export writes a header (CuTeDSL's ABI struct).
-  * ``NARROWS_SHAPES_TO_INT32``: the exported ABI takes i32 extents, so
-    gen_aot_lib emits a stub gate declining dims past INT32_MAX.
-  * ``ARCH_ENV_VAR``: env var this kind reads when no arch is passed
-    explicitly; export._effective_arch resolves it so the sidecar records
-    the arch actually compiled for and a run that changes only that
-    variable is not skipped as already exported.
+Class attributes the driver scripts read:
 
   * ``artifact_exts``: extensions written beside the sidecar.
   * ``link_exts``: which of those reach the linker. Empty for a kind that embeds its
