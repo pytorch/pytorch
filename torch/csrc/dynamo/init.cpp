@@ -603,6 +603,8 @@ void initDynamoBindings(PyObject* torch) {
 
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
   m.def("_get_cache_entries_for_region", &_get_cache_entries_for_region);
+  m.def(
+      "_get_cache_entry_count_for_region", &_get_cache_entry_count_for_region);
   m.def("_clear_cache_entries_for_region", &_clear_cache_entries_for_region);
   m.def("_get_total_cache_entry_count", &_get_total_cache_entry_count);
   m.def("_reset_precompile_entries", &_reset_precompile_entries);
