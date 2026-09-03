@@ -1243,7 +1243,7 @@ class ComboKernelTests(TestCase):
     def test_combo_kernel_split_large_reductions(self):
         # squeezenet1_1 backward (combo regression sum_sum_8bcd6e12dcd4):
         # two very large reductions (sum over [0,2,3] of [512,64,55,55]) must NOT be
-        # co-fused into one combo kernel -- each is split out (5 kernels, vs 4 if fused).
+        # co-fused into one combo kernel -- each is split out into its own kernel.
         import torch._inductor.inductor_prims
 
         class Model(torch.nn.Module):
@@ -1287,12 +1287,22 @@ class ComboKernelTests(TestCase):
 
         m = Model()
         torch._dynamo.reset()
-        torch._inductor.metrics.reset()
         out_eager = m(*inps)
-        out_compiled = torch.compile(m)(*inps)
+        with fresh_cache():
+            out_compiled, code = run_and_get_code(torch.compile(m), *inps)
         torch.testing.assert_close(out_eager, out_compiled, rtol=1e-4, atol=1e-4)
-        # Very-large reductions split out instead of co-fused: 5 kernels (4 = the regression).
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        # The total kernel count is device dependent: reduction_split_factor only
+        # splits these 64-output reductions into a second phase when
+        # 2 * multi_processor_count > 64, so a low-SM GPU legitimately emits one
+        # kernel fewer. Assert the invariant instead -- each very-large reduction
+        # (the same numel gate the partitioner uses) gets a kernel of its own.
+        # Co-fusing them emits both sub-kernels in a single async_compile block.
+        separated = 0
+        for kernel_src in " ".join(code).split("async_compile.triton(")[1:]:
+            numels = re.findall(r"xnumel = (\d+)\s+r0_numel = (\d+)", kernel_src)
+            if any(int(x) * int(r) > LARGE_NUMELS for x, r in numels):
+                separated += 1
+        self.assertEqual(separated, 2)
 
     @requires_gpu_and_triton
     @skipIfXpu(
@@ -2338,7 +2348,8 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         )
 
     @requires_gpu_and_triton
-    def test_disabled_autotune_keeps_indirect_indexing(self):
+    @parametrize("mode", ["autotune_disabled", "deterministic"])
+    def test_no_benchmark_keeps_indirect_indexing(self, mode):
         def fn(a, b, c, idx):
             return a[idx + 1024], b * 2.0, c + 1.0
 
@@ -2348,10 +2359,58 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
             torch.randn(256, device=GPU_TYPE),
             torch.full((256,), -1024, device=GPU_TYPE, dtype=torch.int64),
         ]
-        with fresh_cache(), torch._inductor.config.patch({"combo_kernels_autotune": 0}):
+        config = (
+            {"combo_kernels_autotune": 0}
+            if mode == "autotune_disabled"
+            else {"deterministic": True}
+        )
+        with fresh_cache(), torch._inductor.config.patch(config):
             out, code = run_and_get_code(torch.compile(fn), *inps)
         self.assertEqual(out, fn(*inps))
         FileCheck().check("'num_kernels': 3").run(code[0])
+
+    @requires_gpu_and_triton
+    def test_compile_time_autotune_deterministic_mode(self):
+        # Deterministic mode bans timing-based benchmarking (may_ban_benchmarking).
+        # Compile-time autotune must skip its subkernel benchmark and fall back to
+        # default configs -- not crash.
+        def f(a, b, c, d, e, g):
+            return a + b, c * d, e.sum(-1), g.amax(-1)
+
+        inps = [
+            torch.randn(8192, device=GPU_TYPE),
+            torch.randn(8192, device=GPU_TYPE),
+            torch.randn(4096, device=GPU_TYPE),
+            torch.randn(4096, device=GPU_TYPE),
+            torch.randn(1024, 512, device=GPU_TYPE),
+            torch.randn(1024, 768, device=GPU_TYPE),
+        ]
+        counters.clear()
+        with fresh_cache(), torch._inductor.config.patch(deterministic=True):
+            out = torch.compile(f)(*inps)
+        self.assertEqual(out, f(*inps))
+        # No timing-based benchmark ran in deterministic mode.
+        self.assertEqual(counters["inductor"]["combo_subkernel_autotune"], 0)
+
+    @requires_gpu_and_triton
+    def test_deterministic_mode_preserves_runtime_autotune(self):
+        def f(a, b):
+            return a + 1.0, b * 2.0
+
+        inps = [
+            torch.randn(4096, device=GPU_TYPE),
+            torch.randn(8192, device=GPU_TYPE),
+        ]
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                deterministic=True,
+                combo_kernel_compile_time_autotune=False,
+            ),
+        ):
+            out, code = run_and_get_code(torch.compile(f), *inps)
+        self.assertEqual(out, f(*inps))
+        self.assertNotIn("'stitched_num_warps'", " ".join(code))
 
 
 @instantiate_parametrized_tests
@@ -2804,7 +2863,10 @@ class ComboKernelTestsMaxAutotune(TestCase):
             self.assertIn("'max_persistent_rblock': 1024", joined)
 
     @requires_gpu_and_triton
-    def test_combo_kernel_coordesc_tunes_largest_subkernel_first(self):
+    @parametrize("compile_time_autotune", [False, True])
+    def test_combo_kernel_coordesc_tunes_largest_subkernel_first(
+        self, compile_time_autotune
+    ):
         def fn(a, b, c):
             return (
                 torch.nn.functional.relu(a),
@@ -2827,12 +2889,23 @@ class ComboKernelTestsMaxAutotune(TestCase):
             }
 
         logger = logging.getLogger("torch._inductor.runtime.coordinate_descent_tuner")
-        with torch._inductor.config.patch(coordinate_descent_tuning=True):
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "coordinate_descent_tuning": True,
+                    "combo_kernel_compile_time_autotune": compile_time_autotune,
+                }
+            ),
+        ):
             with self.assertLogs(logger, level=logging.DEBUG) as cm:
                 out_compiled = torch.compile(fn)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
 
+        # Compile-time autotune passes per-subkernel blocks as args, so runtime
+        # coordinate descent still refines the suffixed XBLOCK_i fields (same as
+        # the runtime per-subkernel path).
         baseline_log = next(
             msg for msg in cm.output if "Baseline Config" in msg and "XBLOCK_" in msg
         )
