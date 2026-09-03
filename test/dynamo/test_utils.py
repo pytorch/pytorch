@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
+import gc
 import json
 import os
 import pprint
@@ -48,6 +49,56 @@ class TestUtils(TestCase):
         hook2 = utils.CleanupHook.create(scope, "myglobal", object())
         hook2()
         self.assertNotIn("myglobal", scope)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=12345)
+    def test_deferred_full_gc(self):
+        saved = gc.get_threshold()
+        try:
+            with utils.deferred_full_gc():
+                self.assertEqual(gc.get_threshold()[2], 12345)
+                # Nested compiles share the outermost adjustment.
+                with utils.deferred_full_gc():
+                    self.assertEqual(gc.get_threshold()[2], 12345)
+                self.assertEqual(gc.get_threshold()[2], 12345)
+            self.assertEqual(gc.get_threshold(), saved)
+            # gen0 and gen1 are left alone, so they keep collecting.
+            self.assertEqual(gc.get_threshold()[:2], saved[:2])
+        finally:
+            gc.set_threshold(*saved)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=12345)
+    def test_deferred_full_gc_restores_on_exception(self):
+        # A depth counter left above zero would silently turn the feature into a
+        # no-op for the rest of the process and pin the raised threshold.
+        saved = gc.get_threshold()
+        try:
+            with self.assertRaises(RuntimeError):
+                with utils.deferred_full_gc():
+                    raise RuntimeError("boom")
+            self.assertEqual(gc.get_threshold(), saved)
+            self.assertEqual(utils._gc_threshold_depth, 0)
+            # The next one still installs the threshold.
+            with utils.deferred_full_gc():
+                self.assertEqual(gc.get_threshold()[2], 12345)
+        finally:
+            gc.set_threshold(*saved)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=None)
+    def test_deferred_full_gc_disabled(self):
+        saved = gc.get_threshold()
+        with utils.deferred_full_gc():
+            self.assertEqual(gc.get_threshold(), saved)
+
+    @dynamo_config.patch(gc_gen2_threshold_during_compile=100)
+    def test_deferred_full_gc_does_not_lower_threshold(self):
+        saved = gc.get_threshold()
+        try:
+            gc.set_threshold(saved[0], saved[1], 5000)
+            with utils.deferred_full_gc():
+                self.assertEqual(gc.get_threshold()[2], 5000)
+            self.assertEqual(gc.get_threshold()[2], 5000)
+        finally:
+            gc.set_threshold(*saved)
 
     def test_nan(self):
         a = torch.Tensor([float("nan")])

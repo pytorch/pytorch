@@ -17,6 +17,7 @@ from collections.abc import Callable
 
 import torch
 import torch.fx as fx
+import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
 
 
@@ -52,18 +53,6 @@ _ORDER_SENSITIVE_NAMESPACES = frozenset(
 )
 
 
-# Functions that bump a tensor's version counter in place. Matched by identity,
-# not __name__: torch._C._increment_version is exposed under a different name and
-# is separately allowlisted in Dynamo's trace_rules, so both spellings can appear
-# as graph targets.
-_VERSION_MUTATING_FUNCTIONS = frozenset(
-    {
-        torch.autograd.graph.increment_version,
-        torch._C._increment_version,
-    }
-)
-
-
 def _computation_node_key(
     node: fx.Node, canonical_idx: dict[fx.Node, int]
 ) -> tuple[int, str, tuple[int, ...]]:
@@ -86,14 +75,6 @@ def _canonical_node_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> obj
         return (3,)
     else:
         return _computation_node_key(node, canonical_idx)
-
-
-_INFERENCE_MODE_FUNCTIONS = frozenset(
-    {
-        torch.autograd.grad_mode._enter_inference_mode,
-        torch.autograd.grad_mode._exit_inference_mode,
-    }
-)
 
 
 # Higher order operators whose whole effect is the subgraphs they are handed:
@@ -159,11 +140,11 @@ def _hop_effects_are_pure(node: fx.Node) -> bool:
 def _is_safe_to_reorder(node: fx.Node) -> bool:
     """Check if a node is safe to reorder during graph canonicalization.
 
-    Builds on Node.is_impure() (used by DCE), which misses several kinds of
-    ordering-sensitive node: in-place call_methods, higher order operators whose
-    subgraphs mutate, functional collectives, version-counter bumps,
-    inference_mode brackets, and non-OpOverload state-changing functions caught
-    by a no-node-arguments heuristic.
+    Builds on Node.is_impure() (used by DCE) with additional checks for cases
+    it doesn't cover: in-place call_method nodes, higher order operators whose
+    subgraphs mutate, functional collectives, nodes binding unbacked symbols,
+    and non-OpOverload state-changing functions detected by no-node-arguments
+    and no-tensor-or-symbolic-value heuristics.
 
     Returning False is a graph-scale decision, not a node-scale one: barriers
     partition the graph into segments (see ``canonicalize_graph``) and pure nodes
@@ -206,20 +187,6 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
         collective_namespace = None
     if collective_namespace in _ORDER_SENSITIVE_NAMESPACES:
         return False
-    # increment_version takes the tensor as an FX Node arg (so the no-input
-    # heuristic below misses it) and is not an OpOverload, so is_impure() does
-    # not flag it. Reordering it relative to version reads
-    # (prims._tensor_version) corrupts version-counter semantics.
-    if node.target in _VERSION_MUTATING_FUNCTIONS:
-        return False
-    # inference_mode brackets the ops traced inside it. Unlike autocast and
-    # set_grad_enabled, neither end is in fx's _side_effectful_functions, and
-    # only the enter is caught incidentally by the no-Node-arguments heuristic
-    # below -- the exit takes the enter's token, so it looks pure. Hoisting the
-    # exit above the compute silently drops inference mode, and the result comes
-    # back with is_inference() False.
-    if node.target in _INFERENCE_MODE_FUNCTIONS:
-        return False
     if not isinstance(node.target, torch._ops.OpOverload):
         name = getattr(node.target, "__name__", "")
         if name.endswith("_"):
@@ -241,6 +208,19 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
             return False
         # functorch batch dim ops modify the vmap interpreter stack.
         if name in ("_add_batch_dim", "_remove_batch_dim"):
+            return False
+        # State-changing functions that consume other nodes escape the
+        # no-node-arguments heuristic above (e.g. _exit_inference_mode takes
+        # the token produced by _enter_inference_mode, _sdpa_kernel takes
+        # _backend_from_string nodes). Dynamo and export attach a tensor or
+        # symbolic example_value/val to every node whose result feeds the
+        # program; state-changing calls are never wrapped as data, so a node
+        # carrying no such value only exists for its side effect.
+        values = [node.meta.get("example_value"), node.meta.get("val")]
+        if not any(
+            isinstance(v, (torch.Tensor, torch.SymInt, torch.SymFloat, torch.SymBool))
+            for v in pytree.tree_leaves(values)
+        ):
             return False
     return True
 
