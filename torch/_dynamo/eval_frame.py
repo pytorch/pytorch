@@ -694,17 +694,23 @@ def remove_from_cache(f: Any) -> None:
     """
     Make sure f.__code__ is not cached to force a recompile
     """
-    if isinstance(f, types.CodeType):
-        reset_code(f)
-    elif hasattr(f, "__code__"):
-        reset_code(f.__code__)
-    elif hasattr(getattr(f, "forward", None), "__code__"):
-        reset_code(f.forward.__code__)
-    else:
-        from . import reset  # type: ignore[attr-defined]
+    from .convert_frame import compile_lock
 
-        reset()
-        log.warning("could not determine __code__ for %s", f)
+    # Under compile_lock, like torch._dynamo.reset(): an in-flight compile
+    # holds a snapshot of this code's cache entries (recompile-reason logging,
+    # cache-size accounting) and reset_code frees them in place.
+    with compile_lock:
+        if isinstance(f, types.CodeType):
+            reset_code(f)
+        elif hasattr(f, "__code__"):
+            reset_code(f.__code__)
+        elif hasattr(getattr(f, "forward", None), "__code__"):
+            reset_code(f.forward.__code__)
+        else:
+            from . import reset  # type: ignore[attr-defined]
+
+            reset()
+            log.warning("could not determine __code__ for %s", f)
 
 
 def nothing() -> None:
@@ -998,7 +1004,15 @@ class _TorchDynamoContext:
                         self._package.initialize(
                             fn_key, result.dynamo, ignore_inlined_sources=False
                         )
-                        self._package.install(result.backends)
+                        # Install into the SAME region this context looks up in.
+                        # Precompile entries match their own region only, so a
+                        # default-bucket install here would never be found by an
+                        # isolate_recompiles=True context -- the cache would load
+                        # and then silently serve nothing.
+                        self._package.install(
+                            result.backends,
+                            isolate_recompiles_id=self._isolate_recompiles_id,
+                        )
                     except RuntimeError:
                         log.warning(
                             "Failed to load entry from dynamo cache", exc_info=True
@@ -1799,6 +1813,14 @@ def optimize(*args: Any, **kwargs: Any) -> OptimizeContext | _NullDecorator:
     return _optimize(rebuild_ctx, *args, **kwargs)
 
 
+def _backend_emits_native_code(backend: str | Callable[..., Any] | None) -> bool:
+    # get_compiler_fn erases the name, and torch.compile hands us a
+    # _TorchCompileWrapper rather than the string the user wrote.
+    from torch._dynamo.package import emits_native_code
+
+    return emits_native_code(str(getattr(backend, "compiler_name", backend)))
+
+
 def _optimize(
     rebuild_ctx: Callable[[], OptimizeContext | _NullDecorator],
     backend: str | Callable[..., Any] = "inductor",
@@ -1886,6 +1908,7 @@ def _optimize(
             dynamic_shapes=dynamic_shapes,
         )
 
+    native_backend = _backend_emits_native_code(backend)
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -1900,7 +1923,12 @@ def _optimize(
     if config.caching_precompile and package is None:
         from .package import CompilePackage
 
-        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
+        package = CompilePackage(
+            fn=None,
+            dynamo=None,
+            ignore_inlined_sources=False,
+            requires_native_backend_compatibility=native_backend,
+        )
 
     return _optimize_catch_errors(
         convert_frame.convert_frame(
@@ -2830,6 +2858,7 @@ def _optimize_assert(
     Used for fullgraph=True and export, since we must always error on graph breaks and ignore
     symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
+    native_backend = _backend_emits_native_code(backend)
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -2843,7 +2872,12 @@ def _optimize_assert(
         # and OptimizeContext.
         from .package import CompilePackage
 
-        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
+        package = CompilePackage(
+            fn=None,
+            dynamo=None,
+            ignore_inlined_sources=False,
+            requires_native_backend_compatibility=native_backend,
+        )
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(

@@ -16,6 +16,7 @@ import functools
 import hashlib
 import importlib
 import inspect
+import io
 import itertools
 import json
 import logging
@@ -25,14 +26,16 @@ import platform
 import shutil
 import sys
 import types
-from collections.abc import Callable, Generator, Iterator
+import uuid
+import weakref
+from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import nullcontext
 from typing import Any, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import PackageError
-from torch._dynamo.graph_utils import _graph_device_type
+from torch._dynamo.graph_utils import _graph_device_types
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
@@ -111,6 +114,173 @@ class SerializedCode:
         )
 
 
+class _Missing:
+    def __init__(self, reason: str | None = None) -> None:
+        self._reason = reason
+
+    def __repr__(self) -> str:
+        return f"_Missing({self._reason})"
+
+    def __str__(self) -> str:
+        return f"_Missing({self._reason})"
+
+    # Sometimes _Missing object is used as the callable with functools.partial,
+    # so we add a dummy __call__ here to bypass TypeError from partial().
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return _Missing()
+
+
+# The persistent id GuardsStatePickler.persistent_id emits for a pruned value
+# the C pickler never routes through reducer_override; _GuardsStateUnpickler
+# turns it back into _Missing. Any other persistent id in a guards state is a bug.
+_PRUNED_VALUE_PID = "missing values"
+
+
+class FunctionPicklerBase(pickle.Pickler):
+    """Reducers shared by GuardsStatePickler and AOTCompilePickler.
+
+    Both rebuild the same kinds of objects that pickle cannot do by reference:
+    code objects, closure cells, python modules, bound methods, and functions
+    rebuilt from their code object. Each subclass keeps its own dispatch and
+    decides what a rebuilt function carries; this class fixes HOW it is rebuilt
+    so a fix in one pickler cannot be missed in the other.
+
+    Defaults, __dict__, and the globals snapshot travel as pickle STATE, applied
+    after memoization, so `wrapper.me = wrapper` and module-scope cycles end.
+    A closure cell is a reduce ARGUMENT: a function closing over itself is
+    reduced twice, and save_reduce's recursive-object fallback (present in both
+    the C and the pure-Python pickler) drops the outer copy.
+    """
+
+    @classmethod
+    def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
+        return SerializedCode.to_code_object(serialized_code)
+
+    @classmethod
+    def _unpickle_python_module(cls, name: str) -> types.ModuleType:
+        return importlib.import_module(name)
+
+    @classmethod
+    def _unpickle_bound_method(cls, func: Any, base: Any) -> types.MethodType:
+        return types.MethodType(func, base)
+
+    @classmethod
+    def _unpickle_empty_cell(cls) -> types.CellType:
+        return types.CellType()
+
+    @staticmethod
+    def _set_cell_contents(cell: types.CellType, state: tuple[Any]) -> None:
+        # The contents travel wrapped in a 1-tuple: pickle skips the state step
+        # entirely when the state object is None, and None is an ordinary cell
+        # value that must not come back as an empty cell.
+        cell.cell_contents = state[0]
+
+    @classmethod
+    def _build_function(
+        cls,
+        f_globals: dict[str, Any],
+        module: str,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        fn = types.FunctionType(code, f_globals, name, None, closure)
+        # FunctionType derives __module__ from f_globals["__name__"], so any
+        # scope that is not the real module dict leaves it None and a guard
+        # rooted at fn.__module__ rebuilds against that.
+        fn.__module__ = module
+        fn.__qualname__ = qualname
+        return fn
+
+    @classmethod
+    def _unpickle_fn_from_module(
+        cls,
+        module: str,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        # functools.wraps copies __module__, so this scope can be a different
+        # file from the one the function lives in; a pickler that guards
+        # __globals__ sends the snapshot variant instead. A module that only
+        # existed in sys.modules at save (exec-created, transformers_modules.*)
+        # gets an empty scope: a guard never calls the rebuilt function.
+        f_globals: dict[str, Any]
+        try:
+            f_globals = importlib.import_module(module).__dict__
+        except ImportError:
+            f_globals = {}
+        return cls._build_function(f_globals, module, code, qualname, name, closure)
+
+    @classmethod
+    def _unpickle_fn_from_snapshot(
+        cls,
+        module: str,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        # The scope arrives as pickle STATE, through _apply_function_state.
+        return cls._build_function({}, module, code, qualname, name, closure)
+
+    @staticmethod
+    def _apply_function_state(fn: types.FunctionType, state: tuple[Any, ...]) -> None:
+        defaults, kwdefaults, attributes, globals_snapshot = state
+        fn.__defaults__ = defaults
+        fn.__kwdefaults__ = kwdefaults
+        fn.__dict__.update(attributes)
+        if globals_snapshot is not None:
+            fn.__globals__.update(globals_snapshot)
+
+    def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            # A free variable only assigned on a path that did not run.
+            return type(self)._unpickle_empty_cell, ()
+        return (
+            type(self)._unpickle_empty_cell,
+            (),
+            (contents,),
+            None,
+            None,
+            type(self)._set_cell_contents,
+        )
+
+    def _reduce_bound_method(self, method: types.MethodType) -> tuple[Any, ...] | None:
+        # pickle rebuilds a bound method by getattr() on self at load, which is
+        # wrong when that does not resolve back to the same function; those
+        # carry the function and self explicitly.
+        func = method.__func__
+        inner = getattr(method.__self__, func.__name__, None)
+        if inspect.ismethod(inner):
+            inner = inner.__func__
+        if func is inner:
+            return None
+        return type(self)._unpickle_bound_method, (func, method.__self__)
+
+    def _reduce_function(
+        self,
+        fn: types.FunctionType,
+        *,
+        defaults: tuple[Any, ...] | None,
+        kwdefaults: dict[str, Any] | None,
+        closure: tuple[types.CellType, ...] | None,
+        attributes: dict[str, Any],
+        globals_snapshot: dict[str, Any] | None = None,
+    ) -> tuple[Any, ...]:
+        args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
+        if globals_snapshot is None:
+            unpickle = type(self)._unpickle_fn_from_module
+        else:
+            unpickle = type(self)._unpickle_fn_from_snapshot
+        state = (defaults, kwdefaults, attributes, globals_snapshot)
+        return unpickle, args, state, None, None, type(self)._apply_function_state
+
+
 @dataclasses.dataclass
 class _GuardedCodeCacheEntry:
     """
@@ -124,6 +294,13 @@ class _GuardedCodeCacheEntry:
     dynamo_code: SerializedCode
 
 
+class _GuardsStateUnpickler(pickle.Unpickler):
+    def persistent_load(self, pid: Any) -> Any:
+        if pid != _PRUNED_VALUE_PID:
+            raise pickle.UnpicklingError(f"unknown guards state persistent id {pid!r}")
+        return _Missing(pid)
+
+
 def load_guards_state(guards_state: bytes) -> Any:
     try:
         import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
@@ -132,7 +309,7 @@ def load_guards_state(guards_state: bytes) -> Any:
     except ImportError:
         ctx = nullcontext()  # type: ignore[assignment]
     with ctx:
-        return pickle.loads(guards_state)
+        return _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
 
 
 def load_guard_manager(
@@ -237,6 +414,57 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
+
+
+def _resume_global_renames(
+    entries: Iterable[_DynamoCodeCacheEntry], install_token: str
+) -> dict[str, str]:
+    """
+    Pick a global name for every resume function that is unique to the code it
+    names and to the package installing it, rather than to the process that
+    captured it.
+
+    ``__resume_at_<offset>_<n>`` comes from a counter that restarts in every
+    capture process, so two artifacts captured separately both claim, say,
+    ``__resume_at_16_3``. A serving process installs both into the same module
+    dict: the second one wins, and because precompile lookup is region-EXACT
+    the first package's frame then resolves the name to a twin holding another
+    region's entries and is served nothing at all.
+
+    The digest alone does not settle it: the shape that mints the same name
+    usually mints the same code with it -- one script captured in two
+    processes, or one artifact loaded twice to serve two model instances --
+    and both then hash to a single name. The token, unique to the loaded
+    package, is what separates those; the digest stays so the name still says
+    which code it belongs to.
+    """
+    renames: dict[str, str] = {}
+    for entry in entries:
+        if not entry.install_to_global:
+            continue
+        digest = hashlib.sha256(pickle.dumps(entry.python_code)).hexdigest()[:16]
+        for name in entry.function_names:
+            renames[name] = f"{name}_{digest}_{install_token}"
+    return renames
+
+
+def _rename_globals(code: types.CodeType, renames: dict[str, str]) -> types.CodeType:
+    """
+    Rewrite ``co_names`` so LOAD_GLOBAL follows the renamed bindings. Indices
+    into ``co_names`` are preserved, so the bytecode itself is untouched.
+    """
+    if not renames:
+        return code
+    consts = tuple(
+        _rename_globals(c, renames) if isinstance(c, types.CodeType) else c
+        for c in code.co_consts
+    )
+    names = tuple(renames.get(name, name) for name in code.co_names)
+    if names == code.co_names and all(
+        new is old for new, old in zip(consts, code.co_consts)
+    ):
+        return code
+    return code.replace(co_names=names, co_consts=consts)
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
@@ -387,10 +615,99 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     return toplevel.__qualname__, code_source.strip(".")
 
 
+_CpuCodegenTarget = tuple[str, str, int | None, str | None]
+
+
+def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
+    """(machine, vec_isa, simdlen, march): what inductor bakes into CPU code.
+
+    ``pick_vec_isa`` dry-compiles a probe with the C++ toolchain, so call this
+    only when the artifact can hold native CPU code. None means the host has no
+    usable CPU codegen target: the probe raised, or it picked no valid vector
+    ISA (``pick_vec_isa`` never raises for a missing compiler; it returns
+    ``invalid_vec_isa``), so it can neither produce nor run a vectorized
+    inductor CPU kernel.
+    """
+    from torch._inductor import config as inductor_config, cpu_vec_isa
+
+    try:
+        vec_isa = cpu_vec_isa.pick_vec_isa()
+    except Exception:
+        logger.warning(
+            "Could not determine the CPU vector ISA, so no CPU codegen target "
+            "is recorded and none will be checked.",
+            exc_info=True,
+        )
+        return None
+    if isinstance(vec_isa, cpu_vec_isa.InvalidVecISA):
+        return None
+
+    return (
+        platform.machine(),
+        str(vec_isa),
+        inductor_config.cpp.simdlen,
+        inductor_config.cpp.march,
+    )
+
+
+def _cpu_codegen_target_problem(
+    cached: _CpuCodegenTarget, current: _CpuCodegenTarget | None
+) -> str | None:
+    """Why code built for ``cached`` cannot run on this host, or None.
+
+    Vector ISAs nest (an avx512 host runs avx2 code), so the artifact's ISA
+    only has to be one this host can build for; simdlen and march change the
+    emitted code and must match exactly.
+    """
+    if current is None:
+        return (
+            "This host has no usable CPU codegen target (no C++ toolchain or no "
+            "supported vector ISA), so it cannot run inductor CPU kernels."
+        )
+    from torch._inductor import cpu_vec_isa
+
+    machine, vec_isa, simdlen, march = cached
+    if machine != current[0]:
+        return f"The artifact was built for machine {machine!r}, this host is {current[0]!r}."
+    host_isas = sorted(str(isa) for isa in cpu_vec_isa.valid_vec_isa_list())
+    if vec_isa not in host_isas:
+        return f"The artifact needs vector ISA {vec_isa!r}; this host can build for {host_isas}."
+    if simdlen != current[2]:
+        return f"The artifact was built with simdlen={simdlen!r}, this host uses {current[2]!r}."
+    if march != current[3]:
+        return f"The artifact was built with march={march!r}, this host uses {current[3]!r}."
+    return None
+
+
+# Registered backends that generate no native code, so an artifact of theirs
+# has no baked vector width to protect and must not be gated on one. This is a
+# blacklist on purpose: anything unrecognised -- including a user's own
+# callable, whose compiler_name is just its __name__ -- is assumed to emit
+# code, because a false rejection at load is recoverable and silently running a
+# kernel built for another ISA is not.
+_NO_NATIVE_CODE_BACKENDS = frozenset(
+    {
+        "aot_eager",
+        "aot_eager_decomp_partition",
+        "aot_eager_decomp_partition_crossref",
+        "aot_eager_decomp_partition_with_mode",
+        "aot_eager_default_partitioner",
+        "eager",
+        "eager_debug",
+        "eager_noexcept",
+        "pre_dispatch_eager",
+    }
+)
+
+
+def emits_native_code(backend_name: str) -> bool:
+    return backend_name not in _NO_NATIVE_CODE_BACKENDS
+
+
 @dataclasses.dataclass(frozen=True)
 class SystemInfo:
     """
-    System information including Python, PyTorch, and GPU details.
+    System information including Python, PyTorch, CPU codegen, and GPU details.
     This information is used to ensure compiled artifacts can only be loaded
     with compatible system configurations.
     """
@@ -400,13 +717,16 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
+    cpu_codegen_target: _CpuCodegenTarget | None = None
     CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
-    def current(cls) -> "SystemInfo":
-        """Create a SystemInfo instance with current system information."""
-        # Get GPU name if CUDA or XPU is available
-        gpu_name = None
+    def current(cls, *, cpu_codegen: bool = True) -> "SystemInfo":
+        """Create a SystemInfo instance with current system information.
+
+        ``cpu_codegen=False`` skips the C++ toolchain probe behind
+        ``cpu_codegen_target``.
+        """
         from torch.utils._triton import get_triton_version
 
         gpu_name, toolkit_version = None, None
@@ -425,10 +745,15 @@ class SystemInfo:
             toolkit_version=toolkit_version,
             triton_version=get_triton_version((0, 0)),
             gpu_name=gpu_name,
+            cpu_codegen_target=_current_cpu_codegen_target() if cpu_codegen else None,
         )
 
     def check_compatibility(
-        self, other: "SystemInfo", device_type: str = "cpu"
+        self,
+        other: "SystemInfo",
+        device_type: str = "cpu",
+        *,
+        check_codegen: bool = True,
     ) -> None:
         """
         Check if this SystemInfo is compatible with another SystemInfo.
@@ -443,9 +768,33 @@ class SystemInfo:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
             )
+        # A cached None means the artifact predates this field, not "no vector
+        # ISA"; for a release build that is every artifact already on disk.
+        if (
+            check_codegen
+            and device_type == "cpu"
+            and self.cpu_codegen_target is not None
+        ):
+            problem = _cpu_codegen_target_problem(
+                self.cpu_codegen_target, other.cpu_codegen_target
+            )
+            if problem is not None:
+                raise RuntimeError(
+                    "Compile package was created for a CPU codegen target this host "
+                    f"cannot run: cached={self.cpu_codegen_target}, "
+                    f"current={other.cpu_codegen_target}. {problem}"
+                )
         if device_type in self.CHECK_GPUS:
+            # Device EXISTENCE is not a native-code question: an artifact
+            # holding cuda tensors cannot run without cuda whatever backend
+            # produced it, so this check stays outside check_codegen. Only the
+            # toolkit/Triton/GPU-model checks below describe generated code and
+            # are skipped for a backend that emits none.
             if not getattr(torch, device_type).is_available():
                 raise RuntimeError(f"{device_type} is not available")
+
+            if not check_codegen:
+                return
 
             if self.toolkit_version != other.toolkit_version:
                 raise RuntimeError(
@@ -474,6 +823,10 @@ class _DynamoCacheEntry:
     source_info: SourceInfo
     device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    # device_type keeps the collapsed accelerator-wins value for BC; a mixed
+    # cpu+accelerator capture still holds native CPU code, so keep the full set.
+    device_types: frozenset[str] | None = None
+    requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
     fn_first_lineno: str | None = None
 
@@ -483,8 +836,22 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
-        current_system_info = SystemInfo.current()
-        self.system_info.check_compatibility(current_system_info, self.device_type)
+        device_types = self.device_types or frozenset((self.device_type,))
+        check_codegen = self.requires_native_backend_compatibility
+        current_system_info = SystemInfo.current(
+            cpu_codegen=(
+                check_codegen
+                and "cpu" in device_types
+                and self.system_info.cpu_codegen_target is not None
+            )
+        )
+        # cpu first, so a codegen-target refusal is not masked by a GPU error.
+        for device_type in sorted(device_types):
+            self.system_info.check_compatibility(
+                current_system_info,
+                device_type,
+                check_codegen=check_codegen,
+            )
 
     def debug_info(self) -> dict[str, Any]:
         if len(self.codes) == 0:
@@ -613,6 +980,28 @@ def _compile_frame_context(
     return _ctx()
 
 
+def _uninstall_abandoned_package(
+    installed_globals: dict[types.ModuleType, dict[str, object]],
+    precompile_codes: list[types.CodeType],
+    region_id: int,
+    owner: object,
+) -> None:
+    # weakref.finalize callback for a CompilePackage that died while still
+    # installed. A global is only popped while it still holds OUR value: a
+    # later load of the same artifact reuses the artifact's names, and its
+    # overwrite must survive us. Entry teardown fires from GC, which can run
+    # mid-guard-evaluation, so _reset_precompile_entries_for_owner never
+    # blocks (it parks the reset when the cache lock is unavailable).
+    from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_owner
+
+    for module, values_by_name in installed_globals.items():
+        for name, value in values_by_name.items():
+            if module.__dict__.get(name) is value:
+                del module.__dict__[name]
+    for code in precompile_codes:
+        _reset_precompile_entries_for_owner(code, region_id, owner)
+
+
 class CompilePackage:
     """
     CompilePackage is considered a low level component and should not be directly exposed to
@@ -631,23 +1020,51 @@ class CompilePackage:
         fn: Callable[..., Any] | None,
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
+        *,
+        requires_native_backend_compatibility: bool = True,
     ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
-        self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        # device_type that model compiled with.
-        self._device_type = "cpu"
+        # name -> installed value, so teardown can tell its own binding from
+        # one a later package overwrote (two loads of one artifact reuse the
+        # artifact's global names).
+        self._installed_globals: dict[types.ModuleType, dict[str, object]] = {}
+        # Code objects holding this package's region state, so uninstall() can
+        # clear all of them -- and only them. Clearing the code object wholesale
+        # would take every OTHER region's entries with it, and since lookup() is
+        # region-exact those owners can no longer be served by what is left.
+        self._installed_precompile_codes: list[types.CodeType] = []
+        self._installed_precompile_region_id = -1
+        # Identity token stamped onto every precompile entry this package
+        # installs, so uninstall() can remove its own and leave a neighbour
+        # package's entries on a shared code object alone.
+        self._install_owner = object()
+        # Uninstalls an installed package that dies without uninstall(),
+        # so repeated loads of one artifact cannot grow the frame cache and
+        # module globals without bound. Registered by install().
+        self._uninstall_finalizer: weakref.finalize[..., CompilePackage] | None = None
+        # Empty means no graph named a device; cache_entry records that as cpu.
+        self._device_types: set[str] = set()
+        # An eager backend bakes no vector width, so it neither pays the C++
+        # toolchain probe at save nor is rejected on ISA skew at load.
+        self._requires_native_backend_compatibility = (
+            requires_native_backend_compatibility
+        )
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
         self._source_info: SourceInfo = SourceInfo(inlined_sources=set())
         self._resume_codes: set[types.CodeType] = set()
+        # Resume functions install under a global name carrying this token, so
+        # two packages holding byte-identical resume code -- two loads of one
+        # artifact, or two artifacts of one script captured in separate
+        # processes -- do not take each other's name. See _resume_global_renames.
+        self._install_token = uuid.uuid4().hex
         self._initialized = False
         if fn is not None:
             self.initialize(fn, dynamo, ignore_inlined_sources)
-            self.uninstall()
             self.validate()
 
     def is_initialized(self) -> bool:
@@ -686,6 +1103,11 @@ class CompilePackage:
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
+            # Restored so a re-save keeps checking what the capture targeted.
+            self._device_types = set(dynamo.device_types or (dynamo.device_type,))
+            self._requires_native_backend_compatibility = (
+                dynamo.requires_native_backend_compatibility
+            )
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
@@ -798,12 +1220,16 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        self._device_type = _graph_device_type(graph)
+        self._device_types.update(_graph_device_types(graph))
 
     def bypass_current_entry(self) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
+        # A bypassed entry is never installed, so what it already registered
+        # would only be serialized for nothing.
+        self._current_entry.backend_ids.clear()
+        self._current_entry.guarded_codes.clear()
 
     def add_resume_function(
         self,
@@ -861,22 +1287,38 @@ class CompilePackage:
         # so that hook must not delete it once its code object is collected.
         CleanupHook.disown(module.__dict__, name)
         module.__dict__[name] = value
-        self._installed_globals.setdefault(module, []).append(name)
+        self._installed_globals.setdefault(module, {})[name] = value
 
     def uninstall(self) -> None:
-        from torch._C._dynamo.eval_frame import _reset_precompile_entries
+        from torch._C._dynamo.eval_frame import _reset_precompile_entries_for_owner
 
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in uninstall")
-        for module, names in self._installed_globals.items():
-            for name in names:
-                module.__dict__.pop(name, None)
+        if self._uninstall_finalizer is not None:
+            self._uninstall_finalizer.detach()
+            self._uninstall_finalizer = None
+        # Pop only what still holds OUR value: a user (or a later load of the
+        # same artifact) may have rebound the name since install().
+        for module, values_by_name in self._installed_globals.items():
+            for name, value in values_by_name.items():
+                if module.__dict__.get(name) is value:
+                    del module.__dict__[name]
 
         self._installed_globals = {}
 
-        _reset_precompile_entries(self._innermost_fn.__code__)
+        for code in self._installed_precompile_codes:
+            _reset_precompile_entries_for_owner(
+                code, self._installed_precompile_region_id, self._install_owner
+            )
+        self._installed_precompile_codes = []
+        self._installed_precompile_region_id = -1
 
-    def install(self, backends: dict[_BackendId, Any]) -> None:
+    def install(
+        self,
+        backends: dict[_BackendId, Any],
+        *,
+        isolate_recompiles_id: int = -1,
+    ) -> None:
         """
         Sync the package states to the compiled function. This includes the following actions:
           1. Clean up the previously installed states.
@@ -889,6 +1331,17 @@ class CompilePackage:
         from .output_graph import get_builtins_dict
 
         self.uninstall()
+        # A fresh token per install: the uninstall above may have PARKED
+        # its eviction (lock contended, or run from inside a lookup), and
+        # a parked eviction keyed on the old token must not take the
+        # entries this install is about to add.
+        self._install_owner = object()
+        self._installed_precompile_region_id = isolate_recompiles_id
+        # Resume functions are bound under a name unique to their code and to
+        # this package, not under the name the capture process happened to
+        # mint. Every reference to them lives in some frame's dynamo bytecode,
+        # remapped below.
+        renames = _resume_global_renames(self._codes.values(), self._install_token)
         for code, entry in self._codes.items():
             context = (
                 _compile_frame_context(code)
@@ -904,6 +1357,7 @@ class CompilePackage:
                 target_code = code
                 if entry.install_to_global:
                     for function_name in entry.function_names:
+                        function_name = renames.get(function_name, function_name)
                         if code.co_freevars:
                             # Resume functions with freevars need a factory
                             # that takes a closure tuple, matching
@@ -936,6 +1390,18 @@ class CompilePackage:
                     continue
 
                 input_codes.add(target_code)
+                if target_code not in self._installed_precompile_codes:
+                    # Deliberately NOT clearing the region here. A frame reached
+                    # through code_source is shared -- a library block two
+                    # loaded models both call -- and several packages may hold
+                    # entries for it in one region, which lookup handles by
+                    # evaluating each entry's guards. Clearing the region would
+                    # evict a live neighbour, and since lookup is region-exact
+                    # the neighbour cannot be served by what is left. This
+                    # package's own stale entries are already gone: install()
+                    # runs uninstall() first, which removes exactly the ones it
+                    # owns.
+                    self._installed_precompile_codes.append(target_code)
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
                         raise RuntimeError(
@@ -993,17 +1459,53 @@ class CompilePackage:
                     _load_precompile_entry(
                         target_code,
                         guard_manager,
-                        SerializedCode.to_code_object(guarded_code.dynamo_code),
+                        _rename_globals(
+                            SerializedCode.to_code_object(guarded_code.dynamo_code),
+                            renames,
+                        ),
+                        self._installed_precompile_region_id,
+                        self._install_owner,
                     )
+        # The callback must not capture self (it would never fire); it works
+        # off the very containers install() just populated, which uninstall()
+        # rebinds rather than mutates, so an explicit uninstall + reinstall
+        # cannot be undone by a stale finalizer.
+        self._uninstall_finalizer = weakref.finalize(
+            self,
+            _uninstall_abandoned_package,
+            self._installed_globals,
+            self._installed_precompile_codes,
+            self._installed_precompile_region_id,
+            self._install_owner,
+        )
+        # Not at interpreter exit: module dicts and the frame cache are torn down.
+        self._uninstall_finalizer.atexit = False
 
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in cache_entry")
+        device_types = frozenset(self._device_types or ("cpu",))
+        device_type = next(
+            (device for device in sorted(device_types) if device != "cpu"),
+            "cpu",
+        )
         return _DynamoCacheEntry(
             codes=list(self._codes.values()),
             source_info=self._source_info,
-            device_type=self._device_type,
+            device_type=device_type,
+            device_types=device_types,
+            # The codegen probe runs the C++ toolchain; only pay for it when the
+            # artifact can hold native CPU code.
+            system_info=SystemInfo.current(
+                cpu_codegen=(
+                    self._requires_native_backend_compatibility
+                    and "cpu" in device_types
+                )
+            ),
+            requires_native_backend_compatibility=(
+                self._requires_native_backend_compatibility
+            ),
             fn_name=self._innermost_fn.__qualname__,
             fn_first_lineno=self._innermost_fn.__code__.co_firstlineno,
         )
@@ -1276,16 +1778,25 @@ class DiskDynamoCache(DiskDynamoStore):
         counters["dynamo_cache"]["dynamo_cache_miss"] += 1
         return None
 
-    def load_and_install_package(self, fn: Callable[..., Any]) -> CompilePackage | None:
+    def load_and_install_package(
+        self, fn: Callable[..., Any], *, isolate_recompiles_id: int = -1
+    ) -> CompilePackage | None:
         """
-        Load directly into a package and install backends
+        Load directly into a package and install backends.
+
+        ``isolate_recompiles_id`` must be the region the caller will look up in:
+        precompile entries match their own region only, so installing into the
+        default bucket for an isolated caller loads the artifact and then serves
+        nothing from it.
         """
         results = self.load(fn)
         if results is None:
             return None
         else:
             package = CompilePackage(fn, results.dynamo)
-            package.install(results.backends)
+            package.install(
+                results.backends, isolate_recompiles_id=isolate_recompiles_id
+            )
             return package
 
     def path_prefix(self) -> str:
