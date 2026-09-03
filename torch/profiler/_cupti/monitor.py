@@ -729,15 +729,14 @@ class CuptiMonitor:
     def flush(self, *, sync: bool = False, timeout_s: float = 5.0) -> None:
         """Flush CUPTI's activity buffers to the processing worker.
 
-        Both paths issue ``cuptiActivityFlushAll(0)`` -- which hands over COMPLETED
-        records, never in-progress ones -- and end by draining the native decoder's
-        accumulated columns and dispatching them to the observers. The monitor never
-        FORCE-flushes (``CUPTI_ACTIVITY_FLAG_FLUSH_FORCED``): a forced flush hands back
-        a still-running kernel's record with a zero end timestamp and consumes it, so
-        CUPTI never re-delivers the real completion (it would strand a slow-but-healthy
-        collective as a false hang in the comm watchdog), and forcing in-progress
-        buffers over concurrent host activity is the flush race that corrupts the HES
-        heap and freezes the decode worker.
+        Both paths issue ``cuptiActivityFlushAll(0)`` -- which hands over buffers whose
+        records are all complete, never a buffer holding an in-progress record -- and
+        end by draining the native decoder's accumulated columns and dispatching them to
+        the observers. Neither path FORCE-flushes: a forced flush hands back a
+        still-running kernel's record with a zero end timestamp and consumes it, so CUPTI
+        never re-delivers the real completion (it would strand a slow-but-healthy
+        collective as a false hang in the comm watchdog). The one forced flush the
+        monitor issues is in _reconfigure, behind a device sync, where CUPTI requires it.
 
         Plain (``sync=False``) flushes then drains -- the background flush loop and the
         per-step foreground driver. With ``sync=True`` it first blocks until the native
@@ -1100,18 +1099,25 @@ class CuptiMonitor:
         added = [k for k in target if k not in self._enabled]
         for kind in (*removed, *changed):
             self._cupti.activity_disable(sub, kind)
-        # FENCE between disabling and (re-)enabling a kind with a new field selection.
-        # A completed buffer carries one layout per kind (ppRecordLayouts), so a buffer
-        # that spans the switch has one of its two record shapes read at the other's
-        # offsets -- field 24 (the kernel name) is the schema's only const char*, so it
-        # is the only field whose misparse faults; every misparsed numeric field is
-        # silently wrong. activity_flush_all() hands over COMPLETED buffers only and
-        # leaves the partially-filled one to refill under the new selection, so it must
-        # be the fence. Placement matters as much as the fence: the disable above is
-        # what stops the kind producing, so by here nothing is refilling the buffer the
-        # fence evacuates. No forced flush is involved.
+        # CUPTI requires cuptiActivityFlushAll(FORCED) between disabling a kind and
+        # re-enabling it with a different field selection (usage guide, User-Defined
+        # Activity Records). A completed buffer carries one layout per kind
+        # (ppRecordLayouts), so a buffer still filling at the switch would otherwise mix
+        # two record shapes under one layout: the kernel-name const char* misparses into
+        # a wild pointer and every numeric field is silently wrong. A plain flush cannot
+        # evacuate that buffer while any record in it is in progress, and under a
+        # concurrent launch load there always is one, so the flush must be forced. The
+        # device sync first completes every kernel in flight at the disable, so the
+        # forced flush hands back no zero-end record for them. Kernels of a kind that
+        # stays enabled and is launched by another thread between the sync and the flush
+        # can still come back with a zero end timestamp and lose their completion; that
+        # is a few records per reconfigure and is dwarfed by the kernels the disable
+        # itself leaves unrecorded. The disable above stops the changed kind producing,
+        # so nothing refills the buffer between the flush and the enable.
         if removed or changed:
-            self.flush(sync=True)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            self._cupti.activity_flush_all(forced=True)
         for kind in (*added, *changed):
             self._cupti.activity_enable(sub, kind, target[kind])
 
