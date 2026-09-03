@@ -40,6 +40,7 @@ from torch._inductor.autotune_process import (
     TuningProcessPool,
     use_pipelined_autotuning,
 )
+from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.registry import override_template_heuristics
@@ -198,7 +199,10 @@ class TestMaxAutotune(TestCase):
         return a, b
 
     def _run_blackwell_bmm_template(
-        self, broadcast_b: bool, epilogue_subtile: int
+        self,
+        broadcast_b: bool,
+        data_partition_factor: int,
+        epilogue_subtile: int,
     ) -> None:
         bsz, m, k, n = 3, 256, 8193, 128
         a_storage = torch.randn(bsz, k, m, device=GPU_TYPE, dtype=torch.bfloat16)
@@ -220,6 +224,7 @@ class TestMaxAutotune(TestCase):
                     ):
                         yield {
                             **template_config,
+                            "DATA_PARTITION_FACTOR": data_partition_factor,
                             "EPILOGUE_SUBTILE": epilogue_subtile,
                         }
                         return
@@ -256,12 +261,26 @@ class TestMaxAutotune(TestCase):
         self.assertIn("make_tensor_descriptor", codes[0])
         self.assertNotIn("two_ctas=True", codes[0])
         self.assertIn(f"EPILOGUE_SUBTILE : tl.constexpr = {epilogue_subtile}", codes[0])
+        if meta_ws_enabled():
+            self.assertIn(
+                f"DATA_PARTITION_FACTOR : tl.constexpr = {data_partition_factor}",
+                codes[0],
+            )
+            self.assertIn("SEPARATE_EPILOGUE_STORE : tl.constexpr = True", codes[0])
+        else:
+            self.assertNotIn("data_partition_factor", codes[0])
 
     @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @parametrize("data_partition_factor", (1, 2))
     @parametrize("epilogue_subtile", (1, 2, 4))
-    def test_blackwell_bmm_template(self, epilogue_subtile: int) -> None:
+    def test_blackwell_bmm_template(
+        self,
+        data_partition_factor: int,
+        epilogue_subtile: int,
+    ) -> None:
         self._run_blackwell_bmm_template(
             broadcast_b=False,
+            data_partition_factor=data_partition_factor,
             epilogue_subtile=epilogue_subtile,
         )
 
@@ -269,6 +288,7 @@ class TestMaxAutotune(TestCase):
     def test_blackwell_bmm_template_broadcast_b(self) -> None:
         self._run_blackwell_bmm_template(
             broadcast_b=True,
+            data_partition_factor=1,
             epilogue_subtile=1,
         )
 

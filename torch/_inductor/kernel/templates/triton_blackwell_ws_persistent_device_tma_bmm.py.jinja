@@ -42,6 +42,17 @@
     k_tiles = tl.cdiv(K, BLOCK_K)
     tile_id_c = start_pid - NUM_SMS
 
+    {%- if USE_META_WS %}
+    for tile_id in tl.range(
+        start_pid,
+        num_tiles,
+        NUM_SMS,
+        flatten=FLATTEN,
+        warp_specialize=WARP_SPECIALIZE,
+        data_partition_factor=DATA_PARTITION_FACTOR,
+        separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
+    ):
+    {%- else %}
     for tile_id in tl.range(
         start_pid,
         num_tiles,
@@ -49,6 +60,7 @@
         flatten=FLATTEN,
         warp_specialize=WARP_SPECIALIZE,
     ):
+    {%- endif %}
         pid_m, pid_n = _blackwell_bmm_pid(
             tile_id, num_pid_in_group, grid_m, GROUP_M
         )
