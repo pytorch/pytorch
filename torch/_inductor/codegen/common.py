@@ -387,6 +387,9 @@ class DeviceOpOverrides:
     def kernel_driver(self) -> str:
         raise NotImplementedError
 
+    def cpp_kernel_launch_supports_pdl(self) -> bool:
+        return False
+
     def cpp_stream_type(self) -> str:
         raise NotImplementedError
 
@@ -543,12 +546,15 @@ def get_custom_backend_config_for_device(device: str) -> ConfigModule | None:
     return custom_backend_codegen_configs.get(device)
 
 
+# Prevents a hook that re-enters init_backend_registration from firing itself again.
+_privateuse1_backend_init_in_progress = False
+
+
 @functools.cache
-def init_backend_registration() -> None:
-    """
-    Register the backend for different devices, including the scheduling
-    for kernel code generation and the host side wrapper code generation.
-    """
+def _init_builtin_backend_registration() -> None:
+    # The built-in devices are never unregistered, so this only needs to run
+    # once per process; the privateuse1 probe in init_backend_registration
+    # below re-runs on every call.
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_gpu import CppWrapperGpu
@@ -643,18 +649,48 @@ def init_backend_registration() -> None:
             WrapperFxCodegen,
         )
 
+
+def init_backend_registration() -> None:
+    """
+    Register the backend for different devices, including the scheduling
+    for kernel code generation and the host side wrapper code generation.
+    """
+    global _privateuse1_backend_init_in_progress
+    _init_builtin_backend_registration()
+
     private_backend = torch._C._get_privateuse1_backend_name()
     if (
         private_backend != "privateuseone"
         and get_scheduling_for_device(private_backend) is None
     ):
-        from torch.utils.backend_registration import _get_custom_mod_func
+        device_mod = getattr(torch, private_backend, None)
+        backend_init = getattr(device_mod, "_inductor_backend_init", None)
+        if backend_init is not None:
+            # Vendor hook: runs the full inductor integration and must call
+            # register_backend_for_device itself. Serialized on the compile
+            # lock so a concurrent first compile waits for the in-flight hook
+            # instead of observing a half-registered device.
+            from torch._dynamo.convert_frame import compile_lock
 
-        try:
-            device_scheduling = _get_custom_mod_func("Scheduling")
-            wrapper_codegen = _get_custom_mod_func("PythonWrapperCodegen")
-            cpp_wrapper_codegen = _get_custom_mod_func("CppWrapperCodegen")
-            fx_wrapper_codegen = _get_custom_mod_func("WrapperFxCodegen")
+            with compile_lock:
+                # Re-check under the lock: another thread may have finished
+                # registration while we waited, and a hook that re-enters
+                # this function (the lock is re-entrant) must not fire
+                # itself again.
+                if get_scheduling_for_device(private_backend) is not None:
+                    return
+                if _privateuse1_backend_init_in_progress:
+                    return
+                _privateuse1_backend_init_in_progress = True
+                try:
+                    backend_init()
+                finally:
+                    _privateuse1_backend_init_in_progress = False
+        else:
+            device_scheduling = getattr(device_mod, "Scheduling", None)
+            wrapper_codegen = getattr(device_mod, "PythonWrapperCodegen", None)
+            cpp_wrapper_codegen = getattr(device_mod, "CppWrapperCodegen", None)
+            fx_wrapper_codegen = getattr(device_mod, "WrapperFxCodegen", None)
             if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:
                 register_backend_for_device(
                     private_backend,
@@ -663,8 +699,6 @@ def init_backend_registration() -> None:
                     cpp_wrapper_codegen,
                     fx_wrapper_codegen,
                 )
-        except RuntimeError:
-            pass
 
 
 def index_prevent_reordering(
@@ -2310,6 +2344,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.cse: CSE[CSEVariableType, Any] = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers: OrderedSet[str] = OrderedSet()
         self.store_buffer_names: OrderedSet[str] = OrderedSet()
+        self.store_buffer_counts: dict[str, int] = {}
         self._load_mask: str | None = None
         self._load_other: None | int | float = None
         # OrderedSet in set_current_node
@@ -2550,7 +2585,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
                     name, fused_node_names
                 )
             ):
-                self.num_store -= 1
+                self.num_store -= self.store_buffer_counts.get(name, 1)
                 names_to_remove.add(name)
 
         for name in names_to_remove:
@@ -3050,6 +3085,9 @@ class CSEProxy(DefaultHandler):
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
             self.kernel.num_store += 1
+            self.kernel.store_buffer_counts[name] = (
+                self.kernel.store_buffer_counts.get(name, 0) + 1
+            )
         self.kernel.record_op_trace("store", (name, index, value, mode), {})
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
@@ -3066,6 +3104,9 @@ class CSEProxy(DefaultHandler):
 
         if name not in V.graph.removed_buffers:
             self.kernel.num_store += 1
+            self.kernel.store_buffer_counts[name] = (
+                self.kernel.store_buffer_counts.get(name, 0) + 1
+            )
             return self.kernel.store_reduction(name, index, value)
 
     def reduction(

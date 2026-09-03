@@ -14,10 +14,13 @@ import numpy as np
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch._functorch.config as functorch_config
+import torch._inductor.config as inductor_config
 import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
 from torch._dynamo.variables.functions import _TIME_FUNCTION_NAMES
+from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -1027,6 +1030,53 @@ else:
             self.assertEqual(fn_opt(x, y2), fn(x, y2))
             self.assertEqual(fn_opt(x, y3), fn(x, y3))
             self.assertEqual(cnt.frame_count, 1)
+
+    # assume_static_by_default=False is needed for frame_count == 1 even when
+    # this test is rerun without the class-level patch (see
+    # test_nested_graph_breaks_wrapped.py); otherwise the first call compiles a
+    # static graph and the second recompiles dynamically.
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
+    def test_unspecialized_float_clamp_tensorify(self):
+        # https://github.com/pytorch/pytorch/issues/194976
+        def fn(x, limit):
+            gate, up = torch.chunk(x, 2, dim=-1)
+            gate = F.silu(gate).clamp(max=limit)
+            up = up.clamp(min=-limit, max=limit)
+            return gate * up
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch.compile(fn, backend=cnt)
+        for limit in [0.5, 1.0, 0.25]:
+            x = torch.full((1, 4), 0.75, requires_grad=True)
+            x_ref = x.detach().clone().requires_grad_(True)
+            actual = fn_opt(x, limit)
+            expected = fn(x_ref, limit)
+            self.assertEqual(actual, expected)
+            actual.sum().backward()
+            expected.sum().backward()
+            self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("force_disable_caches", False)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_unspecialized_float_untensorifiable_use_specializes(self):
+        # https://github.com/pytorch/pytorch/issues/194976
+        # torch.full's fill value cannot be tensorified while x * scale can.
+        # The surviving use must force Dynamo to specialize and guard on the
+        # float; specializing only in the joint graph poisons the
+        # AOTAutogradCache with a baked-in value that is silently reused for
+        # other values of scale.
+        def fn(x, scale):
+            return torch.full((3,), scale, device=x.device) + x * scale
+
+        fn_opt = torch.compile(fn, backend="inductor")
+        with fresh_cache():
+            x = torch.randn(3)
+            for scale in [0.5, 0.75, 1.0]:
+                self.assertEqual(fn_opt(x, scale), fn(x, scale))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_tensorfiy_python_scalars_1(self):
