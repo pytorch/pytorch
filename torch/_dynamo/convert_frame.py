@@ -597,16 +597,8 @@ def get_compile_id(
     if not isinstance(frame_id, int):
         raise AssertionError(f"frame_id must be an int, got {type(frame_id)}")
 
-    if get_eval_frame_isolate_recompiles_id() >= 0:
-        frame_compile_id = frame_state.get("_compile_id", 0)
-        if not isinstance(frame_compile_id, int):
-            raise AssertionError(
-                f"frame compile id must be an int, got {type(frame_compile_id)}"
-            )
-        frame_state["_compile_id"] = frame_compile_id + 1
-    else:
-        frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
-        FRAME_COMPILE_COUNTER[frame_id] += 1
+    frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
+    FRAME_COMPILE_COUNTER[frame_id] += 1
 
     compiled_autograd_id = None
     if prior := CompileContext.current_compile_id():
@@ -677,6 +669,8 @@ class ConvertFrameAssert:
             if package is None:
                 raise AssertionError("explicit package must not be None")
             total_count = package.guarded_code_count(code)
+            if package.serving:
+                total_count += len(cache_entries)
         else:
             total_count = _get_total_cache_entry_count(code)
             for region_id in _get_explicit_compile_regions():
@@ -2030,11 +2024,12 @@ def _compile(
                 torch_function_mode_stack_state_mgr.temp_restore_stack()
             )
         explicit_capture = package is not None and package.explicit_capture
+        record = package is not None and not package.serving
         with dynamo_timed("build_guards", log_pt2_compile_event=True), build_guards_ctx:
             check_fn = dynamo_output.build_guards(
                 code,
                 hooks=hooks,
-                save=package is not None,
+                save=record,
                 cache_entries=cache_entries,
                 serialization_guard_filter_fn=(
                     package.serialization_guard_filter_fn
@@ -2042,12 +2037,12 @@ def _compile(
                     else None
                 ),
                 explicit_capture=explicit_capture,
-                strict_error=explicit_capture,
+                strict_error=record and explicit_capture,
             )
 
         # bypass_package clears output.package when this entry's guards could
         # not be serialized; the local still holds what was passed in.
-        if output.package is not None:
+        if record and output.package is not None:
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
             output.package.add_guarded_code(check_fn.guards_state, out_code)
@@ -2144,7 +2139,7 @@ def _compile(
                 troubleshooting_url,
             )
 
-            if package is not None and package.has_current_entry():
+            if package is not None and package.current_entry is not None:
                 # This frame will stop compiling new variants, so the ones
                 # past the limit will never be captured. Record that so a caller
                 # building an artifact can detect the gap. Deliberately not a

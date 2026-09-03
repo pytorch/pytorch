@@ -169,8 +169,9 @@ class TestCodegenMutationEpilogue(TestCase):
         The codegen'd epilogue and the reference _apply_input_mutations must
         hand _replay_input_mutation the same arguments: the mutated input's
         position among the compiled function's inputs (dynamo orders inputs by
-        first use, so x is input 0 and the mutated y is input 1 in slot 0) and
-        the compile id, which together key the once-per-graph warning. On an
+        first use, so x is input 0 and the mutated y is input 1 in slot 0), the
+        compile id the warning names, and the epilogue's own set of inputs
+        already warned about, which makes the warning once per graph. On an
         IN_CUSTOM_FUNCTION view both write the values under no_grad with the
         version counter preserved.
         """
@@ -193,7 +194,6 @@ class TestCodegenMutationEpilogue(TestCase):
             data = torch.randn(4)
             y = self._custom_function_view(data.clone().requires_grad_() * 1.0)
             version = y._version
-            rw._warn_replayed_custom_function_view.cache_clear()
             pattern = "mutated input 1 of compiled graph"
             with self.assertWarnsRegex(UserWarning, pattern) as cm:
                 f(x, y)
@@ -212,10 +212,12 @@ class TestCodegenMutationEpilogue(TestCase):
         self.assertIn(f"[{cid}]", str(cm.warning))
         self.assertEqual(len(captured), 1)
         calls = re.findall(r"_replay_input_mutation\((.*)\)", captured[0])
-        self.assertEqual(calls, [f"orig_inputs[1], updated_inputs[0], 1, {cid!r}"])
+        expected = (
+            f"orig_inputs[1], updated_inputs[0], 1, {cid!r}, _warned_inputs, False"
+        )
+        self.assertEqual(calls, [expected])
 
         y_ref = self._custom_function_view(data.clone().requires_grad_() * 1.0)
-        rw._warn_replayed_custom_function_view.cache_clear()
         pattern = rf"mutated input 1 of compiled graph \[{re.escape(cid)}\]"
         with self.assertWarnsRegex(UserWarning, pattern):
             reference._apply_input_mutations({0: x, 1: y_ref}, [y_ref.detach() * 2])
@@ -259,7 +261,8 @@ class TestCodegenMutationEpilogue(TestCase):
         self.assertEqual(a._version, version + 1)
         self.assertEqual(len(captured), 1)
         calls = re.findall(r"else: _replay_input_mutation\((.*)\)", captured[0])
-        self.assertEqual(calls, ["orig_inputs[0], updated_inputs[0], 0, None"])
+        expected = "orig_inputs[0], updated_inputs[0], 0, None, _warned_inputs, False"
+        self.assertEqual(calls, [expected])
 
         (reference,) = epilogues
         a_ref = self._custom_function_view(data.clone())
