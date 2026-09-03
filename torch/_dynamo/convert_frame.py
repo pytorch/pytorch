@@ -1963,12 +1963,14 @@ def _compile(
                 cache_entries=cache_entries,
             )
 
-        if package is not None:
+        # bypass_package clears output.package when this entry's guards could
+        # not be serialized; the local still holds what was passed in.
+        if output.package is not None:
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
-            package.add_guarded_code(check_fn.guards_state, out_code)
-            package.add_inlined_source(output.tracing_context.traced_code)
-            package.update_device_type(output.current_tracer.graph)
+            output.package.add_guarded_code(check_fn.guards_state, out_code)
+            output.package.add_inlined_source(output.tracing_context.traced_code)
+            output.package.update_device_type(output.current_tracer.graph)
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
