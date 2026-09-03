@@ -381,7 +381,7 @@ TORCH_META_FUNC(aminmax)
     // symbolic shapes, where overlap cannot be proven either way; requiring No
     // there would reject non-contiguous out= tensors that do not overlap.
     const auto overlap = at::get_overlap_status(min, max);
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(
         overlap != at::MemOverlapStatus::Partial &&
             overlap != at::MemOverlapStatus::Full,
         "aminmax(): the `min` and `max` out= tensors must not overlap.");
