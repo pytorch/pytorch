@@ -42,12 +42,15 @@ from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
-from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals, guard_or_true
+from torch.fx.experimental.symbolic_shapes import (
+    fx_placeholder_vals,
+    statically_known_true,
+)
 from torch.fx.graph_module import GraphModule
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.types import py_sym_types
+from torch.types import IntLikeType, py_sym_types
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torchgen.utils import dataclass_repr
 
@@ -2320,7 +2323,7 @@ def _aot_stage2b_fw_compile(
     # pyrefly: ignore [implicit-any]
     fw_compiler: Callable,
     # pyrefly: ignore [implicit-any]
-) -> tuple[list[tuple[int, ...] | None] | None, Callable]:
+) -> tuple[list[tuple[IntLikeType, ...] | None] | None, Callable]:
     return _aot_stage2b_compile_forward_or_inference(
         fw_module,
         adjusted_flat_args,
@@ -2337,7 +2340,7 @@ def _aot_stage2b_bw_compile(
     bw_module: torch.fx.GraphModule,
     maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
-    fwd_output_strides: list[tuple[int, ...] | None] | None,
+    fwd_output_strides: list[tuple[IntLikeType, ...] | None] | None,
     num_symints_saved_for_bw: int,
     aot_config: AOTConfig,
     # pyrefly: ignore [implicit-any]
@@ -2375,47 +2378,40 @@ def _aot_stage2b_bw_compile(
                 if forward_saved_for_backwards_strides is None:
                     continue
 
-                real_stride = None
+                inductor_stride = None
                 # Per all_args calling convention
                 j = i - num_symints_saved_for_bw
                 if 0 <= j < len(forward_saved_for_backwards_strides):
-                    real_stride = forward_saved_for_backwards_strides[j]
-                if real_stride is None:
+                    inductor_stride = forward_saved_for_backwards_strides[j]
+                if inductor_stride is None:
                     continue
 
-                # Comparing ph_arg.stride() with real_stride directly may
-                # cause dynamic dimensions in ph_arg being specialized to static
-                # value. Using suppress_guards and guard_or_true to avoid that.
-
-                stride_different = False
-                fake_mode = detect_fake_mode()
-                suppress_ctx = (
-                    fake_mode.shape_env.suppress_guards()
-                    if fake_mode is not None and fake_mode.shape_env is not None
-                    else nullcontext()
+                # Inductor can choose a different layout for a saved activation
+                # than the backward graph's placeholder has. This comparison must
+                # not specialize ph_arg's dynamic dims, which is why it is
+                # proof-only: statically_known_true consults the shape env's
+                # replacements and value ranges, and uses hints only to
+                # disprove, so it installs no guard and an incidental match at
+                # the current sizes is not mistaken for equality. A stride
+                # inductor genuinely specialized still compares equal, while
+                # s1 vs align(s1) correctly does not. inductor_stride may be
+                # symbolic, see set_tracing_context_output_strides.
+                stride_different = any(
+                    not statically_known_true(ph_stride == inductor_stride[k])
+                    for k, ph_stride in enumerate(ph_arg.stride())
                 )
 
-                # Inductor can choose different strides for activations than
-                # what backward graph has. if we can't statically tell that
-                # strides are the same, we assume they are not.
-                with suppress_ctx:
-                    for k in range(len(ph_arg.stride())):
-                        # real_stride can't be symbolic.
-
-                        if guard_or_true(ph_arg.stride()[k] != int(real_stride[k])):
-                            stride_different = True
-                            break
-
                 if stride_different:
-                    # Note that here we use the stride of the real tensor to
-                    # restride a FakeTensor. This does not cause trouble
-                    # for dynamic shape since this code path only get
-                    # executed if layout optimization is enabled. And we
-                    # disable layout optimization for dynamic shape right
-                    # now.
+                    # Note that here we use the stride inductor chose to restride
+                    # a FakeTensor. Under dynamic shapes that stride can be
+                    # symbolic, since config.pad_dynamic_shapes lets inductor pad
+                    # a symbolically-shaped buffer. It has to stay symbolic here:
+                    # resolving it against the current hint bakes that constant
+                    # into the backward graph and breaks every later call whose
+                    # dynamic size differs.
                     #
-                    # A solution that decide stride order based on real
-                    # tensor's stride and then apply that stride order to
+                    # A solution that decide stride order based on inductor's
+                    # stride and then apply that stride order to
                     # the FakeTensor does not work smoothly since some
                     # tensor's layout is not 'dense'. E.g. mixnet_l has a
                     # tensor with size [8, 64, 112, 112] and strides
@@ -2425,7 +2421,7 @@ def _aot_stage2b_bw_compile(
 
                     ph_size = ph_arg.size()
 
-                    placeholder_list[i] = ph_arg.as_strided(ph_size, real_stride)
+                    placeholder_list[i] = ph_arg.as_strided(ph_size, inductor_stride)
             compiled_bw_func = None
             if (
                 num_symints_saved_for_bw > 0
@@ -2778,7 +2774,7 @@ def _aot_stage2b_compile_forward_or_inference(
     is_inference: bool,
     num_fw_outs_saved_for_bw: int | None = None,
     # pyrefly: ignore [implicit-any]
-) -> tuple[list[tuple[int, ...] | None] | None, Callable]:
+) -> tuple[list[tuple[IntLikeType, ...] | None] | None, Callable]:
     """
     Compile the forward or inference graph. Returns:
     - the output strides of the forward graph
