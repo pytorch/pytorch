@@ -50,7 +50,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *example_args, backend="inductor", tracer="make_fx", decompositions=None, example_inputs=None, artifact_path=None, cache_path=None, guard_filter_fn=None, recompile_limit=None, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False)
+.. py:function:: precompile(fn, *example_args, backend="inductor", tracer="make_fx", decompositions=None, example_inputs=None, artifact_path=None, cache_path=None, guard_filter_fn=None, recompile_limit=None, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False, keep_example_grads=False)
 
    Ahead-of-time precompile ``fn`` against ``example_inputs``, a sequence of calls each
    given as a tuple of positional arguments. ``example_inputs`` is required -- omitting it
@@ -171,9 +171,11 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    :param cache_path: Optional file to write ``cache`` to; see ``artifact_path``.
    :param require_complete: Refuse to produce an artifact whose capture was incomplete --
        a call raised, no frame produced compiled code at all, a frame hit
-       ``recompile_limit``, a frame exercised during capture produced no guarded code, or
-       a frame was bypassed (its guards could not be serialized, so it would serve
-       nothing). Applies only to ``tracer="dynamo"``.
+       ``recompile_limit``, a frame exercised during capture produced no guarded code, a
+       frame was bypassed (its guards could not be serialized, so it would serve
+       nothing), or a variant was left out because inductor's CPU codegen target changed
+       mid-capture (``PrecompileSummary.variants_dropped_for_codegen_target``). Applies
+       only to ``tracer="dynamo"``.
    :param require_no_risky_drops: Refuse to produce an artifact that dropped a guard which
        can affect dispatch. Nothing checks such a guard at load, so a different value can
        silently select the wrong graph instead of recompiling. Applies only to
@@ -186,6 +188,17 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        caller's: a ``training=False`` artifact returns outputs with no autograd history
        even inside ``torch.enable_grad()``, and a ``training=True`` artifact runs its
        backward and accumulates ``.grad`` even inside the caller's ``torch.no_grad()``.
+   :param keep_example_grads: Leave ``.grad`` exactly as the example calls left it.
+       By default precompile snapshots and clears the example model's gradients before
+       the calls and restores them afterwards, so capturing cannot double the gradients
+       of the documented warmup-step-then-capture flow. Pass ``True`` when the example
+       call IS your live training step and its gradients are the point -- otherwise the
+       backward you just paid for is discarded, and the artifact is produced either way
+       so nothing tells you a batch went missing. With it set, a gradient already present
+       accumulates exactly as it would in eager. The snapshot covers tensors and modules
+       reachable from the example arguments and from ``fn`` when it is a module or bound
+       method; a model ``fn`` reaches only as a global is not snapshotted. Applies only
+       to ``tracer="dynamo"``.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string and a
        binary acceleration cache. If ``artifact_path`` and ``cache_path`` are given, the
        pair is written to those files and precompile returns instead what each
@@ -229,6 +242,102 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
            artifact_path="model.py",
            cache_path="model.cache",
        )
+```
+
+```{eval-rst}
+.. py:method:: precompile.accumulate(fn, *, artifact_path, cache_path, backend="inductor", tracer="dynamo", guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False)
+
+   Capture ``fn`` across calls that YOUR loop makes, rewriting the artifact each time.
+
+   :func:`torch.compiler.precompile` makes its example calls itself, back to back, which is
+   wrong whenever the calls are not independent -- a training step whose inputs come off a
+   queue that the enclosing loop advances cannot be called twice in a row, because the second
+   call finds the state the first one consumed. ``accumulate`` inverts that: the caller keeps
+   their loop and precompile stops and resumes around each call.
+
+   Each call runs ``fn`` for real, folds whatever graphs and variants it newly exercised into
+   the capture, rewrites both files, and returns what ``fn`` returned. A call that exercises
+   nothing new adds nothing. There is no finalize step: the two files are a complete, loadable
+   artifact for everything captured so far from the first call onwards, so a job that dies
+   partway through leaves a working artifact for the batches it did reach.
+
+   Gradients pass straight through: the snapshot-and-restore :func:`torch.compiler.precompile`
+   puts around the calls IT makes is skipped here, since every call is the caller's own, and
+   ``keep_example_grads`` does not apply.
+
+   A call whose rendered artifact a ``require_*`` gate refuses still returns its result -- it
+   has already run -- and the files keep the previous artifact; the refusal is logged once per
+   distinct message and the last one is raised from ``close()`` (or the block's exit) unless a
+   later call's render passed. ``calls()`` counts only the calls folded into the files.
+
+   The returned object holds a LIVE compiled region, because that is the only way a later call
+   can reuse an earlier one's variants: they are filed under an id that nothing can hand back
+   to ``torch._dynamo.optimize``. Use it as a context manager, or call ``close()``, to release
+   it. A capture left open keeps that region and its Dynamo cache entries alive -- the compiled
+   variants and whatever they reference -- not any compiler configuration, which is scoped to
+   each call. Each rewrite renames the cache into place before the code, so a process that dies
+   between the two leaves a newer cache beside the previous code, which ``load`` accepts (it
+   warns and runs the code alone).
+
+   :param fn: The whole computation to capture, taking the model(s) and runtime inputs
+       positionally, exactly as :func:`torch.compiler.precompile` does. A ``*args`` or
+       ``**kwargs`` entry is refused before any call runs: the served call binds the
+       entry's named parameters.
+   :param artifact_path: File to write ``python_code`` to, rewritten on every call. Required.
+       Each rewrite goes to a ``<name>.<random>.tmp`` beside the file and is renamed over it,
+       so a symlink here is replaced by a regular file on the first call (its target is left
+       as it was), an existing file keeps its mode (a read-only one included), a new one
+       gets what ``open()`` would create under the process umask, and a process killed
+       mid-write can leave a ``.tmp`` beside the artifact that nothing reclaims.
+   :param cache_path: File to write the acceleration cache to. Required.
+   :param backend: ``"inductor"`` (default) or ``"eager"``, as for
+       :func:`torch.compiler.precompile`.
+   :param tracer: ``"dynamo"``, and nothing else -- a make_fx trace is a single graph of a
+       single call and has nothing to accumulate.
+   :param guard_filter_fn: Serialization filter, composed (AND) with the default that drops
+       the guards which cannot be serialized; a custom filter can only drop more. Every
+       custom-filter drop counts as risky.
+   :param recompile_limit: Maximum variants captured per frame across all calls; a frame
+       that reaches it is reported as truncated.
+   :param dynamic: Dynamic-shape policy forwarded to ``torch.compile``.
+   :param invariants: Optional path receiving the invariant report, rewritten after every
+       call (whether or not a gate then refuses that call's render); ``close()`` does not
+       write it.
+   :param require_complete: Refuse a render whose capture is incomplete -- a call raised
+       during THIS render's cycle, no frame produced compiled code, a frame hit
+       ``recompile_limit``, a frame was bypassed, or a variant was left out because
+       inductor's CPU codegen target changed between calls
+       (``PrecompileSummary.variants_dropped_for_codegen_target``). A refused render leaves
+       the files as they were; see above for how the refusal surfaces.
+   :param require_no_risky_drops: Refuse a render that dropped a guard which can affect
+       dispatch, as for :func:`torch.compiler.precompile`.
+   :param require_no_dropped_guards: Refuse a render that dropped ANY guard. Off by default,
+       since every real model drops the identity guards precompile cannot serialize.
+   :param training: Run the calls with grad enabled, for an ``fn`` that performs a backward;
+       the artifact serves under the captured grad mode, not the caller's.
+   :returns: A :class:`torch.compiler.AccumulatingCapture`. Call it like ``fn``; it also
+       exposes ``summary()``, ``invariants()``, ``calls()`` and ``close()``. Calls from
+       several threads run one at a time, and ``close()`` from any thread waits for a call
+       in flight and the rewrite it ends in; called from inside the call (from ``fn``, or
+       a hook it fires) it raises ``RuntimeError`` rather than wait on itself.
+   :raises PrecompileError: as :func:`torch.compiler.precompile` does, on the call that
+       violates the contract.
+
+   Example::
+
+       with torch.compiler.precompile.accumulate(
+           train_step, artifact_path="m.py", cache_path="m.cache",
+           training=True, require_no_risky_drops=False,
+       ) as capture:
+           for batch in loader:
+               losses = capture(model, batch)   # runs for real, returns its result
+               optimizer.step()
+
+   .. note::
+
+      Rewriting is proportional to everything captured so far, not to the call, so a long loop
+      over a large model pays it every time. Capture the batches that add variants rather than
+      all of them.
 ```
 
 ```{eval-rst}
@@ -302,6 +411,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 .. autoexception:: torch.compiler.PrecompileError
 
 .. autoclass:: torch.compiler.PrecompiledCallable
+   :members:
+
+.. autoclass:: torch.compiler.AccumulatingCapture
    :members:
 
 .. autoclass:: torch.compiler.PrecompileSummary

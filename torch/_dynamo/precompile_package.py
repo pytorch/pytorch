@@ -146,7 +146,7 @@ from .package import (
     PrecompileCacheEntry,
 )
 from .pgo import _use_code_state
-from .source import AttrSource, DictGetItemSource, GlobalSource
+from .source import AttrSource, DictGetItemSource, GlobalSource, LocalSource
 
 
 if TYPE_CHECKING:
@@ -183,6 +183,7 @@ __all__ = [
     "PrecompileSession",
     "PrecompileSummary",
     "InstalledCallable",
+    "precompile_accumulate",
     "precompile_capture",
     "prepare_cache_entry",
     "serve_cache_entry",
@@ -1240,6 +1241,50 @@ def _autograd_cache_bypasses() -> int:
     return counters["aot_autograd"].get("autograd_cache_bypass", 0)
 
 
+def _environment_rooted(entries: Sequence[GuardFilterEntry]) -> set[str]:
+    """The slots the precompile contract pins, by what they are ROOTED at.
+
+    The invariant policy drops a slot that held identically in every captured
+    variant, on the caller's statement that the environment is fixed and every
+    variation is in the inputs. It has no way to check which of the two a slot
+    is, so it infers it from observed variance -- and variance is evidence only
+    when there is more than one variant to compare. varying_guard_slots over a
+    single variant is empty by construction, which is the shipped default, so
+    the inference runs on no evidence and calls the inputs invariant too.
+
+    Classify by the root instead. Environment is the module structure, the
+    process globals, the global interpreter state and the shape env; a local
+    holding anything else is data the caller passes in, and the contract does
+    not license dropping guards on it. Measured on a real ranking model that is
+    roughly 60 of 7,575 slots retained, because in a real model the bulk of the
+    invariant guards genuinely are module structure.
+
+    Module-rooted is decided by VALUE, not by the name starting with "self":
+    precompile's own calling convention passes the model in as an argument, so
+    on the public API the module structure hangs off a local like ``model``.
+    """
+    modules = sorted(
+        (
+            e.name
+            for e in entries
+            if e.has_value and isinstance(e.value, torch.nn.Module) and e.name
+        ),
+        key=len,
+    )
+
+    def under_a_module(name: str) -> bool:
+        return any(name == m or name.startswith((f"{m}.", f"{m}[")) for m in modules)
+
+    rooted = set()
+    for e in entries:
+        root = _source_root(e.orig_guard.originating_source)
+        # Anything not rooted at a local is environment outright: a module
+        # global, the global state guards, the shape env.
+        if not isinstance(root, LocalSource) or under_a_module(e.name):
+            rooted.add(e.name)
+    return rooted
+
+
 def _missing_backends_message(
     total: int, missing: Sequence[object], backend: str = "inductor"
 ) -> str:
@@ -1468,7 +1513,11 @@ def _summarize(
     uncovered: frozenset[str],
     capture_errors: Sequence[str],
     guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+    dropped_code: Mapping[tuple[str, str], str],
+    variants_without_input_guards: int,
+    drifted: set[tuple[str, str]],
     unrendered: Mapping[str, str],
+    variants_dropped_for_codegen_target: int,
 ) -> PrecompileSummary:
     wont_generalize = _wont_generalize(kept, guard_sets)
     return PrecompileSummary(
@@ -1481,18 +1530,28 @@ def _summarize(
         uncovered_frames=tuple(sorted(uncovered)),
         wont_generalize=wont_generalize,
         dropped_guards=tuple(sorted(dropped)),
+        dropped_guard_code=tuple(
+            (gtype, name, dropped_code[(gtype, name)])
+            for gtype, name in sorted(dropped | policy_dropped | risky)
+            if (gtype, name) in dropped_code
+        ),
         kept_guards=tuple(sorted(kept)),
         risky_dropped_guards=tuple(sorted(risky)),
         policy_dropped_guards=tuple(sorted(policy_dropped)),
         capture_errors=tuple(capture_errors),
+        variants_without_input_guards=variants_without_input_guards,
+        drifted_guards=tuple(sorted(drifted)),
         unrendered_backends=tuple(sorted(unrendered.items())),
+        variants_dropped_for_codegen_target=variants_dropped_for_codegen_target,
     )
 
 
 class PrecompileSession:
     """
     A capture in progress. Use as a context manager to get the callable to
-    exercise, then ``save()``. A session is one-shot and cannot be re-entered.
+    exercise, then ``save()``. A session is one-shot and cannot be re-entered
+    unless built ``resumable``, in which case each entry is one capture cycle
+    and :meth:`close` retires it.
     """
 
     def __init__(
@@ -1507,6 +1566,8 @@ class PrecompileSession:
         example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
         invariants: str | None = None,
         training: bool = False,
+        keep_example_grads: bool = False,
+        resumable: bool = False,
         prune_invariant_guards: bool = False,
         collect_results: bool = False,
         keep_graphs: bool = False,
@@ -1548,7 +1609,25 @@ class PrecompileSession:
         # The leaves every live guard build produced, to compare a rebuild
         # against; see _report_guard_drift.
         self._live_guard_leaves: set[tuple[str, str]] = set()
+        # This cycle's leaves only; unioned into the above when the cycle ends.
+        self._cycle_guard_leaves: set[tuple[str, str]] = set()
+        # Per render, like the policy drops: the drift in the artifact being
+        # written now. Cleared where a render starts, unioned per variant.
         self._drifted_guards: set[tuple[str, str]] = set()
+        # Warnings already issued, so a render that re-runs the policy does not
+        # repeat them: (frame, drifted leaves) and (frame, slot) respectively.
+        self._warned_drift: set[tuple[str, frozenset[tuple[str, str]]]] = set()
+        self._warned_unrebuildable: set[tuple[str, tuple[str, str]]] = set()
+        # Per render: (frame, variant index) of every variant the policy left
+        # with no guard rooted at a call argument. See
+        # PrecompileSummary.variants_without_input_guards.
+        self._variants_without_input_guards: set[tuple[str, int]] = set()
+        self._warned_no_input_guards: set[str] = set()
+        # Rendered subgraph source by backend id, None where rendering failed.
+        # A backend id's graph never changes, so this is never invalidated.
+        self._rendered_sources: dict[str, str | None] = {}
+        # backend id -> why it stays pickled, for the ids that failed above.
+        self._unrendered_backends: dict[str, str] = {}
         # The grad mode each compilation ran under, read in the traced frame's
         # own state. The artifact dispatches under it when they all agree.
         self._compile_grad_modes: set[bool] = set()
@@ -1556,18 +1635,45 @@ class PrecompileSession:
         # eagerly, so the artifact carries AOTAutograd's CompiledFunction and
         # calling .backward() on a served output runs precompiled code.
         self._training = training
+        # Leave .grad exactly as the example calls left it, for a caller whose
+        # example IS their live training step. Off by default: the documented
+        # flow is a warmup step and then a capture, where restoring is what
+        # keeps the capture from doubling the gradients it finds.
+        self._keep_example_grads = keep_example_grads
+        # An accumulating capture re-enters this session once per caller-driven
+        # call, so __exit__ must not tear the region down: the compiled variants
+        # are filed under isolate_recompiles_id, and lookup matches that id with
+        # no fallback, so a fresh region would make every prior variant
+        # invisible and recompile the world. Nothing can hand an existing id to
+        # torch._dynamo.optimize either -- it mints its own from a private
+        # counter -- so the only way to keep them is to keep the region.
+        # Fixed at construction: __exit__ reads it to decide whether the
+        # one-shot policy pass runs, and close() must not be able to turn a
+        # resumable session into a one-shot one under a call in flight.
+        self._resumable = resumable
+        # Set by close(): the next __exit__ retires the region even on a
+        # resumable session, and __enter__ refuses.
+        self._retired = False
+        # The thread that entered, until its __exit__ completes. The capture
+        # config __enter__ installs is context-local, so only that thread can
+        # undo it; close() from any other thread waits for it instead.
+        self._entered_thread: int | None = None
         # Off unless the subgraphs will be rendered: retaining them deepcopies
         # every compiled graph for the life of the session.
         self._keep_graphs = keep_graphs
         self._backend_obj: _PrecompileBackend | None = None
         self._policy_dropped_guards: set[tuple[str, str]] = set()
-        # backend id -> why its subgraph could not be composed to source and so
-        # ships only in the pickled bundle; see rendered_backends.
-        self._unrendered_backends: dict[str, str] = {}
+        # slot -> the check it rendered as, for every slot dropped by any
+        # route. See PrecompileSummary.dropped_guard_code for why the slot
+        # tuple alone cannot be audited.
+        self._dropped_guard_code: dict[tuple[str, str], str] = {}
         self._dropped_guards: set[tuple[str, str]] = set()
         self._kept_guards: set[tuple[str, str]] = set()
         self._risky_dropped_guards: set[tuple[str, str]] = set()
         self._capture_errors: list[str] = []
+        # How many capture errors predate the current cycle. Always 0 for a
+        # one-shot capture, which has exactly one cycle.
+        self._gate_error_mark = 0
         self._recorded_exception_keys: set[tuple[type[BaseException], str]] = set()
         # (co_name, co_filename, co_firstlineno) -> one fact set per compilation
         self._guard_sets: dict[tuple[str, str, int], list[frozenset[_GuardFact]]] = {}
@@ -1594,7 +1700,9 @@ class PrecompileSession:
 
         self._pgo_state = _new_code_state()
         self._state = threading.Condition()
-        self._active_calls = 0
+        # Thread ident -> calls in flight on it. __exit__ waits for this to
+        # empty, so a close() from a thread listed here would wait on itself.
+        self._calling_threads: collections.Counter[int] = collections.Counter()
         self._closing = False
         self._finished = False
 
@@ -1675,12 +1783,57 @@ class PrecompileSession:
                 self._package.cached_backends.clear()
             self._pgo_state.clear()
 
+    def close(self) -> None:
+        """Retire a resumable session: give back its compiled region for good.
+
+        A one-shot session does this itself on exit. A resumable one keeps the
+        region across cycles, so something has to say when the last cycle is
+        over; after this the session cannot be re-entered. Idempotent.
+
+        Safe against a call still in flight. A call can only be running while
+        the block is entered, and closing then IS the exit, for good: __exit__
+        refuses new calls, waits out the running ones, and retires the region.
+        The thread that entered is the only one that can run that __exit__ --
+        the capture configuration it undoes is context-local -- so from any
+        other thread this waits for the entering thread's __exit__ to complete
+        and then retires the region itself. It does not run __exit__ on the
+        entering thread's behalf, so a block that thread never leaves is
+        waited on forever.
+
+        Raises RuntimeError when called from inside a call the session is
+        running (from the captured function, or a hook it fires): the exit
+        waits for that call to return, which it then never would.
+        """
+        self._refuse_from_inside_a_call("close()")
+        with self._state:
+            self._retired = True
+            while self._entered_thread not in (None, threading.get_ident()):
+                self._state.wait()
+            entered = self._stack is not None
+        if entered:
+            self.__exit__(None, None, None)
+            return
+        self._clear_runtime_cache()
+        self._finished = True
+
+    def _refuse_from_inside_a_call(self, what: str) -> None:
+        with self._state:
+            inside = threading.get_ident() in self._calling_threads
+        if inside:
+            raise RuntimeError(
+                f"PrecompileSession {what} was called from inside a call the "
+                f"session is running (from the captured function, or a hook it "
+                f"fires). It waits for that call to finish, so it would never "
+                f"return; close the session after the call returns."
+            )
+
     def _call(self, *args: object, **kwargs: object) -> object:
+        ident = threading.get_ident()
         with self._state:
             if self._compiled is None or self._closing:
                 raise RuntimeError("PrecompileSession is not active")
             compiled = self._compiled
-            self._active_calls += 1
+            self._calling_threads[ident] += 1
         from .pgo import _use_code_state
 
         try:
@@ -1691,23 +1844,36 @@ class PrecompileSession:
             raise
         finally:
             with self._state:
-                self._active_calls -= 1
-                if self._active_calls == 0:
+                self._calling_threads[ident] -= 1
+                if self._calling_threads[ident] == 0:
+                    del self._calling_threads[ident]
+                if not self._calling_threads:
                     self._state.notify_all()
 
     def __enter__(self) -> Callable[..., object]:
-        if self._finished:
-            raise RuntimeError("PrecompileSession cannot be re-entered")
-        if self._stack is not None:
-            raise RuntimeError("PrecompileSession is already active")
+        with self._state:
+            if self._finished or self._retired:
+                raise RuntimeError("PrecompileSession cannot be re-entered")
+            if self._stack is not None or self._entered_thread is not None:
+                raise RuntimeError("PrecompileSession is already active")
+            self._entered_thread = threading.get_ident()
+        # Set by every exit and, on the one-shot path, never read again. A
+        # resumable session does re-enter, and _call refuses to run while it is
+        # set, so clearing it here is what makes the second cycle work at all.
+        self._closing = False
+        self._gate_error_mark = len(self._capture_errors)
         grads: dict[torch.Tensor, torch.Tensor | None] = {}
         stack = contextlib.ExitStack()
-        # Backends must serialize into the artifact rather than into the
-        # process-local inductor cache.
-        stack.enter_context(_capture_config(self._training))
-        self._live_guard_leaves = stack.enter_context(record_live_guard_leaves())
-        self._stack = stack
         try:
+            # Backends must serialize into the artifact rather than into the
+            # process-local inductor cache.
+            stack.enter_context(_capture_config(self._training))
+            # A fresh set per cycle, unioned into _live_guard_leaves when the
+            # cycle ends: _report_guard_drift compares EVERY frame in the
+            # package against it, so keeping only the last cycle's leaves would
+            # report every frame that cycle did not recompile as drifted.
+            self._cycle_guard_leaves = stack.enter_context(record_live_guard_leaves())
+            self._stack = stack
             if self._example_inputs:
                 module = (
                     self._fn
@@ -1742,9 +1908,20 @@ class PrecompileSession:
             # changed, and on the documented warmup-step-then-capture flow it
             # would otherwise double them. make_fx does the same; see the
             # rationale at torch._precompile._capture.
-            grads = _grad_snapshot(self._fn, self._example_inputs)
-            for tensor in grads:
-                tensor.grad = None
+            #
+            # Unless the caller says the example call IS their training step, in
+            # which case its gradients are the point and restoring discards the
+            # backward they just paid for -- silently, since the artifact is
+            # produced either way. Then precompile touches .grad not at all, and
+            # a pre-existing grad accumulates exactly as it would in eager.
+            # Only around calls precompile makes ITSELF: on a caller-driven
+            # session the gradients are the caller's own and pass straight
+            # through, and the snapshot would be a read of every .grad per
+            # cycle with a cross-thread window in which they are None.
+            if not self._keep_example_grads and self._example_inputs:
+                grads = _grad_snapshot(self._fn, self._example_inputs)
+                for tensor in grads:
+                    tensor.grad = None
             # Automatic examples are the ordinary no_grad inference path.
             # inference_mode is a distinct guarded state and is disabled here
             # even when the caller entered it before starting capture.
@@ -1791,6 +1968,9 @@ class PrecompileSession:
                 finally:
                     self._clear_runtime_cache()
                     self._finished = True
+                    with self._state:
+                        self._entered_thread = None
+                        self._state.notify_all()
             raise
         finally:
             # The SAME grad object, not a copy: a caller holding a prior p.grad
@@ -1804,12 +1984,13 @@ class PrecompileSession:
         return self._call
 
     def __exit__(self, *exc: object) -> None:
+        self._refuse_from_inside_a_call("__exit__")
         if isinstance(exc[1], BaseException):
             self._record_capture_error(exc[1])
         with self._state:
             self._closing = True
             try:
-                while self._active_calls:
+                while self._calling_threads:
                     self._state.wait()
             except BaseException:
                 self._closing = False
@@ -1825,18 +2006,21 @@ class PrecompileSession:
                 self._record_capture_error(e)
                 raise
             finally:
+                self._live_guard_leaves |= self._cycle_guard_leaves
                 try:
                     self._take_backend_artifacts()
                 finally:
-                    self._clear_runtime_cache()
-                    self._finished = True
+                    if not self._resumable or self._retired:
+                        self._clear_runtime_cache()
+                        self._finished = True
                     with self._state:
+                        self._entered_thread = None
                         self._state.notify_all()
         self._recorded_exception_keys.clear()
         # Before the report, so that it describes the artifact actually written.
         # The rebuildability check for the other path is in artifact()/save(),
         # where a caller can catch it like every other artifact-quality gate.
-        if exc[0] is None and self._prune_invariant_guards:
+        if exc[0] is None and self._prune_invariant_guards and not self._resumable:
             self._apply_guard_policy()
         if self._invariants_path is None:
             return
@@ -1930,6 +2114,10 @@ class PrecompileSession:
         if not extra:
             return
         self._drifted_guards |= extra
+        key = (code_entry.python_code.co_name, frozenset(extra))
+        if key in self._warned_drift:
+            return
+        self._warned_drift.add(key)
         log.warning(
             "precompile: %s's guards rebuild into %d check(s) the capture never "
             "made, so reconstruction lost something they read. They will not "
@@ -1987,6 +2175,10 @@ class PrecompileSession:
         for guard, exc in failures:
             slot = _guard_slot(guard)
             dropped.add(slot)
+            key = (code_entry.python_code.co_name, slot)
+            if key in self._warned_unrebuildable:
+                continue
+            self._warned_unrebuildable.add(key)
             # Naming the frame matters: several frames can guard the same source
             # string, so "dropped" and "still failing" are otherwise
             # indistinguishable between one frame swept and another missed.
@@ -2047,10 +2239,77 @@ class PrecompileSession:
         return state
 
     def _apply_guard_policy(self) -> None:
+        """Apply the policy IN PLACE and fold its drops into the session.
+
+        The one-shot path: the capture is over, so consuming the accumulated
+        facts to produce the artifact costs nothing. An accumulating capture
+        must use :meth:`_policy_filtered_codes` instead -- see the warning
+        there for what re-running this would destroy.
+        """
+        by_frame = self._run_guard_policy(list(self._package.code_entries()))
+        # Not "risky": the policy is the caller stating that the environment is
+        # fixed and every variation is in the inputs, so a slot that never
+        # varied is out of the artifact's declared domain rather than an
+        # unchecked hazard. summary() subtracts these from the kept set, so the
+        # kept set itself stays as the filters recorded it.
+        self._policy_dropped_guards = set().union(*by_frame.values())
+        # The facts follow the serialized guards exactly: a fact is pruned iff
+        # the policy dropped its slot IN THAT FRAME, so the root classification
+        # and derived types that decided the drop decide the report too, and a
+        # slot dropped in one frame leaves the same-named enforced fact of
+        # another alone. Only reached on the one-shot path -- __exit__ gates it
+        # on `not self._resumable`, and the accumulating path renders from
+        # copies instead.
+        for key, variants in self._guard_sets.items():
+            gone = {(t, _normalize(name)) for t, name in by_frame.get(key, ())}
+            self._guard_sets[key] = [
+                frozenset(
+                    f
+                    for f in facts
+                    if not f.enforced or (f.guard_type, f.source) not in gone
+                )
+                for facts in variants
+            ]
+
+    def _policy_filtered_codes(self) -> list[Any]:
+        """Policy-filtered COPIES of the code entries, session left pristine.
+
+        An accumulating capture renders an artifact after every call, and the
+        policy is not safe to apply to the same state twice. It rewrites each
+        variant's serialized guards and then prunes the facts it derived them
+        from, so a second pass reads bytes the first already filtered against
+        facts the first already edited, and filtering can only ever remove.
+
+        That is not a theoretical loss. varying_guard_slots over a SINGLE
+        variant is empty by construction -- one variant cannot disagree with
+        itself -- so the pass after the first call drops every slot of every
+        frame that is not unconditionally kept. When a later call adds the
+        variant that makes one of those slots discriminate, the earlier variant
+        cannot get it back, and it goes on matching calls that belong to the
+        new graph.
+
+        So the accumulating path filters a copy and keeps its own state
+        pristine. deepcopy treats bytes as atomic, so this duplicates the record
+        structure and not the serialized guard payloads.
+        """
+        codes = copy.deepcopy(list(self._package.code_entries()))
+        # REPLACED, not unioned. keep_only grows as calls add variants, so a
+        # slot dropped by an earlier render can survive a later one, and a
+        # cumulative set would keep reporting it as dropped from an artifact
+        # that carries it. This is the drops in the file being written now.
+        by_frame = self._run_guard_policy(codes)
+        self._policy_dropped_guards = set().union(*by_frame.values())
+        return codes
+
+    def _run_guard_policy(
+        self, code_entries: list[Any]
+    ) -> dict[tuple[str, str, int], set[tuple[str, str]]]:
         """
         Drop every guard slot whose fact was identical in every variant of every
         frame. Such a slot discriminates nothing, and most of an artifact's
         guards are of that kind: on a 62-frame ranking model, 738 of 1207 slots.
+
+        Returns the dropped slots per frame, keyed like ``_guard_sets``.
 
         Which slots those are is only knowable once every variant exists, but
         guards are serialized per compilation, as each one is produced. So the
@@ -2063,8 +2322,11 @@ class PrecompileSession:
         from torch._dynamo.output_graph import OutputGraphCommon
         from torch._dynamo.package import load_guards_state, SerializedCode
 
-        varying = varying_guard_slots(self._guard_sets)
-        dropped: set[tuple[str, str]] = set()
+        keep_only = varying_guard_slots(self._guard_sets)
+        by_frame: dict[tuple[str, str, int], set[tuple[str, str]]] = {}
+        dropped: set[tuple[str, str]] = set()  # rebound per frame below
+        without_input_guards: set[tuple[str, int]] = set()
+        variant: tuple[str, int] = ("", 0)
         self._drifted_guards.clear()
 
         def survives(guard_type: str, name: str, derived: Sequence[str] = ()) -> bool:
@@ -2084,25 +2346,45 @@ class PrecompileSession:
             return (
                 guard_type in kept_types
                 or any(d in kept_types for d in derived)
-                or (guard_type, _normalize(name)) in varying
+                or (guard_type, _normalize(name)) in keep_only
             )
 
         def policy(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+            # Only environment slots are the policy's to drop. See
+            # _environment_rooted for why observed variance cannot decide this.
+            environment = _environment_rooted(entries)
             decisions = []
+            input_guarded = False
             for entry in entries:
                 slot = _guard_slot(entry.orig_guard)
-                keep = survives(slot[0], slot[1], entry.derived_guard_types)
+                keep = entry.name not in environment or survives(
+                    entry.guard_type,
+                    slot[1],
+                    tuple(entry.derived_guard_types),
+                )
                 if not keep:
                     dropped.add(slot)
+                    self._record_dropped_code(slot, entry)
+                elif entry.guard_type not in _UNMODELLED_GUARD_TYPES and isinstance(
+                    _source_root(entry.orig_guard.originating_source), LocalSource
+                ):
+                    input_guarded = True
                 decisions.append(keep)
+            if not input_guarded:
+                without_input_guards.add(variant)
             return decisions
 
-        for code_entry in self._package.code_entries():
+        for code_entry in code_entries:
             # A bypassed frame has no guards to re-serialize.
             f_code = None
-            for guarded in code_entry.guarded_codes:
+            code = code_entry.python_code
+            dropped = by_frame.setdefault(
+                (code.co_name, code.co_filename, code.co_firstlineno), set()
+            )
+            for index, guarded in enumerate(code_entry.guarded_codes):
                 if f_code is None:
                     f_code = SerializedCode.to_code_object(code_entry.python_code)
+                variant = (code.co_name, index)
                 loaded = load_guards_state(guarded.guards_state)
                 # This rebuild is also the rebuildability check: a guard whose
                 # source cannot be re-evaluated against the reconstructed values
@@ -2135,21 +2417,35 @@ class PrecompileSession:
                 self._report_guard_drift(code_entry, rebuilt)
                 guarded.guards_state = self._validated(code_entry, f_code, pruned)
 
-        self._policy_dropped_guards |= dropped
-        # Not "risky": the policy is the caller stating that the environment is
-        # fixed and every variation is in the inputs, so a slot that never
-        # varied is out of the artifact's declared domain rather than an
-        # unchecked hazard.
-        self._kept_guards -= dropped
-        for key, variants in self._guard_sets.items():
-            self._guard_sets[key] = [
-                frozenset(
-                    f
-                    for f in facts
-                    if not f.enforced or survives(f.guard_type, f.source)
-                )
-                for facts in variants
-            ]
+        # REPLACED, like the policy drops: this describes the render just made.
+        self._variants_without_input_guards = without_input_guards
+        for name in sorted({frame for frame, _ in without_input_guards}):
+            if name in self._warned_no_input_guards:
+                continue
+            self._warned_no_input_guards.add(name)
+            log.warning(
+                "precompile: a variant of %s keeps no guard on any of its call "
+                "arguments after the drops above, so it is served to every call "
+                "that reaches it. summary().variants_without_input_guards counts "
+                "these; expected only for a frame with no tensor arguments.",
+                name,
+            )
+        return by_frame
+
+    def _record_dropped_code(
+        self, slot: tuple[str, str], entry: GuardFilterEntry
+    ) -> None:
+        """Remember what a dropped slot actually checked.
+
+        First writer wins: the same slot is dropped once per variant and per
+        re-serialization, and the renderings agree up to the ids _normalize
+        already masks.
+        """
+        if slot in self._dropped_guard_code:
+            return
+        rendered = " ; ".join(_render_code(entry.code))
+        if rendered:
+            self._dropped_guard_code[slot] = rendered
 
     def _recording_filter(
         self,
@@ -2175,6 +2471,8 @@ class PrecompileSession:
             undetermined: set[_GuardFact] = set()
             for keep, entry in zip(decisions, entries):
                 slot = _guard_slot(entry.orig_guard)
+                if not keep:
+                    self._record_dropped_code(slot, entry)
                 target = self._kept_guards if keep else self._dropped_guards
                 target.add(slot)
                 if not keep and (
@@ -2372,14 +2670,18 @@ class PrecompileSession:
         return _summarize(
             self._package.cache_entry(),
             self._dropped_guards,
-            self._kept_guards,
+            self._kept_guards - self._policy_dropped_guards,
             self._policy_dropped_guards,
             risky,
             self._package.truncated_frames,
             self._package.uncovered_frames,
             self._capture_errors,
             self._guard_sets,
-            unrendered=self._unrendered_backends,
+            self._dropped_guard_code,
+            len(self._variants_without_input_guards),
+            self._drifted_guards,
+            self._unrendered_backends,
+            self._package.variants_dropped_for_codegen_target,
         )
 
     def _gated_summary(
@@ -2399,10 +2701,15 @@ class PrecompileSession:
         if not self._prune_invariant_guards:
             self._drop_unrebuildable_guards()
         summary = self.summary()
-        if require_complete and summary.capture_errors:
+        # On a resumable session, only the errors THIS cycle raised. A call that
+        # failed already raised to the caller, who saw it and carried on; making
+        # every later render refuse over it would freeze the artifact at the
+        # last good call for the rest of the loop.
+        fresh_errors = list(summary.capture_errors)[self._gate_error_mark :]
+        if require_complete and fresh_errors:
             raise PackageError(
                 "Precompilation is incomplete because capture raised: "
-                f"{list(summary.capture_errors)}. Re-run every example successfully, "
+                f"{fresh_errors}. Re-run every example successfully, "
                 "or pass require_complete=False to save the partial artifact."
             )
         if require_no_dropped_guards and summary.dropped_guards:
@@ -2466,6 +2773,18 @@ class PrecompileSession:
                     f"were bypassed and will serve nothing: {list(summary.bypassed)}. "
                     f"This usually means their guards could not be serialized. Pass "
                     f"require_complete=False to accept a partial artifact."
+                )
+            if summary.variants_dropped_for_codegen_target:
+                raise PackageError(
+                    f"Precompilation is incomplete: "
+                    f"{summary.variants_dropped_for_codegen_target} variant(s) were "
+                    f"compiled after inductor's CPU codegen target (the vector ISA "
+                    f"and width its kernels are built for, from cpp.simdlen and the "
+                    f"toolchain) moved away from the one this capture recorded on "
+                    f"its first graph, and were left out of the artifact, so the "
+                    f"calls that exercised them are not served. Keep that "
+                    f"configuration fixed for the whole capture, or pass "
+                    f"require_complete=False to accept the gap."
                 )
         if summary.wont_generalize:
             log.warning(
@@ -2542,13 +2861,16 @@ class PrecompileSession:
         output, which has a source form (the make_fx tracer emits exactly this),
         unlike the guard trees and transformed bytecode beside it. Anything that
         fails to render -- a training graph, an effectful op, a graph with no
-        compute -- is absent here and stays pickled, warned about once and
-        listed in ``summary().unrendered_backends``, because a training
-        artifact that quietly falls back to the bundle is not the readable one
-        the caller asked for.
+        compute -- is absent here and stays pickled, warned about once per
+        backend id and listed in ``summary().unrendered_backends``, because a
+        training artifact that quietly falls back to the bundle is not the
+        readable one the caller asked for.
 
         Rendering re-runs AOTAutograd + Inductor on the retained graph, so it is
-        a second lowering, paid once per subgraph that reaches the artifact.
+        a second lowering. It is paid once per subgraph for the life of the
+        session -- an accumulating capture renders after every call, and a
+        backend id's graph never changes -- with only the namespacing redone
+        per render, since that depends on which subgraphs share the artifact.
         """
         from torch._functorch import aot_autograd
 
@@ -2556,35 +2878,82 @@ class PrecompileSession:
             return {}
         rendered: dict[str, str] = {}
         for backend_id in backend_ids:
-            held = self._backend_obj.graphs.get(str(backend_id))
-            if held is None:
-                continue
-            gm, fakes = held
-            try:
-                # grad_enabled is what makes AOTAutograd emit the joint
-                # forward+backward for a training capture; without it the
-                # backward is silently absent and the served output loses its
-                # grad_fn.
-                source, _ = aot_autograd.compile_to_python(
-                    gm, fakes, grad_enabled=self._training
-                )
-            except Exception as e:
-                reason = f"{type(e).__name__}: {e}"
-                self._unrendered_backends[str(backend_id)] = reason
-                log.warning(
-                    "precompile: subgraph %s could not be composed to source "
-                    "and stays pickled (%s)",
-                    backend_id,
-                    reason,
-                )
-                continue
-            rendered[str(backend_id)] = source
+            key = str(backend_id)
+            if key not in self._rendered_sources:
+                held = self._backend_obj.graphs.get(key)
+                if held is None:
+                    continue
+                gm, fakes = held
+                try:
+                    # grad_enabled is what makes AOTAutograd emit the joint
+                    # forward+backward for a training capture; without it the
+                    # backward is silently absent and the served output loses
+                    # its grad_fn.
+                    source, _ = aot_autograd.compile_to_python(
+                        gm, fakes, grad_enabled=self._training
+                    )
+                except Exception as e:
+                    reason = f"{type(e).__name__}: {e}"
+                    self._unrendered_backends[key] = reason
+                    log.warning(
+                        "precompile: subgraph %s could not be composed to source "
+                        "and stays pickled (%s)",
+                        key,
+                        reason,
+                    )
+                    source = None
+                self._rendered_sources[key] = source
+            source = self._rendered_sources[key]
+            if source is not None:
+                rendered[key] = source
         from torch._functorch._aot_autograd.to_standalone_python import (
             namespace_module_names,
         )
 
         keys = list(rendered)
         return dict(zip(keys, namespace_module_names([rendered[k] for k in keys])))
+
+    def snapshot_artifact(
+        self,
+        *,
+        require_complete: bool = True,
+        require_no_risky_drops: bool = True,
+        require_no_dropped_guards: bool = False,
+    ) -> tuple[str, bytes]:
+        """Render everything captured SO FAR, leaving this session able to capture more.
+
+        Same gates and the same rendering as :meth:`artifact`, but derived from
+        policy-filtered COPIES of the code entries, so the accumulated guard
+        state and the facts it was derived from survive intact for the next
+        call. See :meth:`_policy_filtered_codes` for why applying the policy to
+        the session itself would quietly destroy the artifact.
+        """
+        # The policy FIRST: it is what populates policy_dropped_guards, and the
+        # gates below read them. Gating first leaves require_no_risky_drops
+        # judging the previous render's numbers -- inert on the first call, and
+        # a capture that renders once therefore reports POLICY_DROPPED_GUARDS =
+        # [] while that same pass dropped every invariant slot.
+        codes = self._policy_filtered_codes()
+        summary = self._gated_summary(
+            require_complete=require_complete,
+            require_no_risky_drops=require_no_risky_drops,
+            require_no_dropped_guards=require_no_dropped_guards,
+            caller="snapshot_artifact()",
+        )
+        from torch._precompile import _build_multigraph_artifact
+
+        backends = self._collect_backends()
+        entry = dataclasses.replace(self._package.cache_entry(), codes=codes)
+        rendered = self.rendered_backends(list(backends))
+        return _build_multigraph_artifact(
+            entry,
+            backends,
+            self._with_unrendered(summary),
+            self._backend,
+            self._entry_fn,
+            rendered,
+            grad_enabled=self._capture_grad_mode(),
+        )
 
     def _with_unrendered(self, summary: PrecompileSummary) -> PrecompileSummary:
         # Rendering runs after the gates, so the gated summary predates what
@@ -2878,6 +3247,7 @@ def precompile_capture(
     example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
     invariants: str | None = None,
     training: bool = False,
+    keep_example_grads: bool = False,
     prune_invariant_guards: bool = False,
     collect_results: bool = False,
     keep_graphs: bool = False,
@@ -2918,9 +3288,46 @@ def precompile_capture(
         example_inputs=example_inputs,
         invariants=invariants,
         training=training,
+        keep_example_grads=keep_example_grads,
         prune_invariant_guards=prune_invariant_guards,
         collect_results=collect_results,
         keep_graphs=keep_graphs,
+    )
+
+
+def precompile_accumulate(
+    fn: Callable[..., object],
+    *,
+    backend: str = "inductor",
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+    | None = None,
+    recompile_limit: int = 256,
+    dynamic: bool | None = None,
+    invariants: str | None = None,
+    training: bool = False,
+) -> PrecompileSession:
+    r"""A session the caller drives one call at a time.
+
+    Unlike :func:`precompile_capture` this takes no ``example_inputs``: the
+    calls are made by the caller, between whatever else their loop has to do,
+    and the session is entered and left around each one. It therefore keeps its
+    compiled region alive across cycles rather than tearing it down, which is
+    what lets a later call reuse the variants an earlier one produced.
+    """
+    return PrecompileSession(
+        fn,
+        backend=backend,
+        guard_filter_fn=guard_filter_fn,
+        recompile_limit=recompile_limit,
+        dynamic=dynamic,
+        example_inputs=None,
+        invariants=invariants,
+        training=training,
+        resumable=True,
+        prune_invariant_guards=True,
+        # Retain graphs only where they will be rendered: an eager "backend"
+        # is an fx graph with no source to emit.
+        keep_graphs=backend != "eager",
     )
 
 

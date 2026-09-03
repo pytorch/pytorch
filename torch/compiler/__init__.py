@@ -9,10 +9,11 @@ import torch
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 
 # ``torch.compiler.precompile``: example_inputs=[(...), ...] is the calling convention
-# (the 2.14 positional form survives under a FutureWarning), and ``tracer`` picks the
-# front-end -- make_fx takes a single call and produces a self-contained Python source
-# plus an acceleration cache, dynamo takes several and produces a guarded multi-graph
-# artifact spanning graph breaks and recompilations. Re-exported from the private impl, whose ``_PrecompileApi.__module__`` is forced to
+# (the 2.14 positional form survives under a FutureWarning, and ``accumulate`` drives
+# the calls from the caller's loop), and ``tracer`` picks the front-end -- make_fx
+# takes a single call and produces a self-contained Python source plus an acceleration
+# cache, dynamo takes several and produces a guarded multi-graph artifact spanning graph
+# breaks and recompilations. Re-exported from the private impl, whose ``_PrecompileApi.__module__`` is forced to
 # "torch.compiler" so this is the single public location. Distinct from
 # ``torch._dynamo.config.caching_precompile``
 # (a ``torch.compile`` guard-serialization caching mode), despite the shared word.
@@ -20,6 +21,7 @@ from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 # conventional ``except torch.compiler.PrecompileError`` works; its ``__module__`` is already
 # forced to "torch.compiler" in the impl module, matching this public location.
 from torch._precompile import (
+    AccumulatingCapture as AccumulatingCapture,
     precompile as precompile,
     PrecompiledCallable as PrecompiledCallable,
     PrecompileError as PrecompileError,
@@ -57,6 +59,7 @@ __all__ = [
     "cudagraph_mark_warmup_incomplete",
     "load_compiled_function",
     "precompile",
+    "AccumulatingCapture",
     "ExampleInput",
     "FrameInvariants",
     "GuardFact",
