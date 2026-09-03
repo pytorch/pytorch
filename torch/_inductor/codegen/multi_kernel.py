@@ -6,6 +6,7 @@ import os
 import pathlib
 from typing import Any
 
+import torch
 from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
@@ -32,6 +33,46 @@ class MultiKernelState:
     def __init__(self):
         self.subkernel_to_kernel_name = {}
         self.kernel_defs = IndentedBuffer()
+
+    def define_kernel_plan(
+        self,
+        plans: list[list[Any]],
+        arg_index: list[list[list[int]]],
+    ) -> str:
+        """Define a bounded runtime choice between ordered kernel sequences."""
+        plan_names = tuple(tuple(k.kernel_name for k in plan) for plan in plans)
+        arg_index_key = tuple(
+            tuple(tuple(indices) for indices in plan_indices)
+            for plan_indices in arg_index
+        )
+        cache_key = ("plan", plan_names, arg_index_key)
+        if cache_key in self.subkernel_to_kernel_name:
+            return self.subkernel_to_kernel_name[cache_key]
+
+        if V.graph.cpp_wrapper:
+            raise NotImplementedError(
+                "multi-kernel plan selection is not supported by the C++ wrapper"
+            )
+
+        multi_kernel_name = f"multi_kernel_plan_{len(self.subkernel_to_kernel_name)}"
+        self.subkernel_to_kernel_name[cache_key] = multi_kernel_name
+        buf = self.kernel_defs
+        buf.writeline("")
+        buf.writeline(f"{multi_kernel_name} = async_compile.multi_kernel_plan(")
+        with buf.indent():
+            buf.writeline(f"{multi_kernel_name!r},")
+            buf.writeline("[")
+            with buf.indent():
+                for names in plan_names:
+                    buf.writeline("[")
+                    with buf.indent():
+                        for name in names:
+                            buf.writeline(f"{name},")
+                    buf.writeline("],")
+            buf.writeline("],")
+            buf.writeline(f"arg_index={arg_index!r},")
+        buf.writeline(")")
+        return multi_kernel_name
 
     def define_kernel(
         self,
@@ -303,6 +344,108 @@ class MultiKernel:
         pass
 
 
+class MultiKernelPlan:
+    """Compile-time wrapper for a bounded choice of ordered kernel sequences."""
+
+    def __init__(self, plans):
+        if len(plans) < 2 or any(len(plan) < 1 for plan in plans):
+            raise AssertionError("expected at least two non-empty kernel plans")
+        if V.graph.cpp_wrapper:
+            raise NotImplementedError(
+                "multi-kernel plan selection is not supported by the C++ wrapper"
+            )
+        self.plans = plans
+        all_kernels = [kernel for plan in plans for kernel in plan]
+        workspace_args = all_kernels[0].args.workspace_args
+        if any(
+            kernel.args.workspace_args != workspace_args for kernel in all_kernels[1:]
+        ):
+            raise NotImplementedError(
+                "multi-kernel plans with different internal workspaces are not supported"
+            )
+        self.call_args, self.arg_types, arg_index = self._union_call_args(plans)
+        self.kernel_name = V.graph.wrapper_code.multi_kernel_state.define_kernel_plan(
+            plans, arg_index
+        )
+        self.args = object()
+
+    @staticmethod
+    def _union_call_args(plans):
+        call_args = []
+        arg_types = []
+        arg_to_index = {}
+        arg_index = []
+        for plan in plans:
+            plan_indices = []
+            for kernel in plan:
+                _, kernel_args, _, kernel_arg_types = kernel.args.python_argdefs()
+                kernel.add_numel_to_call_args(
+                    "multi_kernel_plan", kernel_args, kernel_arg_types
+                )
+                indices = []
+                for arg, arg_type in zip(kernel_args, kernel_arg_types):
+                    if arg in arg_to_index:
+                        index = arg_to_index[arg]
+                        if arg_types[index] != arg_type:
+                            raise AssertionError(
+                                f"inconsistent type for plan argument {arg}: "
+                                f"{arg_types[index]} != {arg_type}"
+                            )
+                    else:
+                        index = len(call_args)
+                        arg_to_index[arg] = index
+                        call_args.append(arg)
+                        arg_types.append(arg_type)
+                    indices.append(index)
+                plan_indices.append(indices)
+            arg_index.append(plan_indices)
+        return call_args, arg_types, arg_index
+
+    def call_kernel(self, kernel_name):
+        if kernel_name != self.kernel_name:
+            raise AssertionError(
+                f"expected kernel_name == self.kernel_name, "
+                f"got {kernel_name} != {self.kernel_name}"
+            )
+        V.graph.wrapper_code.write_triton_header_once()
+        for ws in self.plans[0][0].args.workspace_args:
+            V.graph.wrapper_code.generate_workspace_allocation(ws)
+        V.graph.wrapper_code.generate_kernel_call(
+            kernel_name, self.call_args, arg_types=self.arg_types
+        )
+        for ws in reversed(self.plans[0][0].args.workspace_args):
+            V.graph.wrapper_code.generate_workspace_deallocation(ws)
+
+    def codegen_nan_check(self):
+        # The selected plan has already produced the common logical outputs.
+        # Reusing the first kernel's checks would miss outputs of a later stage,
+        # so leave checks to the enclosing graph until output metadata is wired.
+        pass
+
+    @property
+    def removed_buffers(self):
+        per_plan = [
+            OrderedSet.union(*(kernel.removed_buffers for kernel in plan))
+            for plan in self.plans
+        ]
+        return OrderedSet.intersection(*per_plan)
+
+    @property
+    def inplaced_to_remove(self):
+        per_plan = [
+            OrderedSet.union(*(kernel.inplaced_to_remove for kernel in plan))
+            for plan in self.plans
+        ]
+        return OrderedSet.intersection(*per_plan)
+
+    @property
+    def inplace_update_buffers(self):
+        return {}
+
+    def warn_mix_layout(self, kernel_name: str):
+        pass
+
+
 class MultiKernelCall:
     """
     This class is called at run time to actually run the kernel
@@ -527,6 +670,168 @@ class MultiKernelCall:
                 row[f"kernel{i}_path"] = ""
                 row[f"kernel{i}_latency"] = ""
         return row
+
+
+class MultiKernelPlanCall:
+    """Runtime selector between bounded, ordered kernel plans.
+
+    Unlike :class:`MultiKernelCall`, a choice may contain more than one kernel.
+    This is useful when two implementations of one logical operation have
+    different launch counts, for example a one-pass reduction versus a partial
+    reduction followed by a final reduction.  The selector benchmarks the
+    complete sequence and caches only the winning plan index.
+
+    ``arg_index[plan][kernel]`` contains indices into the arguments passed to
+    :meth:`run`.  Keeping argument routing outside the kernels lets different
+    stages share an intermediate buffer while another plan omits it entirely.
+    """
+
+    def __init__(self, multi_kernel_name, plans, arg_index):
+        if len(plans) < 2:
+            raise AssertionError(f"expected at least 2 plans, got {len(plans)}")
+        if any(len(plan) < 1 for plan in plans):
+            raise AssertionError("kernel plans must be non-empty")
+        if len(arg_index) != len(plans) or any(
+            len(indices) != len(plan) for plan, indices in zip(plans, arg_index)
+        ):
+            raise AssertionError("arg_index must match the kernel plan structure")
+
+        self._plans = plans
+        self.multi_kernel_name = multi_kernel_name
+        self.arg_index = arg_index
+        self.disable_cache = (
+            os.environ.get("TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE") == "1"
+        )
+        self.picked_plan = None
+        if config.triton.multi_kernel > 1:
+            picked_by_config = config.triton.multi_kernel - 2
+            if picked_by_config >= len(plans):
+                raise AssertionError(
+                    f"expected picked_by_config < len(plans), "
+                    f"got {picked_by_config} >= {len(plans)}"
+                )
+            self.picked_plan = picked_by_config
+        elif not self.disable_cache:
+            self.load_cache()
+
+    @property
+    def plans(self):
+        """Resolve compilation futures without losing plan boundaries."""
+        for plan_index, plan in enumerate(self._plans):
+            for kernel_index, kernel in enumerate(plan):
+                if isinstance(kernel, CodeCacheFuture):
+                    self._plans[plan_index][kernel_index] = kernel.result()
+        return self._plans
+
+    def cache_file_path(self):
+        # Include plan boundaries: [[a, b], [c]] is not equivalent to
+        # [[a], [b, c]], even though both contain the same flattened kernels.
+        plan_keys = []
+        for plan in self.plans:
+            plan_keys.append(
+                ",".join(
+                    f"{k.fn.cache_key}{k.size_hints!r}{k.triton_meta!r}" for k in plan
+                )
+            )
+        key = code_hash(f"{plan_keys!r};{self.arg_index!r}")
+        _, _, path = get_path(key, "picked_kernel_plan")
+        return pathlib.Path(path)
+
+    def load_cache(self):
+        if self.picked_plan is not None:
+            raise AssertionError("expected self.picked_plan to be None")
+        path = self.cache_file_path()
+        if path.exists():
+            with path.open() as fd:
+                self.picked_plan = int(fd.read())
+            if not 0 <= self.picked_plan < len(self._plans):
+                raise AssertionError(
+                    f"expected 0 <= picked_plan < {len(self._plans)}, "
+                    f"got {self.picked_plan}"
+                )
+            log.debug("Load picked plan %d from cache file %s", self.picked_plan, path)
+
+    def store_cache(self):
+        if self.picked_plan is None:
+            raise AssertionError("expected self.picked_plan to not be None")
+        path = self.cache_file_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_atomic(path, str(self.picked_plan))
+        log.debug("Store picked plan %d to cache file %s", self.picked_plan, path)
+
+    def _get_filtered_args(self, args, plan_index, kernel_index):
+        return [args[i] for i in self.arg_index[plan_index][kernel_index]]
+
+    def _clone_plan_args(self, args, plan_index):
+        """Clone each mutated union argument once for the whole plan.
+
+        Cloning each stage independently would disconnect a producer's cloned
+        intermediate from the consumer's cloned input.  Cloning the union here
+        preserves that sharing across the complete benchmarked sequence.
+        """
+        from ..compile_fx import clone_preserve_strides
+
+        cloned = list(args)
+        mutated_indices = OrderedSet()
+        for kernel_index, kernel in enumerate(self.plans[plan_index]):
+            indices = self.arg_index[plan_index][kernel_index]
+            for local_index, name in enumerate(kernel.fn.arg_names[: len(indices)]):
+                if name in kernel.mutated_arg_names:
+                    mutated_indices.add(indices[local_index])
+        clones_by_identity = {}
+        for index in mutated_indices:
+            arg = args[index]
+            if not isinstance(arg, torch.Tensor):
+                raise AssertionError(
+                    f"Expected torch.Tensor for mutated plan argument {index}, "
+                    f"got {type(arg)}"
+                )
+            identity = id(arg)
+            if identity not in clones_by_identity:
+                clones_by_identity[identity] = clone_preserve_strides(arg)
+            cloned[index] = clones_by_identity[identity]
+        return cloned
+
+    def benchmark_plans(self, *args, **kwargs):
+        def wrap_plan(plan_index):
+            def inner():
+                cloned_args = self._clone_plan_args(args, plan_index)
+                for kernel_index, kernel in enumerate(self.plans[plan_index]):
+                    filtered_args = self._get_filtered_args(
+                        cloned_args, plan_index, kernel_index
+                    )
+                    kernel.run(*filtered_args, **kwargs)
+
+            return inner
+
+        device = self.plans[0][0].device_props.type
+        return [
+            benchmarker.benchmark(wrap_plan(plan_index), device=device, rep=40)
+            for plan_index in range(len(self.plans))
+        ]
+
+    def run(self, *args, **kwargs):
+        if self.picked_plan is None:
+            timings = self.benchmark_plans(*args, **kwargs)
+            self.picked_plan = timings.index(min(timings))
+            log.debug(
+                "pick %dth kernel plan in %s. Plans %s. Timings %s",
+                self.picked_plan,
+                self.multi_kernel_name,
+                [
+                    [k.inductor_meta.get("kernel_name") for k in plan]
+                    for plan in self.plans
+                ],
+                timings,
+            )
+            if not self.disable_cache:
+                self.store_cache()
+
+        for kernel_index, kernel in enumerate(self.plans[self.picked_plan]):
+            filtered_args = self._get_filtered_args(
+                args, self.picked_plan, kernel_index
+            )
+            kernel.run(*filtered_args, **kwargs)
 
 
 class SizeHintMultiKernel(MultiKernel):
