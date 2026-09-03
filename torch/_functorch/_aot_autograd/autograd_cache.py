@@ -942,7 +942,7 @@ def create_fx_config(
         boxed_forward_device_index = None
     else:
         cudagraphs = compiler_config_extra.cudagraphs
-        boxed_forward_device_index = compiler_config_extra.forward_device
+        boxed_forward_device_index = compiler_config_extra.forward_device_index
     return {
         "cudagraphs": cudagraphs,
         "boxed_forward_device_index": boxed_forward_device_index,

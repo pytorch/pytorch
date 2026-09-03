@@ -370,7 +370,7 @@ inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metr
 #     eager code BETWEEN graph partitions (graph_partition mode) or
 #     between dynamo graphs move per call; partitioned forwards therefore
 #     demote ALL saved activations, conservatively including pool-owned
-#     ones (forward_is_partitioned -> get_static_bw_input_idxs, see
+#     ones (forward_is_cudagraph_partitioned -> get_static_bw_input_idxs, see
 #     compile_fx_backward), and across dynamo graph breaks staticness only
 #     transfers within a pool lineage (cudagraph_managed_idxs, cudagraph
 #     trees).
@@ -2480,10 +2480,7 @@ def fw_compiler_freezing(
     dynamo_model: GraphModule,
     num_example_inputs: int,
     inner_compile: Callable[..., Any],
-    # TODO: Take compiler_config_extra instead
-    cudagraphs: BoxedBool,
-    graph_id: int,
-    forward_device: BoxedDeviceIndex,
+    compiler_config_extra: CompilerConfigExtra,
 ) -> Callable[[list[object]], Sequence[torch.Tensor]]:
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
@@ -2563,10 +2560,10 @@ def fw_compiler_freezing(
             opt_model,
             aot_example_inputs,
             static_input_idxs=static_input_idxs,
-            cudagraphs=cudagraphs,
-            graph_id=graph_id,
+            cudagraphs=compiler_config_extra.cudagraphs,
+            graph_id=compiler_config_extra.graph_id,
             is_inference=True,
-            boxed_forward_device_index=forward_device,
+            boxed_forward_device_index=compiler_config_extra.forward_device_index,
             layout_opt=layout_opt,
         )
 
@@ -2720,15 +2717,15 @@ def cudagraph_annotation_context(
 class CompilerConfigExtra:
     cudagraphs: BoxedBool
     graph_id: int
-    forward_device: BoxedDeviceIndex
-    forward_is_partitioned: BoxedBool
+    forward_device_index: BoxedDeviceIndex
+    forward_is_cudagraph_partitioned: BoxedBool
     cudagraphs_bwd_override: bool | None = None
 
 
 def create_compiler_config_extra(
     gm: GraphModule | GmWrapper,
 ) -> CompilerConfigExtra:
-    gm_meta = gm.meta if isinstance(gm, GraphModule) else None
+    dynamo_graph_metadata = gm.meta if isinstance(gm, GraphModule) else None
 
     # Although cudagraphs may have been enabled via config, various
     # conditions (which are tested within the bowels of Inductor) may
@@ -2742,8 +2739,9 @@ def create_compiler_config_extra(
     # Disabling fwd disables bwd (copying activations isn't profitable),
     # so cudagraphs_bwd_override is only needed for fwd=True / bwd=False.
     if (
-        gm_meta is not None
-        and (annotation := gm_meta.get("cudagraph_annotation")) is not None
+        dynamo_graph_metadata is not None
+        and (annotation := dynamo_graph_metadata.get("cudagraph_annotation"))
+        is not None
     ):
         if annotation.fwd is not None and annotation.fwd != config.triton.cudagraphs:
             cudagraphs = BoxedBool(annotation.fwd)
@@ -2771,19 +2769,19 @@ def create_compiler_config_extra(
     graph_id = next(_graph_counter)
 
     # See [Backward Generation Handling]
-    forward_device = BoxedDeviceIndex(None)
+    forward_device_index = BoxedDeviceIndex(None)
 
     # Set by the forward compilation when it is partitioned for CUDA graphs.
     # The backward reads this to decide whether saved tensors can be assumed
     # to have fixed addresses.
-    forward_is_partitioned = BoxedBool(False)
+    forward_is_cudagraph_partitioned = BoxedBool(False)
 
     return CompilerConfigExtra(
         cudagraphs=cudagraphs,
         graph_id=graph_id,
-        forward_device=forward_device,
+        forward_device_index=forward_device_index,
         cudagraphs_bwd_override=cudagraphs_bwd_override,
-        forward_is_partitioned=forward_is_partitioned,
+        forward_is_cudagraph_partitioned=forward_is_cudagraph_partitioned,
     )
 
 
@@ -2926,7 +2924,7 @@ def compile_fx_forward(
             cudagraphs=compiler_config_extra.cudagraphs,
             graph_id=compiler_config_extra.graph_id,
             is_inference=is_inference,
-            boxed_forward_device_index=compiler_config_extra.forward_device,
+            boxed_forward_device_index=compiler_config_extra.forward_device_index,
         )
 
         if (
@@ -2935,7 +2933,7 @@ def compile_fx_forward(
             and result.partition_maps
             and len(result.partition_maps) > 1
         ):
-            compiler_config_extra.forward_is_partitioned.value = True
+            compiler_config_extra.forward_is_cudagraph_partitioned.value = True
 
         return result
 
@@ -2987,7 +2985,7 @@ def compile_fx_backward(
         #    meta["is_static_input"] to demote it to the runtime
         #    copy_if_misaligned treatment. Unstamped placeholders default to
         #    static, preserving the name-based classification.
-        if compiler_config_extra.forward_is_partitioned.value:
+        if compiler_config_extra.forward_is_cudagraph_partitioned.value:
             candidate_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
         else:
             candidate_idxs = range(fixed)
@@ -3012,7 +3010,7 @@ def compile_fx_backward(
                 cudagraphs=cudagraphs,
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
-                boxed_forward_device_index=compiler_config_extra.forward_device,
+                boxed_forward_device_index=compiler_config_extra.forward_device_index,
             )
 
 
@@ -3367,9 +3365,7 @@ def _compile_fx_main(
                 dynamo_model=model_,
                 num_example_inputs=num_example_inputs,
                 inner_compile=inner_compile,
-                cudagraphs=compiler_config_extra.cudagraphs,
-                graph_id=compiler_config_extra.graph_id,
-                forward_device=compiler_config_extra.forward_device,
+                compiler_config_extra=compiler_config_extra,
             )
         else:
             inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
