@@ -1,6 +1,5 @@
 #include <ATen/native/quantized/cpu/qlinear.h>
 #include <ATen/record_function.h>
-#include <c10/core/DeviceType.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/Layout.h>
@@ -13,7 +12,6 @@
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
-#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/jit/serialization/pickle.h>
@@ -1357,13 +1355,12 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
     int num_tensors,
     AtenTensorHandle* flatten_tensor_args) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    if (!proxy_executor) {
-      throw std::runtime_error(
-          "Unable to find a proxy executor to run custom ops. Please check if "
-          "there is a json file generated in the same directory as the so, or use "
-          "torch._inductor.aoti_compile_and_package to package everything into a "
-          "PT2 artifact.");
-    }
+    TORCH_CHECK(
+        proxy_executor,
+        "Unable to find a proxy executor to run custom ops. Please check if "
+        "there is a json file generated in the same directory as the so, or use "
+        "torch._inductor.aoti_compile_and_package to package everything into a "
+        "PT2 artifact.");
     ProxyExecutor* executor = reinterpret_cast<ProxyExecutor*>(proxy_executor);
     executor->call_function(
         extern_node_index,
