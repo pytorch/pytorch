@@ -54,24 +54,6 @@ if TYPE_CHECKING:
 log: logging.Logger = logging.getLogger(__name__)
 
 
-def _accepts_flex_attention_mutated_inputs(
-    append_choices: typing.Callable[..., Any],
-) -> bool:
-    try:
-        parameters = inspect.signature(append_choices).parameters
-    except (TypeError, ValueError):
-        return False
-    mutated_inputs = parameters.get("mutated_inputs")
-    return (
-        mutated_inputs is not None
-        and mutated_inputs.kind
-        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
-    ) or any(
-        parameter.kind is inspect.Parameter.VAR_KEYWORD
-        for parameter in parameters.values()
-    )
-
-
 if TYPE_CHECKING or not config.is_fbcode():
 
     def _maybe_log_inductor_mm_shape(
@@ -214,16 +196,11 @@ class InductorChoices:
         kernel_options: dict[str, Any],
         sparse_q_block_size: int,
         sparse_kv_block_size: int,
-        mutated_inputs: list[Any] | None = None,
     ) -> list[Any]:
-        """Append backend-specific flex-attention template choices.
+        """Append backend-specific forward flex-attention template choices.
 
         Default is a no-op. Subclasses may override to inject additional
         autotuning candidates (e.g. TLX templates in fbcode).
-
-        Forward calls provide nine input nodes and two subgraphs. Backward calls
-        provide sixteen input nodes, four subgraphs, and the output buffers in
-        ``mutated_inputs``.
         """
         return choices
 
@@ -237,27 +214,16 @@ class InductorChoices:
         kernel_options: dict[str, Any],
         sparse_q_block_size: int,
         sparse_kv_block_size: int,
+        *,
         mutated_inputs: list[Any],
     ) -> list[Any]:
-        """Append backend-specific backward flex-attention choices."""
-        append_choices = self.append_flex_attention_choices
-        if (
-            getattr(append_choices, "__func__", None)
-            is InductorChoices.append_flex_attention_choices
-            or not _accepts_flex_attention_mutated_inputs(append_choices)
-        ):
-            return choices
-        return append_choices(
-            choices,
-            configs,
-            input_nodes,
-            subgraphs,
-            layout,
-            kernel_options,
-            sparse_q_block_size,
-            sparse_kv_block_size,
-            mutated_inputs=mutated_inputs,
-        )
+        """Append backend-specific backward flex-attention template choices.
+
+        Default is a no-op. Subclasses may override to inject additional
+        autotuning candidates. Backward calls provide sixteen input nodes, four
+        subgraphs, and the output buffers in ``mutated_inputs``.
+        """
+        return choices
 
     def _logging_context(self) -> dict[str, Any]:
         """Extra fields for the per-shape log row. Subclasses may override."""
@@ -886,10 +852,6 @@ class _ComposedInductorChoices(InductorChoices):
         super().__init__()
         self._choices = tuple(choices)
         self._dispatchers: dict[str, typing.Callable[..., Any] | None] = {}
-        self._flex_attention_backward_dispatcher: typing.Callable[..., Any] | None = (
-            None
-        )
-        self._flex_attention_backward_dispatcher_initialized = False
 
     def __getattribute__(self, name: str) -> Any:
         try:
@@ -938,64 +900,6 @@ class _ComposedInductorChoices(InductorChoices):
         if dispatcher is None:
             return object.__getattribute__(self, name)
         return dispatcher
-
-    def append_flex_attention_backward_choices(
-        self,
-        choices: list[Any],
-        configs: list[Any],
-        input_nodes: list[Any],
-        subgraphs: list[Any],
-        layout: Any,
-        kernel_options: dict[str, Any],
-        sparse_q_block_size: int,
-        sparse_kv_block_size: int,
-        mutated_inputs: list[Any],
-    ) -> list[Any]:
-        if not self._flex_attention_backward_dispatcher_initialized:
-            default = inspect.getattr_static(
-                InductorChoices, "append_flex_attention_choices"
-            )
-            dispatcher = None
-            owner = ""
-            for choice in self._choices:
-                choice_impl = inspect.getattr_static(
-                    choice, "append_flex_attention_choices"
-                )
-                if choice_impl is default:
-                    continue
-                append_choices = choice.append_flex_attention_choices
-                if not _accepts_flex_attention_mutated_inputs(append_choices):
-                    continue
-                if dispatcher is not None:
-                    log.warning(
-                        "InductorChoices hook %r accepts backward inputs in both %s and %s; "
-                        "list order selects %s",
-                        "append_flex_attention_choices",
-                        owner,
-                        type(choice).__name__,
-                        owner,
-                    )
-                    continue
-                dispatcher = append_choices
-                owner = type(choice).__name__
-
-            self._flex_attention_backward_dispatcher = dispatcher
-            self._flex_attention_backward_dispatcher_initialized = True
-
-        dispatcher = self._flex_attention_backward_dispatcher
-        if dispatcher is None:
-            return choices
-        return dispatcher(
-            choices,
-            configs,
-            input_nodes,
-            subgraphs,
-            layout,
-            kernel_options,
-            sparse_q_block_size,
-            sparse_kv_block_size,
-            mutated_inputs=mutated_inputs,
-        )
 
     def uuid(self) -> tuple[str, tuple[Any, ...]]:
         return (

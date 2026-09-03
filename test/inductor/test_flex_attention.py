@@ -6087,11 +6087,11 @@ class GraphModule(torch.nn.Module):
     @supported_platform
     @skip_on_cpu
     @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
-    def test_backward_calls_flex_attention_choices_hook(self, device):
+    def test_backward_calls_flex_attention_backward_choices_hook(self, device):
         from torch._inductor.choices import InductorChoices
         from torch._inductor.virtualized import V
 
-        class LegacyChoices(InductorChoices):
+        class ForwardChoices(InductorChoices):
             def __init__(self):
                 self.calls = 0
 
@@ -6128,7 +6128,7 @@ class GraphModule(torch.nn.Module):
                 self.stock_input_nodes = None
                 self.stock_mutated_inputs = None
 
-            def append_flex_attention_choices(
+            def append_flex_attention_backward_choices(
                 self,
                 choices,
                 configs,
@@ -6138,7 +6138,8 @@ class GraphModule(torch.nn.Module):
                 kernel_options,
                 sparse_q_block_size,
                 sparse_kv_block_size,
-                mutated_inputs=None,
+                *,
+                mutated_inputs,
             ):
                 self.calls.append((input_nodes, subgraphs, mutated_inputs))
                 stock_choice = choices[0]
@@ -6148,20 +6149,12 @@ class GraphModule(torch.nn.Module):
                 choices.append(SelectedChoice(stock_choice, self))
                 return choices
 
-        class VariadicChoices(InductorChoices):
-            def __init__(self):
-                self.calls = []
-
-            def append_flex_attention_choices(self, *args, **kwargs):
-                self.calls.append((args[2], args[3], kwargs["mutated_inputs"]))
-                return args[0]
-
         class MutatingChoices(InductorChoices):
             def __init__(self):
                 self.stock_input_node_count = None
                 self.stock_mutated_input_count = None
 
-            def append_flex_attention_choices(
+            def append_flex_attention_backward_choices(
                 self,
                 choices,
                 configs,
@@ -6171,7 +6164,8 @@ class GraphModule(torch.nn.Module):
                 kernel_options,
                 sparse_q_block_size,
                 sparse_kv_block_size,
-                mutated_inputs=None,
+                *,
+                mutated_inputs,
             ):
                 input_nodes.clear()
                 subgraphs.clear()
@@ -6225,16 +6219,16 @@ class GraphModule(torch.nn.Module):
                     query, key, value, out, logsumexp, grad_out
                 )
 
-        legacy_choices = LegacyChoices()
-        legacy_result = run_with_choices(legacy_choices)
-        self.assertEqual(legacy_choices.calls, 0)
+        forward_choices = ForwardChoices()
+        stock_result = run_with_choices(forward_choices)
+        self.assertEqual(forward_choices.calls, 0)
 
         recording_choices = RecordingChoices()
         recording_result = run_with_choices(recording_choices)
 
         self.assertEqual(len(recording_choices.calls), 1)
         self.assertTrue(recording_choices.selected)
-        self.assertEqual(recording_result, legacy_result)
+        self.assertEqual(recording_result, stock_result)
         input_nodes, subgraphs, mutated_inputs = recording_choices.calls[0]
         self.assertEqual(len(input_nodes), 16)
         self.assertEqual(len(subgraphs), 4)
@@ -6256,20 +6250,9 @@ class GraphModule(torch.nn.Module):
 
         mutating_choices = MutatingChoices()
         mutating_result = run_with_choices(mutating_choices)
-        self.assertEqual(mutating_result, legacy_result)
+        self.assertEqual(mutating_result, stock_result)
         self.assertEqual(mutating_choices.stock_input_node_count, 16)
         self.assertEqual(mutating_choices.stock_mutated_input_count, 2)
-
-        variadic_choices = VariadicChoices()
-        run_with_choices(variadic_choices)
-
-        self.assertEqual(len(variadic_choices.calls), 1)
-        input_nodes, subgraphs, mutated_inputs = variadic_choices.calls[0]
-        self.assertEqual(len(input_nodes), 16)
-        self.assertEqual(len(subgraphs), 4)
-        self.assertEqual(len(mutated_inputs), 2)
-        self.assertIs(mutated_inputs[0], input_nodes[6])
-        self.assertIs(mutated_inputs[1], input_nodes[7])
 
     @supported_platform
     @skip_on_cpu
@@ -6285,7 +6268,7 @@ class GraphModule(torch.nn.Module):
             def uuid(self):
                 return "captured_grad_mutation_test"
 
-            def append_flex_attention_choices(
+            def append_flex_attention_backward_choices(
                 self,
                 choices,
                 configs,
@@ -6295,7 +6278,8 @@ class GraphModule(torch.nn.Module):
                 kernel_options,
                 sparse_q_block_size,
                 sparse_kv_block_size,
-                mutated_inputs=None,
+                *,
+                mutated_inputs,
             ):
                 self.calls.append((input_nodes, subgraphs, mutated_inputs))
                 return choices
