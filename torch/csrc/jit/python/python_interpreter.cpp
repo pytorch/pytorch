@@ -53,7 +53,7 @@ Operation createPythonOperation(const Node* op_) {
       py::object py_output(func(*py_inputs));
       stack.push_back(returnToIValue(op->output()->type(), py_output));
     } catch (py::error_already_set& e) {
-      throw std::runtime_error(e.what());
+      TORCH_CHECK(false, e.what());
     }
   };
 }

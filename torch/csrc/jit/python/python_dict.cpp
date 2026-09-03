@@ -146,7 +146,7 @@ void initScriptDictBindings(PyObject* module) {
             try {
               key_ivalue = toIValue(std::move(key), self->type()->getKeyType());
             } catch (const py::cast_error&) {
-              throw py::type_error();
+              TORCH_CHECK_TYPE(false, "dict key is of the wrong type");
             }
 
             // Try to convert the value to an IValue.
@@ -154,7 +154,7 @@ void initScriptDictBindings(PyObject* module) {
               value_ivalue =
                   toIValue(std::move(value), self->type()->getValueType());
             } catch (const py::cast_error&) {
-              throw py::type_error();
+              TORCH_CHECK_TYPE(false, "dict value is of the wrong type");
             }
 
             self->setItem(key_ivalue, value_ivalue);
@@ -168,7 +168,7 @@ void initScriptDictBindings(PyObject* module) {
             try {
               key_ivalue = toIValue(std::move(key), self->type()->getKeyType());
             } catch (const py::cast_error&) {
-              throw py::type_error();
+              TORCH_CHECK_TYPE(false, "dict key is of the wrong type");
             }
 
             // If removed = false, that means the key didn't exist in the

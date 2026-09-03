@@ -173,9 +173,9 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
             pybind11::gil_scoped_acquire ag;
             return toIValue(pf->func_(pyFut), PyObjectType::get());
           } catch (py::error_already_set& e) {
-            auto err = std::runtime_error(c10::str(
+            auto err = c10::str(
                 "Got the following error when running the callback: ",
-                e.what()));
+                e.what());
             {
               pybind11::gil_scoped_acquire ag;
               // Release ownership on py::objects and also restore Python
@@ -186,7 +186,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
               PyErr_Clear();
             }
 
-            throw std::runtime_error(err);
+            TORCH_CHECK(false, err);
           }
         },
         PyObjectType::get()));
@@ -846,16 +846,18 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
   try {
     return toIValue(object, type);
   } catch (const py::cast_error& error) {
-    throw std::runtime_error(c10::str(
-        " expected value of type ",
-        type->str(),
-        " for return value but instead got value of type ",
-        py::str(py::type::handle_of(object).attr("__name__")),
-        ".",
-        "\nValue: ",
-        py::repr(object),
-        "\nCast error details: ",
-        error.what()));
+    TORCH_CHECK(
+        false,
+        c10::str(
+            " expected value of type ",
+            type->str(),
+            " for return value but instead got value of type ",
+            py::str(py::type::handle_of(object).attr("__name__")),
+            ".",
+            "\nValue: ",
+            py::repr(object),
+            "\nCast error details: ",
+            error.what()));
   }
 }
 
@@ -868,7 +870,7 @@ inline py::object getScriptedClassOrError(const c10::NamedTypePtr& classType) {
     err << "Unknown reference to ScriptClass ";
     err << classType->name()->qualifiedName();
     err << ". (Did you forget to import it?)";
-    throw std::runtime_error(std::move(err).str());
+    TORCH_CHECK(false, std::move(err).str());
   }
   return py_class;
 }
