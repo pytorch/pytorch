@@ -1666,6 +1666,9 @@ test_libtorch_profiler() {
   # Tests for torch/csrc/profiler/collection.cpp.
   python test/run_test.py --cpp --verbose -i cpp/test_profiler_collection
 
+  # Tests for MTIA profiler activity filtering.
+  python test/run_test.py --cpp --verbose -i cpp/test_mtia_activity_filter
+
   # Tests for torch/csrc/profiler/util.h GlobalStateManager.
   python test/run_test.py --cpp --verbose -i cpp/test_global_state_manager
 }
