@@ -228,6 +228,55 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(tp_mesh.get_group() in groups)
         self.assertTrue(dp_mesh.get_group() in groups)
 
+    @with_comms()
+    def test_abort_2d_mesh(self):
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        groups = mesh_2d.get_all_groups()
+        group_names = [pg.group_name for pg in groups]
+
+        mesh_2d.abort()
+
+        for name in group_names:
+            self.assertNotIn(name, [_world.pg_names[pg] for pg in _world.pg_names])
+
+    @with_comms()
+    def test_abort_1d_mesh(self):
+        mesh_1d = init_device_mesh(
+            self.device_type, (self.world_size,), mesh_dim_names=("world",)
+        )
+        group = mesh_1d.get_group()
+        default_group = _get_default_group()
+        if group is default_group:
+            # 1D mesh reused the WORLD PG; aborting it tears down the
+            # default group which conflicts with @with_comms teardown.
+            return
+        group_name = group.group_name
+
+        mesh_1d.abort()
+
+        self.assertNotIn(group_name, [_world.pg_names[pg] for pg in _world.pg_names])
+
+    @with_comms()
+    def test_abort_submesh_raises(self):
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        submesh = mesh_2d["tp"]
+
+        with self.assertRaisesRegex(RuntimeError, "not supported on a submesh"):
+            submesh.abort()
+
+    @with_comms()
+    def test_abort_no_backend(self):
+        mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(self.world_size),
+            _init_backend=False,
+        )
+        mesh.abort()
+
     @with_comms
     def test_get_local_rank_raises_exception(self):
         mesh_shape = (2, self.world_size // 2)
