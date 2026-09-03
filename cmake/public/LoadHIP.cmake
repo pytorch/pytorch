@@ -220,6 +220,23 @@ list(FILTER CMAKE_MODULE_PATH EXCLUDE REGEX ".*/cmake/hip$")
 set(PYTORCH_FOUND_HIP TRUE)
 find_package_and_print_version(hip REQUIRED CONFIG)
 
+# hip::amdhip64's own DT_NEEDED on libhsa-runtime64.so must resolve at link
+# time. Nothing propagates ${ROCM_PATH}/lib as an -rpath-link entry for it, so
+# if some OTHER -rpath-link source elsewhere in the build (e.g. c10's NUMA
+# workaround, which points at libnuma's directory) happens to also contain an
+# unrelated system libhsa-runtime64.so (a stray distro package sharing that
+# multiarch dir), the linker's rpath-link search -- which is checked before
+# -rpath -- resolves against that wrong/incompatible version instead, causing
+# "undefined reference to hsa_amd_vmem_*"-style failures in ANY target that
+# transitively links hip::amdhip64, however deep. Attach this ROCm install's
+# own lib dir directly to the imported target so every consumer inherits it,
+# regardless of how many levels of target_link_libraries separate them from
+# hip::amdhip64. ELF/GNU-ld only.
+if(NOT WIN32 AND NOT APPLE AND TARGET hip::amdhip64)
+  set_property(TARGET hip::amdhip64 APPEND PROPERTY
+    INTERFACE_LINK_OPTIONS "$<BUILD_INTERFACE:LINKER:-rpath-link,${ROCM_PATH}/lib>")
+endif()
+
 # Map lowercase hip_VERSION vars (from CONFIG mode) to uppercase HIP_VERSION
 # vars that the rest of PyTorch's build expects (previously set by FindHIP MODULE).
 if(hip_VERSION AND NOT HIP_VERSION)
@@ -346,6 +363,10 @@ if(PYTORCH_FOUND_HIP)
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
+    # hipFile is Linux-only and ships with ROCm 7.14 and later, where it is required.
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0")
+      find_package_and_print_version(hipfile REQUIRED)
+    endif()
   endif()
 
   # Optional components.

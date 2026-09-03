@@ -328,12 +328,12 @@ void prepareTrace(
   };
 
   const bool has_cpu_activity =
-      activities.count(torch::autograd::profiler::ActivityType::CPU);
+      activities.contains(torch::autograd::profiler::ActivityType::CPU);
 
   if (has_cpu_activity) {
     insertActivities(torch::autograd::profiler::ActivityType::CPU, kCpuTypes);
   }
-  if (activities.count(torch::autograd::profiler::ActivityType::XPU)) {
+  if (activities.contains(torch::autograd::profiler::ActivityType::XPU)) {
     const auto filter_it =
         activity_filter.find(torch::autograd::profiler::ActivityType::XPU);
     if (filter_it != activity_filter.end()) {
@@ -366,7 +366,7 @@ void prepareTrace(
       insertActivities(torch::autograd::profiler::ActivityType::XPU, kXpuTypes);
     }
   }
-  if (activities.count(torch::autograd::profiler::ActivityType::MTIA)) {
+  if (activities.contains(torch::autograd::profiler::ActivityType::MTIA)) {
     if (config.custom_profiler_config.empty()) {
       insertActivities(
           torch::autograd::profiler::ActivityType::MTIA, kMtiaTypes);
@@ -397,10 +397,10 @@ void prepareTrace(
       }
     }
   }
-  if (activities.count(torch::autograd::profiler::ActivityType::HPU)) {
+  if (activities.contains(torch::autograd::profiler::ActivityType::HPU)) {
     insertActivities(torch::autograd::profiler::ActivityType::HPU, kHpuTypes);
   }
-  if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
+  if (activities.contains(torch::autograd::profiler::ActivityType::CUDA)) {
     insertActivities(torch::autograd::profiler::ActivityType::CUDA, kCudaTypes);
     if (config.enable_cuda_sync_events || get_cuda_sync_enabled()) {
       LOG(INFO) << "Enabling CUDA Sync Events";
@@ -410,7 +410,8 @@ void prepareTrace(
   if (collectivesProfilerExists()) {
     k_activities.insert(libkineto::ActivityType::COLLECTIVE_COMM);
   }
-  if (activities.count(torch::autograd::profiler::ActivityType::PrivateUse1)) {
+  if (activities.contains(
+          torch::autograd::profiler::ActivityType::PrivateUse1)) {
     insertActivities(
         torch::autograd::profiler::ActivityType::PrivateUse1,
         kPrivateUse1Types);
@@ -429,7 +430,7 @@ void toggleCollectionDynamic(const bool enable) {
 #ifdef USE_KINETO
   // TODO: We may want to consider adding another input arg for this function
   // if we want to support turning off certain devices and keeping others on.
-  // For now, we can keep it simple at have it turn off all tracing of "CUDA"
+  // For now, we can keep it simple and have it turn off all tracing of "CUDA"
   // devices
   libkineto::api().activityProfiler().toggleCollectionDynamic(enable);
 #endif // USE_KINETO
