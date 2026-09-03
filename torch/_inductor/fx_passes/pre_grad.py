@@ -507,9 +507,7 @@ def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 elif not node.args and set(node.kwargs) == {"input"}:
                     input_node = node.kwargs["input"]
                 else:
-                    raise AssertionError(
-                        "expected one input for identity node"
-                    )
+                    raise AssertionError("expected one input for identity node")
                 node.replace_all_uses_with(input_node)
                 graph.erase_node(node)
                 work_done = True
