@@ -189,6 +189,14 @@ class _BatchNorm(_NormBase):
             if self.num_batches_tracked is not None:  # type: ignore[has-type]
                 self.num_batches_tracked.add_(1)  # type: ignore[has-type]
                 if self.momentum is None:  # use cumulative moving average
+                    if torch.compiler.is_compiling():
+                        raise RuntimeError(
+                            "BatchNorm(momentum=None) uses a cumulative moving average that reads "
+                            "num_batches_tracked as a Python scalar via .item(), which torch.compile "
+                            "cannot capture under fullgraph=True "
+                            "(see https://github.com/pytorch/pytorch/issues/194504). "
+                            "Consider pass an explicit momentum, or compile with fullgraph=False."
+                        )
                     exponential_average_factor = 1.0 / float(self.num_batches_tracked)
                 else:  # use exponential moving average
                     exponential_average_factor = self.momentum
