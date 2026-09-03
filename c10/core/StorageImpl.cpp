@@ -60,6 +60,18 @@ void warnDeprecatedDataPtr() {
   TORCH_CHECK(false, "Cannot access data pointer of Storage that is invalid.");
 }
 
+void StorageImpl::check_immutable_data_ptr_access() const {
+  if (immutable_data_ptr_check_ == DataPtrCheck::Throw) {
+    throw_data_ptr_access_error();
+  }
+  if (extra_meta_ && extra_meta_->custom_data_ptr_error_msg_) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    TORCH_WARN(*extra_meta_->custom_data_ptr_error_msg_);
+  } else {
+    TORCH_WARN("Accessed data pointer of Storage that is invalid.");
+  }
+}
+
 void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr) {
   // Allowlist verification.
   // Only if the devicetype is in the allowlist,

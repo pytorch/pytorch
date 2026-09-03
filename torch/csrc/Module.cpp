@@ -2825,6 +2825,14 @@ Call this whenever a new thread is created in order to propagate values from
       });
 
   py_module.def(
+      "_set_storage_data_ptr_access_warn_msg",
+      [](size_t storage_impl_ptr, std::string s) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        storage_impl->set_data_ptr_access_warn_msg_(s);
+      });
+
+  py_module.def(
       "_clear_storage_data_ptr_access_error_msg", [](size_t storage_impl_ptr) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
