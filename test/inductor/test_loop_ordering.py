@@ -16,10 +16,12 @@ from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, ir, metrics
 from torch._inductor.codegen.simd import MemoryCoalescing, SIMDScheduling
 from torch._inductor.codegen.triton import TritonScheduling
+from torch._inductor.dependencies import MemoryDep
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
 from torch._inductor.scheduler import (
     _LoopMutationTracker,
+    _LoopStateSnapshot,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
     refresh_group_node_dependencies,
@@ -389,6 +391,60 @@ class ImplDetailTest(MockSchedulerTest):
         self.assertEqual(
             new_body.indexing_exprs["index0"],
             z2 + 49 * z1 + 2401 * ModularIndexing(z3, 1, 64),
+        )
+
+    def test_reduction_output_first_order(self):
+        def make_node(ranges, index_fn):
+            d = tuple(sympy_index_symbol(f"d{i}") for i in range(len(ranges)))
+            dep = MemoryDep("scale", index_fn(*d), d, tuple(ranges))
+            node = object.__new__(SchedulerNode)
+            node._sizes = (ranges, ())
+            node.read_writes = mock.Mock(reads=OrderedSet([dep]), range_vars=d)
+            return node
+
+        order = Scheduler._reduction_output_first_order
+        outputs = OrderedSet(["scale"])
+        n42 = sympy.Integer(42)
+        self.assertEqual(
+            order(
+                outputs,
+                make_node([6, 7, 16, 16], lambda d0, d1, d2, d3: 7 * d0 + d1),
+                n42,
+            ),
+            (0, 1, 2, 3),
+        )
+        self.assertEqual(
+            order(
+                outputs,
+                make_node([6, 16, 7, 16], lambda d0, d1, d2, d3: 7 * d0 + d2),
+                n42,
+            ),
+            (0, 2, 1, 3),
+        )
+        # A transposed read is iterated in the output's memory order.
+        self.assertEqual(
+            order(
+                outputs,
+                make_node([6, 16, 7, 16], lambda d0, d1, d2, d3: d0 + 6 * d2),
+                n42,
+            ),
+            (2, 0, 1, 3),
+        )
+        self.assertIsNone(
+            order(
+                outputs,
+                make_node(
+                    [6, 16, 7, 16], lambda d0, d1, d2, d3: sympy_index_symbol("tmp0")
+                ),
+                n42,
+            )
+        )
+        self.assertIsNone(
+            order(
+                outputs,
+                make_node([6, 16, 7, 16], lambda d0, d1, d2, d3: 7 * d0 + d2),
+                sympy.Integer(96),
+            )
         )
 
     def test_weighted_cost_penalizes_uncoalesced(self):
@@ -917,6 +973,81 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         # Block reduction + broadcast pointwise should fuse into 1 kernel
         self.assertEqual(1, metrics.generated_kernel_count)
+
+    @staticmethod
+    def _square_block_broadcast(x, transpose_scale=False):
+        block_size = 16
+        rows, cols = x.shape
+        blocks = (
+            x.reshape(
+                rows // block_size,
+                block_size,
+                cols // block_size,
+                block_size,
+            )
+            .permute(0, 2, 1, 3)
+            .contiguous()
+        )
+        scale = blocks.abs().amax(dim=(-2, -1), keepdim=True).clamp(min=1e-6)
+        divisor = scale.transpose(0, 1) if transpose_scale else scale
+        quantized = blocks / divisor
+        output = quantized.permute(0, 2, 1, 3).contiguous().reshape(rows, cols)
+        return output, scale.squeeze(-1).squeeze(-1)
+
+    def test_square_block_broadcast_vertical_fusion(self):
+        block_size = 16
+
+        original_memory = Scheduler._selected_tiling_memory
+        individual_sizes = []
+
+        def record_memory(scheduler, nodes):
+            if len(nodes) == 1:
+                individual_sizes.extend(
+                    tuple(sn._sizes[0]) for sn in nodes[0].get_nodes()
+                )
+            return original_memory(scheduler, nodes)
+
+        x = torch.randn(6 * block_size, 7 * block_size, device=GPU_TYPE)
+        with mock.patch.object(Scheduler, "_selected_tiling_memory", record_memory):
+            self.do_acc_test(self._square_block_broadcast, x)
+        self.assertEqual(1, metrics.generated_kernel_count)
+        self.assertIn((6, 16, 7, 16), individual_sizes)
+        self.assertNotIn((6, 7, 16, 16), individual_sizes)
+
+    @inductor_config.patch(loop_ordering_after_fusion=False)
+    def test_square_block_broadcast_respects_disabled_loop_ordering(self):
+        x = torch.randn(6 * 16, 7 * 16, device=GPU_TYPE)
+        self.do_acc_test(self._square_block_broadcast, x)
+        self.assertEqual(2, metrics.generated_kernel_count)
+
+    def test_square_block_broadcast_transposed_reduction_output(self):
+        x = torch.randn(6 * 16, 6 * 16, device=GPU_TYPE)
+        self.do_acc_test(self._square_block_broadcast, x, True)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    @inductor_config.patch(force_disable_caches=True)
+    def test_square_block_broadcast_reindex_rollback(self):
+        original_restore = _LoopStateSnapshot.restore
+        restored = []
+
+        def record_restore(snapshot):
+            original_restore(snapshot)
+            for sn, state in snapshot.scheduler_node_states.items():
+                self.assertEqual(state, sn.snapshot_loop_state())
+            restored.append(True)
+
+        x = torch.randn(6 * 16, 7 * 16, device=GPU_TYPE)
+        with (
+            mock.patch.object(
+                Scheduler,
+                "_reindexing_regresses_memory_coalescing",
+                return_value=True,
+            ),
+            mock.patch.object(_LoopStateSnapshot, "restore", record_restore),
+        ):
+            self.do_acc_test(self._square_block_broadcast, x)
+        self.assertTrue(restored)
+        self.assertEqual(2, metrics.generated_kernel_count)
 
     def test_floordiv_broadcast_with_preceding_reduction(self):
         """
