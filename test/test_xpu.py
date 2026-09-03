@@ -1840,6 +1840,23 @@ if __name__ == "__main__":
         torch.xpu.synchronize()
         self.assertTrue(s_cpu.is_pinned())
 
+    @unittest.skipIf(not Xe2_Or_Later, "XPU register/unregister not available")
+    def test_pin_memory(self):
+        import mmap
+
+        import torch.xpu._pin_memory_utils as pin_memory_utils
+
+        # mmap-backed buffers are guaranteed to be page-aligned, which
+        # pin_memory()/register_host_memory() require.
+        page_size = mmap.PAGESIZE
+        buf = mmap.mmap(-1, page_size)
+        a = torch.frombuffer(buf, dtype=torch.uint8, count=page_size)
+        self.assertFalse(a.is_pinned())
+        pin_memory_utils.pin_memory(a.data_ptr(), a.nbytes)
+        self.assertTrue(a.is_pinned())
+        pin_memory_utils.unpin_memory(a.data_ptr())
+        self.assertFalse(a.is_pinned())
+
     def test_graph_is_current_stream_capturing(self):
         self.assertFalse(torch.xpu.is_current_stream_capturing())
         s = torch.xpu.Stream()

@@ -652,6 +652,14 @@ static void initXpuMethodBindings(PyObject* module) {
       [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
         c10::xpu::XPUCachingAllocator::releasePool(device, mempool_id);
       });
+  m.def("_xpu_pinMemory", [](uintptr_t data_ptr, size_t size) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    c10::xpu::register_host_memory(reinterpret_cast<void*>(data_ptr), size);
+  });
+  m.def("_xpu_unpinMemory", [](uintptr_t data_ptr) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    c10::xpu::unregister_host_memory(reinterpret_cast<void*>(data_ptr));
+  });
 }
 
 // Callback for python part. Used for additional initialization of python
