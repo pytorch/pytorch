@@ -13,6 +13,7 @@ from torch.distributed.tensor import DTensor
 
 from ._fsdp_api import _ReduceOp
 from ._fsdp_common import (
+    _chunk_with_empty,
     _get_dim0_padded_size,
     _raise_assert_with_print,
     _to_dtype_if_needed,
@@ -561,12 +562,6 @@ def foreach_reduce(
     autograd, so clearing the list frees the gradients.
     """
 
-    grad_dtypes = {grad.dtype for grad in unsharded_grads}
-    if len(grad_dtypes) > 1 and reduce_dtype is None:
-        _raise_assert_with_print(
-            "FSDP reduce-scatter requires an explicit reduce dtype for mixed "
-            f"gradient dtypes but got {grad_dtypes}"
-        )
     reduce_dtype = reduce_dtype or unsharded_grads[0].dtype
     (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
         _get_gradient_divide_factors(
@@ -598,11 +593,6 @@ def foreach_reduce(
                 )
             chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
             unsharded_grads[i] = torch.cat(chunks, dim=0)
-
-    if len(grad_dtypes) > 1:
-        # Keep the uniform path's fused pack-and-cast in _chunk_cat.
-        for i, grad in enumerate(unsharded_grads):
-            unsharded_grads[i] = _to_dtype_if_needed(grad, reduce_dtype)
 
     padded_unsharded_sizes = tuple(
         _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
@@ -699,15 +689,15 @@ def foreach_reduce(
 
     with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
-        # Rebinds to a new orig_dtype tensor when reduce_dtype !=
-        # orig_dtype. Do NOT rely on this stream-scoped rebind to manage
-        # the old reduce-dtype buffer's lifetime: the rebind orders the
-        # cast before the free-event on AR stream, but the freed block
-        # lands on the caching allocator's free list and the next layer's
-        # RS on RS stream can reuse it without waiting for this layer's
+        # Rebinds to a new orig_dtype tensor when every parameter has the same
+        # original dtype and it differs from reduce_dtype. Do NOT rely on this
+        # stream-scoped rebind to manage the old reduce-dtype buffer's lifetime:
+        # the rebind orders the cast before the free-event on AR stream, but the
+        # freed block lands on the caching allocator's free list and the next
+        # layer's RS on RS stream can reuse it without waiting for this layer's
         # AR to finish. The reduce-dtype buffer is held across layers by
-        # FSDPParamGroup._all_reduce_state (captured above) to prevent
-        # this. See PR #140044, regression test PR #180900.
+        # FSDPParamGroup._all_reduce_state (captured above) to prevent this. See
+        # PR #140044, regression test PR #180900.
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
@@ -722,6 +712,10 @@ def foreach_reduce(
                 stride=fsdp_param.contiguous_sharded_stride,
                 storage_offset=flat_grad_offset,
             )
+            if orig_dtype is None:
+                new_sharded_grad = _to_dtype_if_needed(
+                    new_sharded_grad, fsdp_param.orig_dtype
+                )
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
             if fsdp_param.offload_to_cpu:
                 # Only overlap the D2H copy (copying to pinned memory) when no
@@ -796,9 +790,49 @@ def foreach_reduce_scatter_copy_in(
     world_size: int,
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
-    torch.ops.fsdp.chunk_cat(
-        unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
-    )
+    if len({grad.dtype for grad in unsharded_grads}) == 1:
+        torch.ops.fsdp.chunk_cat(
+            unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
+        )
+        return
+
+    # CUDA foreach-copy requires a uniform source dtype for its fused path.
+    copy_groups: dict[
+        torch.dtype, tuple[list[torch.Tensor], list[torch.Tensor]]
+    ] = {}
+    padding_outputs: list[torch.Tensor] = []
+    output_offset = 0
+    for grad in unsharded_grads:
+        padded_size = _get_dim0_padded_size(grad.size(), world_size)
+        padded_chunk_numel = padded_size.numel() // world_size
+        for rank, input_chunk in enumerate(
+            _chunk_with_empty(grad, world_size, dim=0)
+        ):
+            output_chunk = reduce_scatter_input[rank].narrow(
+                0, output_offset, padded_chunk_numel
+            )
+            input_numel = input_chunk.numel()
+            if input_numel > 0:
+                copy_output = output_chunk.narrow(0, 0, input_numel).view(
+                    input_chunk.shape
+                )
+                if input_chunk.is_contiguous():
+                    outputs, inputs = copy_groups.setdefault(grad.dtype, ([], []))
+                    outputs.append(copy_output)
+                    inputs.append(input_chunk)
+                else:
+                    copy_output.copy_(input_chunk)
+            padding_numel = padded_chunk_numel - input_numel
+            if padding_numel > 0:
+                padding_outputs.append(
+                    output_chunk.narrow(0, input_numel, padding_numel)
+                )
+        output_offset += padded_chunk_numel
+
+    for outputs, inputs in copy_groups.values():
+        torch._foreach_copy_(outputs, inputs)
+    if padding_outputs:
+        torch._foreach_zero_(padding_outputs)
 
 
 def _get_all_gather_input_metadatas(

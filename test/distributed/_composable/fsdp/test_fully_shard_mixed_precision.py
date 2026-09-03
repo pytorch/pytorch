@@ -10,11 +10,13 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
+import torch.distributed.fsdp._fully_shard._fsdp_collectives as fsdp_collectives
 import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
+    foreach_reduce_scatter_copy_in,
 )
 from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import (
@@ -269,9 +271,9 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.w0 = nn.Parameter(torch.randn(12, 12))
-                self.w1 = nn.Parameter(torch.randn(12, 12))
-                self.w2 = nn.Parameter(torch.randn(12, 12))
+                self.w0 = nn.Parameter(torch.randn(13, 13))
+                self.w1 = nn.Parameter(torch.randn(13, 13))
+                self.w2 = nn.Parameter(torch.randn(13, 13))
                 self.param_dtypes: tuple[torch.dtype, ...] = ()
 
             def forward(self, inp: torch.Tensor) -> torch.Tensor:
@@ -321,7 +323,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             self.assertIsNone(param.mp_policy.param_dtype_fn)
 
         torch.manual_seed(1 + self.rank)
-        inp = torch.randn(4, 12, device=device_type)
+        inp = torch.randn(4, 13, device=device_type)
         ref_weights = tuple(ref_model.parameters())
 
         def ref_forward() -> torch.Tensor:
@@ -357,7 +359,19 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             out = model(inp)
             self.assertEqual(out, ref_out)
             ref_out.sum().backward()
-            out.sum().backward()
+            dtype_casts = []
+            orig_to_dtype_if_needed = fsdp_collectives._to_dtype_if_needed
+
+            def to_dtype_if_needed(tensor, dtype):
+                if dtype is not None and tensor.dtype != dtype:
+                    dtype_casts.append((tensor.dtype, dtype, tensor.numel()))
+                return orig_to_dtype_if_needed(tensor, dtype)
+
+            with mock.patch.object(
+                fsdp_collectives, "_to_dtype_if_needed", to_dtype_if_needed
+            ):
+                out.sum().backward()
+            self.assertEqual(dtype_casts, [])
             for param in ref_model.parameters():
                 dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
             check_sharded_parity(self, ref_model, model)
@@ -458,6 +472,54 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         )
         self.assertEqual(model.weight.dtype, torch.bfloat16)
         self.assertEqual(model.bias.dtype, torch.float32)
+
+    @skipIfRocmVersionLessThan((7, 0))
+    @skip_if_lt_x_gpu(2)
+    def test_mixed_dtype_reduce_scatter_copy_in(self):
+        world_size = 3
+        grads = [
+            torch.randn(
+                (world_size + 2, 2), device=device_type, dtype=torch.bfloat16
+            ),
+            torch.randn(
+                (world_size * 2, 3), device=device_type, dtype=torch.float32
+            ),
+            torch.randn((1, 4), device=device_type, dtype=torch.bfloat16),
+            torch.randn(
+                (5, world_size * 2), device=device_type, dtype=torch.float16
+            ).T,
+        ]
+        expected = torch._chunk_cat(
+            [grad.to(torch.float32) for grad in grads],
+            dim=0,
+            num_chunks=world_size,
+        )
+        reduce_scatter_input = torch.full_like(expected.flatten(), torch.nan)
+        foreach_copy_dtypes = []
+        orig_foreach_copy = torch._foreach_copy_
+
+        def foreach_copy(dst_tensors, src_tensors, *args, **kwargs):
+            foreach_copy_dtypes.append(
+                (
+                    {tensor.dtype for tensor in dst_tensors},
+                    {tensor.dtype for tensor in src_tensors},
+                )
+            )
+            return orig_foreach_copy(dst_tensors, src_tensors, *args, **kwargs)
+
+        with mock.patch.object(torch, "_foreach_copy_", foreach_copy):
+            foreach_reduce_scatter_copy_in(
+                grads, reduce_scatter_input, world_size
+            )
+
+        self.assertEqual(reduce_scatter_input.view_as(expected), expected)
+        self.assertEqual(
+            foreach_copy_dtypes,
+            [
+                ({torch.float32}, {torch.bfloat16}),
+                ({torch.float32}, {torch.float32}),
+            ],
+        )
 
     @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
@@ -570,12 +632,82 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         if param_group is None:
             raise AssertionError("Expected an FSDP parameter group")
         self.assertIsNone(param_group._orig_dtype)
-        self.assertIsNone(param_group._reduce_dtype)
+        self.assertEqual(param_group._reduce_dtype, torch.float32)
 
-        model.w1.requires_grad_(True)
-        model(inp).sum().backward()
+        model.requires_grad_(True)
+        orig_reduce_scatter = dist.reduce_scatter_single
+
+        def assert_fn(output: torch.Tensor):
+            self.assertEqual(output.dtype, torch.float32)
+
+        reduce_scatter = functools.partial(
+            reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
+        )
+        with patch_reduce_scatter(reduce_scatter):
+            model(inp).sum().backward()
+        self.assertEqual(model.w0.grad.dtype, torch.float32)
         self.assertEqual(model.w1.grad.dtype, torch.bfloat16)
-        self.assertIsNone(model.w0.grad)
+
+    @skipIfRocmVersionLessThan((7, 0))
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(DISTRIBUTED_BACKEND != "nccl", "Requires NCCL backend")
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_unexpected_fresh_gradient_dtype(self):
+        model = nn.Linear(8, 8).to(device_type)
+        fully_shard(
+            model,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.float32,
+            ),
+            reshard_after_forward=False,
+        )
+        inp = torch.randn(4, 8, device=device_type)
+        loss = model(inp).sum()
+        model.weight.grad_dtype = torch.float32
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "expected gradient dtype torch.bfloat16.*got torch.float32",
+        ):
+            loss.backward()
+        model.reset_iter_state()
+
+    @skipIfRocmVersionLessThan((7, 0))
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(DISTRIBUTED_BACKEND != "nccl", "Requires NCCL backend")
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_unexpected_accumulated_gradient_dtype(self):
+        model = nn.Linear(8, 8).to(device_type)
+        fully_shard(
+            model,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.float32,
+            ),
+            reshard_after_forward=False,
+        )
+        model.set_requires_gradient_sync(False)
+        inp = torch.randn(4, 8, device=device_type)
+        model(inp).sum().backward()
+        param_group = fully_shard.state(model)._fsdp_param_group
+        if param_group is None:
+            raise AssertionError("Expected an FSDP parameter group")
+        fsdp_param = param_group.fsdp_params[0]
+        accumulated_grad = fsdp_param.unsharded_accumulated_grad
+        if accumulated_grad is None:
+            raise AssertionError("Expected an accumulated gradient")
+        self.assertEqual(accumulated_grad.dtype, torch.float32)
+        fsdp_param.unsharded_accumulated_grad = accumulated_grad.to(torch.bfloat16)
+
+        model.set_requires_gradient_sync(True)
+        with self.assertRaisesRegex(
+            AssertionError,
+            "expected accumulated gradient dtype torch.float32.*got torch.bfloat16",
+        ):
+            model(inp).sum().backward()
+        fsdp_param.unsharded_accumulated_grad = None
+        model.reset_iter_state()
 
     @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)

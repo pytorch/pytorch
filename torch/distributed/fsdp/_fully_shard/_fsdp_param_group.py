@@ -295,11 +295,6 @@ class FSDPParamGroup:
         reduce_dtypes = {
             p.reduce_dtype or p.param_dtype or p.orig_dtype for p in params_for_dtype
         }
-        if len(trainable_params) > 0 and len(orig_dtypes) != 1:
-            # Models may have no grad params
-            raise AssertionError(
-                f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
-            )
         if len(trainable_params) > 0 and len(reduce_dtypes) != 1:
             # This can be relaxed if we issue one reduce-scatter per reduce
             # dtype (but we would need a way for users to specify multiple
@@ -312,7 +307,7 @@ class FSDPParamGroup:
         orig_dtypes_are_uniform = len(orig_dtypes) == 1
         reduce_dtypes_are_uniform = len(reduce_dtypes) == 1
         self._orig_dtype = next(iter(orig_dtypes)) if orig_dtypes_are_uniform else None
-        if not (orig_dtypes_are_uniform and reduce_dtypes_are_uniform):
+        if not reduce_dtypes_are_uniform:
             self._reduce_dtype = None
         elif self.mp_policy.reduce_dtype is not None and any(
             p.reduce_dtype is not None
@@ -644,6 +639,7 @@ class FSDPParamGroup:
             self._training_state = TrainingState.POST_BACKWARD
             with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
                 for fsdp_param in self.fsdp_params:
+                    fsdp_param._validate_unsharded_grad_dtypes()
                     fsdp_param.accumulate_unsharded_grad_if_needed()
             with record_function(self._with_fqn("FSDP::post_backward_reshard")):
                 if not self.reduce_grads:
@@ -704,6 +700,19 @@ class FSDPParamGroup:
                         del oldest
             if len(fsdp_params_with_grad) == 0:
                 return
+            orig_dtypes = {p.orig_dtype for p in fsdp_params_with_grad}
+            orig_dtype = next(iter(orig_dtypes)) if len(orig_dtypes) == 1 else None
+            reduce_dtypes = {
+                p.reduce_dtype or p.param_dtype or p.orig_dtype
+                for p in fsdp_params_with_grad
+            }
+            if len(reduce_dtypes) != 1:
+                raise AssertionError(
+                    "FSDP requires a common reduce dtype for all parameters with "
+                    f"gradients but got {reduce_dtypes}. Set "
+                    "MixedPrecisionPolicy.reduce_dtype to an explicit dtype."
+                )
+            reduce_dtype = next(iter(reduce_dtypes))
             with record_function(self._with_fqn("FSDP::post_backward_reduce")):
                 all_reduce_pg = (
                     self._all_reduce_process_group
@@ -742,8 +751,8 @@ class FSDPParamGroup:
                     ),
                     self.comm_ctx.reduce_scatter_stream,
                     self._reduce_scatter_comm,
-                    self._orig_dtype,
-                    self._reduce_dtype,
+                    orig_dtype,
+                    reduce_dtype,
                     self.device,
                     self.gradient_divide_factor,
                     (
