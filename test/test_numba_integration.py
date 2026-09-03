@@ -25,7 +25,7 @@ class TestNumbaIntegration(common.TestCase):
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_from_cuda_array_interface_does_not_leak_references(self):
         class TrackedString(str):
-            pass
+            __slots__ = ()
 
         class Wrapper:
             def __init__(self, tensor):
@@ -57,6 +57,7 @@ class TestNumbaIntegration(common.TestCase):
         refcounts = tuple(sys.getrefcount(item) for item in tracked)
         for _ in range(10):
             converted = torch.as_tensor(wrapper)
+            self.assertEqual(converted, source)
             del converted
 
         self.assertEqual(tuple(sys.getrefcount(item) for item in tracked), refcounts)
