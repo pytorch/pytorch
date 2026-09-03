@@ -355,12 +355,78 @@ def _get_module_content(module: types.ModuleType) -> str:
     return inspect.getsource(module)
 
 
+def _defining_module_name(code: types.CodeType) -> str | None:
+    """
+    The sys.modules key whose source actually contains ``code``.
+
+    Two things make this harder than ``inspect.getmodule``. It can hand back a
+    module that merely re-exports the code from a private implementation file --
+    ``collections.abc`` is three lines of ``from _collections_abc import *`` --
+    and hashing this code's line range against that module reads lines that are
+    not there. And ``__name__`` is not necessarily importable back to the same
+    object: ``_collections_abc`` sets its own ``__name__`` to "collections.abc",
+    which imports to the shim instead. Load-time revalidation re-imports this
+    name, so return the key, not ``__name__``.
+
+    Real models inline through such modules constantly, so give up and skip the
+    checksum rather than record one against the wrong file.
+    """
+    module = inspect.getmodule(code)
+    if module is not None and getattr(module, "__file__", None) == code.co_filename:
+        name = getattr(module, "__name__", None)
+        if name is not None and sys.modules.get(name) is module:
+            return name
+    return _scan_sys_modules_for_file(code.co_filename)
+
+
+# filename -> (len(sys.modules) when scanned, module key or None).
+_MODULE_KEY_BY_FILE: dict[str, tuple[int, str | None]] = {}
+
+
+def _scan_sys_modules_for_file(filename: str) -> str | None:
+    """
+    Memoized because the fallback is O(len(sys.modules)) and this runs per
+    inlined code object during capture, on the shared caching_precompile path.
+
+    A hit is cached for as long as the key still names a module with this
+    file. A MISS is only cached while sys.modules has not changed size, because
+    the usual reason for one is that the module has not been imported yet --
+    caching that permanently, which functools.cache would, silently drops the
+    source checksum for every lazily imported file for the rest of the process.
+
+    Length is an ABA check, not a version: equal-size churn between two calls
+    keeps a stale miss, and ``del sys.modules[m]; import m`` -- the ordinary
+    force-reimport idiom -- is exactly that. sys.modules exposes no mutation
+    counter to use instead. A stale MISS costs this file's checksum, so a later
+    edit to it is not caught at load; worth knowing when hunting a checksum
+    that should have fired.
+    """
+    generation = len(sys.modules)
+    cached = _MODULE_KEY_BY_FILE.get(filename)
+    if cached is not None:
+        if cached[1] is None:
+            if cached[0] == generation:
+                return None
+        elif getattr(sys.modules.get(cached[1]), "__file__", None) == filename:
+            return cached[1]
+    found = None
+    for key, candidate in list(sys.modules.items()):
+        if getattr(candidate, "__file__", None) == filename:
+            found = key
+            break
+    _MODULE_KEY_BY_FILE[filename] = (generation, found)
+    return found
+
+
 @dataclasses.dataclass
 class SourceInfo:
     inlined_sources: set[InlinedSource]
 
     def add_code(self, code: types.CodeType) -> None:
-        module = inspect.getmodule(code)
+        module_name = _defining_module_name(code)
+        if module_name is None:
+            return
+        module = sys.modules.get(module_name)
         if module is None:
             return
         sourcelines, firstlineno = inspect.getsourcelines(code)
@@ -373,7 +439,7 @@ class SourceInfo:
             )
         self.inlined_sources.add(
             InlinedSource(
-                module=module.__name__,
+                module=module_name,
                 firstlineno=firstlineno,
                 lastlineno=lastlineno,
                 checksum=_hash_source(source),
@@ -1161,9 +1227,11 @@ class CompilePackage:
                 dynamo.requires_native_backend_compatibility
             )
         else:
-            self._add_function(
-                self._innermost_fn.__code__, self._innermost_fn.__module__
+            module_name = (
+                _defining_module_name(self._innermost_fn.__code__)
+                or self._innermost_fn.__module__
             )
+            self._add_function(self._innermost_fn.__code__, module_name)
         self._initialized = True
 
     def _add_function(
