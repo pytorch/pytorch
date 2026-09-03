@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
+from concurrent.futures import Future
 from unittest import skipIf
 
 import torch
@@ -7,6 +8,7 @@ from torch.distributed.checkpoint._experimental.staging import (
     CheckpointStagerConfig,
     DefaultStager,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -105,6 +107,95 @@ class TestDefaultStagerGeneric(_StagerTestMixin, TestCase):
                 self.assertIn(key, result)
         stager.close()
 
+
+class TestDefaultStagerAccelerator(_StagerTestMixin, TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_accelerator_tensors_staging(self, device) -> None:
+        state_dict = {
+            "accelerator_tensor": torch.randn(3, 4, device=device),
+            "cpu_tensor": torch.randn(2, 3),
+            "mixed_model": {
+                "weight": torch.randn(5, 5, device=device),
+                "bias": torch.randn(5, device=device),
+            },
+        }
+        options = CheckpointStagerConfig(
+            use_pinned_memory=False,
+            use_shared_memory=False,
+            use_async_staging=False,
+            use_non_blocking_copy=False,
+        )
+        stager = DefaultStager(options)
+
+        staged_dict = stager.stage(state_dict)
+        self.assertIsInstance(staged_dict, dict)
+        self.assertIn("accelerator_tensor", staged_dict)
+        self.assertIn("cpu_tensor", staged_dict)
+        self.assertIn("mixed_model", staged_dict)
+        self.assertEqual(staged_dict["accelerator_tensor"].device.type, "cpu")
+        self.assertEqual(staged_dict["cpu_tensor"].device.type, "cpu")
+        self.assertEqual(staged_dict["mixed_model"]["weight"].device.type, "cpu")
+        self.assertEqual(staged_dict["mixed_model"]["bias"].device.type, "cpu")
+        stager.close()
+
+
+class TestDefaultStagerStreamAccelerator(_StagerTestMixin, TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_async_staging(self, device) -> None:
+        state_dict = {"tensor": torch.randn(3, 4, device=device)}
+        options = CheckpointStagerConfig(
+            use_pinned_memory=False,
+            use_shared_memory=False,
+            use_async_staging=True,
+            use_non_blocking_copy=False,
+        )
+        stager = DefaultStager(options)
+
+        result = stager.stage(state_dict)
+        self.assertIsInstance(result, Future)
+        staged_dict = result.result()
+        self.assertEqual(staged_dict["tensor"].device.type, "cpu")
+        stager.close()
+
+
+class TestDefaultStagerCUDA(_StagerTestMixin, TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_sync_staging(self, device) -> None:
+        """Test synchronous staging with the original optimized defaults."""
+        stager = DefaultStager(CheckpointStagerConfig(use_async_staging=False))
+
+        staged_dict = stager.stage(self.state_dict)
+
+        self.assertIsInstance(staged_dict, dict)
+        self.assertIn("model", staged_dict)
+        self.assertIn("optimizer", staged_dict)
+        self.assertEqual(staged_dict["epoch"], 5)
+        self.assertEqual(staged_dict["step"], 1000)
+        self.assertIn("tensor", staged_dict)
+        self.assertIn("nested", staged_dict)
+        stager.close()
+
+
+instantiate_device_type_tests(
+    TestDefaultStagerAccelerator,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDefaultStagerStreamAccelerator,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDefaultStagerCUDA,
+    globals(),
+    only_for=("cuda",),
+)
 
 if __name__ == "__main__":
     run_tests()
