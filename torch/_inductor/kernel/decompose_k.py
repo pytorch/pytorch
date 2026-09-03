@@ -6,14 +6,17 @@ the final reduction remain separate so autotuning can compare complete plans.
 """
 
 import dataclasses
+import functools
 import math
 from typing import Any
 
 import torch
 from torch._inductor import inductor_prims, ir
+from torch._inductor.codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from torch._inductor.lowering import register_lowering
 from torch._inductor.select_algorithm import SymbolicGridFn, TritonTemplate
 from torch._inductor.utils import get_num_sms
+from torch.fx.experimental.proxy_tensor import make_fx
 
 from .mm_common import load_kernel_template
 
@@ -53,6 +56,7 @@ class BlackwellDecomposeKPartialConfig:
     block_k: int
     num_stages: int
     epilogue_subtile: int
+    data_partition_factor: int
     two_ctas: bool
 
 
@@ -60,9 +64,9 @@ class BlackwellDecomposeKPartialConfig:
 # production-shaped handwritten sweep, not a replacement for a future cost
 # model.
 BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS = (
-    BlackwellDecomposeKPartialConfig(128, 128, 128, 3, 2, False),
-    BlackwellDecomposeKPartialConfig(128, 128, 64, 4, 1, True),
-    BlackwellDecomposeKPartialConfig(128, 256, 64, 6, 2, True),
+    BlackwellDecomposeKPartialConfig(128, 128, 128, 3, 2, 1, False),
+    BlackwellDecomposeKPartialConfig(128, 128, 64, 4, 1, 1, True),
+    BlackwellDecomposeKPartialConfig(128, 256, 64, 6, 2, 1, True),
 )
 
 
@@ -128,7 +132,7 @@ def append_blackwell_decompose_k_partial_choice(
         "USE_META_WS": True,
         "WARP_SPECIALIZE": True,
         "FLATTEN": False,
-        "DATA_PARTITION_FACTOR": 1,
+        "DATA_PARTITION_FACTOR": config.data_partition_factor,
         "SEPARATE_EPILOGUE_STORE": True,
         "EPILOGUE_SUBTILE": config.epilogue_subtile,
         "TWO_CTAS": config.two_ctas,
@@ -139,7 +143,7 @@ def append_blackwell_decompose_k_partial_choice(
     if config.two_ctas:
         kwargs["ctas_per_cga"] = (2, 1, 1)
 
-    error = blackwell_decompose_k_partial_template.maybe_append_choice(
+    blackwell_decompose_k_partial_template.maybe_append_choice(
         choices,
         input_nodes=input_nodes,
         layout=layout,
@@ -148,8 +152,6 @@ def append_blackwell_decompose_k_partial_choice(
         num_warps=8,
         **kwargs,
     )
-    if error is not None:
-        raise error
 
 
 @register_lowering(
@@ -161,6 +163,8 @@ def lower_blackwell_decompose_k_partial(
     mat2,
     k_split: int,
     config_index: int,
+    m_pad: int,
+    k_part: int,
 ):
     try:
         partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[int(config_index)]
@@ -173,15 +177,22 @@ def lower_blackwell_decompose_k_partial(
             "Blackwell decompose-K partial config must be static"
         ) from error
     m = int(mat1.get_size()[0])
+    k = int(mat1.get_size()[1])
     n = int(mat2.get_size()[1])
     m_tiles = math.ceil(m / partial_config.block_m)
     if partial_config.two_ctas:
         m_tiles = math.ceil(m_tiles / 2) * 2
-    m_pad = m_tiles * partial_config.block_m
+    expected_m_pad = m_tiles * partial_config.block_m
+    expected_k_part = (
+        math.ceil(math.ceil(k / int(k_split)) / partial_config.block_k)
+        * partial_config.block_k
+    )
+    if int(m_pad) != expected_m_pad or int(k_part) != expected_k_part:
+        raise AssertionError("decompose-K plan geometry does not match its config")
     layout = ir.FixedLayout(
         mat1.get_device(),
         torch.float32,
-        [int(k_split) * m_pad, n],
+        [int(k_split) * int(m_pad), n],
         [n, 1],
     )
     choices: list[Any] = []
@@ -193,3 +204,68 @@ def lower_blackwell_decompose_k_partial(
         config=partial_config,
     )
     return choices[0].output_node()
+
+
+def blackwell_decomposeK(a, b, k_split, config_index):
+    """Aligned decompose-K using the dedicated rank-2 partial template."""
+    config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
+    m = a.shape[0]
+    k = a.shape[1]
+    n = b.shape[1]
+    m_tiles = (m + config.block_m - 1) // config.block_m
+    if config.two_ctas:
+        m_tiles = (m_tiles + 1) // 2 * 2
+    m_pad = m_tiles * config.block_m
+    k_part = (
+        ((k + k_split - 1) // k_split + config.block_k - 1)
+        // config.block_k
+        * config.block_k
+    )
+    partial_flat = inductor_prims.blackwell_decompose_k_partial(
+        a,
+        b,
+        k_split,
+        config_index,
+        m_pad,
+        k_part,
+    )
+    partials = partial_flat.view(k_split, m_pad, n)
+    return partials[:, :m].sum(0).to(a.dtype)
+
+
+class BlackwellDecomposeKSubgraphTemplate(SubgraphTemplate):
+    def __init__(self):
+        super().__init__(name="blackwell_decompose_k")
+
+    def generate(  # type: ignore[override]
+        self,
+        input_nodes: list[ir.Buffer],
+        layout: ir.Layout,
+        k_split: int,
+        config_index: int,
+    ) -> SubgraphChoiceCaller:
+        from torch._dispatch.python import enable_python_dispatcher
+
+        from ..decomposition import select_decomp_table
+
+        name = f"blackwell_decompose_k_{k_split}_split_config_{config_index}"
+        description = f"{k_split=}, {config_index=}"
+        with enable_python_dispatcher():
+            fn = make_fx(
+                functools.partial(
+                    blackwell_decomposeK,
+                    k_split=k_split,
+                    config_index=config_index,
+                ),
+                decomposition_table=select_decomp_table(),
+            )
+            return super().generate(
+                name=name,
+                input_nodes=input_nodes,
+                layout=layout,
+                make_fx_graph=fn,
+                description=description,
+            )
+
+
+blackwell_decompose_k_subgraph_template = BlackwellDecomposeKSubgraphTemplate()
