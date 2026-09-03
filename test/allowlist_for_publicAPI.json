@@ -1062,6 +1062,9 @@
   ],
   "torch.utils.data": [
     "_DatasetKind",
+    "SharedDict",
+    "SharedList",
+    "SharedTensor",
     "argument_validation",
     "default_collate",
     "default_convert",
@@ -1070,7 +1073,8 @@
     "guaranteed_datapipes_determinism",
     "non_deterministic",
     "runtime_validation",
-    "runtime_validation_disabled"
+    "runtime_validation_disabled",
+    "to_shared_dataset"
   ],
   "torch.utils.data.dataloader": [
     "default_collate",
