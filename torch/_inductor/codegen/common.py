@@ -473,6 +473,8 @@ class BackendFeature(Enum):
     BUCKETIZE = auto()
     INPLACE_BUFFERS = auto()
     MASKED_SCATTER_WITH_INDEX = auto()
+    # Stores inside ops.masked are predicated by the region mask.
+    MASKED_STORE = auto()
     SCAN = auto()
     SORT = auto()
     TUPLE_REDUCTION = auto()
@@ -2817,6 +2819,9 @@ class CSEProxy(DefaultHandler):
         bounds = self._bound_variable(name, *args, **kwargs)
 
         value = getattr(self.parent_handler, name)(*args, **kwargs)
+        if name == "masked" and value is None:
+            self.kernel.record_op_trace(name, args, kwargs, None)
+            return None
         dtype_handler = DtypePropagationOpsHandler()
         shape_handler = ShapePropagationOpsHandler()
 
