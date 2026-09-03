@@ -138,8 +138,12 @@ def _bmm_shared_a_configs(dtype):
 @SymbolicGridFn
 def blackwell_bmm_grid(b, m, n, meta, *, cdiv, max, min):
     grid_m = cdiv(m, meta["BLOCK_M"])
+    if meta["TWO_CTAS"]:
+        grid_m = cdiv(grid_m, 2) * 2
     tiles = grid_m * cdiv(n, meta["BLOCK_N"])
     grid_x = min(meta["NUM_SMS"], tiles)
+    if meta["TWO_CTAS"]:
+        grid_x = grid_x // 2 * 2
     max_y_grid = get_max_y_grid()
     grid_z = max(cdiv(b, max_y_grid), 1)
     return (grid_x, cdiv(b, grid_z), grid_z)
@@ -164,6 +168,7 @@ class BlackwellBMMConfig:
     epilogue_subtile: int = 1
     data_partition_factor: int = 1
     separate_epilogue_store: bool = True
+    two_ctas: bool = False
 
 
 BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
