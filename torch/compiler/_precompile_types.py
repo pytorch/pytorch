@@ -141,6 +141,7 @@ class PrecompileSummary:
         return base
 
 
+# Exported from torch.compiler, so pickling and Sphinx anchor them there.
 ExampleInput.__module__ = "torch.compiler"
 GuardFact.__module__ = "torch.compiler"
 FrameInvariants.__module__ = "torch.compiler"

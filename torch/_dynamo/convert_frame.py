@@ -597,6 +597,9 @@ def get_compile_id(
         raise AssertionError(f"frame_id must be an int, got {type(frame_id)}")
 
     if get_eval_frame_isolate_recompiles_id() >= 0:
+        # Per-region compile ids: each region's frame_state dict has its own
+        # _id, so (frame_id, frame_compile_id) stays unique without the global
+        # counter.
         frame_compile_id = frame_state.get("_compile_id", 0)
         if not isinstance(frame_compile_id, int):
             raise AssertionError(

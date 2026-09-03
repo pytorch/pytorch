@@ -559,14 +559,11 @@ def _is_skip_guard_eval_unsafe_stance() -> bool:
 
 
 def _reset_guarded_backend_cache() -> None:
-    from .package import reset_live_packages
-
     global cached_backends
     for backend in cached_backends.values():
         if hasattr(backend, "reset"):
             backend.reset()
     cached_backends.clear()
-    reset_live_packages()
 
 
 DONT_WRAP_FILES = {
@@ -1141,6 +1138,41 @@ class _TorchDynamoContext:
         self.prior = unset
         return None
 
+    def _load_package(self, fn_key: Callable[..., Any]) -> None:
+        from .package import DynamoCache
+
+        if self._package is None:
+            raise AssertionError("_load_package needs a package")
+        result = DynamoCache.load(fn_key)
+        if result is None:
+            # Create a fresh CompilePackage
+            self._package.initialize(fn_key, None, ignore_inlined_sources=False)
+            return
+        try:
+            self._package.initialize(
+                fn_key, result.dynamo, ignore_inlined_sources=False
+            )
+            # Install into the SAME region this context looks up in. Precompile
+            # entries match their own region only, so a default-bucket install
+            # here would never be found by an isolate_recompiles=True context --
+            # the cache would load and then silently serve nothing.
+            self._package.install(
+                result.backends, isolate_recompiles_id=self._isolate_recompiles_id
+            )
+        except Exception as e:
+            # initialize()/install() also raise KeyError (sys.modules),
+            # AttributeError (_lookup_code) and ModuleNotFoundError on a stale
+            # artifact; every one of them means "compile cold", not "fail the
+            # user's call".
+            log.warning(
+                "Failed to load entry from dynamo cache (%s); compiling from scratch",
+                type(e).__name__,
+                exc_info=True,
+            )
+            if self._package.is_initialized():
+                self._package.reset_after_failed_install()
+            self._package.initialize(fn_key, None, ignore_inlined_sources=False)
+
     def __call__(self, fn: Any) -> Any:
         if isinstance(fn, staticmethod):
             return staticmethod(self(fn.__func__))
@@ -1149,54 +1181,32 @@ class _TorchDynamoContext:
         def get_compiler_config() -> CompilerConfig | None:
             return self.compiler_config
 
-        from .package import DynamoCache, live_package, register_live_package
+        from .package import acquire_live_package, live_package_key
 
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
             if self._package is not None and not self._package.is_initialized():
                 fn_key = fn.forward if isinstance(fn, torch.nn.Module) else fn
-                shared = live_package(fn_key, self._isolate_recompiles_id)
-                if shared is not None:
-                    # Another live wrapper of this function already loaded and
-                    # installed its artifact into this region; a second install
-                    # would stack a duplicate precompile entry per wrap.
+                # Joins the package another live wrapper with the SAME settings
+                # already loaded and installed into this region; a second
+                # install would stack a duplicate precompile entry per wrap.
+                shared = acquire_live_package(
+                    live_package_key(
+                        fn_key,
+                        self._isolate_recompiles_id,
+                        innermost_backend(self.callback),  # type: ignore[arg-type]
+                        self._package,
+                    ),
+                    self._package,
+                    functools.partial(self._load_package, fn_key),
+                )
+                if shared is not self._package:
                     if not isinstance(self.callback, convert_frame.CatchErrorsWrapper):
                         raise AssertionError(
                             f"unexpected callback {type(self.callback)}"
                         )
                     self.callback.set_package(shared)
                     self._package = shared
-                else:
-                    result = DynamoCache.load(fn_key)
-                    if result is None:
-                        # Create a fresh CompilePackage
-                        self._package.initialize(
-                            fn_key, None, ignore_inlined_sources=False
-                        )
-                    else:
-                        try:
-                            self._package.initialize(
-                                fn_key, result.dynamo, ignore_inlined_sources=False
-                            )
-                            # Install into the SAME region this context looks up in.
-                            # Precompile entries match their own region only, so a
-                            # default-bucket install here would never be found by an
-                            # isolate_recompiles=True context -- the cache would load
-                            # and then silently serve nothing.
-                            self._package.install(
-                                result.backends,
-                                isolate_recompiles_id=self._isolate_recompiles_id,
-                            )
-                        except RuntimeError:
-                            log.warning(
-                                "Failed to load entry from dynamo cache", exc_info=True
-                            )
-                            if self._package.is_initialized():
-                                self._package.reset_after_failed_install()
-                            self._package.initialize(
-                                fn_key, None, ignore_inlined_sources=False
-                            )
-                    register_live_package(self._package, self._isolate_recompiles_id)
 
         fn = innermost_fn(fn)
 

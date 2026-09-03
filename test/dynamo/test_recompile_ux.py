@@ -505,12 +505,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
     # ===== Basic isolation: independent caches per compile call =====
 
     def test_concurrent_calls_do_not_deadlock_on_the_cache_lock(self):
-        """lookup() holds the ExtraState cache lock across guard evaluation,
-        and guard evaluation runs Python -- a LAMBDA_GUARD calls straight back
-        into the interpreter, so the GIL can drop mid-iteration. A thread that
-        blocks on that lock while HOLDING the GIL wedges the owner, who needs
-        the GIL to finish. The lock therefore has to release the GIL before it
-        waits. A short switch interval makes the handoff frequent.
+        """lookup() copies what guard evaluation needs out of each entry under
+        the ExtraState cache lock and runs the guards with the lock released,
+        so nothing under the lock runs Python. CacheLock is still defensive: it
+        releases the GIL before it waits, so a thread that blocks on the lock
+        while HOLDING the GIL can never wedge an owner that needs the GIL to
+        finish. A short switch interval makes the handoff frequent.
 
         The wedged thread holds the GIL, so nothing written in Python can
         report this -- join() never returns, and a watchdog thread cannot help
