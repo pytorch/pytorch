@@ -2760,16 +2760,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             if mark_dynamic:
                 torch._dynamo.mark_dynamic(inp, 0)
             foo_c = torch.compile(foo)
-            torch.testing.assert_close(
-                foo(inp),
-                foo_c(inp),
-                rtol=0,
-                atol=0,
-                equal_nan=True,
-                check_device=True,
-                check_dtype=False,
-                check_stride=False,
-            )
+            torch.testing.assert_allclose(foo(inp), foo_c(inp))
 
     @skipCUDAIf(
         not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
@@ -2810,14 +2801,11 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         )
         self.assertEqual(foo(x0), result)
 
-    @unittest.skipIf(
-        not config.is_fbcode(),
-        "bfloat16 atomic add is only supported in fbcode today #97016",
-    )
     @skipCUDAIf(
-        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+        not SM90OrLater and not TEST_WITH_ROCM,
+        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
     )
-    def test_atomic_add_bfloat16(self):
+    def test_index_add_bfloat16_dim0(self):
         def f(x, y):
             return torch.index_select(x, 0, y)
 
@@ -2870,48 +2858,105 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             self.assertEqual(torch.compile(f)(x, y), out)
 
     @skipCUDAIf(
-        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+        not SM90OrLater and not TEST_WITH_ROCM,
+        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
     )
-    @unittest.skipIf(
-        config.is_fbcode(),
-        "bfloat16 atomic add is supported in fbcode, so we won't fallback",
-    )
-    def test_index_add_fallback(self):
-        def f(x, y):
-            return torch.index_select(x, 0, y)
-
-        x = torch.randn(
-            2000, 384, dtype=torch.bfloat16, device=device_type, requires_grad=True
-        )
-        y = torch.ones(713268, dtype=torch.int64, device=device_type)
-        x_ref = x.clone().detach().requires_grad_(True)
-        y_ref = y.clone().detach()
-
-        out, (_, bw_code) = run_fw_bw_and_get_code(lambda: torch.compile(f)(x, y))
-        fc = FileCheck()
-        fc.check("aten.index_add")
-        fc.run(bw_code)
-
-        self.assertEqual(f(x_ref, y_ref), out)
-
-    @skipCUDAIf(
-        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
-    )
-    @unittest.skipIf(
-        config.is_fbcode(),
-        "bfloat16 atomic add is supported in fbcode, so we won't fallback",
-    )
-    def test_index_add_fallback_direct(self):
+    def test_index_add_bfloat16_direct(self):
         def f(x, idx, src):
-            return torch.index_add(x, 0, idx, src)
+            return torch.index_add(x, -1, idx, src, alpha=0.5)
 
-        x = torch.randn(16, 256, dtype=torch.bfloat16, device=device_type)
-        idx = torch.randperm(8, device=device_type)
-        src = torch.randn(8, 256, dtype=torch.bfloat16, device=device_type)
+        x = torch.zeros(16, 256, dtype=torch.bfloat16, device=device_type).T
+        idx = torch.tensor(
+            [0, 1, 1, 2, 2, 2, 7, 7], dtype=torch.int32, device=device_type
+        )
+        src = torch.ones(8, 256, dtype=torch.bfloat16, device=device_type).T
 
         out = f(x, idx, src)
-        compiled_out = torch.compile(f)(x, idx, src)
+        compiled_out, (code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True), x, idx, src
+        )
+
+        FileCheck().check("tl.atomic_add").check_not(
+            "torch.ops.aten.index_add.default"
+        ).run(code)
         self.assertEqual(out, compiled_out)
+
+    @skipCUDAIf(
+        not SM90OrLater and not TEST_WITH_ROCM,
+        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
+    )
+    def test_index_add_bfloat16_scalar_index(self):
+        def f(x, idx, src):
+            return torch.index_add(x, 1, idx, src)
+
+        x = torch.zeros(8, 16, dtype=torch.bfloat16, device=device_type)
+        idx = torch.tensor(3, device=device_type)
+        src = torch.ones(8, 1, dtype=torch.bfloat16, device=device_type)
+
+        out = f(x, idx, src)
+        compiled_out, (code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True), x, idx, src
+        )
+
+        FileCheck().check("tl.atomic_add").check_not(
+            "torch.ops.aten.index_add.default"
+        ).run(code)
+        self.assertEqual(out, compiled_out)
+
+    @skipIfXpu(msg="XPU deterministic mode does not use the aten.index_put_ fallback")
+    @skipCUDAIf(
+        not SM90OrLater and not TEST_WITH_ROCM,
+        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
+    )
+    @unittest.skipIf(
+        config.is_fbcode(),
+        "fbcode uses its bfloat16 atomic add lowering",
+    )
+    def test_index_add_bfloat16_deterministic(self):
+        def f(x, idx, src):
+            return torch.index_add(x, 1, idx, src)
+
+        x = torch.zeros(32, 16, dtype=torch.bfloat16, device=device_type)
+        idx = torch.arange(8, device=device_type)
+        src = torch.ones(32, 8, dtype=torch.bfloat16, device=device_type)
+
+        with DeterministicGuard(True):
+            out = f(x, idx, src)
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, fullgraph=True), x, idx, src
+            )
+
+        FileCheck().check("aten.index_put_").check_not("tl.atomic_add").check_not(
+            "torch.ops.aten.index_add.default"
+        ).run(code)
+        self.assertEqual(out, compiled_out)
+
+    def _check_topk(self, fn, x, source, k, *, dim=-1, expect_triton=True):
+        """Check topk through gathers since the index chosen among ties is free."""
+        expected = fn(x)
+        torch._dynamo.reset()
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        values, indices = actual[0], actual[1]
+        self.assertEqual(values, expected[0], equal_nan=True)
+        self.assertEqual(indices.dtype, torch.int64)
+        source = source.movedim(dim, -1).reshape(-1, source.shape[dim])
+        values = values.movedim(dim, -1).reshape(-1, k).contiguous()
+        indices = indices.movedim(dim, -1).reshape(-1, k)
+        gathered = torch.gather(source, -1, indices).contiguous()
+        # Selected values are bit-identical to the inputs, NaN payloads included.
+        int_dtype = torch.int32 if source.dtype == torch.float32 else torch.int16
+        self.assertEqual(gathered.view(int_dtype), values.view(int_dtype))
+        self.assertTrue((indices.sort(dim=-1).values.diff(dim=-1) > 0).all())
+        self.assertEqual(actual[2:], expected[2:])
+        if expect_triton:
+            FileCheck().check("topk_with_index").check_not(
+                "torch.ops.aten.topk.default("
+            ).run(code)
+        else:
+            FileCheck().check("torch.ops.aten.topk.default(").check_not(
+                "topk_with_index"
+            ).run(code)
+        return code
 
     @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
     def test_topk_fusible_ir(self):
@@ -2921,64 +2966,39 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         x = torch.randn(32, 1000, dtype=torch.bfloat16, device=device_type).T
         self.assertFalse(x.is_contiguous())
-        expected = f(x)
-        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
-
-        self.assertEqual(actual[0], expected[0])
-        gathered = torch.gather(x * 2, 1, actual[1].view(1000, 4))
-        self.assertEqual(gathered.flatten(), actual[0])
-        self.assertTrue(actual[0].is_contiguous())
-        self.assertTrue(actual[1].is_contiguous())
+        code = self._check_topk(f, x, x * 2, 4)
         self.assertEqual(code.count("async_compile.triton("), 1)
-        FileCheck().check("topk_with_index").check_not(
-            "torch.ops.aten.topk.default("
-        ).run(code)
 
     @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
-    def test_topk_fusible_ir_non_power_of_two(self):
+    @parametrize("largest", [True, False])
+    def test_topk_fusible_ir_specials(self, largest):
         def f(x):
-            return torch.topk(x, 16, dim=-1)
+            return torch.topk(x, 16, dim=-1, largest=largest)
 
+        # Width 17 leaves 15 padding lanes in the 32-wide block.
         x = torch.randn(128, 17, dtype=torch.float32, device=device_type)
         x[:, 0] = torch.nan
         x[:, 1] = -torch.nan
         x[:, 2] = torch.inf
         x[:, 3] = -torch.inf
         x[:, 4:8] = 2
-        expected = f(x)
-        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
-
-        self.assertEqual(actual[0], expected[0], equal_nan=True)
-        gathered = torch.gather(x, 1, actual[1])
-        self.assertEqual(gathered, actual[0], equal_nan=True)
-        sorted_indices = actual[1].sort(dim=-1).values
-        self.assertTrue((sorted_indices.diff(dim=-1) > 0).all())
-        FileCheck().check("topk_with_index").check_not(
-            "torch.ops.aten.topk.default("
-        ).run(code)
+        x[:, 8] = 0.0
+        x[:, 9] = -0.0
+        x[100:, :] = -torch.inf
+        x[110:, :] = torch.nan
+        self._check_topk(f, x, x, 16)
 
     @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
-    def test_topk_fusible_ir_dtypes_and_k(self):
-        for dtype, k, width in (
-            (torch.float16, 2, 33),
-            (torch.bfloat16, 8, 65),
-            (torch.float32, 16, 17),
-        ):
-            with self.subTest(dtype=dtype, k=k, width=width):
-                torch._dynamo.reset()
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @parametrize("k, width", [(2, 33), (3, 65), (6, 17), (8, 65), (16, 17), (16, 16)])
+    @parametrize("largest", [True, False])
+    def test_topk_fusible_ir_dtypes_and_k(self, dtype, k, width, largest):
+        def f(x):
+            values, indices = torch.topk(x, k, dim=-1, largest=largest)
+            return values, indices, values.float().sum(-1)
 
-                def f(x):
-                    return torch.topk(x, k, dim=-1)
-
-                x = torch.randn(128, width, dtype=dtype, device=device_type)
-                actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
-                expected = f(x)
-
-                self.assertEqual(actual[0], expected[0])
-                self.assertEqual(torch.gather(x, 1, actual[1]), actual[0])
-                FileCheck().check("topk_with_index").check_not(
-                    "torch.ops.aten.topk.default("
-                ).run(code)
+        x = torch.randn(128, width, dtype=dtype, device=device_type)
+        self._check_topk(f, x, x, k)
 
     @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
     @config.patch({"emulate_precision_casts": True})
@@ -2987,38 +3007,20 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             return torch.topk(torch.sin(x) + 0.25, 4, dim=-1)
 
         x = torch.randn(1000, 32, dtype=torch.bfloat16, device=device_type)
-        expected = f(x)
-        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
-
-        self.assertEqual(actual[0], expected[0])
-        FileCheck().check("topk_with_index").check_not(
-            "torch.ops.aten.topk.default("
-        ).run(code)
+        self._check_topk(f, x, torch.sin(x) + 0.25, 4)
 
     @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
     def test_topk_fusible_ir_preserves_selected_values(self):
         def f(x):
             return torch.topk(x, 2, dim=-1)
 
-        bits = torch.full(
-            (2, 33),
-            0xBF800000,
-            dtype=torch.uint32,
-            device=device_type,
-        )
+        bits = torch.full((2, 33), 0xBF800000, dtype=torch.uint32, device=device_type)
         bits[0, 0] = 0xFFC12345
         bits[0, 1] = 0x7FC54321
         bits[1, 0] = 0x80000000
         bits[1, 1] = 0xBF000000
         x = bits.view(torch.float32)
-
-        expected = f(x)
-        values, indices = torch.compile(f, fullgraph=True)(x)
-        gathered = torch.gather(x, 1, indices)
-
-        self.assertEqual(values, expected[0], equal_nan=True)
-        self.assertEqual(values, gathered, equal_nan=True)
-        self.assertEqual(values[1].view(torch.uint32), gathered[1].view(torch.uint32))
+        self._check_topk(f, x, x, 2)
 
     @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
     def test_topk_fusible_ir_backend_without_sort(self):
@@ -3039,58 +3041,76 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         x = torch.randn(16, 65, device=device_type)
         with mock.patch.object(GraphLowering, "has_feature", has_feature_without_sort):
-            actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
-
-        self.assertEqual(actual, f(x))
-        self.assertIn("torch.ops.aten.topk.default", code)
+            self._check_topk(f, x, x * 2, 4, expect_triton=False)
 
     @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
     @config.patch({"triton.mix_order_reduction_non_strict_mode": True})
-    def test_topk_fusible_ir_does_not_use_mix_order_reduction(self):
+    def test_topk_fusible_ir_mix_order_reduction(self):
         def f(x):
-            return torch.topk(x, 4, dim=1), x.sum(dim=0)
+            return *torch.topk(x, 4, dim=1), x.sum(dim=0)
 
         x = torch.randn(16, 65, device=device_type)
-        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
-
-        self.assertEqual(actual, f(x))
-        self.assertEqual(code.count("async_compile.triton("), 2)
+        code = self._check_topk(f, x, x, 4)
+        self.assertEqual(code.count("async_compile.triton("), 1)
 
     @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
-    def test_topk_fusible_ir_cost_model_fallback(self):
-        for name, shape, k, dim, largest in (
-            ("cost_model", (1000, 256), 16, -1, True),
-            ("non_power_of_two_k", (128, 33), 3, -1, True),
-            ("wide_input", (128, 257), 4, -1, True),
-            ("non_last_dim", (33, 128), 4, 0, True),
-            ("smallest", (128, 33), 4, -1, False),
-        ):
-            with self.subTest(name=name):
-                torch._dynamo.reset()
+    def test_topk_fusible_ir_dynamic_rows(self):
+        def f(x):
+            return torch.topk(x * 2, 4, dim=-1)
 
-                def f(x):
-                    return torch.topk(x, k, dim=dim, largest=largest)
+        x = torch.randn(1000, 32, dtype=torch.bfloat16, device=device_type)
+        torch._dynamo.mark_dynamic(x, 0)
+        self._check_topk(f, x, x * 2, 4)
 
-                x = torch.randn(shape, dtype=torch.bfloat16, device=device_type)
-                actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+    @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
+    @parametrize(
+        "name, shape, k, dim",
+        [
+            ("k_too_large", (128, 33), 17, -1),
+            ("k_one", (128, 33), 1, -1),
+            ("wide_input", (128, 257), 4, -1),
+            ("non_last_dim", (33, 128), 4, 0),
+        ],
+        name_fn=lambda name, shape, k, dim: name,
+    )
+    def test_topk_fusible_ir_fallback(self, name, shape, k, dim):
+        def f(x):
+            return torch.topk(x, k, dim=dim)
 
-                self.assertEqual(actual, f(x))
-                FileCheck().check("torch.ops.aten.topk.default(").check_not(
-                    "topk_with_index"
-                ).run(code)
+        x = torch.randn(shape, dtype=torch.bfloat16, device=device_type)
+        self._check_topk(f, x, x, k, dim=dim, expect_triton=False)
+
+    @skipCUDAIf(not SM90OrLater, "tl.topk path is enabled on SM90 and newer")
+    def test_topk_fusible_ir_dynamic_k_fallback(self):
+        def f(x, k):
+            return torch.topk(x, k, dim=-1)
+
+        x = torch.randn(128, 33, dtype=torch.bfloat16, device=device_type)
+        torch._dynamo.reset()
+        torch._dynamo.mark_dynamic(x, 0)
+        expected = f(x, 4)
+        actual, (code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True, dynamic=True), x, 4
+        )
+        self.assertEqual(actual, expected)
+        FileCheck().check("torch.ops.aten.topk.default(").check_not(
+            "topk_with_index"
+        ).run(code)
 
     @skipCUDAIf(not SM90OrLater, "bounded grouping is enabled on SM90 and newer")
-    def test_bounded_topk_index_group(self):
+    @parametrize("bins", [32, 48])
+    @parametrize("cumsum_dtype", [torch.int32, None])
+    def test_bounded_topk_index_group(self, bins, cumsum_dtype):
         def f(x):
             values, indices = torch.topk(x, 4, dim=-1)
             sorted_indices, permutation = torch.sort(indices.flatten())
             histogram = torch.histc(
                 sorted_indices.to(torch.int32),
-                bins=32,
+                bins=bins,
                 min=0,
-                max=31,
+                max=bins - 1,
             )
-            offsets = torch.cumsum(histogram, 0, dtype=torch.int32)
+            offsets = torch.cumsum(histogram, 0, dtype=cumsum_dtype)
             return values, indices, sorted_indices, permutation, offsets
 
         x = torch.randn(1000, 32, dtype=torch.bfloat16, device=device_type)
@@ -3100,11 +3120,13 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(torch.gather(x, 1, indices), values)
         expected_indices, expected_permutation = torch.sort(indices.flatten())
         self.assertEqual(sorted_indices, expected_indices)
-        self.assertEqual(permutation, expected_permutation)
-        expected_offsets = (
-            torch.bincount(indices.flatten(), minlength=32).cumsum(0).to(torch.int32)
+        self.assertEqual(indices.flatten()[permutation], sorted_indices)
+        self.assertEqual(
+            permutation.sort().values, torch.arange(4000, device=device_type)
         )
-        self.assertEqual(offsets, expected_offsets)
+        expected_offsets = torch.bincount(indices.flatten(), minlength=bins).cumsum(0)
+        self.assertEqual(offsets, expected_offsets.to(offsets.dtype))
+        self.assertEqual(offsets.dtype, f(x)[4].dtype)
         FileCheck().check("tl.associative_scan").check_not(
             "torch.ops.aten.sort.default("
         ).check_not("torch.ops.aten.histc.default(").check_not(
@@ -3211,22 +3233,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                 self.assertEqual(permutation, expected_permutation)
                 self.assertEqual(indices.flatten()[permutation], sorted_indices)
                 FileCheck().check_not("tl.associative_scan").run(code)
-
-    @skipCUDAIf(not SM90OrLater, "bounded grouping is enabled on SM90 and newer")
-    @config.patch({"triton.persistent_reductions": False})
-    def test_bounded_topk_index_group_requires_persistent_reductions(self):
-        def f(x):
-            _, indices = torch.topk(x, 4, dim=-1)
-            sorted_indices, permutation = torch.sort(indices.flatten())
-            return indices, sorted_indices, permutation
-
-        x = torch.randn(128, 32, dtype=torch.bfloat16, device=device_type)
-        actual, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
-        indices, sorted_indices, permutation = actual
-
-        self.assertEqual(sorted_indices, torch.sort(indices.flatten())[0])
-        self.assertEqual(indices.flatten()[permutation], sorted_indices)
-        FileCheck().check_not("tl.associative_scan").run(code)
 
     @skipCUDAIf(not SM90OrLater, "bounded grouping is enabled on SM90 and newer")
     def test_bounded_topk_index_group_backend_without_scan(self):

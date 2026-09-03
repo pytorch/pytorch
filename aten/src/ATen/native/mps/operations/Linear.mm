@@ -133,7 +133,8 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
       at::empty(output_size, input.scalar_type(), std::nullopt, kMPS, std::nullopt, input.suggest_memory_format());
 
   if (output.numel() == 0) {
-    return output;
+    // Squeeze last dim of 1D linear
+    return weight_arg.dim() != 1 ? output : output.squeeze(-1);
   }
 
   // An empty reduction dimension (in_features == 0) makes the matmul term
@@ -289,6 +290,12 @@ static Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& g
   }
 
   const auto weight_contig = weight.is_contiguous() ? weight : weight.contiguous();
+  // A 1D weight is the out_features == 1 case with the trailing output dim squeezed
+  // (see _mps_linear), so grad_output is missing it too. Restore both, otherwise mm
+  // gets a vector for mat2 and rejects it.
+  if (weight.dim() == 1) {
+    return at::mm(grad_output.reshape({-1, 1}), weight_contig.unsqueeze(0)).view(input_size);
+  }
   const auto grad_output_2d = grad_output.dim() != 2 ? grad_output.reshape({-1, grad_output.size(-1)}) : grad_output;
   return at::mm(grad_output_2d, weight_contig).view(input_size);
 }
@@ -303,29 +310,32 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
   TORCH_CHECK(supportedFloatingOrComplexType(grad_output),
               "MPS device does not support linear backward for non-float inputs");
 
+  // A 1D weight is the out_features == 1 case with the trailing output dim squeezed
+  // (see _mps_linear), so grad_output is missing it too; flattening to {-1, 1}
+  // restores it and grad_weight is viewed back to the weight's shape below.
+  const auto out_features = weight.dim() == 1 ? 1 : grad_output.size(-1);
+
   // Guard before the reshapes below: for a 0-element input, reshape({-1, 0}) is
   // ambiguous and throws. The weight gradient is empty or zero here, but the bias
   // gradient is still the sum of grad_output over the leading dims.
   if (grad_output.numel() == 0 || input.numel() == 0) {
-    auto grad_weight = at::zeros({grad_output.size(-1), input.size(-1)}, grad_output.options());
+    auto grad_weight = at::zeros(weight.sizes(), grad_output.options());
     Tensor grad_bias;
     if (bias_defined) {
-      grad_bias = at::zeros({grad_output.size(-1)}, grad_output.options());
+      grad_bias = at::zeros({out_features}, grad_output.options());
       if (grad_output.numel() != 0) {
-        const auto grad_output_flat =
-            grad_output.dim() != 2 ? grad_output.reshape({-1, grad_output.size(-1)}) : grad_output;
-        grad_bias.copy_(grad_output_flat.sum(0));
+        grad_bias.copy_(grad_output.reshape({-1, out_features}).sum(0));
       }
     }
     return {grad_weight, grad_bias};
   }
 
-  const auto grad_output_2d = grad_output.dim() != 2 ? grad_output.reshape({-1, grad_output.size(-1)}) : grad_output;
+  const auto grad_output_2d = grad_output.reshape({-1, out_features});
   const auto input_2d = input.dim() != 2 ? input.reshape({-1, input.size(-1)}) : input;
 
   // Route through at::mm so the dispatcher can pick the Metal fallback for K-dim
   // overflow on Apple7/8 (M1/M2). See pytorch/pytorch#177116.
-  auto grad_weight = at::mm(grad_output_2d.t(), input_2d.contiguous());
+  auto grad_weight = at::mm(grad_output_2d.t(), input_2d.contiguous()).view(weight.sizes());
   // autocast promotes sum() to float32, but linear_backward's meta keeps grad_output's
   // dtype; cast back so inductor's baked-in dtype matches the runtime buffer.
   auto grad_bias = bias_defined ? grad_output_2d.sum(0).to(grad_output.scalar_type()) : Tensor();

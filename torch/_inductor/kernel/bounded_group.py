@@ -4,19 +4,63 @@ from __future__ import annotations
 import torch
 
 from .. import ir
-from ..lowering import add, expand, iota, make_pointwise, sum_, to_dtype, view
+from ..lowering import expand, iota, make_pointwise, sum_, to_dtype, view
 from ..virtualized import ops, V
 
 
 eq = make_pointwise(ops.eq, override_return_dtype=torch.bool)
+le = make_pointwise(ops.le, override_return_dtype=torch.bool)
 lt = make_pointwise(ops.lt, override_return_dtype=torch.bool)
 
 
-def _scan_scatter(int_matches, matches, bases, output_dtype, output_value):
+def _key_matrix(keys, bound):
+    """Broadcast keys [N] against arange(bound) [E] as a pair of [E, N] views."""
+    (routes,) = keys.get_size()
+    shape = [bound, routes]
+    groups = iota(
+        bound,
+        start=0,
+        step=1,
+        dtype=keys.get_dtype(),
+        device=keys.get_device(),
+        requires_grad=False,
+    )
+    return expand(view(keys, [1, routes]), shape), expand(
+        view(groups, [bound, 1]), shape
+    )
+
+
+def bounded_group_offsets(keys, bound, dtype):
+    """Inclusive cumsum of the histogram of keys over the bins [0, bound)."""
+    route_keys, groups = _key_matrix(keys, bound)
+    return sum_(le(route_keys, groups), axis=1, dtype=dtype)
+
+
+def bounded_group(keys, bound):
+    """Counting sort of integer keys in [0, bound): (sorted keys, permutation).
+
+    Row e of the [bound, N] match matrix scans its matches to rank each key
+    within group e; base offsets come from counting the smaller keys.
+    """
+    route_keys, groups = _key_matrix(keys, bound)
+    matches = eq(route_keys, groups)
+    bases = sum_(lt(route_keys, groups), axis=1, dtype=torch.int32)
+    key_dtype = keys.get_dtype()
+    sorted_keys = _scan_scatter(
+        matches, bases, key_dtype, lambda idx: ops.index_expr(idx[0], key_dtype)
+    )
+    permutation = _scan_scatter(
+        matches, bases, torch.int64, lambda idx: ops.index_expr(idx[1], torch.int64)
+    )
+    return sorted_keys, permutation
+
+
+def _scan_scatter(matches, bases, dtype, value_fn):
+    """Scatter value_fn(idx) of each match to bases[group] + rank within the group."""
     device = matches.get_device()
-    experts, routes = matches.get_size()
+    groups, routes = matches.get_size()
     matches_loader = matches.make_loader()
-    int_matches_loader = int_matches.make_loader()
+    int_matches_loader = to_dtype(matches, torch.int32).make_loader()
     bases_loader = bases.make_loader()
 
     def combine_fn(a_tuple, b_tuple):
@@ -24,100 +68,35 @@ def _scan_scatter(int_matches, matches, bases, output_dtype, output_value):
         (b,) = b_tuple
         return (ops.add(a, b),)
 
-    def reindex(index, scan_index):
-        return [index[0], scan_index[0]]
-
     def output_indexer(idx, result):
-        grouped_offset = ops.add(
-            bases_loader([idx[0]]),
-            ops.sub(result[0], ops.constant(1, torch.int32)),
+        offset = ops.add(
+            bases_loader([idx[0]]), ops.sub(result[0], ops.constant(1, torch.int32))
         )
-        safe_grouped_offset = ops.where(
-            matches_loader(idx),
-            grouped_offset,
-            ops.constant(0, torch.int32),
-        )
-        return [
-            ops.indirect_indexing(
-                safe_grouped_offset,
-                routes,
-                check=False,
-                wrap_neg=False,
-            )
-        ]
+        offset = ops.where(matches_loader(idx), offset, ops.constant(0, torch.int32))
+        return [ops.indirect_indexing(offset, routes, check=False, wrap_neg=False)]
 
     scan = ir.ScanScatter(
         device=device,
-        dtype=output_dtype,
+        dtype=dtype,
         inner_fn=int_matches_loader,
-        ranges=[experts],
+        ranges=[groups],
         scan_ranges=[routes],
-        size=[experts, routes],
+        size=[groups, routes],
         combine_fn=combine_fn,
-        reindex=reindex,
+        reindex=lambda index, scan_index: [index[0], scan_index[0]],
         reduction_hint=ir.ReductionHint.DEFAULT,
         output_index=0,
         dtypes=(torch.int32,),
         inner_fns=(int_matches_loader,),
         output_indexer=output_indexer,
-        output_value=output_value,
+        output_value=lambda idx, result: value_fn(idx),
         store_mask=lambda idx, result: matches_loader(idx),
     )
     buffer = ir.ComputedBuffer(
         name=None,
-        layout=ir.FixedLayout(
-            device,
-            output_dtype,
-            [routes],
-            [1],
-        ),
+        layout=ir.FixedLayout(device, dtype, [routes], [1]),
         data=scan,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
     return ir.TensorBox.create(buffer)
-
-
-def bounded_group(keys, upper_bound):
-    size = keys.get_size()
-    if len(size) != 1:
-        raise AssertionError("bounded_group expects one-dimensional keys")
-    routes = int(size[0])
-    upper_bound = int(upper_bound)
-    device = keys.get_device()
-    if device is None:
-        raise AssertionError("bounded_group keys must have a device")
-
-    matrix_shape = [upper_bound, routes]
-    expert_ids = iota(
-        upper_bound,
-        start=0,
-        step=1,
-        dtype=keys.get_dtype(),
-        device=device,
-        requires_grad=False,
-    )
-    expert_ids = expand(view(expert_ids, [upper_bound, 1]), matrix_shape)
-    route_keys = expand(view(keys, [1, routes]), matrix_shape)
-    matches = eq(route_keys, expert_ids)
-    int_matches = to_dtype(matches, torch.int32)
-    lower_keys = to_dtype(lt(route_keys, expert_ids), torch.int32)
-    bases = sum_(lower_keys, axis=1, dtype=torch.int32)
-    counts = sum_(int_matches, axis=1, dtype=torch.int32)
-    offsets = add(bases, counts)
-
-    sorted_keys = _scan_scatter(
-        int_matches,
-        matches,
-        bases,
-        keys.get_dtype(),
-        lambda idx, result: ops.index_expr(idx[0], keys.get_dtype()),
-    )
-    permutation = _scan_scatter(
-        int_matches,
-        matches,
-        bases,
-        torch.int64,
-        lambda idx, result: ops.index_expr(idx[1], torch.int64),
-    )
-    return sorted_keys, permutation, offsets

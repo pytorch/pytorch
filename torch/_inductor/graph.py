@@ -58,6 +58,7 @@ from torch.utils._typing_utils import not_none
 
 from . import config, ir
 from .codegen.common import (
+    _uses_gpu_cpp_wrapper,
     BackendFeature,
     DeviceOpOverrides,
     FileBackedGraphModule,
@@ -143,6 +144,7 @@ from torch._inductor.codecache import output_code_log
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+
 
 aten = torch.ops.aten
 
@@ -472,7 +474,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.additional_buffer_deps: dict[str, OrderedSet[str]] = defaultdict(
             OrderedSet
         )
-        self.additional_star_deps: dict[str, OrderedSet[str]] = defaultdict(OrderedSet)
         # Maps control_deps FX node to operation names created when lowering it,
         # for void ops (e.g. record_event) that return None and therefore cannot
         # be referenced by name in subsequent control_deps ordering constraints.
@@ -518,11 +519,16 @@ class GraphLowering(torch.fx.Interpreter):
         self.removed_inplace_buffers: OrderedSet[str] = OrderedSet()
         self.mutated_buffers: OrderedSet[str] = OrderedSet()
         self.sdpa_constraint_cache: dict[tuple, ir.IRNode] = {}
-        # Inclusive offsets produced while lowering a proven-bounded integer
-        # sort. Exact histogram/cumsum consumers can reuse these instead of
-        # materializing an external histogram kernel.
-        self.bounded_group_offsets: dict[torch.fx.Node, ir.TensorBox] = {}
+        # Inputs of sorts lowered as a bounded integer grouping; the histogram
+        # cumsum of their output is a reduction over these same keys.
+        self.bounded_sort_keys: dict[torch.fx.Node, ir.TensorBox] = {}
+        # Buffers that are neither recycled nor freed. Aliasing kernels rely on
+        # the second half: some have no output variable to free at all.
         self.never_reuse_buffers: OrderedSet[str] = OrderedSet()
+        # Buffers withheld from the reuse pool but still freed, for storage that
+        # may be retained behind inductor's back. Freeing only drops inductor's
+        # own reference, so a retained tensor survives; recycling would not.
+        self.never_reuse_but_free_buffers: OrderedSet[str] = OrderedSet()
         self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
@@ -2610,7 +2616,7 @@ class GraphLowering(torch.fx.Interpreter):
         `cpp_wrapper_cpu.py`).
         """
         self.validate_can_generate_cpp_wrapper()
-        has_gpu = any(device in self.device_types for device in ["cuda", "xpu"])
+        has_gpu = any(_uses_gpu_cpp_wrapper(device) for device in self.device_types)
         # CPU + user-defined Triton + AOTI + autotune block disabled is the
         # only CPU configuration that needs the two-pass dance: the autotune
         # block normally populates CpuTritonKernelCache, but here it doesn't run.
@@ -2920,7 +2926,7 @@ class GraphLowering(torch.fx.Interpreter):
         # A "cpu" device would precompile cpp_wrapper/cpu.h, which does not
         # include the CUDA headers needed to compile the kernel call sites.
         device_type = next(
-            (d for d in self.device_types if d in ("cuda", "xpu")),
+            (d for d in self.device_types if _uses_gpu_cpp_wrapper(d)),
             next((d for d in self.device_types if d != "meta"), "cpu"),
         )
 

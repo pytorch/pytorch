@@ -60,7 +60,7 @@ if HAS_GPU:
     import triton
     import triton.language as tl
 
-    from torch.testing._internal.triton_utils import add_kernel_2d_autotuned
+    from torch.testing._internal.triton_utils import add_kernel, add_kernel_2d_autotuned
 
 test_config = {
     "compile_threads": 1,
@@ -1035,6 +1035,23 @@ class AOTFxirTestCase(InductorTestCase):
             inp,
             dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}),
         )
+
+    def test_custom_triton_view_arg(self):
+        # The mm output's halves reach the kernel as reinterpret_tensor(...) views.
+        n = 8
+
+        class Model(torch.nn.Module):
+            def forward(self, x, w):
+                t = torch.mm(x, w).view(-1)
+                output = torch.zeros(n, device=x.device)
+                add_kernel[(1,)](t[:n], t[n:], output, n, BLOCK_SIZE=n)
+                return output
+
+        inp = (
+            torch.randn(2 * n, 4, device=self.device),
+            torch.randn(4, 1, device=self.device),
+        )
+        self.check(Model().to(device=self.device), inp, strict=True)
 
     def test_custom_triton_autotune_dynamic(self):
         class Model(torch.nn.Module):

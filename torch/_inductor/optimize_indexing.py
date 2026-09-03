@@ -1,4 +1,5 @@
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,7 +11,58 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .loop_body import LoopBody
-from .utils import dominated_nodes
+from .utils import dominated_nodes, flatten_index
+from .virtualized import V
+
+
+_ARG_REDUCTION_TYPES = (
+    "argmax",
+    "argmin",
+    "argmax_value",
+    "argmin_value",
+    "argmax_with_value",
+    "argmin_with_value",
+)
+
+
+def remove_redundant_argreduce_indices(
+    loop_bodies: Sequence[LoopBody],
+) -> None:
+    """Drop explicit arg-reduction indices that match the final loop order."""
+    reductions: dict[torch.fx.Node, Any] = {}
+    non_native: OrderedSet[torch.fx.Node] = OrderedSet()
+    for loop_body in loop_bodies:
+        if not loop_body.reduce_vars:
+            continue
+        native_index = flatten_index(loop_body.reduce_vars, loop_body.sizes[1])
+        for block in (loop_body.root_block, *loop_body.subblocks.values()):
+            for node in block.graph.find_nodes(op="call_method", target="reduction"):
+                if node.args[-2] not in _ARG_REDUCTION_TYPES:
+                    continue
+                value = node.args[-1]
+                if not (isinstance(value, tuple) and len(value) == 2):
+                    continue
+                reduction_value, logical_index = value
+                if not (
+                    isinstance(logical_index, torch.fx.Node)
+                    and logical_index.target in ("index_expr", "value_expr")
+                ):
+                    continue
+                index_node = logical_index.args[1]
+                if not isinstance(index_node, torch.fx.Node):
+                    continue
+                index_name = index_node.args[0]
+                if not isinstance(index_name, str):
+                    continue
+                reductions[node] = reduction_value
+                if not V.graph.sizevars.statically_known_equals(
+                    loop_body.indexing_exprs[index_name], native_index
+                ):
+                    non_native.add(node)
+
+    for node, reduction_value in reductions.items():
+        if node not in non_native:
+            node.args = (*node.args[:-1], reduction_value)
 
 
 def val_expressable_in_32_bits(val: object) -> bool:
@@ -221,7 +273,6 @@ class _ValueUseRules:
         stable: bool,
         descending: bool,
         top_k: int | None = None,
-        output_dtypes: tuple[torch.dtype, ...] | None = None,
     ) -> _ValueUseRule:
         return _ValueUseRule(value_sinks=(values,))
 

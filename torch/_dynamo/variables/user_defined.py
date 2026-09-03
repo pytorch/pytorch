@@ -1423,7 +1423,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             # graph break on any contextlib.* that it is not contextlib.contextmanager
             # Some of the APIs below are not supported because they rely on features
-            # that Dynamo doesn't play well today (i.e. contextlib.suppress)
+            # that Dynamo doesn't play well with today (i.e. contextlib.suppress)
             if self.value in (
                 contextlib._AsyncGeneratorContextManager,
                 contextlib.closing,
@@ -2269,7 +2269,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # Mirror's CPython variant of vectorcall_method.
+        # Mirrors CPython variant of vectorcall_method.
         # NOTE: Dynamo does not IMPLEMENT the vectorcall protocol, but we keep
         # the name for consistency with CPython's typeobject.c
         m = self._lookup_method(tx, name)
@@ -2281,7 +2281,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         name: str,
         args: list[VariableTracker],
     ) -> VariableTracker | None:
-        # Mirror's CPython variants of maybe_call_special_no_args and maybe_call_special_one_arg
+        # Mirrors CPython variants of maybe_call_special_no_args and maybe_call_special_one_arg
         m = self._maybe_lookup_method(tx, name)
         if m is None:
             return None
@@ -3604,6 +3604,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         can_use_mro_source = self.cls_source is not None and self.source is not None
 
+        # LOAD_ATTR + CALL (3.11+) never hits call_method unless getattr
+        # returns CallMethodVariable. object_generic_getattr already does this;
+        # UDOV must too, or tp_methods handlers are skipped and the class
+        # function is inlined. That breaks when Dynamo has replaced the method
+        # (Optimizer._init_group is wrapped with torch.compiler.disable).
+        from .object_protocol import _is_method_type
+
+        if self.lookup_tp_method(name) is not None and (
+            _is_method_type(type_attr)
+            or getattr(type_attr, "_torchdynamo_disable", False)
+        ):
+            return variables.CallMethodVariable(self, name, source=source)
+
         if isinstance(type_attr, staticmethod):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
@@ -3668,6 +3681,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             or is_cython_function(type_attr)
         ):
             return variables.GetAttrVariable(self, name, type(type_attr), source=source)
+
+        if inspect.ismethoddescriptor(type_attr):
+            return variables.GetAttrVariable(self, name, source=source)
 
         # Plain class variable (or MethodType, C-level non-data descriptor
         # without __get__, etc.).
@@ -4891,7 +4907,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L2356-L2395
         # The C impl uses a naming convention of left/right for the two operands
-        # and swap self/other depending on some conditions. For simplicity, we
+        # and swaps self/other depending on some conditions. For simplicity, we
         # will suffix the var names with "_"
 
         # new_defdict(self, left) calls type(self)(self.default_factory, left),

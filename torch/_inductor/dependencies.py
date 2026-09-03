@@ -922,7 +922,6 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         stable: Any,
         descending: Any,
         top_k: Any = None,
-        output_dtypes: Any = None,
     ) -> tuple[None, ...]:
         return (None,) * len(values)
 

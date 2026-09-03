@@ -958,58 +958,74 @@ def sort_with_index(
 
 
 @triton.jit
+def _topk_pack(x, idxs, rnumel, descending: tl.constexpr):
+    """Pack 32-bit floats and lane indices into int64 keys ordered like x.
+
+    The high word orders like the float (NaN above +inf, matching torch.sort),
+    the low word breaks ties by preferring lower lanes and keeps the NaN sign so
+    the unpacked value is bit-identical to the input.
+    """
+    bits = x.to(tl.int32, bitcast=True)
+    is_nan = x != x
+    nan_sign = is_nan & (bits < 0)
+    bits = tl.where(is_nan, bits & 0x7FFFFFFF, bits)
+    key = tl.where(bits < 0, bits ^ 0x7FFFFFFF, bits)
+    lane = idxs.to(tl.int32)
+    if descending:
+        lane = 0x7FFFFFFF - lane
+    low = lane.to(tl.uint32) | (nan_sign.to(tl.uint32) << 31)
+    packed = (key.to(tl.int64) << 32) | low.to(tl.int64)
+    if rnumel is not None:
+        if descending:
+            packed = tl.where(idxs < rnumel, packed, -9223372036854775808)
+        else:
+            packed = tl.where(idxs < rnumel, packed, 9223372036854775807)
+    return packed
+
+
+@triton.jit
+def _topk_unpack(packed, descending: tl.constexpr):
+    key = (packed >> 32).to(tl.int32)
+    low = packed.to(tl.uint32)
+    bits = tl.where(key < 0, key ^ 0x7FFFFFFF, key)
+    neg_nan = ((key & 0x7FFFFFFF) > 0x7F800000) & ((low >> 31) != 0)
+    bits = tl.where(neg_nan, bits + (-2147483648), bits)
+    lane = (low & 0x7FFFFFFF).to(tl.int32)
+    if descending:
+        lane = 0x7FFFFFFF - lane
+    return bits.to(tl.float32, bitcast=True), lane
+
+
+@triton.jit
 def topk_with_index(
     x,
     idxs,
     rnumel,
     k: tl.constexpr,
     dim: tl.constexpr = None,
+    descending: tl.constexpr = True,
 ):
-    """Return the top-k values and distinct source indices in the first k lanes."""
+    """Top-k of x with source indices, repeated across the reduction dim.
+
+    Lane r of the result holds rank r % k, so the first k lanes are the answer.
+    """
     x, idxs = tl.broadcast(x, idxs)
     _dim: tl.constexpr = len(x.shape) - 1 if dim is None else dim
     tl.static_assert(
         _dim == len(x.shape) - 1, "only minor dimension is currently supported"
     )
+    tl.static_assert(x.dtype == tl.float32, "topk_with_index expects fp32 keys")
+    n: tl.constexpr = x.shape[_dim]
 
-    if rnumel is None:
-        valid = tl.full(x.shape, True, tl.int1)
-    else:
-        valid = idxs < rnumel
-
-    is_nan = (x != x) & valid
-    ranked_x = tl.where(is_nan, float("inf"), tl.where(valid, x, float("-inf")))
-    top_values = tl.topk(ranked_x, k, dim=_dim)
-
-    lanes = tl.arange(0, x.shape[-1])
-    top_lanes = tl.arange(0, k)
-    used = tl.full(x.shape, False, tl.int1)
-    out_values = tl.full(x.shape, 0.0, x.dtype)
-    out_indices = tl.full(idxs.shape, 0, idxs.dtype)
-
-    # tl.topk currently returns values only. Recover one distinct source index
-    # for each rank; topk does not specify which index wins a tie.
-    for rank in tl.static_range(k):
-        ranked_value = tl.sum(
-            tl.where(top_lanes == rank, top_values, 0.0),
-            axis=_dim,
-            keep_dims=True,
+    packed = _topk_pack(x, idxs, rnumel, descending)
+    top = tl.topk(packed, k, dim=_dim, descending=descending)
+    if n != k:
+        top = tl.reshape(
+            tl.broadcast_to(tl.expand_dims(top, _dim), x.shape[:_dim] + [n // k, k]),
+            x.shape,
         )
-        has_nan = tl.sum((is_nan & ~used).to(tl.int32), axis=_dim, keep_dims=True) > 0
-        matches = tl.where(
-            has_nan,
-            is_nan & ~used,
-            valid & (ranked_x == ranked_value) & ~used,
-        )
-        index = tl.argmax(matches.to(tl.int32), axis=_dim, keep_dims=True)
-        selected = lanes == index
-        used |= selected
-        selected_value = select_one(x, selected, dim=_dim, keep_dims=True)
-        selected_index = tl.sum(tl.where(selected, idxs, 0), axis=_dim, keep_dims=True)
-        out_values = tl.where(lanes == rank, selected_value, out_values)
-        out_indices = tl.where(lanes == rank, selected_index, out_indices)
-
-    return out_values, out_indices
+    values, lanes = _topk_unpack(top, descending)
+    return values, lanes.to(idxs.dtype)
 
 
 @triton.jit

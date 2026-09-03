@@ -111,6 +111,7 @@ from .loop_body import LoopBody
 from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties, ReductionHint
+from .sizevars import is_range_bound
 from .utils import (
     argsort,
     argsort_sym,
@@ -147,7 +148,7 @@ if TYPE_CHECKING:
     from .codegen.cutlass.template import CUTLASSTemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
-    from .kernel.gemm_epilogue import GemmReductionPlan
+    from .kernel.gemm_epilogue import GemmEpiloguePlan, GemmReductionPlan
     from .utils import IndentedBuffer
 
 else:
@@ -3252,7 +3253,6 @@ class Sort(Loops):
     stable: bool
     descending: bool
     top_k: int | None = None
-    output_dtypes: tuple[torch.dtype, ...] | None = None
 
     # HACK we mimic reduction
 
@@ -3285,28 +3285,19 @@ class Sort(Loops):
         idx = self.reindex(vars, reduction_vars)
         values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
         result = ops.sort(
-            self.dtypes,
-            values,
-            self.stable,
-            self.descending,
-            top_k=self.top_k,
-            output_dtypes=self.output_dtypes,
+            self.dtypes, values, self.stable, self.descending, top_k=self.top_k
         )
-        store_idx = idx
-        store_value = result[self.output_index]
+        value = result[self.output_index]
         if self.top_k is not None:
-            if len(reduction_vars) != 1:
-                raise AssertionError("top-k expects one reduction dimension")
-            rank = ops.index_expr(reduction_vars[0], torch.int64)
-            store_value = ops.set_store_mask(
-                store_value,
-                ops.lt(rank, ops.constant(self.top_k, torch.int64)),
-            )
-            # Keep the dependency index within the compact output allocation
-            # while retaining the full input reduction range used by tl.topk.
-            rank = ModularIndexing(reduction_vars[0], 1, self.top_k)
-            store_idx = self.reindex(vars, [rank])
-        return ops.store(output_name or "unnamed", indexer(store_idx), store_value)
+            # The selection lives in the first top_k lanes of the full sort
+            # range: predicate the store on the lane and keep the dependency
+            # index inside the compact output.
+            (rank,) = reduction_vars
+            lane = ops.index_expr(rank, torch.int64)
+            in_range = ops.lt(lane, ops.constant(self.top_k, torch.int64))
+            value = ops.set_store_mask(value, in_range)
+            idx = self.reindex(vars, [ModularIndexing(rank, 1, self.top_k)])
+        return ops.store(output_name or "unnamed", indexer(idx), value)
 
     def get_reduction_type(self) -> str | None:
         return "sort"
@@ -3346,7 +3337,6 @@ class Sort(Loops):
         stable: bool,
         descending: bool,
         top_k: int | None = None,
-        output_dtypes: tuple[torch.dtype, ...] | None = None,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         **kwargs: Any,
     ) -> Sequence[TensorBox | None]:
@@ -3355,11 +3345,9 @@ class Sort(Loops):
         output_size = list(size)
         if top_k is not None:
             output_size[axis] = top_k
-        if output_dtypes is None:
-            output_dtypes = dtypes
 
         if not V.graph.has_feature(device, BackendFeature.SORT):
-            return [None] * len(output_dtypes)
+            return [None] * len(dtypes)
 
         sizevars = V.graph.sizevars
         sort_numel = sizevars.simplify(sympy_product(sort_ranges))
@@ -3382,19 +3370,17 @@ class Sort(Loops):
 
         if len(dtypes) != len(inner_fns):
             raise AssertionError("Expected len(dtypes) == len(inner_fns)")
-        if len(output_dtypes) != len(dtypes):
-            raise AssertionError("Expected len(output_dtypes) == len(dtypes)")
 
         # Sort with a single element is just a copy
         if sizevars.statically_known_true(sympy.Le(sort_numel, 1)):
             return [
                 Pointwise.create(
                     device=device,
-                    dtype=output_dtypes[output_index],
+                    dtype=dtypes[output_index],
                     inner_fn=inner_fns[output_index],
                     ranges=size,
                 )
-                for output_index in range(len(output_dtypes))
+                for output_index in range(len(dtypes))
             ]
 
         def reindex(index: Sequence[Expr], sort_index: Sequence[Expr]) -> list[Expr]:
@@ -3408,7 +3394,7 @@ class Sort(Loops):
             TensorBox.create(
                 Sort(
                     device=device,
-                    dtype=output_dtypes[output_index],
+                    dtype=dtypes[output_index],
                     dtypes=dtypes,
                     inner_fn=inner_fns[output_index],
                     inner_fns=inner_fns,
@@ -3421,11 +3407,10 @@ class Sort(Loops):
                     stable=stable,
                     descending=descending,
                     top_k=top_k,
-                    output_dtypes=output_dtypes,
                     **kwargs,
                 )
             )
-            for output_index in range(len(output_dtypes))
+            for output_index in range(len(dtypes))
         ]
 
         for result in results:
@@ -6799,10 +6784,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self,
         out_node: Any,
         hint_override: int | None = None,
-        epilogue_fn_code: str | None = None,
-        epilogue_reads: list[str] | None = None,
-        epilogue_writes: list[str] | None = None,
-        epilogue_var_renames: dict[str, Any] | None = None,
+        epilogue: GemmEpiloguePlan | None = None,
         local_reduce: GemmReductionPlan | None = None,
     ) -> tuple[Any, Any]:
         """
@@ -6812,10 +6794,6 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         - kernel: NVUniversalGemmKernel object with call_kernel() method
         - render: function that returns source code string
         """
-        if epilogue_fn_code is not None:
-            if epilogue_var_renames is None:
-                raise AssertionError("epilogue_fn_code requires epilogue_var_renames")
-
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernel,
         )
@@ -6850,10 +6828,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             scale_type_b=self.scale_type_b,
             swizzle_type_a=self.swizzle_type_a,
             swizzle_type_b=self.swizzle_type_b,
-            epilogue_fn_code=epilogue_fn_code,
-            epilogue_reads=epilogue_reads,
-            epilogue_writes=epilogue_writes,
-            epilogue_var_renames=epilogue_var_renames,
+            epilogue=epilogue,
             local_reduce=local_reduce,
             swap_ab=self.swap_ab,
             bias_node=bias_node,
@@ -8210,37 +8185,46 @@ class ExternKernel(InputsKernel):
             )
         )
 
+    def get_assert_name(self) -> str:
+        name = self.get_name()
+        if V.graph.cpp_wrapper and self.is_inplace_view():
+            # inplace_view ops (e.g. set_.source_Tensor) don't declare an
+            # output variable; assert on the mutated input instead.
+            if not isinstance(self.inputs[0], IRNode):
+                raise AssertionError("Expected isinstance(self.inputs[0], IRNode)")
+            name = self.inputs[0].get_name()
+        return name
+
     def codegen_size_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         if not config.size_asserts:
             return
         if self.is_inplace_view() and not V.graph.cpp_wrapper:
             return
         op_name = self.get_op_name()
-        name = self.get_name()
-        if V.graph.cpp_wrapper:
-            # inplace_view ops (e.g. set_.source_Tensor) don't declare an
-            # output variable; assert on the mutated input instead.
-            if self.is_inplace_view():
-                if not isinstance(self.inputs[0], IRNode):
-                    raise AssertionError("Expected isinstance(self.inputs[0], IRNode)")
-                name = self.inputs[0].get_name()
+        name = self.get_assert_name()
         size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
         stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
         dtype = self.get_dtype() if self.should_assert_dtype(op_name) else None
         wrapper.write_assert_size_stride(name, size, stride, op_name, dtype)
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
-        if config.alignment_asserts and not V.graph.cpp_wrapper:
-            name = self.get_name()
-            aligned = name not in V.graph.unaligned_buffers
+        # Preserve the existing Python-wrapper behavior for inplace-view
+        # results. Only cpp_wrapper needs get_assert_name() to spell the check
+        # with the mutated input handle because its shim declares no output.
+        if config.alignment_asserts:
+            name = self.get_assert_name()
+            # For cpp_wrapper inplace-view ops, `name` is the mutated input
+            # variable used to spell the runtime check, while self.get_name()
+            # describes the post-mutation result whose layout was classified.
+            # Keep the alignment decision tied to that result layout.
+            aligned = self.get_name() not in V.graph.unaligned_buffers
             op_name = self.get_op_name()
             if aligned:
-                wrapper.writeline(
-                    f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
-                )
+                wrapper.write_assert_alignment(name, GPU_ALIGN_BYTES, op_name)
             else:
-                wrapper.writeline(
-                    f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
+                wrapper.make_comment(
+                    f"{wrapper.comment} buffer {name} (op: {op_name}) "
+                    "is assumed to be not aligned"
                 )
 
     def codegen_memory_tracking(self, wrapper: PythonWrapperCodegen) -> None:
@@ -9544,6 +9528,8 @@ class AssertScalar(ExternKernel):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         if not config.scalar_asserts:
+            return
+        if config.unsafe_skip_scalar_range_asserts and is_range_bound(self.scalar):
             return
         # NB: It is EXTREMELY important not to simplify the scalar under assertion here,
         # because simplify is done with respect to runtime asserts.  So if you have

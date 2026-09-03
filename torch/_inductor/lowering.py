@@ -52,6 +52,7 @@ from torch.fx.experimental.symbolic_shapes import (
     resolve_unbacked_bindings,
     SymTypes,
 )
+from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
@@ -85,6 +86,7 @@ from .ir import (
     validate_ir,
     View,
 )
+from .ops_handler import register_pointwise_op
 from .utils import (
     ceildiv,
     convert_symint_to_expr,
@@ -981,6 +983,9 @@ def to_dtype(
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+register_pointwise_op("to_dtype")
+
+
 _FLOAT8_E8M0FNU_TO_FLOAT_DTYPES = (
     torch.float32,
     torch.float64,
@@ -1149,6 +1154,7 @@ def register_pointwise(
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
+    register_pointwise_op(name)
     fn = ops_wrapper(name)
 
     register_op_dtype_propagation_rules(
@@ -7275,12 +7281,12 @@ def _make_reduction_inner(
             kept_idx.append(i)
             kept_sizes.append(size[i])
 
-    # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
-    should_compute_logical_index = False
+    # Loop reordering happens after lowering, so the input IR cannot reliably predict
+    # when the physical reduction order will differ from the logical order.
     supports_logical_index_argreduce = is_triton(x) or (
         ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
     )
-    if (
+    should_compute_logical_index = (
         reduction_type
         in (
             "argmax",
@@ -7292,16 +7298,7 @@ def _make_reduction_inner(
         )
         and len(reduced_sizes) > 1
         and supports_logical_index_argreduce
-    ):
-        if isinstance(x.data, PermuteView):
-            should_compute_logical_index = True
-        elif isinstance(x.data, ir.ReinterpretView) or (
-            isinstance(x.data, ir.StorageBox) and isinstance(x.data.data, ir.Buffer)
-        ):
-            layout = x.get_layout()
-            should_compute_logical_index = (
-                layout.is_transposed() or not layout.is_contiguous()
-            )
+    )
 
     def loader(index, reduction_index):
         if len(reduction_index) != len(reduced_idx):
@@ -7815,6 +7812,9 @@ def mul(a, b):
         return make_pointwise(fn)(a, b)
 
 
+register_pointwise_op("mul")
+
+
 def get_constant_value(x: ir.IRNode) -> ir.Constant | None:
     """Try convert an arbitrary IR node into an ir.Constant value"""
 
@@ -7872,6 +7872,9 @@ def div_prim(a, b):
         return ops.truediv(*args)
 
     return make_pointwise(fn)(a, b)
+
+
+register_pointwise_op("truediv")
 
 
 @register_lowering(
@@ -7989,111 +7992,118 @@ fallback_cummax = fallback_handler(aten.cummax.default)
 fallback_cummin = fallback_handler(aten.cummin.default)
 
 
-def _get_fx_arg(
-    node: torch.fx.Node,
-    index: int,
-    name: str,
-    default: Any = None,
-) -> Any:
-    if index < len(node.args):
-        return node.args[index]
-    return node.kwargs.get(name, default)
+def _fx_kwargs(node: Any) -> dict[str, Any] | None:
+    """Schema-normalized arguments of an aten call, defaults included."""
+    if not isinstance(node, torch.fx.Node) or not isinstance(
+        node.target, torch._ops.OpOverload
+    ):
+        return None
+    normalized = normalize_function(
+        node.target, node.args, node.kwargs, normalize_to_only_use_kwargs=True
+    )
+    return normalized.kwargs if normalized else None
 
 
-def _topk_index_upper_bound(node: torch.fx.Node) -> int | None:
-    while node.op == "call_function" and node.target in (
+# The bounded grouping below materializes a [bound, len(keys)] predicate matrix,
+# so both the value bound and the key count are capped.
+_BOUNDED_GROUP_MAX_BOUND = 256
+_BOUNDED_GROUP_MAX_KEYS = 16384
+
+
+def _topk_index_bound(node: Any) -> int | None:
+    """Exclusive bound of node's values if they are topk indices seen through views."""
+    while isinstance(node, torch.fx.Node) and node.target in (
         aten.view.default,
         aten.reshape.default,
         aten._unsafe_view.default,
     ):
-        source = _get_fx_arg(node, 0, "self")
-        if not isinstance(source, torch.fx.Node):
-            return None
-        node = source
-
+        node = node.args[0]
     if not (
-        node.op == "call_function"
+        isinstance(node, torch.fx.Node)
         and node.target is operator.getitem
-        and _get_fx_arg(node, 1, "index") == 1
+        and node.args[1] == 1
     ):
         return None
-    topk_node = _get_fx_arg(node, 0, "self")
+    topk_node = node.args[0]
     if not (
         isinstance(topk_node, torch.fx.Node)
-        and topk_node.op == "call_function"
         and topk_node.target is aten.topk.default
+        and (topk := _fx_kwargs(topk_node)) is not None
     ):
         return None
-    topk_input = _get_fx_arg(topk_node, 0, "self")
-    if not isinstance(topk_input, torch.fx.Node):
+    val = topk["input"].meta.get("val")
+    if not isinstance(val, torch.Tensor):
         return None
-    topk_input_val = topk_input.meta.get("val")
-    if not isinstance(topk_input_val, torch.Tensor):
+    bound = val.shape[topk["dim"]]
+    if not isinstance(bound, int) or bound > _BOUNDED_GROUP_MAX_BOUND:
         return None
-
-    dim = _get_fx_arg(topk_node, 2, "dim", -1)
-    if not isinstance(dim, int):
-        return None
-    if dim < 0:
-        dim += topk_input_val.ndim
-    if not 0 <= dim < topk_input_val.ndim:
-        return None
-    dim_size = topk_input_val.shape[dim]
-    if not isinstance(dim_size, int) or not 1 <= dim_size <= 256:
-        return None
-    return dim_size
+    return bound
 
 
-def _bounded_group_offsets_for_cumsum(axis, dtype):
-    if axis != 0 or dtype is not torch.int32:
+def _bounded_group_keys(x: TensorBox, node: Any) -> int | None:
+    """Value bound of keys x (lowered from fx node) if the bounded grouping applies."""
+    device = x.get_device()
+    size = x.get_size()
+    if not (
+        len(size) == 1
+        and isinstance(size[0], (int, sympy.Integer))
+        and 2 <= int(size[0]) <= _BOUNDED_GROUP_MAX_KEYS
+        and device is not None
+        and device.type == "cuda"
+        and torch.version.hip is None
+        and V.graph.has_feature(device, BackendFeature.SCAN)
+        and torch.cuda.get_device_capability(device) >= (9, 0)
+    ):
         return None
+    return _topk_index_bound(node)
 
-    cumsum_node = V.graph.current_node
-    if cumsum_node is None:
+
+def _bounded_histogram_cumsum(axis, dtype):
+    """cumsum(histc(sorted_keys, bins, 0, bins - 1)) for proven-bounded topk keys.
+
+    Every key lies in [0, bins) or is dropped by histc, so the inclusive offsets
+    are a single reduction over the original keys, fusible with their sort.
+    """
+    node = V.graph.current_node
+    if node is None or node.target is not aten.cumsum.default or axis not in (0, -1):
         return None
-    histc_node = _get_fx_arg(cumsum_node, 0, "self")
+    histc_node = node.args[0]
     if not (
         isinstance(histc_node, torch.fx.Node)
-        and histc_node.op == "call_function"
         and histc_node.target is aten.histc.default
+        and (histc := _fx_kwargs(histc_node)) is not None
     ):
         return None
-    convert_node = _get_fx_arg(histc_node, 0, "self")
+    bins = histc["bins"]
+    if not (isinstance(bins, int) and histc["min"] == 0 and histc["max"] == bins - 1):
+        return None
+    sorted_keys = histc["input"]
+    if (
+        isinstance(sorted_keys, torch.fx.Node)
+        and sorted_keys.target is prims.convert_element_type.default
+    ):
+        sorted_keys = sorted_keys.args[0]
     if not (
-        isinstance(convert_node, torch.fx.Node)
-        and convert_node.op == "call_function"
-        and convert_node.target is prims.convert_element_type.default
-        and _get_fx_arg(convert_node, 1, "dtype") is torch.int32
+        isinstance(sorted_keys, torch.fx.Node)
+        and sorted_keys.target is operator.getitem
+        and sorted_keys.args[1] == 0
     ):
         return None
-    values_node = _get_fx_arg(convert_node, 0, "self")
-    if not (
-        isinstance(values_node, torch.fx.Node)
-        and values_node.op == "call_function"
-        and values_node.target is operator.getitem
-        and _get_fx_arg(values_node, 1, "index") == 0
-    ):
+    sort_node = sorted_keys.args[0]
+    if not isinstance(sort_node, torch.fx.Node) or bins > _BOUNDED_GROUP_MAX_BOUND:
         return None
-    sort_node = _get_fx_arg(values_node, 0, "self")
-    if not isinstance(sort_node, torch.fx.Node):
+    keys = V.graph.bounded_sort_keys.get(sort_node)
+    if keys is None:
         return None
 
-    offsets = V.graph.bounded_group_offsets.get(sort_node)
-    if offsets is None:
-        return None
-    upper_bound = offsets.get_size()[0]
-    if not (
-        _get_fx_arg(histc_node, 1, "bins") == upper_bound
-        and _get_fx_arg(histc_node, 2, "min") == 0
-        and _get_fx_arg(histc_node, 3, "max") == upper_bound - 1
-    ):
-        return None
-    return offsets
+    from .kernel.bounded_group import bounded_group_offsets
+
+    return bounded_group_offsets(keys, bins, node.meta["val"].dtype)
 
 
 @register_lowering(aten.cumsum)
 def cumsum(x, axis=None, dtype=None):
-    offsets = _bounded_group_offsets_for_cumsum(axis, dtype)
+    offsets = _bounded_histogram_cumsum(axis, dtype)
     if offsets is not None:
         return offsets
 
@@ -8318,38 +8328,32 @@ add = register_pointwise(
 sort_fallback = fallback_handler(aten.sort.stable, add_to_fallback_set=False)
 
 
-@register_lowering(aten.sort.stable, type_promotion_kind=None)
-def sort_stable(x, *, stable=None, dim=-1, descending=False, top_k=None):
-    if stable is None:
-        stable = False
-
+def _triton_sort(x, *, dim, stable, descending, top_k=None):
+    """Sort (or top-k select) x along dim as loop IR, or None if unsupported."""
     shape = x.get_size()
     device = x.get_device()
-    dim = canonicalize_dim(len(shape), dim)
-    if len(shape) == 0:
-        return clone(x), _full(0, device, torch.int64, shape)
-
-    dim_size = shape[dim] if len(shape) else 1
+    dim_size = shape[dim]
     # Use int32 indices when decompose_sort_ops is enabled, allowing sort
     # dimensions up to 2^31-1.  Default int16 keeps register pressure low
-    # on GPU where the bitonic network holds all indices in-block.
-    if config.triton.decompose_sort_ops:
+    # on GPU where the bitonic network holds all indices in-block.  Top-k
+    # packs lane indices next to the keys itself, so it can emit int64.
+    if top_k is not None:
+        idx_dtype = torch.int64
+    elif config.triton.decompose_sort_ops:
         idx_dtype = torch.int32
     else:
         idx_dtype = torch.int16
     if not V.graph.sizevars.guard_or_false(
         sympy.Lt(dim_size, torch.iinfo(idx_dtype).max)
     ):
-        return sort_fallback(x, stable=stable, dim=dim, descending=descending)
+        return None
 
     indices = iota(
         dim_size, start=0, step=1, dtype=idx_dtype, device=device, requires_grad=False
     )
     view_shape = [1] * len(shape)
-    if len(shape):
-        view_shape[dim] = dim_size
-    indices = view(indices, view_shape)
-    indices = expand(indices, shape)
+    view_shape[dim] = dim_size
+    indices = expand(view(indices, view_shape), shape)
 
     values, indices = ir.Sort.create(
         device=device,
@@ -8360,59 +8364,44 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False, top_k=None):
         stable=stable,
         descending=descending,
         top_k=top_k,
-        output_dtypes=((x.dtype, torch.int64) if top_k is not None else None),
     )
     if values is None:
-        return sort_fallback(x, stable=stable, dim=dim, descending=descending)
-
+        return None
     if indices is None:
         raise AssertionError("expected: indices is not None")
     return values, to_dtype(indices, torch.int64)
 
 
-def _try_bounded_integer_group(x, dim, descending):
-    size = x.get_size()
-    device = x.get_device()
-    if not (
-        len(size) == 1
-        and dim in (-1, 0)
-        and descending is False
-        and x.get_dtype() is torch.int64
-        and device is not None
-        and device.type == "cuda"
-        and torch.version.hip is None
-        and torch.cuda.get_device_capability(device) >= (9, 0)
-        and config.triton.persistent_reductions
-        and V.graph.has_feature(device, BackendFeature.SCAN)
-        and isinstance(size[0], (int, sympy.Integer))
-        and 2 <= int(size[0]) <= 16384
-    ):
-        return None
+@register_lowering(aten.sort.stable, type_promotion_kind=None)
+def sort_stable(x, *, stable=None, dim=-1, descending=False):
+    if stable is None:
+        stable = False
 
-    current_node = V.graph.current_node
-    if current_node is None:
-        return None
-    fx_input = _get_fx_arg(current_node, 0, "self")
-    if not isinstance(fx_input, torch.fx.Node):
-        return None
+    shape = x.get_size()
+    dim = canonicalize_dim(len(shape), dim)
+    if len(shape) == 0:
+        return clone(x), _full(0, x.get_device(), torch.int64, shape)
 
-    upper_bound = _topk_index_upper_bound(fx_input)
-    if upper_bound is None:
-        return None
-
-    from .kernel.bounded_group import bounded_group
-
-    return bounded_group(x, upper_bound)
+    result = _triton_sort(x, dim=dim, stable=stable, descending=descending)
+    if result is None:
+        return sort_fallback(x, stable=stable, dim=dim, descending=descending)
+    return result
 
 
 @register_lowering(aten.sort.default, type_promotion_kind=None)
 def sort(x, dim=-1, descending=False):
-    grouped = _try_bounded_integer_group(x, dim, descending)
-    if grouped is not None:
-        sorted_keys, permutation, offsets = grouped
-        V.graph.bounded_group_offsets[V.graph.current_node] = offsets
-        counters["inductor"]["bounded_integer_group"] += 1
-        return sorted_keys, permutation
+    node = V.graph.current_node
+    if (
+        not descending
+        and dim in (-1, 0)
+        and node is not None
+        and node.target is aten.sort.default
+        and (bound := _bounded_group_keys(x, node.args[0])) is not None
+    ):
+        from .kernel.bounded_group import bounded_group
+
+        V.graph.bounded_sort_keys[node] = x
+        return bounded_group(x, bound)
     return sort_stable(x, stable=False, dim=dim, descending=descending)
 
 
@@ -8573,82 +8562,43 @@ def mode_default(self, dim=-1, keepdim=False):
     return mode_vals, mode_idxs
 
 
+def _use_triton_topk(x, k, dim) -> bool:
+    """Whether to select top-k in a fusible sort kernel instead of ATen."""
+    shape = x.get_size()
+    device = x.get_device()
+    if not (
+        config.triton.persistent_reductions
+        and device.type == "cuda"
+        and torch.version.hip is None
+        and V.graph.has_feature(device, BackendFeature.SORT)
+        and x.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and dim == len(shape) - 1
+        and isinstance(k, (int, sympy.Integer))
+        and isinstance(shape[dim], (int, sympy.Integer))
+    ):
+        return False
+    k, width = int(k), int(shape[dim])
+    return (
+        2 <= k <= 16
+        and k <= width <= 256
+        and torch.cuda.get_device_capability(device) >= (9, 0)
+        and V.graph.sizevars.optimization_hint(sympy_product(shape[:dim])) > 0
+    )
+
+
 @register_lowering(aten.topk.default, type_promotion_kind=None)
 def topk(self, k, dim=-1, largest=True, sorted=True):
-    """Lower aten.topk to fusible sort IR when its shape is profitable."""
-
     shape = self.get_size()
     ndim = len(shape)
     if ndim == 0:
         return clone(self), _full(0, self.get_device(), torch.int64, shape)
     dim = canonicalize_dim(ndim, dim)
-
-    # tl.topk computes a partial bitonic selection and remains ordinary loop IR,
-    # allowing input producers to fuse. Keep this eligibility check broader than
-    # the profitability policy so measurements can tune the latter independently.
-    dim_size = shape[dim]
-    device = self.get_device()
-    static_k = int(k) if isinstance(k, (int, sympy.Integer)) else None
-    static_dim_size = (
-        int(dim_size) if isinstance(dim_size, (int, sympy.Integer)) else None
-    )
-    outer_numel = sympy_product(shape[:dim] + shape[dim + 1 :])
-    static_outer_numel = (
-        int(outer_numel) if isinstance(outer_numel, (int, sympy.Integer)) else None
-    )
-
-    def profitable_triton_topk(rows: int, width: int, top_k: int) -> bool:
-        """B200 crossover model for the partial bitonic selection."""
-        rblock = 1 << (width - 1).bit_length()
-        if rows == 0:
-            return False
-        if top_k <= 4:
-            return True
-        if top_k == 8:
-            if rblock <= 16:
-                return True
-            if rblock == 32:
-                return rows >= 32
-            if rblock <= 128:
-                return True
-            # At RBLOCK=256, register pressure loses in the occupancy regime
-            # between a few blocks and full-device saturation.
-            return rows <= 64
-        if top_k == 16:
-            if rblock <= 16:
-                return True
-            # Larger selections need enough rows to amortize launch overhead,
-            # but spill once the input block grows beyond 64 lanes.
-            return rblock <= 64 and rows >= 128
-        return False
-
-    can_use_triton_topk = (
-        config.triton.persistent_reductions
-        and device.type == "cuda"
-        and torch.version.hip is None
-        and torch.cuda.get_device_capability(device) >= (9, 0)
-        and V.graph.has_feature(device, BackendFeature.SORT)
-        and self.dtype in (torch.float16, torch.bfloat16, torch.float32)
-        and dim == ndim - 1
-        and largest
-        and static_k is not None
-        and static_dim_size is not None
-        and static_outer_numel is not None
-        and 2 <= static_k <= 16
-        and static_k & (static_k - 1) == 0
-        and static_k <= static_dim_size <= 256
-        and profitable_triton_topk(static_outer_numel, static_dim_size, static_k)
-    )
-    if can_use_triton_topk:
-        top_values, top_indices = sort_stable(
-            self,
-            stable=False,
-            dim=dim,
-            descending=True,
-            top_k=static_k,
+    if _use_triton_topk(self, k, dim):
+        result = _triton_sort(
+            self, dim=dim, stable=False, descending=largest, top_k=int(k)
         )
-        return top_values, top_indices
-
+        if result is not None:
+            return result
     if not config.triton.decompose_sort_ops:
         return topk_fallback(self, k, dim, largest, sorted)
     sorted_vals, sorted_idxs = sort_stable(
@@ -9742,6 +9692,25 @@ def with_effects(token, op, *args, **kwargs):
                         raise AssertionError("Multiple effects NYI")
                     effect_type = next(iter(effects))
 
+    # An effectful op may retain its tensor inputs in state inductor cannot see
+    # (e.g. pushing a tensor onto a torchbind queue), so the input buffers must
+    # never have their storage recycled for another buffer. This is retention,
+    # not ordering: no dependency edge can express "the callee kept a reference",
+    # so the ordering dep below (deliberately weak) does not cover it. We pin the
+    # inputs of every ORDERED op rather than only those that can actually retain
+    # them, since there is no reliable "retains inputs" signal: retention happens
+    # inside the op implementation, so it is absent from the schema (queue_push
+    # reports alias_info=None), the EffectType enum only encodes ordering, and a
+    # ScriptObject argument merely triggers the default effect. Under-pinning
+    # silently miscompiles, so the bounded over-pinning is the intended tradeoff.
+    # never_reuse_but_free_buffers rather than never_reuse_buffers: dropping
+    # inductor's own reference is safe here, only recycling the storage is not.
+    if effect_type:
+        for arg in pytree.tree_leaves((args, kwargs)):
+            if isinstance(arg, TensorBox):
+                arg.realize()
+                V.graph.never_reuse_but_free_buffers.add(arg.get_name())
+
     # Track operations before
     operation_len = len(V.graph.operations)
 
@@ -9759,8 +9728,13 @@ def with_effects(token, op, *args, **kwargs):
             wrap_tensors, ir.FallbackKernel.create(op, *args, **kwargs)
         )
 
-    # Get all the operations created during the lowering above, and add StarDeps
-    # to the previous node with the same effect
+    # Get all the operations created during the lowering above, and order them
+    # after the previous op with the same effect. This is an ordering constraint
+    # only: an effect edge says nothing about whether this op reads the previous
+    # one's buffer, so it goes through additional_buffer_deps, which the
+    # scheduler installs as WeakDep(is_fake=True). A strong dep would be counted
+    # as a real read and would extend the previous buffer's lifetime past its
+    # last true use, defeating both reuse and deallocation.
     if len(V.graph.operations[operation_len:]) <= 0:
         raise AssertionError(
             f"No operation nodes were generated when lowering effectful operator {op}."
@@ -9771,8 +9745,12 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
-                V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
+                op_name = (
+                    new_op.get_operation_name()
+                )  # pyrefly: ignore[missing-attribute]
+                V.graph.additional_buffer_deps[op_name].add(
+                    prev_effect_buffer.get_name()
+                )
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (
             new_op  # pyrefly: ignore[unsupported-operation]
@@ -9900,32 +9878,41 @@ def lower_inline_asm_elementwise(
     inputs = broadcast_tensors(*inputs)
 
     input_dtypes = tuple(inp.get_dtype() for inp in inputs)
+    output_dtypes = dtype if isinstance(dtype, tuple) else (dtype,)
     loaders = [inp.make_loader() for inp in inputs]
 
-    def inner_fn(idx):
-        vals = tuple(loader(idx) for loader in loaders)
-        result = ops.inline_asm_elementwise(
-            *vals,
-            asm=asm_str,
-            constraints=constraints,
-            dtype=dtype,
-            is_pure=is_pure,
-            pack=pack,
-            input_dtypes=input_dtypes,
-        )
-        # Inductor computes in fp32 for bf16/fp16. Upcast so fused downstream
-        # ops (reductions, etc.) see fp32 values. The Pointwise's storage dtype
-        # handles the final downcast on store.
-        if dtype in (torch.float16, torch.bfloat16):
-            result = ops.to_dtype(result, torch.float32)
-        return result
+    def make_output(output_index):
+        output_dtype = output_dtypes[output_index]
 
-    return ir.Pointwise.create(
-        device=inputs[0].get_device(),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=list(inputs[0].get_size()),
-    )
+        def inner_fn(idx):
+            vals = tuple(loader(idx) for loader in loaders)
+            result = ops.inline_asm_elementwise(
+                *vals,
+                asm=asm_str,
+                constraints=constraints,
+                dtype=output_dtype,
+                is_pure=is_pure,
+                pack=pack,
+                input_dtypes=input_dtypes,
+                output_dtypes=output_dtypes if len(output_dtypes) > 1 else None,
+                output_index=output_index,
+            )
+            # Inductor computes bf16/fp16 in fp32. Upcast so fused downstream
+            # ops (reductions, etc.) see fp32 values. The Pointwise's storage dtype
+            # handles the final downcast on store.
+            if output_dtype in (torch.float16, torch.bfloat16):
+                result = ops.to_dtype(result, torch.float32)
+            return result
+
+        return ir.Pointwise.create(
+            device=inputs[0].get_device(),
+            dtype=output_dtype,
+            inner_fn=inner_fn,
+            ranges=list(inputs[0].get_size()),
+        )
+
+    outputs = tuple(make_output(i) for i in range(len(output_dtypes)))
+    return outputs if isinstance(dtype, tuple) else outputs[0]
 
 
 # populate lowerings defined in kernel/*
