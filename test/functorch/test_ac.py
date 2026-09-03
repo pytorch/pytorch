@@ -8,6 +8,7 @@ import torch._functorch.config as config
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -346,6 +347,7 @@ class MemoryBudgetTestDevice(TestCase):
         self.assertEqual(flops - eager_flops, 2 * 2 * 6 + 4 * 4 * 4)
 
     @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4729")
     def test_attention_vs_linear(self, device):
         def f(x, w):
             orig_shape = x.shape
@@ -424,7 +426,9 @@ class MemoryBudgetTestDevice(TestCase):
         self.assertEqual(flops, eager_flops)
 
 
-instantiate_device_type_tests(MemoryBudgetTestDevice, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    MemoryBudgetTestDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
