@@ -3215,7 +3215,7 @@ end
             }
             build_abicompat = (
                 config.is_fbcode()
-                and device_type == "cpu"
+                and device_type in ("cpu", "cuda")
                 and graph.aot_mode
                 and not config.aot_inductor.package_cpp_only
             )

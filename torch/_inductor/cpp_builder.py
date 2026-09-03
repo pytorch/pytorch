@@ -1671,20 +1671,20 @@ def _validate_cpp_stdlib(
 ) -> None:
     """Reject cpp_stdlib requests that would otherwise be silently ignored.
 
-    The private libc++ is only available in fbcode and wired up for AOT CPU
-    builds: the archives are linked in get_cpp_torch_device_options under
-    device_type == "cpu", and both the header setup and the link flags gate on
-    aot_mode. Any other combination either strips the default stdlib without
-    linking a replacement or quietly produces a libstdc++ artifact, so fail
-    loudly instead.
+    The private libc++ is only available in fbcode and wired up for AOT CPU and
+    CUDA builds. Both the header setup and the link flags gate on aot_mode. Any
+    other combination either strips the default stdlib without linking a
+    replacement or quietly produces a libstdc++ artifact, so fail loudly
+    instead.
     """
     if cpp_stdlib != "libc++":
         return
     if not config.is_fbcode():
         raise RuntimeError("cpp_stdlib='libc++' is only supported in fbcode.")
-    if device_type != "cpu":
+    if device_type not in ("cpu", "cuda"):
         raise RuntimeError(
-            "cpp_stdlib='libc++' is only supported with device_type='cpu', "
+            "cpp_stdlib='libc++' is only supported with device_type='cpu' or "
+            "device_type='cuda', "
             f"got device_type='{device_type}'"
         )
     if not aot_mode:
@@ -1695,11 +1695,12 @@ def _validate_cpp_stdlib(
 
 
 def _get_cpp_stdlib_args(
-    aot_mode: bool, cpp_stdlib: CppStdlib
+    device_type: str, aot_mode: bool, cpp_stdlib: CppStdlib
 ) -> tuple[list[str], list[str], list[str]]:
     """
-    For fbcode AOTI, select either the legacy dynamic libstdc++ dependency or
-    the statically linked private __aoti-namespace libc++.
+    For fbcode AOTI, link the private __aoti-namespace libc++ when requested.
+    CPU builds otherwise link the legacy dynamic libstdc++; accelerator builds
+    preserve their existing implicit standard-library resolution.
     """
     lib_dir_paths: list[str] = []
     libs: list[str] = []
@@ -1714,7 +1715,7 @@ def _get_cpp_stdlib_args(
             " -Wl,-Bdynamic",
             " -Wl,--exclude-libs,ALL",
         ]
-    elif config.is_fbcode():
+    elif config.is_fbcode() and device_type == "cpu":
         lib_dir_paths = [sysconfig.get_config_var("LIBDIR")]
         libs.append("stdc++")
 
@@ -2266,17 +2267,16 @@ def get_cpp_torch_device_options(
                     # Only add link args, when compile_only is false.
                     passthrough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
 
-        if device_type == "cpu":
-            (
-                libcxx_lib_dir_paths,
-                libcxx_libs,
-                libcxx_passthrough,
-            ) = _get_cpp_stdlib_args(aot_mode, cpp_stdlib)
-            libraries_dirs += libcxx_lib_dir_paths
-            libraries += libcxx_libs
-            if not compile_only:
-                # Only add link args, when compile_only is false.
-                passthrough_args += libcxx_passthrough
+        (
+            stdlib_lib_dir_paths,
+            stdlib_libs,
+            stdlib_passthrough,
+        ) = _get_cpp_stdlib_args(device_type, aot_mode, cpp_stdlib)
+        libraries_dirs += stdlib_lib_dir_paths
+        libraries += stdlib_libs
+        if not compile_only:
+            # Only add link args, when compile_only is false.
+            passthrough_args += stdlib_passthrough
 
     if config.aot_inductor.custom_op_libs:
         libraries += config.aot_inductor.custom_op_libs

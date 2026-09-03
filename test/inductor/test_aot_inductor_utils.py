@@ -196,11 +196,11 @@ class AOTIRunnerUtil:
                 device = optimized.get_metadata().get("AOTI_DEVICE_KEY")
                 if (
                     IS_FBCODE
-                    and device == "cpu"
+                    and device in ("cpu", "cuda")
                     and any(name.endswith(".wrapper.so") for name in names)
                 ):
                     raise AssertionError(
-                        "CPU AOTI package is missing its ABI-compatible DSO"
+                        f"{device} AOTI package is missing its ABI-compatible DSO"
                     )
                 return optimized(*example_inputs)
 
