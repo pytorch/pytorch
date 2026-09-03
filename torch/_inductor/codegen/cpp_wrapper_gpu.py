@@ -1357,19 +1357,22 @@ class CppWrapperGpu(CppWrapperCpu):
     def write_tma_descriptor_helpers_once(self):
         self.header.splice(self.device_codegen.tma_descriptor_helpers())
 
-    def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
+    def write_get_raw_stream(self, device_idx: int, graph_name: str | None) -> str:
         # Pure AOTI receives the stream as a function parameter. JIT and
         # dual-wrapper-mode code use an explicit stream variable so the shared kernel
         # call arguments are valid for the JIT entry point.
         if V.graph.aot_mode and not V.graph.is_dual_wrapper_mode:
             return "stream"
 
-        name = f"stream{device_idx}"
         # In dual-wrapper mode, the JIT stream is declared at the entry function
         # prologue (see _codegen_entry_impl_prologue) so it stays in scope
         # across all kernel call sites.
         if V.graph.is_dual_wrapper_mode:
-            return name
+            return f"stream{device_idx}"
+
+        # If subgraphs were generated as functions, rather than inline, we wouldn't need
+        # the graph name here.
+        name = f"stream{device_idx}{f'_{graph_name}' if graph_name is not None else ''}"
 
         self.writeline(
             maybe_hipify_code_wrapper(
