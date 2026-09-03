@@ -519,6 +519,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.removed_inplace_buffers: OrderedSet[str] = OrderedSet()
         self.mutated_buffers: OrderedSet[str] = OrderedSet()
         self.sdpa_constraint_cache: dict[tuple, ir.IRNode] = {}
+        # Inputs of sorts lowered as a bounded integer grouping; the histogram
+        # cumsum of their output is a reduction over these same keys.
+        self.bounded_sort_keys: dict[torch.fx.Node, ir.TensorBox] = {}
         # Buffers that are neither recycled nor freed. Aliasing kernels rely on
         # the second half: some have no output variable to free at all.
         self.never_reuse_buffers: OrderedSet[str] = OrderedSet()
