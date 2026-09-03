@@ -89,6 +89,17 @@ def customized_ctx_manager_with_graph_break(mode):
         torch._C._set_grad_enabled(prev)
 
 
+class HeldAutocastModule(torch.nn.Module):
+    def __init__(self, ctx):
+        super().__init__()
+        self.ctx = ctx
+        self.l = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        with self.ctx:
+            return self.l(x)
+
+
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_no_grad(self):
         def fn1(a, b):
@@ -321,6 +332,56 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled.device.type, device_type)
         self.assertEqual(compiled.device.index, 0)
         self.assertEqual(compiled.dtype, torch.float32)
+
+    def _compile_held_autocast_module(self):
+        module = HeldAutocastModule(torch.amp.autocast("cpu", dtype=torch.bfloat16))
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(module, backend=cnts)
+        x = torch.randn(4, 4)
+        self.assertEqual(compiled(x).dtype, torch.bfloat16)
+        self.assertEqual(cnts.frame_count, 1)
+        return module, compiled, cnts, x
+
+    def test_autocast_object_guarded_by_value_not_identity(self):
+        module, compiled, cnts, x = self._compile_held_autocast_module()
+
+        # A DIFFERENT object with the same settings: same graph, no recompile.
+        # An id() guard would miss here and recompile.
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.bfloat16)
+        self.assertEqual(compiled(x).dtype, torch.bfloat16)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # A different setting is a different graph. Checked on `enabled` rather
+        # than dtype: flipping dtype on a live model reuses autocast's cached
+        # cast of the weight, which is its own behaviour and not what is under
+        # test here.
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.bfloat16, enabled=False)
+        self.assertEqual(compiled(x).dtype, torch.float32)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_autocast_object_mutated_in_place_recompiles(self):
+        module, compiled, cnts, x = self._compile_held_autocast_module()
+
+        # Must be the first divergence after compile; a rebind first would let a recompile mask the stale graph.
+        module.ctx._enabled = False
+        self.assertEqual(compiled(x).dtype, torch.float32)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_autocast_object_from_constant_source(self):
+        # A ConstantSource has no guardable expression, so the value guards must
+        # be skipped rather than raise from AttrSource.make_guard.
+        @torch._dynamo.assume_constant_result
+        def get_ctx():
+            return torch.amp.autocast("cpu", dtype=torch.bfloat16)
+
+        weight = torch.randn(4, 4)
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            with get_ctx():
+                return x @ weight
+
+        self.assertEqual(fn(torch.randn(4, 4)).dtype, torch.bfloat16)
 
     def test_autocast_cpu(self):
         class MyModule(torch.nn.Module):
@@ -722,6 +783,7 @@ class GraphModule(torch.nn.Module):
             torch.set_autocast_enabled("cpu", True)
             torch.set_autocast_dtype("cpu", torch.bfloat16)
             torch.set_autocast_cache_enabled(True)
+            torch.autocast_increment_nesting()
             x = x @ y
             torch.autocast_decrement_nesting()
             torch.clear_autocast_cache()
@@ -731,6 +793,8 @@ class GraphModule(torch.nn.Module):
         prev_enabled = torch.is_autocast_enabled("cpu")
         prev_dtype = torch.get_autocast_dtype("cpu")
         prev_cache = torch.is_autocast_cache_enabled()
+        nesting_before = torch.autocast_increment_nesting() - 1
+        torch.autocast_decrement_nesting()
 
         try:
             opt_f = torch.compile(f, backend="eager", fullgraph=True)
@@ -741,6 +805,9 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(out, opt_out)
             self.assertEqual(out.dtype, opt_out.dtype)
             self.assertFalse(torch.is_autocast_enabled("cpu"))
+            nesting_after = torch.autocast_increment_nesting() - 1
+            torch.autocast_decrement_nesting()
+            self.assertEqual(nesting_after, nesting_before)
         finally:
             torch.set_autocast_enabled("cpu", prev_enabled)
             torch.set_autocast_dtype("cpu", prev_dtype)
