@@ -201,7 +201,7 @@ id_t MPSEventPool::acquireEvent(bool enable_timing) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
   MPSEventPtr event = acquireEvent(enable_timing, nullptr);
   TORCH_INTERNAL_ASSERT(event);
-  id_t event_id = event->get()->getID();
+  id_t event_id = event->getID();
   m_in_use_events.emplace(event_id, std::move(event));
   return event_id;
 }
