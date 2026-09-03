@@ -695,7 +695,9 @@ def get_runner_prefix(
         )
         del scale_config_experiments[1:]
     if lf_enabled:
-        fleet = SCALE_CONFIG_LF_PREFIX + (SCALE_CONFIG_CANARY_SUFFIX if is_canary else "")
+        fleet = SCALE_CONFIG_LF_PREFIX + (
+            SCALE_CONFIG_CANARY_SUFFIX if is_canary else ""
+        )
         scale_config_experiments.insert(0, fleet)
     scale_config_prefix = (
         ".".join(scale_config_experiments) + "." if scale_config_experiments else ""
