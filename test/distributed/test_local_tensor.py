@@ -1034,6 +1034,89 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
         self.assertEqual(coord.node._local_ints, expected)
 
 
+class TestLocalTensorWorld12(LocalTensorWorldTest):
+    world_size = 12
+
+    def test_dist_get_rank_permuted_row(self):
+        # 3x4 mesh row with caller order; siblings mirror the same permutation.
+        sub_ranks = [0, 3, 1, 2]
+        sub_pg = dist.new_group(ranks=sub_ranks, sort_ranks=False)
+        self.assertEqual(dist.get_process_group_ranks(sub_pg), sub_ranks)
+        with LocalTensorMode(self.world_size):
+            rank = dist.get_rank(sub_pg)
+            self.assertEqual(
+                set(rank.node._local_ints.keys()), set(range(self.world_size))
+            )
+            # Fibers [0,3,1,2], [4,7,5,6], [8,11,9,10]
+            expected = {
+                0: 0,
+                3: 1,
+                1: 2,
+                2: 3,
+                4: 0,
+                7: 1,
+                5: 2,
+                6: 3,
+                8: 0,
+                11: 1,
+                9: 2,
+                10: 3,
+            }
+            self.assertEqual(rank.node._local_ints, expected)
+
+    def test_allgather_permuted_row(self):
+        sub_ranks = [0, 3, 1, 2]
+        sub_pg = dist.new_group(ranks=sub_ranks, sort_ranks=False)
+        shards = {r: torch.tensor([float(r)]) for r in range(self.world_size)}
+        with LocalTensorMode(self.world_size):
+            lt = LocalTensor(shards)
+            out = torch.zeros(len(sub_ranks), dtype=torch.float32)
+            dist.all_gather_single(out, lt, group=sub_pg)
+            self.assertEqual(out._local_tensors[0].tolist(), [0.0, 3.0, 1.0, 2.0])
+            self.assertEqual(out._local_tensors[4].tolist(), [4.0, 7.0, 5.0, 6.0])
+            self.assertEqual(out._local_tensors[8].tolist(), [8.0, 11.0, 9.0, 10.0])
+
+    def test_broadcast_permuted_row(self):
+        # Global src=3 -> group-local 1 on [0,3,1,2]; siblings use local 1 (7, 11).
+        sub_ranks = [0, 3, 1, 2]
+        sub_pg = dist.new_group(ranks=sub_ranks, sort_ranks=False)
+        shards = {r: torch.tensor([float(r)]) for r in range(self.world_size)}
+        with LocalTensorMode(self.world_size):
+            lt = LocalTensor({r: t.clone() for r, t in shards.items()})
+            dist.broadcast(lt, src=3, group=sub_pg)
+            for r in (0, 3, 1, 2):
+                self.assertEqual(lt._local_tensors[r].item(), 3.0)
+            for r in (4, 7, 5, 6):
+                self.assertEqual(lt._local_tensors[r].item(), 7.0)
+            for r in (8, 11, 9, 10):
+                self.assertEqual(lt._local_tensors[r].item(), 11.0)
+
+    def test_scatter_permuted_row(self):
+        # Global src=3 -> group-local 1 on [0,3,1,2]; siblings use local 1 (7, 11).
+        from torch.distributed._local_tensor._c10d import _local_scatter_
+
+        sub_ranks = [0, 3, 1, 2]
+        sub_pg = dist.new_group(ranks=sub_ranks, sort_ranks=False)
+        with LocalTensorMode(self.world_size):
+            scatter_list = [
+                LocalTensor(
+                    {
+                        r: torch.tensor([float(100 * r + i)])
+                        for r in range(self.world_size)
+                    }
+                )
+                for i in range(len(sub_ranks))
+            ]
+            out = LocalTensor({r: torch.zeros(1) for r in range(self.world_size)})
+            _local_scatter_([out], [scatter_list], sub_pg, root_rank=1)
+            for r, i in zip((0, 3, 1, 2), range(4)):
+                self.assertEqual(out._local_tensors[r].item(), 300.0 + i)
+            for r, i in zip((4, 7, 5, 6), range(4)):
+                self.assertEqual(out._local_tensors[r].item(), 700.0 + i)
+            for r, i in zip((8, 11, 9, 10), range(4)):
+                self.assertEqual(out._local_tensors[r].item(), 1100.0 + i)
+
+
 class TestLocalTensorWorld8(LocalTensorWorldTest):
     world_size = 8
 
