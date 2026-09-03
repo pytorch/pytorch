@@ -44,7 +44,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     bytes_to_scalar, parametrize, noncontiguous_like,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
     xfailIfS390X, set_warn_always_context, decorateIf, isRocmArchAnyOf,
-    IS_MACOS,
+    IS_MACOS, NATIVE_DEVICES,
 )
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
@@ -7964,10 +7964,13 @@ class TestTorch(TestCase):
         self.assertEqual(get_device('not_a_module'), 'cpu')
         self.assertEqual(get_device(''), 'cpu')
 
-        # a device type needs no entry here to be recognised, including the
-        # PrivateUse1 name an out-of-tree accelerator registers
-        for device_type in ('hpu', 'xpu', 'mps', 'mtia',
-                            torch._C._get_privateuse1_backend_name()):
+        # A device type needs no entry here to be recognised. Derived from
+        # NATIVE_DEVICES so this widens on its own when a native device is added,
+        # and it already ends with the PrivateUse1 name an out-of-tree
+        # accelerator registers. 'hpu' is added back because NATIVE_DEVICES does
+        # not carry it and it was one of the three entries in the whitelist this
+        # replaces, so deriving alone would drop that regression.
+        for device_type in sorted((set(NATIVE_DEVICES) | {'hpu'}) - {'cpu'}):
             self.assertEqual(get_device(f'torch.{device_type}'), device_type)
             self.assertEqual(get_device(f'some_package.{device_type}'), device_type)
 
