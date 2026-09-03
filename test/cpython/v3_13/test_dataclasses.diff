@@ -1,0 +1,211 @@
+diff --git a/test/cpython/v3_13/test_dataclasses.py b/test/cpython/v3_13/test_dataclasses.py
+index ec70f9ceda5d5ec140e9ed6c0c27b7ba2b9b0e3f..7ceb41c9c8b97d3d1853dedaaaa285543228405c 100644
+--- a/test/cpython/v3_13/test_dataclasses.py
++++ b/test/cpython/v3_13/test_dataclasses.py
+@@ -1,3 +1,23 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_dataclasses.py
++# (upstream is Lib/test/test_dataclasses/__init__.py in 3.13; the package's
++# sibling fixture modules are copied alongside this file unmodified)
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ # Deliberately use "from dataclasses import *".  Every name in __all__
+ # is tested, so they all must be present.  This is a way to catch
+ # missing ones.
+@@ -28,7 +48,7 @@ from test import support
+ # Just any custom exception we can catch.
+ class CustomError(Exception): pass
+ 
+-class TestCase(unittest.TestCase):
++class TestCase(CPythonTestCase):
+     def test_no_fields(self):
+         @dataclass
+         class C:
+@@ -2218,7 +2238,7 @@ class TestCase(unittest.TestCase):
+             A()
+ 
+ 
+-class TestFieldNoAnnotation(unittest.TestCase):
++class TestFieldNoAnnotation(CPythonTestCase):
+     def test_field_without_annotation(self):
+         with self.assertRaisesRegex(TypeError,
+                                     "'f' is a field but has no type annotation"):
+@@ -2253,7 +2273,7 @@ class TestFieldNoAnnotation(unittest.TestCase):
+                 f = field()
+ 
+ 
+-class TestDocString(unittest.TestCase):
++class TestDocString(CPythonTestCase):
+     def assertDocStrEqual(self, a, b):
+         # Because 3.6 and 3.7 differ in how inspect.signature work
+         #  (see bpo #32108), for the time being just compare them with
+@@ -2356,7 +2376,7 @@ class TestDocString(unittest.TestCase):
+         self.assertDocStrEqual(C.__doc__, "C")
+ 
+ 
+-class TestInit(unittest.TestCase):
++class TestInit(CPythonTestCase):
+     def test_base_has_init(self):
+         class B:
+             def __init__(self):
+@@ -2441,7 +2461,7 @@ class TestInit(unittest.TestCase):
+         self.assertEqual(D(5).a, 10)
+ 
+ 
+-class TestRepr(unittest.TestCase):
++class TestRepr(CPythonTestCase):
+     def test_repr(self):
+         @dataclass
+         class B:
+@@ -2512,7 +2532,7 @@ class TestRepr(unittest.TestCase):
+         self.assertEqual(repr(C(0)), 'x')
+ 
+ 
+-class TestEq(unittest.TestCase):
++class TestEq(CPythonTestCase):
+     def test_recursive_eq(self):
+         # Test a class with recursive child
+         @dataclass
+@@ -2568,7 +2588,7 @@ class TestEq(unittest.TestCase):
+         self.assertNotEqual(C(1), 1)
+ 
+ 
+-class TestOrdering(unittest.TestCase):
++class TestOrdering(CPythonTestCase):
+     def test_functools_total_ordering(self):
+         # Test that functools.total_ordering works with this class.
+         @total_ordering
+@@ -2644,7 +2664,7 @@ class TestOrdering(unittest.TestCase):
+                 def __ge__(self):
+                     pass
+ 
+-class TestHash(unittest.TestCase):
++class TestHash(CPythonTestCase):
+     def test_unsafe_hash(self):
+         @dataclass(unsafe_hash=True)
+         class C:
+@@ -2864,7 +2884,7 @@ class TestHash(unittest.TestCase):
+                     assert False, f'unknown value for expected={expected!r}'
+ 
+ 
+-class TestFrozen(unittest.TestCase):
++class TestFrozen(CPythonTestCase):
+     def test_frozen(self):
+         @dataclass(frozen=True)
+         class C:
+@@ -3219,7 +3239,7 @@ class TestFrozen(unittest.TestCase):
+             self.assertEqual(deepcopy(c), c)
+ 
+ 
+-class TestSlots(unittest.TestCase):
++class TestSlots(CPythonTestCase):
+     def test_simple(self):
+         @dataclass
+         class C:
+@@ -3758,7 +3778,7 @@ class TestSlots(unittest.TestCase):
+         self.assertEqual(CorrectSuper.args, ["default", "default"])
+ 
+ 
+-class TestDescriptors(unittest.TestCase):
++class TestDescriptors(CPythonTestCase):
+     def test_set_name(self):
+         # See bpo-33141.
+ 
+@@ -3939,7 +3959,7 @@ class TestDescriptors(unittest.TestCase):
+         with self.assertRaisesRegex(TypeError, 'missing 1 required positional argument'):
+             c = C()
+ 
+-class TestStringAnnotations(unittest.TestCase):
++class TestStringAnnotations(CPythonTestCase):
+     def test_classvar(self):
+         # Some expressions recognized as ClassVar really aren't.  But
+         #  if you're using string annotations, it's not an exact
+@@ -4042,10 +4062,10 @@ class TestStringAnnotations(unittest.TestCase):
+                 self.assertEqual(C(10).x, 10)
+ 
+     def test_classvar_module_level_import(self):
+-        from test.test_dataclasses import dataclass_module_1
+-        from test.test_dataclasses import dataclass_module_1_str
+-        from test.test_dataclasses import dataclass_module_2
+-        from test.test_dataclasses import dataclass_module_2_str
++        import dataclass_module_1
++        import dataclass_module_1_str
++        import dataclass_module_2
++        import dataclass_module_2_str
+ 
+         for m in (dataclass_module_1, dataclass_module_1_str,
+                   dataclass_module_2, dataclass_module_2_str,
+@@ -4083,7 +4103,7 @@ class TestStringAnnotations(unittest.TestCase):
+                     self.assertNotIn('not_iv4', c.__dict__)
+ 
+     def test_text_annotations(self):
+-        from test.test_dataclasses import dataclass_textanno
++        import dataclass_textanno
+ 
+         self.assertEqual(
+             get_type_hints(dataclass_textanno.Bar),
+@@ -4103,7 +4123,7 @@ WrongModuleMakeDataclass = make_dataclass('WrongModuleMakeDataclass',
+                                           [('x', int)],
+                                           module='custom')
+ 
+-class TestMakeDataclass(unittest.TestCase):
++class TestMakeDataclass(CPythonTestCase):
+     def test_simple(self):
+         C = make_dataclass('C',
+                            [('x', int),
+@@ -4297,7 +4317,7 @@ class TestMakeDataclass(unittest.TestCase):
+                 C = make_dataclass(classname, ['a', 'b'])
+                 self.assertEqual(C.__name__, classname)
+ 
+-class TestReplace(unittest.TestCase):
++class TestReplace(CPythonTestCase):
+     def test(self):
+         @dataclass(frozen=True)
+         class C:
+@@ -4525,7 +4545,7 @@ class TestReplace(unittest.TestCase):
+ 
+     ##     replace(c, x=5)
+ 
+-class TestAbstract(unittest.TestCase):
++class TestAbstract(CPythonTestCase):
+     def test_abc_implementation(self):
+         class Ordered(abc.ABC):
+             @abc.abstractmethod
+@@ -4562,7 +4582,7 @@ class TestAbstract(unittest.TestCase):
+         self.assertRaisesRegex(TypeError, msg, Date)
+ 
+ 
+-class TestMatchArgs(unittest.TestCase):
++class TestMatchArgs(CPythonTestCase):
+     def test_match_args(self):
+         @dataclass
+         class C:
+@@ -4627,7 +4647,7 @@ class TestMatchArgs(unittest.TestCase):
+         self.assertEqual(C.__match_args__, ('z',))
+ 
+ 
+-class TestKeywordArgs(unittest.TestCase):
++class TestKeywordArgs(CPythonTestCase):
+     def test_no_classvar_kwarg(self):
+         msg = 'field a is a ClassVar but specifies kw_only'
+         with self.assertRaisesRegex(TypeError, msg):
+@@ -4902,4 +4922,4 @@ class TestKeywordArgs(unittest.TestCase):
+ 
+ 
+ if __name__ == '__main__':
+-    unittest.main()
++    run_tests()
