@@ -55,7 +55,6 @@ void bfloat16_copy_kernel_cuda(TensorIteratorBase &iter) {
     });
 }
 
-#ifdef USE_ROCM
 void bfloat16tofloat32_copy_kernel_cuda(TensorIteratorBase &iter) {
     gpu_kernel_nocast(iter, [] GPU_LAMBDA(at::BFloat16 value) {
         return static_cast<float>(value);
@@ -66,7 +65,6 @@ void float16tofloat32_copy_kernel_cuda(TensorIteratorBase &iter) {
         return static_cast<float>(value);
     });
 }
-#endif
 
 template <typename SrcT>
 struct ConvertToFloat8E4M3fnOp {
@@ -225,7 +223,6 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
        float16_copy_kernel_cuda(iter);
      }
   }
-#ifdef USE_ROCM
   else if ((iter.dtype(1) == kBFloat16 || iter.dtype(1) == kHalf) && dtype == kFloat) {
     if (iter.dtype(1) == kBFloat16) {
       bfloat16tofloat32_copy_kernel_cuda(iter);
@@ -233,7 +230,6 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
       float16tofloat32_copy_kernel_cuda(iter);
     }
   }
-#endif
   else if (isBitsType(dtype)) {
     TORCH_CHECK(dtype == iter.dtype(1), "copy_() does not support casting "
       "bits types to different bits types. Source dtype is ", iter.dtype(1), "target dtype is ", dtype);
