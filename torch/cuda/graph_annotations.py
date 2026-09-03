@@ -22,8 +22,12 @@ argument of :class:`torch.cuda.graph`::
 
     annotations = get_kernel_annotations()
 
-The annotation mapping is typically pickled and joined against a profiler
-trace offline (matching each kernel event's ``graph node id`` field).
+To get them into a profiler trace, export it with
+``prof.export_chrome_trace(path, cuda_graph_annotations=get_kernel_annotations())``,
+which bakes each annotation into the events of the graph nodes it describes. Any
+mapping in that shape works, so the annotations can be filtered or edited first,
+or pickled and passed to a later export -- they match a kernel event by its
+``graph node id`` field.
 
 Requires the ``cuda-bindings`` package and a CUDA driver that supports
 ``cudaGraphNodeGetToolsId`` (CUDA >= 13.1, or an equivalent cuda-compat

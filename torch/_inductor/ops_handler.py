@@ -53,6 +53,12 @@ ReductionType = Literal[
     "xor_sum",
     "online_softmax_reduce",
 ]
+registered_pointwise_ops: OrderedSet[str] = OrderedSet()
+
+
+def register_pointwise_op(name: str) -> None:
+    """Record a deterministic scalar operation that commutes with broadcasting."""
+    registered_pointwise_ops.add(name)
 
 
 def _arg_str(a: object) -> str:
@@ -311,7 +317,6 @@ class OpsHandler(Generic[T]):
         stable: bool,
         descending: bool,
         top_k: int | None = None,
-        output_dtypes: tuple[torch.dtype, ...] | None = None,
     ) -> tuple[T, ...]:
         """
         Sort values along the reduction dimension.
@@ -768,7 +773,15 @@ class OpsHandler(Generic[T]):
         is_pure: bool = True,
         pack: int = 1,
         input_dtypes: tuple[torch.dtype, ...] | None = None,
+        output_dtypes: tuple[torch.dtype, ...] | None = None,
+        output_index: int = 0,
     ) -> T:
+        """Emit one inline-asm output.
+
+        ``output_dtypes`` describes all outputs from the same asm invocation;
+        ``dtype`` and ``output_index`` select the output represented by this
+        pointwise IR node. Codegen may share the invocation across those nodes.
+        """
         raise NotImplementedError
 
     def output(self, *args: T) -> None:
@@ -891,9 +904,7 @@ class NoopHandler(DefaultHandler):
         return (None,) * len(values)
 
     @staticmethod
-    def sort(
-        dtypes, values, stable, descending, top_k=None, output_dtypes=None
-    ) -> tuple[None, ...]:
+    def sort(dtypes, values, stable, descending, top_k=None) -> tuple[None, ...]:
         return (None,) * len(values)
 
     @staticmethod
@@ -1007,10 +1018,9 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
         )
 
     @staticmethod
-    def sort(dtypes, values, stable, descending, top_k=None, output_dtypes=None):
+    def sort(dtypes, values, stable, descending, top_k=None):
         return tuple(
-            f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending}, "
-            f"top_k={top_k}, output_dtypes={output_dtypes})[{i}]"
+            f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending}, top_k={top_k})[{i}]"
             for i in range(len(values))
         )
 

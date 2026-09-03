@@ -204,8 +204,8 @@ case "$tag" in
       ANACONDA_PYTHON_VERSION=3.12
     fi
     GCC_VERSION=13
-    ROCM_VERSION=7.14
-    THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
+    ROCM_VERSION=10.0
+    THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
     TRITON=yes
     KATEX=yes
     PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
@@ -234,6 +234,7 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     XPU_VERSION=2026.1
+    OMIX_VERSION=0.3.0
     if [[ $tag =~ "client" ]]; then
       XPU_DRIVER_TYPE=CLIENT
     else
@@ -426,6 +427,7 @@ build_image() {
        --build-arg "TSAN=${TSAN}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
+       --build-arg "OMIX_VERSION=${OMIX_VERSION}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
