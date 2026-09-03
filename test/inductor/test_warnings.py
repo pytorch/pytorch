@@ -6,6 +6,10 @@ import warnings
 import torch
 import torch._inductor.compile_fx as inductor_compile_fx
 import torch._inductor.fx_passes.fuse_attention as fuse_attention
+from torch._inductor.utils import run_and_get_code
+from torch._logging import warning_once
+from torch.nn.attention.flex_attention import flex_attention
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
 from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     run_tests,
@@ -26,6 +30,44 @@ def _has_cuda_sm80() -> bool:
 
 
 class InductorWarningTests(TestCase):
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @recover_orig_fp32_precision
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flex_attention_warns_and_uses_ieee_for_bfx9(self):
+        def fn(q, k, v):
+            return flex_attention(
+                q,
+                k,
+                v,
+                kernel_options={
+                    "BACKEND": "TRITON",
+                    "FLOAT32_PRECISION": "'tf32'",
+                },
+            )
+
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        warning_once.cache_clear()
+        self.addCleanup(warning_once.cache_clear)
+        q = torch.randn(1, 1, 128, 64, device="cuda")
+        k = torch.randn_like(q)
+        v = torch.randn_like(q)
+        with (
+            self.assertLogs(
+                "torch._inductor.kernel.flex.flex_attention", level="WARNING"
+            ) as logs,
+            warnings.catch_warnings(),
+        ):
+            warnings.filterwarnings("ignore", message="dynamo_pgo force disabled by.*")
+            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), q, k, v)
+        self.assertTrue(torch.isfinite(actual).all())
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("using IEEE precision instead", logs.output[0])
+        source = "\n".join(code)
+        self.assertIn("FLOAT32_PRECISION : tl.constexpr = 'ieee'", source)
+        self.assertNotIn("FLOAT32_PRECISION : tl.constexpr = 'tf32'", source)
+
     @unittest.skipIf(not _has_cuda_sm80(), "requires CUDA SM80")
     @recover_orig_fp32_precision
     def test_trivial_matmul_compile_no_user_warning(self):
