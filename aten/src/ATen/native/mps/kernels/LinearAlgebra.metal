@@ -2629,7 +2629,7 @@ kernel void luInvSmall(
 #pragma unroll
   for (short j = 0; j < N; j++) {
     float bv = -1.0f;
-    short p = -1;
+    short p = j;
 #pragma unroll
     for (short r = 0; r < N; r++) {
       if (r >= j) {
@@ -2639,9 +2639,6 @@ kernel void luInvSmall(
           p = r;
         }
       }
-    }
-    if (p < 0) {
-      p = j;
     }
     if (bv == 0.0f && inf == 0) {
       inf = j + 1;
@@ -2666,7 +2663,6 @@ kernel void luInvSmall(
       for (short r = 0; r < N; r++) {
         if (r > j) {
           const float l = a[r][j] * rp;
-          a[r][j] = l;
 #pragma unroll
           for (short c = 0; c < N; c++) {
             if (c > j) {
