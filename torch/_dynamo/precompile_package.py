@@ -69,6 +69,7 @@ from torch.compiler._precompile_types import (
 )
 from torch.utils._pytree import tree_leaves
 
+from .convert_frame import CatchErrorsWrapper
 from .exc import PackageError
 from .guards import CheckFunctionManager
 from .package import (
@@ -86,14 +87,16 @@ from .source import AttrSource, DictGetItemSource, GlobalSource
 if TYPE_CHECKING:
     import traceback
 
+    from .convert_frame import ConvertFrameReturn
     from .eval_frame import OptimizeContext
-    from .types import GuardFilterEntry
+    from .types import CacheEntry, DynamoFrameType, GuardFilterEntry
+    from .variables.builder import FrameStateSizeEntry
 
 
 log = logging.getLogger(__name__)
 
-# Built once: the served call path enters this on every call, and
-# config.patch() allocates a class and a ContextVar each time it is called.
+# Built once: config.patch() allocates a class and a ContextVar each time it is
+# called, and this runs on every frame Dynamo compiles for a package.
 _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
     allow_empty_graphs=True
 )
@@ -107,7 +110,6 @@ __all__ = [
     "FrameInvariants",
     "PrecompileSession",
     "PrecompileSummary",
-    "PrecompiledCallable",
     "precompile_capture",
     "serving",
 ]
@@ -163,6 +165,29 @@ def _clear_package_region(
         _clear_cache_entries_for_region(code, isolate_recompiles_id)
 
 
+class _AllowEmptyGraphsCallback(CatchErrorsWrapper):
+    """The package's Dynamo callback, compiling its frames with allow_empty_graphs.
+
+    An uncovered no-op branch must become a guarded variant rather than Dynamo's
+    ordinary eager-only SkipFrame, or one fallback call permanently skips that
+    frame and serving() can no longer detect it. Scoped to the callback rather
+    than to the whole call so that an unrelated compiled function running
+    eagerly inside it compiles on its own callback, with the ordinary SkipFrame.
+    """
+
+    def __call__(
+        self,
+        frame: DynamoFrameType,
+        cache_entry: CacheEntry | None,
+        frame_state: dict[str, int | FrameStateSizeEntry],
+    ) -> ConvertFrameReturn:
+        revert = _ALLOW_EMPTY_GRAPHS()
+        try:
+            return super().__call__(frame, cache_entry, frame_state)
+        finally:
+            revert()
+
+
 def _optimize_isolated(
     backend: _PrecompileBackend,
     package: CompilePackage,
@@ -181,6 +206,12 @@ def _optimize_isolated(
     )
     if not isinstance(optimize_ctx, OptimizeContext):
         raise PackageError("torch.compiler.precompile requires Dynamo to be enabled")
+    callback = optimize_ctx.callback
+    if not isinstance(callback, CatchErrorsWrapper):
+        raise AssertionError(f"expected a CatchErrorsWrapper, got {type(callback)}")
+    optimize_ctx.callback = _AllowEmptyGraphsCallback(
+        callback._torchdynamo_orig_backend, callback.hooks
+    )
     return optimize_ctx
 
 
@@ -968,6 +999,15 @@ _UNMODELLED_GUARD_TYPES = frozenset(
 _NOOP_GUARD_TYPES = frozenset({"DETERMINISTIC_ALGORITHMS", "GRAD_MODE"})
 
 
+def _is_noop_guard_type(guard_type: str) -> bool:
+    # EMPTY_NN_MODULE_HOOKS_DICT is a no-op by config: under
+    # skip_nnmodule_hook_guards, the default, GuardBuilder emits nothing for it.
+    return guard_type in _NOOP_GUARD_TYPES or (
+        guard_type == "EMPTY_NN_MODULE_HOOKS_DICT"
+        and torch._dynamo.config.skip_nnmodule_hook_guards
+    )
+
+
 # The ONLY guard types the invariance policy may drop, and only when proven
 # invariant across every captured variant: identity guards (which the default
 # filter drops anyway, as unserializable) and process-wide compiler state. The
@@ -984,13 +1024,12 @@ _INVARIANT_DROPPABLE_GUARD_TYPES = frozenset(
         "CLASS_MATCH",
         "CLOSURE_MATCH",
         # COW_TENSOR_MATCH pins a folded torch._C._is_cow_tensor branch, so by
-        # value it reads like the shape-bearing membership guards -- but unlike
-        # them it is an unserializable lambda guard, so the DEFAULT filter drops
-        # it before the policy runs and _is_risky_drop flags that drop, refusing
-        # at the default gates. It lives here rather than in the shape-bearing
-        # set because the policy keeping it would be futile (it can never be
-        # serialized) and because, unlike a dropped membership guard, its loss
-        # is never silent.
+        # value it reads like the shape-bearing membership guards -- but it
+        # cannot be rebuilt from the pickle: the tensor comes back fake and its
+        # builder rejects that, so the default filter keeps it and then the
+        # policy's re-serialization, or a load, fails on it rather than losing
+        # it silently. It lives here rather than in the shape-bearing set
+        # because keeping it never yields a loadable artifact.
         "COW_TENSOR_MATCH",
         "DICT_VERSION",
         "DUAL_LEVEL",
@@ -1529,10 +1568,13 @@ class PrecompileSession:
             # because they never enter _guard_sets, so they were never shown
             # to be constant -- only never analyzed (SHAPE_ENV is the one that
             # matters: it carries symbolic shape constraints no TENSOR_MATCH
-            # repeats); and a type in NO set is one GuardBuilder grew after
-            # the classification, kept until someone triages it.
+            # repeats); a type in NO set is one GuardBuilder grew after the
+            # classification, kept until someone triages it; and a type whose
+            # builder emits nothing under the current config has no check to
+            # drop, so dropping it would only report a drop that never was.
             return (
                 guard_type not in _INVARIANT_DROPPABLE_GUARD_TYPES
+                or _is_noop_guard_type(guard_type)
                 or (guard_type, _normalize(name)) in keep_only
             )
 
@@ -1632,8 +1674,9 @@ class PrecompileSession:
                 else decisions
             )
             namespaces = _module_namespaces(entries)
-            # A no-op type's check is GLOBAL_STATE's leaf, made whatever the
-            # filter said about the marker: it is dropped only with GLOBAL_STATE.
+            # A no-op type's check, where it has one, is GLOBAL_STATE's leaf,
+            # made whatever the filter said about the marker: it is dropped
+            # only with GLOBAL_STATE.
             global_state_kept = any(
                 keep and e.guard_type == "GLOBAL_STATE"
                 for keep, e in zip(decisions, entries)
@@ -1643,7 +1686,7 @@ class PrecompileSession:
             for keep, by_default, entry in zip(decisions, default_kept, entries):
                 slot = (entry.guard_type, entry.name)
                 enforced = keep or (
-                    entry.guard_type in _NOOP_GUARD_TYPES and global_state_kept
+                    _is_noop_guard_type(entry.guard_type) and global_state_kept
                 )
                 target = self._kept_guards if enforced else self._dropped_guards
                 target.add(slot)
@@ -1663,8 +1706,9 @@ class PrecompileSession:
                 (undetermined if unmodelled else facts).add(fact)
             # One filter call is one compilation, and only the package knows
             # which frame is being compiled.
-            if self._package.has_current_entry():
-                code = self._package.current_entry().python_code
+            entry = self._package.current_entry
+            if entry is not None:
+                code = entry.python_code
                 key = (code.co_name, code.co_filename, code.co_firstlineno)
             else:
                 key = ("<unknown>", "<unknown>", 0)
@@ -2102,14 +2146,18 @@ class PrecompileSession:
         log.info("precompile: saved %s to %s", summary, path)
         return summary
 
-    def rendered_backends(self, backend_ids: Sequence[str]) -> dict[str, str]:
-        """Compiled subgraphs as READABLE source, keyed by backend id.
+    def rendered_backends(
+        self, backend_ids: Sequence[str]
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Compiled subgraphs as READABLE source, and the reason each of the rest
+        stayed pickled, both keyed by backend id.
 
         The pickled bundle is the fallback, not the goal: a subgraph is Inductor
         output, which has a source form (the make_fx tracer emits exactly this),
         unlike the guard trees and transformed bytecode beside it. Anything that
-        fails to render -- a training graph, an effectful op, a graph with no
-        compute -- is simply absent here and stays pickled.
+        fails to render -- an effectful op, a graph with no compute, a training
+        shape the composer refuses -- stays pickled, and its reason is warned
+        here and written into the artifact header so the fallback is visible.
 
         Rendering re-runs AOTAutograd + Inductor on the retained graph, so it is
         a second lowering, paid once per subgraph that reaches the artifact.
@@ -2117,8 +2165,9 @@ class PrecompileSession:
         from torch._functorch import aot_autograd
 
         if self._backend_obj is None or self._backend == "eager":
-            return {}
+            return {}, {}
         rendered: dict[str, str] = {}
+        refused: dict[str, str] = {}
         for backend_id in backend_ids:
             held = self._backend_obj.graphs.get(str(backend_id))
             if held is None:
@@ -2133,7 +2182,13 @@ class PrecompileSession:
                     gm, fakes, grad_enabled=self._training
                 )
             except Exception as e:
-                log.debug("precompile: %s stays pickled (%s)", backend_id, e)
+                reason = " ".join(f"{type(e).__name__}: {e}".split())
+                log.warning(
+                    "precompile: subgraph %s stays pickled, not rendered as source: %s",
+                    backend_id,
+                    reason,
+                )
+                refused[str(backend_id)] = reason
                 continue
             rendered[str(backend_id)] = source
         from torch._functorch._aot_autograd.to_standalone_python import (
@@ -2141,7 +2196,8 @@ class PrecompileSession:
         )
 
         keys = list(rendered)
-        return dict(zip(keys, namespace_module_names([rendered[k] for k in keys])))
+        namespaced = namespace_module_names([rendered[k] for k in keys])
+        return dict(zip(keys, namespaced)), refused
 
     def _collect_backends(self) -> dict[str, Any]:
         """The compiled subgraphs this capture produced, keyed by backend id."""
@@ -2206,13 +2262,15 @@ class PrecompileSession:
         self._package.refuse_unserializable()
         entry = self._package.cache_entry()
         backends = self._collect_backends()
+        rendered, refused = self.rendered_backends(list(backends))
         return _build_multigraph_artifact(
             entry,
             backends,
             summary,
             self._backend,
             _entry_fn_of(self._fn),
-            self.rendered_backends(list(backends)),
+            rendered,
+            refused,
         )
 
 
@@ -2307,7 +2365,7 @@ def precompile_load(
     | None = None,
     recompile_limit: int = 256,
     dynamic: bool | None = None,
-) -> PrecompiledCallable:
+) -> _ServedCallable:
     r"""Load an artifact and return a callable ready to serve it.
 
     .. warning::
@@ -2346,7 +2404,7 @@ def serve_cache_entry(
     | None = None,
     recompile_limit: int = 256,
     dynamic: bool | None = None,
-) -> PrecompiledCallable:
+) -> _ServedCallable:
     """Wire an already-loaded cache entry onto ``fn`` and install it.
 
     Shared by ``precompile_load``, which reads the entry from a path, and by the
@@ -2363,6 +2421,7 @@ def serve_cache_entry(
             default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
         ),
         explicit_capture=True,
+        serving=True,
     )
     optimize_ctx = _optimize_isolated(
         _PrecompileBackend(backend),
@@ -2373,7 +2432,7 @@ def serve_cache_entry(
     compiled = optimize_ctx(fn)
     isolate_recompiles_id = optimize_ctx.isolate_recompiles_id
     package.install(cache_entry.backends, isolate_recompiles_id=isolate_recompiles_id)
-    return PrecompiledCallable(compiled, package, isolate_recompiles_id)
+    return _ServedCallable(compiled, package, isolate_recompiles_id)
 
 
 def precompile_capture(
@@ -2428,7 +2487,7 @@ def precompile_capture(
     )
 
 
-class PrecompiledCallable:
+class _ServedCallable:
     """A loaded artifact. Call it, or use it as a context manager to scope it."""
 
     def __init__(
@@ -2454,7 +2513,7 @@ class PrecompiledCallable:
     def __call__(self, *args: object, **kwargs: object) -> object:
         with self._state:
             if not self._loaded or self._unloading:
-                raise PackageError("PrecompiledCallable has been unloaded")
+                raise PackageError("this loaded artifact has been unloaded")
             if self._package.installed_entries_dropped():
                 raise PackageError(
                     "torch._dynamo.reset() cleared the precompiled code this "
@@ -2467,20 +2526,9 @@ class PrecompiledCallable:
             if compiled is None:
                 raise AssertionError("loaded callable is missing")
             self._active_calls += 1
-        # An uncovered no-op branch must become a guarded variant rather than
-        # Dynamo's ordinary eager-only SkipFrame. Otherwise one fallback call
-        # permanently skips that frame and later serving() cannot detect it.
         try:
-            # _make_closure_patcher rather than config.patch(): patch() builds a
-            # fresh ConfigPatch class and a fresh ContextVar on every call, and
-            # this runs on every served call. The patcher is built once at import
-            # and costs a set/restore pair.
-            revert = _ALLOW_EMPTY_GRAPHS()
-            try:
-                with _use_code_state(self._pgo_state):
-                    return compiled(*args, **kwargs)
-            finally:
-                revert()
+            with _use_code_state(self._pgo_state):
+                return compiled(*args, **kwargs)
         finally:
             with self._state:
                 self._active_calls -= 1
@@ -2490,7 +2538,7 @@ class PrecompiledCallable:
     def __enter__(self) -> Self:
         with self._state:
             if not self._loaded or self._unloading:
-                raise PackageError("PrecompiledCallable has been unloaded")
+                raise PackageError("this loaded artifact has been unloaded")
         return self
 
     def __exit__(self, *exc: object) -> None:

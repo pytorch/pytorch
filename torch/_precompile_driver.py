@@ -562,7 +562,11 @@ def _build_multigraph_forward():
             # a guard written against a defaulted argument has nothing to bind to
             # otherwise, and every variant misses on a call that omitted it.
             if entry_defaults:
-                for name, value in zip(arg_names[len(args) :], entry_defaults):
+                # __defaults__ aligns with the LAST len(defaults) parameters,
+                # not with the first parameter this call omitted.
+                for name, value in zip(
+                    arg_names[-len(entry_defaults) :], entry_defaults
+                ):
                     f_locals.setdefault(name, value)
             if entry_kwdefaults:
                 for name, value in entry_kwdefaults.items():
@@ -645,14 +649,21 @@ def _build_installed_forward():
     import types
 
     from torch._dynamo.package import SerializedCode
-    from torch._precompile import _InstalledArtifact
+    from torch._precompile import _InstalledArtifact, PrecompileError
 
     cache_entry = pickle.loads(base64.b64decode(_PACKAGE))
 
     # install resolves every frame through sys.modules[...] directly, so each
     # module a captured frame came from has to be imported before it runs.
     for _code_entry in cache_entry.dynamo.codes:
-        importlib.import_module(_code_entry.python_module)
+        try:
+            importlib.import_module(_code_entry.python_module)
+        except ImportError as e:
+            raise PrecompileError(
+                f"precompile: this artifact holds a frame captured from module "
+                f"{_code_entry.python_module!r}, which is not importable here "
+                f"({e}). Load it where that module is, or pass fn= to load()."
+            ) from e
 
     def _entry_function():
         # The entry records no qualname to resolve -- it is the callable handed

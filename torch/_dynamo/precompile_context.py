@@ -144,18 +144,15 @@ class _SourceGraphModule(torch.nn.Module):
         # no_dispatch(), where rebuilding a fake tensor asserts.
         new = object.__new__(type(self))
         memo[id(self)] = new
-        new.__dict__.update(self.__dict__)
         # _src and the exec'd forward are safely shared -- __reduce__ snapshots
         # the instance's own containers via _current_src(), so the shared _src
-        # never leaks the original's state into a pickled copy. The STATEFUL
-        # containers are not shareable: a "deep" copy sharing the
-        # parameter/buffer dicts and tensors lets an in-place update on one
-        # copy silently edit the other.
-        for stateful in ("_modules", "_parameters", "_buffers"):
-            new.__dict__[stateful] = {
-                name: copy.deepcopy(value, memo)
-                for name, value in self.__dict__[stateful].items()
-            }
+        # never leaks the original's state into a pickled copy. Everything else
+        # nn.Module keeps on an instance is state, hook dicts included, and a
+        # copy sharing it lets an update on one copy silently edit the other.
+        shared = {"_src": self._src, "_generated_forward": self._generated_forward}
+        state = {k: v for k, v in self.__dict__.items() if k not in shared}
+        new.__dict__.update(copy.deepcopy(state, memo))
+        new.__dict__.update(shared)
         return new
 
 

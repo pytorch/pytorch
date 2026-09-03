@@ -129,6 +129,9 @@ class PrecompileSummary:
         return base
 
 
-# __module__ deliberately stays truthful: torch.compiler does not export these
-# names, and pointing __module__ at it would make every instance unpicklable
-# (pickle resolves the class through __module__) and break help()/Sphinx.
+# GuardFact, FrameInvariants and PrecompileSummary keep their truthful
+# __module__: torch.compiler does not export them, so pointing __module__ at it
+# would make every instance unpicklable (pickle resolves the class through
+# __module__). ExampleInput is different: torch.compiler.precompile exports it,
+# so torch/_precompile.py re-homes it there with the singleton's other members
+# (pickle resolves it through the singleton).

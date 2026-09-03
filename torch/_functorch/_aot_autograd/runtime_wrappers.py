@@ -232,46 +232,47 @@ def _identity(x: Any) -> Any:
     return x
 
 
-@functools.cache
-def _warn_replayed_custom_function_view(compile_id: str | None, idx: int) -> None:
-    # Once per (compiled graph, input) via the cache rather than warnings'
-    # registry: each codegen'd epilogue is a fresh fabricated frame, so the
-    # registry would re-warn on every call.
-    graph = f" of compiled graph [{compile_id}]" if compile_id else ""
-    warnings.warn(
-        f"torch.compile is writing mutated input {idx}{graph} back onto a view "
-        "created inside a custom autograd.Function (or an input it returned "
-        "as-is) without autograd tracking. Eager rejects an autograd-visible "
-        "in-place op on such a view; compile cannot tell that apart from a write "
-        "that bypasses autograd (e.g. through .data), so it replays the mutation "
-        "invisibly and gradients that later flow through this input see its "
-        "pre-mutation history only."
-    )
-
-
 def _replay_input_mutation(
-    orig: torch.Tensor, updated: torch.Tensor, idx: int, compile_id: str | None
+    orig: torch.Tensor,
+    updated: torch.Tensor,
+    idx: int,
+    compile_id: str | None,
+    warned: set[int],
+    hidden: bool,
 ) -> None:
     """Write functionalized input mutation ``idx`` back onto the caller's tensor.
 
-    A tracked ``copy_``, except onto a requires-grad view stamped
+    A tracked ``copy_``, except under grad mode onto a requires-grad view stamped
     IN_CUSTOM_FUNCTION (an input a custom autograd.Function returned as-is),
-    which autograd refuses to modify in place. The mutation is in the epilogue
-    rather than the graph because the target requires grad
-    (_check_if_mutation_can_be_in_graph), so that write is replayed under no_grad
-    with the version counter preserved, as a ``.data`` write did in eager. Decided
-    per call: nothing guards the view's provenance. Deliberately diverges from
-    eager, which raises on a visible write to that view.
+    which autograd then refuses to modify in place: that write is replayed under
+    no_grad with the version counter preserved, as a ``.data`` write did in
+    eager. With grad mode off eager itself writes such a view tracked, version
+    bump included, so the plain copy_ stands. Decided per call: nothing guards
+    the view's provenance. The invisible replay deliberately diverges from eager,
+    which raises on a visible write, and warns once per input (``warned`` is the
+    owning epilogue's set) unless ``hidden`` says the traced write was itself
+    invisible to autograd.
     """
     # pybind11 hands back a fresh enum object each call, so this cannot be `is`.
     if (
-        orig.requires_grad
+        torch.is_grad_enabled()
+        and orig.requires_grad
         and orig._is_view()
         and torch._C._autograd._get_creation_meta(orig)
         == torch._C._autograd.CreationMeta.IN_CUSTOM_FUNCTION
     ):
-        if torch.is_grad_enabled() and orig.requires_grad:
-            _warn_replayed_custom_function_view(compile_id, idx)
+        if not hidden and idx not in warned:
+            warned.add(idx)
+            graph = f" of compiled graph [{compile_id}]" if compile_id else ""
+            warnings.warn(
+                f"torch.compile is writing mutated input {idx}{graph} back onto a "
+                "view created inside a custom autograd.Function (or an input it "
+                "returned as-is) without autograd tracking. Eager rejects an "
+                "autograd-visible in-place op on such a view; compile cannot tell "
+                "that apart from a write that bypasses autograd (e.g. through "
+                ".data), so it replays the mutation invisibly and gradients that "
+                "later flow through this input see its pre-mutation history only."
+            )
         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
             orig.copy_(updated)
     else:
@@ -662,6 +663,7 @@ class _RuntimeForwardEpilogue:
     trace_joint: bool
     keep_input_mutations: bool
     epilogue_args_idx: tuple[int, ...] = field(init=False)
+    warned_inputs: set[int] = field(default_factory=set, init=False)
     output_handlers: tuple[
         NoopAliasHandler
         | AliasOfInputHandler
@@ -847,6 +849,9 @@ class _RuntimeForwardEpilogue:
                         updated_inpt,
                         inpt_idx,
                         self.runtime_metadata.compile_id_str,
+                        self.warned_inputs,
+                        meta.mutations_hidden_from_autograd
+                        or meta.mutations_under_no_grad_or_inference_mode,
                     )
 
     def _replay_output_aliases(
@@ -1144,6 +1149,7 @@ def _create_runtime_wrapper(
             torch=torch,
             _unwrap_tensoralias=_unwrap_tensoralias,
             _replay_input_mutation=_replay_input_mutation,
+            _warned_inputs=runtime_epilogue.warned_inputs,
         )
         wrote_body = False
         with buf.indent():
@@ -1195,7 +1201,14 @@ def _create_runtime_wrapper(
                         )
                         write_back = f"raise RuntimeError({msg_name})"
                     else:
-                        args = f"{oi}, {ui}, {inpt_idx}, {runtime_metadata.compile_id_str!r}"
+                        hidden = (
+                            meta.mutations_hidden_from_autograd
+                            or meta.mutations_under_no_grad_or_inference_mode
+                        )
+                        cid = runtime_metadata.compile_id_str
+                        args = (
+                            f"{oi}, {ui}, {inpt_idx}, {cid!r}, _warned_inputs, {hidden}"
+                        )
                         write_back = f"_replay_input_mutation({args})"
                     if meta.is_leaf:
                         buf.writeline(
@@ -2758,24 +2771,12 @@ class _AutogradSavedState:
 def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> None:
     """Give each slot about to be marked non-differentiable its own TensorImpl.
 
-    mark_non_differentiable is keyed on TensorImpl, so marking one slot marks
-    EVERY returned slot holding that same object, and with
-    ctx._materialize_non_diff_grads = False a slot marked this way is handed a
-    None instead of zeros. Backends are free to return one object in two slots
-    -- inductor lowers aten.detach to a no-op, and h*1 / h+0 fold away -- so
-    `return h * 1, h.detach()` marks the differentiable output too and drops
-    the gradient, and `return y[:2], y[2:], y.detach()` marks y's intermediate
-    base, which the backward requires a tangent for.
-
-    Substituting an alias is only correct because the slot is one we are about
-    to declare non-differentiable anyway; slots that stay differentiable keep
-    their identity.
+    mark_non_differentiable is keyed on TensorImpl, and a backend may return one
+    object in two slots (inductor lowers aten.detach to a no-op), so marking one
+    slot would otherwise also mark every other slot holding that object.
     """
     if not marked:
         return
-    # This runs on every forward of every compiled autograd function and almost
-    # never fires, so index the marked slots -- usually one or two -- and probe
-    # the rest against them, rather than indexing all of raw_returns.
     marked_positions: dict[int, list[int]] = {}
     for i in marked:
         x = raw_returns[i]
@@ -3568,9 +3569,6 @@ class _AOTDispatchAutogradFunctionFactory:
                 ):
                     _non_diff_indices.append(i)
             if _non_diff_indices:
-                # See _dealias_marked_returns: marking is keyed on TensorImpl,
-                # so a slot sharing an object with another returned slot marks
-                # that one too.
                 buf.writeline(
                     f"_dealias_marked_returns(raw_returns, {_non_diff_indices!r})"
                 )

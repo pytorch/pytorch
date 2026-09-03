@@ -47,8 +47,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
 ```{warning}
 `torch.compiler.precompile` and everything reached through it (`precompile.load`,
-`torch.compiler.PrecompiledCallable`, and the other objects it returns) is a
-prototype API. Signatures, error types and the artifact format may change between
+`torch.compiler.PrecompiledRunnable`, `torch.compiler.PrecompiledCallable`, and the
+other objects it returns) is a prototype API. Signatures, error types and the artifact format may change between
 releases without a deprecation cycle.
 ```
 
@@ -71,8 +71,9 @@ releases without a deprecation cycle.
    ``(python_code, cache)``. ``tracer`` picks the capture front-end: ``"make_fx"`` (the
    default) is one non-strict ATen trace and takes exactly one call, while ``"dynamo"``
    takes as many as you give it and captures every graph-break continuation and guarded
-   recompilation those calls exercise, under full runtime guards.
-   This is execution-driven coverage, not an
+   recompilation those calls exercise; the artifact serializes the guards that pin what
+   its graphs specialized on and drops the rest (see ``guard_filter_fn`` and the
+   ``require_*`` gates). This is execution-driven coverage, not an
    exhaustive analysis: paths and values that no example executes are absent. ``fn`` is
    the whole computation, taking the model(s) as
    explicit arguments, e.g. ``lambda model, x: model(x)`` or a training step. The
@@ -95,7 +96,8 @@ releases without a deprecation cycle.
       model] in ``torch/_precompile.py``. ``torch.compiler.precompile`` is distinct from
       ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` caching mode).
 
-   If ``fn`` runs a backward, the artifact re-runs the whole forward and backward and
+   If ``fn`` runs a backward (pass ``training=True``; the example calls run under
+   ``torch.no_grad()`` otherwise), the artifact re-runs the whole forward and backward and
    scatters the resulting parameter gradients onto the runtime model's ``parameters()``
    ``.grad`` fields, accumulating (``p.grad += g``) exactly like eager ``.backward()`` --
    so keep your usual ``zero_grad()`` / ``optimizer.step()`` loop. Which params receive a
@@ -159,8 +161,9 @@ releases without a deprecation cycle.
    :param invariants: Optional path receiving the multi-graph invariant report.
    :param require_complete: ``tracer="dynamo"`` only; defaults to ``True``. Refuse to
        produce an artifact whose capture summary is not complete -- a frame that produced
-       no guarded code, hit the recompile limit, or was bypassed, or an example call that
-       raised.
+       no guarded code, hit the recompile limit, or was bypassed, or a capture that
+       compiled no graph at all. (An example call that raises propagates out of
+       ``precompile`` before any gate runs.)
    :param require_no_risky_drops: ``tracer="dynamo"`` only; defaults to ``True``. Refuse
        to produce an artifact that dropped a guard whose loss could change the answer
        (every drop made by a custom ``guard_filter_fn`` counts as risky).
@@ -168,7 +171,8 @@ releases without a deprecation cycle.
        Refuse to produce an artifact that dropped any guard at all. Off by default because
        every model drops identity guards that cannot be serialized.
    :param training: Run the example calls with grad enabled and lower a backward into the
-       artifact; defaults to ``False`` (calls run under ``torch.no_grad()``).
+       artifact; defaults to ``False`` (calls run under ``torch.no_grad()``, for either
+       ``tracer``). Required for a ``fn`` that runs a backward.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string and a
        binary acceleration cache.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
@@ -226,9 +230,10 @@ releases without a deprecation cycle.
        the function object to install onto, when it is not importable from where it was
        captured (e.g. defined in ``__main__`` or a notebook); pass it before the first
        call. A standalone artifact rejects ``fn=`` with ``PrecompileError``.
-   :returns: A runnable callable with the same calling convention as the captured ``fn``.
-       Arguments are matched positionally at both capture and load time; keyword-argument
-       calling conventions are not supported. A dynamo artifact with captured frames the
+   :returns: A :class:`torch.compiler.PrecompiledRunnable` with the same calling
+       convention as the captured ``fn``. A ``make_fx`` artifact takes positional arguments
+       only; a dynamo artifact also accepts keyword arguments, the way its
+       ``ExampleInput`` calls passed them. A dynamo artifact with captured frames the
        entry bytecode cannot reach on its own -- for example a graph break inside a child
        module's frame -- serves by INSTALLING onto the captured code objects: the returned
        callable mutates process state on first call (or on ``__enter__``) and supports
@@ -248,7 +253,8 @@ releases without a deprecation cycle.
    One capture call for ``example_inputs`` when positional arguments alone are not
    enough (``tracer="dynamo"`` only). A plain tuple in ``example_inputs`` is the
    positional arguments of one
-   call; wrap a call that needs keyword arguments in this instead::
+   call; wrap a call that needs keyword arguments in this instead, and call the loaded
+   artifact with the same keywords::
 
        torch.compiler.precompile(
            fn,
@@ -258,8 +264,17 @@ releases without a deprecation cycle.
                torch.compiler.precompile.ExampleInput(args=(x,), kwargs={"scale": 2}),
            ],
        )
+       loaded = torch.compiler.precompile.load(python_code, cache)
+       loaded(x, scale=2)
 
 .. autoexception:: torch.compiler.PrecompileError
+
+.. autoclass:: torch.compiler.PrecompiledRunnable
+   :members: unload
+
+   Every object :func:`precompile.load` returns is one of these, whichever of the
+   two shapes below the capture produced, so ``isinstance(loaded,
+   torch.compiler.PrecompiledRunnable)`` holds for both.
 
 .. autoclass:: torch.compiler.PrecompiledCallable
    :members: unload

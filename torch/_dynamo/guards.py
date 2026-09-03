@@ -4183,6 +4183,10 @@ def _is_interned_singleton(value: Any) -> bool:
     )
 
 
+# The bookkeeping torch.nn.Module.__init__ installs on every module.
+_NN_MODULE_STATE_ATTRS = frozenset(vars(torch.nn.Module()))
+
+
 class GuardsStatePickler(FunctionPicklerBase):
     def __init__(
         self,
@@ -4620,6 +4624,11 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif inspect.ismethod(obj):
             reduced = self._reduce_bound_method(obj)
             if reduced is not None:
+                if self._keep(obj):
+                    # A guard reads a method's attributes through __func__, so
+                    # the function it carries is guarded too, and an fqn
+                    # mismatch there is rebuilt rather than pruned.
+                    self.guard_tree_values[id(obj.__func__)] = obj.__func__
                 return reduced
 
         elif isinstance(obj, types.CellType):
@@ -4702,8 +4711,14 @@ class GuardsStatePickler(FunctionPicklerBase):
         whose __setstate__ or __reduce__ reads a pruned attribute sees _Missing
         at load.
         """
-        for attr in vars(obj).values():
+        is_module = isinstance(obj, torch.nn.Module)
+        for name, attr in vars(obj).items():
             if isinstance(attr, (torch.Tensor, torch.nn.Module)):
+                continue
+            if is_module and name in _NN_MODULE_STATE_ATTRS:
+                # nn.Module.__getattr__ indexes these, so a pruned one turns
+                # every attribute miss on the loaded module into a TypeError.
+                # Their elements are still pruned one by one.
                 continue
             if id(attr) in self.guard_tree_values:
                 continue
@@ -4891,9 +4906,11 @@ def pickle_guards_state(
     # Anything dump raises means a guarded value cannot be serialized, which is
     # a bypass (an error under strict_precompile), never a compiler crash. A
     # PackageError raised inside reducer_override already carries its message.
+    # RecursionError is a cycle the reducers did not route through pickle state
+    # (see FunctionPicklerBase), which is a bug here and must stay loud.
     try:
         pickler.dump(state)
-    except torch._dynamo.exc.PackageError:
+    except (torch._dynamo.exc.PackageError, RecursionError):
         raise
     except Exception as e:
         # Deliberately broad, including AssertionError. It is tempting to let
@@ -5049,12 +5066,13 @@ class CheckFunctionManager:
                     guard for guard, keep in zip(all_guards, filter_results) if keep
                 ]
 
-            # Guard.set_export_info EXTENDS code_list on every build, so an
-            # inspection build that runs AFTER the runtime one hands the filter
-            # -- and therefore _GuardFact.code and the committed invariants
-            # report -- each guard's code parts two or three times over. Build
-            # the entries first whenever anything is going to want them, which
-            # for a serialization-only filter is not otherwise until later.
+            # Each build_guards call resets and repopulates code_list and
+            # guard_types on the guards it is given, and serialize_guards reads
+            # guard_types off whichever build ran last. Build the entries -- a
+            # snapshot of the unfiltered inspection build -- before the runtime
+            # and save builds, so the snapshot is one consistent build over all
+            # guards and the inspection build never overwrites the export info
+            # of the build that gets serialized.
             if guard_filter_fn is not None or (
                 save_guards and serialization_guard_filter_fn is not None
             ):
@@ -5331,10 +5349,8 @@ class CheckFunctionManager:
                         obj_weakref=None,
                         guarded_class_weakref=None,
                         create_fn=normalize_create_fn(guard.create_fn),
-                        # Export bookkeeping, repopulated by create_fn at load.
-                        # set_export_info EXTENDS these on every guard build and
-                        # CheckFunctionManager builds up to three times, so the
-                        # artifact otherwise ships each code part several times over.
+                        # Per-build export bookkeeping, repopulated by create_fn
+                        # at load.
                         guard_types=None,
                         code_list=None,
                     )
@@ -5657,9 +5673,7 @@ class CheckFunctionManager:
             reason = f"Cache line invalidated because {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
 
-            extra_state.invalidate(
-                cache_entry, deleted_guard_manager, self.guard_manager
-            )
+            extra_state.invalidate(deleted_guard_manager, self.guard_manager)
             self.guard_manager = deleted_guard_manager
 
     def id_ref(self, obj: object, obj_str: str) -> int:

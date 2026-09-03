@@ -343,12 +343,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         return module, compiled, cnts, x
 
     def test_autocast_object_guarded_by_value_not_identity(self):
-        # A user-held autocast object reaches the trace as four specialized
-        # values (device, dtype, enabled, cache_enabled), so those are what the
-        # graph depends on. Guarding the object by id() instead is both too
-        # strong -- a second object configured identically cannot reuse the
-        # graph -- and unserializable, which is what makes a precompiled
-        # artifact drop the guard entirely.
         module, compiled, cnts, x = self._compile_held_autocast_module()
 
         # A DIFFERENT object with the same settings: same graph, no recompile.
@@ -366,13 +360,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
 
     def test_autocast_object_mutated_in_place_recompiles(self):
-        # The live-mutation direction of the value guards: mutating the held
-        # object leaves id() unchanged, so an ID_MATCH on it keeps serving the
-        # stale bf16 graph. This must be the FIRST divergence after compile --
-        # any rebind in between would give the id() guard a different object
-        # and let a recompile mask the staleness.
         module, compiled, cnts, x = self._compile_held_autocast_module()
 
+        # Must be the first divergence after compile; a rebind first would let a recompile mask the stale graph.
         module.ctx._enabled = False
         self.assertEqual(compiled(x).dtype, torch.float32)
         self.assertEqual(cnts.frame_count, 2)
