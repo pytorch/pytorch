@@ -373,6 +373,17 @@ class ReconstructedByNewargs:
         return (self.payload,)
 
 
+class Point(NamedTuple):
+    x: int
+    y: int
+
+
+class TaggedPoint(Point):
+    # No __slots__, so an instance carries a __dict__ alongside its items, and
+    # namedtuple's __getnewargs__ returns only the items.
+    pass
+
+
 # --- an empty closure cell -------------------------------------------------
 def keep_name_with_empty_cell(func):
     @functools.wraps(func)
@@ -1104,6 +1115,66 @@ class TestGuardSerialization(TestGuardSerializationBase):
         got = pickle.loads(buf.getvalue())["fn"]
         self.assertEqual(got.__module__, w.__module__)
         self.assertEqual(got.__doc__, w.__doc__)
+
+    def test_guard_on_an_object_that_reconstructs_itself(self):
+        # Pruning replaces an unguarded attribute by id, which only comes back
+        # as a missing attribute under the DEFAULT protocol. A class with its own
+        # __reduce__ gets the sentinel as a constructor ARGUMENT instead, so its
+        # attributes must not be pruned at all.
+        obj = ReconstructedByReduce("tag", CarriedPayload(3))
+
+        def fn(x):
+            if obj.tag == "tag":
+                return x + 1
+            return x - 1
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "obj": obj}, True)
+
+    def test_guard_on_an_object_whose_setstate_or_new_reads_state(self):
+        # __reduce__ is not the only hook that reads a pruned value back: the
+        # default protocol hands __setstate__ the whole __dict__, and
+        # __getnewargs__ feeds __new__. Either saw the sentinel and raised at
+        # load, so both classes must keep every attribute.
+        from torch._dynamo.guards import _builds_its_own_pickle
+
+        self.assertFalse(_builds_its_own_pickle(CarriedPayload))
+        for obj in (
+            ReconstructedBySetstate("tag", CarriedPayload(3)),
+            ReconstructedByNewargs(CarriedPayload(3)),
+        ):
+            self.assertTrue(_builds_its_own_pickle(type(obj)))
+
+            def fn(x):
+                if obj.tag == "tag":
+                    return x + 1
+                return x - 1
+
+            with self.subTest(cls=type(obj).__name__):
+                ref, loaded = self._test_serialization(
+                    "EQUALS_MATCH", fn, torch.randn(3)
+                )
+                self._test_check_fn(
+                    ref, loaded, {"x": torch.randn(3), "obj": obj}, True
+                )
+
+    def test_guard_on_a_namedtuple_subclass_with_an_unpicklable_extra(self):
+        # Every namedtuple has a __getnewargs__, but it returns the ITEMS, which
+        # pruning never touches, so a subclass carrying __dict__ extras is pruned
+        # like any other user object rather than pickled whole.
+        from torch._dynamo.guards import _builds_its_own_pickle
+
+        self.assertFalse(_builds_its_own_pickle(TaggedPoint))
+        pt = TaggedPoint(1, 2)
+        pt.scratch = (i for i in ())
+
+        def fn(x):
+            if pt.x == 1:
+                return x + 1
+            return x - 1
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "pt": pt}, True)
 
     def test_tensor_match(self):
         def f(x: torch.Tensor):
@@ -2562,49 +2633,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # Round-trip through pickle should work even with init=False fields
         restored = pickle.loads(pickle.dumps(source))
         self.assertEqual(source, restored)
-
-    def test_guard_on_an_object_that_reconstructs_itself(self):
-        # Pruning replaces an unguarded attribute by id, which only comes back
-        # as a missing attribute under the DEFAULT protocol. A class with its own
-        # __reduce__ gets the sentinel as a constructor ARGUMENT instead, so its
-        # attributes must not be pruned at all.
-        obj = ReconstructedByReduce("tag", CarriedPayload(3))
-
-        def fn(x):
-            if obj.tag == "tag":
-                return x + 1
-            return x - 1
-
-        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
-        self._test_check_fn(ref, loaded, {"x": torch.randn(3), "obj": obj}, True)
-
-    def test_guard_on_an_object_whose_setstate_or_new_reads_state(self):
-        # __reduce__ is not the only hook that reads a pruned value back: the
-        # default protocol hands __setstate__ the whole __dict__, and
-        # __getnewargs__ feeds __new__. Either saw the sentinel and raised at
-        # load, so both classes must keep every attribute.
-        from torch._dynamo.guards import _builds_its_own_pickle
-
-        self.assertFalse(_builds_its_own_pickle(CarriedPayload))
-        for obj in (
-            ReconstructedBySetstate("tag", CarriedPayload(3)),
-            ReconstructedByNewargs(CarriedPayload(3)),
-        ):
-            self.assertTrue(_builds_its_own_pickle(type(obj)))
-
-            def fn(x):
-                if obj.tag == "tag":
-                    return x + 1
-                return x - 1
-
-            with self.subTest(cls=type(obj).__name__):
-                ref, loaded = self._test_serialization(
-                    "EQUALS_MATCH", fn, torch.randn(3)
-                )
-                self._test_check_fn(
-                    ref, loaded, {"x": torch.randn(3), "obj": obj}, True
-                )
-
 
 
 class SimpleModule(torch.nn.Module):

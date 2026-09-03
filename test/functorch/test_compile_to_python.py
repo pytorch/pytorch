@@ -880,6 +880,39 @@ class TestAOTCompileToPython(TestCase):
         self.assertEqual(inner, [])
         self.assertEqual(len(outer), 1)
 
+    def test_interleaved_autograd_spec_sink_exits(self):
+        # Generator-driven contexts exit in whatever order the generators are
+        # closed. A LIFO pop on exit then removed the OTHER sink -- its later
+        # specs were lost -- and raised from the finally block, masking any
+        # exception in flight. Removal is by identity, scanning from the end.
+        import torch._dynamo
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _compile_spec_sinks,
+            capture_autograd_compile_specs,
+        )
+
+        def f(x):
+            return (x * 2).sum()
+
+        def recording():
+            with capture_autograd_compile_specs() as sink:
+                yield sink
+
+        def compile_once():
+            torch._dynamo.reset()
+            torch.compile(f, backend="aot_eager")(torch.randn(4, requires_grad=True))
+
+        first, second = recording(), recording()
+        a, b = next(first), next(second)
+        compile_once()
+        first.close()
+        compile_once()
+        second.close()
+        self.assertEqual(len(a), 1)
+        self.assertEqual(len(b), 2)
+        self.assertIs(b[0], a[0])
+        self.assertEqual(_compile_spec_sinks.sinks, [])
+
 
 @instantiate_parametrized_tests
 class TestComposerHelpers(TestCase):
