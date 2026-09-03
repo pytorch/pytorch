@@ -190,7 +190,6 @@ void XNNGraph::defineAllNodes(std::shared_ptr<torch::jit::Graph>& graph) {
         break;
       }
       default: {
-        throw std::exception();
         TORCH_CHECK(
             false,
             "The node of ",
