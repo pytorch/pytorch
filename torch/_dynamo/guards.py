@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import builtins
 import collections
+import copyreg
 import dataclasses
 import enum
 import functools
@@ -4250,7 +4251,12 @@ def _builds_its_own_pickle(cls: type) -> bool:
     __dict__ and so are never pruned. A namedtuple subclass with __dict__
     extras is pruned like any other user object. The generated one is a fresh
     function per namedtuple class, so it is known by where it was defined.
+
+    A reducer registered with copyreg.pickle decides the arguments the same way
+    from outside the class, so the dispatch table counts too.
     """
+    if copyreg.dispatch_table.get(cls) is not None:
+        return True
     for name in _PICKLE_PROTOCOL_HOOKS:
         hook = getattr(cls, name, None)
         if hook is getattr(object, name, None) or hook is getattr(tuple, name, None):
@@ -4280,6 +4286,9 @@ class GuardsStatePickler(pickle.Pickler):
         self.guard_tree_values = guard_tree_values
         self.empty_values = empty_values
         self.missing_values = missing_values
+        # The object reducer_override was last handed, so a failure inside a
+        # __reduce__ can be attributed to a value rather than only to a type.
+        self.last_reduced: Any = None
         # Cells kept in a reconstructed function's closure: reduced empty, filled
         # from that function's state so a self-reference cannot recurse.
         self.deferred_cells: set[int] = set()
@@ -4619,6 +4628,8 @@ class GuardsStatePickler(pickle.Pickler):
         self, obj: Any
     ) -> tuple[Callable[..., Any], tuple[Any, ...]] | Any:
         import sympy
+
+        self.last_reduced = obj
 
         if id(obj) in self.empty_values:
             return type(obj).__new__, (type(obj),)
@@ -4961,40 +4972,56 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
-def _offending_value_path(state: Any, error: Exception) -> str:
+def _scope_roots(graph: Any) -> list[tuple[str, Any]]:
+    """The named values a guard state can reach, for the diagnostic walk."""
+    return [
+        (f"local_scope[{k!r}]", v)
+        for k, v in (getattr(graph, "local_scope", None) or {}).items()
+    ] + [
+        (f"global_scope[{k!r}]", v)
+        for k, v in (getattr(graph, "global_scope", None) or {}).items()
+    ]
+
+
+def _offending_value_path(
+    state: Any, target: Any, roots: list[tuple[str, Any]] | None = None
+) -> str:
     """Best-effort attribute path to the value that could not be pickled.
 
-    The type in the error names WHAT failed and never WHERE it lives, which in a
-    large model means bisecting by hand across multi-minute captures. Walk the
-    scopes the guard state carries and report the first path whose value has the
-    failing type. Best-effort by construction: it is a diagnostic appended to an
-    error that is already being raised, so any failure here must stay silent
-    rather than mask the real one.
+    The error names WHAT failed and never WHERE it lives, which in a large model
+    means bisecting by hand across multi-minute captures. The pickler records
+    the object it was reducing, so this walks the guard state and reports the
+    first path holding THAT object -- by identity, not by type, which used to
+    report a same-typed bystander instead.
+
+    Searched from ``state``, because that is what gets pickled. Rooting only at
+    the two scopes searched five objects on a real capture while the pickler
+    walked the whole output graph, its guards and its guard-tree values, so a
+    value living anywhere else -- a lock on a compiler internal, say -- was
+    unreachable however well the scopes were preserved. The scopes stay as
+    SEEDS, ahead of ``state`` in the queue, so the common case still reports the
+    short readable path rather than a long one through the graph.
+
+    Best-effort by construction: it is a diagnostic appended to an error that is
+    already being raised, so any failure here must stay silent rather than mask
+    the real one.
     """
     try:
-        wanted = re.search(r"cannot pickle '([^']+)' object", str(error))
-        if wanted is None:
+        if target is None:
             return ""
-        # CPython qualifies the name for anything outside builtins -- a lock is
-        # '_thread.lock' against a __name__ of 'lock' -- so compare on the last
-        # component or the archetypal offenders never match.
-        target = wanted.group(1).rsplit(".", 1)[-1]
-        graph = state.output_graph
-        roots = [
-            (f"local_scope[{k!r}]", v)
-            for k, v in (getattr(graph, "local_scope", None) or {}).items()
-        ] + [
-            (f"global_scope[{k!r}]", v)
-            for k, v in (getattr(graph, "global_scope", None) or {}).items()
-        ]
+        if roots is None:
+            roots = _scope_roots(state.output_graph)
         seen: set[int] = set()
-        queue = collections.deque(roots)
+        queue = collections.deque([*roots, ("state", state)])
+        # Higher than the scope-only walk needed: the whole guard state is
+        # orders of magnitude larger, and this runs once, on a path that is
+        # already raising.
         while queue:
             path, value = queue.popleft()
-            if id(value) in seen or len(seen) > 20000:
+            if id(value) in seen or len(seen) > 200000:
                 continue
             seen.add(id(value))
-            if type(value).__name__ == target:
+            if value is target:
                 return f"\n  reached via: {path}"
             if isinstance(value, (list, tuple)):
                 queue.extend((f"{path}[{i}]", v) for i, v in enumerate(value))
@@ -5039,6 +5066,12 @@ def pickle_guards_state(
             missing_values[id(leaf)] = leaf
     pickler = GuardsStatePickler(guard_tree_values, empty_values, missing_values, buf)
 
+    # Snapshot the search roots before the pruning below empties global_scope.
+    # The diagnostic that names the unpicklable value walks these, so pruning
+    # first leaves anything reachable only through a global unnameable -- which
+    # is how "cannot pickle '_thread.RLock' object" arrived with no path at all.
+    scope_roots = _scope_roots(state.output_graph)
+
     if all(
         torch.compiler.keep_portable_guards_unsafe(
             [
@@ -5059,6 +5092,13 @@ def pickle_guards_state(
         # have flattened. Both are ours, and a bypass would hide them behind a
         # model that silently runs eager.
         raise
+    except torch._dynamo.exc.PackageError as e:
+        # A reducer that refuses a value knows WHAT it refused and not where the
+        # value lives, which is the half the caller can act on -- so append the
+        # path, exactly as the broad handler below does.
+        raise torch._dynamo.exc.PackageError(
+            f"{e}{_offending_value_path(state, pickler.last_reduced, scope_roots)}"
+        ) from e
     except torch._dynamo.exc.TorchDynamoException:
         # Dynamo steers compilation with exceptions -- RestartAnalysis,
         # SkipFrame, Unsupported, ObservedException -- and all of them derive
@@ -5082,7 +5122,8 @@ def pickle_guards_state(
         # value, because a type alone ("cannot pickle 'generator' object") is
         # not actionable in a model with a thousand-frame guard tree.
         raise torch._dynamo.exc.PackageError(
-            f"{type(e).__name__}: {e}{_offending_value_path(state, e)}"
+            f"{type(e).__name__}: {e}"
+            f"{_offending_value_path(state, pickler.last_reduced, scope_roots)}"
         ) from e
     return buf.getvalue()
 

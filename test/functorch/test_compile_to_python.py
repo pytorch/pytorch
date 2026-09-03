@@ -904,10 +904,13 @@ class TestAOTCompileToPython(TestCase):
 
         first, second = recording(), recording()
         a, b = next(first), next(second)
-        compile_once()
-        first.close()
-        compile_once()
-        second.close()
+        try:
+            compile_once()
+            first.close()
+            compile_once()
+        finally:
+            first.close()
+            second.close()
         self.assertEqual(len(a), 1)
         self.assertEqual(len(b), 2)
         self.assertIs(b[0], a[0])

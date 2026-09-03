@@ -5,6 +5,7 @@
 #include <torch/csrc/dynamo/extra_state.h>
 
 #include <atomic>
+#include <optional>
 
 CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
     : backend{py::cast<py::object>(get_backend(backend))} {
@@ -20,8 +21,9 @@ CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
   }
   this->root_mgr = torch::dynamo::convert_to_root_guard_manager(
       this->guard_manager.attr("root"));
-  this->diff_guard_root_mgr = torch::dynamo::convert_to_root_guard_manager(
-      this->guard_manager.attr("diff_guard_root"));
+  this->diff_guard_root = this->guard_manager.attr("diff_guard_root");
+  this->diff_guard_root_mgr =
+      torch::dynamo::convert_to_root_guard_manager(this->diff_guard_root);
 }
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
@@ -40,7 +42,8 @@ CacheEntry::Detached CacheEntry::invalidate(py::object deleted_guard_manager) {
   Detached old{
       std::move(this->guard_manager),
       std::move(this->code),
-      std::move(this->backend)};
+      std::move(this->backend),
+      std::move(this->diff_guard_root)};
   // The moved-from members are null, so these assignments decref nothing.
   this->guard_manager = std::move(deleted_guard_manager);
   this->code = py::none();
@@ -52,8 +55,21 @@ CacheEntry::Detached CacheEntry::invalidate(py::object deleted_guard_manager) {
 }
 
 void CacheEntry::update_diff_guard_root_manager() {
-  this->diff_guard_root_mgr = torch::dynamo::convert_to_root_guard_manager(
-      this->guard_manager.attr("diff_guard_root"));
+  py::object fresh = this->guard_manager.attr("diff_guard_root");
+  void* fresh_mgr = torch::dynamo::convert_to_root_guard_manager(fresh);
+  // A lookup on another thread may be inside the old manager's guards; it holds
+  // a reference of its own (GuardCandidate), so the swap only has to be atomic
+  // with respect to readers under the lock. The old reference dies after it.
+  py::object old;
+  {
+    std::optional<CacheLock> lock;
+    if (this->_owner != nullptr) {
+      lock.emplace(this->_owner->cache_mutex);
+    }
+    old = std::move(this->diff_guard_root);
+    this->diff_guard_root = std::move(fresh);
+    this->diff_guard_root_mgr = fresh_mgr;
+  }
 }
 
 // Set once, the first time a backend that carries a cache key is built. Until

@@ -115,6 +115,7 @@ from .backends.registry import CompilerFn, lookup_backend
 from .code_context import code_context
 from .exc import (
     CondOpArgsMismatchError,
+    PackageError,
     RecompileError,
     ShortenTraceback,
     UncapturedHigherOrderOpError,
@@ -1159,18 +1160,23 @@ class _TorchDynamoContext:
             self._package.install(
                 result.backends, isolate_recompiles_id=self._isolate_recompiles_id
             )
-        except Exception as e:
-            # initialize()/install() also raise KeyError (sys.modules),
-            # AttributeError (_lookup_code) and ModuleNotFoundError on a stale
-            # artifact; every one of them means "compile cold", not "fail the
-            # user's call".
+        except (RuntimeError, ImportError, KeyError, AttributeError, PackageError) as e:
+            # What a stale or foreign artifact raises: RuntimeError from
+            # check_versions() and the source checksum, ModuleNotFoundError and
+            # KeyError (sys.modules) from a module that moved, AttributeError
+            # from _lookup_code, PackageError from a refused entry. Each means
+            # "compile cold", not "fail the user's call" -- unless the caller
+            # asked to fail. Anything else (an AssertionError) is a bug in the
+            # loader and propagates.
+            if self._package.is_initialized():
+                self._package.reset_after_failed_install()
+            if config.strict_precompile:
+                raise
             log.warning(
                 "Failed to load entry from dynamo cache (%s); compiling from scratch",
                 type(e).__name__,
                 exc_info=True,
             )
-            if self._package.is_initialized():
-                self._package.reset_after_failed_install()
             self._package.initialize(fn_key, None, ignore_inlined_sources=False)
 
     def __call__(self, fn: Any) -> Any:
@@ -1181,8 +1187,16 @@ class _TorchDynamoContext:
         def get_compiler_config() -> CompilerConfig | None:
             return self.compiler_config
 
-        from .package import acquire_live_package, live_package_key
+        from .package import (
+            acquire_live_package,
+            drain_pending_releases,
+            live_package_key,
+        )
 
+        # A package every wrapper dropped may still hold a process-wide skip on
+        # this frame if its finalizer fired under a lock; release it before the
+        # new wrapper's first call would run that frame eager.
+        drain_pending_releases()
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
             if self._package is not None and not self._package.is_initialized():
@@ -1196,6 +1210,7 @@ class _TorchDynamoContext:
                         self._isolate_recompiles_id,
                         innermost_backend(self.callback),  # type: ignore[arg-type]
                         self._package,
+                        self._hooks.guard_filter_fn if self._hooks else None,
                     ),
                     self._package,
                     functools.partial(self._load_package, fn_key),
