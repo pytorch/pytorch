@@ -26,14 +26,36 @@ namespace c10d::nccl2 {
 
 class ProcessGroupNCCL;
 
+// Kept separate from ProcessGroupNCCL so a Work can safely drop its events
+// after the process group is destroyed without extending the group's lifetime.
+class NCCLEventPool {
+ public:
+  NCCLEventPool(bool cacheEnabled, bool timingEnabled, size_t maxSize);
+
+  std::unique_ptr<at::cuda::CUDAEvent> getEvent(bool timingEnabled);
+  void returnEvent(
+      std::unique_ptr<at::cuda::CUDAEvent> event,
+      bool timingEnabled);
+  void clear();
+  void enableTiming();
+  bool timingEnabled() const;
+
+ private:
+  std::mutex event_pool_mutex_;
+  std::queue<std::unique_ptr<at::cuda::CUDAEvent>> event_pool_;
+  const bool event_cache_enabled_;
+  const size_t max_event_pool_size_;
+  std::atomic<bool> timing_enabled_;
+};
+
 // Work object for the NCCL TorchComms backend. Ported from torchcomms'
 // WorkNCCL, but rebased onto c10d::Work (upstream subclassed
 // torchcomms::TorchWork). Completion is tracked with a pair of CUDA events;
 // the Future/result handling that BackendWrapper::WorkWrapper used to provide
 // is folded in here (see setOutputs/getFuture). The back-pointer to the owning
-// backend is non-owning: the backend drains its work queue in finalize()/dtor,
-// so a work never outlives its backend (upstream held a shared_ptr, which is
-// incompatible with c10d's intrusive_ptr ownership of the backend).
+// backend is non-owning: finalize() completes pending work before destroying
+// the backend, while the event pool is independently lifetime-safe for a
+// completed caller-owned Work that outlives the backend.
 class WorkNCCL : public c10d::Work {
  public:
   enum class WorkStatus {
