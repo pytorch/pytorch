@@ -28,12 +28,18 @@ from torch._inductor.utils import run_and_get_code
 from torch._subclasses.fake_tensor import is_fake
 from torch.nn import functional as F
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM100OrLater, SM120OrLater, TEST_CUDA
+from torch.testing._internal.common_cuda import (
+    BF16X9_SUPPORTED,
+    SM100OrLater,
+    SM120OrLater,
+    TEST_CUDA,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantized import _f32_to_floatx_unpacked, pack_uint4
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    recover_orig_fp32_precision,
     run_tests,
     skipIfNoCuteDSL,
     TestCase,
@@ -2249,7 +2255,6 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
             group=8,
             axis=0,
             reduction_type="sum",
-            source_type="identity",
             source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
             primary_output="output",
             feeds_main=True,
@@ -2411,7 +2416,6 @@ class TestFlexGemmRuntime(FlexGemmTestCase):
                 group=8,
                 axis=0,
                 reduction_type="max",
-                source_type="identity",
                 source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
                 primary_output="output",
                 feeds_main=True,
@@ -3064,6 +3068,29 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertEqual(aux.dtype, torch.float32)
         self.assertIs(actual.fake_mode, mode)
         self.assertIs(aux.fake_mode, mode)
+
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @recover_orig_fp32_precision
+    def test_bfx9_flex_gemm_falls_back_to_aten(self):
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                torch.relu,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        a = self.makeTensor(64, 64, dtype=torch.float32)
+        b = self.makeTensor(64, 64, dtype=torch.float32)
+        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), a, b)
+
+        self.assertEqual(actual, torch.relu(torch.mm(a, b)))
+        source = "\n".join(code)
+        self.assertIn("extern_kernels.mm(", source)
+        self.assertNotIn("flex_gemm_epilogue(", source)
 
     def test_autograd_is_not_implemented(self):
         a = torch.randn(8, 16, requires_grad=True)

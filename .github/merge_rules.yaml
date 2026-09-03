@@ -625,8 +625,6 @@
   - williamwen42
   - ydwu4
   - yushangdi
-  - zpcore
-  - zoranzhao
   mandatory_checks_name:
   - EasyCLA
   - Lint

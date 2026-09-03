@@ -13,6 +13,7 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch._logging import warning_once
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv
 
@@ -127,19 +128,26 @@ def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv
     return (cdiv(num_queries, meta["BLOCK_M"]), batch_size, q_heads)
 
 
-def get_float32_precision():
-    if (
-        (
-            torch.backends.cuda.matmul.fp32_precision == "ieee"
-            if torch.backends.cuda.matmul.fp32_precision != "none"
-            else torch.get_float32_matmul_precision() == "highest"
+def set_float32_precision(kernel_options: dict[str, Any], dtype: torch.dtype) -> None:
+    precision = torch.backends.cuda.matmul.fp32_precision
+    if precision == "none":
+        precision = (
+            "ieee" if torch.get_float32_matmul_precision() == "highest" else "tf32"
         )
-        or torch.version.hip
-        or torch.mtia.is_available()
-    ):
-        return "'ieee'"
-    else:
-        return "'tf32'"
+    if dtype == torch.float32 and precision == "bfx9":
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        warning_once(
+            log,
+            "FP32 FlexAttention does not support bfx9 precision; using IEEE precision instead.",
+        )
+        kernel_options["FLOAT32_PRECISION"] = "'ieee'"
+        return
+    precision = (
+        "ieee"
+        if precision == "ieee" or torch.version.hip or torch.mtia.is_available()
+        else "tf32"
+    )
+    kernel_options.setdefault("FLOAT32_PRECISION", repr(precision))
 
 
 flex_attention_template = TritonTemplate(
@@ -273,7 +281,7 @@ def flex_attention(
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
-    kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
+    set_float32_precision(kernel_options, query.get_dtype())
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
@@ -817,7 +825,7 @@ def flex_attention_backward(*args, **kwargs):
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
-    kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
+    set_float32_precision(kernel_options, query.get_dtype())
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
