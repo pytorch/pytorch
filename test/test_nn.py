@@ -41,15 +41,15 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
-    SM80OrLater, SM90OrLater, _get_torch_rocm_version
+    SM80OrLater, SM90OrLater, _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
+    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, onlyOn, \
     skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    skipMeta, get_all_device_types
+    expectedFailureMPSPre27, skipMeta, get_all_device_types
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -3199,6 +3199,41 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         self.assertNotEqual(output2.data, prev_output)
                 prev_output = output1.data
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_RNN_dropout_gradients(self):
+        # Regression test for ROCm/ROCm#6339: a multi-layer GRU with dropout set
+        # via the module parameter (which routes through the fused cuDNN/MIOpen
+        # dropout path) must produce a fresh mask each training step and must not
+        # zero the input-to-hidden gradients. A prior MIOpen bug reused a single
+        # all-drop mask, which zeroed weight_ih_l* gradients and stalled training.
+        torch.manual_seed(0)
+        rnn = nn.GRU(16, 32, num_layers=2, dropout=0.5).cuda()
+        rnn.train()
+        input = torch.randn(7, 4, 16, device="cuda")
+        target = torch.randn(7, 4, 32, device="cuda")
+
+        # Consecutive training forwards on the same input must differ (dropout is
+        # actually stochastic across steps, not a fixed mask). Compare multiple
+        # consecutive pairs: under the original bug the first forward generated a
+        # real mask and only later steps repeated the fixed all-drop mask, so
+        # out1 != out2 held even on broken code while out2 == out3 exposed it.
+        out1, _ = rnn(input)
+        out2, _ = rnn(input)
+        out3, _ = rnn(input)
+        self.assertNotEqual(out1, out2)
+        self.assertNotEqual(out2, out3)
+        self.assertNotEqual(out1, out3)
+
+        # After a backward, the input-to-hidden gradients of the dropped layer
+        # must not be entirely zero.
+        rnn.zero_grad()
+        out, _ = rnn(input)
+        (out - target).pow(2).mean().backward()
+        for name, param in rnn.named_parameters():
+            if name.startswith("weight_ih"):
+                self.assertIsNotNone(param.grad)
+                self.assertGreater(param.grad.abs().sum().item(), 0.0)
+
     def test_inplace_thnn(self):
         modules = [nn.ReLU, nn.ELU, nn.SELU, nn.CELU, nn.RReLU]
         for mod in modules:
@@ -4057,6 +4092,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError,
                                     re.escape("input tensor must have at least one element, but got input_sizes = [0, 1]")):
             torch.batch_norm_update_stats(input=input, momentum=0.0, running_mean=running_mean, running_var=running_var)
+
+    def test_native_batch_norm_eval_requires_running_stats(self):
+        # The raw aten op in eval mode with no running statistics used to
+        # segfault inside the kernel; it must raise instead (#194014).
+        x = torch.full((9, 2, 8, 8), 1.11e15)
+        w = torch.ones(2)
+        b = torch.zeros(2)
+        with self.assertRaisesRegex(ValueError, "running_mean must be defined in evaluation mode"):
+            torch.ops.aten.native_batch_norm(x, w, b, None, None, False, 0.1, 1e-5)
 
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
@@ -7650,6 +7694,27 @@ class TestNNDeviceType(NNTestCase):
             c_cpu.backward(grad.cpu())
             self.assertEqual(x.grad, ref_x.grad)
 
+    @onlyAccelerator   # CPU is the reference the results are compared against
+    @parametrize_test("mode,shape,padding", [
+        ("constant", (1, 2, 3, 256, 256), (0, 0, 0, 0, 2, 1)),
+        ("constant", (1, 1, 2, 2, 65536), (2, 1)),
+        ("constant", (1, 1, 2, 2, 65536), (0, 0, 2, 1)),
+        ("replicate", (1, 2, 3, 256, 256), (0, 0, 0, 0, 2, 1)),
+        ("reflect", (1, 2, 3, 256, 256), (0, 0, 0, 0, 2, 1)),
+    ])
+    def test_pad_5d_large_inner_dims(self, device, mode, shape, padding):
+        # Padding a rank > 4 operand must not corrupt the copied input when the inner extent is large.
+        # https://github.com/pytorch/pytorch/issues/194922
+        x = torch.randn(shape, device=device, requires_grad=True)
+        ref_x = x.detach().cpu().requires_grad_()
+        out = F.pad(x, padding, mode=mode)
+        out_cpu = F.pad(ref_x, padding, mode=mode)
+        self.assertEqual(out, out_cpu)
+        grad = torch.randn_like(out)
+        out.backward(grad)
+        out_cpu.backward(grad.cpu())
+        self.assertEqual(x.grad, ref_x.grad)
+
     @onlyCUDA
     @largeTensorTest("48GB", "cpu")
     @largeTensorTest("48GB", "cuda")
@@ -8279,6 +8344,48 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(bias.grad.cpu(), bias_cpu.grad, f"M={M} N={N}", atol=1e-4, rtol=1e-4)
 
+    @onlyCUDA
+    @parametrize_test("op,normalized_shape,has_weight", [
+        subtest(("layer_norm", [64], False), name="layer_norm_1d_no_weight"),
+        subtest(("layer_norm", [8, 16], True), name="layer_norm_multidim"),
+        subtest(("layer_norm", [8, 16], False), name="layer_norm_multidim_no_weight"),
+        subtest(("rms_norm", [8, 16], True), name="rms_norm_multidim"),
+    ])
+    def test_layer_norm_gamma_beta_backward_huge_M_buffers(self, device, op, normalized_shape, has_weight):
+        # The huge-M path (M > 64*1024 && N / warp_size < sm_count / 2,
+        # shared by layer_norm and rms_norm via
+        # LayerNormBackwardKernelImplInternal<..., rms_norm>) allocates
+        # scratch buffers sized by N. Undefined gamma (weight=None) and
+        # multi-dim normalized_shape are the cases where a size derived
+        # from gamma's own shape instead of N would go wrong. Both cases
+        # are covered alongside the plain defined-gamma case.
+        M = 100000
+        eps = 1e-5
+        x = torch.randn(M, *normalized_shape, dtype=torch.float32)
+        grad_out = torch.randn(M, *normalized_shape, dtype=torch.float32)
+        weight = torch.randn(normalized_shape, dtype=torch.float32) if has_weight else None
+        bias = torch.randn(normalized_shape, dtype=torch.float32) if op == "layer_norm" else None
+
+        grads = []
+        for dev in (device, "cpu"):
+            # detach() so the "cpu" iteration copies instead of flipping
+            # requires_grad on the shared source tensors in place.
+            w = weight.detach().to(dev).requires_grad_(True) if weight is not None else None
+            b = bias.detach().to(dev).requires_grad_(True) if bias is not None else None
+            if op == "layer_norm":
+                out = torch.nn.functional.layer_norm(x.to(dev), normalized_shape, w, b, eps)
+            else:
+                out = torch.nn.functional.rms_norm(x.to(dev), normalized_shape, w, eps)
+            out.backward(grad_out.to(dev))
+            grads.append((w.grad if w is not None else None, b.grad if b is not None else None))
+        (dgamma, dbeta), (dgamma_ref, dbeta_ref) = grads
+
+        for grad, ref, name in ((dgamma, dgamma_ref, "weight"), (dbeta, dbeta_ref, "bias")):
+            if ref is None:
+                continue
+            self.assertEqual(grad.shape, torch.Size(normalized_shape), f"{name}.grad")
+            self.assertEqual(grad.cpu(), ref, f"{name}.grad", atol=1e-3, rtol=1e-3)
+
     @onlyCPU
     def test_glu_bfloat16(self, device):
         def test_dtype(fn, input, dtype):
@@ -8657,7 +8764,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 0], g[:, :, : pl + 1].sum(-1))
             self.assertEqual(x.grad[:, :, -1], g[:, :, -pr - 1:].sum(-1))
 
-    @expectedFailureMPS  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
+    @expectedFailureMPSPre27  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad2d_large(self, device):
         shapes = ([2, 65736, 4, 4], [65736, 2, 4, 4])
         pl, pr, pt, pb = 3, 4, 5, 6
@@ -11764,7 +11871,7 @@ class TestNNDeviceType(NNTestCase):
 
         input_lengths = torch.full((N,), T, dtype=other_dtype).to(other_device)
         target_lengths = torch.randint(low=1, high=S, size=(N,), dtype=other_dtype).to(other_device)
-        targets = torch.randint(low=0, high=C, size=(sum(target_lengths),), dtype=other_dtype).to(other_device)
+        targets = torch.randint(low=1, high=C, size=(sum(target_lengths),), dtype=other_dtype).to(other_device)
 
         ctc_loss = torch.nn.functional.ctc_loss(
             log_probs=log_probs,
@@ -12011,6 +12118,25 @@ class TestNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 F.nll_loss(x, t, weight=weight)
 
+    @onlyAccelerator
+    def test_nll_loss_1d_input_backward(self, device):
+        # For 1D (no batch dim) input aten.nll_loss_backward uses only target[0].
+        # The MPS Metal kernel used to dispatch target.numel() threads, reading
+        # the single-element grad_output out of bounds and scattering garbage
+        # into grad_input. Back grad_output with a larger sentinel-filled tensor
+        # and view out a single element so any out-of-bounds read is a
+        # deterministic non-zero value. gh-195391
+        input = torch.randn(3, device=device)
+        target = torch.tensor([2, 0, 1], device=device)
+        total_weight = torch.tensor(1.0, device=device)
+        grad_output_storage = torch.full((4,), torch.finfo(torch.float32).max, device=device)
+        grad_output_storage[0] = torch.randn(())
+        grad_output = grad_output_storage[:1]
+        args = (grad_output, input, target, None, 0, 10, total_weight)
+        ref = torch.ops.aten.nll_loss_backward(*(a.cpu() if torch.is_tensor(a) else a for a in args))
+        out = torch.ops.aten.nll_loss_backward(*args)
+        self.assertEqual(out.cpu(), ref)
+
     # Ref: https://github.com/pytorch/pytorch/issues/85005
     @onlyCUDA
     @largeTensorTest("120GB", "cpu")
@@ -12058,8 +12184,8 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(torch.allclose(loss_cpu, loss.cpu(), rtol=1e-4, atol=1e-4))
 
     # Ref: https://github.com/pytorch/pytorch/issues/190139
-    @onlyCUDA
-    @largeTensorTest("5GB", "cuda")
+    @onlyOn(["cuda", "mps"])
+    @largeTensorTest("5GB")
     def test_nll_loss2d_backward_large_sample_offset(self, device):
         batch_size = 2**16 + 1
         num_classes = 2**15
@@ -12091,7 +12217,7 @@ class TestNNDeviceType(NNTestCase):
             one,
         )
 
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         self.assertEqual(grad_input[-1, 0, 0, 0], -1)
 
     def _nll_loss_helper(self, input_size, reduction, expected, device, dtype):
@@ -12224,13 +12350,7 @@ class TestThatContainsCUDAAssert(TestCase):
 if __name__ == '__main__':
     run_tests()
         """)
-        # CUDA says "device-side assert triggered"
-        # ROCm says "unspecified launch failure", or HSA_STATUS_ERROR_EXCEPTION
-        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
-        has_hip_assert = ('launch failure' in stderr
-                          or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
-                          or 'illegal memory access' in stderr)
-        self.assertTrue(has_cuda_assert or has_hip_assert,
+        self.assertTrue(has_device_side_assert(stderr),
                         lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}")
 
 
@@ -12950,17 +13070,6 @@ if __name__ == '__main__':
     @dtypesIfMPS(torch.float32)
     @dtypes(torch.float32, torch.float64)
     def test_module_to_empty(self, device, dtype):
-        if (
-            TEST_WITH_ROCM
-            and getRocmVersion() >= (7, 14)
-            and torch.device(device).type == "cuda"
-            and dtype == torch.float32
-        ):
-            self.skipTest(
-                "order/state-dependent NotImplementedError regex mismatch on "
-                "ROCm 7.14+ (cuda, float32)"
-            )
-
         class MyModule(nn.Module):
             def __init__(self, in_features, out_features, device=None, dtype=None):
                 super().__init__()
@@ -14572,6 +14681,14 @@ if __name__ == '__main__':
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy, bias):
+        if (
+            TEST_WITH_ROCM
+            and (torch.version.rocm or "0").split(".")[0] == "10"
+            and not bias
+            and dtype == torch.float16
+            and acc_policy == "compact"
+        ):
+            self.skipTest("times out on ROCm 10")
         if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
             self.skipTest("bf16 requires SM80+ on CUDA")
         self._test_linear_cross_entropy_loss(
@@ -14585,6 +14702,14 @@ if __name__ == '__main__':
     def test_linear_cross_entropy_loss_none_reduction_with_acc_dtype(
         self, device, dtype, acc_policy, bias
     ):
+        if (
+            TEST_WITH_ROCM
+            and (torch.version.rocm or "0").split(".")[0] == "10"
+            and not bias
+            and dtype == torch.bfloat16
+            and acc_policy == "auto"
+        ):
+            self.skipTest("times out on ROCm 10")
         # reduction='none' counterpart of
         # test_linear_cross_entropy_loss_with_acc_dtype: exercises the
         # no_reduction op (per-sample loss + recompute backward)
