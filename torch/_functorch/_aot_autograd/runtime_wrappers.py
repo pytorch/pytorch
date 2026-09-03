@@ -547,9 +547,12 @@ class _FirstInvocationContext:
 # are the readable reference implementations for the codegen'd _runtime_wrapper
 # generated in _create_runtime_wrapper(). They are not called on the hot path;
 # the codegen inlines their logic with all branches resolved at compile time.
+# _AutogradForwardEpilogue.finalize is the same kind of twin for the codegen'd
+# _codegen_finalize that _AOTDispatchAutogradFunctionFactory.build installs over
+# it.
 #
 # WARNING: Any semantic change to the runtime wrapper must be reflected in both
-# the reference methods here and the codegen in _create_runtime_wrapper().
+# the reference methods and their codegen.
 @dataclass
 class _RuntimeCompiledFnInvoker:
     compiled_fn: Callable[..., Any]
@@ -4125,13 +4128,11 @@ def _dealias_marked_returns(raw_returns: list[Any], marked: Sequence[int]) -> No
             marked_positions.setdefault(id(x), []).append(i)
     if not marked_positions:
         return
-    marked_set = set(marked)
     collide: set[int] = set()
     for j, o in enumerate(raw_returns):
-        if j not in marked_set:
-            hits = marked_positions.get(id(o))
-            if hits is not None:
-                collide.update(hits)
+        hits = marked_positions.get(id(o))
+        if hits is not None and j not in hits:
+            collide.update(hits)
     for i in collide:
         raw_returns[i] = raw_returns[i].detach()
 
@@ -4142,6 +4143,11 @@ class _AutogradForwardEpilogue:
     # Captured at compile time; see _set_grad_output_prototypes.
     prune_unused_outputs: bool = False
 
+    # WARNING: this is a reference implementation; the hot path uses the
+    # codegen'd _codegen_finalize that _AOTDispatchAutogradFunctionFactory.build
+    # installs in its place (the raw-returns transform is specialized on the
+    # metadata). Keep both in sync.
+    # See Note [RuntimeWrapper codegen specification methods]
     def finalize(self, ctx: Any, fw_outs: Sequence[Any]) -> tuple[Any, ...]:
         num_outputs = self.metadata.num_outputs
         num_outputs_aliased = self.metadata.num_outputs_aliased
@@ -4706,17 +4712,6 @@ class _AutogradBackwardCompiler:
             if bw_compiler is None:
                 raise AssertionError("bw_compiler must not be None")
             compiled_bw = bw_compiler(copy.deepcopy(bw_module), placeholder_list)
-            # Maybe save cache entry. Only the base backward is cached: a first
-            # backward served by a specialized variant leaves the entry unsaved
-            # until a full backward compiles the base (the variants are
-            # per-mask derivations the cache does not model).
-            if self.try_save_cache_entry is not None and not specialization_key:
-                self.try_save_cache_entry(
-                    compiled_bw,
-                    bw_module,
-                    self.fw_metadata,
-                    self.aot_config,
-                )
 
         donated = bool(donated_idxs)
         # Compare-and-publish: a concurrent retain_graph backward may have
@@ -4724,7 +4719,10 @@ class _AutogradBackwardCompiler:
         # ran. Publishing a donated entry after that would be the last write,
         # and with the list empty the clear could never re-fire, so every later
         # retained backward would trip the donated-buffer check. Serve the
-        # result to this call only and let the next backward recompile.
+        # result to this call only and let the next backward recompile. The
+        # cache entry pickles the live fw_metadata (now with bw_donated_idxs
+        # cleared), which a loading process would pair with this
+        # donation-compiled backward, so it is gated the same way.
         with self._prepare_lock:
             publish = not donated or (
                 list(self.fw_metadata.bw_donated_idxs or []) == donated_snapshot
@@ -4735,17 +4733,25 @@ class _AutogradBackwardCompiler:
                 self.specialized_compiled_bws[specialization_key] = _CompiledBackward(
                     compiled_bw, donated, kept_arg_indices
                 )
+                log.info(
+                    "Compiled specialized backward for undefined grad output mask "
+                    "%s (%d specialized variant(s) total)",
+                    f"{specialization_key:#b}",
+                    len(self.specialized_compiled_bws),
+                )
             elif publish:
                 self.compiled_bw = _CompiledBackward(compiled_bw, donated)
+        # Only the base backward is cached: a first backward served by a
+        # specialized variant leaves the entry unsaved until a full backward
+        # compiles the base (the variants are per-mask derivations the cache
+        # does not model).
+        if publish and self.try_save_cache_entry is not None and not specialization_key:
+            self.try_save_cache_entry(
+                compiled_bw, bw_module, self.fw_metadata, self.aot_config
+            )
         if specialization_key:
             if kept_arg_indices is None:
                 raise AssertionError("kept_arg_indices must not be None")
-            log.info(
-                "Compiled specialized backward for undefined grad output mask %s "
-                "(%d specialized variant(s) total)",
-                f"{specialization_key:#b}",
-                len(self.specialized_compiled_bws),
-            )
             _prune_runtime_args_in_place(all_args, kept_arg_indices)
             return compiled_bw, all_args, (), donated
 

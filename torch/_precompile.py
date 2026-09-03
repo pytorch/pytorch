@@ -2226,9 +2226,9 @@ def _validate_dynamo_capture(
     # A capture runs against a copy of fn.__globals__ and the artifact runs
     # against its own namespace, so a STORE_GLOBAL in the entry frame would
     # never reach the caller's module at serve time. Reject rather than
-    # silently drop the side effect. (A mutation inlined from a helper reaches
-    # the residual bytecode as an attribute store on the imported module and is
-    # rejected in _import_sources_for_residual_globals.)
+    # silently drop the side effect. (A mutation inlined from a helper, or of
+    # an object a module holds, is a replayed side effect Dynamo records for
+    # the compiled code and is rejected in _reject_module_reachable_side_effects.)
     if mutates_globals(target.__code__):
         raise PrecompileError(
             "precompile tracer='dynamo' cannot capture a Python function that "
@@ -2465,14 +2465,84 @@ def _translate_dynamo_capture_errors(
         ) from e
 
 
+class _ReplayedSideEffects:
+    """The Python side effects Dynamo replays outside the graph, per compile of
+    the capture frame.
+
+    Dynamo attaches the sources of the pre-existing objects each compiled code
+    mutates to that code object (convert_frame.get_compiled_code_side_effects:
+    ``L['obj']`` for a call argument, ``G['m'].CONFIG`` for state reached
+    through a global). This bytecode hook collects them for the artifact build,
+    which rejects the ones a served artifact cannot reproduce. It stays
+    registered for the capture's lifetime: a stateful state rebuilds from every
+    variant recorded so far, so a rejected variant must keep failing the build.
+    """
+
+    def __init__(self, capture_target: Callable[..., object]) -> None:
+        from torch._dynamo.convert_frame import register_bytecode_hook
+
+        self._code = capture_target.__code__
+        self.sources: list[str] = []
+        self._handle = register_bytecode_hook(self._record)
+
+    def _record(self, code: types.CodeType, out_code: types.CodeType) -> None:
+        from torch._dynamo.convert_frame import get_compiled_code_side_effects
+
+        if code is self._code:
+            self.sources.extend(get_compiled_code_side_effects(out_code) or ())
+
+    def remove(self) -> None:
+        self._handle.remove()
+
+
+def _reject_module_reachable_side_effects(
+    capture_target: Callable[..., object], sources: Sequence[str]
+) -> None:
+    """Fail capture on a replayed side effect the artifact cannot reproduce.
+
+    Dynamo replays a mutation of a pre-existing Python object in the residual
+    bytecode, on the object its source names. A call argument (``L['obj']``) is
+    the caller's object at serve time too, so that replay is faithful. An object
+    reached through a global -- a module a helper's ``global`` writes
+    (``G['m']``), an object or container a module holds (``G['m'].CONFIG``,
+    ``G['m'].OBJS[0]``, ``G['m'].DICT``) -- is the SERVING process's object, so
+    the replay would apply the capture-time mutation there; reject it with the
+    path. (The entry frame's own global stores were rejected up front in
+    _validate_dynamo_capture.)
+    """
+    fn_globals = capture_target.__globals__
+    for source in sources:
+        if source.startswith("L["):
+            continue
+        match = re.fullmatch(r"G\[(['\"])(.*?)\1\](.*)", source, re.DOTALL)
+        if match is None:
+            path = source
+        else:
+            root, rest = match.group(2), match.group(3)
+            value = fn_globals.get(root)
+            if not isinstance(value, types.ModuleType):
+                path = f"{capture_target.__module__}.{root}{rest}"
+            elif rest:
+                path = f"{value.__name__}{rest}"
+            else:
+                path = f"module {value.__name__!r}"
+        raise PrecompileError(
+            f"precompile tracer='dynamo' cannot serve {capture_target.__name__!r}: "
+            f"its compiled bytecode mutates {path}, state reachable from a module "
+            "global; the artifact cannot reproduce that side effect in the serving "
+            "process. Return the value instead."
+        )
+
+
 def _make_dynamo_capture_optimizer(
     capture_target: Callable[..., object],
     package: Any,
     backend: str,
     capture_limit: int,
     dynamic: bool | None,
-) -> tuple[Callable[..., object], Callable[..., object]]:
+) -> tuple[Callable[..., object], Callable[..., object], _ReplayedSideEffects]:
     compile_graph = _dynamo_backend_compiler(backend)
+    side_effects = _ReplayedSideEffects(capture_target)
     compiled = torch._dynamo.optimize(
         backend=compile_graph,
         nopython=True,
@@ -2485,12 +2555,13 @@ def _make_dynamo_capture_optimizer(
     if compiled is capture_target:
         # torch._dynamo.optimize returned its null decorator: capture would
         # silently run eager and fail later with a misleading error.
+        side_effects.remove()
         raise PrecompileError(
             "precompile tracer='dynamo' cannot capture because Dynamo is "
             "disabled in this process (TORCHDYNAMO_DISABLE or a compiler "
             "kill switch)."
         )
-    return compiled, compile_graph
+    return compiled, compile_graph, side_effects
 
 
 class PrecompileStateSummary(NamedTuple):
@@ -2537,76 +2608,10 @@ def _global_loads(code: types.CodeType) -> Iterator[str]:
             yield from _global_loads(constant)
 
 
-def _module_attribute_stores(code: types.CodeType) -> Iterator[tuple[str, str]]:
-    """Mutations of state reachable from globals in a code object (recursively).
-
-    Yields ``("", name)`` for STORE_GLOBAL/DELETE_GLOBAL, and ``(receiver, attr)``
-    for an attribute store whose receiver is a global or an attribute chain off
-    one (``m.CONFIG`` for ``m.CONFIG.value = ...``), reached directly, through a
-    temp local Dynamo spilled it into, or through a stack COPY. Dynamo replays a
-    user object's attribute mutation not as STORE_ATTR but as a call
-    ``object_setattr_ignore_descriptor(receiver, "attr", value)`` (or
-    ``object.__setattr__`` for frozen dataclasses), so that form is recognized
-    too: after the helper is loaded, the next receiver path followed by a string
-    constant is the mutated attribute. Receivers that are plain locals (call
-    arguments) are not reported.
-    """
-    import dis
-
-    loaded: list[str] | None = None  # receiver path being built on the stack
-    dup = False  # a COPY left the receiver on the stack past the next store
-    local_alias: dict[str, tuple[str, ...]] = {}
-    pending_setattr = False
-    for instruction in dis.get_instructions(code):
-        op, argval = instruction.opname, instruction.argval
-        if op in _GLOBAL_LOAD_OPS and isinstance(argval, str):
-            loaded, dup = [argval], False
-        elif op in ("LOAD_FAST", "LOAD_FAST_CHECK", "LOAD_FAST_AND_CLEAR"):
-            alias = local_alias.get(argval)
-            loaded, dup = (list(alias) if alias else None), False
-        elif op == "LOAD_FAST_LOAD_FAST":
-            alias = local_alias.get(argval[-1])
-            loaded, dup = (list(alias) if alias else None), False
-        elif op == "LOAD_ATTR":
-            if loaded is not None:
-                if argval in ("object_setattr_ignore_descriptor", "__setattr__"):
-                    pending_setattr, loaded = True, None
-                else:
-                    loaded = [*loaded, argval]
-        elif op == "COPY":
-            dup = loaded is not None
-        elif op in ("STORE_FAST", "STORE_FAST_STORE_FAST"):
-            names = argval if isinstance(argval, tuple) else (argval,)
-            for name in names:
-                if loaded is not None and len(names) == 1:
-                    local_alias[name] = tuple(loaded)
-                else:
-                    local_alias.pop(name, None)
-            if not dup:
-                loaded = None
-            dup = False
-        elif op in ("STORE_GLOBAL", "DELETE_GLOBAL"):
-            yield "", argval
-            loaded = None
-        elif op in ("STORE_ATTR", "DELETE_ATTR"):
-            if loaded is not None:
-                yield ".".join(loaded), argval
-            loaded = None
-        elif op == "LOAD_CONST":
-            if pending_setattr and loaded is not None and isinstance(argval, str):
-                yield ".".join(loaded), argval
-            if pending_setattr:
-                pending_setattr = False
-            loaded = None
-        elif op not in ("SWAP", "PUSH_NULL", "NOP", "CACHE"):
-            loaded = None
-    for constant in code.co_consts:
-        if isinstance(constant, types.CodeType):
-            yield from _module_attribute_stores(constant)
-
-
 def _import_sources_for_residual_globals(
-    code: Any, capture_target: Callable[..., object]
+    code: Any,
+    capture_target: Callable[..., object],
+    user_globals: Mapping[str, object],
 ) -> dict[str, str]:
     """The module bindings the served Dynamo bytecode needs, checked at capture.
 
@@ -2628,33 +2633,8 @@ def _import_sources_for_residual_globals(
     bound = set(import_sources) | set(code.backend_ids) | set(vars(builtins))
     fn_globals = capture_target.__globals__
 
-    def is_module_global(name: str) -> bool:
-        return name in import_sources or isinstance(
-            fn_globals.get(name), types.ModuleType
-        )
-
     for guarded in code.guarded_codes:
         code_obj = SerializedCode.to_code_object(guarded.dynamo_code)
-        # A mutation of state reachable from a module (a helper's `global
-        # COUNTER`, or `m.CONFIG.value = ...` on an object the module holds)
-        # reaches the residual bytecode as a store through the imported module
-        # and would apply the capture-time value to the SERVING process's
-        # objects; the entry frame's own STORE_GLOBALs were rejected at capture.
-        for receiver, attribute in _module_attribute_stores(code_obj):
-            root = receiver.split(".", 1)[0]
-            if receiver == "" or is_module_global(root):
-                module_name = (
-                    capture_target.__module__
-                    if receiver == ""
-                    else import_sources.get(root) or fn_globals[root].__name__
-                )
-                path = module_name + receiver[len(root) :]
-                raise PrecompileError(
-                    f"precompile tracer='dynamo' cannot serve {capture_target.__name__!r}: "
-                    f"its compiled bytecode assigns {path}.{attribute}, state reachable "
-                    "from a module global; the artifact cannot reproduce that side "
-                    "effect. Return the value instead."
-                )
         for name in _global_loads(code_obj):
             if name in bound or name in import_sources or name not in fn_globals:
                 continue
@@ -2678,10 +2658,10 @@ def _import_sources_for_residual_globals(
                     )
                 import_sources[name] = value.__name__
                 continue
-            # Dynamo installs its helpers under `__<purpose>_<n>` names
-            # (e.g. __gen_rand_values_1 for Python-level random); a user's own
-            # dunder-prefixed global has no numeric suffix.
-            if callable(value) and re.fullmatch(r"__\w+?_\d+", name):
+            # Dynamo installs its helpers (e.g. the value generator for
+            # Python-level random) into the capture's copy of the globals, so a
+            # global the user's own module never held is one of them.
+            if name not in user_globals:
                 raise PrecompileError(
                     f"precompile tracer='dynamo' cannot serve {capture_target.__name__!r}: "
                     f"its compiled bytecode reads {name!r}, a helper Dynamo installed "
@@ -2704,6 +2684,8 @@ def _build_dynamo_artifact(
     *,
     backend: str,
     grad_enabled: bool,
+    side_effects: _ReplayedSideEffects,
+    user_globals: Mapping[str, object],
     keep_capture: bool = False,
 ) -> tuple[str, bytes, PrecompileStateSummary]:
     """Render the package's accumulated capture as (python_code, cache) bytes.
@@ -2743,6 +2725,7 @@ def _build_dynamo_artifact(
         raise PrecompileError(
             "precompile tracer='dynamo' did not capture a runnable entry frame."
         )
+    _reject_module_reachable_side_effects(capture_target, side_effects.sources)
     filtered_guard_states, dropped_guards = _filter_dynamo_guards(
         capture_target, code.guarded_codes, example_inputs
     )
@@ -2759,7 +2742,9 @@ def _build_dynamo_artifact(
 
     dynamo_state: dict[str, Any] = {
         "code": code.python_code,
-        "import_sources": _import_sources_for_residual_globals(code, capture_target),
+        "import_sources": _import_sources_for_residual_globals(
+            code, capture_target, user_globals
+        ),
         "defaults": capture_target.__defaults__,
         "kwdefaults": capture_target.__kwdefaults__,
         # Newest-first: the driver serves the first variant whose guards pass,
@@ -2806,10 +2791,13 @@ def _teardown_dynamo_capture(
     capture_target: Callable[..., object],
     pgo_state: Any,
     backend_fn: Callable[..., object] | None = None,
+    side_effects: _ReplayedSideEffects | None = None,
 ) -> None:
     from torch._dynamo.eval_frame import cached_backends
     from torch._dynamo.utils import guard_failures
 
+    if side_effects is not None:
+        side_effects.remove()
     try:
         if package is not None:
             package.uninstall()
@@ -2910,6 +2898,7 @@ def _precompile_dynamo(
     with _DYNAMO_COMPILE_LOCK:
         package = None
         backend_fn = None
+        side_effects = None
         pgo_state = _new_code_state()
         try:
             with (
@@ -2917,7 +2906,7 @@ def _precompile_dynamo(
                 _translate_dynamo_capture_errors(capture_limit),
             ):
                 package = CompilePackage(capture_target)
-                compiled, backend_fn = _make_dynamo_capture_optimizer(
+                compiled, backend_fn, side_effects = _make_dynamo_capture_optimizer(
                     capture_target, package, backend, capture_limit, dynamic
                 )
                 recorded = []
@@ -2930,10 +2919,14 @@ def _precompile_dynamo(
                     recorded,
                     backend=backend,
                     grad_enabled=grad_enabled,
+                    side_effects=side_effects,
+                    user_globals=target.__globals__,
                 )
                 return python_code, cache
         finally:
-            _teardown_dynamo_capture(package, capture_target, pgo_state, backend_fn)
+            _teardown_dynamo_capture(
+                package, capture_target, pgo_state, backend_fn, side_effects
+            )
 
 
 def _warn_unclosed_dynamo_state(fn_name: str) -> None:
@@ -2989,6 +2982,7 @@ class _PrecompileDynamoState:
         self.environment_scan = environment_scan
         self.compiled: Callable[..., object] | None = None
         self.backend_fn: Callable[..., object] | None = None
+        self.side_effects: _ReplayedSideEffects | None = None
         self.examples: list[tuple[object, ...]] = []
         self.calls = 0
         self.last_summary: PrecompileStateSummary | None = None
@@ -3022,7 +3016,11 @@ class _PrecompileDynamoState:
             self.compiled = None
             self.examples.clear()
             _teardown_dynamo_capture(
-                self.package, self.capture_target, self.pgo_state, self.backend_fn
+                self.package,
+                self.capture_target,
+                self.pgo_state,
+                self.backend_fn,
+                self.side_effects,
             )
 
     def __repr__(self) -> str:
@@ -3212,13 +3210,17 @@ def _precompile_dynamo_stateful(
                 ),
             ):
                 if state.compiled is None:
-                    state.compiled, state.backend_fn = _make_dynamo_capture_optimizer(
-                        state.capture_target,
-                        state.package,
-                        backend,
-                        state.capture_limit,
-                        state.dynamic,
+                    state.compiled, state.backend_fn, state.side_effects = (
+                        _make_dynamo_capture_optimizer(
+                            state.capture_target,
+                            state.package,
+                            backend,
+                            state.capture_limit,
+                            state.dynamic,
+                        )
                     )
+                if state.side_effects is None:
+                    raise AssertionError("capture session has no side-effect hook")
                 import inspect
 
                 # An unbindable example (a caller arity mistake) must never be
@@ -3253,6 +3255,8 @@ def _precompile_dynamo_stateful(
                         state.examples,
                         backend=backend,
                         grad_enabled=grad_enabled,
+                        side_effects=state.side_effects,
+                        user_globals=state.target.__globals__,
                         keep_capture=True,
                     )
                 except PrecompileError as e:

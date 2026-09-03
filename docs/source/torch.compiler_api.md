@@ -293,7 +293,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    rewrites -- from the file pair at ``artifact_path``/``cache_path``. Pass one
    form or the other, not both (mixing any in-memory argument with any path
    argument raises ``TypeError``; giving only one path raises ``ValueError``; a
-   ``cache`` that is not bytes-like raises ``TypeError``). The calling convention is read from
+   ``cache`` that is not ``bytes``, ``bytearray`` or ``memoryview`` raises
+   ``TypeError``). The calling convention is read from
    ``python_code`` (the single source of truth); ``cache`` only accelerates
    loading -- it carries only the compiled backend artifact (the Inductor
    bundle for ``backend="inductor"``; empty for ``backend="eager"``) and no

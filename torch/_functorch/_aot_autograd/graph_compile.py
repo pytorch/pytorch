@@ -3159,16 +3159,12 @@ def _cache_autograd_info(
                     guards_expr=guards_expr,
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw=num_symints_saved_for_bw,
-                    # serialize_graph_module wipes node.meta in place, and the
-                    # lazy backward info keeps THIS bw_module for the undefined-
-                    # tangent retrace (which binds saved activations by desc and
-                    # fingerprint) and for structural pruning (which needs
-                    # meta["val"]); serialize a copy so those keep working after
-                    # the entry is saved, both at forward time (eager backward)
-                    # and after the first lazy backward compile.
-                    serialized_bw_module=serialize_graph_module(
-                        copy.deepcopy(bw_module)
-                    ),
+                    # The lazy backward info keeps THIS bw_module for the
+                    # undefined-tangent retrace (which binds saved activations
+                    # by desc and fingerprint) and for structural pruning
+                    # (which needs meta["val"]), so serialization must leave
+                    # its node.meta intact.
+                    serialized_bw_module=serialize_graph_module(bw_module),
                     min_cut_info_str=min_cut_info_str,
                 )
                 AOTAutogradCache.save(

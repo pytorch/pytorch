@@ -4,6 +4,7 @@ import enum
 import io
 import os
 import pickle
+import random
 import stat
 import subprocess
 import sys
@@ -107,8 +108,51 @@ def _precompile_dynamo_mutates_object_then_global(x):
     return x + 1
 
 
+def _precompile_dynamo_deletes_attribute_on_module_object(x):
+    del _helpers.DELETABLE.value
+    return x + 1
+
+
+def _precompile_dynamo_mutates_subscripted_module_object(x):
+    _helpers.OBJS[0].value = 1
+    return x + 1
+
+
+def _precompile_dynamo_stores_into_module_dict(x):
+    _helpers.DICT["k"] = 1
+    return x + 1
+
+
+def _precompile_dynamo_appends_to_module_list(x):
+    _helpers.LIST.append(1)
+    return x + 1
+
+
+def _precompile_dynamo_mutates_module_object_via_local(x):
+    cfg = _helpers.CONFIG
+    cfg.value = 2
+    return x + 1
+
+
+def _precompile_dynamo_sets_module_attribute(x):
+    _helpers.FLAG = True
+    return x + 1
+
+
 def _precompile_dynamo_returns_dunder_global(x):
     return x + 1, __PRECOMPILE_DUNDER_LIST
+
+
+def __precompile_dunder_helper_2(t):
+    return t * 2
+
+
+def _precompile_dynamo_returns_callable_dunder_global(x):
+    return x + 1, __precompile_dunder_helper_2
+
+
+def _precompile_dynamo_uses_python_random(x):
+    return x + random.random()
 
 
 def _precompile_bump_counter():
@@ -2019,10 +2063,12 @@ class TestPrecompile(TestCase):
             )
 
     def test_tracer_dynamo_rejects_global_mutation_via_inlined_helper(self):
-        # `global COUNTER` inside an inlined callee reaches the residual
-        # bytecode as an attribute store on the imported module, which the
-        # served artifact would apply to the SERVING process's module.
-        with self.assertRaisesRegex(PrecompileError, "assigns .*_PRECOMPILE_COUNTER"):
+        # `global COUNTER` inside an inlined callee is replayed as a store on
+        # the module object, which the served artifact would apply to the
+        # SERVING process's module.
+        # The capture runs on a copy of the entry module's globals, so even a
+        # same-module helper's `global` is a store on the module object.
+        with self.assertRaisesRegex(PrecompileError, f"mutates module '{__name__}'"):
             torch.compiler.precompile(
                 _precompile_dynamo_mutates_global_via_helper,
                 example_inputs=[(torch.randn(3),)],
@@ -2031,33 +2077,79 @@ class TestPrecompile(TestCase):
             )
 
     def test_tracer_dynamo_rejects_module_reachable_mutations(self):
-        # Every replay form Dynamo emits for state reached through a module:
-        # a helper's `global` in another module (STORE_ATTR through the import
-        # alias, possibly spilled through a temp and a stack COPY when two
-        # globals are assigned), and an attribute store on an object the
-        # module holds (replayed as an object_setattr_ignore_descriptor call).
-        # A served artifact would apply the capture-time values to the serving
-        # process's module, so all must be rejected at capture, with the path.
+        # Mutations of state reached through a module, in every replay form
+        # Dynamo emits: a helper's `global` in another module, an attribute set
+        # or deleted on an object the module holds (directly, through a local
+        # alias, or behind a subscript), a store into a dict or list it holds,
+        # and a module attribute itself. A served artifact would apply the
+        # capture-time values to the serving process's objects, so all must be
+        # rejected at capture, with the path, whatever bytecode Dynamo emits
+        # for them (the check reads the side effects Dynamo recorded).
+        module = r"module 'precompile_test_helpers'"
         cases = (
-            (
-                _precompile_dynamo_mutates_other_module_global,
-                r"precompile_test_helpers\.A",
-            ),
-            (
-                _precompile_dynamo_mutates_two_other_module_globals,
-                r"precompile_test_helpers\.[AB]",
-            ),
+            (_precompile_dynamo_mutates_other_module_global, module),
+            (_precompile_dynamo_mutates_two_other_module_globals, module),
+            (_precompile_dynamo_sets_module_attribute, module),
             (
                 _precompile_dynamo_mutates_object_on_module,
-                r"precompile_test_helpers\.CONFIG\.value",
+                r"precompile_test_helpers\.CONFIG",
+            ),
+            (
+                _precompile_dynamo_mutates_module_object_via_local,
+                r"precompile_test_helpers\.CONFIG",
+            ),
+            (
+                _precompile_dynamo_deletes_attribute_on_module_object,
+                r"precompile_test_helpers\.DELETABLE",
+            ),
+            (
+                _precompile_dynamo_mutates_subscripted_module_object,
+                r"precompile_test_helpers\.OBJS\[0\]",
+            ),
+            (
+                _precompile_dynamo_stores_into_module_dict,
+                r"precompile_test_helpers\.DICT",
+            ),
+            (
+                _precompile_dynamo_appends_to_module_list,
+                r"precompile_test_helpers\.LIST",
             ),
             (
                 _precompile_dynamo_mutates_object_then_global,
-                r"precompile_test_helpers\.",
+                r"precompile_test_helpers",
             ),
         )
-        for fn, pattern in cases:
-            with self.assertRaisesRegex(PrecompileError, "assigns " + pattern):
+        try:
+            for fn, pattern in cases:
+                with self.assertRaisesRegex(PrecompileError, "mutates .*" + pattern):
+                    torch.compiler.precompile(
+                        fn,
+                        example_inputs=[(torch.randn(3),)],
+                        tracer="dynamo",
+                        backend="eager",
+                    )
+        finally:
+            # The captures ran the mutations on the helper module.
+            _helpers.DELETABLE.value = 0
+            _helpers.FLAG = False
+            _helpers.DICT.pop("k", None)
+            del _helpers.LIST[1:]
+
+    def test_tracer_dynamo_dunder_user_global_gets_generic_message(self):
+        # A user's own dunder-prefixed global is not a Dynamo helper, even one
+        # that is callable and numbered like the installed helpers; the
+        # rejection must describe it as what it is.
+        for fn, pattern in (
+            (
+                _precompile_dynamo_returns_dunder_global,
+                r"'__PRECOMPILE_DUNDER_LIST' \(a list\)",
+            ),
+            (
+                _precompile_dynamo_returns_callable_dunder_global,
+                r"'__precompile_dunder_helper_2' \(a function\)",
+            ),
+        ):
+            with self.assertRaisesRegex(PrecompileError, pattern):
                 torch.compiler.precompile(
                     fn,
                     example_inputs=[(torch.randn(3),)],
@@ -2065,14 +2157,13 @@ class TestPrecompile(TestCase):
                     backend="eager",
                 )
 
-    def test_tracer_dynamo_dunder_user_global_gets_generic_message(self):
-        # A user's own dunder-prefixed global is not a Dynamo helper; the
-        # rejection must describe it as what it is.
-        with self.assertRaisesRegex(
-            PrecompileError, r"'__PRECOMPILE_DUNDER_LIST' \(a list\)"
-        ):
+    def test_tracer_dynamo_rejects_installed_helper_global(self):
+        # Python-level random makes Dynamo install a value generator into the
+        # capture's globals; the served bytecode would read it, and the
+        # rejection names it as a Dynamo helper rather than a user global.
+        with self.assertRaisesRegex(PrecompileError, "a helper Dynamo installed"):
             torch.compiler.precompile(
-                _precompile_dynamo_returns_dunder_global,
+                _precompile_dynamo_uses_python_random,
                 example_inputs=[(torch.randn(3),)],
                 tracer="dynamo",
                 backend="eager",

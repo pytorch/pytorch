@@ -13,6 +13,11 @@ class _Config:
 
 
 CONFIG = _Config()
+DELETABLE = _Config()
+OBJS = [_Config()]
+DICT = {"a": 1}
+LIST = [1]
+FLAG = False
 
 
 def bump_a():
