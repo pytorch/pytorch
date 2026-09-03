@@ -88,6 +88,16 @@ class MPSEventPtrTarget : public c10::intrusive_ptr_target {
     return m_event;
   }
 
+  void record(bool needsLock, bool syncEvent = false) {
+    m_event->record(needsLock, syncEvent);
+  }
+  bool synchronize() {
+    return m_event->synchronize();
+  }
+  id_t getID() const {
+    return m_event->getID();
+  }
+
  private:
   MPSEvent* m_event;
   MPSEventPool* m_pool;

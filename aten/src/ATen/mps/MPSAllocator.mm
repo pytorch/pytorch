@@ -686,7 +686,7 @@ bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
         buffer_block->event = m_event_pool->acquireEvent(false, buffer_block->stream);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer_block->event);
       }
-      buffer_block->event->get()->record(/*needsLock*/ false);
+      buffer_block->event->record(/*needsLock*/ false);
       recordedEvent = true;
     }
   }
@@ -708,7 +708,7 @@ bool MPSHeapAllocatorImpl::recordStream(const void* ptr, MPSStream* stream) {
     it = buffer_block->stream_uses.emplace(stream, m_event_pool->acquireEvent(false, stream)).first;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(it->second);
   }
-  it->second->get()->record(/*needsLock*/ true);
+  it->second->record(/*needsLock*/ true);
   return true;
 }
 
@@ -750,7 +750,7 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
       bool waitedOnCPU = false;
       // Every consumer stream that was recorded on this buffer must finish.
       for (MPSEventPtr event : pending_wait.events) {
-        waitedOnCPU |= event->get()->synchronize();
+        waitedOnCPU |= event->synchronize();
       }
       if (waitedOnCPU) {
         // after waiting, it's a good time to free some pending inactive buffers
