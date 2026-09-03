@@ -1795,10 +1795,15 @@ class TritonOverrides(OpOverrides):
             shape=(RBLOCK, XBLOCK),
         )
 
-        if torch.backends.cuda.matmul.fp32_precision == "tf32":
-            input_precision = "tf32"
-        else:
-            input_precision = "ieee"
+        precision = torch.backends.cuda.matmul.fp32_precision
+        if precision == "bfx9" and orig_a.dtype == torch.float32:
+            # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+            torch._logging.warning_once(
+                log,
+                "Triton does not support bfx9 precision; using IEEE precision instead.",
+            )
+            precision = "ieee"
+        input_precision = "tf32" if precision == "tf32" else "ieee"
 
         return f'tl.dot({a}, {b}, input_precision="{input_precision}")'
 
@@ -5580,7 +5585,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return "value"
             return "index"
 
-        cache_key = (src_dtype, reduction_type, value)
+        cache_key = (
+            src_dtype,
+            reduction_type,
+            value if logical_index is None else (value, logical_index),
+        )
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
 
