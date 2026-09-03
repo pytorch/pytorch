@@ -1875,6 +1875,35 @@ void PythonArgParser::print_error(
     PyObject* args,
     PyObject* kwargs,
     PyObject* parsed_args[]) { // NOLINT
+  if (kwargs) {
+    PyObject* key = nullptr;
+    PyObject* value = nullptr;
+    Py_ssize_t pos = 0;
+
+    // Note that this dict traversal is NoGil safe as the kwargs dict is only
+    // accessible within this thread.
+    while (PyDict_Next(kwargs, &pos, &key, &value)) {
+      if (!THPUtils_checkString(key)) {
+        TORCH_CHECK_TYPE(false, "keywords must be strings");
+      }
+
+      bool found = false;
+      for (auto& signature : signatures_) {
+        if (find_param(signature, key) >= 0) {
+          found = true;
+          break;
+        }
+      }
+
+      TORCH_CHECK_TYPE(
+          found,
+          fmt::format(
+              "{}() got an unexpected keyword argument '{}'",
+              function_name,
+              THPUtils_unpackString(key)));
+    }
+  }
+
   size_t num_args =
       (args ? PyTuple_GET_SIZE(args) : 0) + (kwargs ? PyDict_Size(kwargs) : 0);
   std::vector<unsigned> plausible_idxs;
