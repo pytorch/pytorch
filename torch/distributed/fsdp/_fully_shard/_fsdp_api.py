@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 
 
 _ReduceOp = dist.ReduceOp | dist.ReduceOp.RedOpType
@@ -12,24 +13,24 @@ _ReduceOp = dist.ReduceOp | dist.ReduceOp.RedOpType
 
 @dataclass(frozen=True)
 class MixedPrecisionPolicy:
-    """
-    This configures FSDP's mixed precision. Unlike autocast, this applies mixed
-    precision at the module level, not op level, which means low-precision
-    activations are saved for backward and high-to-low-precision casts are
-    incurred only at module boundaries.
+    r"""
+    This configures FSDP's mixed precision. Parameter precision may be
+    configured per parameter, while input and output casting applies at the
+    module level. Unlike autocast, this is not an op-level policy.
 
-    FSDP works well with module-level mixed precision since it keeps the
-    high-precision sharded parameters in memory anyway. In other words, FSDP
-    does not require any extra memory to keep a high-precision copy of the
-    parameters for the optimizer step.
+    FSDP works well with mixed precision since it keeps the high-precision
+    sharded parameters in memory anyway. In other words, FSDP does not require
+    any extra memory to keep a high-precision copy of the parameters for the
+    optimizer step.
 
     Attributes:
         param_dtype (Optional[torch.dtype]): This specifies the dtype for
             the unsharded parameter and hence the dtype for forward/backward
             computation and the parameter all-gather. If this is ``None``, then
             the unsharded parameter uses the original dtype. The optimizer step
-            uses the sharded parameter in the original dtype. (Default:
-            ``None``)
+            uses the sharded parameter in the original dtype. This is also the
+            default dtype used when ``param_dtype_fn`` returns ``None``.
+            (Default: ``None``)
         reduce_dtype (Optional[torch.dtype]): This specifies the dtype for
             gradient reduction (i.e. reduce-scatter or all-reduce). If this is
             ``None`` but ``param_dtype`` is not ``None``, then the reduction
@@ -37,6 +38,8 @@ class MixedPrecisionPolicy:
             in full precision while using low precision for compute. If also
             gradient reduction is disabled via :meth:`set_requires_gradient_sync`,
             then FSDP will accumulate gradients using ``reduce_dtype``.
+            If ``param_dtype_fn`` selects multiple compute dtypes for trainable
+            parameters, then this must be set to a common explicit dtype.
             (Default: ``None``)
         output_dtype (Optional[torch.dtype]): This specifies the dtype for
             casting floating-point forward outputs. This can be used to
@@ -46,12 +49,24 @@ class MixedPrecisionPolicy:
             forward's floating-point input tensors to ``param_dtype`` or not.
             For grouped ``fully_shard([a, b, ...])``, the cast is applied per
             module, before each module's forward.
+        param_dtype_fn (Callable[[nn.Parameter], Optional[torch.dtype]], optional):
+            This callable overrides ``param_dtype`` for individual parameters.
+            It is called once per parameter during initialization, before FSDP
+            replaces the parameter. Returning ``None`` uses ``param_dtype``.
+            To preserve a parameter's original dtype, return ``param.dtype``.
+            The callable must return the same result on every rank. It does not
+            affect forward input or output casting, which remain module-level.
+            FSDP does not retain the callable after initialization. Callers
+            should likewise avoid retaining original parameters through a
+            long-lived callable closure.
+            Default: ``None``.
     """
 
     param_dtype: torch.dtype | None = None
     reduce_dtype: torch.dtype | None = None
     output_dtype: torch.dtype | None = None
     cast_forward_inputs: bool = True
+    param_dtype_fn: Callable[[nn.Parameter], torch.dtype | None] | None = None
 
 
 class Comm(ABC):

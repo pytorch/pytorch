@@ -396,12 +396,18 @@ def _get_param_all_gather_inputs(
     foreach_copy_indices: list[int] = []
     foreach_copy_inputs: list[torch.Tensor] = []
     foreach_copy_input_numels: list[int] = []
+    foreach_copy_dtype: torch.dtype | None = None
+    foreach_copy_dtypes_are_uniform = True
 
     # 1st pass: for foreach-copy parameters, get inputs and metadata for the
     # foreach copy, and for the others, actually get their all-gather inputs
     for i, fsdp_param in enumerate(fsdp_params):
         if use_foreach_copy(fsdp_param):
             foreach_copy_indices.append(i)
+            if foreach_copy_dtype is None:
+                foreach_copy_dtype = fsdp_param.param_dtype
+            elif fsdp_param.param_dtype != foreach_copy_dtype:
+                foreach_copy_dtypes_are_uniform = False
             all_gather_input = (
                 fsdp_param._sharded_param_data
                 if fsdp_param.sharded_state == ShardedState.SHARDED
@@ -413,6 +419,12 @@ def _get_param_all_gather_inputs(
             param_all_gather_inputs[i] = fsdp_param.all_gather_inputs
 
     # 2nd pass: use foreach copy to compute the remaining all-gather inputs
+    if not foreach_copy_dtypes_are_uniform:
+        # The flat foreach destination has one dtype, so use the per-parameter
+        # cast path when parameters request different compute dtypes.
+        for i in foreach_copy_indices:
+            param_all_gather_inputs[i] = fsdp_params[i].all_gather_inputs
+        return param_all_gather_inputs
     if foreach_copy_inputs:
         fsdp_param_0 = fsdp_params[foreach_copy_indices[0]]
         param_dtype, device = fsdp_param_0.param_dtype, fsdp_param_0.device
@@ -550,14 +562,12 @@ def foreach_reduce(
     """
 
     grad_dtypes = {grad.dtype for grad in unsharded_grads}
-    if len(grad_dtypes) != 1:
-        # Check this at runtime since it could be a real runtime error if e.g.
-        # fp8 weights do not produce the correct higher precision gradients
+    if len(grad_dtypes) > 1 and reduce_dtype is None:
         _raise_assert_with_print(
-            f"FSDP reduce-scatter expects uniform gradient dtype but got {grad_dtypes}"
+            "FSDP reduce-scatter requires an explicit reduce dtype for mixed "
+            f"gradient dtypes but got {grad_dtypes}"
         )
-    grad_dtype = unsharded_grads[0].dtype
-    reduce_dtype = reduce_dtype or grad_dtype
+    reduce_dtype = reduce_dtype or unsharded_grads[0].dtype
     (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
         _get_gradient_divide_factors(
             reduce_scatter_group,
@@ -588,6 +598,11 @@ def foreach_reduce(
                 )
             chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
             unsharded_grads[i] = torch.cat(chunks, dim=0)
+
+    if len(grad_dtypes) > 1:
+        # Keep the uniform path's fused pack-and-cast in _chunk_cat.
+        for i, grad in enumerate(unsharded_grads):
+            unsharded_grads[i] = _to_dtype_if_needed(grad, reduce_dtype)
 
     padded_unsharded_sizes = tuple(
         _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
