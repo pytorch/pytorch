@@ -31,7 +31,7 @@ TORCH_API bool canFuseOnGPU();
 // flakiness)
 TORCH_API void overrideCanFuseOnCPU(bool value);
 
-// Sets whether fusion on CPU must use LLVM Codegen and not SimpleIREval
+// Sets whether fusion on CPU must use LLVM Codegen and not SimplieIREval
 TORCH_API void overrideMustUseLLVMOnCPU(bool value);
 
 // Sets whether fusion on the GPU is allowed (enabled by default)

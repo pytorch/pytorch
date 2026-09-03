@@ -362,8 +362,8 @@ except ImportError:
     _NCCL_AVAILABLE = False
 
 try:
-    # In-tree NCCL backend built on the torchcomms engine (the default "nccl"
-    # implementation, also available explicitly as "nccl2").
+    # In-tree NCCL backend built on the torchcomms engine (selected via the
+    # "nccl2" backend / entry point). Available whenever NCCL is built.
     from torch._C._distributed_c10d import ProcessGroupNCCL2
 
     ProcessGroupNCCL2.__module__ = "torch.distributed.distributed_c10d"
@@ -743,13 +743,14 @@ def _nccl2_device(
     if device is not None:
         return device
 
-    device_count = torch.cuda.device_count()
-    if device_count == 0:
-        raise RuntimeError("nccl2 requires at least one CUDA device")
-
-    if "LOCAL_RANK" in os.environ:
-        device_index = get_node_local_rank() % device_count
+    if torch.cuda.is_initialized():
+        device_index = torch.cuda.current_device()
+    elif "LOCAL_RANK" in os.environ:
+        device_index = get_node_local_rank()
     else:
+        device_count = torch.cuda.device_count()
+        if device_count == 0:
+            raise RuntimeError("nccl2 requires at least one CUDA device")
         global_rank = (
             opts.global_ranks_in_group[opts.group_rank]
             if opts.global_ranks_in_group
@@ -875,9 +876,9 @@ def _register_builtin_gloo_backend() -> None:
 
 def _register_builtin_nccl_backend() -> None:
     creator_fn = (
-        _create_nccl_process_group
-        if os.environ.get("TORCH_DIST_USE_NCCL2") == "0"
-        else _create_nccl2_process_group
+        _create_nccl2_process_group
+        if os.environ.get("TORCH_DIST_USE_NCCL2") == "1"
+        else _create_nccl_process_group
     )
     # Record what "nccl" actually resolved to for _maybe_attach_flight_recorder,
     # which must skip a group only if every one of its backends feeds a
@@ -1466,7 +1467,7 @@ class GroupMember(metaclass=_WorldMeta):
 
 def _get_default_timeout(backend: str) -> timedelta:
     # see note on nccl vs other backend timeout (constants.py)
-    if backend in (Backend.NCCL, "nccl-legacy", "nccl2", "nccl-lazy"):
+    if backend == Backend.NCCL:
         if not isinstance(default_pg_nccl_timeout, timedelta):
             # TODO moco benchmark on CPU initializes pgnccl backend today, triggered this assert in CI before it was
             # changed to be a warning.  We should fix the moco model.
@@ -5332,6 +5333,11 @@ def all_gather_single(
 
 
 @_exception_logger
+@deprecated(
+    "`torch.distributed.all_gather_into_tensor` is deprecated. "
+    "Please use `torch.distributed.all_gather_single` instead.",
+    category=FutureWarning,
+)
 def all_gather_into_tensor(
     output_tensor: torch.Tensor,
     input_tensor: torch.Tensor,
@@ -5341,8 +5347,9 @@ def all_gather_into_tensor(
     """
     Gather tensors from all ranks and put them in a single output tensor.
 
-    Alias of :func:`all_gather_single`, kept for backward compatibility. New
-    code should call :func:`all_gather_single`, which takes the same arguments.
+    .. warning::
+        `all_gather_into_tensor` is deprecated. Users should use
+        `all_gather_single` instead.
 
     """
     return all_gather_single(output_tensor, input_tensor, group, async_op)
@@ -5723,6 +5730,11 @@ def gather_single(
 
 
 @_exception_logger
+@deprecated(
+    "`torch.distributed.gather_into_tensor` is deprecated. "
+    "Please use `torch.distributed.gather_single` instead.",
+    category=FutureWarning,
+)
 def gather_into_tensor(
     tensor: torch.Tensor,
     gather_tensor: torch.Tensor | None = None,
@@ -5734,8 +5746,9 @@ def gather_into_tensor(
     """
     Gather the input tensor from all ranks into a single output tensor on ``dst``.
 
-    Alias of :func:`gather_single`, kept for backward compatibility. New code
-    should call :func:`gather_single`, which takes the same arguments.
+    .. warning::
+        `gather_into_tensor` is deprecated. Users should use `gather_single`
+        instead.
 
     """
     return gather_single(tensor, gather_tensor, dst, group, async_op, group_dst)
@@ -6073,6 +6086,11 @@ def reduce_scatter_single(
 
 
 @_exception_logger
+@deprecated(
+    "`torch.distributed.reduce_scatter_tensor` is deprecated. "
+    "Please use `torch.distributed.reduce_scatter_single` instead.",
+    category=FutureWarning,
+)
 def reduce_scatter_tensor(
     output: torch.Tensor,
     input: torch.Tensor,
@@ -6083,9 +6101,9 @@ def reduce_scatter_tensor(
     """
     Reduces, then scatters a tensor to all ranks in a group.
 
-    Alias of :func:`reduce_scatter_single`, kept for backward compatibility.
-    New code should call :func:`reduce_scatter_single`, which takes the same
-    arguments.
+    .. warning::
+        `reduce_scatter_tensor` is deprecated. Users should use
+        `reduce_scatter_single` instead.
 
     """
     return reduce_scatter_single(output, input, op, group, async_op)

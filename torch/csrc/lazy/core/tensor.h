@@ -206,7 +206,7 @@ TORCH_API LazyTensorPtr GetLtcTensorOrCreateForWrappedNumber(
     const BackendDevice& device);
 
 // Section 2: LazyTensor => at::Tensor.
-// Creates an ATen tensor from a LazyTensor.
+// Creates an ATen tensor from an LazyTensor.
 TORCH_API at::Tensor CreateAtenFromLtcTensor(const LazyTensorPtr& ltc_tensor);
 TORCH_API at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor);
 

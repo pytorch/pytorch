@@ -10,13 +10,10 @@
 # CUDA inner-tree kernel produced -- the CuTeDSL kernel reproduces them
 # bit-for-bit, which is the contract for this op.
 
+import contextlib
 import os
 import unittest
 from unittest import mock
-
-
-# Native reductions register during import, so enable the rollout first.
-os.environ["PYTORCH_SUM_INNER_TREE"] = "1"
 
 import torch
 from torch.testing._internal.common_cuda import (
@@ -202,6 +199,18 @@ class TestSumCuteDSLOverride(TestCase):
         "float64": torch.float64,
     }
 
+    @contextlib.contextmanager
+    def _inner_tree_flag(self):
+        old_value = os.environ.get("PYTORCH_SUM_INNER_TREE")
+        os.environ["PYTORCH_SUM_INNER_TREE"] = "1"
+        try:
+            yield
+        finally:
+            if old_value is None:
+                os.environ.pop("PYTORCH_SUM_INNER_TREE", None)
+            else:
+                os.environ["PYTORCH_SUM_INNER_TREE"] = old_value
+
     def _make_input(self, m, n, dtype):
         compute_dtype = torch.float64 if dtype == torch.float64 else torch.float32
         cols = torch.arange(n, device="cuda", dtype=compute_dtype)
@@ -230,30 +239,36 @@ class TestSumCuteDSLOverride(TestCase):
 
     def test_cond_accepts_covered_shapes(self):
         impl = _cutedsl_impl()
-        for dtype in (torch.float32, torch.float64):
-            x = torch.randn(128, 8192, device="cuda", dtype=dtype)
-            self.assertTrue(impl._cond(x, [1]))
-            # Strided outer input (contiguous reduced dim) is still covered.
-            strided = torch.randn(256, 8192, device="cuda", dtype=dtype)[::2]
-            self.assertTrue(impl._cond(strided, [1]))
+        with self._inner_tree_flag():
+            for dtype in (torch.float32, torch.float64):
+                x = torch.randn(128, 8192, device="cuda", dtype=dtype)
+                self.assertTrue(impl._cond(x, [1]))
+                # Strided outer input (contiguous reduced dim) is still covered.
+                strided = torch.randn(256, 8192, device="cuda", dtype=dtype)[::2]
+                self.assertTrue(impl._cond(strided, [1]))
 
     def test_cond_rejects_unsupported(self):
         impl = _cutedsl_impl()
         x = torch.randn(128, 8192, device="cuda", dtype=torch.float32)
-        # Multi-dim and full reductions are out of scope.
-        self.assertFalse(impl._cond(x, [0, 1]))
-        self.assertFalse(impl._cond(x, None))
-        # dtype-casting sum is out of scope.
-        self.assertFalse(impl._cond(x, [1], dtype=torch.float64))
-        # Non-contiguous reduced dim.
-        self.assertFalse(impl._cond(x[:, ::2], [1]))
-        # Integer / complex dtypes fall through to aten.
-        self.assertFalse(
-            impl._cond(torch.ones(17, 8192, device="cuda", dtype=torch.int64), [1])
-        )
-        self.assertFalse(
-            impl._cond(torch.ones(17, 8192, device="cuda", dtype=torch.complex64), [1])
-        )
+        # No flag -> reject.
+        self.assertFalse(impl._cond(x, [1]))
+        with self._inner_tree_flag():
+            # Multi-dim and full reductions are out of scope.
+            self.assertFalse(impl._cond(x, [0, 1]))
+            self.assertFalse(impl._cond(x, None))
+            # dtype-casting sum is out of scope.
+            self.assertFalse(impl._cond(x, [1], dtype=torch.float64))
+            # Non-contiguous reduced dim.
+            self.assertFalse(impl._cond(x[:, ::2], [1]))
+            # Integer / complex dtypes fall through to aten.
+            self.assertFalse(
+                impl._cond(torch.ones(17, 8192, device="cuda", dtype=torch.int64), [1])
+            )
+            self.assertFalse(
+                impl._cond(
+                    torch.ones(17, 8192, device="cuda", dtype=torch.complex64), [1]
+                )
+            )
 
     # --- correctness ---
 
@@ -262,7 +277,8 @@ class TestSumCuteDSLOverride(TestCase):
         x = self._make_order_sensitive_input(128, 8192, dtype)
         with torch.backends.python_native.cutedsl.disabled():
             ref = x.sum(dim=1)
-        got = x.sum(dim=1)
+        with self._inner_tree_flag():
+            got = x.sum(dim=1)
         self.assertEqual(got, ref)
 
     def test_override_out_variant(self):
@@ -270,26 +286,30 @@ class TestSumCuteDSLOverride(TestCase):
         with torch.backends.python_native.cutedsl.disabled():
             ref = x.sum(dim=1)
         out = torch.empty(128, device="cuda", dtype=torch.float32)
-        torch.sum(x, dim=1, out=out)
+        with self._inner_tree_flag():
+            torch.sum(x, dim=1, out=out)
         self.assertEqual(out, ref)
 
     def test_strided_outer_input(self):
         base = torch.ones(256, 32, device="cuda", dtype=torch.float32)
         base[1::2, :] = 5
         x = base[::2, :]
-        result = x.sum(dim=1)
+        with self._inner_tree_flag():
+            result = x.sum(dim=1)
         self.assertEqual(result, torch.full((128,), 32, device="cuda", dtype=x.dtype))
 
     def test_looped_kernel_partial_last_block(self):
         x = torch.ones(129, 256, device="cuda", dtype=torch.float32)
-        result = x.sum(dim=1)
+        with self._inner_tree_flag():
+            result = x.sum(dim=1)
         self.assertEqual(result, torch.full((129,), 256, device="cuda", dtype=x.dtype))
 
     @parametrize("dtype", [torch.int64, torch.complex64])
     def test_integer_and_complex_fall_through(self, dtype):
         # CuTeDSL declines integer/complex; the call must fall through to aten.
         x = torch.ones(17, 8192, device="cuda", dtype=dtype)
-        result = x.sum(dim=1)
+        with self._inner_tree_flag():
+            result = x.sum(dim=1)
         self.assertEqual(result, torch.full((17,), 8192, device="cuda", dtype=dtype))
 
     # --- bitwise equivalence ---
@@ -300,7 +320,8 @@ class TestSumCuteDSLOverride(TestCase):
     )
     def test_cross_warp_order_sensitive_hash_sm100(self):
         x = self._make_order_sensitive_input(17, 8192, torch.float32)
-        result = x.sum(dim=1)
+        with self._inner_tree_flag():
+            result = x.sum(dim=1)
         self.assertEqual(self._sha(result), "75d8b1a702344e90")
 
     @skipIfRocm
@@ -311,7 +332,8 @@ class TestSumCuteDSLOverride(TestCase):
             for m, n in self._SHAPES:
                 with self.subTest(dtype_name=dtype_name, m=m, n=n):
                     x = self._make_input(m, n, dtype)
-                    result = self._eager_sum(x)
+                    with self._inner_tree_flag():
+                        result = self._eager_sum(x)
                     sha = self._sha(result)
                     expected = self._EXPECTED[(dtype_name, m, n)]
                     self.assertEqual(
@@ -347,7 +369,8 @@ class TestSumCuteDSLOverride(TestCase):
                 x = self._make_prod_input(m, n, dtype)
                 with torch.backends.python_native.cutedsl.disabled():
                     ref = x.prod(dim=1)
-                got = x.prod(dim=1)
+                with self._inner_tree_flag():
+                    got = x.prod(dim=1)
                 self.assertEqual(got, ref, rtol=rtol, atol=atol)
 
     def test_prod_override_engaged(self):
@@ -358,7 +381,8 @@ class TestSumCuteDSLOverride(TestCase):
         x = self._make_prod_input(128, 8192, torch.float32)
         with torch.backends.python_native.cutedsl.disabled():
             ref = x.prod(dim=1)
-        got = x.prod(dim=1)
+        with self._inner_tree_flag():
+            got = x.prod(dim=1)
         self.assertFalse(torch.equal(got, ref))
 
     @parametrize("dtype", [torch.float16, torch.bfloat16])
@@ -385,6 +409,7 @@ class TestSumCuteDSLOverride(TestCase):
                         "inner_tree_prod_into",
                         wraps=inner_tree_kernel.inner_tree_prod_into,
                     ) as prod_into,
+                    self._inner_tree_flag(),
                 ):
                     got = x.prod(dim=1)
                 # Proves fp16/bf16 route through the CuTeDSL override, not a
@@ -394,9 +419,10 @@ class TestSumCuteDSLOverride(TestCase):
 
     def test_prod_override_out_variant(self):
         x = self._make_prod_input(128, 8192, torch.float32)
-        ref = x.prod(dim=1)
-        out = torch.empty(128, device="cuda", dtype=torch.float32)
-        torch.prod(x, dim=1, out=out)
+        with self._inner_tree_flag():
+            ref = x.prod(dim=1)
+            out = torch.empty(128, device="cuda", dtype=torch.float32)
+            torch.prod(x, dim=1, out=out)
         # The out= path runs the same kernel as the functional path.
         self.assertEqual(out, ref, rtol=0, atol=0)
 
@@ -406,24 +432,28 @@ class TestSumCuteDSLOverride(TestCase):
         base = torch.ones(256, 32, device="cuda", dtype=torch.float32)
         base[1::2, :] = 5
         x = base[::2, :]
-        result = x.prod(dim=1)
+        with self._inner_tree_flag():
+            result = x.prod(dim=1)
         self.assertEqual(result, torch.ones(128, device="cuda", dtype=x.dtype))
 
     def test_prod_looped_partial_last_block(self):
         x = torch.ones(129, 256, device="cuda", dtype=torch.float32)
-        result = x.prod(dim=1)
+        with self._inner_tree_flag():
+            result = x.prod(dim=1)
         self.assertEqual(result, torch.ones(129, device="cuda", dtype=x.dtype))
 
     def test_prod_deterministic(self):
         x = self._make_prod_input(64, 12000, torch.float32)
-        first = x.prod(dim=1)
-        second = x.prod(dim=1)
+        with self._inner_tree_flag():
+            first = x.prod(dim=1)
+            second = x.prod(dim=1)
         self.assertEqual(first, second, rtol=0, atol=0)
 
     @parametrize("dtype", [torch.int64, torch.complex64])
     def test_prod_integer_and_complex_fall_through(self, dtype):
         x = torch.ones(17, 8192, device="cuda", dtype=dtype)
-        result = x.prod(dim=1)
+        with self._inner_tree_flag():
+            result = x.prod(dim=1)
         self.assertEqual(result, torch.ones(17, device="cuda", dtype=dtype))
 
 

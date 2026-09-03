@@ -4,6 +4,7 @@
 #include <c10/util/SmallVector.h>
 #include <structmember.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <algorithm>
 
 namespace {

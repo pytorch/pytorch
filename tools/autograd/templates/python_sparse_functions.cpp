@@ -51,9 +51,13 @@ void initSparseFunctions(PyObject* module) {
   };
   PyObject* sparse = PyModule_Create(&def);
   THPSparseVariableFunctionsModule = sparse;
-  TORCH_CHECK_PYTHON(sparse);
+  if (!sparse) {
+    throw python_error();
+  }
   // steals a reference to sparse
-  TORCH_CHECK_PYTHON(PyModule_AddObject(module, "_sparse", sparse) == 0);
+  if (PyModule_AddObject(module, "_sparse", sparse) != 0) {
+    throw python_error();
+  }
 }
 
 // generated methods start here

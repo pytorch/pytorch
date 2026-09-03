@@ -102,9 +102,8 @@ bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
 c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     c10::DeviceType deviceType) {
   // If there is a backend associated with this device type then return it
-  if (auto it = deviceTypeToBackend_.find(deviceType);
-      it != deviceTypeToBackend_.end()) {
-    return it->second;
+  if (deviceTypeToBackend_.contains(deviceType)) {
+    return deviceTypeToBackend_.at(deviceType);
   }
 
   // Get the backend type associated with the device
@@ -117,9 +116,8 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
   }
 
   // Check if the backend has already been initialized
-  if (auto it = backendTypeToBackend_.find(backendType);
-      it != backendTypeToBackend_.end()) {
-    auto backend = it->second;
+  if (backendTypeToBackend_.contains(backendType)) {
+    auto backend = backendTypeToBackend_.at(backendType);
     deviceTypeToBackend_[deviceType] = backend;
     return backend;
   }
@@ -485,10 +483,7 @@ void register_work(
   RankLocal<WorkRegistry>::get().register_work(tensor, work);
 }
 
-namespace {
-
-std::vector<c10::intrusive_ptr<c10d::Work>> pop_works(
-    const at::Tensor& tensor) {
+at::Tensor wait_tensor(const at::Tensor& tensor) {
   // First try to find work in the current thread's registry (fast path)
   auto works = RankLocal<WorkRegistry>::get().pop_works(tensor);
 
@@ -509,35 +504,11 @@ std::vector<c10::intrusive_ptr<c10d::Work>> pop_works(
       works = std::move(result.value());
     }
   }
-  return works;
-}
-
-} // namespace
-
-at::Tensor wait_tensor(const at::Tensor& tensor) {
-  auto works = pop_works(tensor);
 
   for (const auto& work : works) {
     work->wait();
   }
   return tensor;
-}
-
-std::vector<at::Tensor> wait_tensors(at::TensorList tensors) {
-  TORCH_CHECK(!tensors.empty(), "wait_tensors requires at least one tensor");
-  std::vector<c10::intrusive_ptr<c10d::Work>> works;
-  std::unordered_set<c10d::Work*> seen;
-  for (const auto& tensor : tensors) {
-    for (auto& work : pop_works(tensor)) {
-      if (seen.insert(work.get()).second) {
-        works.push_back(std::move(work));
-      }
-    }
-  }
-  for (const auto& work : works) {
-    work->wait();
-  }
-  return tensors.vec();
 }
 
 void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {

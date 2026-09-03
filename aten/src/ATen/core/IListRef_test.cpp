@@ -5,6 +5,7 @@
 #endif
 #include <ATen/core/IListRef.h>
 #include <gtest/gtest.h>
+#include <algorithm>
 
 using namespace c10;
 

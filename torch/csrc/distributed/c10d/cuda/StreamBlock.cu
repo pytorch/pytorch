@@ -85,7 +85,7 @@ __launch_bounds__(1, 1) void kernel_barrier(int32_t* value, size_t timeout_ms) {
 
 StreamBlock::StreamBlock(std::chrono::milliseconds timeout)
     : comm_{
-      // We need to pin the memory since we access the CPU memory directly from
+      // We need to pin the memory since we access the CPU memory directly form
       // the GPU.
       at::zeros({2}, at::TensorOptions().dtype(at::kInt)).pin_memory()
     },

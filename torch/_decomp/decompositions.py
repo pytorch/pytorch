@@ -1270,13 +1270,6 @@ def logit_backward(
 @aten.dropout.default.py_impl(DispatchKey.Autograd)
 def dropout(input: Tensor, p: float, train: bool | None):
     if train and p != 0:
-        if input.is_complex():
-            # native_dropout's autograd node rejects complex outputs; inline the
-            # real-valued mask math so grad flows through the (complex-safe) mul.
-            if p == 1:
-                return torch.zeros_like(input)
-            bool_mask = torch.rand_like(input.real) > p
-            return bool_mask * input * (1.0 / (1.0 - p))
         return aten.native_dropout(input, p, train)[0]
     else:
         return input
@@ -3370,7 +3363,7 @@ def index_add_(
 
 
 @register_decomposition(aten.index_add)
-@out_wrapper(exact_dtype=True)
+@out_wrapper()
 def index_add(
     x: TensorLike,
     dim: int,
@@ -3475,7 +3468,7 @@ def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 
 
 @register_decomposition(aten.index_copy)
-@out_wrapper(exact_dtype=True)
+@out_wrapper()
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return _index_copy(x, dim, index, tensor, inplace=False)
 

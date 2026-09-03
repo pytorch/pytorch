@@ -13,6 +13,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
+#include <ATen/Config.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/cudnn/ConvShared.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -21,6 +22,7 @@
 #include <vector>
 
 #include <ATen/cudnn/Types.h>
+#include <ATen/cudnn/Utils.h>
 #include <ATen/native/utils/ParamsHash.h>
 
 #include <ATen/TensorUtils.h>
@@ -30,7 +32,9 @@
 #include <cstdint>
 #include <functional>
 #include <iterator>
+#include <memory>
 #include <mutex>
+#include <sstream>
 #include <unordered_map>
 
 // Note [behavior of cudnnFind and cudnnGet]

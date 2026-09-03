@@ -9,6 +9,7 @@
 #include <utility>
 
 #ifdef USE_KINETO
+#include <libkineto.h>
 #endif
 #ifdef USE_DISTRIBUTED
 #include <c10/util/hash.h>

@@ -4619,21 +4619,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    def test_grad_requires_grad_read(self):
-        counters.clear()
-
-        def fn(x):
-            # _create_differentiable has already made x differentiable
-            return (x * (10.0 if x.requires_grad else 1.0)).sum()
-
-        def wrapper_fn(x):
-            return torch.func.grad(fn)(x)
-
-        x = torch.randn(3, 3)
-        expected = wrapper_fn(x)
-        actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
-        self.assertEqual(actual, expected)
-
     def test_grad_freevar_tensor(self):
         counters.clear()
         y = torch.randn(3, 3)

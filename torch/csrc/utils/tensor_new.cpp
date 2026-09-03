@@ -25,10 +25,12 @@
 #include <ATen/dlpack.h>
 #include <c10/core/Backend.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/Layout.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <optional>
 
+#include <stdexcept>
 #include <vector>
 
 using at::Device;
@@ -90,7 +92,8 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
   THPObjectPtr obj;
   while (PySequence_Check(seq)) {
     auto length = PySequence_Length(seq);
-    TORCH_CHECK_PYTHON(length >= 0);
+    if (length < 0)
+      throw python_error();
     if (is_storage) {
       length /= static_cast<int64_t>(elementSize(scalar_type));
     }
@@ -169,14 +172,16 @@ ScalarType infer_scalar_type(PyObject* obj) {
       "'");
   if (PySequence_Check(obj)) {
     auto length = PySequence_Length(obj);
-    TORCH_CHECK_PYTHON(length >= 0);
+    if (length < 0)
+      throw python_error();
     // match NumPy semantics, except use default tensor type instead of double.
     if (length == 0)
       return torch::tensors::get_default_scalar_type();
     ScalarType scalarType{};
     for (const auto i : c10::irange(length)) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
-      TORCH_CHECK_PYTHON(handle);
+      if (!handle)
+        throw python_error();
       auto cur_item = handle.get();
       TORCH_CHECK_TYPE(
           cur_item != obj, "new(): self-referential lists are incompatible");
@@ -226,7 +231,8 @@ void recursive_store(
 
   auto n = sizes[dim];
   auto seq = THPObjectPtr(PySequence_Fast(obj, "not a sequence"));
-  TORCH_CHECK_PYTHON(seq);
+  if (!seq)
+    throw python_error();
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto seq_size = PySequence_Fast_GET_SIZE(seq.get());
   TORCH_CHECK_VALUE(
@@ -424,22 +430,19 @@ Tensor internal_new_from_data(
 
         // If the device is Meta, take the shortcut. We don't want to allocate
         // an empty CPU tensor which would break our contract for meta tensors.
-        // Indexed Meta devices take the same path and, like plain Meta, skip
-        // recursive_store validation.
-        if (device.type() == DeviceType::Meta) {
-          tensor = at::empty(sizes, opts.device(device));
-        } else {
-          tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
-          if (c10::multiply_integers(tensor.sizes()) != 0) {
-            recursive_store(
-                (char*)tensor.data_ptr(),
-                tensor.sizes(),
-                tensor.strides(),
-                0,
-                inferred_scalar_type,
-                tensor.dtype().itemsize(),
-                data);
-          }
+        if (device == at::kMeta) {
+          return at::empty(sizes, opts.device(device));
+        }
+        tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
+        if (c10::multiply_integers(tensor.sizes()) != 0) {
+          recursive_store(
+              (char*)tensor.data_ptr(),
+              tensor.sizes(),
+              tensor.strides(),
+              0,
+              inferred_scalar_type,
+              tensor.dtype().itemsize(),
+              data);
         }
       }
     }
@@ -473,28 +476,13 @@ Tensor internal_new_from_data(
     at::AutoDispatchBelowADInplaceOrView guard;
     tensor = at::lift_fresh(tensor);
   }
-  // CPU and Meta tensors are already on their canonical devices, but tensors
-  // constructed from storage can still need a post-lift device move.
-  if (only_lift_cpu_tensors()) {
-    const auto tensor_device_type = tensor.device().type();
-    const bool already_on_canonical_device =
-        (device.type() == DeviceType::CPU &&
-         tensor_device_type == DeviceType::CPU) ||
-        (device.type() == DeviceType::Meta &&
-         tensor_device_type == DeviceType::Meta);
-    if (!already_on_canonical_device) {
-      if (device.type() == DeviceType::Meta) {
-        device = at::kMeta;
-      } else if (device.type() == DeviceType::CPU) {
-        device = at::kCPU;
-      } else if (
-          !device.has_index() &&
-          !torch::utils::is_device_initialized(device.type())) {
-        // Infer device 0 to avoid device init
-        device = c10::Device(device.type(), 0);
-      }
-      tensor = tensor.to(device, /*non_blocking=*/false, /*copy=*/false);
+  if (only_lift_cpu_tensors() && device.type() != DeviceType::CPU) {
+    if (!device.has_index() &&
+        !torch::utils::is_device_initialized(device.type())) {
+      // Infer device 0 to avoid device init
+      device = c10::Device(device.type(), 0);
     }
+    tensor = tensor.to(device, /*non_blocking=*/false, /*copy=*/false);
   }
   return tensor;
 }
@@ -951,7 +939,9 @@ static Tensor sparse_compressed_tensor_ctor_worker(
     // See https://github.com/pytorch/pytorch/issues/58520 for more details
     auto rc = PyObject_GetAttrString(o, attr_name);
     if (!rc) {
-      TORCH_CHECK_PYTHON(PyErr_ExceptionMatches(PyExc_AttributeError));
+      if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
+        throw python_error();
+      }
       // Warning: a wrong attribute error may be suppressed here
       PyErr_Clear();
     }
@@ -1469,7 +1459,8 @@ Tensor tensor_ctor(
           "To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() "
           "or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).",
           1);
-      TORCH_CHECK_PYTHON(ret == 0);
+      if (ret != 0)
+        throw python_error();
     }
 
     bool type_inference = r.isNone(1);
@@ -1529,7 +1520,8 @@ Tensor new_tensor(
           "To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() "
           "or sourceTensor.detach().clone().requires_grad_(True), rather than tensor.new_tensor(sourceTensor).",
           1);
-      TORCH_CHECK_PYTHON(ret == 0);
+      if (ret != 0)
+        throw python_error();
     }
 
     bool args_requires_grad = r.toBool(3);

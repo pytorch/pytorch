@@ -13,7 +13,7 @@ __all__ = ["Exponential"]
 
 class Exponential(ExponentialFamily):
     r"""
-    Creates an Exponential distribution parameterized by :attr:`rate`.
+    Creates a Exponential distribution parameterized by :attr:`rate`.
 
     Example::
 

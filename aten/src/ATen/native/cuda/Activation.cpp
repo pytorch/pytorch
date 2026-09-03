@@ -6,6 +6,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/Resize.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

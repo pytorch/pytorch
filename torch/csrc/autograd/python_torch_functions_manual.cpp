@@ -1,5 +1,7 @@
+#include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -12,6 +14,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
+#include <torch/csrc/utils/structseq.h>
+#include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 
@@ -20,6 +24,8 @@
 #include <ATen/native/Resize.h>
 #include <ATen/ops/from_blob.h>
 
+#include <Python.h>
+#include <fmt/format.h>
 #include <pybind11/pybind11.h>
 #include <utility>
 #include <vector>
@@ -80,7 +86,8 @@ static PyObject* THPVariable_range(
         "because its behavior is inconsistent with Python's range builtin. "
         "Instead, use torch.arange, which produces values in [start, end).",
         1);
-    TORCH_CHECK_PYTHON(ret == 0);
+    if (ret != 0)
+      throw python_error();
     if (r.isNone(3)) {
       const auto options = TensorOptions()
                                .dtype(r.scalartype(4))
@@ -622,23 +629,27 @@ void initTorchFunctions(PyObject* module) {
   gatherTorchFunctions(torch_functions);
   THPVariableFunctions.tp_methods = torch_functions.data();
 
-  TORCH_CHECK_PYTHON(PyType_Ready(&THPVariableFunctions) >= 0);
+  if (PyType_Ready(&THPVariableFunctions) < 0) {
+    throw python_error();
+  }
   Py_INCREF(&THPVariableFunctions);
 
   // Steals
   Py_INCREF(&THPVariableFunctions);
-  TORCH_CHECK_PYTHON(
-      PyModule_AddObject(
+  if (PyModule_AddObject(
           module,
           "_VariableFunctionsClass",
-          reinterpret_cast<PyObject*>(&THPVariableFunctions)) >= 0);
+          reinterpret_cast<PyObject*>(&THPVariableFunctions)) < 0) {
+    throw python_error();
+  }
   // PyType_GenericNew returns a new reference
   THPVariableFunctionsModule =
       PyType_GenericNew(&THPVariableFunctions, Py_None, Py_None);
   // PyModule_AddObject steals a reference
-  TORCH_CHECK_PYTHON(
-      PyModule_AddObject(
-          module, "_VariableFunctions", THPVariableFunctionsModule) >= 0);
+  if (PyModule_AddObject(
+          module, "_VariableFunctions", THPVariableFunctionsModule) < 0) {
+    throw python_error();
+  }
 
   // pybind registrations to torch module
   // TODO: move these from torch.* to torch._C.*

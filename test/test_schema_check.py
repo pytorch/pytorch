@@ -7,19 +7,14 @@ import torch
 from torch.utils._pytree import tree_map
 import unittest
 
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    IS_WINDOWS,
-    run_tests,
-    slowTestIf,
-    TEST_WITH_TORCHDYNAMO,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
 from torch.fx.operator_schemas import normalize_function
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_device_type import ops, OpDTypes, instantiate_device_type_tests
+from torch.testing._internal.common_utils import IS_WINDOWS, slowTestIf
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
@@ -103,8 +98,6 @@ class IncorrectAliasTensor(torch.Tensor):
 
 # Tests various schema checking functionalities.
 class TestSchemaCheck(JitTestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         if TEST_WITH_TORCHDYNAMO:
             self.skipTest("SchemaCheckMode is ignored by dynamo")
@@ -504,8 +497,6 @@ class TestSchemaCheck(JitTestCase):
             x.add(x)
 
 class TestSchemaCheckModeOpInfo(JitTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
     @ops(op_db, dtypes=OpDTypes.supported)
     @slowTestIf(IS_WINDOWS)
     def test_schema_correctness(self, device, dtype, op):
@@ -517,7 +508,7 @@ class TestSchemaCheckModeOpInfo(JitTestCase):
             with SchemaCheckMode():
                 op(sample.input, *sample.args, **sample.kwargs)
 
-instantiate_device_type_tests(TestSchemaCheckModeOpInfo, globals())
+instantiate_device_type_tests(TestSchemaCheckModeOpInfo, globals(), only_for=("cpu", "cuda"))
 
 if __name__ == '__main__':
     run_tests()

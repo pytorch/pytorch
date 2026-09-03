@@ -1329,7 +1329,7 @@ def enable_activation_quantization(
                 continue
             node.meta["saved_for_quantization"] = True
             node.meta["dequant_type"] = node.meta["val"].dtype
-            # some of the fwd outputs and bwd inputs do not share the same object
+            # some of the fwd outputs and bwd inputs are not share the same object
             bwd_module_inputs[node.name].meta["saved_for_quantization"] = True
             bwd_module_inputs[node.name].meta["dequant_type"] = node.meta["val"].dtype
             should_perform_fp8_quant = True
@@ -1424,11 +1424,7 @@ def _extract_fwd_bwd_modules(
         # then the collective will generally by followed by a wait_tensor() call.
         # we need to peek one node further to see if this wait_tensor is dead as well.
         elif distributed_enabled and all(
-            n.target
-            in (
-                torch.ops._c10d_functional.wait_tensor.default,
-                torch.ops._c10d_functional.wait_tensors.default,
-            )
+            n.target is torch.ops._c10d_functional.wait_tensor.default
             and len(n.users) == 0
             for n in node.users
         ):
@@ -1723,11 +1719,7 @@ def default_partition(
             )
             and (
                 not distributed_enabled
-                or node.target
-                not in (
-                    torch.ops._c10d_functional.wait_tensor.default,
-                    torch.ops._c10d_functional.wait_tensors.default,
-                )
+                or node.target is not torch.ops._c10d_functional.wait_tensor.default
             )
         )
 
@@ -2338,23 +2330,13 @@ def force_save_collectives(joint_module: fx.GraphModule) -> None:
     unless they come from a user-annotated AC region.
     See Note [Recomputing collectives in the partitioner]
     """
-
-    def mark_leaf_tensor_outputs(node: fx.Node) -> None:
-        getitem_users = [user for user in node.users if user.target is operator.getitem]
-        if getitem_users:
-            for user in getitem_users:
-                mark_leaf_tensor_outputs(user)
-            return
-        if not isinstance(node.meta.get("val"), (tuple, list)):
-            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
-
     for node in joint_module.graph.nodes:
         if (
             isinstance(node.target, torch._ops.OpOverload)
             and node.target.namespace == "_c10d_functional"
             and not must_recompute(node)
         ):
-            mark_leaf_tensor_outputs(node)
+            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
 
 def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
@@ -3870,7 +3852,6 @@ def _sync_decision_cross_ranks(
     joint_graph: torch.fx.Graph, saved_values: list[torch.fx.Node]
 ) -> list[torch.fx.Node]:
     # use the same policy across different GPUs
-    from torch._dynamo.distributed import get_compile_sync_pg
     from torch._subclasses.fake_tensor import unset_fake_temporarily
 
     def has_collectives(joint_graph: torch.fx.Graph) -> bool:
@@ -3888,11 +3869,6 @@ def _sync_decision_cross_ranks(
         and has_collectives(joint_graph)
     ):
         return saved_values
-
-    pg = get_compile_sync_pg()
-    if pg is None:
-        raise AssertionError("Compile sync process group must be available here")
-    coll_device = torch.distributed.distributed_c10d._get_object_coll_device(pg)
 
     canonical = _canonical_node_names(joint_graph)
     reverse_canonical = {v: k for k, v in canonical.items()}
@@ -3914,9 +3890,10 @@ def _sync_decision_cross_ranks(
             for n in sorted(joint_graph.nodes, key=lambda n: canonical[n])
         )
         inputs = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
-        all_inputs = [None for _ in range(pg.size())]
+        all_inputs = [None for _ in range(torch.distributed.get_world_size())]
         with no_dispatch(), unset_fake_temporarily():
-            torch.distributed.all_gather_object(all_inputs, inputs, group=pg)
+            # TODO: maybe use a different process group?
+            torch.distributed.all_gather_object(all_inputs, inputs)
             for rank, x in enumerate(all_inputs):
                 if all_inputs[0] != x:
                     log.debug(
@@ -3931,10 +3908,10 @@ def _sync_decision_cross_ranks(
             # Communicate saved values using canonical names so that
             # node names (which may differ across ranks) don't matter.
             objects = [[canonical[x] for x in saved_values]]
-            saved_ops_names_all_ranks: list[list[str]] = [[] for _ in range(pg.size())]
-            torch.distributed.all_gather_object(
-                saved_ops_names_all_ranks, objects[0], group=pg
-            )
+            saved_ops_names_all_ranks: list[list[str]] = [
+                [] for _ in range(torch.distributed.get_world_size())
+            ]
+            torch.distributed.all_gather_object(saved_ops_names_all_ranks, objects[0])
             saved_sizes: list[int] = []
             saved_ops_with_sizes: dict[str, int] = {}
 
@@ -3946,16 +3923,17 @@ def _sync_decision_cross_ranks(
                 for node in saved_nodes:
                     size_of_node = _size_of(node)
                     saved_size += size_of_node
-                    if idx == pg.rank():
+                    if idx == torch.distributed.get_rank():
                         saved_ops_with_sizes[node.name] = size_of_node
                 saved_ops_with_sizes["total size"] = saved_size
                 saved_sizes.append(saved_size)
 
-            saved_sizes_tensor = torch.tensor(saved_sizes, device=coll_device)
+            saved_sizes_tensor = torch.tensor(
+                saved_sizes,
+                device=torch.distributed.distributed_c10d._get_object_coll_device(),
+            )
             torch.distributed.all_reduce(
-                saved_sizes_tensor,
-                op=torch.distributed.distributed_c10d.ReduceOp.MAX,
-                group=pg,
+                saved_sizes_tensor, op=torch.distributed.distributed_c10d.ReduceOp.MAX
             )
 
             picked_rank_idx = int(torch.argmin(saved_sizes_tensor).item())

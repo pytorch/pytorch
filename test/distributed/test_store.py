@@ -35,7 +35,6 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     ADDRESS_IN_USE,
     CONNECT_TIMEOUT,
-    HardwareClassification,
     load_tests,
     retry_on_connect_failures,
     run_tests,
@@ -77,8 +76,6 @@ device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else 
 
 
 class StoreTestBase:
-    hw_classification = HardwareClassification.GENERIC
-
     def _create_store(self, i):
         raise RuntimeError("not implemented")
 
@@ -283,8 +280,6 @@ class StoreTestBase:
 
 
 class FileStoreTest(TestCase, StoreTestBase):
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         super().setUp()
         with tempfile.NamedTemporaryFile(delete=False) as f:
@@ -335,8 +330,6 @@ class FileStoreTest(TestCase, StoreTestBase):
 
 @skip_if_win32()
 class HashStoreTest(TestCase, StoreTestBase):
-    hw_classification = HardwareClassification.GENERIC
-
     def _create_store(self):
         store = dist.HashStore()
         store.set_timeout(timedelta(seconds=300))
@@ -344,8 +337,6 @@ class HashStoreTest(TestCase, StoreTestBase):
 
 
 class PrefixStoreTest(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         super().setUp()
         # delete is false as FileStore will automatically clean up the file
@@ -369,8 +360,6 @@ class PrefixStoreTest(TestCase):
 
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         super().setUp()
         with tempfile.NamedTemporaryFile(delete=False) as f:
@@ -388,8 +377,6 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
 
 
 class TCPStoreTest(TestCase, StoreTestBase):
-    hw_classification = HardwareClassification.GENERIC
-
     _use_libuv = False
 
     def _create_store(self):
@@ -706,8 +693,6 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
 
 class LibUvTCPStoreTest(TCPStoreTest):
-    hw_classification = HardwareClassification.GENERIC
-
     _use_libuv = True
 
     def _create_store(self):
@@ -722,8 +707,6 @@ class LibUvTCPStoreTest(TCPStoreTest):
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         super().setUp()
         self.tcpstore = create_tcp_store()
@@ -788,8 +771,6 @@ class MyPythonStore(dist.Store):
 
 
 class PythonStoreTest(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_set_get(self):
         # If we were to inherit from StoreTestBase and try to use
         # its test_set_get function, we would exercise the Python
@@ -802,8 +783,6 @@ class PythonStoreTest(TestCase):
 
 
 class RendezvousTest(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_unknown_handler(self):
         with self.assertRaisesRegex(RuntimeError, "^No rendezvous handler"):
             dist.rendezvous("invalid://")
@@ -814,8 +793,6 @@ class RendezvousTest(TestCase):
 
 
 class RendezvousEnvTest(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     @retry_on_connect_failures
     def test_nominal(self):
         os.environ["WORLD_SIZE"] = "1"
@@ -836,8 +813,6 @@ class RendezvousEnvTest(TestCase):
 
 
 class RendezvousFileTest(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_common_errors(self):
         with self.assertRaisesRegex(ValueError, "path missing"):
             gen = dist.rendezvous("file://?rank=0&world_size=1")
@@ -872,8 +847,6 @@ class RendezvousFileTest(TestCase):
 
 @skip_if_win32()
 class RendezvousTCPTest(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def create_tcp_url(self):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
@@ -1021,8 +994,6 @@ class DummyStore(dist.Store):
 
 
 class TestPythonStore(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_optional_methods_fail(self):
         class TestStore(dist.Store):
             pass
@@ -1092,8 +1063,6 @@ class TestPythonStore(TestCase):
 
 
 class TestMultiThreadedWait(MultiThreadedTestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     file_store = dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)  # noqa: SIM115
     hash_store = dist.HashStore()
 
@@ -1155,8 +1124,6 @@ instantiate_parametrized_tests(TestMultiThreadedWait)
 
 @skip_if_win32()
 class TimeoutTest(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def tearDown(self):
         import signal
 
@@ -1227,8 +1194,6 @@ class InitPgWithNonUvStore(TestCase):
     the default backend.
     """
 
-    hw_classification = HardwareClassification.GENERIC
-
     def tearDown(self):
         super().tearDown()
         os.environ.pop("USE_LIBUV", None)
@@ -1266,8 +1231,6 @@ class InitPgWithNonUvStore(TestCase):
 
 
 class TestClientProtocol(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_client_connect(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(("localhost", 0))

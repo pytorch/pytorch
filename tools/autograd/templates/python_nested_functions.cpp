@@ -63,9 +63,13 @@ void initNestedFunctions(PyObject* module) {
   };
   PyObject* nested = PyModule_Create(&def);
   THPNestedVariableFunctionsModule = nested;
-  TORCH_CHECK_PYTHON(nested);
+  if (!nested) {
+    throw python_error();
+  }
   // steals a reference to nested
-  TORCH_CHECK_PYTHON(PyModule_AddObject(module, "_nested", nested) == 0);
+  if (PyModule_AddObject(module, "_nested", nested) != 0) {
+    throw python_error();
+  }
 }
 
 // generated methods start here

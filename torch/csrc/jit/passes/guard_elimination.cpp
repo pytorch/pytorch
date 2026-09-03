@@ -272,7 +272,7 @@ struct GuardElimination {
   // to compute any properties `isSummarized()` isn't amenable to guard
   // elimination.
   // Categories:
-  // * Functional-like(e.g. add, sub, le) operations with broadcast semantics
+  // * Functional-like(e.g. add, sub, le) operations with broadcast semenatics
   //   Guards can be removed if all inputs are guarded and `isSummarized()`
   //   returns
   //   false or inputs are `prim::Constant`

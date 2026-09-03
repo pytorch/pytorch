@@ -30,26 +30,26 @@ __device__ __forceinline__ void philox_derive_key(
   *out_offset = static_cast<uint64_t>(r.z) | (static_cast<uint64_t>(r.w) << 32);
 }
 
-// One thread per (split_idx, key_idx) pair.
+// Grid-stride loop over (split_idx, key_idx) pairs.
 __global__ void philox_key_split_kernel(
     const uint64_t* __restrict__ input,
     uint64_t* __restrict__ output,
     int64_t num_keys,
     int64_t num_splits) {
+  int64_t total = num_keys * num_splits;
   int64_t tid = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-  if (tid >= num_keys * num_splits) {
-    return;
+  for (; tid < total; tid += static_cast<int64_t>(gridDim.x) * blockDim.x) {
+    int64_t split_idx = tid / num_keys;
+    int64_t key_idx = tid % num_keys;
+
+    uint64_t seed = input[key_idx * 2];
+    uint64_t offset = input[key_idx * 2 + 1];
+
+    // Sample randomness to get the next (seed, offset pair).
+    uint4 r = philox_4x32(seed, offset + static_cast<uint64_t>(split_idx));
+    int64_t out = (split_idx * num_keys + key_idx) * 2;
+    philox_derive_key(r, &output[out], &output[out + 1]);
   }
-  int64_t split_idx = tid / num_keys;
-  int64_t key_idx = tid % num_keys;
-
-  uint64_t seed = input[key_idx * 2];
-  uint64_t offset = input[key_idx * 2 + 1];
-
-  // Sample randomness to get the next (seed, offset pair).
-  uint4 r = philox_4x32(seed, offset + static_cast<uint64_t>(split_idx));
-  int64_t out = (split_idx * num_keys + key_idx) * 2;
-  philox_derive_key(r, &output[out], &output[out + 1]);
 }
 
 // Fold the scalar value `data` into every key.
@@ -59,15 +59,14 @@ __device__ __forceinline__ void philox_key_fold_in_impl(
     int64_t num_keys,
     uint64_t data) {
   int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-  if (idx >= num_keys) {
-    return;
-  }
-  uint64_t seed = input[idx * 2];
-  uint64_t offset = input[idx * 2 + 1];
+  for (; idx < num_keys; idx += static_cast<int64_t>(gridDim.x) * blockDim.x) {
+    uint64_t seed = input[idx * 2];
+    uint64_t offset = input[idx * 2 + 1];
 
-  // Sample randomness to get the next (seed, offset pair).
-  uint4 r = philox_4x32(seed, offset + data);
-  philox_derive_key(r, &output[idx * 2], &output[idx * 2 + 1]);
+    // Sample randomness to get the next (seed, offset pair).
+    uint4 r = philox_4x32(seed, offset + data);
+    philox_derive_key(r, &output[idx * 2], &output[idx * 2 + 1]);
+  }
 }
 
 // data passed by value (baked into the launch).
@@ -112,8 +111,9 @@ Tensor _philox_key_split_cuda(const Tensor& key, int64_t num_splits) {
 
   int64_t total_threads = num_keys * num_splits;
   constexpr int block_size = 256;
-  int num_blocks =
-      static_cast<int>((total_threads + block_size - 1) / block_size);
+  int num_blocks = std::min(
+      static_cast<int>((total_threads + block_size - 1) / block_size),
+      at::cuda::getCurrentDeviceProperties()->multiProcessorCount * 4);
 
   auto key_contig = key.contiguous();
   philox_key_split_kernel<<<num_blocks, block_size, 0,
@@ -141,7 +141,9 @@ Tensor _philox_key_fold_in_cuda(const Tensor& key, int64_t data) {
   }
 
   constexpr int block_size = 256;
-  int num_blocks = static_cast<int>((num_keys + block_size - 1) / block_size);
+  int num_blocks = std::min(
+      static_cast<int>((num_keys + block_size - 1) / block_size),
+      at::cuda::getCurrentDeviceProperties()->multiProcessorCount * 4);
 
   auto key_contig = key.contiguous();
   philox_key_fold_in_scalar_kernel<<<num_blocks, block_size, 0,
@@ -180,7 +182,9 @@ Tensor _philox_key_fold_in_tensor_cuda(const Tensor& key, const Tensor& data) {
   auto key_contig = key.contiguous();
 
   constexpr int block_size = 256;
-  int num_blocks = static_cast<int>((num_keys + block_size - 1) / block_size);
+  int num_blocks = std::min(
+      static_cast<int>((num_keys + block_size - 1) / block_size),
+      at::cuda::getCurrentDeviceProperties()->multiProcessorCount * 4);
 
   philox_key_fold_in_tensor_kernel<<<num_blocks, block_size, 0,
       at::cuda::getCurrentCUDAStream()>>>(

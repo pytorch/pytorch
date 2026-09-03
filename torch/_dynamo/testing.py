@@ -565,7 +565,7 @@ def expectedFailureCodegenDynamic(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     return fn
 
 
-# Controls tests generated in test/inductor/test_cpp_wrapper.py
+# Controls test generated in test/inductor/test_cpp_wrapper.py
 def expectedFailureDynamicWrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     fn._expected_failure_dynamic_wrapper = True  # type: ignore[attr-defined]
     return fn
