@@ -301,9 +301,13 @@ DeviceAssertionsData* CUDAKernelLaunchRegistry::
       cudaMallocManaged(&uvm_assertions_ptr, sizeof(DeviceAssertionsData)));
 
 #if CUDART_VERSION >= 13000 && !defined(USE_ROCM)
+  // The CPU is addressed via cudaMemLocationTypeHost; a device location with
+  // id == cudaCpuDeviceId is rejected with cudaErrorInvalidValue, since ids are
+  // only validated as device ordinals. The id field is ignored for host
+  // locations.
   cudaMemLocation cpuDevice;
-  cpuDevice.type = cudaMemLocationTypeDevice;
-  cpuDevice.id = cudaCpuDeviceId;
+  cpuDevice.type = cudaMemLocationTypeHost;
+  cpuDevice.id = 0;
 #else
   // hipMemAdvise_v2 with hipMemLocationTypeDevice + hipCpuDeviceId fails on
   // ROCm; the v1 int API maps to Host semantics and works.
