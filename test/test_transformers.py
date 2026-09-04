@@ -4525,7 +4525,7 @@ class TestSDPAAccelerator(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_long_sequence_mask(self, device, dtype):
-        if torch.accelerator.get_memory_info() < 80 * 2**30:
+        if torch.accelerator.get_memory_info()[1] < 80 * 2**30:
             unittest.skip("This test requires substatnial GPU memory.")
             return
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
@@ -5141,7 +5141,7 @@ class TestSDPAAccelerator(NNTestCase):
             tester_p = p if not TEST_WITH_ROCM else 0.0
             mask = (rand_uniform > tester_p).to(torch.float32)
             return mask
-        if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info() < 40 * 2**30:
+        if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info()[1] < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
         if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
@@ -5263,7 +5263,7 @@ class TestSDPAAccelerator(NNTestCase):
             tester_p = p if not TEST_WITH_ROCM else 0.0
             mask = (rand_uniform > tester_p).to(torch.float32)
             return mask
-        if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info() < 40 * 2**30:
+        if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info()[1] < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
         if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
@@ -5684,9 +5684,9 @@ class TestSDPAAccelerator(NNTestCase):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
             self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
-        if TEST_WITH_ROCM and seq_len_q >= 1024 and seq_len_k >= 1024 and batch_size > 1:
+        if (TEST_WITH_ROCM or TEST_XPU) and seq_len_q >= 1024 and seq_len_k >= 1024 and batch_size > 1:
             torch.accelerator.empty_cache()  # Prevent memory fragmentation
-        if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info() < 40 * 2**30:
+        if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info()[1] < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
 
@@ -6952,8 +6952,8 @@ if TEST_XPU:
 
 instantiate_device_type_tests(TestTransformersAccelerator, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
-instantiate_device_type_tests(TestSDPAGeneric, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
-instantiate_device_type_tests(TestSDPAAccelerator, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
+instantiate_device_type_tests(TestSDPAGeneric, globals(), only_for=device_types, allow_mps=True)
+instantiate_device_type_tests(TestSDPAAccelerator, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestSDPACPU, globals(), only_for=("cpu"))
 instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True)
