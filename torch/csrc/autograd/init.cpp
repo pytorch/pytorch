@@ -634,6 +634,35 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         meta->set_creation_meta(new_creation_meta);
       });
 
+  m.def("_get_view_attr_version", [](const at::Tensor& t) {
+    auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
+    TORCH_CHECK(meta != nullptr && meta->has_bw_view());
+    return meta->get_attr_version();
+  });
+
+  m.def(
+      "_unsafe_set_view_attr_version",
+      [](const at::Tensor& t, uint32_t version) {
+        auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
+        TORCH_CHECK(meta != nullptr && meta->has_bw_view());
+        meta->set_attr_version(version);
+      });
+
+  m.def("_unsafe_mark_view_attr_version_stale", [](const at::Tensor& t) {
+    auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
+    TORCH_CHECK(meta != nullptr && meta->has_bw_view());
+    const auto current_version = static_cast<uint32_t>(t._version());
+    meta->set_attr_version(current_version - 1);
+  });
+
+  m.def(
+      "_is_same_version_counter", [](const at::Tensor& a, const at::Tensor& b) {
+        const auto& a_version = torch::autograd::impl::version_counter(a);
+        const auto& b_version = torch::autograd::impl::version_counter(b);
+        return a_version.enabled() && b_version.enabled() &&
+            a_version.is_same_version_counter(b_version);
+      });
+
   m.def("_get_current_graph_task_keep_graph", []() {
     return torch::autograd::get_current_graph_task_keep_graph();
   });

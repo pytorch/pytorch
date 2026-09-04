@@ -891,6 +891,23 @@ at::Tensor ChainedViewFunc::operator()(const at::Tensor& input_base) const {
   return (*second)((*first)(input_base));
 }
 
+std::vector<at::Tensor> ChainedViewFunc::call_multi_output(
+    const at::Tensor& input_base) const {
+  if (second->has_multi_output()) {
+    return second->call_multi_output((*first)(input_base));
+  }
+  return first->call_multi_output(input_base);
+}
+
+at::Tensor ChainedViewFunc::apply_after_multi_output(
+    const at::Tensor& output) const {
+  if (second->has_multi_output()) {
+    return second->apply_after_multi_output(output);
+  }
+  TORCH_INTERNAL_ASSERT(first->has_multi_output());
+  return (*second)(first->apply_after_multi_output(output));
+}
+
 std::unique_ptr<ViewFunc> ChainedViewFunc::clone_and_set(
     std::optional<std::vector<c10::SymInt>> symints,
     std::optional<std::vector<at::Tensor>> tensors) const {

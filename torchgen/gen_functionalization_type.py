@@ -877,10 +877,12 @@ class ViewMetaSpecialization:
 
         # Override `to_out_index` if this operation returns more than 1 value.
         to_out_index_decl = ""
+        forward_multi_output_decl = ""
         if self.is_multi_output:
             to_out_index_decl = (
                 "  std::shared_ptr<ViewMeta> to_out_index(int64_t out_idx) override;"
             )
+            forward_multi_output_decl = "  std::vector<Tensor> forward_multi_output(const Tensor& base) override;"
 
         return [
             f"""
@@ -896,6 +898,7 @@ struct TORCH_API {self.classname} : public ViewMeta {{
 {ctor_assignments} {{}}
 
   Tensor forward(const Tensor& base) override;
+{forward_multi_output_decl}
   Tensor reverse(const Tensor& base, const Tensor& mutated_view) override;
 {to_out_index_decl}
 
@@ -909,7 +912,9 @@ struct TORCH_API {self.classname} : public ViewMeta {{
         ]
 
     # Generate a call to the actual operation.
-    def opcall(self, is_reverse: bool, reapply_views: bool) -> str:
+    def opcall(
+        self, is_reverse: bool, reapply_views: bool, *, multi_output: bool = False
+    ) -> str:
         opname = functionalization.name(
             self.g,
             is_reverse=is_reverse,
@@ -939,7 +944,7 @@ struct TORCH_API {self.classname} : public ViewMeta {{
 
         # Index the result if this operation returns multiple values.
         maybe_index = ""
-        if not is_reverse and self.is_multi_output:
+        if not is_reverse and self.is_multi_output and not multi_output:
             maybe_index = f"[{self.out_index}]"
 
         return f"{opname}({arguments}){maybe_index}"
@@ -963,6 +968,14 @@ at::Tensor {self.classname}::reverse(const at::Tensor& base, const Tensor& mutat
         # If this operation returns multiple values, also generate a `to_out_index`
         # implementation.
         if self.is_multi_output:
+            functions.append(f"""
+std::vector<at::Tensor> {self.classname}::forward_multi_output(const at::Tensor& base) {{
+  if (reapply_views) {{
+    return {self.opcall(is_reverse=False, reapply_views=True, multi_output=True)};
+  }} else {{
+    return {self.opcall(is_reverse=False, reapply_views=False, multi_output=True)};
+  }}
+}}""")
             functions.append(f"""
 std::shared_ptr<at::functionalization::ViewMeta> {self.classname}::to_out_index(int64_t out_index) {{
   return {self.new("out_index")};

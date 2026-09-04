@@ -13,7 +13,8 @@ a functionalized version of the graph under compilation.
 import collections
 import contextlib
 import logging
-from typing import Any, TYPE_CHECKING
+import weakref
+from typing import Any, NamedTuple, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -26,6 +27,7 @@ from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.proxy_tensor import disable_autocast_cache
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
@@ -71,6 +73,420 @@ zip = strict_zip
 
 log = logging.getLogger(__name__)
 static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_inputs")
+
+
+class _ViewReplayState(NamedTuple):
+    tensor_ref: weakref.ReferenceType[Tensor]
+    effective_input_versions: tuple[int | None, ...]
+    creation_error_input_indices: tuple[int, ...]
+    has_active_multi_output_restriction: bool
+    requires_grad: bool
+    has_delayed_requires_grad_transition: bool
+    non_grad_input_regrad_view_count: int | None
+    lineage_grad_root_node: Any | None
+    view_meta_grad_enabled: tuple[bool | None, ...]
+    view_meta_sequence: tuple[Any, ...]
+    storage_ref: StorageWeakRef
+    base_idx: int | None
+
+
+class _InputVersionSnapshotMode(TorchFunctionMode):
+    def __init__(self, inputs: list[Any]) -> None:
+        super().__init__()
+        self.inputs = inputs
+        self.initial_grad_enabled = torch.is_grad_enabled()
+        self.output_states: dict[int, _ViewReplayState] = {}
+        self.creation_error_conditions: dict[int, set[int]] = collections.defaultdict(
+            set
+        )
+        self.input_tensor_id_to_idx = {
+            id(inp): i for i, inp in enumerate(inputs) if isinstance(inp, Tensor)
+        }
+        self.input_storage_to_indices: dict[StorageWeakRef, list[int]] = (
+            collections.defaultdict(list)
+        )
+        for i, inp in enumerate(inputs):
+            if isinstance(inp, FunctionalTensor):
+                self.input_storage_to_indices[
+                    StorageWeakRef(inp.elem.untyped_storage())
+                ].append(i)
+
+    def input_versions(self) -> tuple[int | None, ...]:
+        return tuple(
+            inp._version if isinstance(inp, Tensor) and not inp.is_inference() else None
+            for inp in self.inputs
+        )
+
+    def __torch_function__(
+        self,
+        func: Callable[..., Any],
+        types: tuple[type, ...],
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
+        kwargs = kwargs or {}
+        tracked_inputs: list[tuple[FunctionalTensor, _ViewReplayState]] = []
+        seen_input_ids: set[int] = set()
+        for inp in pytree.tree_leaves((args, kwargs)):
+            if not isinstance(inp, FunctionalTensor) or id(inp) in seen_input_ids:
+                continue
+            state = self.output_states.get(id(inp))
+            if state is not None and state.tensor_ref() is inp:
+                tracked_inputs.append((inp, state))
+                seen_input_ids.add(id(inp))
+
+        input_versions_before = self.input_versions() if tracked_inputs else None
+        out = func(*args, **kwargs)
+        flat_outputs = pytree.tree_leaves(out)
+        current_grad_enabled = torch.is_grad_enabled()
+        if current_grad_enabled and input_versions_before is not None:
+            for tracked_input, state in tracked_inputs:
+                if (
+                    not state.has_active_multi_output_restriction
+                    or state.base_idx is None
+                ):
+                    continue
+                pending_input_indices = tuple(
+                    i
+                    for i, (effective_version, current_version) in enumerate(
+                        zip(
+                            state.effective_input_versions,
+                            input_versions_before,
+                            strict=True,
+                        )
+                    )
+                    if effective_version is not None
+                    and current_version != effective_version
+                )
+                if not pending_input_indices or not any(
+                    isinstance(output, Tensor)
+                    and output is not tracked_input
+                    and output.grad_fn is not None
+                    and _autograd_output_depends_on_input(output.grad_fn, tracked_input)
+                    for output in flat_outputs
+                ):
+                    continue
+                self.creation_error_conditions[state.base_idx].update(
+                    pending_input_indices
+                )
+
+        functional_outputs = [
+            output for output in flat_outputs if isinstance(output, FunctionalTensor)
+        ]
+        if functional_outputs:
+            output_creation_versions = self.input_versions()
+            for output in functional_outputs:
+                key = id(output)
+                prior = self.output_states.get(key)
+                same_object_state = (
+                    prior
+                    if prior is not None and prior.tensor_ref() is output
+                    else None
+                )
+
+                view_meta_sequence = tuple(
+                    torch._C._functionalization.get_view_meta_sequence(output.elem)
+                )
+                if not view_meta_sequence:
+                    # Storage-changing operations can leave the wrapper's
+                    # multi-output tag set after clearing its view recipe. The
+                    # new storage no longer belongs to that lineage.
+                    self.output_states.pop(key, None)
+                    continue
+                is_multi_output_view = any(
+                    view_meta.is_multi_output for view_meta in view_meta_sequence
+                )
+
+                output_storage = StorageWeakRef(output.elem.untyped_storage())
+                parent_matches: list[tuple[int, _ViewReplayState]] = []
+                for _, state in tracked_inputs:
+                    if state.storage_ref != output_storage:
+                        continue
+                    parent_sequence = state.view_meta_sequence
+                    if len(parent_sequence) > len(view_meta_sequence):
+                        continue
+                    if parent_sequence == view_meta_sequence[: len(parent_sequence)]:
+                        parent_matches.append((len(parent_sequence), state))
+
+                parent_state = None
+                if parent_matches:
+                    longest_prefix = max(length for length, _ in parent_matches)
+                    longest_matches = [
+                        state
+                        for length, state in parent_matches
+                        if length == longest_prefix
+                    ]
+                    first_state = longest_matches[0]
+                    if any(
+                        state.effective_input_versions
+                        != first_state.effective_input_versions
+                        or state.creation_error_input_indices
+                        != first_state.creation_error_input_indices
+                        or state.view_meta_grad_enabled
+                        != first_state.view_meta_grad_enabled
+                        or state.has_active_multi_output_restriction
+                        != first_state.has_active_multi_output_restriction
+                        or state.requires_grad != first_state.requires_grad
+                        or state.has_delayed_requires_grad_transition
+                        != first_state.has_delayed_requires_grad_transition
+                        or state.non_grad_input_regrad_view_count
+                        != first_state.non_grad_input_regrad_view_count
+                        or state.lineage_grad_root_node
+                        is not first_state.lineage_grad_root_node
+                        for state in longest_matches[1:]
+                    ):
+                        raise AssertionError(
+                            "multi-output view has ambiguous parent creation state"
+                        )
+                    parent_state = first_state
+
+                lineage_state = same_object_state or parent_state
+                base_idx = lineage_state.base_idx if lineage_state is not None else None
+                if base_idx is None and output._base is not None:
+                    base_idx = self.input_tensor_id_to_idx.get(id(output._base))
+                if base_idx is None:
+                    storage_input_indices = self.input_storage_to_indices.get(
+                        output_storage, []
+                    )
+                    unique_input_ids = {
+                        id(self.inputs[i]): i for i in storage_input_indices
+                    }
+                    if len(unique_input_ids) == 1:
+                        base_idx = next(iter(unique_input_ids.values()))
+                    elif len(unique_input_ids) > 1:
+                        raise AssertionError(
+                            "multi-output view lineage has ambiguous input storage"
+                        )
+
+                grad_enabled = (
+                    current_grad_enabled
+                    if current_grad_enabled != self.initial_grad_enabled
+                    else None
+                )
+                if (
+                    lineage_state is not None
+                    and len(lineage_state.view_meta_sequence) <= len(view_meta_sequence)
+                    and lineage_state.view_meta_sequence
+                    == view_meta_sequence[: len(lineage_state.view_meta_sequence)]
+                ):
+                    view_meta_grad_enabled = lineage_state.view_meta_grad_enabled + (
+                        grad_enabled,
+                    ) * (
+                        len(view_meta_sequence) - len(lineage_state.view_meta_sequence)
+                    )
+                else:
+                    view_meta_grad_enabled = (grad_enabled,) * len(view_meta_sequence)
+
+                has_active_multi_output_restriction = (
+                    is_multi_output_view
+                    and output._is_view()
+                    and output.requires_grad
+                    and not output.is_inference()
+                    and torch._C._autograd._get_creation_meta(output)
+                    != torch._C._autograd.CreationMeta.DEFAULT
+                )
+
+                if same_object_state is not None:
+                    # Data mutations and in-place metadata operations return
+                    # the same FunctionalTensor. An active autograd restriction
+                    # keeps its original snapshot so the mutation makes it
+                    # stale. Inactive state starts a fresh interval, as do
+                    # transitions into or out of the restricted state.
+                    effective_input_versions = (
+                        same_object_state.effective_input_versions
+                        if same_object_state.has_active_multi_output_restriction
+                        and has_active_multi_output_restriction
+                        else output_creation_versions
+                    )
+                    detach_indices = [
+                        i
+                        for i, view_meta in enumerate(view_meta_sequence)
+                        if type(view_meta).__name__
+                        in ("detach_ViewMeta", "detach__ViewMeta")
+                    ]
+                    has_delayed_requires_grad_transition = (
+                        same_object_state.has_delayed_requires_grad_transition
+                        or (
+                            output.requires_grad != same_object_state.requires_grad
+                            and bool(detach_indices)
+                            and len(view_meta_sequence) > detach_indices[-1] + 1
+                        )
+                    )
+                    non_grad_input_regrad_view_count = (
+                        same_object_state.non_grad_input_regrad_view_count
+                    )
+                    lineage_grad_root_node = same_object_state.lineage_grad_root_node
+                    if (
+                        not same_object_state.requires_grad
+                        and output.requires_grad
+                        and base_idx is not None
+                        and not self.inputs[base_idx].requires_grad
+                        and not detach_indices
+                    ):
+                        non_grad_input_regrad_view_count = len(view_meta_sequence)
+                    if not same_object_state.requires_grad and output.requires_grad:
+                        with FunctionalTensorMode():
+                            lineage_grad_root_node = (
+                                torch.autograd.graph.get_gradient_edge(output).node
+                            )
+                    self.output_states[key] = _ViewReplayState(
+                        tensor_ref=weakref.ref(output),
+                        effective_input_versions=effective_input_versions,
+                        creation_error_input_indices=(
+                            same_object_state.creation_error_input_indices
+                        ),
+                        has_active_multi_output_restriction=(
+                            has_active_multi_output_restriction
+                        ),
+                        requires_grad=output.requires_grad,
+                        has_delayed_requires_grad_transition=(
+                            has_delayed_requires_grad_transition
+                        ),
+                        non_grad_input_regrad_view_count=(
+                            non_grad_input_regrad_view_count
+                        ),
+                        lineage_grad_root_node=lineage_grad_root_node,
+                        view_meta_grad_enabled=view_meta_grad_enabled,
+                        view_meta_sequence=view_meta_sequence,
+                        storage_ref=output_storage,
+                        base_idx=base_idx,
+                    )
+                    continue
+
+                creation_error_input_indices: tuple[int, ...] = ()
+                if parent_state is not None:
+                    creation_error_input_indices = (
+                        parent_state.creation_error_input_indices
+                    )
+                    if (
+                        parent_state.has_active_multi_output_restriction
+                        and has_active_multi_output_restriction
+                        and current_grad_enabled
+                    ):
+                        new_errors = tuple(
+                            i
+                            for i, (parent_version, creation_version) in enumerate(
+                                zip(
+                                    parent_state.effective_input_versions,
+                                    output_creation_versions,
+                                    strict=True,
+                                )
+                            )
+                            if parent_version is not None
+                            and creation_version != parent_version
+                        )
+                        creation_error_input_indices = tuple(
+                            dict.fromkeys((*creation_error_input_indices, *new_errors))
+                        )
+                if creation_error_input_indices and base_idx is not None:
+                    self.creation_error_conditions[base_idx].update(
+                        creation_error_input_indices
+                    )
+
+                self.output_states[key] = _ViewReplayState(
+                    tensor_ref=weakref.ref(output),
+                    effective_input_versions=output_creation_versions,
+                    creation_error_input_indices=creation_error_input_indices,
+                    has_active_multi_output_restriction=(
+                        has_active_multi_output_restriction
+                    ),
+                    requires_grad=output.requires_grad,
+                    has_delayed_requires_grad_transition=(
+                        parent_state.has_delayed_requires_grad_transition
+                        if parent_state is not None
+                        else False
+                    ),
+                    non_grad_input_regrad_view_count=(
+                        parent_state.non_grad_input_regrad_view_count
+                        if parent_state is not None
+                        else None
+                    ),
+                    lineage_grad_root_node=(
+                        parent_state.lineage_grad_root_node
+                        if parent_state is not None
+                        else None
+                    ),
+                    view_meta_grad_enabled=view_meta_grad_enabled,
+                    view_meta_sequence=view_meta_sequence,
+                    storage_ref=output_storage,
+                    base_idx=base_idx,
+                )
+        return out
+
+
+def _multi_output_view_node_and_index(
+    output: Tensor,
+    grad_fn: Any,
+    view_meta_sequence: ViewMetaSequence,
+) -> tuple[Any, int] | None:
+    """Find the last multi-output view node represented in a view chain.
+
+    ViewMeta sequences run from the input base to the output, while autograd
+    edges run in the opposite direction. Walking one unique autograd edge for
+    every ViewMeta after the last multi-output op identifies the shared node
+    even when each sibling has additional, distinct suffix views.
+    """
+    multi_output_indices = [
+        i
+        for i, view_meta in enumerate(view_meta_sequence.sequence)
+        if view_meta.is_multi_output
+    ]
+    if not multi_output_indices:
+        return None
+
+    view_meta_index = multi_output_indices[-1]
+    node = grad_fn
+    autograd_output_index = int(output.output_nr)
+    for _ in range(len(view_meta_sequence.sequence) - view_meta_index - 1):
+        next_edges = [edge for edge in node.next_functions if edge[0] is not None]
+        if len(next_edges) != 1:
+            log.debug(
+                "Cannot batch multi-output view replay: expected one autograd "
+                "edge while walking suffix views, got %s",
+                len(next_edges),
+            )
+            return None
+        node, autograd_output_index = next_edges[0]
+
+    view_meta_output_index = int(view_meta_sequence.sequence[view_meta_index].out_index)
+    if autograd_output_index != view_meta_output_index:
+        log.debug(
+            "Cannot batch multi-output view replay: autograd output index %s "
+            "does not match ViewMeta output index %s",
+            autograd_output_index,
+            view_meta_output_index,
+        )
+        return None
+    return node, view_meta_output_index
+
+
+def _autograd_graph_reaches_input(grad_fn: Any, input_tensor: Tensor) -> bool:
+    target = torch.autograd.graph.get_gradient_edge(input_tensor).node
+    return _autograd_graph_reaches_node(grad_fn, target)
+
+
+def _autograd_graph_reaches_node(grad_fn: Any, target: Any) -> bool:
+    pending = [grad_fn]
+    seen: set[Any] = set()
+    while pending:
+        node = pending.pop()
+        if node is target:
+            return True
+        if node is None or node in seen:
+            continue
+        seen.add(node)
+        pending.extend(edge[0] for edge in node.next_functions)
+    return False
+
+
+def _autograd_output_depends_on_input(grad_fn: Any, input_tensor: Tensor) -> bool:
+    try:
+        return _autograd_graph_reaches_input(grad_fn, input_tensor)
+    except AssertionError:
+        # A view made under no_grad can require grad while having neither a
+        # grad_fn nor an AccumulateGrad edge. A differentiable operation that
+        # directly consumes it represents that missing edge with None.
+        return any(edge[0] is None for edge in grad_fn.next_functions)
 
 
 # Note [Tangents memory format]
@@ -170,6 +586,7 @@ def run_functionalized_fw_and_collect_metadata(
     *,
     flat_args_descs: list[AOTInput],
     keep_input_mutations: bool,
+    capture_multi_output_view_invalidations: bool = True,
     # Note: this is guaranteed to be set when running under dynamo
     static_input_indices: list[int] | None = None,
     pre_dispatch: bool = False,
@@ -222,7 +639,13 @@ def run_functionalized_fw_and_collect_metadata(
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
-            flat_f_outs = f(*flat_f_args)
+            mutation_order_mode = (
+                _InputVersionSnapshotMode(flat_f_args)
+                if capture_multi_output_view_invalidations
+                else contextlib.nullcontext()
+            )
+            with mutation_order_mode:
+                flat_f_outs = f(*flat_f_args)
 
             # Assert that f does NOT have an AOTOutputs in it, easy mistake to
             # make!  You need to drop the second output before calling this
@@ -305,6 +728,11 @@ def run_functionalized_fw_and_collect_metadata(
 
         # We need inp tensor id's to be able to tell if an outputs **are** inputs.
         inp_tensor_ids = {id(inpt) for inpt in flat_f_args if isinstance(inpt, Tensor)}
+        inp_tensor_id_to_idx = {
+            id(inpt): idx
+            for idx, inpt in enumerate(flat_f_args)
+            if isinstance(inpt, Tensor)
+        }
         # We need output tensor id's to tell if any output._base` attributes **are** other outputs.
         # (This is also a dict because we need to know that output's index, so we can regenerate
         # the alias from it).
@@ -319,6 +747,7 @@ def run_functionalized_fw_and_collect_metadata(
         num_aliased_tensors_that_are_multi_output_views: collections.defaultdict[
             StorageWeakRef | None, int
         ] = collections.defaultdict(int)
+        multi_output_view_tensor_ids: set[int] = set()
 
         out_storage_to_metadata_key_to_tensors: collections.defaultdict[
             StorageWeakRef | None,
@@ -403,6 +832,12 @@ def run_functionalized_fw_and_collect_metadata(
                 # Given that it is not possible for mutating one of these aliases to affect the autograd metadata of another alias
                 # without causing an error in eager mode, we will simple hide the aliasing from autograd during torch.compile
                 # if all of the above conditions are met.
+                #
+                # This optimization only applies to views of intermediates. For
+                # views of graph inputs, hiding the aliases gives all siblings a
+                # shared CompiledFunctionBackward whose saved tensors are freed
+                # after the first backward. Those aliases instead use grouped
+                # runtime view replay so independent backwards match eager mode.
                 # This has the slight downside that it's possible to write some "bad" code that autograd will raise an error on
                 # in eager but fail to during torch.compile, but it has the benefit that this code has much better performance.
                 # NOTE: if and when we eventually update AOTAutograd to do the "view graph slicing" defined here:
@@ -413,8 +848,21 @@ def run_functionalized_fw_and_collect_metadata(
                 ) and torch._functionalize_is_multi_output_view(  # type: ignore[attr-defined]
                     o.elem
                 )
+                if is_cur_tensor_multi_out_view and isinstance(
+                    mutation_order_mode, _InputVersionSnapshotMode
+                ):
+                    state = mutation_order_mode.output_states.get(id(o))
+                    is_cur_tensor_multi_out_view = (
+                        state is not None
+                        and state.tensor_ref() is o
+                        and any(
+                            view_meta.is_multi_output
+                            for view_meta in state.view_meta_sequence
+                        )
+                    )
                 if is_cur_tensor_multi_out_view:
                     num_aliased_tensors_that_are_multi_output_views[curr_storage] += 1
+                    multi_output_view_tensor_ids.add(id(o))
                 if o.requires_grad:
                     out_storage_to_metadata_key_to_tensors[curr_storage][
                         MetadataKey.make(o)
@@ -424,6 +872,9 @@ def run_functionalized_fw_and_collect_metadata(
         intermediate_base_tensor_id_to_output_idx: dict[int, int] = {}
         intermediate_bases: list[torch.Tensor] = []
         intermediate_bases_descs: list[AOTInput] = []
+        input_multi_output_view_groups: dict[tuple[int, Any], int] = {}
+        detached_output_roots: dict[int, tuple[Any, int]] = {}
+        output_grad_fns: list[Any] = []
         # Why Do We Care If Storage Changed?
         # It's important to understand the implications of storage changes in complex scenarios. Take this example:
         #
@@ -459,6 +910,11 @@ def run_functionalized_fw_and_collect_metadata(
                 if not isinstance(o, torch.Tensor)
                 else StorageWeakRef(o.untyped_storage())
             )
+            multi_output_view_base_idx = (
+                inp_storage_refs.get(curr_storage)
+                if curr_storage is not None and id(o) in multi_output_view_tensor_ids
+                else None
+            )
             outs_with_identical_metadata_that_require_grad: list[torch.Tensor] = (
                 []
                 if not isinstance(o, Tensor)
@@ -477,9 +933,95 @@ def run_functionalized_fw_and_collect_metadata(
             # on FunctionalTensors, so we must enable a FunctionalTensorMode here to ensure
             # these op calls succeed.
             grad_fn = None
+            creation_meta = None
+            multi_output_view_was_invalidated = False
+            multi_output_view_invalidating_input_indices: tuple[int, ...] = ()
+            view_replay_grad_enabled: tuple[bool | None, ...] = ()
+            replay_from_detached_base = False
+            replay_detached_view_meta_sequence = False
+            has_explicit_detach = False
+            has_delayed_requires_grad_transition = False
+            non_grad_input_regrad_view_count = None
+            lineage_grad_root_node = None
             if isinstance(o, Tensor):
-                with FunctionalTensorMode():
-                    grad_fn = o.grad_fn
+                if o._is_view() and not o.is_inference():
+                    creation_meta = torch._C._autograd._get_creation_meta(o)
+                original_attr_version = None
+                if (
+                    capture_multi_output_view_invalidations
+                    and id(o) in multi_output_view_tensor_ids
+                    and o._is_view()
+                    and creation_meta != torch._C._autograd.CreationMeta.DEFAULT
+                ):
+                    original_attr_version = torch._C._autograd._get_view_attr_version(o)
+                    multi_output_view_was_invalidated = (
+                        original_attr_version != o._version
+                    )
+                    if multi_output_view_was_invalidated:
+                        # Inspecting grad_fn normally raises for this stale
+                        # multi-output view. Temporarily restore its creation
+                        # version so metadata collection can recover the shared
+                        # node, then put the eager error state back.
+                        torch._C._autograd._unsafe_set_view_attr_version(o, o._version)
+                try:
+                    with FunctionalTensorMode():
+                        grad_fn = o.grad_fn
+                finally:
+                    if multi_output_view_was_invalidated:
+                        if original_attr_version is None:
+                            raise AssertionError("expected an original view version")
+                        torch._C._autograd._unsafe_set_view_attr_version(
+                            o, original_attr_version
+                        )
+                if (
+                    capture_multi_output_view_invalidations
+                    and id(o) in multi_output_view_tensor_ids
+                ):
+                    if not isinstance(mutation_order_mode, _InputVersionSnapshotMode):
+                        raise AssertionError("expected mutation-order metadata")
+                    creation = mutation_order_mode.output_states.get(id(o))
+                    if creation is None or creation.tensor_ref() is not o:
+                        raise AssertionError(
+                            "missing input versions for multi-output view"
+                        )
+                    if creation.base_idx is not None:
+                        multi_output_view_base_idx = creation.base_idx
+                    view_replay_grad_enabled = creation.view_meta_grad_enabled
+                    has_explicit_detach = any(
+                        type(view_meta).__name__
+                        in ("detach_ViewMeta", "detach__ViewMeta")
+                        for view_meta in creation.view_meta_sequence
+                    )
+                    has_delayed_requires_grad_transition = (
+                        creation.has_delayed_requires_grad_transition
+                    )
+                    non_grad_input_regrad_view_count = (
+                        creation.non_grad_input_regrad_view_count
+                    )
+                    lineage_grad_root_node = creation.lineage_grad_root_node
+                    # detach() descendants can retain functionalization's
+                    # multi-output-view tag without carrying differentiable
+                    # view restrictions. A direct detach is not a view, while
+                    # a view after detach has DEFAULT creation metadata.
+                    if (
+                        o._is_view()
+                        and o.requires_grad
+                        and not o.is_inference()
+                        and creation_meta != torch._C._autograd.CreationMeta.DEFAULT
+                    ):
+                        final_input_versions = mutation_order_mode.input_versions()
+                        multi_output_view_invalidating_input_indices = tuple(
+                            i
+                            for i, (creation_version, final_version) in enumerate(
+                                zip(
+                                    creation.effective_input_versions,
+                                    final_input_versions,
+                                    strict=True,
+                                )
+                            )
+                            if creation_version is not None
+                            and final_version != creation_version
+                        )
 
             is_result_of_custom_autograd_fn = False
             # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction)
@@ -506,34 +1048,94 @@ def run_functionalized_fw_and_collect_metadata(
                 # pyrefly: ignore [bad-index, index-error]
                 base_idx = inp_storage_refs[curr_storage]
                 is_input_tensor = id(o) in inp_tensor_ids
-                num_aliased_outs = out_tensor_alias_counts[curr_storage]
-                num_multi_output_view_outs = (
-                    num_aliased_tensors_that_are_multi_output_views[curr_storage]
-                )
-                num_aliased_outs_that_are_not_multi_output_views = (
-                    num_aliased_outs - num_multi_output_view_outs
-                )
-                if (
-                    grad_fn is not None
-                    and num_aliased_outs_that_are_not_multi_output_views == 0
-                ):
-                    # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
-                    # In particular, given:
-                    # def f(x):
-                    #     return list(x.unbind(0))
-                    # The main reason we ordinarily try to regenerate these output aliases outside of the
-                    # compiled autograd.Function is because if any of the outputs are later mutated,
-                    # autograd needs to perform view-replay to regenerate them.
-                    # However, autograd does not allow users to mutate multi-output views
-                    # in any way that can change the autograd metadata of other aliases.
-                    # So we hide this aliasing from autograd here.
-                    log.debug(
-                        "Encountered AOTAutograd case: differentiable outputs that \
-alias each other from a multi-output view call"
-                    )
-                    output_type = OutputType.non_alias
-                elif is_input_tensor:
+                # Preserve input aliasing even for multi-output views (e.g.
+                # unbind/split). Otherwise pure view functions get a shared
+                # CompiledFunctionBackward instead of replaying views from the
+                # input, and individual backwards over outputs incorrectly
+                # re-enter that node after its saved tensors are freed.
+                if is_input_tensor:
                     output_type = OutputType.is_input
+                elif (
+                    id(o) in multi_output_view_tensor_ids
+                    and has_explicit_detach
+                    and multi_output_view_base_idx is not None
+                ):
+                    # Functionalization keeps view ancestry across detach, but
+                    # replaying that recipe would reconnect the severed
+                    # autograd history. Rebuild the final geometry from a
+                    # detached runtime base instead.
+                    output_type = OutputType.alias_of_input
+                    base_idx = multi_output_view_base_idx
+                    replay_from_detached_base = True
+                    replay_detached_view_meta_sequence = (
+                        o._is_view()
+                        and creation_meta
+                        == torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE
+                    )
+                elif (
+                    id(o) in multi_output_view_tensor_ids
+                    and o._is_view()
+                    and creation_meta == torch._C._autograd.CreationMeta.DEFAULT
+                    and multi_output_view_base_idx is not None
+                ):
+                    # A view after detach keeps functionalization's ancestry
+                    # tag but has ordinary DEFAULT autograd view semantics.
+                    output_type = OutputType.alias_of_input
+                    base_idx = multi_output_view_base_idx
+                    replay_from_detached_base = True
+                elif (
+                    id(o) in multi_output_view_tensor_ids
+                    and grad_fn is None
+                    and o.requires_grad
+                    and not o._is_view()
+                    and multi_output_view_base_idx is not None
+                ):
+                    # detach().requires_grad_() starts a new leaf even though
+                    # functionalization retains the multi-output ancestry tag.
+                    # Replaying it from the input would reconnect that severed
+                    # autograd history.
+                    output_type = OutputType.alias_of_input
+                    base_idx = multi_output_view_base_idx
+                    replay_from_detached_base = True
+                elif (
+                    id(o) in multi_output_view_tensor_ids
+                    and grad_fn is not None
+                    and creation_meta
+                    == torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE
+                    and o._base is not None
+                    and id(o._base) in inp_tensor_id_to_idx
+                    and flat_f_args[inp_tensor_id_to_idx[id(o._base)]].requires_grad
+                    and _autograd_graph_reaches_input(
+                        grad_fn, flat_f_args[inp_tensor_id_to_idx[id(o._base)]]
+                    )
+                ):
+                    # Storage identity is insufficient when multiple inputs
+                    # share storage but have independent autograd histories.
+                    # Use the differentiable view base that actually owns this
+                    # output's backward edge.
+                    base_idx = inp_tensor_id_to_idx[id(o._base)]
+                    output_type = OutputType.alias_of_input
+                elif id(o) in multi_output_view_tensor_ids and grad_fn is not None:
+                    if (
+                        creation_meta
+                        == torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE
+                        and multi_output_view_base_idx is not None
+                    ):
+                        output_type = OutputType.alias_of_input
+                        base_idx = multi_output_view_base_idx
+                        if not flat_f_args[base_idx].requires_grad:
+                            # requires_grad_() started a new leaf from a
+                            # non-grad input. Replay on a detached runtime base
+                            # so a later view does not acquire an input edge.
+                            replay_from_detached_base = True
+                            replay_detached_view_meta_sequence = True
+                        # Otherwise a no_grad view severed the graph without a
+                        # detach. Per-ViewMeta grad modes can replay that
+                        # boundary directly on the original input, preserving
+                        # eager's exposed ._base identity.
+                    else:
+                        output_type = OutputType.non_alias
+                        base_idx = None
                 else:
                     output_type = OutputType.alias_of_input
             elif functional_tensor_storage_changed and id(o) in inp_tensor_ids:
@@ -713,8 +1315,103 @@ from a multi-output view call"
             ):
                 if isinstance(o, FunctionalTensor):
                     view_meta_sequence = ViewMetaSequence(o)
-
+            requires_structured_view_replay = (
+                replay_from_detached_base or len(set(view_replay_grad_enabled)) > 1
+            )
+            if replay_from_detached_base and has_delayed_requires_grad_transition:
+                raise AssertionError(
+                    "aot_autograd() does not yet handle delayed requires_grad_() "
+                    "transitions in detached multi-output-view lineages"
+                )
+            if (
+                non_grad_input_regrad_view_count is not None
+                and view_meta_sequence is not None
+                and len(view_meta_sequence.sequence) > non_grad_input_regrad_view_count
+            ):
+                raise AssertionError(
+                    "aot_autograd() does not yet handle view operations after "
+                    "requires_grad_() in a non-grad-input multi-output-view lineage"
+                )
+            if (
+                output_type == OutputType.alias_of_input
+                and id(o) in multi_output_view_tensor_ids
+                and requires_structured_view_replay
+                and (
+                    view_meta_sequence is None
+                    or any(
+                        view_meta.has_symbolic_inputs
+                        for view_meta in view_meta_sequence.sequence
+                    )
+                )
+            ):
+                raise AssertionError(
+                    "aot_autograd() does not yet handle symbolic or unavailable "
+                    "ViewMeta replay for detached or mixed-grad-mode "
+                    "multi-output views"
+                )
+            starts_new_grad_history_from_non_grad_input = (
+                isinstance(o, Tensor)
+                and output_type is OutputType.alias_of_input
+                and id(o) in multi_output_view_tensor_ids
+                and o.requires_grad
+                and base_idx is not None
+                and not flat_f_args[base_idx].requires_grad
+            )
+            if (
+                (
+                    replay_from_detached_base
+                    or starts_new_grad_history_from_non_grad_input
+                )
+                and isinstance(o, Tensor)
+                and lineage_grad_root_node is not None
+            ):
+                # Reconstructing aliases independently only changes observable
+                # autograd behavior when they share the same gradient root.
+                # Purely non-differentiable detached siblings have no root to
+                # split and remain safe to return.
+                grad_root_id = id(lineage_grad_root_node)
+                if grad_root_id in detached_output_roots:
+                    raise AssertionError(
+                        "aot_autograd() does not yet handle multiple returned "
+                        "aliases sharing a detached multi-output-view lineage"
+                    )
+                detached_output_roots[grad_root_id] = (
+                    lineage_grad_root_node,
+                    len(output_info),
+                )
             requires_grad = isinstance(o, torch.Tensor) and o.requires_grad
+            multi_output_view_group = None
+            multi_output_view_index = None
+            if (
+                output_type == OutputType.alias_of_input
+                and id(o) in multi_output_view_tensor_ids
+                and not replay_from_detached_base
+                and grad_fn is not None
+                and view_meta_sequence is not None
+                and view_meta_sequence.sequence
+            ):
+                multi_output_view = _multi_output_view_node_and_index(
+                    o, grad_fn, view_meta_sequence
+                )
+                if multi_output_view is not None:
+                    multi_output_node, multi_output_view_index = multi_output_view
+                    if base_idx is None:
+                        raise AssertionError(
+                            "multi-output input alias must have an input base"
+                        )
+                    group_key = (base_idx, multi_output_node)
+                    if group_key not in input_multi_output_view_groups:
+                        input_multi_output_view_groups[group_key] = len(
+                            input_multi_output_view_groups
+                        )
+                    multi_output_view_group = input_multi_output_view_groups[group_key]
+
+            if (
+                id(o) in multi_output_view_tensor_ids
+                and multi_output_view_base_idx is None
+                and output_type in (OutputType.alias_of_input, OutputType.is_input)
+            ):
+                multi_output_view_base_idx = base_idx
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),
@@ -725,10 +1422,43 @@ from a multi-output view call"
                 # its base but has no grad_fn and does not participate in
                 # differentiation.
                 requires_grad_for_backward=requires_grad
-                and (o._base is None or grad_fn is not None),
+                and (o._base is None or grad_fn is not None)
+                and not replay_from_detached_base,
+                is_conj=isinstance(o, Tensor) and o.is_conj(),
+                is_neg=isinstance(o, Tensor) and o.is_neg(),
+                is_view=isinstance(o, Tensor) and o._is_view(),
+                is_multi_output_view=id(o) in multi_output_view_tensor_ids,
+                view_replay_grad_enabled=view_replay_grad_enabled,
+                multi_output_view_base_idx=multi_output_view_base_idx,
+                replay_from_detached_base=replay_from_detached_base,
+                replay_detached_view_meta_sequence=(replay_detached_view_meta_sequence),
+                multi_output_view_was_invalidated=multi_output_view_was_invalidated,
+                multi_output_view_invalidating_input_indices=(
+                    multi_output_view_invalidating_input_indices
+                ),
                 view_meta_sequence=view_meta_sequence,
+                multi_output_view_group=multi_output_view_group,
+                multi_output_view_index=multi_output_view_index,
             )
             output_info.append(out_info)
+            output_grad_fns.append(grad_fn)
+
+        for grad_root_node, alias_idx in detached_output_roots.values():
+            for output_idx, (info, grad_fn) in enumerate(
+                zip(output_info, output_grad_fns, strict=True)
+            ):
+                if (
+                    output_idx == alias_idx
+                    or info.replay_from_detached_base
+                    or grad_fn is None
+                ):
+                    continue
+                if _autograd_graph_reaches_node(grad_fn, grad_root_node):
+                    raise AssertionError(
+                        "aot_autograd() does not yet handle returned "
+                        "differentiable outputs that share a detached "
+                        "multi-output-view lineage"
+                    )
 
         # See Note [AOT Autograd: Views to avoid tangents aliasing inputs]
         def view_avoid_dupes_with_primals(t: object) -> object:
@@ -900,6 +1630,14 @@ from a multi-output view call"
             subclass_inp_meta=subclass_inp_meta,
             subclass_fw_graph_out_meta=subclass_fw_graph_out_meta,
             subclass_tangent_meta=subclass_tangent_meta,
+            multi_output_view_creation_error_conditions=(
+                tuple(
+                    (base_idx, tuple(sorted(indices)))
+                    for base_idx, indices in mutation_order_mode.creation_error_conditions.items()
+                )
+                if isinstance(mutation_order_mode, _InputVersionSnapshotMode)
+                else ()
+            ),
             grad_enabled_mutation=grad_enabled_mutation,
             static_input_indices=static_input_indices,
             tokens=mode._tokens,
