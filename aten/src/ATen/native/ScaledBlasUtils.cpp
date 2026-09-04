@@ -177,14 +177,19 @@ bool check_deepseek_recipe(
     return false;
   }
 
-  // Need expected recipe with float or e8m0fnu scales (both must match)
+  // Need expected recipe with float scales, or (XPU only) e8m0fnu scales
+  // (both must match). e8m0fnu is only implemented for the DeepSeek recipe
+  // on XPU (oneDNN); CUDA/ROCm still require float scales here.
   if (recipe_a[0] != expected_recipe_a) return false;
   if (recipe_b[0] != expected_recipe_b) return false;
   auto scale_dtype_a = scales_a[0].scalar_type();
-  auto scale_dtype_b = scales_b[0].scalar_type();
-  if (scale_dtype_a != ScalarType::Float && scale_dtype_a != ScalarType::Float8_e8m0fnu) return false;
-  if (scale_dtype_b != ScalarType::Float && scale_dtype_b != ScalarType::Float8_e8m0fnu) return false;
-  if (scale_dtype_a != scale_dtype_b) return false;
+  bool e8m0_allowed = scales_a[0].is_xpu();
+  if (scale_dtype_a != ScalarType::Float &&
+      !(e8m0_allowed && scale_dtype_a == ScalarType::Float8_e8m0fnu)) {
+    return false;
+  }
+  // scale_dtype_b is implied to be valid once it matches scale_dtype_a.
+  if (scale_dtype_a != scales_b[0].scalar_type()) return false;
 
   return true;
 }

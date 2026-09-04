@@ -193,7 +193,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       ", 1) and scale_b should be (1, ",
       b.size(1),
       "), and both should be contiguous.\n",
-      "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
+      "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float or float8_e8m0fnu, scale_a should be (",
       a.size(0),
       ", ",
       ceil_div<int64_t>(a.size(1), 128),
@@ -202,7 +202,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       ", ",
       b.size(1),
       ").\n"
-      "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
+      "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float or float8_e8m0fnu, scale_a should be (",
       ceil_div<int64_t>(a.size(0), 128),
       ", ",
       ceil_div<int64_t>(a.size(1), 128),
@@ -464,6 +464,7 @@ Tensor& _scaled_mm_out_xpu(
   // call a contiguous() to ensure row-major for oneDNN
   Tensor scale_a_internal = scale_a;
   Tensor scale_b_internal = scale_b;
+
   if (scaling_choice_a == ScalingType::BlockWise128x128 ||
       scaling_choice_a == ScalingType::BlockWise1x128 ||
       scaling_choice_a == ScalingType::BlockWise1x32 ||
@@ -707,7 +708,8 @@ Tensor& _scaled_block1x128_block1x128(
 
   TORCH_CHECK_VALUE(
       scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
-          (scale_a.scalar_type() == kFloat || scale_a.scalar_type() == kFloat8_e8m0fnu),
+          (scale_a.scalar_type() == kFloat ||
+           scale_a.scalar_type() == kFloat8_e8m0fnu),
       "scale_a must have shape ",
       M,
       " x ",
@@ -717,7 +719,8 @@ Tensor& _scaled_block1x128_block1x128(
 
   TORCH_CHECK_VALUE(
       scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
-          (scale_b.scalar_type() == kFloat || scale_b.scalar_type() == kFloat8_e8m0fnu),
+          (scale_b.scalar_type() == kFloat ||
+           scale_b.scalar_type() == kFloat8_e8m0fnu),
       "scale_b must have shape ",
       N,
       " x ",
@@ -774,7 +777,8 @@ Tensor& _scaled_block128x128_block1x128(
   TORCH_CHECK_VALUE(
       scale_a.size(0) == ceil_div<int64_t>(K, 128) &&
           scale_a.size(1) == ceil_div<int64_t>(M, 128) &&
-          (scale_a.scalar_type() == kFloat || scale_a.scalar_type() == kFloat8_e8m0fnu),
+          (scale_a.scalar_type() == kFloat ||
+           scale_a.scalar_type() == kFloat8_e8m0fnu),
       "scale_a must have shape ",
       ceil_div<int64_t>(K, 128),
       " x ",
@@ -784,7 +788,8 @@ Tensor& _scaled_block128x128_block1x128(
 
   TORCH_CHECK_VALUE(
       scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
-          (scale_b.scalar_type() == kFloat || scale_b.scalar_type() == kFloat8_e8m0fnu),
+          (scale_b.scalar_type() == kFloat ||
+           scale_b.scalar_type() == kFloat8_e8m0fnu),
       "scale_b must have shape ",
       N,
       " x ",
@@ -841,7 +846,8 @@ Tensor& _scaled_block1x128_block128x128(
 
   TORCH_CHECK_VALUE(
       scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
-          (scale_a.scalar_type() == kFloat || scale_a.scalar_type() == kFloat8_e8m0fnu),
+          (scale_a.scalar_type() == kFloat ||
+           scale_a.scalar_type() == kFloat8_e8m0fnu),
       "scale_a must have shape ",
       M,
       " x ",
@@ -852,7 +858,8 @@ Tensor& _scaled_block1x128_block128x128(
   TORCH_CHECK_VALUE(
       scale_b.size(0) == ceil_div<int64_t>(K, 128) &&
           scale_b.size(1) == ceil_div<int64_t>(N, 128) &&
-          (scale_b.scalar_type() == kFloat || scale_b.scalar_type() == kFloat8_e8m0fnu),
+          (scale_b.scalar_type() == kFloat ||
+           scale_b.scalar_type() == kFloat8_e8m0fnu),
       "scale_b must have shape ",
       ceil_div<int64_t>(K, 128),
       " x ",
@@ -1281,7 +1288,7 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
       ", 1) and scale_b should be (1, ",
       mat_b.size(1),
       "), and both should be contiguous.\n"
-      "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
+      "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float or float8_e8m0fnu, scale_a should be (",
       mat_a.size(0),
       ", ",
       ceil_div<int64_t>(mat_a.size(1), 128),
@@ -1290,7 +1297,7 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
       ", ",
       ceil_div<int64_t>(mat_b.size(0), 128),
       ").\n"
-      "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
+      "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float or float8_e8m0fnu, scale_a should be (",
       ceil_div<int64_t>(mat_a.size(1), 128),
       ", ",
       ceil_div<int64_t>(mat_a.size(0), 128),
