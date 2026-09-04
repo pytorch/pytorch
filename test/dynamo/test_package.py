@@ -25,6 +25,7 @@ from torch._dynamo.package import (
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
+    load_guards_state,
     SystemInfo,
 )
 from torch._dynamo.precompile_context import PrecompileContext
@@ -123,45 +124,37 @@ class TestPackage(torch._inductor.test_case.TestCase):
         with self.assertRaisesRegex(RuntimeError, "CPU codegen target"):
             entry.check_versions()
 
-    def test_cpu_codegen_target_accepts_an_isa_the_host_can_build(self):
-        # Vector ISAs nest: an avx512 host runs avx2 code, and the same hardware
-        # picks a different ISA under ATEN_CPU_CAPABILITY. The artifact's ISA
-        # only has to be one the host can build for; a superset host accepts a
-        # subset artifact, never the reverse, and the machine must match.
-        def check(cached_target, host_target, host_isas):
+    def test_cpu_codegen_target_requires_the_host_to_pick_the_same_isa(self):
+        # The kernel source is tiled for the ISA picked at codegen and compiled
+        # with the ISA picked on the loading host, so the two must be equal. A
+        # wider host is not a superset: its masked loads zero-fill the lanes the
+        # narrower tiling never touches, and unmasked reductions read them.
+        def check(cached_target, host_target):
             base = SystemInfo.current(cpu_codegen=False)
             cached = dataclasses.replace(base, cpu_codegen_target=cached_target)
-            with (
-                patch.object(cpu_vec_isa, "valid_vec_isa_list", return_value=host_isas),
-                patch(
-                    "torch._dynamo.package._current_cpu_codegen_target",
-                    return_value=host_target,
-                ),
+            with patch(
+                "torch._dynamo.package._current_cpu_codegen_target",
+                return_value=host_target,
             ):
                 cached.check_compatibility(SystemInfo.current())
 
-        avx2, avx512 = cpu_vec_isa.VecAVX2(), cpu_vec_isa.VecAVX512()
-        check(
-            ("x86_64", "avx2", None, None),
-            ("x86_64", "avx512", None, None),
-            [avx512, avx2],
-        )
+        check(("x86_64", "avx2", None, None), ("x86_64", "avx2", None, None))
         with self.assertRaisesRegex(
-            RuntimeError, r"needs vector ISA 'avx512'.*\['avx2'\]"
+            RuntimeError, "generated for vector ISA 'avx2'.*for 'avx512'"
         ):
-            check(
-                ("x86_64", "avx512", None, None), ("x86_64", "avx2", None, None), [avx2]
-            )
+            check(("x86_64", "avx2", None, None), ("x86_64", "avx512", None, None))
+        with self.assertRaisesRegex(
+            RuntimeError, "generated for vector ISA 'avx512'.*for 'avx2'"
+        ):
+            check(("x86_64", "avx512", None, None), ("x86_64", "avx2", None, None))
         with self.assertRaisesRegex(
             RuntimeError, "machine 'aarch64', this host is 'x86_64'"
         ):
-            check(
-                ("aarch64", "asimd", None, None), ("x86_64", "avx2", None, None), [avx2]
-            )
+            check(("aarch64", "asimd", None, None), ("x86_64", "avx2", None, None))
         with self.assertRaisesRegex(RuntimeError, "simdlen=256, this host uses None"):
-            check(("x86_64", "avx2", 256, None), ("x86_64", "avx2", None, None), [avx2])
+            check(("x86_64", "avx2", 256, None), ("x86_64", "avx2", None, None))
         with self.assertRaisesRegex(RuntimeError, "no usable CPU codegen target"):
-            check(("x86_64", "avx2", None, None), None, [])
+            check(("x86_64", "avx2", None, None), None)
 
     def test_no_valid_vec_isa_records_no_cpu_codegen_target(self):
         # pick_vec_isa never raises for a missing compiler; it returns
@@ -545,8 +538,12 @@ class TestPackage(torch._inductor.test_case.TestCase):
         compiled_fn = torch._dynamo.optimize(package=package)(fn)
         package.install(backends)
 
-        installed = {name for name in scope if name.startswith(prefixes)} - preexisting
+        # The bindings install() is responsible for: its per-install names plus
+        # the builtins dict. The capture-time __compiled_fn global is not among
+        # them (install binds a renamed twin), so its hook popping it is fine.
+        installed = set(package._installed_globals[sys.modules[fn.__module__]])
         self.assertTrue(installed)
+        self.assertTrue(installed - preexisting)
 
         del pinned
         gc.collect()
@@ -689,6 +686,33 @@ def add(x, y):
 
         torch._dynamo.reset()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_held_autocast_object_survives_the_package_round_trip(self):
+        # An identity guard on the autocast object used to bypass the package;
+        # the value guards serialize, so the entry installs on reload and still
+        # tells configurations apart.
+        def fn(x, ac):
+            with ac:
+                return torch.mm(x, x)
+
+        x = torch.randn(4, 4)
+        same = torch.autocast("cpu", dtype=torch.bfloat16)
+        self.assertEqual(torch.compile(fn)(x, same).dtype, torch.bfloat16)  # noqa: UNSPECIFIED_BACKEND
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertTrue(entry["backend_ids"])
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertGreater(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled(x, same).dtype, torch.bfloat16)
+            other = torch.autocast("cpu", dtype=torch.bfloat16, enabled=False)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
+            ):
+                compiled(x, other)
 
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_unserializable_guard_bypasses_the_package(self):
@@ -914,12 +938,16 @@ def add(x, y):
             return x + 1
 
         self._save_eager_package(fn, ctx, (torch.randn(3, 2),))
-        module_dict = sys.modules[fn.__module__].__dict__
-        before = set(module_dict)
+        module = sys.modules[fn.__module__]
+        module_dict = module.__dict__
         pkg, backends = ctx.load_package(fn, self.path())
         pkg.install(backends)
+        # From the package's own bookkeeping, not a module-dict diff: on a
+        # free-threaded build the capture-time CleanupHook (keyed on a code
+        # object, deferred-refcounted there) may not have popped the previous
+        # compile's name yet, so a diff can be empty.
         (name,) = [
-            k for k in set(module_dict) - before if k.startswith("__compiled_fn")
+            k for k in pkg._installed_globals[module] if k.startswith("__compiled_fn")
         ]
         sentinel = object()
         module_dict[name] = sentinel
@@ -978,6 +1006,85 @@ def add(x, y):
         explicit = CompilePackage(fn, explicit_capture=True)
         self.assertTrue(explicit.explicit_capture)
         self.assertIsNone(explicit.serialization_guard_filter_fn)
+
+    def _saved_guard_names(self, package):
+        names = set()
+        for guarded in package.cache_entry().codes[0].guarded_codes:
+            state = load_guards_state(guarded.guards_state)
+            names |= {g.create_fn_name() for g in state.output_graph.guards}
+        return names
+
+    def test_serialization_filter_applies_to_the_saved_guards_only(self):
+        # The live guards keep checking what they check, so an explicit capture
+        # still recompiles on a dtype change; only the serialized copy is
+        # filtered. The same filter on a non-explicit package does the same, and
+        # an explicit package without a filter saves its guards unfiltered.
+        def fn(x):
+            return x + 1
+
+        def drop_tensor_match(entries):
+            return [e.guard_type != "TENSOR_MATCH" for e in entries]
+
+        for explicit_capture in (True, False):
+            torch._dynamo.reset()
+            pkg = CompilePackage(
+                fn,
+                explicit_capture=explicit_capture,
+                serialization_guard_filter_fn=drop_tensor_match,
+            )
+            counter = torch._dynamo.testing.CompileCounter()
+            compiled = torch._dynamo.optimize(backend=counter, package=pkg)(fn)
+            compiled(torch.randn(3))
+            compiled(torch.randint(0, 5, (3,)))
+            self.assertEqual(counter.frame_count, 2)
+            self.assertNotIn("TENSOR_MATCH", self._saved_guard_names(pkg))
+
+        torch._dynamo.reset()
+        bare = CompilePackage(fn, explicit_capture=True)
+        torch._dynamo.optimize(backend="eager", package=bare)(fn)(torch.randn(3))
+        self.assertIn("TENSOR_MATCH", self._saved_guard_names(bare))
+
+    @torch._dynamo.config.patch(recompile_limit=1)
+    def test_truncated_frames_names_the_frame_that_hit_the_recompile_limit(self):
+        def fn(x):
+            return x + 1
+
+        pkg = CompilePackage(fn, explicit_capture=True)
+        compiled = torch._dynamo.optimize(backend="eager", package=pkg)(fn)
+        compiled(torch.randn(3))
+        self.assertEqual(pkg.truncated_frames, frozenset())
+        compiled(torch.randint(0, 5, (3,)))
+        code = fn.__code__
+        location = f"fn ({code.co_filename}:{code.co_firstlineno})"
+        self.assertEqual(pkg.truncated_frames, frozenset({location}))
+        # The variant captured before the limit stays in the package.
+        self.assertEqual(len(pkg.cache_entry().codes[0].guarded_codes), 1)
+
+    def test_uncovered_frames_follows_the_entries(self):
+        # A frame that entered Dynamo without producing guarded code is a gap
+        # only while that stays true: a later variant that compiles covers it,
+        # whichever order the variants ran in.
+        def fn(x):
+            return x
+
+        pkg = CompilePackage(fn)
+        torch._dynamo.optimize(backend="eager", package=pkg)(fn)(torch.randn(3))
+        self.assertEqual(pkg.uncovered_frames, frozenset({"fn"}))
+        with pkg.code_context(fn.__code__):
+            pkg.add_guarded_code(b"", fn.__code__)
+        self.assertEqual(pkg.uncovered_frames, frozenset())
+
+    def test_serving_package_records_nothing_and_still_recompiles(self):
+        def fn(x):
+            return x + 1
+
+        pkg = CompilePackage(fn, serving=True)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch._dynamo.optimize(backend=counter, package=pkg)(fn)
+        compiled(torch.randn(3))
+        compiled(torch.randint(0, 5, (3,)))
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(pkg.cache_entry().codes[0].guarded_codes, [])
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @parametrize("isolate_recompiles", (False, True))
