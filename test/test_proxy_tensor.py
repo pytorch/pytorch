@@ -2247,8 +2247,6 @@ out_symbolic_tensor_failures = {
     xfail('argmax', ''),
     xfail('argmin', ''),
     xfail('gather', ''),
-    xfail('scatter_add', ''),
-    xfail('scatter', ''),
     xfail('take_along_dim', ''),
 
     # SymIntArrayRef expected to contain only concrete

@@ -17,7 +17,7 @@ inline void scatter_gather_dtype_check(
   const Tensor& index,
   const std::optional<Tensor>& src_opt = std::nullopt
 ) {
-  if (index.numel() != 0) {
+  if (index.sym_numel() != 0) {
     TORCH_CHECK(
       index.scalar_type() == at::ScalarType::Long || index.scalar_type() == at::ScalarType::Int,
       method_name, "(): Expected dtype int32/int64 for index"
@@ -68,7 +68,7 @@ inline void scatter_shape_check(
   const Tensor& self, int64_t dim, const Tensor& index,
   const std::optional<Tensor>& src_opt = std::nullopt
 ) {
-  if (index.numel() == 0) return;
+  if (index.sym_numel() == 0) return;
   TORCH_CHECK(
     ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(index.dim()),
     "Index tensor must have the same number of dimensions as self tensor"
@@ -79,9 +79,9 @@ inline void scatter_shape_check(
 
   //  Check: index.size(d) <= self.size(d) for all d != dim
   for (const auto d : c10::irange(self_dims)) {
-    int64_t index_d_size = ensure_nonempty_size(index, d);
+    c10::SymInt index_d_size = ensure_nonempty_sym_size(index, d);
     if (d == dim) continue;
-    if (index_d_size > ensure_nonempty_size(self, d)) {
+    if (index_d_size > ensure_nonempty_sym_size(self, d)) {
       is_wrong_shape = true;
       break;
     }
@@ -91,8 +91,8 @@ inline void scatter_shape_check(
   if (!is_wrong_shape && src_opt.has_value()) {
     const auto& src = src_opt.value();
     for (const auto d : c10::irange(self_dims)) {
-      int64_t index_d_size = ensure_nonempty_size(index, d);
-      if (index_d_size > ensure_nonempty_size(src, d)) {
+      c10::SymInt index_d_size = ensure_nonempty_sym_size(index, d);
+      if (index_d_size > ensure_nonempty_sym_size(src, d)) {
         is_wrong_shape = true;
         break;
       }
@@ -108,16 +108,16 @@ inline void scatter_shape_check(
     );
 
     TORCH_CHECK(!is_wrong_shape,
-      "Expected index ", index.sizes(),
-      " to be no larger than self ", self.sizes(),
+      "Expected index ", index.sym_sizes(),
+      " to be no larger than self ", self.sym_sizes(),
       " apart from dimension ", dim,
-      " and to be no larger size than src ", src.sizes()
+      " and to be no larger size than src ", src.sym_sizes()
     );
   }
   else {
     TORCH_CHECK(!is_wrong_shape,
-      "Expected index ", index.sizes(),
-      " to be no larger than self ", self.sizes(),
+      "Expected index ", index.sym_sizes(),
+      " to be no larger than self ", self.sym_sizes(),
       " apart from dimension ", dim
     );
   }
