@@ -5061,6 +5061,64 @@ class PropertyVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    tp_members = {
+        "fget": Member(
+            getset_load_or_build(
+                lambda s: s.descriptor.fget,
+                "fget",
+                lambda s: s.source and AttrSource(s.source, "fget"),
+            ),
+            readonly_setter,
+        ),
+        "fset": Member(
+            getset_load_or_build(
+                lambda s: s.descriptor.fset,
+                "fset",
+                lambda s: s.source and AttrSource(s.source, "fset"),
+            ),
+            readonly_setter,
+        ),
+        "fdel": Member(
+            getset_load_or_build(
+                lambda s: s.descriptor.fdel,
+                "fdel",
+                lambda s: s.source and AttrSource(s.source, "fdel"),
+            ),
+            readonly_setter,
+        ),
+        "__doc__": Member(
+            getset_load_or_build(
+                lambda s: s.descriptor.__doc__,
+                "__doc__",
+                lambda s: s.source and AttrSource(s.source, "__doc__"),
+            ),
+            getset_set("__doc__"),
+        ),
+    }
+
+    def _name_getter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # property.__name__ only exists from 3.13
+        if sys.version_info >= (3, 13):
+            name = getattr(self.descriptor, "__name__", None)
+            if name is not None:
+                source = self.source and AttrSource(self.source, "__name__")
+                return VariableTracker.build(tx, name, source)
+        raise_attribute_error(
+            tx, f"'{self.python_type_name()}' object has no attribute '__name__'"
+        )
+
+    tp_getset = {
+        "__name__": GetSet(_name_getter, getset_set("__name__")),
+        "__isabstractmethod__": GetSet(
+            getset_load_or_build(
+                lambda s: s.descriptor.__isabstractmethod__,
+                "__isabstractmethod__",
+                lambda s: s.source and AttrSource(s.source, "__isabstractmethod__"),
+            ),
+            readonly_setter,
+        ),
+    }
+
     def __init__(
         self,
         descriptor: property,
@@ -5078,6 +5136,46 @@ class PropertyVariable(VariableTracker):
 
     def as_python_constant(self) -> property:
         return self.descriptor
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        attr = "fset" if value is not None else "fdel"
+        fn = getattr(self.descriptor, attr)
+
+        if fn is None:
+            display_name = getattr(self.descriptor, "__name__", None)
+            kind = "setter" if value is not None else "deleter"
+            if sys.version_info >= (3, 11):
+                # property_descr_set formats %R of the owner's *type*, whose
+                # repr is its bare __qualname__ (no module prefix) -- unlike
+                # python_qualified_name(), which mirrors the module-qualified
+                # _PyType_GetFullyQualifiedName used elsewhere (e.g. __repr__).
+                try:
+                    cls_name = obj.python_type().__qualname__
+                except NotImplementedError:
+                    cls_name = obj.python_type_name()
+                if display_name is not None:
+                    msg = f"property '{display_name}' of '{cls_name}' object has no {kind}"
+                else:
+                    msg = f"property of '{cls_name}' object has no {kind}"
+            else:
+                # < 3.11: no owner/property-name in the message at all.
+                verb = "set" if value is not None else "delete"
+                if display_name is not None:
+                    msg = f"can't {verb} attribute '{display_name}'"
+                else:
+                    msg = f"can't {verb} attribute"
+            raise_attribute_error(tx, msg)
+
+        args = [obj] if value is None else [obj, value]
+        VariableTracker.build(
+            tx, fn, source=self.source and AttrSource(self.source, attr)
+        ).call_function(tx, args, {})
+        return ConstantVariable.create(None)
 
     def tp_descr_get_impl(
         self,
