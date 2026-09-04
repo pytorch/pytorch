@@ -496,8 +496,9 @@ class BaseBuiltinVariable(VariableTracker):
         if self.as_python_constant() is type:
             if isinstance(arg, variables.UserDefinedClassVariable):
                 return VariableTracker.build(tx, type.__str__(arg.value))
-            if arg.is_python_constant() and isinstance(arg.as_python_constant(), type):
-                return VariableTracker.build(tx, type.__str__(arg.as_python_constant()))
+            const = arg.as_python_constant() if arg.is_python_constant() else None
+            if isinstance(const, type):
+                return VariableTracker.build(tx, type.__str__(const))
         return generic_str(tx, arg)
 
     def _unbound_repr(
@@ -510,9 +511,24 @@ class BaseBuiltinVariable(VariableTracker):
         if self.as_python_constant() is type:
             if isinstance(arg, variables.UserDefinedClassVariable):
                 return VariableTracker.build(tx, type.__repr__(arg.value))
-            if arg.is_python_constant() and isinstance(arg.as_python_constant(), type):
-                return VariableTracker.build(tx, type.__repr__(arg.as_python_constant()))
+            const = arg.as_python_constant() if arg.is_python_constant() else None
+            if isinstance(const, type):
+                return VariableTracker.build(tx, type.__repr__(const))
         return generic_repr(tx, arg)
+
+    # Unbound Type.__str__/__repr__(x) is not the 0-arg tp_str/tp_repr slot.
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__str__" and len(args) == 1 and not kwargs:
+            return self._unbound_str(tx, args[0])
+        if name == "__repr__" and len(args) == 1 and not kwargs:
+            return self._unbound_repr(tx, args[0])
+        return super().call_method(tx, name, args, kwargs)
 
 
 def _uses_custom_classinfo_check(
@@ -1929,12 +1945,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             # e.g. list.__len__(my_list) → len(my_list)
             return generic_size(tx, args[0])
 
-        if name == "__str__" and len(args) == 1 and not kwargs:
-            return self._unbound_str(tx, args[0])
-
-        if name == "__repr__" and len(args) == 1 and not kwargs:
-            return self._unbound_repr(tx, args[0])
-
         if name == "__iter__" and len(args) == 1 and not kwargs:
             # type.__iter__(instance) → iter(instance)
             # e.g., tuple.__iter__(my_tuple) → iter(my_tuple)
@@ -3274,10 +3284,6 @@ class DictBuiltinVariable(BaseBuiltinVariable):
             elif isinstance(args[0], ConstDictVariable):
                 return args[0].call_method(tx, name, args[1:], kwargs)
 
-        if name == "__str__" and len(args) == 1 and not kwargs:
-            return self._unbound_str(tx, args[0])
-        if name == "__repr__" and len(args) == 1 and not kwargs:
-            return self._unbound_repr(tx, args[0])
         return super().call_method(tx, name, args, kwargs)
 
     @staticmethod
@@ -3876,10 +3882,6 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                     tx=tx,
                 )
 
-        if name == "__str__" and len(args) == 1 and not kwargs:
-            return self._unbound_str(tx, args[0])
-        if name == "__repr__" and len(args) == 1 and not kwargs:
-            return self._unbound_repr(tx, args[0])
         return super().call_method(tx, name, args, kwargs)
 
 
