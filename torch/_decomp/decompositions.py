@@ -3557,7 +3557,7 @@ def _index_copy(
 def log_sigmoid_forward(self: Tensor) -> tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
     z = torch.exp(-torch.abs(self))
-    if self.is_cuda or self.is_xpu:
+    if self.is_cuda or self.is_xpu or self.is_mps:
         buffer = self.new_zeros((0,))
     else:
         buffer = z
