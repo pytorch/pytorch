@@ -1530,34 +1530,6 @@ class TestQuantizedOps(_QuantizedActivationTestMixin, TestCase):
                          msg="ops.quantized.max_pool2d results are off")
 
 
-    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
-    def test_max_pool2d_pt2e(self):
-        kernel_list = [2, 3]
-        stride_list = [1, 2]
-        padding_list = [0, 2]
-        dilation_list = [1, 2]
-        ceil_mode_list = [False, True]
-        channels_last_input = [False, True]
-        options = itertools.product(kernel_list, stride_list, padding_list, dilation_list, ceil_mode_list, channels_last_input)
-        for kernel, stride, padding, dilation, ceil_mode, channels_last in options:
-            if padding >= (kernel // 2):
-                # Continue with invalid input
-                continue
-            input = torch.randint(0, 8, (1, 3, 8, 8), dtype=torch.uint8)
-            if channels_last:
-                input = input.contiguous(memory_format=torch.channels_last)
-            a_pool = torch.nn.functional.max_pool2d(input.to(torch.float32), kernel_size=kernel,
-                                                    stride=stride, padding=padding, dilation=dilation,
-                                                    ceil_mode=ceil_mode).to(torch.uint8)
-            a_hat = torch.ops.quantized.max_pool2d(input, kernel_size=_pair(kernel),
-                                                   stride=_pair(stride), padding=_pair(padding),
-                                                   dilation=_pair(dilation), ceil_mode=ceil_mode)
-            self.assertEqual(input.is_contiguous(), a_hat.is_contiguous(),
-                             msg="ops.quantized.max_pool2d input output diff memory format")
-            self.assertEqual(a_pool, a_hat,
-                             msg="ops.quantized.max_pool2d results are off")
-
-
     """Tests 3D max pool operation on quantized tensors."""
     def test_max_pool3d(self):
         torch_types = [torch.qint8, torch.quint8]
@@ -3501,6 +3473,48 @@ class TestQuantizedOpsCUDNN(TestCase):
             padding=_pair(padding), dilation=_pair(dilation), ceil_mode=ceil_mode)
         self.assertEqual(a_ref, a_hat.dequantize(),
                          msg="ops.quantized.max_pool2d results are off")
+
+
+class TestQuantizedMaxPool2dPT2EDevice(TestCase):
+    """The pt2e lowering of max_pool2d takes a plain uint8 tensor rather than a
+    quantized dtype, so unlike the rest of this file it is not tied to the
+    CPU-only QuantizedCPU backend. quantized::max_pool2d is registered for the
+    plain (non-quantized) key on CPU and XPU only -- CUDA has just the
+    QuantizedCUDA/cudnn variant -- hence the only_for below."""
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    def test_max_pool2d_pt2e(self, device):
+        kernel_list = [2, 3]
+        stride_list = [1, 2]
+        padding_list = [0, 2]
+        dilation_list = [1, 2]
+        ceil_mode_list = [False, True]
+        channels_last_input = [False, True]
+        options = itertools.product(kernel_list, stride_list, padding_list, dilation_list, ceil_mode_list, channels_last_input)
+        for kernel, stride, padding, dilation, ceil_mode, channels_last in options:
+            if padding >= (kernel // 2):
+                # Continue with invalid input
+                continue
+            input = torch.randint(0, 8, (1, 3, 8, 8), dtype=torch.uint8, device=device)
+            if channels_last:
+                input = input.contiguous(memory_format=torch.channels_last)
+            a_pool = torch.nn.functional.max_pool2d(input.to(torch.float32), kernel_size=kernel,
+                                                    stride=stride, padding=padding, dilation=dilation,
+                                                    ceil_mode=ceil_mode).to(torch.uint8)
+            a_hat = torch.ops.quantized.max_pool2d(input, kernel_size=_pair(kernel),
+                                                   stride=_pair(stride), padding=_pair(padding),
+                                                   dilation=_pair(dilation), ceil_mode=ceil_mode)
+            self.assertEqual(input.is_contiguous(), a_hat.is_contiguous(),
+                             msg="ops.quantized.max_pool2d input output diff memory format")
+            self.assertEqual(a_pool, a_hat,
+                             msg="ops.quantized.max_pool2d results are off")
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    def test_max_pool2d_invalid_padding(self, device):
+        input = torch.randint(0, 8, (1, 3, 8, 8), dtype=torch.uint8, device=device)
+        with self.assertRaisesRegex(RuntimeError, "padding should be smaller than half of kernel_size"):
+            torch.ops.quantized.max_pool2d(input, kernel_size=_pair(2), stride=_pair(1),
+                                           padding=_pair(2), dilation=_pair(1), ceil_mode=False)
 
 
 class TestDynamicQuantizedOps(TestCase):
@@ -9665,6 +9679,9 @@ class TestQuantizedWithMinMax(TestCase):
 
 
 instantiate_device_type_tests(TestQuantizedOpsDevice, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(
+    TestQuantizedMaxPool2dPT2EDevice, globals(), only_for=("cpu", "xpu"), allow_xpu=True
+)
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")
