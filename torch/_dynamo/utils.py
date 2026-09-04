@@ -4784,6 +4784,151 @@ def nn_module_has_global_hooks() -> bool:
     )
 
 
+DynamoRuntimeModuleRef = weakref.ReferenceType[torch.nn.Module]
+
+
+class _DynamoRuntimeModuleProvider:
+    """Compiler-owned wrapper that declares its runtime module values."""
+
+    def _dynamo_runtime_module_values(self) -> tuple[Any, ...]:
+        return ()
+
+
+class _DynamoRuntimeModule(torch.nn.Module, _DynamoRuntimeModuleProvider):
+    """Compiler-owned module that may contain more runtime module values."""
+
+
+class _DynamoRuntimeModuleTLS(threading.local):
+    def __init__(self) -> None:
+        self.refs: dict[int, DynamoRuntimeModuleRef] = {}
+        self.all_modules = False
+
+
+_dynamo_runtime_module_tls = _DynamoRuntimeModuleTLS()
+_dynamo_runtime_module_null_context = contextlib.nullcontext()
+
+
+class _DynamoRuntimeModuleContext:
+    def __init__(
+        self, refs: tuple[DynamoRuntimeModuleRef, ...], *, all_modules: bool = False
+    ) -> None:
+        self.refs = refs
+        self.all_modules = all_modules
+        self.prior: dict[int, DynamoRuntimeModuleRef] = {}
+        self.prior_all_modules = False
+
+    def __enter__(self) -> None:
+        self.prior = _dynamo_runtime_module_tls.refs
+        self.prior_all_modules = _dynamo_runtime_module_tls.all_modules
+        current = self.prior.copy()
+        for ref in self.refs:
+            module = ref()
+            if module is not None:
+                current[id(module)] = ref
+        _dynamo_runtime_module_tls.refs = current
+        _dynamo_runtime_module_tls.all_modules = (
+            self.prior_all_modules or self.all_modules
+        )
+
+    def __exit__(self, *args: Any) -> None:
+        _dynamo_runtime_module_tls.refs = self.prior
+        _dynamo_runtime_module_tls.all_modules = self.prior_all_modules
+
+
+def get_dynamo_runtime_module_refs(*values: Any) -> tuple[DynamoRuntimeModuleRef, ...]:
+    """Get weak references to exact compiler-owned module identities.
+
+    GraphModule ``get_attr`` subgraphs and ``_DynamoRuntimeModule`` call targets
+    are compiler-created too. Ordinary ``call_module`` children are user modules
+    and intentionally remain visible unless a caller supplies them explicitly.
+    """
+    refs: list[DynamoRuntimeModuleRef] = []
+    seen: set[int] = set()
+    pending = list(values)
+
+    while pending:
+        value = pending.pop()
+        if isinstance(
+            value, (types.MethodType, types.BuiltinMethodType)
+        ) and isinstance(value.__self__, torch.nn.Module):
+            value = value.__self__
+        if not isinstance(value, (torch.nn.Module, _DynamoRuntimeModuleProvider)):
+            continue
+        if id(value) in seen:
+            continue
+        seen.add(id(value))
+
+        if isinstance(value, torch.nn.Module):
+            refs.append(weakref.ref(value))
+
+        if isinstance(value, torch.fx.GraphModule):
+            for node in value.graph.nodes:
+                if node.op not in ("call_module", "get_attr"):
+                    continue
+                try:
+                    submodule = value.get_submodule(str(node.target))
+                except AttributeError:
+                    continue
+                if (
+                    node.op == "get_attr"
+                    and isinstance(submodule, torch.fx.GraphModule)
+                ) or isinstance(submodule, _DynamoRuntimeModule):
+                    pending.append(submodule)
+
+        if isinstance(value, _DynamoRuntimeModuleProvider):
+            pending.extend(value._dynamo_runtime_module_values())
+    return tuple(refs)
+
+
+def dynamo_runtime_modules(
+    refs: tuple[DynamoRuntimeModuleRef, ...],
+) -> AbstractContextManager[None]:
+    """Mark module identities as compiler-owned during a nested call.
+
+    The state is installed only while global module hooks are active to keep
+    ordinary compiled calls free of tracking overhead. Weak references avoid
+    extending the lifetime of backend-owned modules.
+    """
+    if not refs or not torch.nn.modules.module._has_any_global_hook():
+        return _dynamo_runtime_module_null_context
+    return _DynamoRuntimeModuleContext(refs)
+
+
+def dynamo_compiler_modules() -> AbstractContextManager[None]:
+    """Treat every module invoked by a compiler as a runtime artifact."""
+    if not torch.nn.modules.module._has_any_global_hook():
+        return _dynamo_runtime_module_null_context
+    return _DynamoRuntimeModuleContext((), all_modules=True)
+
+
+def is_dynamo_runtime_module(module: torch.nn.Module) -> bool:
+    if _dynamo_runtime_module_tls.all_modules:
+        return True
+    ref = _dynamo_runtime_module_tls.refs.get(id(module))
+    return ref is not None and ref() is module
+
+
+def wrap_dynamo_runtime_module_call(
+    fn: Callable[_P, R], refs: tuple[DynamoRuntimeModuleRef, ...]
+) -> Callable[_P, R]:
+    """Run ``fn`` with the supplied compiler-owned modules active."""
+    if not refs:
+        return fn
+
+    @functools.wraps(fn)
+    def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> R:
+        if not torch.nn.modules.module._has_any_global_hook():
+            return fn(*args, **kwargs)
+        with _DynamoRuntimeModuleContext(refs):
+            return fn(*args, **kwargs)
+
+    if (boxed_call := getattr(fn, "_boxed_call", None)) is not None:
+        wrapped._boxed_call = boxed_call  # type: ignore[attr-defined]
+    # The AOT standalone composer can omit this observational wrapper.
+    wrapped._dynamo_runtime_module_call_inner = fn  # type: ignore[attr-defined]
+    return wrapped
+
+
 def nn_module_get_all_hooks(
     mod: torch.nn.Module,
     check_forward_hooks: bool = False,
@@ -5603,7 +5748,7 @@ def nn_module_proxy(mod: Any) -> Any:
     return proxy
 
 
-class GmWrapper(torch.nn.Module):
+class GmWrapper(_DynamoRuntimeModule):
     def __init__(
         self, gm: torch.fx.GraphModule, unflatten_fn: Callable[[list[Any]], Any]
     ) -> None:
@@ -5615,6 +5760,9 @@ class GmWrapper(torch.nn.Module):
         # pyrefly: ignore [redefinition]
         args: list[Any] = list(args)
         return self.gm(*self.unflatten_fn(args))
+
+    def _dynamo_runtime_module_values(self) -> tuple[Any, ...]:
+        return (self.gm,)
 
 
 def flatten_graph_inputs(
@@ -5650,14 +5798,19 @@ def flatten_graph_inputs(
         def unflatten_fn(flat_args: Any) -> Any:
             return (flat_args[:boxed_inputs_count], *flat_args[boxed_inputs_count:])
 
-        compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flatten_fn(inputs))
+        flat_inputs = flatten_fn(inputs)
     else:
         # slow path, don't know inputs structure
         flat_inputs, spec = pytree.tree_flatten(inputs)
         unflatten_fn = functools.partial(pytree.tree_unflatten, treespec=spec)
-        compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flat_inputs)
         # note this doesn't check the spec, assuming it is the same
         flatten_fn = pytree.arg_tree_leaves
+
+    gm_wrapper = GmWrapper(gm, unflatten_fn)
+    compile_module_refs = get_dynamo_runtime_module_refs(gm_wrapper, gm)
+    with dynamo_runtime_modules(compile_module_refs):
+        compiled_fn = compile_gm(gm_wrapper, flat_inputs)
+    runtime_module_refs = get_dynamo_runtime_module_refs(gm_wrapper, gm, compiled_fn)
 
     def wrapper(*args: Any) -> Any:
         flat_args = flatten_fn(args)
@@ -5667,7 +5820,8 @@ def flatten_graph_inputs(
             args[i].clear()
 
         # this call is boxed to avoid increasing refcount until we reach aot_module_simplified forward
-        return compiled_fn(flat_args)
+        with dynamo_runtime_modules(runtime_module_refs):
+            return compiled_fn(flat_args)
 
     return wrapper
 

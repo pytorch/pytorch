@@ -64,11 +64,14 @@ class DecoratorTests(PytreeRegisteringTestCase):
         gm = torch.fx.symbolic_trace(f)
         boxed = invoke_subgraph_inner_compiler(gm, [torch.randn(4)])
 
-        # The boxed wrapper closes over `invoke_subgraph_wrapper_unboxed`.
+        # The runtime-module wrapper preserves the boxed compiler's callable.
+        boxed_compiler = boxed.__wrapped__
+        # The boxed compiler closes over `invoke_subgraph_wrapper_unboxed`.
         self.assertEqual(
-            boxed.__code__.co_freevars, ("invoke_subgraph_wrapper_unboxed",)
+            boxed_compiler.__code__.co_freevars,
+            ("invoke_subgraph_wrapper_unboxed",),
         )
-        unboxed = boxed.__closure__[0].cell_contents
+        unboxed = boxed_compiler.__closure__[0].cell_contents
 
         self.assertTrue(is_callable_allowed(unboxed))
 

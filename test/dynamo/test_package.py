@@ -13,7 +13,12 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
+from torch._dynamo.package import (
+    CompilePackage,
+    DiskDynamoStore,
+    DynamoCache,
+    InMemoryDynamoStore,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
@@ -29,6 +34,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
     HAS_XPU_AND_TRITON,
 )
+from torch.utils.module_tracker import ModuleTracker
 
 
 def compute_loss_helper(x):
@@ -145,6 +151,69 @@ class TestPackage(torch._inductor.test_case.TestCase):
             compiled_fn = torch._dynamo.optimize(package=package)(fn)
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
+
+    @parametrize("force_autograd_cache", (False, True))
+    def test_eager_runtime_modules_after_install(self, force_autograd_cache):
+        def fn(pred, x):
+            return torch.cond(
+                pred,
+                lambda value: value.sin(),
+                lambda value: value.cos(),
+                (x,),
+            )
+
+        def guard_filter_fn(guards):
+            return [False for _ in guards]
+
+        args = (torch.tensor(True), torch.randn(2, 2))
+        expected = fn(*args)
+        false_args = (torch.tensor(False), args[1])
+        false_expected = fn(*false_args)
+        ctx = InMemoryDynamoStore()
+        with torch._functorch.config.patch(force_autograd_cache=force_autograd_cache):
+            package = CompilePackage(fn)
+            compiled_fn = torch._dynamo.optimize(
+                backend="eager", package=package, guard_filter_fn=guard_filter_fn
+            )(fn)
+            self.assertEqual(compiled_fn(*args), expected)
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+            ctx.save_package(package, "runtime-modules")
+
+            torch._dynamo.reset()
+            PrecompileContext.clear()
+            package, backends = ctx.load_package(fn, "runtime-modules")
+            compiled_fn = torch._dynamo.optimize(
+                package=package, guard_filter_fn=guard_filter_fn
+            )(fn)
+            package.install(backends)
+
+        seen = []
+
+        @torch._dynamo.disable
+        def record(module, args):
+            if isinstance(module, torch.fx.GraphModule):
+                seen.append(
+                    (
+                        id(module),
+                        tracker.parents.copy(),
+                        torch._dynamo.utils.is_dynamo_runtime_module(module),
+                    )
+                )
+
+        with ModuleTracker() as tracker:
+            handle = torch.nn.modules.module.register_module_forward_pre_hook(record)
+            try:
+                self.assertEqual(compiled_fn(*args), expected)
+                self.assertEqual(compiled_fn(*false_args), false_expected)
+            finally:
+                handle.remove()
+
+        self.assertGreaterEqual(len(seen), 2)
+        self.assertGreaterEqual(len({module_id for module_id, _, _ in seen}), 2)
+        for _, parents, is_dynamo_runtime in seen:
+            self.assertEqual(parents, {"Global"})
+            self.assertTrue(is_dynamo_runtime)
 
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda", "xpu"))
