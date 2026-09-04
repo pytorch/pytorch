@@ -45,9 +45,9 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCUDA,
     ops,
-    onlyAccelerator,
 )
 from torch.testing._internal.common_methods_invocations import (
     binary_ufuncs,
@@ -700,18 +700,18 @@ FBCODE_XFAIL_DICTS = {
 #   - Some CUDA xfails XPASS on XPU (e.g. remainder/fmod binary numerics, rsqrt/sin
 #     unary numerics), so they are omitted here.
 #   - Some ops fail on XPU that pass on CUDA (e.g. exp/exp2/log2/log1p/tan/tanh
-#     eager_equivalence in fp32, leaky_relu low-precision numerics, remainder
+#     eager_equivalence in fp32, gelu/linear fp32 eager_equivalence, remainder
 #     determinism).
 # intel/torch-xpu-ops/issues/5168
 XPU_EAGER_EQUIV_XFAILS = {
-    "p": {
+    "aot_eager_decomp_partition": {
+        "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
-        "nn.functional.leaky_relu": {bf16, fp16},
         "softmax": {fp32},
-        "log_softmax": {fp32, fp16},
+        "log_softmax": {fp32},
     },
     "inductor_default": {
-        "exp": {bf16, fp16, fp32},
+        "exp": {fp32},
         "exp2": {fp32},
         "expm1": {fp32},
         "log1p": {fp32},
@@ -720,28 +720,26 @@ XPU_EAGER_EQUIV_XFAILS = {
         "sigmoid": {fp32},
         "sub": {fp32},
         "tan": {fp32},
-        "tanh": {fp16, fp32},
+        "tanh": {fp32},
         "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
-        "nn.functional.leaky_relu": {bf16, fp16},
-        "nn.functional.silu": {bf16, fp32},
+        "nn.functional.silu": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
     },
     "inductor_numerics": {
-        "exp": {bf16, fp16, fp32},
+        "exp": {fp32},
         "exp2": {fp32},
         "expm1": {fp32},
         "log1p": {fp32},
         "log2": {fp32},
-        "remainder": {fp32},
         "sigmoid": {fp32},
         "sub": {ALL},
         "tan": {fp32},
-        "tanh": {fp16, fp32},
+        "tanh": {fp32},
+        "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
-        "nn.functional.leaky_relu": {bf16, fp16},
-        "nn.functional.rms_norm": {fp32},
+        "nn.functional.linear": {fp32},
         "nn.functional.silu": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
@@ -749,9 +747,6 @@ XPU_EAGER_EQUIV_XFAILS = {
 }
 
 XPU_DETERMINISM_XFAILS = {
-    "inductor_default": {
-        "remainder": {fp32},
-    },
     "inductor_numerics": {
         "remainder": {fp32},
     },
@@ -771,25 +766,22 @@ XPU_BATCH_INVARIANCE_XFAILS = {
 
 XPU_UNARY_NUMERICAL_XFAILS = {
     "inductor_default": {
-        "exp": {bf16, fp16, fp32},
+        "exp": {fp32},
         "exp2": {fp32},
-        "expm1": {fp32},
         "log1p": {fp32},
         "log2": {fp32},
         "sigmoid": {fp32},
-        "tan": {fp16, fp32},
-        "tanh": {fp16, fp32},
+        "tan": {fp32},
+        "tanh": {fp32},
     },
     "inductor_numerics": {
-        "exp": {bf16, fp16, fp32},
+        "exp": {fp32},
         "exp2": {fp32},
-        "expm1": {fp32},
-        "log": {fp32},
         "log1p": {fp32},
         "log2": {fp32},
         "sigmoid": {fp32},
-        "tan": {fp16, fp32},
-        "tanh": {fp16, fp32},
+        "tan": {fp32},
+        "tanh": {fp32},
     },
 }
 
@@ -1293,7 +1285,9 @@ class TestOpInfoProperties(TestCase):
         )
 
 
-instantiate_device_type_tests(TestOpInfoProperties, globals(), except_for=["cpu"], allow_xpu=True)
+instantiate_device_type_tests(
+    TestOpInfoProperties, globals(), except_for=["cpu"], allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
