@@ -2642,6 +2642,32 @@ class TritonKernelOverrides(TritonOverrides):
             fn.__name__ = fn_name  # type: ignore[attr-defined]
             setattr(cls, fn_name, staticmethod(fn))
 
+    @staticmethod
+    def _use_aten_fp32_special(x):
+        return (
+            config.should_use_pytorch_libdevice()
+            and torch.version.cuda is not None
+            and torch.version.hip is None
+            and V.graph.get_current_device_or_throw().type == "cuda"
+            and triton_arg_dtype(x) == torch.float32
+        )
+
+    @staticmethod
+    def i0(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            from torch._inductor.codegen.common import OpDecompositions
+
+            return OpDecompositions.i0(x).value
+        return TritonOverrides.i0(x)
+
+    @staticmethod
+    def i1(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            from torch._inductor.codegen.common import OpDecompositions
+
+            return OpDecompositions.i1(x).value
+        return TritonOverrides.i1(x)
+
     @classmethod
     def constant(cls, value, dtype):
         # NOTE: Cannot use shape=[] as it's not supported by triton-rocm
