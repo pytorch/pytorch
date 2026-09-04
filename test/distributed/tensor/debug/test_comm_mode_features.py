@@ -11,7 +11,14 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfHpu, TEST_XPU, xfailIf
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfHpu,
+    TEST_XPU,
+    xfailIf,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
@@ -28,6 +35,8 @@ c10d_functional = torch.ops.c10d_functional
 
 
 class TestCommModeFeatures(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     # checks if parameter / sharding info is the same as ground truth
     def check_same_set_of_keys(self, dict1, dict2):
         """
@@ -219,6 +228,10 @@ class TestCommModeFeatures(DTensorTestBase):
             1,
         )
 
+
+class TestCommModeTransformerCUDA(DTensorTestBase):
+    hw_classification = HardwareClassification.CUDA
+
     @skipIfHpu
     @skip_unless_torch_gpu
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1555
@@ -372,6 +385,8 @@ class TestCommModeFeatures(DTensorTestBase):
             1,
         )
 
+
+instantiate_device_type_tests(TestCommModeFeatures, globals(), except_for=("cpu",))
 
 if __name__ == "__main__":
     run_tests()
