@@ -1084,11 +1084,6 @@ def _current_config() -> Any:
     return cast(Any, sys.modules[__name__])
 
 
-def use_pytorch_libdevice() -> bool:
-    config = _current_config()
-    return config.numerics == "strict" or config.eager_numerics.use_pytorch_libdevice
-
-
 def use_eager_division_rounding() -> bool:
     config = _current_config()
     return config.numerics == "strict" or config.eager_numerics.division_rounding

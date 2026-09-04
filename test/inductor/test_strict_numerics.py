@@ -89,7 +89,6 @@ FUSION_CASES = (
 )
 
 EFFECTIVE_NUMERICS = {
-    "eager_numerics.use_pytorch_libdevice": config.use_pytorch_libdevice,
     "eager_numerics.division_rounding": config.use_eager_division_rounding,
     "eager_numerics.disable_ftz": config.should_disable_ftz,
     "emulate_precision_casts": config.should_emulate_precision_casts,
@@ -133,8 +132,7 @@ class StrictNumericsConfigTest(TestCase):
                 "-c",
                 (
                     "from torch._inductor import config; "
-                    "print(config.use_pytorch_libdevice(), "
-                    "config.use_eager_division_rounding(), "
+                    "print(config.use_eager_division_rounding(), "
                     "config.should_disable_ftz(), "
                     "config.should_emulate_precision_casts())"
                 ),
@@ -142,7 +140,7 @@ class StrictNumericsConfigTest(TestCase):
             env=env,
             text=True,
         )
-        self.assertEqual(output.strip(), "True True True True")
+        self.assertEqual(output.strip(), "True True True")
 
 
 @unittest.skipUnless(
