@@ -59,6 +59,38 @@ class TestKernelGeneral(TestCase):
         )
         self.assertEqual(idx, torch.full((8,), 40000, device="cuda", dtype=torch.int32))
 
+    def test_family_has_exactly_one_cute_kernel(self):
+        # The unification's claim, asserted rather than described: every axis compiles from the
+        # SAME body. A second @cute.kernel anywhere in the family means an axis has been forked
+        # back out, which is how a shared prologue, projection and store quietly stop being
+        # shared.
+        #
+        # Source-level, but GLOBBED and matched on the decorator rather than one spelling. A
+        # hardcoded file list misses a new kernel_foo.py, and `line == "@cute.kernel"` misses
+        # `@cute.kernel  # note` and `@cutlass.cute.kernel` -- both the same fork with a
+        # different source line, and both slipped past the earlier form. Runtime introspection
+        # cannot replace this: @cute.kernel and @cute.jit both produce a plain function with the
+        # same added attributes, so nothing distinguishes them after import.
+        import pathlib
+        import re
+
+        from torch._native.ops import reductions
+
+        root = pathlib.Path(reductions.__file__).parent
+        deco = re.compile(r"@(?:\w+\.)*cute\.kernel\b")
+        found = [
+            f"{path.name}:{i}"
+            # inner_tree_kernel.py holds the reference implementation's kernels, not this family's.
+            for path in sorted(root.glob("*.py"))
+            if path.name != "inner_tree_kernel.py"
+            for i, line in enumerate(path.read_text().splitlines(), 1)
+            if deco.match(line.strip())
+        ]
+        self.assertEqual(
+            len(found), 1, f"expected one kernel in the family, got {found}"
+        )
+        self.assertTrue(found[0].startswith("tile.py"), f"the body moved: {found}")
+
     def test_internal_invariants_raise(self):
         # These checks exist to hold under `python -O`, where a plain `assert` is stripped
         # entirely. A test cannot observe the -O build from here, so what it CAN pin is that each
@@ -82,6 +114,10 @@ class TestKernelGeneral(TestCase):
             kg.ReduceBlock(
                 trait, count=2**31, num_o=1, red_pairs=((2**31, 1),), kept_pairs=()
             )
+        # No reduced runs at all: the fold's decode would index vals[-1]. An empty KEPT list is
+        # legal (a full reduction), which is why only the reduced side is refused here.
+        with self.assertRaisesRegex(AssertionError, "at least one reduced run"):
+            kg.ReduceBlock(trait, count=1, num_o=1, red_pairs=(), kept_pairs=())
         # The cross-CTA driver reshapes, so it needs a contiguous CUDA input too.
         with self.assertRaisesRegex(AssertionError, "CUDA"):
             xc.reduce_row_xcta(trait, "inv_xcta", xt, torch.float32)
