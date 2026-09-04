@@ -6,9 +6,12 @@ from onnx_test_common import run_model_test
 import torch
 from torch.onnx import OperatorExportTypes
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestAutogradFuns(pytorch_test_common.ExportTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     opset_version = 20
     keep_initializers_as_inputs = False
     onnx_shape_inference = True
