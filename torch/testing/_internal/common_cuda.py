@@ -312,8 +312,8 @@ def evaluate_platform_supports_fp8_grouped_gemm():
                     return True
         else:
             return SM90OrLater and not SM100OrLater
-        if torch.xpu.is_available():
-            return True
+    if torch.xpu.is_available():
+        return True
     return False
 
 def evaluate_platform_supports_mx_gemm():
