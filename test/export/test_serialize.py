@@ -15,11 +15,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from torch.testing._internal.inductor_utils import HAS_GPU
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.testing._internal.inductor_utils import HAS_TRITON, requires_triton
 
 
-if HAS_GPU:
+if HAS_TRITON:
     import triton
     import triton.language as tl
 
@@ -63,7 +62,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
-    requires_accelerator,
     run_tests,
     TemporaryFileName,
     TestCase,
@@ -945,7 +943,7 @@ class TestSerializeDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
-    @requires_gpu_and_triton
+    @requires_triton()
     def test_triton_hop(self, device) -> None:
         @triton.jit
         def add_kernel(
@@ -1097,7 +1095,7 @@ class TestSerializeDevice(TestCase):
                 )
 
     @onlyAccelerator
-    @requires_gpu_and_triton
+    @requires_triton()
     def test_triton_constexpr_matching(self, device) -> None:
         """Test that constexpr values are properly matched during serialization.
 
@@ -2031,25 +2029,6 @@ def forward(self, x):
         f = Module()
         self.check_graph(f, (torch.tensor([1, 1]),))
 
-    @requires_accelerator
-    def test_device(self) -> None:
-        class MyModule(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 16, 3, stride=1, bias=True)
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                conv = self.conv(x)
-                relu = self.relu(conv)
-                mul = relu * 0.5
-                return mul
-
-        device = torch.accelerator.current_accelerator().type
-        inp = torch.randn((1, 3, 224, 224), dtype=torch.float).to(device)
-        model = MyModule().eval().to(device)
-        self.check_graph(model, (inp,))
-
     def test_custom_obj_tuple_out(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -2198,6 +2177,33 @@ def forward(self, x):
 
 
 instantiate_parametrized_tests(TestDeserialize)
+
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestDeserializeDevice(_CheckGraphMixin, TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_device(self, device) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, 3, stride=1, bias=True)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                conv = self.conv(x)
+                relu = self.relu(conv)
+                mul = relu * 0.5
+                return mul
+
+        inp = torch.randn((1, 3, 224, 224), dtype=torch.float, device=device)
+        model = MyModule().eval().to(device)
+        self.check_graph(model, (inp,))
+
+
+instantiate_device_type_tests(TestDeserializeDevice, globals(), allow_xpu=True)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -2499,31 +2505,6 @@ class TestSaveLoad(TestCase):
         loaded_ep = load(buffer)
         self.assertEqual(m(*inp), loaded_ep.module()(*inp))
 
-    @requires_accelerator
-    def test_save_load_accelerator_tensor(self) -> None:
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(64, 64)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        device = torch.accelerator.current_accelerator().type
-        m = M().to(device)
-        inp = (torch.randn(1, 64, device=device),)
-        ep = torch.export.export(m, inp)
-        buffer = io.BytesIO()
-        save(ep, buffer)
-        buffer.seek(0)
-        loaded_ep = load(buffer)
-        loaded_sd = loaded_ep.state_dict
-        for name, param in loaded_sd.items():
-            self.assertEqual(
-                param.device.type, device, lambda msg: f"{msg}\n{name} not on {device}"
-            )
-        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
-
     def test_from_node_metadata_serialization(self):
         """Test that from_node metadata is properly serialized and deserialized."""
 
@@ -2576,6 +2557,41 @@ class TestSaveLoad(TestCase):
                         self.assertEqual(
                             node_source_orig.to_dict(), node_source_loaded.to_dict()
                         )
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestSaveLoadDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_save_load_tensor(self, device) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(64, 64)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M().to(device)
+        inp = (torch.randn(1, 64, device=device),)
+        ep = torch.export.export(m, inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        loaded_sd = loaded_ep.state_dict
+        device_type = torch.device(device).type
+        for name, param in loaded_sd.items():
+            self.assertEqual(
+                param.device.type,
+                device_type,
+                lambda msg: f"{msg}\n{name} not on {device_type}",
+            )
+        self.assertEqual(m(*inp), loaded_ep.module()(*inp))
+
+
+instantiate_device_type_tests(TestSaveLoadDevice, globals(), allow_xpu=True)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
