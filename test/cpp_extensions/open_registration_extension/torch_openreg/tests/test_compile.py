@@ -1,5 +1,8 @@
 # Owner(s): ["module: PrivateUse1"]
 
+import subprocess
+import sys
+
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
@@ -89,6 +92,33 @@ class TestFakeTensor(TestCase):
             self.assertEqual(x.device.type, "openreg")
             y = x + 1
             self.assertEqual(y.device.type, "openreg")
+
+    def test_fake_tensor_mode_warms_runtime(self):
+        """Fakeifying an openreg tensor initializes the backend runtime, the way
+        it does for a built-in accelerator: backward errors later if no real
+        tensor was ever created on the device. Fresh process because
+        is_initialized only starts False once per process, and an earlier real
+        allocation (or an earlier query that initializes the runtime) would
+        hide the flip this construction is supposed to cause."""
+        script = """\
+import torch
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+
+assert not torch.openreg.is_initialized()
+mode = FakeTensorMode()
+with mode:
+    fake = FakeTensor(mode, torch.empty(1, device="meta"), torch.device("openreg"))
+assert torch.openreg.is_initialized()
+assert fake.device.type == "openreg"
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, timeout=120
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
+        )
 
 
 class TestGuards(TestCase):
