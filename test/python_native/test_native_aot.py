@@ -41,14 +41,27 @@ def skipIfNoAotLib(fn):
     )(fn)
 
 
+def skipIfNoJitTopk(fn):
+    """The JIT topk override is gated to sm_100+ (cutedsl_impl._sm100_or_above), while
+    this declaration's AOT kernels cover Hopper as well, so only the tests that assert
+    the JIT layer serves a shape need the narrower device."""
+    capability = (
+        torch.cuda.get_device_capability() if torch.cuda.is_available() else (0, 0)
+    )
+    return unittest.skipUnless(capability[0] >= 10, "JIT topk override needs sm_100+")(
+        fn
+    )
+
+
 # The exported grid (must match the manifest specs).
 GRID_N = (2048, 4096, 8192, 16384)
 GRID_K = (64, 128, 256)
 # Enough rows to pass the full-wave perf gate on any current GPU.
 M = 256
 
-# Subprocess probe with the JIT layer disabled and the AOT hooks live. Reports,
-# per case, whether the DSL kernel ran and whether values matched the reference.
+# Subprocess probe with the JIT layer disabled and the AOT hooks live. Both layers
+# launch the same CuTeDSL kernel, so the name in the profile says a DSL kernel ran
+# while the environment is what makes it the AOT one; aten shows mbtopk instead.
 _PROBE = r"""
 import json, torch
 from torch.profiler import profile, ProfilerActivity
@@ -180,6 +193,7 @@ class TestNativeAotTopK(TestCase):
             self.assertTrue(r["values_ok"], f"values mismatch for {case}")
 
     @skipIfNoAotLib
+    @skipIfNoJitTopk
     def test_uncovered_fp32_served_by_jit_layer(self):
         # JIT layer live in this process, and off-grid fp32 is uncovered, so the cond
         # is not subtracted and the JIT DSL kernel runs.
