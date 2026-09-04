@@ -2681,6 +2681,95 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = fn()
         self.assertEqual(((3, 5), (3, 5)), res)
 
+    @staticmethod
+    def _consume_prefix_state_dict(kind, t):
+        items = [("module.w", t), ("keep", t + 1), ("module.b", t + 2)]
+        if kind == "dict":
+            return dict(items)
+        sd = collections.OrderedDict(items)
+        if kind == "metadata":
+            sd._metadata = collections.OrderedDict(
+                [("", {"version": 1}), ("module", {"version": 2})]
+            )
+        return sd
+
+    @staticmethod
+    def _consume_prefix_snapshot(sd):
+        # pop+reinsert deliberately reorders, so the key ORDER is part of the
+        # contract (eager pins it in test/test_nn.py TestUtils).
+        meta = getattr(sd, "_metadata", None)
+        return (
+            list(sd.keys()),
+            sd["w"] + sd["b"] + sd["keep"],
+            None if meta is None else list(meta.items()),
+        )
+
+    @parametrize("kind", ["dict", "ordered_dict", "metadata"])
+    def test_consume_prefix_in_state_dict_caller_owned(self, kind):
+        # The helper strips a prefix from its state_dict argument in place, so
+        # it cannot be a graph node: FX hands the call an immutable_dict and
+        # fake propagation raises, and when it does not the mutation is
+        # silently dropped. It was bulk-added to the in-graph function list by
+        # #114196 rather than deliberately classified. The dict here is owned
+        # by the caller, so the mutation has to survive side-effect replay.
+        def fn(t, sd):
+            torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(
+                sd, "module."
+            )
+            return t + 1
+
+        x = torch.zeros(2)
+        sd_eager = self._consume_prefix_state_dict(kind, x)
+        fn(x, sd_eager)
+
+        sd_compiled = self._consume_prefix_state_dict(kind, x)
+        torch.compile(fn, backend="eager", fullgraph=True)(x, sd_compiled)
+        self.assertEqual(
+            self._consume_prefix_snapshot(sd_compiled),
+            self._consume_prefix_snapshot(sd_eager),
+        )
+
+    @parametrize("fullgraph", [True, False])
+    def test_consume_prefix_in_state_dict_metadata_only(self, fullgraph):
+        # No state_dict key matches the prefix, but the _metadata half of the
+        # helper still rewrites keys. As a single graph node the call returned
+        # None, its result was unused, and the rewrite was silently dropped.
+        def fn(t, sd):
+            torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(
+                sd, "module."
+            )
+            return t + 1
+
+        def make():
+            sd = collections.OrderedDict(w=torch.zeros(2))
+            sd._metadata = collections.OrderedDict(
+                [("", {"version": 1}), ("module.w", {"version": 2})]
+            )
+            return sd
+
+        x = torch.zeros(2)
+        sd_eager = make()
+        fn(x, sd_eager)
+
+        sd_compiled = make()
+        torch.compile(fn, backend="eager", fullgraph=fullgraph)(x, sd_compiled)
+        self.assertEqual(
+            list(sd_compiled._metadata.items()), list(sd_eager._metadata.items())
+        )
+        self.assertEqual(list(sd_compiled.keys()), list(sd_eager.keys()))
+
+    @parametrize("kind", ["dict", "ordered_dict"])
+    def test_consume_prefix_in_state_dict_built_in_frame(self, kind):
+        def fn(t):
+            sd = self._consume_prefix_state_dict(kind, t)
+            torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(
+                sd, "module."
+            )
+            return self._consume_prefix_snapshot(sd)
+
+        x = torch.zeros(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_missing_attr_on_skipped_function_is_catchable(self):
         # A missing attribute on a skipped callable used to become a deferred
         # GetAttrVariable, which the graph break below materialized where the
