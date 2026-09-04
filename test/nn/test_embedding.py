@@ -12,13 +12,18 @@ import torch.nn.functional as F
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfMPS,
     dtypesIfXPU,
+    expectedFailureCPU,
+    expectedFailureCUDA,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyNativeDeviceTypes,
     onlyOn,
     skipCUDAIf,
     skipMeta,
+    skipMPS,
+    skipMPSIf,
     skipXPUIf,
     TEST_WITH_ROCM,
 )
@@ -299,6 +304,7 @@ class TestEmbeddingNN(NNTestCase):
 
 
 class TestEmbeddingNNDeviceType(NNTestCase):
+    @skipMPS
     def test_embedding_dense_grad(self, device):
         with set_default_dtype(torch.double):
             embd = nn.Embedding(20, 20).to(device)
@@ -362,6 +368,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @dtypesIfCUDA(torch.float16, torch.float64)
     @dtypesIfXPU(torch.float16, torch.float64)
     @dtypes(torch.float64)
+    @skipMPS
     def test_embedding_backward(self, device, dtype):
         embedding = nn.Embedding(10, 3, sparse=True)
         tensor = torch.tensor([[7, 1, 3]])
@@ -545,6 +552,8 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
     @dtypesIfXPU(torch.half, torch.bfloat16)
+    # bfloat16 accumulation-order noise exceeds the fp16-calibrated tolerance
+    @dtypesIfMPS(torch.float32, torch.half)
     def test_embedding_bag_1D_padding_idx(self, device, dtype):
         num_features = 3
         max_indices_per_bag = 10
@@ -992,6 +1001,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     # https://github.com/pytorch/pytorch/issues/190063
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)
     def test_embedding_bag_scale_grad_by_freq_mixed_counts(self, device, dtype):
         # scale_grad_by_freq must divide each index's gradient by that index's
         # own occurrence count. Use mixed counts (index 1 twice, index 3 once)
@@ -1012,6 +1022,87 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             expected[3] = row3  # index 3: 1 occurrence, count 1
             self.assertEqual(weight.grad, expected)
 
+    @onlyOn(["cpu", "cuda", "mps"])
+    @dtypes(torch.bfloat16)
+    def test_embedding_bag_scale_grad_by_freq_exact_counts(self, device, dtype):
+        # scale_grad_by_freq counts must accumulate in integer math: a naive
+        # accumulation of ones in bfloat16 saturates at 256 (256 + 1 == 256)
+        # and would divide index 5's gradient by 256 instead of 300. Only bag
+        # 0 receives gradient, so the numerator (a single 1.0) stays exact
+        # and any mismatch is the divisor's.
+        n = 300
+        w = torch.ones(8, 3, dtype=dtype, device=device, requires_grad=True)
+        indices = torch.full((n,), 5, device=device)
+        offsets = torch.tensor([0, 1], device=device)
+        out = F.embedding_bag(indices, w, offsets, mode="sum", scale_grad_by_freq=True)
+        out[0].sum().backward()
+        expected = torch.zeros(8, 3, dtype=dtype, device=device)
+        expected[5] = torch.tensor(1.0, dtype=dtype) / n
+        self.assertEqual(w.grad, expected)
+
+    # Strict CSR contract: bag membership is defined only by the
+    # [offsets[i], offsets[i + 1]) slices, so indices past the terminal offset
+    # contribute nothing to any mode's output or gradients. CPU consults
+    # trailing indices in some code paths (#52851) and the CUDA kernel runs
+    # the last bag through the end of indices (#29019).
+    @onlyOn(["cpu", "cuda", "mps"])
+    @expectedFailureCPU
+    @expectedFailureCUDA
+    @dtypes(torch.float32)
+    def test_embedding_bag_include_last_offset_trailing_indices(self, device, dtype):
+        W = torch.arange(16.0, device=device, dtype=dtype).reshape(4, 4)
+        indices = torch.tensor([0, 1, 2], device=device)
+        # one bag: indices [0, 2); index 2 is trailing
+        offsets = torch.tensor([0, 2], device=device)
+
+        out_sum = F.embedding_bag(
+            indices, W, offsets, mode="sum", include_last_offset=True
+        )
+        self.assertEqual(
+            out_sum, torch.tensor([[4.0, 6.0, 8.0, 10.0]], device=device, dtype=dtype)
+        )
+
+        out_mean = F.embedding_bag(
+            indices, W, offsets, mode="mean", include_last_offset=True
+        )
+        self.assertEqual(
+            out_mean, torch.tensor([[2.0, 3.0, 4.0, 5.0]], device=device, dtype=dtype)
+        )
+
+        w = W.clone().requires_grad_()
+        out_max = F.embedding_bag(
+            indices, w, offsets, mode="max", include_last_offset=True
+        )
+        self.assertEqual(
+            out_max, torch.tensor([[4.0, 5.0, 6.0, 7.0]], device=device, dtype=dtype)
+        )
+        out_max.sum().backward()
+        expected_max_grad = torch.zeros(4, 4, device=device, dtype=dtype)
+        expected_max_grad[1] = 1.0
+        self.assertEqual(w.grad, expected_max_grad)
+
+        # no gradient may reach the trailing index's weight row or its
+        # per-sample weight
+        psw = torch.tensor(
+            [0.5, 2.0, 3.0], device=device, dtype=dtype, requires_grad=True
+        )
+        w = W.clone().requires_grad_()
+        F.embedding_bag(
+            indices,
+            w,
+            offsets,
+            mode="sum",
+            include_last_offset=True,
+            per_sample_weights=psw,
+        ).sum().backward()
+        expected_w_grad = torch.zeros(4, 4, device=device, dtype=dtype)
+        expected_w_grad[0] = 0.5
+        expected_w_grad[1] = 2.0
+        self.assertEqual(w.grad, expected_w_grad)
+        self.assertEqual(
+            psw.grad, torch.tensor([6.0, 22.0, 0.0], device=device, dtype=dtype)
+        )
+
     # Check correctness of torch.nn.functional.embedding_bag forward and
     # backward functions with padding_idx, given a 2D indices input. Compare
     # against torch.nn.functional.embedding followed by a reduction.
@@ -1019,6 +1110,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
     @dtypesIfXPU(torch.half, torch.bfloat16)
+    @dtypesIfMPS(torch.float32, torch.half, torch.bfloat16)
     def test_embedding_bag_2D_padding_idx(self, device, dtype):
         # Use a Python implementation of embedding_bag with padding_idx support
         # to check torch.nn.functional.embedding_bag correctness
@@ -1170,6 +1262,9 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @dtypes(*itertools.product((torch.float, torch.double), (torch.int, torch.long)))
     @parametrize_test("padding_idx", [None, 0])
     @parametrize_test("mode", ["sum", "mean", "max"])
+    @skipMPSIf(
+        True, "MPS checks bounds asynchronously and raises AcceleratorError at sync"
+    )
     def test_embedding_bag_out_of_bounds_idx(self, device, dtypes, padding_idx, mode):
         padding_idx = 0
         w_dtype, idx_dtype = dtypes
@@ -1304,7 +1399,7 @@ torch.cuda.synchronize()
                     6,
                 ),
                 0,
-                dtype=torch.float64,
+                dtype=torch.float32,
                 device=device,
             )
             indices = torch.full(
@@ -1324,12 +1419,14 @@ torch.cuda.synchronize()
             if i == 0:
                 error_msg = "input has to be 1D or 2D Tensor"
             else:
-                error_msg = "input has to be a 1D or 2D Tensor"
+                # MPS handles only 1D indices at the ATen level (the functional
+                # layer flattens 2D first) and its message says so
+                error_msg = r"input has to be a 1D( or 2D)? Tensor"
             torch._dynamo.disable(self.assertRaisesRegex)(
                 err_type, error_msg, lambda: f(weight, indices, offsets)
             )
 
-            weight = torch.full((2, 2), 0, dtype=torch.float64, device=device)
+            weight = torch.full((2, 2), 0, dtype=torch.float32, device=device)
             indices = torch.full((2,), 1, dtype=torch.int64, device=device)
 
             torch._dynamo.disable(self.assertRaisesRegex)(
@@ -1338,7 +1435,7 @@ torch.cuda.synchronize()
                 lambda: f(weight, indices, offsets),
             )
 
-            weight = torch.full((2, 2, 2), 0, dtype=torch.float64, device=device)
+            weight = torch.full((2, 2, 2), 0, dtype=torch.float32, device=device)
             indices = torch.full((2,), 2, dtype=torch.int64, device=device)
             offsets = torch.full((2,), 0, dtype=torch.int64, device=device)
 
@@ -1354,8 +1451,10 @@ torch.cuda.synchronize()
         es = nn.EmbeddingBag(5, 2, mode="sum").to(dtype=torch.float, device=device)
         input = torch.tensor([3, 1, 1, 1, 4, 0], dtype=dtypes[0], device=device)
         offsets = torch.tensor([0, 0, 3, 3, 6], dtype=dtypes[1], device=device)
-        per_sample_weights = torch.randn_like(input, dtype=torch.double, device=device)
         if device == "cpu":
+            per_sample_weights = torch.randn_like(
+                input, dtype=torch.double, device=device
+            )
             with self.assertRaisesRegex(RuntimeError, "have the same type as"):
                 es(input, offsets, per_sample_weights)
 
@@ -1489,6 +1588,13 @@ torch.cuda.synchronize()
             (torch.float32, torch.double, torch.half),
         )
     )
+    @dtypesIfMPS(
+        *itertools.product(
+            (torch.int, torch.long),
+            (torch.int, torch.long),
+            (torch.float, torch.half, torch.bfloat16),
+        )
+    )
     def test_EmbeddingBag_empty_per_sample_weights_and_offsets(self, device, dtypes):
         # Test empty input and per sample weight, and backward pass. There was a CUDA
         # invalid configuration bug (more context in #46572)
@@ -1562,6 +1668,13 @@ torch.cuda.synchronize()
             (torch.float32, torch.double, torch.half),
         )
     )
+    @dtypesIfMPS(
+        *itertools.product(
+            (torch.int, torch.long),
+            (torch.int, torch.long),
+            (torch.float, torch.half, torch.bfloat16),
+        )
+    )
     def test_EmbeddingBag_per_sample_weights_and_offsets(self, device, dtypes):
         def test_per_sample_weights(mode, trainable_scale):
             es = nn.EmbeddingBag(5, 2, mode=mode).to(dtype=dtypes[2], device=device)
@@ -1628,6 +1741,13 @@ torch.cuda.synchronize()
             (torch.int, torch.long),
             (torch.int, torch.long),
             (torch.float32, torch.double, torch.half),
+        )
+    )
+    @dtypesIfMPS(
+        *itertools.product(
+            (torch.int, torch.long),
+            (torch.int, torch.long),
+            (torch.float, torch.half, torch.bfloat16),
         )
     )
     def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device, dtypes):
@@ -1806,6 +1926,8 @@ torch.cuda.synchronize()
         )
     )
     @dtypes(*itertools.product((torch.int, torch.long), (torch.float, torch.double)))
+    # half/bfloat16 accumulation-order noise exceeds dtype2prec tolerances
+    @dtypesIfMPS(*itertools.product((torch.int, torch.long), (torch.float,)))
     def test_EmbeddingBag_per_sample_weights_and_no_offsets(self, device, dtypes):
         def run_tests(mode, sparse, trainable_per_sample_weights):
             kwargs = dict(
@@ -2007,6 +2129,13 @@ torch.cuda.synchronize()
             (torch.float32, torch.double, torch.half),
         )
     )
+    @dtypesIfMPS(
+        *itertools.product(
+            (torch.int, torch.long),
+            (torch.int, torch.long),
+            (torch.float,),
+        )
+    )
     def test_embedding_bag_device(self, device, dtypes):
         if IS_JETSON and torch.bfloat16 in dtypes and device == "cpu":
             self.skipTest("bfloat16 not supported with Jetson cpu")
@@ -2090,6 +2219,13 @@ torch.cuda.synchronize()
             (torch.float32, torch.double, torch.half),
         )
     )
+    @dtypesIfMPS(
+        *itertools.product(
+            (torch.int, torch.long),
+            (torch.int, torch.long),
+            (torch.float,),
+        )
+    )
     def test_embedding_bag_non_contiguous_weight(self, device, dtypes):
         weight_tensor = torch.randn(3, 4, dtype=dtypes[2], device=device)
 
@@ -2167,7 +2303,9 @@ torch.cuda.synchronize()
         bag(x, per_sample_weights=F.softmax(w, dim=-1))
 
 
-instantiate_device_type_tests(TestEmbeddingNNDeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestEmbeddingNNDeviceType, globals(), allow_xpu=True, allow_mps=True
+)
 instantiate_parametrized_tests(TestEmbeddingNN)
 
 if __name__ == "__main__":
