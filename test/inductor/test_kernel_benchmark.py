@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch._inductor.async_compile
@@ -14,6 +14,10 @@ from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, run_and_get_code, run_and_get_kernels
+from torch._inductor.wrapper_benchmark import (
+    collect_memory_snapshot,
+    compiled_module_main,
+)
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
 from torch.testing._internal.common_utils import recover_orig_fp32_precision
@@ -548,6 +552,185 @@ class TestKernelBenchmark(TestCase):
         FileCheck().check(
             f"print_performance(fn, times=times, repeat=repeat, device='{GPU_TYPE}')"
         ).run(src)
+
+
+class TestCompiledModuleMain(TestCase):
+    """Mock-based tests for the compiled_module_main CLI entry; no GPU needed."""
+
+    def _run_main(self, argv, benchmark_fn=None):
+        benchmark_fn = benchmark_fn or (lambda times, repeat: 0.001)
+        with patch("sys.argv", ["compiled_module.py", *argv]):
+            compiled_module_main("test_benchmark", benchmark_fn)
+
+    def _patch_unavailable_acc(self):
+        # Simulate a built-but-unavailable accelerator (e.g. CUDA build, no GPUs):
+        # the compile-time lookup returns a device but the runtime check fails
+        return (
+            patch(
+                "torch._C._accelerator_getAccelerator",
+                return_value=torch.device("cuda"),
+            ),
+            patch("torch.accelerator.is_available", return_value=False),
+        )
+
+    def test_no_accelerator_skips_memory_stats(self):
+        with (
+            patch("torch.accelerator.current_accelerator", return_value=None) as mock_acc,
+            patch("torch.accelerator.reset_peak_memory_stats") as mock_reset,
+            patch("builtins.print") as mock_print,
+        ):
+            self._run_main([])
+            mock_acc.assert_called_once_with(check_available=True)
+            mock_reset.assert_not_called()
+            printed = " ".join(str(c) for c in mock_print.call_args_list)
+            self.assertNotIn("Peak", printed)
+
+    def test_built_but_unavailable_accelerator_skips_memory_stats(self):
+        # CUDA build on a machine with no visible GPUs: check_available=True makes
+        # the real current_accelerator return None, so no misleading
+        # "Peak CUDA memory usage 0.000 MB" output and no snapshot dispatch
+        patch_acc, patch_avail = self._patch_unavailable_acc()
+        with (
+            patch_acc,
+            patch_avail as mock_avail,
+            patch("torch.accelerator.reset_peak_memory_stats") as mock_reset,
+            patch("torch._inductor.wrapper_benchmark.collect_memory_snapshot") as mock_collect,
+            patch("builtins.print") as mock_print,
+        ):
+            self._run_main(["--memory-snapshot"])
+            mock_avail.assert_called_once_with()
+            mock_reset.assert_not_called()
+            mock_collect.assert_not_called()
+            printed = " ".join(str(c) for c in mock_print.call_args_list)
+            self.assertNotIn("Peak", printed)
+
+    def test_accelerator_resets_and_reports_peak_memory(self):
+        acc = torch.device("cuda")
+        with (
+            patch("torch.accelerator.current_accelerator", return_value=acc),
+            patch("torch.accelerator.reset_peak_memory_stats") as mock_reset,
+            patch("torch.accelerator.max_memory_allocated", return_value=int(2e6)) as mock_max,
+            patch("builtins.print") as mock_print,
+        ):
+            self._run_main([])
+            mock_reset.assert_called_once_with()
+            mock_max.assert_called_once_with()
+            printed = " ".join(str(c) for c in mock_print.call_args_list)
+            self.assertIn("Peak CUDA memory usage 2.000 MB", printed)
+
+    def test_peak_reset_happens_before_benchmark(self):
+        # reset must be called before the benchmark fn runs, so max_memory_allocated
+        # measures the peak of the benchmark itself
+        acc = torch.device("cuda")
+        order = []
+        reset = MagicMock(side_effect=lambda: order.append("reset"))
+        with (
+            patch("torch.accelerator.current_accelerator", return_value=acc),
+            patch("torch.accelerator.reset_peak_memory_stats", reset),
+            patch("torch.accelerator.max_memory_allocated", return_value=0),
+            patch("builtins.print"),
+        ):
+
+            def benchmark_fn(times, repeat):
+                order.append("benchmark")
+                return 0.001
+
+            self._run_main([], benchmark_fn=benchmark_fn)
+            self.assertEqual(order, ["reset", "benchmark"])
+
+    def test_memory_snapshot_dispatched_when_accelerator_present(self):
+        acc = torch.device("cuda")
+        with (
+            patch("torch.accelerator.current_accelerator", return_value=acc),
+            patch("torch._inductor.wrapper_benchmark.collect_memory_snapshot") as mock_collect,
+            patch("torch.accelerator.reset_peak_memory_stats"),
+            patch("torch.accelerator.max_memory_allocated", return_value=0),
+            patch("builtins.print"),
+        ):
+            self._run_main(["--memory-snapshot"])
+            mock_collect.assert_called_once()
+
+    def test_cuda_memory_snapshot_legacy_alias(self):
+        acc = torch.device("cuda")
+        with (
+            patch("torch.accelerator.current_accelerator", return_value=acc),
+            patch("torch._inductor.wrapper_benchmark.collect_memory_snapshot") as mock_collect,
+            patch("torch.accelerator.reset_peak_memory_stats"),
+            patch("torch.accelerator.max_memory_allocated", return_value=0),
+            patch("builtins.print"),
+        ):
+            self._run_main(["--cuda-memory-snapshot"])
+            mock_collect.assert_called_once()
+
+    def test_memory_snapshot_not_dispatched_without_accelerator(self):
+        with (
+            patch("torch.accelerator.current_accelerator", return_value=None),
+            patch("torch._inductor.wrapper_benchmark.collect_memory_snapshot") as mock_collect,
+            patch("builtins.print"),
+        ):
+            self._run_main(["--memory-snapshot"])
+            mock_collect.assert_not_called()
+
+    def test_collect_memory_snapshot_requires_accelerator(self):
+        with patch("torch.accelerator.current_accelerator", return_value=None):
+            with self.assertRaisesRegex(AssertionError, "No accelerator is available"):
+                collect_memory_snapshot(lambda times, repeat: 0.0)
+
+    def test_collect_memory_snapshot_raises_when_unavailable(self):
+        # built-but-unavailable: snapshot collection must fail fast instead of
+        # hitting a runtime error inside _record_memory_history
+        patch_acc, patch_avail = self._patch_unavailable_acc()
+        with patch_acc, patch_avail:
+            with self.assertRaisesRegex(AssertionError, "No accelerator is available"):
+                collect_memory_snapshot(lambda times, repeat: 0.0)
+
+    def test_collect_memory_snapshot_no_memory_module_skips(self):
+        # e.g. mps has no memory submodule at all; should print and return
+        acc = torch.device("mps")
+        fake_device_mod = MagicMock(spec=[])  # no `memory` attribute
+        with (
+            patch("torch.accelerator.current_accelerator", return_value=acc),
+            patch("torch.get_device_module", return_value=fake_device_mod) as mock_gdm,
+            patch("builtins.print") as mock_print,
+        ):
+            collect_memory_snapshot(lambda times, repeat: 0.0)
+            mock_gdm.assert_called_once_with(acc)
+            printed = " ".join(str(c) for c in mock_print.call_args_list)
+            self.assertIn("not supported on mps", printed)
+
+    def test_collect_memory_snapshot_unsupported_memory_module_skips(self):
+        # device module has `memory` but it lacks _record_memory_history
+        acc = torch.device("mtia")
+        mem_mod = MagicMock(spec=["_dump_snapshot"])
+        fake_device_mod = MagicMock()
+        fake_device_mod.memory = mem_mod
+        with (
+            patch("torch.accelerator.current_accelerator", return_value=acc),
+            patch("torch.get_device_module", return_value=fake_device_mod),
+            patch("builtins.print") as mock_print,
+        ):
+            collect_memory_snapshot(lambda times, repeat: 0.0)
+            mem_mod._dump_snapshot.assert_not_called()
+            printed = " ".join(str(c) for c in mock_print.call_args_list)
+            self.assertIn("not supported on mtia", printed)
+
+    def test_collect_memory_snapshot_supported_device(self):
+        acc = torch.device("cuda")
+        mem_mod = MagicMock(spec=["_record_memory_history", "_dump_snapshot"])
+        fake_device_mod = MagicMock()
+        fake_device_mod.memory = mem_mod
+        benchmark_fn = MagicMock(return_value=0.0)
+        with (
+            patch("torch.accelerator.current_accelerator", return_value=acc),
+            patch("torch.get_device_module", return_value=fake_device_mod),
+            patch("builtins.print"),
+        ):
+            collect_memory_snapshot(benchmark_fn)
+            mem_mod._record_memory_history.assert_any_call(max_entries=100000)
+            mem_mod._record_memory_history.assert_any_call(enabled=None)
+            benchmark_fn.assert_called_once_with(times=10, repeat=1)
+            dumped_path = mem_mod._dump_snapshot.call_args[0][0]
+            self.assertIn("memory_snapshot.pickle", dumped_path)
 
 
 if __name__ == "__main__":
