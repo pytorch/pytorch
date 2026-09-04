@@ -54,7 +54,8 @@ int64_t get_current_isolate_recompiles_id(void) {
 }
 
 static void set_current_isolate_recompiles_id(int64_t id) {
-  CHECK(id >= -1);
+  // The Python entry point already rejects id < -1 with ValueError.
+  DEBUG_CHECK(id >= -1);
   PyThread_tss_set(
       &isolate_recompiles_key, (void*)(intptr_t)(id + 2));
 }
