@@ -11673,7 +11673,7 @@ for shape in [(1,), ()]:
         #  - test_saved_variable_packing_unpacking_saved_original_with_hooks
 
         def pack(x):
-            warnings.warn("pack")
+            warnings.warn("pack", stacklevel=2)
             return x
 
         with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
@@ -16340,7 +16340,7 @@ class TestMultithreadAutograd(TestCase):
 
     def test_dataparallel_saved_tensors_hooks(self):
         def pack(x):
-            warnings.warn("pack")
+            warnings.warn("pack", stacklevel=2)
             return x
 
         _self = self

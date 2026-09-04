@@ -253,7 +253,8 @@ class profile:
             warn(
                 "trace_only=True is incompatible with with_stack=True "
                 "(stack traces require event post-processing). "
-                "Disabling trace_only."
+                "Disabling trace_only.",
+                stacklevel=2,
             )
             experimental_config = copy.copy(experimental_config)
             experimental_config.trace_only = False

@@ -133,6 +133,7 @@ except ImportError:
         "to install it with commands from pytorch.org, post-fixed with "
         "`--no-deps` to avoid overwriting the pytorch installation",
         UserWarning,
+        stacklevel=2,
     )
 
 USE_NETWORKX = False
@@ -141,7 +142,9 @@ try:
 
     USE_NETWORKX = True
 except ImportError:
-    warnings.warn("Some tests use networkx but it was not installed", UserWarning)
+    warnings.warn(
+        "Some tests use networkx but it was not installed", UserWarning, stacklevel=2
+    )
 
 # NB: numpy is a testing dependency!
 

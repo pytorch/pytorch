@@ -13,7 +13,8 @@ except ImportError:
 
     parse = ET.parse
     warnings.warn(
-        "lxml was not found. `pip install lxml` to make this script run much faster"
+        "lxml was not found. `pip install lxml` to make this script run much faster",
+        stacklevel=2,
     )
 
 

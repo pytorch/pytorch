@@ -859,7 +859,8 @@ def gt_inference_rule(
             # then we made the wrong assumption about the argument being a tensor
             # so we should fix the assumption
             warnings.warn(
-                f"Made the wrong assumption for node {n}. Correctness not guaranteed."
+                f"Made the wrong assumption for node {n}. Correctness not guaranteed.",
+                stacklevel=2,
             )
 
             new_e1, counter = gen_dvar(counter)

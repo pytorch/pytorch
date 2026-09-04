@@ -527,7 +527,7 @@ from user code:
 
     def test_warnings(self):
         def fn():
-            warnings.warn("test")
+            warnings.warn("test", stacklevel=2)
 
         self.assertExpectedInlineMunged(
             Unsupported,
