@@ -765,7 +765,6 @@ def scaled_addmm(
     *,
     beta: float = 1.0,
     alpha: float = 1.0,
-    out: Tensor | None = None,
 ) -> Tensor: ...
 
 __all__ += ["scaled_addmm"]
