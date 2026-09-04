@@ -11,8 +11,10 @@ if(USE_ROCM)
 include(utils)
 include(LoadHIP)
 endif()
+
+# Note: this file intentionally doesn't set CXX_STANDARD to ensure the Torch target propagates
+# it to downstream projects.
 find_package(Torch REQUIRED)
 
 add_executable(test_jit_hooks test_jit_hooks.cpp)
-set_property(TARGET test_jit_hooks PROPERTY CXX_STANDARD 20)
 target_link_libraries(test_jit_hooks "${TORCH_LIBRARIES}")
