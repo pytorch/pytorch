@@ -461,8 +461,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             return x + (1 if Function.add == saved else 2)
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "richcompare identity fallback undetermined",
+            torch._dynamo.exc.Unsupported, "Unresolved GetAttrVariable comparison"
         ):
             torch.compile(compare, backend="eager", fullgraph=True)(x)
 
@@ -614,8 +613,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), x + 2)
         self.assertEqual(cnt.frame_count, 1)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "richcompare identity fallback undetermined",
+            torch._dynamo.exc.Unsupported, "Unresolved GetAttrVariable comparison"
         ):
             torch.compile(instance_fn, backend="eager", fullgraph=True)(x)
 
