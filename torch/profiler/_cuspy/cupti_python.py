@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-"""CUPTI type and constant definitions used by the in-process monitor.
+"""CUPTI type and constant definitions used by Cuspy.
 
 This module reaches into CUPTI's ABI constants. It does not re-export
 cupti-python's types; callers import those directly
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # cupti-python enums used at runtime. cupti-python is a hard requirement of this
 # module; its absence surfaces as a catchable ModuleNotFoundError for optional
-# consumers (e.g. those probing the monitor import).
+# consumers (e.g. those probing Cuspy import).
 try:
     from cupti.cupti import (  # pyrefly: ignore[missing-import]
         Driver_api_trace_cbid,
@@ -32,13 +32,13 @@ try:
     )
 except ModuleNotFoundError as exc:
     raise ModuleNotFoundError(
-        "torch.profiler._cupti requires the cupti-python package. "
-        "Install cupti-python to use the experimental CUPTI monitor."
+        "torch.profiler._cuspy requires the cupti-python package. "
+        "Install cupti-python to use Cuspy (experimental)."
     ) from exc
 
 # Generated from the CUPTI ABI header (tools/gen_cupti_stubs.py): the
 # CUpti_ActivityAttribute selectors, so their (ABI-renumbered) ints are never hardcoded.
-from torch.profiler._cupti._cupti_stubs import ActivityAttr
+from torch.profiler._cuspy._cupti_stubs import ActivityAttr
 
 
 if TYPE_CHECKING:
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
 
-# libcupti soname for the supported CUDA major (the monitor's floor is 13.3). Loaded
+# libcupti soname for the supported CUDA major (Cuspy's floor is 13.3). Loaded
 # by name so dlopen returns the copy already mapped into the process: torch front-loads
 # the nvidia-cuda-cupti wheel (torch._preload_cuda_deps) and cupti-python / kineto load
 # it otherwise, so every consumer shares one CUPTI -- a second instance would collide
@@ -57,15 +57,15 @@ LIBCUPTI_SONAME = "libcupti.so.13"
 # are stable ABI values, so they are spelled out rather than resolved.
 CUPTI_SUCCESS = 0
 
-# CUpti_ActivityAttribute selectors the monitor sets on its subscription
+# CUpti_ActivityAttribute selectors Cuspy sets on its subscription
 # (ActivityAttr.USER_DEFINED_RECORDS / .ENABLE_KERNEL_LATENCY_TIMESTAMPS /
 # .TIMESTAMP_CALLBACK, ...). cupti-python does not surface this enum, so the values come
 # from the generated _cupti_stubs module (tools/gen_cupti_stubs.py, straight from the ABI
 # header) rather than hardcoded ints -- they are renumbered vs cupti-python's own enum.
 
-# Minimum libcupti the monitor supports. The v2 user-defined-record API arrived in
+# Minimum libcupti Cuspy supports. The v2 user-defined-record API arrived in
 # 13.2, but only 13.3 populates pBufferCompleteInfo->ppRecordLayouts (CUPTI's own
-# per-kind record layout) that the monitor decodes against, so 13.3 is the floor.
+# per-kind record layout) that Cuspy decodes against, so 13.3 is the floor.
 LIBCUPTI_MIN_VERSION = 130300
 
 # CUPTI overhead-kind codes (CUpti_ActivityOverheadKind in cupti_activity.h).
@@ -111,7 +111,7 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
     lib.cuptiEnableCallback.restype = ctypes.c_int
 
     # User-defined-record (subscription) API -- present in libcupti >= 13.2; guarded
-    # so configuring against an older libcupti still succeeds (the monitor's
+    # so configuring against an older libcupti still succeeds (Cuspy's
     # LIBCUPTI_MIN_VERSION check then fails fast at start).
     if hasattr(lib, "cuptiSubscribe_v2"):
         lib.cuptiSubscribe_v2.argtypes = [
@@ -193,8 +193,8 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
         lib.cuptiActivityPopExternalCorrelationId_v2.restype = ctypes.c_int
     # Collection-time noise filter: cuptiActivityEnableRuntimeApi_v2(sub, cbid, 0) stops
     # CUPTI generating RUNTIME records for that cbid (kineto disables cudaGetDevice/etc.
-    # this way to shrink buffers). Only the subscriber-scoped _v2 form is bound: the
-    # monitor is always on the UDR path, where the global form returns
+    # this way to shrink buffers). Only the subscriber-scoped _v2 form is bound:
+    # Cuspy is always on the UDR path, where the global form returns
     # CUPTI_ERROR_NOT_COMPATIBLE (like the timestamp / ext-correlation APIs).
     if hasattr(lib, "cuptiActivityEnableRuntimeApi_v2"):
         lib.cuptiActivityEnableRuntimeApi_v2.argtypes = [
@@ -203,7 +203,7 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
             ctypes.c_uint8,  # enable
         ]
         lib.cuptiActivityEnableRuntimeApi_v2.restype = ctypes.c_int
-    # Same noise filter for the DRIVER API (the v2 monitor enables DRIVER as a carrier,
+    # Same noise filter for the DRIVER API (the v2 Cuspy enables DRIVER as a carrier,
     # so its noise cbids would otherwise fill the UDR buffers).
     if hasattr(lib, "cuptiActivityEnableDriverApi_v2"):
         lib.cuptiActivityEnableDriverApi_v2.argtypes = [
@@ -244,7 +244,7 @@ class _UDActivityConfig(ctypes.Structure):
     ]
 
 
-# cuptiSubscribe requires a valid CUpti_CallbackFunc, but the monitor drives
+# cuptiSubscribe requires a valid CUpti_CallbackFunc, but Cuspy drives
 # collection through the activity API, not callbacks -- a no-op suffices. Kept
 # alive process-wide so the ctypes trampoline isn't garbage-collected.
 _CB_FUNC = ctypes.CFUNCTYPE(
@@ -261,7 +261,7 @@ _NOOP_CB = _CB_FUNC(_noop_callback)
 
 # Runtime-API cbids that are pure noise (no observer needs them); disabled at collection
 # time when libcupti supports it so their RUNTIME records never reach the buffers. Matches
-# the set kineto filters (see also the post-decode _RUNTIME_BLOCKLIST in monitor_trace).
+# the set kineto filters (see also the post-decode _RUNTIME_BLOCKLIST in ``trace``).
 _NOISY_RUNTIME_API_NAMES = ("cudaGetDevice", "cudaSetDevice", "cudaGetLastError")
 
 
@@ -281,11 +281,11 @@ def _noisy_runtime_cbids() -> list[int]:
     return out
 
 
-# Noisy driver-API cbids. The v2 monitor enables DRIVER as a carrier (NCCL launches
+# Noisy driver-API cbids. The v2 Cuspy enables DRIVER as a carrier (NCCL launches
 # collective kernels via the driver API), so these would otherwise fill the UDR buffers.
 # Driver cbid names are unversioned, so -- unlike the runtime names -- they resolve by
 # direct name (no _vNNNN suffix). See also the post-decode allowlist (_DRIVER_REGISTERED
-# in monitor_trace), which keeps any other unregistered driver api out of the trace.
+# in ``trace``), which keeps any other unregistered driver api out of the trace.
 _NOISY_DRIVER_API_NAMES = (
     "cuKernelGetAttribute",
     "cuDevicePrimaryCtxGetState",
@@ -310,8 +310,8 @@ class CuptiError(RuntimeError):
 
 class _PyLibCupti:
     """Pythonic wrapper over libcupti's CUPTI Activity API: each method hides the
-    ctypes marshalling and rc-checking behind a clean call, so callers (the
-    monitor, enable_hes_early, the v2 path) never touch ctypes. Get the
+    ctypes marshalling and rc-checking behind a clean call, so callers (Cuspy,
+    enable_hes_early, the v2 path) never touch ctypes. Get the
     process-wide instance via :func:`pylibcupti`. Methods that must succeed raise
     CuptiError; genuinely-optional ones return a bool / None."""
 
@@ -408,7 +408,7 @@ class _PyLibCupti:
         )
 
     def activity_flush_all(self) -> None:
-        """Hand over COMPLETED buffers only (``cuptiActivityFlushAll(0)``). The monitor
+        """Hand over COMPLETED buffers only (``cuptiActivityFlushAll(0)``). Cuspy
         never forces in-progress buffers (``CUPTI_ACTIVITY_FLAG_FLUSH_FORCED``): a
         forced flush consumes a still-running kernel's record (its real completion is
         then never re-delivered) and racing it against concurrent host activity is the
@@ -420,7 +420,7 @@ class _PyLibCupti:
     ) -> int:
         """Dropped-record count for the subscription.
 
-        Must use the ``_v2`` (subscriber-scoped) entry point: the monitor enables and
+        Must use the ``_v2`` (subscriber-scoped) entry point: Cuspy enables and
         registers through the subscriber-scope API, and CUPTI refuses to mix scopes --
         the global ``cuptiActivityGetNumDroppedRecords`` returns
         CUPTI_ERROR_NOT_COMPATIBLE for every call once a subscriber is in use. That
@@ -445,8 +445,8 @@ class _PyLibCupti:
     def finalize(self) -> None:
         """cuptiFinalize -- detach and release ALL of CUPTI process-wide. This is a
         global, heavy reset for explicit *synchronous* teardown: e.g. releasing a
-        stock Kineto session's CUPTI subscriber before a CUPTI-monitor session
-        subscribes. The monitor itself never calls this at stop() -- it disarms
+        stock Kineto session's CUPTI subscriber before a Cuspy session
+        subscribes. Cuspy itself never calls this at stop() -- it disarms
         user-defined records + unsubscribes instead, because cuptiFinalize is global
         (would clobber a concurrent consumer) and, run asynchronously (Kineto's
         TEARDOWN_CUPTI), can deadlock against another thread's CUPTI calls."""
@@ -469,7 +469,7 @@ class _PyLibCupti:
         sub = ctypes.c_void_p()
         params = _SubscriberParams(
             structSize=ctypes.sizeof(_SubscriberParams),
-            subscriberName=b"torch-cupti-monitor",
+            subscriberName=b"torch-cuspy",
             oldSubscriberName=None,
             oldSubscriberSize=0,
             allowMultipleSubscribers=1 if allow_multiple else 0,
