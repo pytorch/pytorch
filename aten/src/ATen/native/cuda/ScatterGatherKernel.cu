@@ -168,7 +168,7 @@ struct _cuda_scatter_gather_internal_kernel {
          std::is_same_v<scalar_t, c10::Half> || std::is_same_v<scalar_t, c10::BFloat16>)) {
       constexpr size_t element_size = sizeof(scalar_t);
       constexpr size_t alignment = 16;
-      if (at::native::fast_scatter_add_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride * element_size, element_size)) {
+      if (at::native::fast_scatter_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride * element_size, element_size)) {
         auto slice_size = iter.shape()[0] * element_size;
         auto num_ind = iter.shape()[1];
         auto self_stride_bytes = index_stride * element_size;
@@ -176,7 +176,7 @@ struct _cuda_scatter_gather_internal_kernel {
         if (iter.numel() == 0) return;
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
         if (at::cuda::getCurrentDeviceProperties()->major >= 9) {
-          at::native::tma_scatter_add_kernel_launch<scalar_t, index_t>(
+          at::native::tma_scatter_kernel_launch<at::native::ScatterAddOp, scalar_t, index_t>(
               reinterpret_cast<scalar_t*>(self_ptr),
               reinterpret_cast<const scalar_t*>(src_ptr),
               reinterpret_cast<index_t*>(index_ptr),
@@ -185,7 +185,8 @@ struct _cuda_scatter_gather_internal_kernel {
           return;
         }
 #endif
-        at::native::vectorized_scatter_add_kernel_launch<alignment, scalar_t, index_t>(
+        at::native::vectorized_scatter_kernel_launch<
+            at::native::ScatterAddOp, alignment, scalar_t, index_t>(
             reinterpret_cast<scalar_t*>(self_ptr),
             reinterpret_cast<const scalar_t*>(src_ptr),
             reinterpret_cast<index_t*>(index_ptr),
@@ -197,83 +198,54 @@ struct _cuda_scatter_gather_internal_kernel {
 #endif
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     if constexpr (is_scatter_like &&
-        (std::is_same_v<func_t, ReduceMinimum> || std::is_same_v<func_t, ReduceMaximum>) &&
-        (std::is_same_v<scalar_t, c10::Half> || std::is_same_v<scalar_t, c10::BFloat16>)) {
+        (std::is_same_v<func_t, ReduceMinimum> ||
+         std::is_same_v<func_t, ReduceMaximum>) &&
+        (std::is_same_v<scalar_t, c10::Half> ||
+         std::is_same_v<scalar_t, c10::BFloat16>)) {
       constexpr size_t element_size = sizeof(scalar_t);
-      const bool index_aligned = at::native::memory::get_alignment(index_ptr) >= sizeof(index_t);
-      const int device_major = at::cuda::getCurrentDeviceProperties()->major;
-      if (index_aligned && iter.numel() != 0 && device_major >= 8) {
-        const int D = static_cast<int>(iter.shape()[0]);
-        const int num_ind = static_cast<int>(iter.shape()[1]);
-        const int64_t row_bytes = static_cast<int64_t>(D) * element_size;
-        const int64_t self_stride_bytes = index_stride * element_size;
-        const int64_t src_stride_bytes = iter.strides(1)[1];
-        const bool aligned16 = row_bytes >= 16 && row_bytes % 16 == 0 &&
-            at::native::fast_scatter_reduce_kernel_eligible<16>(
-                iter, self_ptr, src_ptr, self_stride_bytes, element_size);
-        if (aligned16 && device_major >= 9) {
+      constexpr size_t alignment = 16;
+      if (at::native::fast_scatter_kernel_eligible<alignment>(
+              iter, self_ptr, src_ptr, index_stride * element_size, element_size)) {
+        auto slice_size = iter.shape()[0] * element_size;
+        auto num_ind = iter.shape()[1];
+        auto self_stride_bytes = index_stride * element_size;
+        auto src_stride_bytes = iter.strides(1)[1];
+        auto ind_dim_size = index_size;
+        if (iter.numel() == 0) return;
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
+        if (at::cuda::getCurrentDeviceProperties()->major >= 9) {
           if constexpr (std::is_same_v<func_t, ReduceMaximum>) {
-            at::native::tma_scatter_reduce_minmax_kernel_launch<
-                scalar_t, index_t, true>(
+            at::native::tma_scatter_kernel_launch<at::native::ScatterMaxOp, scalar_t, index_t>(
                 reinterpret_cast<scalar_t*>(self_ptr),
                 reinterpret_cast<const scalar_t*>(src_ptr),
-                reinterpret_cast<index_t*>(index_ptr), num_ind, D, index_size,
+                reinterpret_cast<index_t*>(index_ptr), num_ind,
+                static_cast<int>(iter.shape()[0]), ind_dim_size,
                 self_stride_bytes, src_stride_bytes);
           } else {
-            at::native::tma_scatter_reduce_minmax_kernel_launch<
-                scalar_t, index_t, false>(
+            at::native::tma_scatter_kernel_launch<at::native::ScatterMinOp, scalar_t, index_t>(
                 reinterpret_cast<scalar_t*>(self_ptr),
                 reinterpret_cast<const scalar_t*>(src_ptr),
-                reinterpret_cast<index_t*>(index_ptr), num_ind, D, index_size,
-                self_stride_bytes, src_stride_bytes);
-          }
-          return;
-#endif
-        }
-        if (device_major < 9 && aligned16) {
-          if constexpr (std::is_same_v<func_t, ReduceMaximum>) {
-            at::native::scatter_reduce_minmax_kernel_launch<
-                scalar_t, index_t, true, 8>(
-                reinterpret_cast<scalar_t*>(self_ptr),
-                reinterpret_cast<const scalar_t*>(src_ptr),
-                reinterpret_cast<index_t*>(index_ptr), num_ind, D, index_size,
-                self_stride_bytes, src_stride_bytes);
-          } else {
-            at::native::scatter_reduce_minmax_kernel_launch<
-                scalar_t, index_t, false, 8>(
-                reinterpret_cast<scalar_t*>(self_ptr),
-                reinterpret_cast<const scalar_t*>(src_ptr),
-                reinterpret_cast<index_t*>(index_ptr), num_ind, D, index_size,
+                reinterpret_cast<index_t*>(index_ptr), num_ind,
+                static_cast<int>(iter.shape()[0]), ind_dim_size,
                 self_stride_bytes, src_stride_bytes);
           }
           return;
         }
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
-        if (device_major >= 9 &&
-            (std::is_same_v<scalar_t, c10::Half> || std::is_same_v<scalar_t, c10::BFloat16>)) {
-          if (D % 4 == 0 &&
-              at::native::fast_scatter_reduce_kernel_eligible<8>(
-                  iter, self_ptr, src_ptr, self_stride_bytes, element_size)) {
-            if constexpr (std::is_same_v<func_t, ReduceMaximum>) {
-              at::native::scatter_reduce_minmax_kernel_launch<
-                  scalar_t, index_t, true, 4>(
-                  reinterpret_cast<scalar_t*>(self_ptr),
-                  reinterpret_cast<const scalar_t*>(src_ptr),
-                  reinterpret_cast<index_t*>(index_ptr), num_ind, D, index_size,
-                  self_stride_bytes, src_stride_bytes);
-            } else {
-              at::native::scatter_reduce_minmax_kernel_launch<
-                  scalar_t, index_t, false, 4>(
-                  reinterpret_cast<scalar_t*>(self_ptr),
-                  reinterpret_cast<const scalar_t*>(src_ptr),
-                  reinterpret_cast<index_t*>(index_ptr), num_ind, D, index_size,
-                  self_stride_bytes, src_stride_bytes);
-            }
-            return;
-          }
-        }
 #endif
+        if constexpr (std::is_same_v<func_t, ReduceMaximum>) {
+          at::native::vectorized_scatter_kernel_launch<at::native::ScatterMaxOp, alignment, scalar_t, index_t>(
+              reinterpret_cast<scalar_t*>(self_ptr),
+              reinterpret_cast<const scalar_t*>(src_ptr),
+              reinterpret_cast<index_t*>(index_ptr), num_ind, slice_size,
+              ind_dim_size, self_stride_bytes, src_stride_bytes);
+        } else {
+          at::native::vectorized_scatter_kernel_launch<at::native::ScatterMinOp, alignment, scalar_t, index_t>(
+              reinterpret_cast<scalar_t*>(self_ptr),
+              reinterpret_cast<const scalar_t*>(src_ptr),
+              reinterpret_cast<index_t*>(index_ptr), num_ind, slice_size,
+              ind_dim_size, self_stride_bytes, src_stride_bytes);
+        }
+        return;
       }
     }
 #endif
