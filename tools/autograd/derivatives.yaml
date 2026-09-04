@@ -524,11 +524,11 @@
   result: logcumsumexp_jvp(self_p, self_t, dim)
 
 - name: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
-  self: cumprod_backward(grad.to(self.scalar_type()), self, dim, result)
+  self: handle_r_to_c(self.scalar_type(), cumprod_backward(grad, self.to(grad.scalar_type()), dim, result))
   result: "cumprod_jvp(self_t, self_p, result, dim).to(dtype.has_value() ? *dtype : self_p.scalar_type())"
 
 - name: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
-  self: cumsum_backward(grad.to(self.scalar_type()), dim)
+  self: cumsum_backward(handle_r_to_c(self.scalar_type(), grad), dim)
   result: auto_linear
 
 - name: cummax(Tensor self, int dim) -> (Tensor values, Tensor indices)
@@ -1156,15 +1156,15 @@
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   dispatch:
     Default:
-      self: grad.expand_symint(self.sym_sizes()) / self.sym_numel()
+      self: handle_r_to_c(self.scalar_type(), grad).expand_symint(self.sym_sizes()) / self.sym_numel()
       result: auto_linear
     AutogradNestedTensor:
       # TODO: replace this with grad.expand_as(self) / self.sym_numel() when that is supported
-      self: (ones_like(self) * grad) / self.sym_numel()
+      self: (ones_like(self) * handle_r_to_c(self.scalar_type(), grad)) / self.sym_numel()
       result: auto_linear
 
 - name: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: mean_backward(grad, self.sym_sizes(), dim, self.sym_numel(), keepdim)
+  self: mean_backward(handle_r_to_c(self.scalar_type(), grad), self.sym_sizes(), dim, self.sym_numel(), keepdim)
   result: auto_linear
 
 - name: median(Tensor self) -> Tensor
@@ -1423,11 +1423,11 @@
   result: auto_element_wise
 
 - name: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: prod_backward(grad, self.to(grad.scalar_type()), result)
+  self: handle_r_to_c(self.scalar_type(), prod_backward(grad, self.to(grad.scalar_type()), result))
   result: (prod_backward(at::ones({}, result.options()).expand_as(result), self_p.to(result.scalar_type()), result) * self_t.conj()).sum().conj()
 
 - name: prod.dim_int(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim)
+  self: handle_r_to_c(self.scalar_type(), prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim))
   result: (prod_backward(at::ones({}, result.options()).expand_as(result), self_p.to(result.scalar_type()), result, dim, keepdim) * self_t.conj()).sum(dim, keepdim).conj()
 
 - name: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
@@ -1714,24 +1714,24 @@
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   dispatch:
     Default:
-      self: grad.expand_symint(self.sym_sizes())
+      self: handle_r_to_c(self.scalar_type(), grad).expand_symint(self.sym_sizes())
       result: auto_linear
     AutogradNestedTensor:
       # TODO: replace this with grad.expand_as(self) when that is supported
-      self: ones_like(self) * grad
+      self: ones_like(self) * handle_r_to_c(self.scalar_type(), grad)
       result: auto_linear
 
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   dispatch:
     Default:
-      self: sum_backward(grad, self.sym_sizes(), dim, keepdim)
+      self: sum_backward(handle_r_to_c(self.scalar_type(), grad), self.sym_sizes(), dim, keepdim)
       result: auto_linear
     AutogradNestedTensor:
       # TODO: replace this function once semantics for nested tensor expand have been settled on
-      self: _nested_sum_backward(grad, self, dim, keepdim)
+      self: _nested_sum_backward(handle_r_to_c(self.scalar_type(), grad), self, dim, keepdim)
 
 - name: nansum(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
+  self: nansum_backward(handle_r_to_c(self.scalar_type(), grad), self, dim, keepdim)
   result: at::where(self_p.isnan(), 0, self_t).sum(dim, keepdim, dtype)
 
 # We never call _linalg_svd with compute_uv=False in an autograd context, so we don't even consider it here
