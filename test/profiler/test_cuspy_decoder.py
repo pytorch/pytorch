@@ -12,10 +12,10 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 # (cupti-python imports its enums at load). TEST_CUPTI_V13_3 additionally requires a loaded
 # libcupti >= 13.3 (the v2 user-defined-record API the decode worker drives).
 if TEST_CUPTI:
-    from torch.profiler._cupti.cupti_python import pylibcupti
+    from torch.profiler._cuspy.cupti_python import pylibcupti
 
 
-class TestCuptiDecoder(TestCase):
+class TestCuspyDecoder(TestCase):
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires a loaded libcupti >= 13.3")
     @unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
     def test_decoder_groups_distinct_layouts(self):
@@ -28,10 +28,10 @@ class TestCuptiDecoder(TestCase):
         # length-consistent groups for the kind.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti.cupti_python import CuptiError
-        from torch.profiler._cupti.records import Kernel
+        from torch.profiler._cuspy.cupti_python import CuptiError
+        from torch.profiler._cuspy.records import Kernel
 
-        native = torch._C._profiler._cupti_monitor
+        native = torch._C._profiler._cuspy
         torch.cuda.init()
         lib = pylibcupti()
         kernel = ActivityKind.CONCURRENT_KERNEL

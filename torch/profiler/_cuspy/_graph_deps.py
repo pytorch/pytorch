@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 class _GraphDependencyRecorder:
     """Persistent recorder of graph_node_id -> predecessor graph_node_ids edges.
 
-    Process-wide singleton, like ``CuptiMonitor``: ``_GraphDependencyRecorder()`` returns
+    Process-wide singleton, like ``Cuspy``: ``_GraphDependencyRecorder()`` returns
     the one instance, constructed on first call. Edges are keyed by ``tools_id`` (== the
     CUPTI ``graph_node_id`` that joins to profiler kernel records). Armed at most once via
     :meth:`arm`; :attr:`deps` is the shared map read (by reference) by every observer's

@@ -46,6 +46,33 @@ class MyException(OSError):
     pass
 
 
+# The writable BaseException attributes live on the wrapped ExceptionVariable
+# rather than in the instance __dict__, so both the in-region read and the
+# object escaping the compiled region need explicit handling.
+WRITABLE_BASE_EXCEPTION_ATTRS = [
+    "args",
+    "__cause__",
+    "__context__",
+    "__suppress_context__",
+]
+
+
+def exception_attr_value(attr):
+    """A value valid for *attr*, built inside the traced region."""
+    if attr == "args":
+        return ("y",)
+    if attr == "__suppress_context__":
+        return True
+    return ValueError("inner")
+
+
+def comparable(value):
+    """Exceptions compare by identity, so compare type and args instead."""
+    if isinstance(value, BaseException):
+        return type(value), value.args
+    return value
+
+
 class ExceptionTests(torch._dynamo.test_case.TestCase):
     def test_exception(self):
         def fn(x):
@@ -1782,6 +1809,74 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         opt_fn(x)  # diverges: Dynamo does not raise
+
+    @parametrize("attr", WRITABLE_BASE_EXCEPTION_ATTRS)
+    def test_exception_attr_read_after_write(self, attr):
+        def fn(x):
+            e = CustomException("x")
+            setattr(e, attr, exception_attr_value(attr))
+            return getattr(e, attr), x + 1
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(comparable(opt_fn(x)[0]), comparable(fn(x)[0]))
+
+    # A write is routed to the wrapped ExceptionVariable, but side_effects sends
+    # only a bare ExceptionVariable through reconstruct(), so a
+    # UserDefinedExceptionObjectVariable is rebuilt via __new__ and the write is
+    # dropped at the boundary.
+    @unittest.expectedFailure
+    @parametrize("attr", WRITABLE_BASE_EXCEPTION_ATTRS)
+    def test_exception_attr_write_survives_escape(self, attr):
+        def fn(x):
+            e = CustomException("x")
+            setattr(e, attr, exception_attr_value(attr))
+            return e
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        got, expected = getattr(opt_fn(x), attr), getattr(fn(x), attr)
+        self.assertEqual(comparable(got), comparable(expected))
+
+    @unittest.expectedFailure
+    def test_exception_store_attr_survives_escape(self):
+        # STORE_ATTR rather than the setattr builtin, and several writes at once.
+        def fn(x):
+            e = CustomException("x")
+            e.args = ("y",)
+            e.__suppress_context__ = True
+            return e
+
+        x = torch.randn(4)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        expected = fn(x)
+        self.assertEqual(got.args, expected.args)
+        self.assertEqual(got.__suppress_context__, expected.__suppress_context__)
+
+    # ExceptionVariable.reconstruct skips any ConstantVariable-valued attribute,
+    # so a deliberate write is indistinguishable from the untouched default.
+    @unittest.expectedFailure
+    def test_builtin_exception_constant_attr_survives_escape(self):
+        def fn(x):
+            e = ValueError("x")
+            e.__suppress_context__ = True
+            return e
+
+        x = torch.randn(4)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(got.__suppress_context__, fn(x).__suppress_context__)
+
+    def test_escaping_exception_defaults_unchanged(self):
+        def fn(x):
+            return CustomException("x")
+
+        x = torch.randn(4)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        expected = fn(x)
+        self.assertEqual(got.args, expected.args)
+        self.assertEqual(got.__suppress_context__, expected.__suppress_context__)
+        self.assertIsNone(got.__cause__)
+        self.assertIsNone(got.__context__)
 
 
 instantiate_parametrized_tests(ExceptionTests)
