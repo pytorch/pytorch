@@ -81,6 +81,36 @@ class Adagrad(Optimizer):
             self._need_device_dtype_check_for_fused = True
             self._step_supports_amp_scaling = True
 
+        capturable_supported_devices = _get_capturable_supported_devices(
+            supports_xla=False
+        )
+        for group in self.param_groups:
+            if group["capturable"] and not all(
+                p.device.type in capturable_supported_devices for p in group["params"]
+            ):
+                raise AssertionError(
+                    f"If capturable=True, params must be on supported devices: {capturable_supported_devices}."
+                )
+            for p in group["params"]:
+                state = self.state[p]
+                state["step"] = (
+                    torch.zeros(
+                        (),
+                        dtype=_get_scalar_dtype(is_fused=group["fused"]),
+                        device=p.device,
+                    )
+                    if group["capturable"] or group["fused"]
+                    else torch.tensor(0.0, dtype=_get_scalar_dtype())
+                )
+                init_value = (
+                    complex(initial_accumulator_value, initial_accumulator_value)
+                    if torch.is_complex(p)
+                    else initial_accumulator_value
+                )
+                state["sum"] = torch.full_like(
+                    p, init_value, memory_format=torch.preserve_format
+                )
+
     def __setstate__(self, state):
         super().__setstate__(state)
         #  define "fused" for
@@ -140,29 +170,6 @@ class Adagrad(Optimizer):
                 params_with_grad.append(p)
                 grads.append(p.grad)
                 state = self.state[p]
-                if len(state) == 0:
-                    if group["fused"]:
-                        _device_dtype_check_for_fused(p)
-
-                    state["step"] = (
-                        torch.zeros(
-                            (),
-                            dtype=_get_scalar_dtype(is_fused=group["fused"]),
-                            device=p.device,
-                        )
-                        if group["capturable"] or group["fused"]
-                        else torch.tensor(0.0, dtype=_get_scalar_dtype())
-                    )
-
-                    initial_accumulator_value = group["initial_accumulator_value"]
-                    init_value = (
-                        complex(initial_accumulator_value, initial_accumulator_value)
-                        if torch.is_complex(p)
-                        else initial_accumulator_value
-                    )
-                    state["sum"] = torch.full_like(
-                        p, init_value, memory_format=torch.preserve_format
-                    )
                 state_sums.append(state["sum"])
                 state_steps.append(state["step"])
 
@@ -370,19 +377,13 @@ def _single_tensor_adagrad(
     if grad_scale is not None or found_inf is not None:
         raise AssertionError("Expected grad_scale and found_inf to be None")
 
-    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch.compiler.is_compiling() and capturable:
-        capturable_supported_devices = _get_capturable_supported_devices(
-            supports_xla=False
+    if capturable and not all(
+        p.device.type == step.device.type
+        for p, step in zip(params, state_steps, strict=True)
+    ):
+        raise AssertionError(
+            "If capturable=True, params and state_steps must be on the same device."
         )
-        if not all(
-            p.device.type == step.device.type
-            and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps, strict=True)
-        ):
-            raise AssertionError(
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
 
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
@@ -464,19 +465,13 @@ def _multi_tensor_adagrad(
     if grad_scale is not None or found_inf is not None:
         raise AssertionError("Expected grad_scale and found_inf to be None")
 
-    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch.compiler.is_compiling() and capturable:
-        capturable_supported_devices = _get_capturable_supported_devices(
-            supports_xla=False
+    if capturable and not all(
+        p.device.type == step.device.type
+        for p, step in zip(params, state_steps, strict=True)
+    ):
+        raise AssertionError(
+            "If capturable=True, params and state_steps must be on the same device."
         )
-        if not all(
-            p.device.type == step.device.type
-            and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps, strict=True)
-        ):
-            raise AssertionError(
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
 
     # Foreach functions will throw errors if given empty lists
     if len(params) == 0:

@@ -509,7 +509,17 @@ def optim_inputs_func_adagrad(device, dtype=None):
 def optim_error_inputs_func_adagrad(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
     if _get_device_type(device) == "cpu":
+        sample_tensor = torch.empty((), device=device, dtype=dtype)
         error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[sample_tensor],
+                    kwargs={"capturable": True},
+                    desc="capturable is not supported on CPU",
+                ),
+                error_type=AssertionError,
+                error_regex="If capturable=True, params must be on supported devices",
+            ),
             ErrorOptimizerInput(
                 OptimizerInput(
                     params=None,
