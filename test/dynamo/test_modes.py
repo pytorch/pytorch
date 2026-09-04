@@ -989,6 +989,30 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         with BaseTorchFunctionMode():
             self.assertEqual(opt_fn(x), fn(x))
 
+    def test_handle_torch_function_explicit_dispatch(self):
+        from torch.overrides import handle_torch_function, has_torch_function_unary
+
+        def my_op(x):
+            if has_torch_function_unary(x):
+                return handle_torch_function(my_op, (x,), x)
+            return x + 1
+
+        class MyOpMode(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                kwargs = kwargs or {}
+                if func is my_op:
+                    return args[0] * 10
+                return super().__torch_function__(func, types, args, kwargs)
+
+        def fn(x):
+            return my_op(x) + my_op(x)
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with MyOpMode():
+            self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(opt_fn(x), fn(x))
+
 
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(
