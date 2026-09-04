@@ -87,6 +87,8 @@ from .base import (
     Member,
     Method,
     NO_SUCH_SUBOBJ,
+    readonly_setter,
+    unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -138,6 +140,7 @@ from .object_protocol import (
     pysequence_check,
     pysequence_contains,
     python_constant_richcompare_impl,
+    resolve_descriptor_owner,
     ternary_iop,
     ternary_op,
     type_implements_mp_length,
@@ -432,10 +435,10 @@ class BaseBuiltinVariable(VariableTracker):
         source = self.source and AttrSource(self.source, "__flags__")
         return VariableTracker.build(tx, fn.__flags__, source)
 
-    tp_getset = {"__bases__": GetSet(_type_get_bases, None)}
+    tp_getset = {"__bases__": GetSet(_type_get_bases, unmodeled_setter)}
     tp_members = {
-        "__base__": Member(_type_get_base, None),
-        "__flags__": Member(_type_get_flags, None),
+        "__base__": Member(_type_get_base, readonly_setter),
+        "__flags__": Member(_type_get_flags, readonly_setter),
     }
 
     @classmethod
@@ -462,6 +465,27 @@ class BaseBuiltinVariable(VariableTracker):
         fn = self.as_python_constant()
         source = self.source and AttrSource(self.source, name)
         attr = getattr(fn, name, None)
+
+        # wrapperdescr_get/method_get with obj=NULL returns the descriptor
+        # itself when accessed on the class, e.g. `int.__hash__`. Model it as
+        # a real descriptor VT (like UserDefinedClassVariable.resolve_cls_descriptor
+        # does) instead of a generic GetAttrVariable, so unbound calls
+        # (`int.__hash__(7)`) go through tp_descr_get_impl's receiver
+        # type-check instead of being blindly forwarded.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
+        if isinstance(fn, type) and name not in ("__get__", "__set__", "__delete__"):
+            if isinstance(
+                attr, (types.WrapperDescriptorType, types.MethodDescriptorType)
+            ):
+                owner = resolve_descriptor_owner(tx, attr, self, fn)
+                descriptor_vt_cls = (
+                    variables.WrapperDescriptorVariable
+                    if isinstance(attr, types.WrapperDescriptorType)
+                    else variables.MethodDescriptorVariable
+                )
+                return descriptor_vt_cls(attr, owner=owner, source=source)
+
         return variables.GetAttrVariable(
             self, name, py_type=type(attr) if attr is not None else None, source=source
         )
@@ -607,7 +631,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return VariableTracker.build(tx, self.fn.__name__, source)
 
     tp_getset = {
-        "__name__": GetSet(_builtin_type_get_name, None),
+        "__name__": GetSet(_builtin_type_get_name, readonly_setter),
     }
 
     @classmethod
@@ -1890,17 +1914,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
 
-        if self.fn in (
-            bool,
-            bytes,
-            complex,
-            float,
-            frozenset,
-            int,
-            str,
-            set,
-            tuple,
-        ) and isinstance(
+        if isinstance(self.fn, type) and isinstance(
             inspect.getattr_static(self.fn, name, None),
             (types.WrapperDescriptorType, types.MethodDescriptorType),
         ):
@@ -2813,6 +2827,30 @@ class BuiltinVariable(BaseBuiltinVariable):
             if not callable(value):
                 return VariableTracker.build(tx, value, source)
         attr = getattr(self.fn, name, None)
+
+        # wrapperdescr_get/method_get with obj=NULL returns the descriptor
+        # itself when accessed on the class, e.g. `int.__hash__`. Model it as
+        # a real descriptor VT (like UserDefinedClassVariable.resolve_cls_descriptor
+        # does) instead of a generic GetAttrVariable, so unbound calls
+        # (`int.__hash__(7)`) go through tp_descr_get_impl's receiver
+        # type-check instead of being blindly forwarded.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L206-L207
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
+        if (
+            isinstance(self.fn, type)
+            and name not in ("__get__", "__set__", "__delete__")
+            and isinstance(
+                attr, (types.WrapperDescriptorType, types.MethodDescriptorType)
+            )
+        ):
+            owner = resolve_descriptor_owner(tx, attr, self, self.fn)
+            descriptor_vt_cls = (
+                variables.WrapperDescriptorVariable
+                if isinstance(attr, types.WrapperDescriptorType)
+                else variables.MethodDescriptorVariable
+            )
+            return descriptor_vt_cls(attr, owner=owner, source=source)
+
         return variables.GetAttrVariable(
             self, name, py_type=type(attr) if attr is not None else None, source=source
         )

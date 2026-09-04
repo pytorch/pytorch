@@ -7015,13 +7015,15 @@ class ConcatKernel(NopKernel):
                 input_unwrapped = inp.data.unwrap_view()
             else:
                 input_unwrapped = inp.data
-
             if (
                 isinstance(input_unwrapped, StorageBox)
                 and input_unwrapped.is_input_buffer()
                 and (dev := inp.get_device()) is not None
                 and is_gpu(dev.type)
-                and not is_dynamic(input_buffer)
+                and (
+                    not is_dynamic(input_buffer)
+                    or config.combo_kernel_foreach_dynamic_shapes
+                )
             ):
                 op_names.append(input_buffer.get_operation_name())
 
@@ -9896,7 +9898,13 @@ class FallbackKernel(ExternKernelAlloc):
             elif isinstance(return_type, torch.IntType):
                 return export_schema.Argument.create(as_int=output)
             else:
-                raise RuntimeError(f"Unsupported return type {type(return_type)}")
+                # Name the op: the bare message gives no way to tell which
+                # extern kernel has the unsupported return. `target` is the op
+                # whose schema produced `return_type`.
+                raise RuntimeError(
+                    f"Unsupported return type {type(return_type)} for "
+                    f"target={target} schema={getattr(target, '_schema', None)}"
+                )
 
         if isinstance(target, torch._higher_order_ops.torchbind.CallTorchBind):
             returns = target.schema(args[0], args[1]).returns
@@ -11791,23 +11799,25 @@ class WhileLoop(ExternKernel):
             stack_output=stack_output,
         )
 
-        if not (
-            body_fn.graph is not None
-            and isinstance(body_fn.graph.module, torch.fx.GraphModule)
-        ):  # to make linter happy
-            raise AssertionError(
-                "Expected body_fn.graph is not None and isinstance( body_fn.graph.module, torch.fx.GraphModule )"
-            )
-
-        # Handling input mutations
-        mutated_idxs = check_input_alias_and_mutation(
-            body_fn.graph.module, fake_all_inputs
-        )[3]
-        mutated_idx_set = OrderedSet(mutated_idxs)
-        mutated_inputs = [all_inputs[idx] for idx in mutated_idx_set]
+        # Handling input mutations. Inputs can be mutated by cond_fn,
+        # body_fn or both (e.g. a captured tensor mutated only in cond_fn).
+        subgraph_mutated_idxs: list[OrderedSet[int]] = []
+        for subgraph in (cond_fn, body_fn):
+            if subgraph.graph is None or not isinstance(
+                subgraph.graph.module, torch.fx.GraphModule
+            ):
+                raise AssertionError(
+                    "Expected lowered subgraph with a GraphModule, got "
+                    f"{subgraph.graph and subgraph.graph.module}"
+                )
+            mutated_idxs = check_input_alias_and_mutation(
+                subgraph.graph.module, fake_all_inputs
+            )[3]
+            subgraph_mutated_idxs.append(OrderedSet(mutated_idxs))
+        cond_mutated_idxs, body_mutated_idxs = subgraph_mutated_idxs
+        mutated_idx_set = cond_mutated_idxs | body_mutated_idxs
 
         # Create all outputs first
-        mutated_inputs_iter = iter(mutated_inputs)
         all_outputs: list[IRNode] = []
         while_loop.outputs = []
         while_loop.mutation_outputs = []
@@ -11830,15 +11840,13 @@ class WhileLoop(ExternKernel):
                 all_outputs.append(multi_out)
         else:
             for idx, output in enumerate(body_outputs):
-                if idx in mutated_idx_set:
-                    if idx >= len(carried_inputs):
-                        raise AssertionError("only carries can be mutated.")
-                    # Create MutationOutput for mutated inputs
-                    mutated_input = next(mutated_inputs_iter)
-                    while_loop.mutation_outputs.append(
-                        MutationOutput(mutated_input.layout, mutated_input, while_loop)  # type: ignore[attr-defined, union-attr]
-                    )
-                    all_outputs.append(mutated_input)
+                if idx in body_mutated_idxs:
+                    # Carries mutated in place by body_fn: the input buffer
+                    # itself is the output. cond_fn mutations must not take
+                    # this branch: the loop state is rebound to body_fn's
+                    # outputs each iteration, so the carry's final value
+                    # still lives in body_outputs[idx].
+                    all_outputs.append(all_inputs[idx])
                 else:
                     multi_out = MultiOutput(
                         FixedLayout(
@@ -11853,6 +11861,16 @@ class WhileLoop(ExternKernel):
                     )
                     while_loop.outputs.append(multi_out)
                     all_outputs.append(multi_out)
+
+            # Register a MutationOutput for every input mutated by either
+            # subgraph (carried or additional, e.g. captured tensors) so
+            # reads of these buffers in the outer graph are ordered after
+            # the loop.
+            for idx in sorted(mutated_idx_set):
+                mutated_input = all_inputs[idx]
+                while_loop.mutation_outputs.append(
+                    MutationOutput(mutated_input.layout, mutated_input, while_loop)  # type: ignore[attr-defined, union-attr]
+                )
 
         for inp, out in zip(carried_inputs, all_outputs):
             if inp.get_name() in V.graph.graph_inputs:
