@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
@@ -26,10 +27,12 @@ from collections.abc import (
     Callable,
     Collection,
     Generator,
+    Iterable,
     Iterator,
     Mapping,
     MutableMapping,
     MutableSet,
+    Set as AbstractSet,
 )
 from datetime import datetime
 from functools import lru_cache
@@ -39,6 +42,7 @@ from typing import (
     Concatenate,
     Generic,
     Literal,
+    NamedTuple,
     Protocol,
     TYPE_CHECKING,
     TypeAlias,
@@ -86,7 +90,7 @@ from torch.fx.experimental.symbolic_shapes import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence, ValuesView
+    from collections.abc import Sequence, ValuesView
     from pathlib import Path
 
     from torch import SymBool, SymFloat, SymInt
@@ -104,21 +108,67 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
 
-GPU_TYPES = ["cuda", "mps", "xpu", "mtia"]
 T = TypeVar("T")
 
 
-# defines here before import torch._dynamo is for avoiding circular import
-# when get_gpu_type is imported from dynamo
+# Defined before the torch._dynamo import below to avoid a circular import
+# when pulled in from dynamo; hence the lazy registry imports in the bodies.
+def _gpu_types() -> list[str]:
+    """Freshly scan the DeviceInterface registry for GPU-class device types,
+    skipping indexed aliases such as "cuda:0". Production code should use the
+    GPU_TYPES snapshot below; this scan exists to compute it and for tests.
+    """
+    from torch._dynamo.device_interface import get_registered_device_interfaces
+
+    return [
+        name
+        for name, device_interface in get_registered_device_interfaces()
+        if ":" not in name and device_interface.is_gpu()
+    ]
+
+
+def _device_is_available(device: str) -> bool:
+    """Whether a registered DeviceInterface reports the device available.
+
+    Tolerates partially-implemented out-of-tree interfaces: the base-class
+    is_available() raises NotImplementedError, which must not propagate out
+    of registry-driven consumers (some run at module import time). Device
+    types with no registered interface are likewise treated as unavailable.
+    """
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    try:
+        return get_interface_for_device(device).is_available()
+    except NotImplementedError:
+        return False
+
+
 @functools.cache
 def get_gpu_type() -> str:
-    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
-    if not len(avail_gpus) <= 1:
-        raise AssertionError(
-            f"Expected at most 1 available GPU type, got {len(avail_gpus)}: {avail_gpus}"
-        )
-    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
-    return gpu_type
+    avail_gpus = [gpu for gpu in GPU_TYPES if _device_is_available(gpu)]
+
+    if not avail_gpus:
+        return "cuda"
+    if len(avail_gpus) == 1:
+        return avail_gpus[0]
+
+    # >1 GPU type available: disambiguate via the current accelerator.
+    acc = torch.accelerator.current_accelerator()
+    if acc is not None and acc.type in avail_gpus:
+        return acc.type
+    # Registry order is insertion order and may differ between processes
+    # (out-of-tree backends register at import time), so fall back to a
+    # stable choice rather than a positional one.
+    chosen = "cuda" if "cuda" in avail_gpus else sorted(avail_gpus)[0]
+    log.warning(
+        "Multiple GPU types %s are available but the current accelerator (%s) "
+        "is not one of them; defaulting to %r. Codegen may target the wrong "
+        "device.",
+        avail_gpus,
+        acc,
+        chosen,
+    )
+    return chosen
 
 
 from torch._dynamo.device_interface import get_interface_for_device
@@ -146,6 +196,15 @@ _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
+# Scanned exactly once, when this module is imported. Safe because both
+# registration paths precede any import of inductor: autoloaded out-of-tree
+# backends register during `import torch` (TORCH_DEVICE_BACKEND_AUTOLOAD, end
+# of torch/__init__.py) and explicit ones at their package import (e.g.
+# `import torch_npu`), while in-tree backends are registered by
+# init_device_reg() inside the scan itself. Registering after this module is
+# imported is not supported (see register_interface_for_device).
+GPU_TYPES: list[str] = _gpu_types()
+
 
 _DO_BENCH_PROFILE_EVENT_NAME = "inductor_do_bench_using_profiling"
 
@@ -153,6 +212,239 @@ _DO_BENCH_PROFILE_EVENT_NAME = "inductor_do_bench_using_profiling"
 _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
 InputType = torch.Tensor | int | torch.SymInt | None
+
+
+class ImportableConstexprType(NamedTuple):
+    module: str
+    qualname: str
+    root_name: str
+
+
+# Keep this aligned with names that generated Triton kernel modules bind before
+# evaluating constexpr reprs. Launcher-specific bindings are checked at its call site.
+_TRITON_CONSTEXPR_RESERVED_NAMES = frozenset(
+    (
+        "AttrsDescriptor",
+        "AutotuneHint",
+        "DeviceProperties",
+        "ReductionHint",
+        "TileHint",
+        "libdevice",
+        "math",
+        "pl",
+        "proton",
+        "tl",
+        "tl_math",
+        "tlx",
+        "torch",
+        "triton",
+        "triton_helpers",
+        "triton_heuristics",
+    )
+)
+
+
+class ConstexprReprChildren(NamedTuple):
+    values: tuple[object, ...]
+    rebuild: Callable[[tuple[object, ...]], object]
+
+
+def get_constexpr_repr_children(value: object) -> ConstexprReprChildren | None:
+    """Describe the immediate values included in an object's repr."""
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        fields = tuple(field for field in dataclasses.fields(value) if field.repr)
+
+        def rebuild_dataclass(children: tuple[object, ...]) -> object:
+            # Avoid constructors that could coerce sanitized values back to Enum.
+            result = copy.copy(value)
+            for field, child in zip(fields, children):
+                object.__setattr__(result, field.name, child)
+            return result
+
+        return ConstexprReprChildren(
+            tuple(getattr(value, field.name) for field in fields),
+            rebuild_dataclass,
+        )
+
+    attrs_fields = getattr(type(value), "__attrs_attrs__", None)
+    if attrs_fields is not None:
+        # attrs permits callable repr formatters, so only False hides a field.
+        fields = tuple(
+            field for field in attrs_fields if getattr(field, "repr", True) is not False
+        )
+
+        def rebuild_attrs(children: tuple[object, ...]) -> object:
+            result = copy.copy(value)
+            for field, child in zip(fields, children):
+                object.__setattr__(result, field.name, child)
+            return result
+
+        return ConstexprReprChildren(
+            tuple(getattr(value, field.name) for field in fields),
+            rebuild_attrs,
+        )
+
+    repr_args = getattr(value, "__repr_args__", None)
+    if callable(repr_args):
+        items = tuple(cast(Callable[[], Iterable[tuple[object, object]]], repr_args)())
+
+        def rebuild_repr_args(children: tuple[object, ...]) -> object:
+            result = copy.copy(value)
+            for (name, _), child in zip(items, children):
+                if not isinstance(name, str):
+                    raise TypeError(
+                        "Cannot sanitize an unnamed value returned by __repr_args__"
+                    )
+                object.__setattr__(result, name, child)
+            return result
+
+        return ConstexprReprChildren(
+            tuple(item for _, item in items),
+            rebuild_repr_args,
+        )
+
+    if isinstance(value, Mapping):
+        items = tuple(value.items())
+        mapping_constructor = cast(
+            Callable[[Mapping[object, object]], object], type(value)
+        )
+
+        def rebuild_mapping(children: tuple[object, ...]) -> object:
+            # children is the flattened key, value, key, value stream.
+            child_iter = iter(children)
+            sanitized = dict(zip(child_iter, child_iter))
+            if isinstance(value, collections.defaultdict):
+                return type(value)(value.default_factory, sanitized)
+            return mapping_constructor(sanitized)
+
+        return ConstexprReprChildren(
+            tuple(item for pair in items for item in pair),
+            rebuild_mapping,
+        )
+
+    if isinstance(value, list):
+        return ConstexprReprChildren(
+            tuple(value), lambda children: type(value)(children)
+        )
+
+    if isinstance(value, tuple) and hasattr(value, "_fields"):
+        return ConstexprReprChildren(
+            tuple(value),
+            lambda children: getattr(type(value), "_make")(children),  # noqa: B009
+        )
+
+    if isinstance(value, tuple):
+        return ConstexprReprChildren(tuple(value), tuple)
+
+    if isinstance(value, AbstractSet):
+        set_constructor = cast(Callable[[Iterable[object]], object], type(value))
+        return ConstexprReprChildren(tuple(value), set_constructor)
+
+    return None
+
+
+def _constexpr_type_repr_prefix(value: object) -> str | None:
+    value_type = type(value)
+    type_name = getattr(value_type, "__name__", None)
+    type_qualname = getattr(value_type, "__qualname__", None)
+    if type_name is None or type_qualname is None:
+        return None
+    value_repr = repr(value)
+    for prefix in (f"{type_qualname}(", f"{type_name}("):
+        if value_repr.startswith(prefix):
+            return prefix
+    return None
+
+
+def _collect_importable_constexpr_types(
+    value: object,
+    result: dict[str, ImportableConstexprType],
+    seen: OrderedSet[int],
+) -> None:
+    if id(value) in seen:
+        return
+    seen.add(id(value))
+
+    value_type = type(value)
+    type_module = getattr(value_type, "__module__", None)
+    type_qualname = getattr(value_type, "__qualname__", None)
+    repr_prefix = (
+        _constexpr_type_repr_prefix(value) if type_module != "builtins" else None
+    )
+    if (
+        type_module is not None
+        and type_qualname is not None
+        and type_module != "builtins"
+        and repr_prefix is not None
+    ):
+        if type_module == "__main__" or "<locals>" in type_qualname:
+            raise ImportError(
+                "Triton constexpr value type "
+                f"{type_module}.{type_qualname} is not importable. "
+                "Define constexpr config classes at module scope in an importable module."
+            )
+        repr_qualname = repr_prefix.removesuffix("(")
+        if repr_qualname != type_qualname:
+            raise ImportError(
+                "Triton constexpr nested value type "
+                f"{type_module}.{type_qualname} uses the bare name "
+                f"{repr_qualname} in its repr, which generated code cannot import. "
+                "Use the type's qualified name in its repr."
+            )
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            for field in dataclasses.fields(value):
+                if field.repr and not field.init:
+                    raise ImportError(
+                        "Triton constexpr dataclass value type "
+                        f"{type_module}.{type_qualname} has repr-visible field "
+                        f"{field.name} with init=False, so its repr cannot be "
+                        "evaluated as a constructor call. Set repr=False or init=True."
+                    )
+        root_name = type_qualname.split(".", 1)[0]
+        if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES:
+            raise ImportError(
+                "Triton constexpr value type "
+                f"{type_module}.{type_qualname} requires import name {root_name}, "
+                "which would shadow a name reserved by generated Triton code. "
+                "Rename the root type."
+            )
+        existing = result.get(root_name)
+        # Generated imports bind the root, so sibling nested types from the
+        # same module intentionally share one entry.
+        if existing is not None and (existing.module, existing.root_name) != (
+            type_module,
+            root_name,
+        ):
+            raise ImportError(
+                "Triton constexpr values require conflicting imports for "
+                f"{root_name}: {existing.module}.{existing.qualname} and "
+                f"{type_module}.{type_qualname}"
+            )
+        result[root_name] = ImportableConstexprType(
+            module=type_module,
+            qualname=type_qualname,
+            root_name=root_name,
+        )
+
+    repr_children = get_constexpr_repr_children(value)
+    if repr_children is not None:
+        for child in repr_children.values:
+            _collect_importable_constexpr_types(child, result, seen)
+
+
+def get_importable_constexpr_types(
+    values: Iterable[object],
+) -> list[ImportableConstexprType]:
+    """Collect imports for constructor-style constexpr reprs that use the type's
+    ``__qualname__`` and can be evaluated in the generated module."""
+    result: dict[str, ImportableConstexprType] = {}
+    seen: OrderedSet[int] = OrderedSet()
+    for value in values:
+        _collect_importable_constexpr_types(value, result, seen)
+    # Import lines are part of the generated kernel source and its cache key, so
+    # their order must not depend on set iteration or PYTHONHASHSEED.
+    return sorted(result.values(), key=lambda spec: (spec.module, spec.root_name))
+
 
 XPU_KERNEL_FORMAT = (
     "spv" if _IS_WINDOWS else os.getenv("TORCHINDUCTOR_XPU_KERNEL_FORMAT", "zebin")
@@ -984,6 +1276,11 @@ def get_fused_kernel_name(
     return name
 
 
+@functools.lru_cache(maxsize=2048)
+def _overloadpacket_str(op: torch._ops.OpOverload) -> str:
+    return str(op._overloadpacket)
+
+
 def get_kernel_metadata(
     node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     wrapper: PythonWrapperCodegen,
@@ -1029,7 +1326,8 @@ def get_kernel_metadata(
             original_aten = node.meta["original_aten"]
             key = None
             if isinstance(original_aten, torch._ops.OpOverload):
-                key = str(original_aten._overloadpacket)
+                # Same op, once per node per kernel; ops are singletons.
+                key = _overloadpacket_str(original_aten)
             elif isinstance(original_aten, torch._ops.HigherOrderOperator):
                 key = str(original_aten.name())
             if key:
@@ -1137,15 +1435,24 @@ def get_kernel_metadata(
 
                         all_writes.append("%" + output_name)
 
+        # Every kernel's comment re-formats its origin nodes, and the same node
+        # is an origin of many kernels, so on a large graph this is the same
+        # handful of strings rebuilt over and over: 258k format_node calls for
+        # 1266 kernels on one model. The graph is already built by the time we
+        # are emitting code, so a node's formatting cannot change; cache it on
+        # the graph, as the topological index map above already does.
+        line_cache = single_graph.__dict__.setdefault(
+            "_inductor_kernel_metadata_node_lines", {}
+        )
         for node in inductor_nodes:
-            formatted_node = node.format_node(include_tensor_metadata=True)
-            # Asm strings can contain newlines, which propagate into
-            # format_node() output.  Split so every line gets the comment
-            # prefix; otherwise bare newlines break the wrapper.
-            detailed_metadata.extend(
-                f"{wrapper.comment}   {line}"
-                for line in str(formatted_node).splitlines()
-            )
+            lines = line_cache.get(node)
+            if lines is None:
+                # Asm strings can contain newlines, which propagate into
+                # format_node() output.  Split so every line gets the comment
+                # prefix; otherwise bare newlines break the wrapper.
+                lines = str(node.format_node(include_tensor_metadata=True)).splitlines()
+                line_cache[node] = lines
+            detailed_metadata.extend(f"{wrapper.comment}   {line}" for line in lines)
 
         detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
@@ -1931,18 +2238,22 @@ def use_triton_template(
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     if enable_float8:
         layout_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
+    # _use_template_for_gpu logs an SM-count warning.
+    # Keep it last so the warning only fires when a Triton template is
+    # actually in play, not on default-mode compiles or on devices without
+    # Triton template support (e.g. mps).
     return (
-        (
+        # some callers handle max-autotune checking externally
+        (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
+        and _use_autotune_backend("TRITON")
+        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
+        and (
             (
                 is_gpu(layout.device.type)
                 and _use_template_for_gpu(layout, layout_dtypes)
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
-        # some callers handle max-autotune checking externally
-        and (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
-        and _use_autotune_backend("TRITON")
-        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
 
 
@@ -2350,10 +2661,12 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     # output dtype
     # FP32 not supported: https://github.com/pytorch/pytorch/issues/145952
     layout_dtypes = [torch.float16, torch.bfloat16, torch.int32]
+    # Keep _use_template_for_gpu last: it calls is_big_gpu, whose SM-count
+    # warning should only fire when the CUTLASS backend is actually enabled.
     res = (
-        _use_template_for_gpu(layout, layout_dtypes)
-        and (config.max_autotune or config.max_autotune_gemm)
+        (config.max_autotune or config.max_autotune_gemm)
         and _use_autotune_backend("CUTLASS")
+        and _use_template_for_gpu(layout, layout_dtypes)
     )
 
     if res:
@@ -2559,11 +2872,23 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 
 @functools.lru_cache
+def rocm_gfx_arch() -> str:
+    """Canonical gfx target of the current device, e.g. "gfx950". Empty if not ROCm.
+
+    Prefer this over get_device_capability() for target-specific behaviour. On
+    ROCm that call reports the gfx major/minor, which does not order by
+    capability and spans two product lines: gfx1250 (MI450) reports (12, 5) and
+    gfx1100 (RDNA3) reports (11, 0), both greater than gfx950's (9, 5). Target
+    features are stripped, so "gfx950:sramecc+:xnack-" becomes "gfx950".
+    """
+    if not torch.version.hip or not torch.cuda.is_available():
+        return ""
+    return _rocm_native_device_arch_name("cuda").split(":", 1)[0]
+
+
 def using_rocm_rdna3() -> bool:
     """Returns true if the device is based on RDNA3, otherwise returns false."""
-    return torch.cuda.is_available() and _rocm_native_device_arch_name(
-        "cuda"
-    ).startswith("gfx11")
+    return rocm_gfx_arch().startswith("gfx11")
 
 
 @functools.cache
@@ -2750,6 +3075,19 @@ def use_cpp_gemm_template(
         and is_last_dim_stride1(mat1)  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and (mat2.is_module_buffer() or not require_constant_mat2)
+    )
+
+
+# Note [BF16x9 precision]
+# The CUDA "bfx9" mode requests cuBLAS's full nine-product BF16 emulation.
+# Triton's bf16x3 and bf16x6 modes use different arithmetic, and Triton has no
+# bf16x9 input_precision. FP32 CUDA matmuls must therefore remain ATen extern
+# calls. Fused kernels without an ATen path warn and fall back to IEEE.
+def is_bf16x9_matmul(device_type: str, dtype: torch.dtype) -> bool:
+    return (
+        device_type == "cuda"
+        and dtype == torch.float32
+        and torch.backends.cuda.matmul.fp32_precision == "bfx9"
     )
 
 
@@ -3570,7 +3908,11 @@ def is_triton_fp8_dtype_supported(
 
 
 def device_need_guard(device: str) -> bool:
-    return device != "mps" and is_gpu(device)  # TODO: MPS does not expose streams now
+    if not is_gpu(device):
+        return False
+    # A GPU-class device still only needs stream guards if it exposes streams;
+    # e.g. MPS is a GPU but does not, so it must be excluded here.
+    return get_interface_for_device(device).exposes_streams()
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
@@ -3895,16 +4237,14 @@ def set_tracing_context_output_strides(
             if exprs is None:
                 context.output_strides.append(None)
             else:
-                fakify_first_call = False
-                if ctx := torch._guards.TracingContext.try_get():
-                    fakify_first_call = ctx.fakify_first_call
 
                 def map_expr(e: Any) -> float | int | SymInt | SymFloat | SymBool:
                     if shape_env is None:
                         return int(e)
-                    if fakify_first_call:
-                        return shape_env.deserialize_symexpr(e)
-                    return shape_env.evaluate_symexpr(e)
+                    # Keep the stride symbolic. Collapsing it to the current
+                    # hint would freeze that hint into the backward graph's
+                    # saved-activation placeholder.
+                    return shape_env.deserialize_symexpr(e)
 
                 context.output_strides.append(
                     tuple(map_expr(e) for e in exprs)  # type: ignore[misc]

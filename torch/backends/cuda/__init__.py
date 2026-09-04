@@ -343,7 +343,8 @@ def cublas_workspace_size(size: None | int = None) -> int:
     When called with no arguments, returns the current workspace size.
     When called with a size argument, sets the workspace size and returns the new value.
     Setting the workspace size will take precedence over the CUBLAS_WORKSPACE_CONFIG environment variable.
-    Changes take effect lazily: only handles used after the change get new workspaces.
+    Changes affect subsequent cuBLAS operations. When workspace caching is enabled,
+    cached allocations are resized lazily as their handle and stream pairs are used.
 
     Args:
         size (int, optional): workspace size in bytes. Must be non-negative.
@@ -362,7 +363,8 @@ def cublaslt_workspace_size(size: None | int = None) -> int:
     When called with no arguments, returns the current workspace size.
     When called with a size argument, sets the workspace size and returns the new value.
     Setting the workspace size will take precedence over the CUBLASLT_WORKSPACE_SIZE environment variable.
-    Changes take effect lazily: only handles used after the change get new workspaces.
+    Changes affect subsequent cuBLASLt operations. When workspace caching is enabled,
+    cached allocations are resized lazily as their handle and stream pairs are used.
 
     Args:
         size (int, optional): workspace size in bytes. Must be non-negative.
@@ -390,11 +392,12 @@ def blas_workspace_size(
 
     .. note::
 
-       When ``TORCH_CUBLASLT_UNIFIED_WORKSPACE`` is enabled (the default on
-       open-source CUDA builds), the cuBLASLt workspace is capped at the
-       cuBLAS workspace size and physically reuses the same allocation.
-       Setting a large cuBLASLt workspace via this function will therefore
-       *not* increase memory beyond the cuBLAS workspace size.
+       On CUDA, when workspace caching is enabled with
+       ``TORCH_CUBLAS_WORKSPACE_CACHE=1``,
+       ``TORCH_CUBLASLT_UNIFIED_WORKSPACE`` controls whether the cuBLASLt
+       workspace is capped at the cuBLAS workspace size and physically reuses
+       the same allocation. Unified workspaces are enabled by default on
+       open-source CUDA builds when caching is enabled.
 
     .. note::
 
