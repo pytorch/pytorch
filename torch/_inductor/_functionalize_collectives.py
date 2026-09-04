@@ -44,7 +44,7 @@ def _resolve_reduce_op_str(
         )
     reduce_op = _get_attr(gm, arg.target)  # type: ignore[arg-type]
     if isinstance(reduce_op, torch.ScriptObject):
-        reduce_op = dist.ReduceOp.RedOpType(reduce_op.op())  # type: ignore[attr-defined]
+        reduce_op = dist.ReduceOp.unbox(reduce_op).op
     return REDUCE_OP_TO_STR[reduce_op]
 
 
