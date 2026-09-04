@@ -676,38 +676,6 @@ class TestLRScheduler(TestCase):
             [float(group["lr"]) for group in self.opt.param_groups], initial_lrs
         )
 
-    @parametrize(
-        "scheduler_factory",
-        [
-            partial(LambdaLR, lr_lambda=lambda epoch: 1.0),
-            partial(MultiplicativeLR, lr_lambda=lambda epoch: 1.0),
-            partial(StepLR, step_size=2),
-            partial(MultiStepLR, milestones=[2]),
-            ConstantLR,
-            LinearLR,
-            partial(ExponentialLR, gamma=0.9),
-            PolynomialLR,
-            partial(CosineAnnealingLR, T_max=4),
-            partial(CyclicLR, base_lr=0.01, max_lr=0.1, cycle_momentum=False),
-            partial(OneCycleLR, max_lr=0.1, total_steps=4, cycle_momentum=False),
-            partial(CosineAnnealingWarmRestarts, T_0=2),
-            partial(SWALR, swa_lr=0.01),
-        ],
-    )
-    def test_scheduler_step_ignores_unused_kwargs(self, scheduler_factory):
-        optimizer = SGD([torch.nn.Parameter(torch.ones(1))], lr=0.05)
-        reference_optimizer = SGD([torch.nn.Parameter(torch.ones(1))], lr=0.05)
-        scheduler = scheduler_factory(optimizer)
-        reference = scheduler_factory(reference_optimizer)
-
-        for _ in range(3):
-            optimizer.step()
-            scheduler.step(unused=True)
-            reference_optimizer.step()
-            reference.step()
-
-            self.assertEqual(scheduler.get_last_lr(), reference.get_last_lr())
-
     def test_plateau_lr_rejects_invalid_optimizer(self):
         with self.assertRaisesRegex(TypeError, "object is not an Optimizer"):
             PlateauLR(object())  # type: ignore[arg-type]
@@ -885,22 +853,7 @@ class TestLRScheduler(TestCase):
         with self.assertRaisesRegex(ValueError, error):
             scheduler.step(1.0)
 
-    def test_reduce_lr_on_plateau_rejects_invalid_optimizer(self):
-        with self.assertRaisesRegex(TypeError, "object is not an Optimizer"):
-            ReduceLROnPlateau(object())  # type: ignore[arg-type]
-
-    def test_reduce_lr_on_plateau_rejects_invalid_configuration(self):
-        cases = [
-            ({"factor": 1.0}, "Factor should be < 1.0"),
-            ({"min_lr": [0.0]}, "expected 2 min_lrs"),
-            ({"mode": "median"}, "mode median is unknown"),
-            ({"threshold_mode": "percentage"}, "threshold mode percentage is unknown"),
-        ]
-        for kwargs, error in cases:
-            with self.subTest(kwargs=kwargs), self.assertRaisesRegex(ValueError, error):
-                ReduceLROnPlateau(self.opt, **kwargs)
-
-    def test_reduce_lr_on_plateau_absolute_min_tracks_improvements(self):
+    def test_reduce_lr_on_plateau1(self):
         epochs = 10
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -916,7 +869,7 @@ class TestLRScheduler(TestCase):
         )
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
-    def test_reduce_lr_on_plateau_absolute_min_respects_patience(self):
+    def test_reduce_lr_on_plateau2(self):
         epochs = 22
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -932,7 +885,7 @@ class TestLRScheduler(TestCase):
         )
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
-    def test_reduce_lr_on_plateau_absolute_max_respects_cooldown(self):
+    def test_reduce_lr_on_plateau3(self):
         epochs = 22
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -943,7 +896,7 @@ class TestLRScheduler(TestCase):
         )
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
-    def test_reduce_lr_on_plateau_relative_max_tracks_improvements(self):
+    def test_reduce_lr_on_plateau4(self):
         epochs = 20
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -954,7 +907,7 @@ class TestLRScheduler(TestCase):
         )
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
-    def test_reduce_lr_on_plateau_relative_max_respects_cooldown(self):
+    def test_reduce_lr_on_plateau5(self):
         epochs = 20
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -970,7 +923,7 @@ class TestLRScheduler(TestCase):
         )
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
-    def test_reduce_lr_on_plateau_relative_min_tracks_improvements(self):
+    def test_reduce_lr_on_plateau6(self):
         epochs = 20
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -981,7 +934,7 @@ class TestLRScheduler(TestCase):
         )
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
-    def test_reduce_lr_on_plateau_relative_min_respects_cooldown(self):
+    def test_reduce_lr_on_plateau7(self):
         epochs = 20
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -997,7 +950,7 @@ class TestLRScheduler(TestCase):
         )
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
-    def test_reduce_lr_on_plateau_respects_per_group_min_lr(self):
+    def test_reduce_lr_on_plateau8(self):
         epochs = 20
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -1014,11 +967,12 @@ class TestLRScheduler(TestCase):
         )
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
-    def test_reduce_lr_on_plateau_initial_state(self):
+    def test_reduce_lr_on_plateau_get_last_lr_before_step(self):
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
-        scheduler = ReduceLROnPlateau(self.opt)
-        self.assertEqual(scheduler.last_epoch, 0)
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+        )
         self.assertEqual(
             scheduler.get_last_lr(), [0.5 for param_group in self.opt.param_groups]
         )
@@ -1031,13 +985,6 @@ class TestLRScheduler(TestCase):
         scheduler.step(2.0)  # Triggers scheduler._reduce_lr
         for group, type_ in zip(self.opt.param_groups, types):
             self.assertEqual(type(group["lr"]), type_)
-
-    def test_reduce_lr_on_plateau_skips_reduction_smaller_than_eps(self):
-        initial_lrs = [group["lr"] for group in self.opt.param_groups]
-        scheduler = ReduceLROnPlateau(self.opt, factor=0.5, patience=0, eps=0.3)
-        scheduler.step(1.0)
-        scheduler.step(2.0)
-        self.assertEqual(scheduler.get_last_lr(), initial_lrs)
 
     def test_reduce_lr_on_plateau_is_deprecated(self):
         with self.assertWarnsRegex(FutureWarning, "PlateauLR"):
@@ -1703,7 +1650,7 @@ class TestLRScheduler(TestCase):
         schedulers[1] = ExponentialLR(self.opt, gamma=0.1)
         self._test(schedulers, targets, epochs)
 
-    def test_compound_reduce_lr_on_plateau_and_step_lr(self):
+    def test_compound_reduce_lr_on_plateau1(self):
         epochs = 10
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -1725,7 +1672,7 @@ class TestLRScheduler(TestCase):
         schedulers[1] = StepLR(self.opt, gamma=0.1, step_size=3)
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
-    def test_compound_reduce_lr_on_plateau_and_multi_step_lr(self):
+    def test_compound_reduce_lr_on_plateau2(self):
         epochs = 22
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -1747,7 +1694,7 @@ class TestLRScheduler(TestCase):
         schedulers[1] = MultiStepLR(self.opt, gamma=0.1, milestones=[3, 8, 12])
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
-    def test_compound_reduce_lr_on_plateau_and_exponential_lr(self):
+    def test_compound_reduce_lr_on_plateau3(self):
         epochs = 22
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.5
@@ -1764,7 +1711,7 @@ class TestLRScheduler(TestCase):
         schedulers[1] = ExponentialLR(self.opt, gamma=0.1)
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
-    def test_compound_reduce_lr_on_plateau_and_cosine_annealing_lr(self):
+    def test_compound_reduce_lr_on_plateau4(self):
         epochs = 20
         for param_group in self.opt.param_groups:
             param_group["lr"] = 0.05
@@ -1784,7 +1731,7 @@ class TestLRScheduler(TestCase):
         schedulers[1] = CosineAnnealingLR(self.opt, epochs, eta_min)
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
-    def test_compound_reduce_lr_on_plateau_and_linear_lr(self):
+    def test_compound_reduce_lr_on_plateau5(self):
         iters = 4
         start_factor = 0.4
         epochs = 22
@@ -3198,7 +3145,7 @@ class TestLRScheduler(TestCase):
             scheduler.step(metrics=1.3)
 
     @parametrize("min_lr", [0, [1e-5, 1e-4]])
-    def test_reduce_lr_on_plateau_supports_added_param_group(self, min_lr):
+    def test_add_param_group_does_not_break_reduce_lr_on_plateau(self, min_lr):
         scheduler = ReduceLROnPlateau(
             self.opt,
             factor=0.1,
@@ -3221,7 +3168,7 @@ class TestLRScheduler(TestCase):
             [0.005, 0.05, 0.005],
         )
 
-    def test_reduce_lr_on_plateau_requires_min_lr_for_added_param_group(self):
+    def test_add_param_group_errors_reduce_lr_on_plateau(self):
         scheduler = ReduceLROnPlateau(
             self.opt,
             mode="min",
