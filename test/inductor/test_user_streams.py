@@ -371,7 +371,7 @@ class TestUserStreamCompile(InductorTestCase):
         not TEST_GPU or device_module.device_count() < 2,
         "requires at least two GPU devices",
     )
-    def test_raw_stream_name_does_not_clobber_user_stream_on_cuda_1(self):
+    def test_raw_stream_name_does_not_clobber_user_stream_on_gpu_1(self):
         from torch._inductor.utils import run_and_get_code
 
         device = torch.device(f"{GPU_TYPE}:1")
