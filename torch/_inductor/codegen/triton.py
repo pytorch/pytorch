@@ -1629,6 +1629,13 @@ class TritonOverrides(OpOverrides):
         elif bug == "accuracy":
             return f"{x} + 1"
         elif bug is None:
+            if config.numerics == "strict":
+                # Eager relu is clamp_min, not maximum: it returns the input unchanged
+                # when x >= 0, so relu(-0.0) is -0.0. maximum(0, x) resolves the +-0.0
+                # tie to +0.0 instead. `x < 0` is false for both zeros and for NaN, so
+                # the else arm passes those through with their sign and payload intact.
+                zero = ops.constant(0, torch.float32)
+                return ops.where(ops.lt(x, zero), zero, x)
             return ops.maximum(ops.constant(0, torch.int32), x)
         else:
             raise AssertionError(
