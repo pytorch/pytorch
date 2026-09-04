@@ -3639,9 +3639,14 @@ class InstructionTranslatorBase(
 
         # Add original GraphModule context to the resume function to handle
         # the case of a graph break while tracing a GraphModule
-        orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
-            "orig_graphmodule", lambda: None
-        )()
+        orig_graphmodule_ref = code_context.get_context(self.f_code).get(
+            "orig_graphmodule"
+        )
+        orig_graphmodule_maybe = (
+            orig_graphmodule_ref()
+            if isinstance(orig_graphmodule_ref, weakref.ReferenceType)
+            else None
+        )
         if orig_graphmodule_maybe is not None:
             code_context.get_context(new_code)["orig_graphmodule"] = weakref.ref(
                 orig_graphmodule_maybe
@@ -5715,6 +5720,10 @@ class InstructionTranslator(InstructionTranslatorBase):
                         continue
                     local_dynamism = None
                     if dynamism:
+                        if not isinstance(dynamism, dict):
+                            raise AssertionError(
+                                f"Expected dynamism context to be a dict, got {type(dynamism)}"
+                            )
                         local_dynamism = frozenset(dynamism.get(name, {}).items())
                     var = LazyVariableTracker.create(
                         value,

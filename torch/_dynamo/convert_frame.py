@@ -856,7 +856,11 @@ def get_compiled_code_side_effects(
     )
     if side_effects is None:
         return None
-    return side_effects
+    if not isinstance(side_effects, tuple) or not all(
+        isinstance(source, str) for source in side_effects
+    ):
+        raise AssertionError("Expected bytecode hook side effects to be strings")
+    return cast(tuple[str, ...], side_effects)
 
 
 def compiled_code_has_side_effects(code: types.CodeType) -> bool:

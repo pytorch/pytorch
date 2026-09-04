@@ -29,7 +29,6 @@ Example usage:
 """
 
 import types
-from typing import Any
 
 from .utils import ExactWeakKeyDictionary
 
@@ -41,7 +40,7 @@ class CodeContextDict:
     def has_context(self, code: types.CodeType) -> bool:
         return code in self.code_context
 
-    def get_context(self, code: types.CodeType) -> dict[str, Any]:
+    def get_context(self, code: types.CodeType) -> dict[str, object]:
         ctx = self.code_context.get(code)
         if ctx is None:
             # pyrefly: ignore [implicit-any]
@@ -49,7 +48,7 @@ class CodeContextDict:
             self.code_context[code] = ctx
         return ctx
 
-    def pop_context(self, code: types.CodeType) -> dict[str, Any]:
+    def pop_context(self, code: types.CodeType) -> dict[str, object]:
         ctx = self.get_context(code)
         self.code_context._remove_id(id(code))
         return ctx
