@@ -1783,6 +1783,22 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         opt_fn(x)  # diverges: Dynamo does not raise
 
+    def test_exception_subclass_super_init_with_kwargs(self):
+        class MyError(RuntimeError):
+            def __init__(self, msg, *, context=None):
+                super().__init__(msg)
+                self.context = context
+
+        def fn(x):
+            try:
+                raise MyError("bad", context="ctx")
+            except MyError as e:
+                return x + 1, e.args, e.context, str(e)
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
 
 instantiate_parametrized_tests(ExceptionTests)
 

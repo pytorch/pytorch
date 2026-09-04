@@ -4554,6 +4554,14 @@ class BoundBuiltinMethodVariable(VariableTracker):
             return self.descriptor.__get__(obj)  # type: ignore[union-attr]
         return getattr(obj, self.descriptor.__name__)
 
+    # meth_getset / meth_members on builtin_function_or_method.
+    # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L266-L296
+    tp_members = {
+        "__name__": Member(getset_build(lambda s: s.descriptor.__name__)),
+        "__qualname__": Member(getset_build(lambda s: s.descriptor.__qualname__)),
+        "__self__": Member(getset_read(lambda s: s.obj)),
+    }
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
