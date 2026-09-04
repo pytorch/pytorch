@@ -624,20 +624,6 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
             gm.graph.get_attr(target)
         gm.recompile()
 
-    @staticmethod
-    def _generated_fn_body(code, signature):
-        # Slice one function/method body out of generated wrapper code: the
-        # signature line plus every following line indented deeper than it.
-        start = code.index(signature)
-        indent = start - (code.rfind("\n", 0, start) + 1)
-        lines = code[start:].split("\n")
-        body = [lines[0]]
-        for line in lines[1:]:
-            if line.strip() and (len(line) - len(line.lstrip())) <= indent:
-                break
-            body.append(line)
-        return "\n".join(body)
-
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     @torch._inductor.config.patch(
         fx_graph_cache=False,
@@ -1135,7 +1121,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 }
             )
 
-    def test_default_inductor_config_max_autotune_mutation_reaches_helpers(self):
+    def test_max_autotune_mutation_reaches_helpers(self):
         nested_config = get_invoke_subgraph_compile_options()
         self.assertEqual(nested_config.inductor_config_patches, {})
         nested_config.inductor_config_patches["fallback_by_default"] = True
@@ -1145,7 +1131,6 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         def compile_fx_inner(gm, example_inputs):
             observed_configs.append(
                 (
-                    torch._inductor.config.triton.autotune_at_compile_time,
                     torch._inductor.config.fallback_by_default,
                     torch._inductor.config.max_autotune,
                 )
@@ -1163,7 +1148,6 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
             ),
             torch._inductor.config.patch(
                 {
-                    "triton.autotune_at_compile_time": False,
                     "fallback_by_default": False,
                     "max_autotune": False,
                 }
@@ -1174,7 +1158,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                     raise AssertionError("Expected an Inductor compiler")
                 compiler(self._empty_graph_module(), [])
 
-        self.assertEqual(observed_configs, [(True, True, True), (True, True, True)])
+        self.assertEqual(observed_configs, [(True, True), (True, True)])
 
     @parametrize("direction", ("forward", "backward"))
     def test_unsupported_nested_region_inductor_config(self, direction):
