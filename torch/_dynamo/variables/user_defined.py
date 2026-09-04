@@ -32,7 +32,6 @@ import inspect
 import random
 import sys
 import threading
-import traceback
 import types
 import warnings
 import weakref
@@ -119,6 +118,7 @@ from .base import (
     VariableTracker,
 )
 from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
+from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
 from .object_protocol import (
@@ -4322,15 +4322,15 @@ _BASE_EXCEPTION_ATTRS = (
 )
 
 
-class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
+class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVariable):
     def __init__(self, value: object, **kwargs: Any) -> None:
-        super().__init__(value, **kwargs)
         init_args = kwargs.get("init_args", [])
-        self._base_vt = variables.ExceptionVariable(self.value_type, init_args)
+        super().__init__(value, exc_type=type(value), args=init_args, **kwargs)
+        # self._base_vt = variables.ExceptionVariable(self.value_type, init_args)
         self._base_methods = (
-            base_exception_methods
-            if isinstance(value, BaseException)
-            else exception_methods
+            exception_methods
+            if isinstance(value, Exception)
+            else base_exception_methods
         )
 
     @property
@@ -4342,11 +4342,6 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None for exception repr")
         return cast(variables.ExceptionVariable, self._base_vt)
-
-    def _with_traceback(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
-    ) -> "VariableTracker":
-        return self._base_vt.call_method(tx, "with_traceback", args, kwargs)  # type: ignore[missing-attribute]
 
     def call_method(
         self,
@@ -4365,7 +4360,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             and len(args) == 2
             and args[0].is_constant_match(*_BASE_EXCEPTION_ATTRS)
         ):
-            return self._base_vt.call_method(tx, "__setattr__", args, kwargs)  # type: ignore[missing-attribute]
+            return ExceptionVariable.call_method(self, tx, "__setattr__", args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     def tp_init_impl(
@@ -4382,75 +4377,38 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             return variables.ConstantVariable.create(None)
         return super().tp_init_impl(tx, args, kwargs)
 
-    tp_methods = {
-        "with_traceback": Method(_with_traceback),
-    }
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # ExceptionVariable.reconstruct hardcodes `from builtins import
+        # <name>`, which is only correct for the true builtin exceptions it
+        # was designed to model. self.exc_type here is an arbitrary
+        # user-defined class, so import it from its actual defining module
+        # instead.
+        from .constant import ConstantVariable
 
-    tp_getset = {
-        "args": GetSet(
-            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "args"),
-            lambda s, tx, value: s._base_vt._set_args(tx, value),
-        ),
-        "__cause__": GetSet(
-            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__cause__"),
-            lambda s, tx, value: s._base_vt._set_cause(tx, value),
-        ),
-        "__context__": GetSet(
-            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__context__"),
-            lambda s, tx, value: s._base_vt._set_context(tx, value),
-        ),
-        "__traceback__": GetSet(
-            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__traceback__"),
-            lambda s, tx, value: s._base_vt._set_traceback(tx, value),
-        ),
-    }
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                self.exc_type.__module__, self.exc_type.__name__
+            )
+        )
+        codegen.foreach(self.args)
+        codegen.call_function(len(self.args), False)
 
-    # BaseException args/__cause__/__context__/__suppress_context__/__traceback__
-    # are members/getsets; delegate each to the wrapped base exception VT.
-    tp_members = {
-        "__suppress_context__": Member(
-            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__suppress_context__"),
-            lambda s, tx, value: s._base_vt._set_suppress_context(tx, value),
-        ),
-    }
+        def codegen_attr(name: str) -> None:
+            attr = getattr(self, name)
+            if istype(attr, ConstantVariable):
+                if attr.value not in (True, False, None):
+                    raise AssertionError(
+                        f"attr.value must be True, False, or None, got {attr}"
+                    )
+            else:
+                codegen.dup_top()
+                codegen(attr)
+                codegen.extend_output(codegen.rot_n(2))
+                codegen.store_attr(name)
 
-    @property
-    def __context__(self) -> "ConstantVariable":
-        return self._base_vt.__context__  # type: ignore[missing-attribute]
-
-    @property
-    def args(self) -> list[VariableTracker]:
-        return self._base_vt.args  # type: ignore[missing-attribute]
-
-    def set_context(self, context: "variables.ExceptionVariable") -> None:
-        return self._base_vt.set_context(context)  # type: ignore[missing-attribute]
-
-    @property
-    def exc_type(self) -> type[BaseException]:
-        return self._base_vt.exc_type  # type: ignore[missing-attribute]
-
-    @property
-    def python_stack(self) -> traceback.StackSummary | None:
-        return self._base_vt.python_stack  # type: ignore[missing-attribute]
-
-    def debug_repr(self) -> str:
-        return self.exc_vt.debug_repr()
-
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
-        # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
-        if type(self.value).__repr__ is not BaseException.__repr__:
-            return super().tp_repr_impl(tx)
-        return self.exc_vt.tp_repr_impl(tx)
-
-    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
-        # ref: BaseException_str in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L118-L129
-        if type(self.value).__str__ is not BaseException.__str__:
-            return super().tp_str_impl(tx)
-        return self.exc_vt.tp_str_impl(tx)
-
-    @python_stack.setter
-    def python_stack(self, value: traceback.StackSummary) -> None:
-        self._base_vt.python_stack = value  # type: ignore[missing-attribute]
+        codegen_attr("__context__")
+        codegen_attr("__cause__")
+        codegen_attr("__suppress_context__")
 
 
 class InspectVariable(UserDefinedObjectVariable):
