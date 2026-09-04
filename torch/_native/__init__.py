@@ -1,7 +1,10 @@
+import contextlib
 import os
 import warnings
 from functools import cache
 from typing import cast
+
+import torch
 
 # This handles collecting registration of all native ops
 # Also need to import DSL utils to make sure DSL registration is ok
@@ -65,3 +68,73 @@ with warnings.catch_warnings():
         category=UserWarning,
     )
     registry._register_all_overrides()
+
+
+@cache
+def _native_aot_embedded() -> bool:
+    """True iff this build ships AOT kernels for its declared ops.
+
+    Answers what the build contains, not whether the kernels may run: a build made
+    without stage 2 has none, and every op falls back to its ordinary aten
+    implementation. Says nothing about set_aot_enabled(), which can mask kernels
+    that are present. Touches no device.
+    """
+    try:
+        return any(
+            schema.name.startswith("_native_aot::")
+            for schema in torch._C._jit_get_all_schemas()
+        )
+    except Exception:
+        return False
+
+
+def set_aot_enabled(enabled: bool) -> None:
+    """Turn the embedded AOT kernels off (or back on) for this process.
+
+    With them off every op computes the same answers through its ordinary aten
+    implementation, so this is the switch to use when comparing against stock
+    PyTorch. Takes effect immediately, on calls already in flight.
+
+    Does NOT reach ops whose kernels ARE the implementation rather than a faster
+    route to the same answer; use _unconditional_masked() for one of those."""
+    torch._C._set_native_aot_enabled(enabled)
+
+
+def aot_enabled() -> bool:
+    return torch._C._get_native_aot_enabled()
+
+
+def _apply_env_opt_out() -> None:
+    """Honour TORCH_DISABLE_NATIVE_AOT=1 at import, once.
+
+    Separate from _native_aot_embedded(), which is cached and answers a question about
+    the build; this reads configuration and changes state. Gated on that answer so the
+    switch keeps its default on a build that ships no kernels, where it means nothing.
+    """
+    if os.getenv("TORCH_DISABLE_NATIVE_AOT") == "1" and _native_aot_embedded():
+        set_aot_enabled(False)
+
+
+_apply_env_opt_out()
+
+
+@contextlib.contextmanager
+def _unconditional_masked():
+    """PRIVATE, for reference computations only: also mask the overrides and AOT
+    kernels that are exempt from the user-facing switches (declaration UNCONDITIONAL
+    or register_op_override(unconditional_override=True)).
+
+    Those two mechanisms otherwise have no off state, leaving a numerics test no way
+    to obtain stock aten values. Not a user knob: masking an unconditional override
+    changes what the op computes. Combine with python_native.<dsl>.disabled(), which
+    masks everything else; this only lifts the exemptions."""
+    from torch._native.registry import _set_mask_unconditional
+
+    # One flag serves both mechanisms (see registry._unconditional_is_masked), and
+    # setting it also rebuilds the routers, so overrides and AOT kernels cannot
+    # disagree about whether the exemption is lifted.
+    previous = _set_mask_unconditional(True)
+    try:
+        yield
+    finally:
+        _set_mask_unconditional(previous)
