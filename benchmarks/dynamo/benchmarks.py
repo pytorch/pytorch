@@ -36,8 +36,7 @@ HF_MODELS_FILE_NAME = model_names(
     os.path.join(os.path.dirname(__file__), "huggingface_models_list.txt")
 )
 # stable_diffusion_text_encoder / stable_diffusion_unet are deliberately absent:
-# both are skipped in torchbench.yaml (#167895). Use torchbench.py --only to run
-# them directly rather than enabling them through this dispatcher.
+# both are skipped in torchbench.yaml (#167895).
 TORCHBENCH_MODELS_FILE_NAME = model_names(
     os.path.join(os.path.dirname(__file__), "all_torchbench_models_list.txt")
 )
