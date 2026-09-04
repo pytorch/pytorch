@@ -1,6 +1,7 @@
 from typing import Any
 
 import torch.fx
+from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
@@ -109,11 +110,11 @@ class FakeTensorProp(torch.fx.Interpreter):
         return self.propagate_dont_convert_inputs(*fake_args)
 
     def propagate_dont_convert_inputs(self, *args: object) -> Any:
-        # In-place ops like shallow_copy_data_ can mutate fake_device on
-        # input FakeTensors during propagation. Save and restore so the
-        # caller's inputs are not permanently corrupted.
-        saved_devices = [
-            (a, a.fake_device)
+        # In-place ops like shallow_copy_data_ and set_ can mutate fake_device
+        # and the storage/layout of input FakeTensors during propagation. Save
+        # and restore so the caller's inputs are not permanently corrupted.
+        saved_inputs = [
+            (a, a.fake_device, fast_detach(self._mode, a))
             for a in args
             if isinstance(a, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
         ]
@@ -121,5 +122,17 @@ class FakeTensorProp(torch.fx.Interpreter):
             try:
                 return super().run(*args)
             finally:
-                for fake, device in saved_devices:
+                for fake, device, orig in saved_inputs:
                     fake.fake_device = device
+                    if (
+                        fake.shape != orig.shape
+                        or fake.stride() != orig.stride()
+                        or fake.storage_offset() != orig.storage_offset()
+                    ):
+                        # set_ also restores the storage, which a set_ in the
+                        # graph may have swapped out for another input's.
+                        with torch.no_grad():
+                            # set_ accepts a Tensor source, but only the Storage
+                            # overloads are in the generated stub.
+                            # pyrefly: ignore [bad-argument-type]
+                            fake.set_(orig)

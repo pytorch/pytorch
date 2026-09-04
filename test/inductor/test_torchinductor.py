@@ -19908,6 +19908,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(x_eager.device, x_compiled.device)
 
+    def test_tensor_set_data_non_contiguous(self):
+        def func(x, replacement, weight):
+            y = x * 2
+            x.data = replacement
+            weight.normal_()
+            return x, y
+
+        def inputs():
+            base = torch.arange(12, device=self.device, dtype=torch.float32).view(4, 3)
+            return (
+                base.t(),
+                torch.ones(3, 4, device=self.device),
+                torch.empty(3, 4, device=self.device),
+            )
+
+        out_eager = func(*inputs())
+        torch._dynamo.reset()
+        out_compiled = torch.compile(func, backend="inductor", fullgraph=True)(
+            *inputs()
+        )
+
+        self.assertEqual(out_eager, out_compiled)
+
     def test_jvp_compile_backward(self):
         def jvp_fn(f, x):
             return torch.func.jvp(f, (x.clone(),), (torch.ones_like(x),))[1]
