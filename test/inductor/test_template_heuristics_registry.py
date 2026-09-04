@@ -1,4 +1,8 @@
 # Owner(s): ["module: inductor"]
+import subprocess
+import sys
+import textwrap
+
 import torch
 from torch._inductor.heuristics.registry import (
     _TEMPLATE_HEURISTIC_REGISTRY,
@@ -13,6 +17,53 @@ from torch._inductor.heuristics.template.triton import (
     FlexConfig,
 )
 from torch._inductor.test_case import run_tests, TestCase
+
+
+class TestTemplateHeuristicsCompatibility(TestCase):
+    def test_historical_import_paths(self):
+        # Subprocess: this test module already imports the canonical package, so
+        # only a cold interpreter reaches it through the shim.
+        source = textwrap.dedent(
+            """
+            import importlib
+            from types import ModuleType
+
+            shim = importlib.import_module("torch._inductor.template_heuristics")
+            names = [
+                name
+                for name, value in vars(shim).items()
+                if not name.startswith("_") and isinstance(value, ModuleType)
+            ]
+            if not names:
+                raise AssertionError("shim re-exports no submodules")
+
+            for name in names:
+                canonical = importlib.import_module(
+                    f"torch._inductor.heuristics.template.{name}"
+                )
+                # Identity, not just importability -- a re-import instead of
+                # an alias would double-register heuristics.
+                dotted = importlib.import_module(
+                    f"torch._inductor.template_heuristics.{name}"
+                )
+                if dotted is not canonical or getattr(shim, name) is not canonical:
+                    raise AssertionError(f"{name} is not the canonical module")
+
+            registry = importlib.import_module(
+                "torch._inductor.heuristics.template.registry"
+            )
+            if shim.get_template_heuristic is not registry.get_template_heuristic:
+                raise AssertionError("get_template_heuristic is not canonical")
+            """
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", source],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, f"stderr:\n{result.stderr}")
 
 
 class TestBlackwellGPUGemmConfig(TestCase):
