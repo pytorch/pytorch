@@ -214,6 +214,20 @@ def _is_privateuse1_autocast(value: Any) -> bool:
     return value is _get_privateuse1_autocast()
 
 
+def _install_privateuse1_autocast_guards() -> None:
+    torch_source = ImportSource("torch")
+    backend_name_source = CallFunctionNoArgsSource(
+        AttrSource(AttrSource(torch_source, "_C"), "_get_privateuse1_backend_name")
+    )
+    install_guard(backend_name_source.make_guard(GuardBuilder.EQUALS_MATCH))
+
+    device_type = torch._C._get_privateuse1_backend_name()
+    autocast_source = AttrSource(
+        AttrSource(AttrSource(torch_source, device_type), "amp"), "autocast"
+    )
+    install_guard(autocast_source.make_guard(GuardBuilder.CLASS_MATCH))
+
+
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
     [
         torch._shape_as_tensor,
@@ -690,6 +704,11 @@ class BaseTorchVariable(VariableTracker):
 
 class TorchCtxManagerClassVariable(BaseTorchVariable):
     """Points to a context manager class in torch.* that dynamo has implementations"""
+
+    def __init__(self, value: Any, **kwargs: Any) -> None:
+        super().__init__(value, **kwargs)
+        if _is_privateuse1_autocast(value):
+            _install_privateuse1_autocast_guards()
 
     def __repr__(self) -> str:
         return f"TorchCtxManagerClassVariable({self.value})"
