@@ -2308,6 +2308,18 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sigmoid(x):
+        # Eager CUDA computes sigmoid as 1 / (1 + exp(-x)); Triton's tl.sigmoid uses an
+        # intrinsic exp and approximate divide that differ by 1-9 ULP on fp32. Under
+        # strict numerics, reproduce eager's formula with libdevice.exp and round-to-
+        # nearest division. Both halves are required: with libdevice.exp but an
+        # approximate divide the result matches neither eager nor tl.sigmoid, so fall
+        # back to the intrinsic unless both knobs are on.
+        if (
+            config.numerics == "strict"
+            or config.eager_numerics.use_pytorch_libdevice
+        ) and config.use_eager_division_rounding():
+            denominator = f"(1.0 + libdevice.exp(-({x})))"
+            return f"triton.language.div_rn(1.0, {denominator})"
         return f"tl.sigmoid({x})"
 
     @staticmethod
