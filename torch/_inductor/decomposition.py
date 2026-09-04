@@ -44,6 +44,7 @@ from torch.fx.experimental.symbolic_shapes import (
 
 from . import config, inductor_prims
 from .utils import (
+    is_bf16x9_matmul,
     is_gpu,
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
@@ -362,13 +363,18 @@ def index_add(
     *,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
-    # If we are not in fbcode and dtype is bfloat16
-    # fallback to index_add kernel
-    # see https://github.com/pytorch/pytorch/issues/137425 for details
     if not is_fbcode() and x.dtype == torch.bfloat16:
-        return NotImplemented
-    else:
-        return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
+        # Triton supports BF16 atomic add on ROCm and NVIDIA SM90 and newer.
+        if x.device.type != "cuda" or (
+            torch.version.hip is None
+            and torch.cuda.get_device_capability(x.device) < (9, 0)
+        ):
+            return NotImplemented
+    # The index_put lowering expects tensor indices to have at least one
+    # dimension. Normalizing a scalar index preserves index_add semantics.
+    if index.ndim == 0:
+        index = index.unsqueeze(0)
+    return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
 
 
 # Not really sure how to put this into the main library.  PrimTorch wants
@@ -437,7 +443,24 @@ def round_dec(x: torch.Tensor, decimals: int = 0) -> torch.Tensor:
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
 
+def _preserve_bf16x9_matmul(arg_index, arg_name):
+    """Keep FP32 CUDA matmuls intact before opmath casts hide their dtype."""
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapped(*args, **kwargs):
+            mat = args[arg_index] if len(args) > arg_index else kwargs[arg_name]
+            if is_bf16x9_matmul(mat.device.type, mat.dtype):
+                return NotImplemented
+            return fn(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
 @register_decomposition([aten.bmm])
+@_preserve_bf16x9_matmul(0, "self")
 @pw_cast_for_opmath
 def bmm(
     self: torch.Tensor,
@@ -471,6 +494,7 @@ def bmm(
 
 
 @register_decomposition([aten.addmm])
+@_preserve_bf16x9_matmul(1, "mat1")
 @pw_cast_for_opmath
 def addmm(
     self: torch.Tensor,
@@ -520,6 +544,7 @@ def addmm(
 
 
 @register_decomposition([aten.mm])
+@_preserve_bf16x9_matmul(0, "self")
 @pw_cast_for_opmath
 def mm(
     self: torch.Tensor,
