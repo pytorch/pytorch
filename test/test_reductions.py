@@ -2668,6 +2668,16 @@ class TestReductions(TestCase):
         self.assertEqual(a[:, ::2, :].median(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
+    def test_median_dim_none_invalid_arguments(self, device):
+        # median.dim/nanmedian.dim only have an int dim overload (the Dimname
+        # overload was removed), so dim=None doesn't match any overload and
+        # should raise a plain argument-parsing error, not a Dimname-lookup
+        # RuntimeError.
+        t = torch.randn(2, 3, device=device)
+        for op in (torch.median, torch.nanmedian):
+            with self.assertRaisesRegex(TypeError, "argument 'dim' must be int, not NoneType"):
+                op(t, dim=None)
+
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/pull/138657 discovers a latent bug")
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
