@@ -114,7 +114,8 @@ struct ViewMeta {
   //
   // The one thing the replayed operation provides that a `select` does not is
   // autograd's restriction on mutating an output of a multi-output view.
-  // apply_view_meta_sequence restores that directly, by setting
+  // apply_view_meta_sequence restores that directly, through the marker
+  // torch/csrc/autograd registers with setMultiOutputViewMarker, which sets
   // CreationMeta::MULTI_OUTPUT_NODE on the regenerated view. The grad_fn is a
   // SelectBackward rather than an UnbindBackward, which computes the same
   // gradient.

@@ -1179,18 +1179,22 @@ class TestMPS(TestCaseMPS):
         s1 = self._get_stream_by_name(stream1)
         s2 = self._get_stream_by_name(stream2)
         s3 = self._get_stream_by_name(stream3)
+        scales = [float(p + 2) for p in range(8)]
         x = torch.full((1_000_000,), 1.0, device="mps", requires_grad=True)
         torch.mps.synchronize()
-        with torch.mps.stream(s1):
-            y1 = (x * 2).sum()
-        with torch.mps.stream(s2):
-            y2 = (x * 3).sum()
-        s1.synchronize()
-        s2.synchronize()
-        with torch.mps.stream(s3):
-            (y1 + y2).backward()
-        s3.synchronize()
-        self.assertEqual(x.grad.cpu(), torch.full_like(x, 5.0))
+        num_loops = 20
+        for _ in range(num_loops):
+            ys = []
+            for p, scale in enumerate(scales):
+                with torch.mps.stream(s1 if p % 2 == 0 else s2):
+                    ys.append((x * scale).sum())
+            s1.synchronize()
+            s2.synchronize()
+            with torch.mps.stream(s3):
+                torch.stack(ys).sum().backward()
+            s3.synchronize()
+        expected = sum(scales) * num_loops
+        self.assertEqual(x.grad.cpu(), torch.full_like(x, expected))
 
     # Tests that the `torch.accelerator` stream API corresponds correctly to
     # the `torch.mps` stream API
@@ -12807,6 +12811,35 @@ class TestLinalgMPS(TestCaseMPS):
         self.assertEqual(mps.residuals.cpu(), cpu.residuals)
         self.assertEqual(mps.rank.cpu(), cpu.rank)
         self.assertEqual(mps.singular_values.cpu(), cpu.singular_values)
+
+    def test_linalg_svd_large_batch(self, device="mps"):
+        # Regression test for https://github.com/pytorch/pytorch/issues/195937:
+        # batches whose numel exceeds 8192 take the native on-device Jacobi
+        # kernel rather than the CPU fallback. That kernel used to crash the
+        # Metal compiler (a runtime mem_flags argument to threadgroup_barrier
+        # fails AGX instruction selection), so nothing above the threshold ran.
+        # Small OpInfo samples stay under the gate, so this is the only coverage
+        # of the kernel itself.
+        for dtype in (torch.float32, torch.complex64):
+            A = torch.randn(4096, 3, 3, dtype=dtype)  # 36864 elements, over the gate
+            Am = A.to(device)
+            U, S, Vh = torch.linalg.svd(Am, full_matrices=False)
+            # Singular values and reconstruction are gauge invariant; the raw
+            # U/Vh differ between the Jacobi solver and LAPACK.
+            self.assertEqual(S.cpu(), torch.linalg.svdvals(A), atol=1e-4, rtol=1e-4)
+            self.assertEqual(((U * S.unsqueeze(-2)) @ Vh).cpu(), A, atol=1e-4, rtol=1e-4)
+            # svdvals shares the same kernel.
+            self.assertEqual(torch.linalg.svdvals(Am).cpu(), torch.linalg.svdvals(A), atol=1e-4, rtol=1e-4)
+
+    def test_linalg_lstsq_large_batch(self, device="mps", dtype=torch.float32):
+        # lstsq is built on the native SVD; exercise a batch above the 8192 gate.
+        A = torch.randn(4096, 6, 3, dtype=dtype)  # overdetermined, well conditioned
+        B = torch.randn(4096, 6, 2, dtype=dtype)
+        xm = torch.linalg.lstsq(A.to(device), B.to(device)).solution.cpu()
+        xc = torch.linalg.lstsq(A, B).solution
+        # Fitted values A@x are unique for full column rank even where the raw
+        # solution is sensitive to conditioning of individual batch members.
+        self.assertEqual(A @ xm, A @ xc, atol=1e-4, rtol=1e-4)
 
     @dtypes(torch.float32, torch.complex64, torch.float16, torch.bfloat16)
     @parametrize("out", ["none", "zeros", "ones"])
