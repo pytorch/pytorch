@@ -2,6 +2,7 @@
 
 import functools
 import logging
+import unittest
 from unittest import mock
 
 import torch
@@ -10,16 +11,23 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import do_bench_using_profiling
 from torch.autograd import DeviceType
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
 
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
+
+class TestFallbackByDefault(TestCase):
+    def test_sym_size_uses_inductor_lowering_in_lite_mode(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        sym_size = graph.call_function(torch.ops.aten.sym_size.int, (x, 0))
+
+        with config.patch({"fallback_by_default": True}):
+            self.assertFalse(utils.should_fallback_by_default(sym_size))
 
 
 class TestFallbackByDefault(TestCase):
@@ -87,25 +95,8 @@ class FakeProfilerEvent:
         self.cpu_children = cpu_children or []
 
 
-class TestBench(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        x = torch.rand(1024, 10).to(device_type).half()
-        w = torch.rand(512, 10).to(device_type).half()
-        cls._bench_fn = staticmethod(
-            functools.partial(torch.nn.functional.linear, x, w)
-        )
-
-    def test_benchmarker(self):
-        res = benchmarker.benchmark_gpu(self._bench_fn)
-        log.warning("do_bench result: %s", res)
-        self.assertGreater(res, 0)
-
-    def test_do_bench_using_profiling(self):
-        res = do_bench_using_profiling(self._bench_fn)
-        log.warning("do_bench_using_profiling result: %s", res)
-        self.assertGreater(res, 0)
+class TestBenchGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_do_bench_profile_result_uses_linked_device_events(self):
         profiler_events = [
@@ -207,5 +198,32 @@ class TestBench(TestCase):
             )
 
 
+class TestBenchCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        x = torch.rand(1024, 10).to(cls.device_type).half()
+        w = torch.rand(512, 10).to(cls.device_type).half()
+        cls._bench_fn = staticmethod(
+            functools.partial(torch.nn.functional.linear, x, w)
+        )
+
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_benchmarker(self):
+        res = benchmarker.benchmark_gpu(self._bench_fn)
+        log.warning("do_bench result: %s", res)
+        self.assertGreater(res, 0)
+
+    def test_do_bench_using_profiling(self):
+        res = do_bench_using_profiling(self._bench_fn)
+        log.warning("do_bench_using_profiling result: %s", res)
+        self.assertGreater(res, 0)
+
+
+instantiate_device_type_tests(TestBenchCuda, globals(), only_for="cuda")
+
+
 if __name__ == "__main__":
-    run_tests(device_type)
+    run_tests()
