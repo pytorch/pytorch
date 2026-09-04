@@ -33,6 +33,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     munge_exc,
     parametrize,
@@ -42,14 +43,8 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.hop_db import hop_db
-from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
-
-
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
 
 
 def count_ops(gm, args, freq, op):
@@ -143,6 +138,8 @@ def default_args_generator(seed_value):
 
 
 class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -3438,8 +3435,12 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(RuntimeError, msg):
             fn_with_hints(x, y)
 
-    @requires_gpu_and_triton
-    def test_wrap_inductor_compiled_regions_option(self):
+
+class HigherOrderOpTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_wrap_inductor_compiled_regions_option(self, device):
         """
         Test that wrap_inductor_compiled_regions option wraps compiled regions
         in inductor_compiled_code HOP, making them visible to DebugMode.
@@ -3460,8 +3461,8 @@ class GraphModule(torch.nn.Module):
         def fn_not_wrapped(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device=GPU_TYPE)
-        y = torch.randn(4, 4, device=GPU_TYPE)
+        x = torch.randn(4, 4, device=device)
+        y = torch.randn(4, 4, device=device)
 
         # Test wrapped version - HOP should be visible in DebugMode
         with DebugMode() as debug_mode_wrapped:
@@ -3482,8 +3483,8 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(result_wrapped, expected)
         self.assertEqual(result_not_wrapped, expected)
 
-    @requires_gpu_and_triton
-    def test_wrap_inductor_compiled_regions_with_backward(self):
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_wrap_inductor_compiled_regions_with_backward(self, device):
         """
         Test that wrap_inductor_compiled_regions works correctly with autograd.
         """
@@ -3497,8 +3498,8 @@ class GraphModule(torch.nn.Module):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device=GPU_TYPE, requires_grad=True)
-        y = torch.randn(4, 4, device=GPU_TYPE, requires_grad=True)
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
 
         # Clone for eager comparison
         x_eager = x.detach().clone().requires_grad_(True)
@@ -3525,6 +3526,8 @@ class GraphModule(torch.nn.Module):
 
 
 class HigherOrderOpVmapGuardTests(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_logging_test(recompiles=True)
     def test_vmap_grad_guard_ok(self, records):
         vmap = torch.vmap
@@ -3794,6 +3797,8 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
 
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         # Ensure that in the case of a test failure, the next test won't fail
         # because of a previous call to _vmap_increment_nesting that wasn't undone
@@ -6992,6 +6997,8 @@ class GraphModule(torch.nn.Module):
 
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
         cloned_args = []
         for arg in args:
@@ -7010,159 +7017,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(result, expected)
             for arg, cloned_arg in zip(args, cloned_args):
                 self.assertEqual(arg.grad, cloned_arg.grad)
-
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
-    @requires_gpu_and_triton
-    @torch._functorch.config.patch(functionalize_rng_ops=True)
-    def test_function(self):
-        def gn(x, y):
-            return torch.sigmoid(torch.matmul(x, y))
-
-        def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(
-                gn, torch.sin(x), y, use_reentrant=True
-            )
-
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
-
-        fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
-        bw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
-        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
-        self._validate(fn, backend, x, y)
-
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
-    @requires_gpu_and_triton
-    @torch._functorch.config.patch(functionalize_rng_ops=True)
-    def test_function_with_kwargs(self):
-        def gn(x, y):
-            return torch.sigmoid(torch.matmul(x, y))
-
-        def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(
-                gn,
-                torch.sin(x),
-                y,
-                use_reentrant=True,
-                preserve_rng_state=False,
-            )
-
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
-
-        fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
-        bw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
-        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
-        self._validate(fn, backend, x, y)
-
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
-    @requires_gpu_and_triton
-    @torch._functorch.config.patch(functionalize_rng_ops=True)
-    def test_dropout(self):
-        def gn(x, y):
-            return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
-
-        def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(
-                gn, torch.sin(x), y, use_reentrant=True
-            )
-
-        x = torch.randn(4, 4, device=device_type, requires_grad=True)
-        y = torch.randn(4, 4, device=device_type, requires_grad=True)
-
-        fw_compiler = functools.partial(
-            count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
-        )
-        # philox_rand is passed from fwd
-        bw_compiler = functools.partial(
-            count_ops, freq=0, op=torch.ops.rngprims.philox_rand.default
-        )
-        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
-        self._validate(
-            fn, backend, x, y, skip_check=True
-        )  # dropout decomp is known to diverge with eager
-
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
-    @requires_gpu_and_triton
-    @torch._functorch.config.patch(functionalize_rng_ops=True)
-    def test_dropout_inductor(self):
-        def gn(x, y):
-            return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
-
-        def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(
-                gn, torch.sin(x), y, use_reentrant=True
-            )
-
-        x = torch.randn(4, 4, device=device_type, requires_grad=True)
-        y = torch.randn(4, 4, device=device_type, requires_grad=True)
-
-        backend = "inductor"
-        self._validate(
-            fn, backend, x, y, skip_check=True
-        )  # dropout decomp is known to diverge with eager
-
-    @requires_gpu_and_triton
-    @torch._functorch.config.patch(functionalize_rng_ops=True)
-    def test_fallback(self):
-        def gn(x, y):
-            torch._dynamo.graph_break()
-            return torch.sigmoid(torch.matmul(x, y))
-
-        def fn(x, y):
-            return torch.cos(
-                torch.utils.checkpoint.checkpoint(
-                    gn, torch.sin(x), y, use_reentrant=True
-                ),
-            )
-
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
-        args = (x, y)
-
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
-        expected = fn(*args)
-        result = torch.compile(fn, backend=cnt)(*args)
-
-        self.assertEqual(result, expected)
-
-        # One graph for torch.sin on the input, and other for torch.cos.
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 2)
-        self.assertEqual(len(backend.graphs), 2)
-
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
-    @requires_gpu_and_triton
-    @torch._functorch.config.patch(functionalize_rng_ops=True)
-    def test_module(self):
-        class MockModule(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-
-            def forward(self, x):
-                return torch.sigmoid(self.linear(x))
-
-        mod = MockModule()
-
-        def fn(x):
-            return torch.utils.checkpoint.checkpoint(
-                mod, torch.sin(x), use_reentrant=True
-            )
-
-        x = torch.randn(10, 10, requires_grad=True)
-
-        fw_compiler = functools.partial(
-            count_ops, freq=1, op=torch.ops.aten.sigmoid.default
-        )
-        # sigmoid passed from fwd
-        bw_compiler = functools.partial(
-            count_ops, freq=0, op=torch.ops.aten.sigmoid.default
-        )
-        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
-        self._validate(fn, backend, x)
 
     def test_override_fallthrough_dispatch_key(self):
         class _FallthroughTestOnly(torch._ops.HigherOrderOperator):
@@ -7375,6 +7229,183 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         )
 
 
+class ActivationCheckpointingTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
+        cloned_args = []
+        for arg in args:
+            cloned_args.append(arg.detach().clone().requires_grad_(arg.requires_grad))
+
+        torch.manual_seed(0)
+        expected = fn(*args)
+        expected.sum().backward()
+
+        opt_fn = torch.compile(fn, fullgraph=fullgraph, backend=backend)
+        torch.manual_seed(0)
+        result = opt_fn(*cloned_args)
+        result.sum().backward()
+
+        if not skip_check:
+            self.assertEqual(result, expected)
+            for arg, cloned_arg in zip(args, cloned_args):
+                self.assertEqual(arg.grad, cloned_arg.grad)
+
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @torch._functorch.config.patch(functionalize_rng_ops=True)
+    def test_function(self, device):
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+
+        fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
+        bw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
+        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        self._validate(fn, backend, x, y)
+
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @torch._functorch.config.patch(functionalize_rng_ops=True)
+    def test_function_with_kwargs(self, device):
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                torch.sin(x),
+                y,
+                use_reentrant=True,
+                preserve_rng_state=False,
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+
+        fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
+        bw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
+        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        self._validate(fn, backend, x, y)
+
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @torch._functorch.config.patch(functionalize_rng_ops=True)
+    def test_dropout(self, device):
+        def gn(x, y):
+            return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+
+        fw_compiler = functools.partial(
+            count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
+        )
+        # philox_rand is passed from fwd
+        bw_compiler = functools.partial(
+            count_ops, freq=0, op=torch.ops.rngprims.philox_rand.default
+        )
+        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        self._validate(
+            fn, backend, x, y, skip_check=True
+        )  # dropout decomp is known to diverge with eager
+
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @torch._functorch.config.patch(functionalize_rng_ops=True)
+    def test_dropout_inductor(self, device):
+        def gn(x, y):
+            return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+
+        backend = "inductor"
+        self._validate(
+            fn, backend, x, y, skip_check=True
+        )  # dropout decomp is known to diverge with eager
+
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @torch._functorch.config.patch(functionalize_rng_ops=True)
+    def test_fallback(self, device):
+        def gn(x, y):
+            torch._dynamo.graph_break()
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.cos(
+                torch.utils.checkpoint.checkpoint(
+                    gn, torch.sin(x), y, use_reentrant=True
+                ),
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        args = (x, y)
+
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        expected = fn(*args)
+        result = torch.compile(fn, backend=cnt)(*args)
+
+        self.assertEqual(result, expected)
+
+        # One graph for torch.sin on the input, and other for torch.cos.
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 2)
+        self.assertEqual(len(backend.graphs), 2)
+
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3361")
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @torch._functorch.config.patch(functionalize_rng_ops=True)
+    def test_module(self, device):
+        class MockModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return torch.sigmoid(self.linear(x))
+
+        mod = MockModule()
+        mod = mod.to(device)
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(
+                mod, torch.sin(x), use_reentrant=True
+            )
+
+        x = torch.randn(10, 10, device=device, requires_grad=True)
+
+        fw_compiler = functools.partial(
+            count_ops, freq=1, op=torch.ops.aten.sigmoid.default
+        )
+        # sigmoid passed from fwd
+        bw_compiler = functools.partial(
+            count_ops, freq=0, op=torch.ops.aten.sigmoid.default
+        )
+        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        self._validate(fn, backend, x)
+
+
 xfail_hops_compile = {
     # aot_eager
     "map",  # assert type(args[1].realize()) is TensorVariable
@@ -7389,7 +7420,9 @@ xfail_hops_compile = {
 
 
 class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
-    @requires_gpu_and_triton
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(
         list(filter(lambda op: op.name not in xfail_hops_compile, hop_db)),
@@ -7424,7 +7457,15 @@ class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
 
 
 instantiate_device_type_tests(
-    TestHigherOrderOpsOpInfo, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    HigherOrderOpTestsDevice, globals(), except_for="cpu", allow_xpu=True
+)
+
+instantiate_device_type_tests(
+    ActivationCheckpointingTestsDevice, globals(), except_for="cpu", allow_xpu=True
+)
+
+instantiate_device_type_tests(
+    TestHigherOrderOpsOpInfo, globals(), except_for="cpu", allow_xpu=True
 )
 
 if __name__ == "__main__":
