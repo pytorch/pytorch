@@ -260,7 +260,8 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 // Coordinates one global RecordFunction callback session (KINETO_ONDEMAND, or
 // KINETO with profile_all_threads) against teardown. Those callbacks fire on
 // every thread and touch the profiler state while disableProfiler() finalizes
-// and frees it on another thread.
+// and frees it on another thread. Memory-reporting writes also participate in
+// this session.
 //
 // While the session is active, each callback invocation brackets only its own
 // short critical section - getGlobal() plus the RecordQueue access - with
@@ -376,6 +377,57 @@ class GlobalCallbackSession {
 };
 
 GlobalCallbackSession global_callback_session;
+
+class GlobalMemoryReportingInfo final : public c10::MemoryReportingInfoBase {
+ public:
+  void reportMemoryUsage(
+      void* ptr,
+      int64_t alloc_size,
+      size_t total_allocated,
+      size_t total_reserved,
+      c10::Device device) override {
+    report([&](KinetoThreadLocalState& state) {
+      state.reportMemoryUsage(
+          ptr, alloc_size, total_allocated, total_reserved, device);
+    });
+  }
+
+  void reportOutOfMemory(
+      int64_t alloc_size,
+      size_t total_allocated,
+      size_t total_reserved,
+      c10::Device device) override {
+    report([&](KinetoThreadLocalState& state) {
+      state.reportOutOfMemory(
+          alloc_size, total_allocated, total_reserved, device);
+    });
+  }
+
+  bool memoryProfilingEnabled() const override {
+    return global_callback_session.isActive();
+  }
+
+ private:
+  template <typename F>
+  void report(F&& report_event) {
+    if (!global_callback_session.isActive()) {
+      return;
+    }
+    global_callback_session.enter();
+    auto in_flight_guard =
+        c10::make_scope_exit([] { global_callback_session.exit(); });
+    if (!global_callback_session.isActive()) {
+      return;
+    }
+    std::shared_ptr<KinetoThreadLocalState> state =
+        KinetoThreadLocalState::getGlobal();
+    if (state) {
+      report_event(*state);
+    }
+  }
+};
+
+GlobalMemoryReportingInfo global_memory_reporting_info;
 
 std::unique_ptr<at::ObserverContext> onFunctionEnterGlobal(
     const at::RecordFunction& fn) {
@@ -838,6 +890,15 @@ void enableProfiler(
         : pushTLSProfilingCallbacks(scopes);
   }
 
+  if (config.pushGlobalCallbacks() && config.profile_memory) {
+    // Without CPU activity, pushGlobalProfilingCallbacks() did not activate
+    // the session, so activate it for memory reporting.
+    if (!has_cpu) {
+      global_callback_session.activate(/*new_session=*/true);
+    }
+    c10::setGlobalMemoryReportingInfo(&global_memory_reporting_info);
+  }
+
   if (!config.global()) {
     torch::profiler::impl::kineto::startTrace();
   }
@@ -876,6 +937,9 @@ void disableProfilerInChildThread() {
 std::unique_ptr<ProfilerResult> disableProfiler() {
   // releasing to inform child threads to stop profiling
   profiler_state_info_ptr = nullptr;
+
+  // Stop new memory reports before draining the global callback session.
+  c10::setGlobalMemoryReportingInfo(nullptr);
 
   // If global callbacks were installed (KINETO_ONDEMAND, or KINETO with
   // profile_all_threads), they may be running on other threads right now. Wait
