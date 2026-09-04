@@ -23,7 +23,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoONEDNN,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     IS_FBCODE,
     IS_LINUX,
     requires_mkl,
@@ -243,6 +243,8 @@ class TestPatternMatcherBase(TestCase):
 
 
 class TestPatternMatcherGeneric(TestPatternMatcherBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_conv_unary_base(self, dim=4):
         if dim != 4 and dim != 5:
             raise AssertionError(f"Expected dim to be 4 or 5, got {dim}")
@@ -327,14 +329,14 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @reduced_f32_on_and_off()
     def test_conv2d_unary(self, device):
-        self.device = device
+        self.device = torch.device(device).type
         self._test_conv_unary_base(dim=4)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @reduced_f32_on_and_off()
     def test_conv3d_unary(self, device):
-        self.device = device
+        self.device = torch.device(device).type
         self._test_conv_unary_base(dim=5)
 
     def _test_conv_transpose_unary_base(self, dim=4):
@@ -418,7 +420,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     )
     @reduced_f32_on_and_off()
     def test_conv_transpose2d_unary(self, device):
-        self.device = device
+        self.device = torch.device(device).type
         self._test_conv_transpose_unary_base(dim=4)
 
     @skipIfNoDynamoSupport
@@ -428,7 +430,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     )
     @reduced_f32_on_and_off()
     def test_conv_transpose3d_unary(self, device):
-        self.device = device
+        self.device = torch.device(device).type
         self._test_conv_transpose_unary_base(dim=5)
 
     @skipIfNoDynamoSupport
@@ -616,14 +618,14 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @reduced_f32_on_and_off(0.02)
     def test_conv2d_binary(self, device):
-        self.device = device
+        self.device = torch.device(device).type
         self._test_conv_binary_base(dim=4)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @reduced_f32_on_and_off(0.02)
     def test_conv3d_binary(self, device):
-        self.device = device
+        self.device = torch.device(device).type
         self._test_conv_binary_base(dim=5)
 
     def _test_conv_binary_broadcast_shapes_base(self, dim=4):
@@ -723,14 +725,14 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @reduced_f32_on_and_off()
     def test_conv2d_binary_broadcast_shapes(self, device):
-        self.device = device
+        self.device = torch.device(device).type
         self._test_conv_binary_broadcast_shapes_base(dim=4)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @reduced_f32_on_and_off(bf32_precision=5e-2)
     def test_conv3d_binary_broadcast_shapes(self, device):
-        self.device = device
+        self.device = torch.device(device).type
         self._test_conv_binary_broadcast_shapes_base(dim=5)
 
     @skipIfNoDynamoSupport
@@ -738,7 +740,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
     @reduced_f32_on_and_off()
     def test_conv2d_linear_add_broadcast_shapes(self, device):
-        self.device = device
+        self.device = torch.device(device).type
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -822,9 +824,11 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 class TestPatternMatcher(TestPatternMatcherBase):
     # Note: tests containing the pattern *qconv2d* were removed in PR #169151 (PT2E migration to torchao).
     # See issue #168635 and its sub-issues.
+    hw_classification = HardwareClassification.CPU
+
     @reduced_f32_on_and_off()
-    def test_linear_unary(self, device="cpu"):
-        self.device = device
+    def test_linear_unary(self, device):
+        self.device = torch.device(device).type
 
         class M(torch.nn.Module):
             def __init__(
@@ -890,8 +894,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @reduced_f32_on_and_off()
     @requires_mkl
-    def test_linear_fp32(self, device="cpu"):
-        self.device = device
+    def test_linear_fp32(self, device):
+        self.device = torch.device(device).type
 
         class M(torch.nn.Module):
             def __init__(self, bias):
@@ -914,8 +918,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(mod, (v,), matcher_check_fn)
 
     @requires_mkl
-    def test_linear_input_non_contiguous_3D_wo_bias(self, device="cpu"):
-        self.device = device
+    def test_linear_input_non_contiguous_3D_wo_bias(self, device):
+        self.device = torch.device(device).type
 
         # Activation is 3D, non-contiguous and without Bias
         class M(torch.nn.Module):
@@ -943,7 +947,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             with (
                 torch.no_grad(),
                 torch.autocast(
-                    device_type="cpu",
+                    device_type=self.device,
                     enabled=autocast_enabled,
                     dtype=dtype,
                 ),
@@ -964,8 +968,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfXpu(
         msg="Different with CPU, two linears will be concat on XPU for better performance"
     )
-    def test_linear_add_bias(self, device="cpu"):
-        self.device = device
+    def test_linear_add_bias(self, device):
+        self.device = torch.device(device).type
 
         class M(torch.nn.Module):
             def __init__(self, device, dtype, unary_fn, cast_bias):
@@ -1035,11 +1039,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(metrics.generated_kernel_count, 3)
 
     @skipIfXpu
-    def test_linear_add_bias_float_constant(self, device="cpu"):
+    def test_linear_add_bias_float_constant(self, device):
         # Regression test: is_linear_add_bias should not crash when
         # add_node.args[1] is a Python float (e.g., from `1.0 + linear_output`).
         # See https://github.com/pytorch/pytorch/pull/183514
-        self.device = device
+        self.device = torch.device(device).type
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -1073,8 +1077,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
 
     @reduced_f32_on_and_off()
-    def test_linear_binary(self, device="cpu"):
-        self.device = device
+    def test_linear_binary(self, device):
+        self.device = torch.device(device).type
 
         class M(torch.nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
@@ -1144,8 +1148,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 expected_kernel_count -= 1
             self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
-    def test_linear_binary_broadcast_shapes(self, device="cpu"):
-        self.device = device
+    def test_linear_binary_broadcast_shapes(self, device):
+        self.device = torch.device(device).type
 
         class M(torch.nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
@@ -1212,8 +1216,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfXpu(
         msg="Different with CPU, two linears will be concat on XPU for better performance"
     )
-    def test_multi_linear_share_same_input(self, device="cpu"):
-        self.device = device
+    def test_multi_linear_share_same_input(self, device):
+        self.device = torch.device(device).type
 
         # llama pattern.
         class M(torch.nn.Module):
@@ -1256,6 +1260,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             mod = M().to(dtype).eval()
             v = torch.randn(2, 4, 16).to(dtype)
             self._test_common(mod, (v,), matcher_check_fn, rtol=1e-2, atol=1e-2)
+
+
+class TestPatternMatcherForGeneric(TestPatternMatcherBase):
+    hw_classification = HardwareClassification.GENERIC
 
     # https://github.com/pytorch/pytorch/issues/99841.
     def test_hardtanh_pattern_fallback(self):
@@ -1830,6 +1838,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
 
 class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         self.ctx_stack.enter_context(
@@ -1854,7 +1864,7 @@ class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
     test_conv3d_binary_dynamic_shapes = TestPatternMatcherGeneric.test_conv3d_binary
 
     def test_conv_transpose2d_dynamic_shapes(self, device):
-        self.device = device
+        self.device = torch.device(device).type
 
         # We don't support conv_transpose2d for now.
         class M(torch.nn.Module):
@@ -1880,7 +1890,7 @@ class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
         msg="Different from CPU, two linears will be concat on XPU for better performance"
     )
     def test_multi_linear_share_same_input_dynamic(self, device):
-        self.device = device
+        self.device = torch.device(device).type
 
         # llama pattern.
         class M(torch.nn.Module):
@@ -1926,6 +1936,8 @@ class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
 
 
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
+    hw_classification = HardwareClassification.CPU
+
     test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
     test_linear_input_non_contiguous_3D_wo_bias_dynamic_shapes = (
         TestPatternMatcher.test_linear_input_non_contiguous_3D_wo_bias
@@ -1949,12 +1961,15 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 
 
 instantiate_device_type_tests(
-    TestPatternMatcherGeneric, globals(), allow_xpu=True, only_for=("cpu", "xpu")
+    TestPatternMatcherGeneric, globals(), except_for="cuda", allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestDynamicPatternMatcherGeneric, globals(), allow_xpu=True, only_for=("cpu", "xpu")
+    TestDynamicPatternMatcherGeneric, globals(), except_for="cuda", allow_xpu=True
 )
-instantiate_parametrized_tests(TestPatternMatcher)
+instantiate_device_type_tests(TestPatternMatcher, globals(), only_for="cpu")
+instantiate_device_type_tests(TestDynamicPatternMatcher, globals(), only_for="cpu")
+
+
 if __name__ == "__main__":
     if IS_LINUX and (HAS_CPU) and torch.backends.mkldnn.is_available():
         run_tests()
