@@ -2681,8 +2681,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = fn()
         self.assertEqual(((3, 5), (3, 5)), res)
 
-    @staticmethod
-    def _consume_prefix_state_dict(kind, prefix_case, t):
+    # NB: not a staticmethod -- make_test_cls_with_patches copies non-test
+    # attributes with getattr(cls, name), which unwraps a staticmethod into a
+    # plain function and rebinds it as an instance method on the generated
+    # class (test_dynamic_shapes, test_nested_graph_breaks_wrapped).
+    def _consume_prefix_state_dict(self, kind, prefix_case, t):
         if prefix_case == "empty":
             items = []
         elif prefix_case == "no_match":
@@ -2698,8 +2701,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             )
         return sd
 
-    @staticmethod
-    def _consume_prefix_snapshot(sd):
+    def _consume_prefix_snapshot(self, sd):
         # pop+reinsert deliberately reorders, so the key ORDER is part of the
         # contract (eager pins it in test/test_nn.py TestUtils).
         meta = getattr(sd, "_metadata", None)
