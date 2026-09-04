@@ -652,6 +652,26 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         with config.patch(e_bool=False):
             self.assertFalse(config._is_default("e_bool"))
 
+    def test_patch_keeps_override_unset(self):
+        for key in ("e_env_default", "e_jk"):
+            entry = config._config[key]
+            self.assertIs(entry.user_override.get(), _UNSET_SENTINEL)
+            with config.patch(key, False):
+                self.assertFalse(getattr(config, key))
+            self.assertIs(entry.user_override.get(), _UNSET_SENTINEL)
+            self.assertTrue(getattr(config, key))
+
+    def test_save_restore_user_overrides(self):
+        config.e_list = [1, 2]
+        saved = config._save_user_overrides()
+        config.e_bool = False
+        config.e_list.append(3)
+        config._restore_user_overrides(saved)
+        self.assertTrue(config.e_bool)
+        self.assertEqual(config.e_list, [1, 2])
+        override = config._config["e_env_default"].user_override
+        self.assertIs(override.get(), _UNSET_SENTINEL)
+
     def test_dict_patch(self):
         self.assertTrue(config.e_bool)
         with config.patch(e_bool=False):
