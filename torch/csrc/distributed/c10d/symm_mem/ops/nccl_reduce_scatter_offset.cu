@@ -6,6 +6,8 @@
 #endif
 #endif
 
+#include <limits>
+
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -67,7 +69,6 @@ constexpr int RS_THREADS_PER_CTA = 128;
 // Total LSA barrier slots needed: one per CTA across all owned blocks.
 constexpr int RS_MAX_CTA_COUNT = (RS_MAX_BLOCKS_PER_RANK * RS_MAX_CTAS_PER_BLOCK);
 
-#ifndef USE_ROCM
 // Per-slot data passed to the kernel in a single struct to avoid multiple
 // kernel arguments.  Indexed by owned slot (0..n_owned-1).
 struct ReduceScatterOffsetsInfo {
@@ -83,6 +84,10 @@ struct ReduceScatterOffsetsInfo {
 // Each CTA belongs to one slot; blockIdx.x is the flat CTA index used as the
 // LSA barrier index, ensuring all ranks assign the same index to each logical
 // (slot, local_block) pair (because owned_sizes[j] is consistent across ranks).
+//
+// ROCm drives this same kernel one owned slot at a time (n_owned == 1 per
+// launch), which reduces the indexing above to slot 0, slot_start 0 and
+// local_block == blockIdx.x.  See the launch site for why.
 //
 // UseMultimem=true: uses ncclMultimemReduceSum for hardware reduction via
 // NVLink multicast; requires devcomm created with lsaMultimem=true.
@@ -140,69 +145,6 @@ __global__ void reduce_scatter_offset_kernel(
   // Release: signal peers that we are done reading window memory.
   bar.sync(coop, cuda::memory_order_release);
 }
-#else
-// Reduces ONE owned block ("slot") per launch.  Grid: 1D, gridDim.x == number of
-// CTAs (row tiles) cooperating on this slot; blockIdx.x is both the row-tile
-// index and the LSA barrier index.  All ranks launch the per-slot kernels in the
-// same order with the same per-slot CTA count (owned_sizes[j] is consistent
-// across ranks), so every rank agrees on the barrier index for each row tile.
-//
-// Slots are launched sequentially on the stream (one launch per owned block) so
-// that at most one destination allocation is being written at a time. A fused
-// multi-destination launch was reproduced with RCCL 2.30.7 on both gfx942 and
-// gfx950: the GPU queues reported HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION
-// while CTAs wrote different destination allocations. Serialize all ROCm
-// launches conservatively until the underlying RCCL device-reduce issue is
-// understood and fixed. Row tiles within one slot all write the same destination
-// allocation, which is safe.
-// TODO: Debug the RCCL multi-destination LSA reduction and narrow or remove this
-// workaround when the fused launch is safe.
-//
-// UseMultimem=true: uses ncclMultimemReduceSum for hardware reduction via
-// multicast; requires devcomm created with lsaMultimem=true.
-// UseMultimem=false: uses ncclLsaReduceSum (software reduce via LSA reads).
-template <typename T, bool UseMultimem>
-__global__ void reduce_scatter_offset_kernel(
-    ncclWindow_t window,
-    size_t base_byte_offset, // window byte offset of this slot's block start
-    T* dst_base,             // this slot's output pointer (contiguous)
-    int rows,                // number of rows to reduce for this slot
-    int cols,                // elements per row
-    int64_t outer_stride,    // row stride of the input buffer (in elements)
-    ncclDevComm devComm) {
-  const int ctas_for_slot = gridDim.x;
-  const int local_block = static_cast<int>(blockIdx.x);
-  const ncclCoopCta coop{};
-
-  // One LSA barrier per row tile; all ranks must call both syncs unconditionally.
-  ncclLsaBarrierSession<ncclCoopCta> bar{
-      coop,
-      devComm,
-      ncclTeamLsa(devComm),
-      devComm.lsaBarrier,
-      blockIdx.x};
-  // Acquire: wait until all peers have written their data into the window.
-  bar.sync(coop, cuda::memory_order_acquire);
-
-  // Each CTA handles a strided subset of rows; the reduce reads from all peers
-  // and writes cols elements starting at dst_row.
-  for (int row = local_block; row < rows; row += ctas_for_slot) {
-    const size_t row_offset =
-        base_byte_offset + static_cast<size_t>(row * outer_stride) * sizeof(T);
-    T* dst_row = dst_base + row * cols;
-    if constexpr (UseMultimem) {
-      ncclMultimemReduceSum(
-          coop, window, row_offset, dst_row, cols, devComm.lsaMultimem);
-    } else {
-      ncclLsaReduceSum(coop, window, row_offset, dst_row, cols, devComm);
-    }
-  }
-
-  // Release: signal peers that we are done reading window memory.
-  bar.sync(coop, cuda::memory_order_release);
-}
-
-#endif
 
 #endif // NCCL_DEVICE_HAS_REDUCE_COPY
 
@@ -393,6 +335,14 @@ void nccl_reduce_scatter_offset(
     TORCH_CHECK(
         out[j].scalar_type() == input.scalar_type(),
         "nccl_reduce_scatter_offset: out[", j, "] must have the same dtype as input");
+    // ReduceScatterOffsetsInfo stores the per-slot size in a uint16_t, so a
+    // larger block would be truncated on the device and silently reduce only
+    // owned_sizes[j] % 65536 of the rows.
+    TORCH_CHECK(
+        owned_sizes[j] <= std::numeric_limits<uint16_t>::max(),
+        "nccl_reduce_scatter_offset: block size ", owned_sizes[j], " at j=", j,
+        " exceeds the maximum supported block size of ",
+        std::numeric_limits<uint16_t>::max());
   }
 
   // Per-slot CTA count: sized for each slot independently.  owned_sizes[j] is
@@ -458,9 +408,21 @@ void nccl_reduce_scatter_offset(
   auto window = nccl_hdl->get_window();
   TORCH_CHECK(window != nullptr, "nccl_reduce_scatter_offset: NCCL window is null");
 
-  // Launch one kernel per owned slot, sequentially on the stream. See the
-  // gfx942/gfx950 RCCL fault rationale above; stream-ordered per-slot launches
-  // keep at most one destination in flight while still tiling rows across CTAs.
+  // Drive the same kernel one owned slot per launch, sequentially on the
+  // stream, so at most one destination allocation is written at a time.  A
+  // fused multi-destination launch was reproduced with RCCL 2.30.7 on both
+  // gfx942 and gfx950: the GPU queues reported
+  // HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION while CTAs wrote different
+  // destination allocations.  Row tiles within one slot all write the same
+  // destination allocation, which is safe.
+  // TODO: Debug the RCCL multi-destination LSA reduction and narrow or remove
+  // this workaround when the fused launch is safe.
+  //
+  // A one-slot info struct makes the kernel's flat-CTA indexing collapse to
+  // slot 0, slot_start 0, local_block == blockIdx.x and ctas_for_slot ==
+  // ctas_j, leaving blockIdx.x as the barrier index.  All ranks agree on
+  // ctas_j because owned_sizes[j] is consistent across ranks, so every rank
+  // assigns the same barrier index to each row tile.
   AT_DISPATCH_NV_FLOATS(
       input.scalar_type(),
       "nccl_reduce_scatter_offset",
@@ -472,23 +434,30 @@ void nccl_reduce_scatter_offset(
               ? static_cast<size_t>(input.storage_offset() + block_start)
               : static_cast<size_t>(input.storage_offset()) +
                     static_cast<size_t>(block_start) * outer_stride;
-          const size_t base_byte_offset =
-              window_base_offset + elem_offset * input.element_size();
-          auto* dst_base = static_cast<scalar_t*>(out[j].data_ptr());
-          const int rows = col_sharded ? fixed_dim_size : static_cast<int>(owned_sizes[j]);
-          const int cols = col_sharded ? static_cast<int>(owned_sizes[j]) : fixed_dim_size;
           const int numel_j = static_cast<int>(owned_sizes[j]) * fixed_dim_size;
-          const int ctas_j = ::max(1, ::min(
+          const int ctas_j = std::max(1, std::min(
               (numel_j + elems_per_cta - 1) / elems_per_cta, RS_MAX_CTAS_PER_BLOCK));
+
+          ReduceScatterOffsetsInfo info;
+          info.n_owned = 1;
+          info.byte_offsets[0] =
+              window_base_offset + elem_offset * input.element_size();
+          info.dst_ptrs[0] = out[j].data_ptr();
+          info.dst_block_size[0] = static_cast<uint16_t>(owned_sizes[j]);
+          info.ctas_offset[0] = static_cast<uint16_t>(ctas_j);
+          for (int k = 0; k < ctas_j; ++k) {
+            info.cta_slot[k] = 0;
+          }
+
           if (use_multimem) {
             reduce_scatter_offset_kernel<scalar_t, true>
                 <<<ctas_j, RS_THREADS_PER_CTA, 0, stream>>>(
-                    window, base_byte_offset, dst_base, rows, cols, outer_stride, devcomm);
+                    window, info, fixed_dim_size, col_sharded, outer_stride, devcomm);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           } else {
             reduce_scatter_offset_kernel<scalar_t, false>
                 <<<ctas_j, RS_THREADS_PER_CTA, 0, stream>>>(
-                    window, base_byte_offset, dst_base, rows, cols, outer_stride, devcomm);
+                    window, info, fixed_dim_size, col_sharded, outer_stride, devcomm);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           }
         }
