@@ -2826,6 +2826,19 @@ class DictTests(torch._dynamo.test_case.TestCase):
             _is_safe_to_reorder(graph.call_function(torch.ops.aten.add.Tensor, (x, x)))
         )
 
+        # Every order-sensitive namespace, not just _c10d_functional. symm_mem
+        # carries sync primitives, so reordering across a wait breaks the sync
+        # contract; _dtensor carries collectives with the same overlap concern.
+        for op in (
+            torch.ops._c10d_functional_autograd.all_to_all_single.default,
+            torch.ops.symm_mem.one_shot_all_reduce.default,
+            torch.ops.symm_mem.nvshmem_wait_for_signal.default,
+            torch.ops._dtensor.shard_dim_alltoall.default,
+        ):
+            self.assertFalse(
+                _is_safe_to_reorder(graph.call_function(op, (x,))), op.name()
+            )
+
 
 instantiate_parametrized_tests(DictTests)
 
