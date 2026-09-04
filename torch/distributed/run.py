@@ -870,7 +870,6 @@ def _find_training_script_index(parser: ArgumentParser, args: list[str]) -> int:
     return n
 
 
-
 def parse_args(args):
     parser = get_args_parser()
     if args is None:
