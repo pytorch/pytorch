@@ -726,6 +726,11 @@ class TestGeomspace(TestCase):
         with self.assertRaises(ValueError):
             w.geomspace(1, 0, num=4)
 
+    def test_geomspace_complex(self):
+        res = w.geomspace(1j, 1000j, num=4)
+        assert_allclose(res, w.array([1j, 10j, 100j, 1000j]))
+        assert_equal(res.dtype, w.complex128)
+
 
 class TestMisc(TestCase):
     hw_classification = HardwareClassification.GENERIC

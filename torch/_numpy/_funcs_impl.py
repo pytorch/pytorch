@@ -362,12 +362,15 @@ def geomspace(
     if bool(torch.any(start == 0)) or bool(torch.any(stop == 0)):
         raise ValueError("Geometric sequence cannot include zero")
     if dtype is None:
-        dtype = _dtypes_impl.default_dtypes().float_dtype
+        if start.is_complex() or stop.is_complex():
+            dtype = _dtypes_impl.default_dtypes().complex_dtype
+        else:
+            dtype = _dtypes_impl.default_dtypes().float_dtype
     elif not isinstance(dtype, torch.dtype):
         from . import _dtypes
 
         dtype = _dtypes.dtype(dtype).torch_dtype
-    out_sign = torch.sign(start)
+    out_sign = torch.sgn(start)
     start = start / out_sign
     stop = stop / out_sign
     log_start = torch.log10(start)
