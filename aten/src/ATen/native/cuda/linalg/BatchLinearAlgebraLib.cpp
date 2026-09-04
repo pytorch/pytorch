@@ -789,11 +789,17 @@ static void apply_cholesky_cusolver_potrfBatched(const Tensor& self_working_copy
 
   // cusolver batched kernels require input be "device array of device pointers"
   Tensor self_working_copy_array = get_device_pointers<scalar_t>(self_working_copy);
+  auto self_working_copy_array_ptr = reinterpret_cast<scalar_t**>(self_working_copy_array.data_ptr());
+  auto infos_ptr = infos.data_ptr<int>();
 
-  at::cuda::solver::potrfBatched<scalar_t>(
-    handle, uplo, n,
-    reinterpret_cast<scalar_t**>(self_working_copy_array.data_ptr()),
-    lda, infos.data_ptr<int>(), batch_size);
+  constexpr int batch_limit = 65535;
+  for (int mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
+    int cur_batch_size = std::min<int>(batch_size - mini_idx, batch_limit);
+    at::cuda::solver::potrfBatched<scalar_t>(
+      handle, uplo, n,
+      &self_working_copy_array_ptr[mini_idx],
+      lda, &infos_ptr[mini_idx], cur_batch_size);
+  }
 }
 
 void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& info) {
@@ -893,18 +899,24 @@ static void apply_cholesky_cusolver_potrsBatched(Tensor& self_working_copy, cons
 
   auto self_ptr_array = get_device_pointers<scalar_t>(self_working_copy);
   auto A_ptr_array = get_device_pointers<scalar_t>(A_column_major_copy);
+  auto self_ptr_array_data = reinterpret_cast<scalar_t**>(self_ptr_array.data_ptr());
+  auto A_ptr_array_data = reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr());
 
-  at::cuda::solver::potrsBatched(
-    handle, uplo,
-    cuda_int_cast(n, "n"),
-    cuda_int_cast(nrhs, "nrhs"),
-    reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr()),
-    cuda_int_cast(lda, "lda"),
-    reinterpret_cast<scalar_t**>(self_ptr_array.data_ptr()),
-    cuda_int_cast(ldb, "ldb"),
-    infos_ptr,
-    cuda_int_cast(batch_size, "batch_size")
-  );
+  constexpr int batch_limit = 65535;
+  for (int mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
+    int cur_batch_size = std::min<int>(batch_size - mini_idx, batch_limit);
+    at::cuda::solver::potrsBatched(
+      handle, uplo,
+      cuda_int_cast(n, "n"),
+      cuda_int_cast(nrhs, "nrhs"),
+      &A_ptr_array_data[mini_idx],
+      cuda_int_cast(lda, "lda"),
+      &self_ptr_array_data[mini_idx],
+      cuda_int_cast(ldb, "ldb"),
+      infos_ptr,
+      cur_batch_size
+    );
+  }
 }
 
 void _cholesky_solve_helper_cuda_cusolver(Tensor& self, const Tensor& A, bool upper) {
