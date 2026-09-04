@@ -1,3 +1,4 @@
+import builtins
 import dataclasses
 import importlib
 import inspect
@@ -215,15 +216,24 @@ class AOTCompiledFunction:
                 # a process that only loads never traced, so seed them here.
                 # Mirrors the precompile load path in package.py.
                 from .output_graph import get_builtins_dict
+                from .utils import CleanupHook
 
                 import_sources = self._artifacts.runtime_env.import_sources
                 for alias, module_name in import_sources.items():
                     if alias not in guard_scope:
+                        # A pre-reset compile may still own the alias via a
+                        # CleanupHook; drop it before we rebind. See _install_global.
+                        CleanupHook.disown(guard_scope, alias)
                         guard_scope[alias] = importlib.import_module(module_name)
                 builtins_key = (
                     guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
                 )
                 if builtins_key and builtins_key not in guard_scope:
+                    # A caller-supplied f_globals need not carry __builtins__;
+                    # exec would seed it, so fall back to the real builtins here.
+                    if "__builtins__" not in guard_scope:
+                        guard_scope["__builtins__"] = builtins.__dict__
+                    CleanupHook.disown(guard_scope, builtins_key)
                     guard_scope[builtins_key] = get_builtins_dict(guard_scope)
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
@@ -569,8 +579,9 @@ class AOTCompiledModel:
         # Resolve from model.forward, not the model: for a hooked module
         # get_traced_fn would return Module._wrapped_call_impl and nn.Module's
         # namespace.
+        forward = model.forward
         try:
-            traced_fn, _ = convert_frame.get_traced_fn(model.forward)
+            traced_fn, _ = convert_frame.get_traced_fn(forward)
             guard_globals = traced_fn.__globals__
         except (RuntimeError, AttributeError):
             log.warning(
@@ -579,7 +590,7 @@ class AOTCompiledModel:
                 "resolve against the scope reconstructed from the serialized "
                 "bytecode instead",
                 type(model).__name__,
-                model.forward,
+                forward,
             )
             guard_globals = None
 
