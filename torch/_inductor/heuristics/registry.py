@@ -11,6 +11,7 @@ Both share one underlying registry dict and cascading fallback lookup.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import logging
 from typing import Any, TYPE_CHECKING
 
@@ -26,6 +27,8 @@ _HEURISTIC_REGISTRY: dict[tuple[str | None, ...], Any] = {}
 # This intentionally covers both template and codegen entries.
 _TEMPLATE_HEURISTIC_REGISTRY = _HEURISTIC_REGISTRY
 _HEURISTIC_CACHE: dict[tuple[str | None, ...], Any] = {}
+_CODEGEN_HEURISTICS_PACKAGE = "torch._inductor.heuristics.triton_codegen"
+
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +57,12 @@ def _lookup(name: str, device_type: str, op_name: str | None) -> Any | None:
         if key in _HEURISTIC_REGISTRY:
             return _HEURISTIC_REGISTRY[key]
     return None
+
+
+def _import_codegen_heuristic_modules() -> None:
+    # Registrations for one name may be spread across multiple required providers.
+    importlib.import_module(f"{_CODEGEN_HEURISTICS_PACKAGE}.pointwise")
+    importlib.import_module(f"{_CODEGEN_HEURISTICS_PACKAGE}.reduction")
 
 
 # -----------------------------------------------------------------
@@ -201,9 +210,7 @@ def get_codegen_heuristic(name: str, device_type: str) -> CodegenConfigHeuristic
     heuristic_class = _lookup(name, device_type, None)
 
     if heuristic_class is None:
-        # Lazily import codegen heuristics to trigger registration
-        import torch._inductor.heuristics.triton_codegen  # noqa: F401
-
+        _import_codegen_heuristic_modules()
         heuristic_class = _lookup(name, device_type, None)
 
     if heuristic_class is None:
@@ -223,7 +230,11 @@ def get_codegen_heuristic(name: str, device_type: str) -> CodegenConfigHeuristic
 
 
 def clear_registry() -> None:
-    """Clear all registered heuristics. Primarily for testing."""
+    """Clear registered heuristic classes and cached instances.
+
+    Imported modules are not unloaded, so tests that need registration side effects
+    to run again must evict those modules before importing them again.
+    """
     _HEURISTIC_REGISTRY.clear()
     _HEURISTIC_CACHE.clear()
 
