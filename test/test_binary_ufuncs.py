@@ -3244,6 +3244,52 @@ class TestBinaryUfuncsDevice(TestCase):
             result_scalar = fn(dividend, -1)
             self.assertEqual(result_scalar, expected)
 
+    @dtypes(torch.float32, torch.float64)
+    def test_fmod_remainder_extremal(self, device, dtype):
+        # Sleef_fmod is undefined once abs(a / b) overflows, so the vectorized
+        # path returned NaN where the scalar path was right. See gh-77742.
+        finfo = torch.finfo(dtype)
+        for num, denom, shape in itertools.product(
+            [finfo.max * 0.7, -finfo.max * 0.7],
+            [finfo.tiny, -finfo.tiny, 0.5, -0.5],
+            [(), (32,)],  # Scalar and vectorized
+        ):
+            a = torch.full(shape, num, dtype=dtype, device=device)
+            b = torch.full(shape, denom, dtype=dtype, device=device)
+            # Compare against the values the kernel actually got, not against
+            # num and denom, since fmod of a huge ratio is sensitive to a
+            # single ULP of rounding in the cast.
+            an, bn = a.cpu().numpy(), b.cpu().numpy()
+            # asarray because numpy hands back a scalar for the 0-d case.
+            with np.errstate(over="ignore", invalid="ignore"):
+                fmod_ref = np.asarray(np.fmod(an, bn))
+                remainder_ref = np.asarray(np.remainder(an, bn))
+            self.assertEqual(torch.fmod(a, b).cpu(), torch.from_numpy(fmod_ref))
+            self.assertEqual(
+                torch.remainder(a, b).cpu(), torch.from_numpy(remainder_ref)
+            )
+
+    @dtypes(torch.bfloat16)
+    def test_remainder_extremal_bfloat16(self, device, dtype):
+        # The bfloat16 remainder kernel converts to float and calls the same
+        # Sleef routine, and bfloat16 has float32's exponent range, so it hits
+        # the same overflow. Vectorized<BFloat16>::fmod uses std::fmod per
+        # element, so fmod itself is fine and only remainder is checked here.
+        finfo = torch.finfo(dtype)
+        for num, denom in itertools.product(
+            [finfo.max * 0.7, -finfo.max * 0.7], [finfo.tiny, -finfo.tiny, 0.5, -0.5]
+        ):
+            # The scalar path is already correct, so it is the reference.
+            expected = torch.remainder(
+                torch.full((), num, dtype=dtype, device=device),
+                torch.full((), denom, dtype=dtype, device=device),
+            )
+            actual = torch.remainder(
+                torch.full((32,), num, dtype=dtype, device=device),
+                torch.full((32,), denom, dtype=dtype, device=device),
+            )
+            self.assertEqual(actual, expected.expand(32))
+
     @dtypes(*all_types_and(torch.half))
     def test_fmod_remainder(self, device, dtype):
         # Use numpy as reference
