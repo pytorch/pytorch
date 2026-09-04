@@ -1543,11 +1543,19 @@ class TestFusedObsFakeQuantModule(TestCase):
                              obs2match)
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestObserverDevice, globals(), only_for=("cuda",))
-instantiate_device_type_tests(TestDistributedDevice, globals(), only_for=("cuda",))
-instantiate_device_type_tests(TestFusedObsFakeQuantModuleDevice, globals(), only_for=only_for)
-instantiate_device_type_tests(TestFakeQuantizeDevice, globals(), only_for=only_for)
+only_for = ("cpu", "cuda", "xpu")
+instantiate_device_type_tests(
+    TestObserverDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestDistributedDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFusedObsFakeQuantModuleDevice, globals(), only_for=only_for, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFakeQuantizeDevice, globals(), only_for=only_for, allow_xpu=True
+)
 
 
 if __name__ == '__main__':
