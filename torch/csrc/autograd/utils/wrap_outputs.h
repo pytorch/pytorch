@@ -6,6 +6,7 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/python_headers.h>
+#include <initializer_list>
 #include <tuple>
 
 #include <torch/csrc/Dtype.h>
@@ -110,7 +111,7 @@ void apply_with_idx_impl(
     const F& f,
     Tuple& t,
     std::index_sequence<Is...> /*indices*/) {
-  (f(std::get<Is>(t), Is), ...);
+  (void)std::initializer_list<int>{(f(std::get<Is>(t), Is), 0)...};
 }
 
 // For tuple(a, b, c), calls f(a, 0), f(b, 1), f(c, 2)
