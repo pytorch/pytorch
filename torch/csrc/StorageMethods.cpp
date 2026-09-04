@@ -50,6 +50,11 @@ static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
 static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self_ = THPStorage_Unpack(self);
+  auto* impl = self_.unsafeGetStorageImpl();
+  if (C10_UNLIKELY(
+          impl->data_ptr_check() != c10::StorageImpl::DataPtrCheck::None)) {
+    return THPStorage_invalidDataPtr(*impl);
+  }
   // See Note [Invalid Python Storages]
   auto invalid = self_.data() == nullptr &&
       self_.device_type() != c10::DeviceType::Meta && self_.sym_nbytes() != 0;

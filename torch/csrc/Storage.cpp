@@ -462,3 +462,19 @@ void THPStorage_assertNotNull(THPStorage* storage) {
 void THPStorage_assertNotNull(PyObject* obj) {
   THPStorage_assertNotNull(reinterpret_cast<THPStorage*>(obj));
 }
+
+PyObject* THPStorage_invalidDataPtr(const c10::StorageImpl& impl) {
+  auto msg = impl.data_ptr_access_error_msg().value_or(
+      "Cannot access data pointer of Storage that is invalid.");
+  THPObjectPtr utils(PyImport_ImportModule("torch._utils"));
+  TORCH_CHECK_PYTHON(utils);
+  THPObjectPtr cls(PyObject_GetAttrString(utils, "_InvalidDataPtr"));
+  TORCH_CHECK_PYTHON(cls);
+  THPObjectPtr py_msg(THPUtils_packString(msg));
+  TORCH_CHECK_PYTHON(py_msg);
+  PyObject* throws = impl.throw_on_immutable_data_ptr() ? Py_True : Py_False;
+  PyObject* res =
+      PyObject_CallFunctionObjArgs(cls, py_msg.get(), throws, nullptr);
+  TORCH_CHECK_PYTHON(res);
+  return res;
+}
