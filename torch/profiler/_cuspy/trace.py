@@ -927,7 +927,7 @@ def _gpu_user_annotation_events(
         return []
 
     # `user_external_id` is the innermost ENCLOSING named-region id (resolved at decode via
-    # the monitor's active-id chain), falling back to the raw external_id.
+    # Cuspy's active-id chain), falling back to the raw external_id.
     correlation_to_user_external = {
         corr: uext
         for corr, uext in zip(
@@ -1010,7 +1010,7 @@ def _gpu_user_annotation_events(
 
 # --- Perfetto-native (.pftrace) encoding -------------------------------------
 # The wire encoding is done natively (protozero via the perfetto SDK) in
-# torch/csrc/profiler/cupti/monitor_pftrace.cpp; here we only shape the window into the
+# torch/csrc/profiler/cuspy/cuspy_pftrace.cpp; here we only shape the window into the
 # flat arrays + track list it consumes.
 
 
@@ -1836,7 +1836,7 @@ def _gpu_annotation_render_column(
     built from the columnar window via the same synthesizer as the chrome gpu_user_annotation
     events -- so it lands on the kernels' capture stream, never a reassigned logical lane.
     None when there are no GPU annotations. Kineto emits no gpu_user_annotation in
-    cupti_monitor mode, so cpu_data cannot be the source (the chrome path synthesizes them too)."""
+    cuspy mode, so cpu_data cannot be the source (the chrome path synthesizes them too)."""
     gua = _gpu_user_annotation_events(trace_window, base_ns=base_ns)
     if not gua:
         return None
@@ -1860,7 +1860,7 @@ def _window_to_pftrace(
     output_path: str,
     compression_level: int = 1,
 ) -> None:
-    """Encode the monitor's columnar window straight to a Perfetto-native trace (.pftrace),
+    """Encode Cuspy's columnar window straight to a Perfetto-native trace (.pftrace),
     concatenated with the Kineto CPU events -- NO chrome-dict materialization. Full parity with
     the chrome path's per-event args, ac2g flows, and collective metadata, emitted as
     TrackEvent debug_annotations + flow_ids by the native encoder. The GPU kinds are assembled
@@ -2088,7 +2088,7 @@ def _window_to_pftrace(
     # the kernels' capture-stream lane -- never a reassigned logical lane (matching the chrome
     # path). Added to render_columns before event-id assignment so the annotation rows share the
     # render-stage row order. Synthesized from the columnar window (kineto emits no
-    # gpu_user_annotation in monitor mode; the chrome path builds them the same way).
+    # gpu_user_annotation in Cuspy mode; the chrome path builds them the same way).
     render_columns = columns
     ann_col = _gpu_annotation_render_column(trace_window, base_ns)
     if ann_col is not None:
@@ -2329,7 +2329,7 @@ def _window_to_pftrace(
         ),
     )
     # encode_pftrace returns gzip-compressed bytes (compressed in C++), so write as-is.
-    out = torch._C._profiler._cupti_monitor.encode_pftrace(
+    out = torch._C._profiler._cuspy.encode_pftrace(
         base_ns,
         tracks,
         name_table,

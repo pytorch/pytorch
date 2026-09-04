@@ -426,7 +426,7 @@ class TestPublicBindings(TestCase):
                 "torch._native.ops.scatter_add.",
                 "torch._native.ops.topk.",
                 "torch._vendor.quack",
-                "torch.profiler._cupti.",
+                "torch.profiler._cuspy.",
             )
             dsl_names = ("triton", "flydsl")
             if (
