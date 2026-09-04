@@ -11,9 +11,12 @@ import unittest
 from argparse import ArgumentParser
 
 from torch.distributed.argparse_util import check_env, env
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class ArgParseUtilTest(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # remove any lingering environment variables
