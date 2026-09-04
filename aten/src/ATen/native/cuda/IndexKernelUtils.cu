@@ -11,7 +11,7 @@
 
 namespace at::native {
 template <int Alignment, typename index_t>
-__global__ void vectorized_gather_kernel(char * out, char * inp, index_t * idx, int num_ind, int64_t slice_size, int64_t ind_dim_size, int64_t inp_stride, int64_t out_stride, bool allow_neg_indices) {
+static __global__ void vectorized_gather_kernel(char * out, char * inp, index_t * idx, int num_ind, int64_t slice_size, int64_t ind_dim_size, int64_t inp_stride, int64_t out_stride, bool allow_neg_indices) {
     int64_t ind = idx[blockIdx.x];
     if (allow_neg_indices) {
         ind = (ind < 0) ? ind + ind_dim_size : ind;

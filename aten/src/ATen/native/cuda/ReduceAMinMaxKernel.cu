@@ -16,7 +16,7 @@
 namespace at::native {
 
 template <typename scalar_t>
-void _min_max_values_kernel_cuda_impl(TensorIterator& iter) {
+static void _min_max_values_kernel_cuda_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, scalar_t>(
       iter,
       MinMaxOps<scalar_t, scalar_t, int32_t>{},
