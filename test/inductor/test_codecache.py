@@ -5347,6 +5347,84 @@ class TestRemoteAOTAutogradCache(TestCase):
             self.assertEqual(b.grad, b2.grad)
 
 
+class TestTritonBundlerCollect(TestCase):
+    """
+    collect() saves the kernel binaries and a snapshot of each statically
+    launchable autotuner. load_autotuners() demands a binary for every
+    compile_result those snapshots name, so the bundle has to cover them.
+    """
+
+    @config.patch(
+        bundle_triton_into_fx_graph_cache=True,
+        use_static_triton_launcher=True,
+        force_disable_caches=False,
+    )
+    def test_bundle_covers_binaries_demanded_on_load(self):
+        from torch._inductor.runtime.runtime_utils import triton_hash_to_path_key
+        from torch._inductor.triton_bundler import (
+            StaticallyLaunchedAutotuner,
+            TritonBundler,
+        )
+
+        def stub_autotuner(cache_key, kernel_name, hashes):
+            # collect() only reaches kernel.compile_results[i].kernel.hash
+            return StaticallyLaunchedAutotuner(
+                cache_key,
+                kernel_name,
+                types.SimpleNamespace(
+                    compile_results=[
+                        types.SimpleNamespace(kernel=types.SimpleNamespace(hash=h))
+                        for h in hashes
+                    ]
+                ),
+            )
+
+        cache_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cache_dir, True)
+
+        # "untuned" stands in for a single-config kernel that has not run by the
+        # time the cache is written, so no winner is ever recorded for it.
+        winner, loser, untuned = "hash_winner", "hash_loser", "hash_untuned"
+        keys = {h: triton_hash_to_path_key(h) for h in (winner, loser, untuned)}
+        for path_key in keys.values():
+            kernel_dir = os.path.join(cache_dir, path_key)
+            os.makedirs(kernel_dir)
+            with open(os.path.join(kernel_dir, "kernel.cubin"), "wb") as f:
+                f.write(b"\x00fake binary\x00")
+            with open(os.path.join(kernel_dir, "kernel.json"), "w") as f:
+                json.dump({"name": "kernel"}, f)
+
+        TritonBundler.begin_compile()
+        self.addCleanup(TritonBundler.end_compile)
+        with mock.patch(
+            "torch._inductor.triton_bundler.triton_cache_dir",
+            return_value=cache_dir,
+        ):
+            for path_key in keys.values():
+                TritonBundler.put(path_key, 0)
+            TritonBundler._static_autotuners = [
+                stub_autotuner("key_tuned", "tuned", [winner, loser]),
+                stub_autotuner("key_untuned", "untuned", [untuned]),
+            ]
+            # _winners is global, so one recorded winner turns the filter on for
+            # every kernel, "untuned" included.
+            TritonBundler.put_winner(keys[winner])
+            bundle, _metadata = TritonBundler.collect()
+
+        bundled = {artifacts.kernel_hash for artifacts in bundle.kernel_artifacts}
+        demanded = {
+            triton_hash_to_path_key(compile_result.kernel.hash)
+            for autotuner in bundle.static_autotuners
+            for compile_result in autotuner.kernel.compile_results
+        }
+
+        self.assertEqual(demanded - bundled, set())
+        self.assertIn(keys[winner], bundled)
+        # The losing config is still dropped, so the bundle does not grow.
+        self.assertNotIn(keys[loser], bundled)
+        self.assertIn(keys[untuned], bundled)
+
+
 class TestUtils(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     def test_fresh_cache(self):
