@@ -39,7 +39,7 @@ from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
 from .cpp_utils import (
     cexpr,
-    DEVICE_TO_ATEN,
+    device_to_aten,
     DEVICE_TO_INT,
     DTYPE_TO_ATEN,
     DTYPE_TO_CPP,
@@ -2481,9 +2481,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self._codegen_runtime_assert(code, stmt)
 
     def codegen_device(self, device):
-        if device.type not in DEVICE_TO_ATEN:
-            raise AssertionError(device.type + " not found in DEVICE_TO_ATEN")
-        device_str = DEVICE_TO_ATEN[device.type][5:].lower()  # remove "at::k"
+        device_str = device_to_aten(device.type)[5:].lower()  # remove "at::k"
         self.used_cached_devices.add(device_str)
         return f"cached_torch_device_type_{device_str}, {device.index or 0}"
 
@@ -3040,16 +3038,30 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # wrapper, we have moved to lifting subgraphs as functions, supported by
         # PythonWrapperCode `codegen_subgraph` function. We should perhaps
         # support lifting of subgraphs as functions for cpp wrapper as well.
+        # Only invoke_subgraph regions have nested config patches set. The
+        # cond/while_loop branch subgraphs are ir.Subgraph too, but leave the
+        # field at None; getattr additionally keeps this robust to non-ir.Subgraph
+        # adapters (e.g. the CodegenGraph used for decompose_k) that reach the
+        # base-class subgraph codegen paths. Mirrors
+        # PythonWrapperCodegen.codegen_subgraph_by_inlining so a nested region is
+        # codegened under its own Inductor config here too.
+        inductor_config_patches = getattr(subgraph, "inductor_config_patches", None)
+        ctx = (
+            config.patch(inductor_config_patches)
+            if inductor_config_patches
+            else contextlib.nullcontext()
+        )
         try:
             self.push_codegened_graph(subgraph.graph)
-            self.writeline(f"// subgraph: {subgraph.name}")
-            self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
-            parent_graph = V.graph
-            with V.set_graph_handler(subgraph.graph):
-                subgraph.graph.codegen_subgraph(
-                    parent_graph=parent_graph,
-                )
-            self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
+            with ctx:
+                self.writeline(f"// subgraph: {subgraph.name}")
+                self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
+                parent_graph = V.graph
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.codegen_subgraph(
+                        parent_graph=parent_graph,
+                    )
+                self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
         finally:
             self.pop_codegened_graph()
 
@@ -4033,13 +4045,9 @@ if (!custom_op_wrapper) {
                     return codegen_ivalue(raw_arg, arg_type.getElementType())
 
                 if isinstance(raw_arg, torch.device):
-                    if raw_arg.type not in DEVICE_TO_ATEN:
-                        raise AssertionError(
-                            raw_arg.type + " not found in DEVICE_TO_ATEN"
-                        )
                     return (
                         "c10::IValue(c10::Device("
-                        f"{DEVICE_TO_ATEN[raw_arg.type]}, "
+                        f"{device_to_aten(raw_arg.type)}, "
                         f"{raw_arg.index if raw_arg.index is not None else 0}))"
                     )
                 if isinstance(raw_arg, torch.dtype):
