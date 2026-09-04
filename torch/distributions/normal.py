@@ -90,9 +90,7 @@ class Normal(ExponentialFamily):
         # compute the variance
         var = self.scale**2
         log_scale = (
-            math.log(self.scale)
-            if isinstance(self.scale, Number)
-            else self.scale.log()
+            math.log(self.scale) if isinstance(self.scale, Number) else self.scale.log()
         )
         return (
             -((value - self.loc) ** 2) / (2 * var)
