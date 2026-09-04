@@ -24,10 +24,7 @@ permissions:
 jobs:
   get-default-label-prefix:
     name: get-default-label-prefix
-    # TEMPORARY (PR validation only): use the PR's own _runner-determinator.yml so
-    # amd-dpx-label-type propagates. Revert to
-    # pytorch/pytorch/.github/workflows/_runner-determinator.yml@main before merge.
-    uses: ./.github/workflows/_runner-determinator.yml
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}
