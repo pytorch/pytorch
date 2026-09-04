@@ -3104,12 +3104,7 @@ class TestLRScheduler(TestCase):
 
     @parametrize("min_lr", [0, [1e-5, 1e-4]])
     def test_plateau_lr_supports_added_param_group(self, min_lr):
-        scheduler = PlateauLR(
-            self.opt,
-            factor=0.1,
-            patience=0,
-            min_lr=min_lr,
-        )
+        scheduler = PlateauLR(self.opt, factor=0.1, patience=0, min_lr=min_lr)
         self.opt.step()
         scheduler.step(metrics=1.0)
 
@@ -3146,12 +3141,7 @@ class TestLRScheduler(TestCase):
 
     @parametrize("min_lr", [0, [1e-5, 1e-4]])
     def test_add_param_group_does_not_break_reduce_lr_on_plateau(self, min_lr):
-        scheduler = ReduceLROnPlateau(
-            self.opt,
-            factor=0.1,
-            patience=0,
-            min_lr=min_lr,
-        )
+        scheduler = ReduceLROnPlateau(self.opt, factor=0.1, patience=0, min_lr=min_lr)
         self.opt.step()
         scheduler.step(1.0)
 
