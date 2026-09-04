@@ -150,6 +150,7 @@ from .symbolic_convert import (
     InstructionTranslator,
     LocalState,
     SpeculationLog,
+    SpeculationLogDivergence,
 )
 from .trace_rules import is_numpy
 from .types import ConvertFrameReturn, FrameAction, FrameExecStrategy, wrap_guarded_code
@@ -958,6 +959,10 @@ def trace_frame(
             exc.SkipFrame,
         ):
             raise
+        except SpeculationLogDivergence:
+            raise exc.SkipFrame(
+                "SpeculationLog diverged during analysis restart"
+            ) from None
         except Exception:
             if translation_validation_enabled():
                 bisect(tracer.output.shape_env)
