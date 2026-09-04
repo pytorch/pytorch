@@ -545,8 +545,7 @@ Tensor _weight_int4pack_mm_xpu(
 
   // qscale:[K/qGroupSize, N]
   // qzp:[K/qGroupSize, N] (optional, nullptr for symmetric quantization)
-  at::native::onednn::woq_matmul_int4(
-      C, A, B, qScale, qZeros, qGroupSize);
+  at::native::onednn::woq_matmul_int4(C, A, B, qScale, qZeros, qGroupSize);
 
   return C;
 }
