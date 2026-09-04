@@ -117,7 +117,8 @@ class _SourceGraphModule(torch.nn.Module):
         # which for a deepcopy are the ORIGINAL's parameter/buffer dicts -- so
         # pickling _src directly would round-trip the original's (possibly
         # since-mutated) tensors into the copy's artifact. Snapshot this
-        # instance's own state instead, converting live sub-GraphModules back
+        # instance's own parameter/buffer/submodule containers instead (other
+        # nn.Module state still comes from _src), converting live sub-GraphModules back
         # to blobs (GraphModule.__reduce__ is lossy for a Dynamo graph, which
         # is why they travel as blobs in the first place).
         body = {**self._src.body}
@@ -227,8 +228,9 @@ class EagerCacheArtifact(BackendCacheArtifact[Any]):
     def __reduce__(self) -> tuple[Any, ...]:
         gm = getattr(self.content, "__self__", None)
         if not isinstance(gm, torch.fx.GraphModule):
-            # torch._dynamo.aot_compile hands us a GraphModuleSerializableCallable
-            # instead of a bound forward; it pickles through GraphModule.__reduce__
+            # The eager backend returns a GraphModuleSerializableCallable instead
+            # of a bound forward under torch._functorch.config.force_autograd_cache
+            # (backends/debugging.py); it pickles through GraphModule.__reduce__
             # and so has the same lossiness, but precompile never reaches it.
             return (type(self), (self.key, self.content))
         return (_rebuild_eager_artifact, (self.key, _graph_module_to_source(gm)))
