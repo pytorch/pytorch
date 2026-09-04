@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
+from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
 
 if IS_WINDOWS and IS_CI:
@@ -104,6 +104,79 @@ class TestMemoryPlanningOutputGroups(TestCase):
         group = self.compute_single_group(scheduler_buffers=scheduler_buffers)
         self.assertEqual(group.names, ["buf16", "buf48"])
         self.assertTrue(group.is_output)
+
+
+class TestAllocFromPool(TestCase):
+    def test_alloc_from_pool_in_bounds(self):
+        base = torch.arange(8, dtype=torch.int64)
+        view = torch.ops.inductor._alloc_from_pool(base, 0, torch.int64, [8], [1])
+        self.assertEqual(view, base)
+
+        second = torch.ops.inductor._alloc_from_pool(base, 8, torch.int64, [1], [1])
+        self.assertEqual(second.item(), 1)
+
+    def test_alloc_from_pool_rejects_oob_offset(self):
+        base = torch.arange(8, dtype=torch.int64)
+        # 8 * sizeof(int64) = 64-byte storage; offset 64 starts past the end.
+        with self.assertRaisesRegex(RuntimeError, r"_alloc_from_pool:.*out of bounds"):
+            torch.ops.inductor._alloc_from_pool(base, 64, torch.int64, [1], [1])
+
+    def test_alloc_from_pool_rejects_unaligned_offset(self):
+        base = torch.arange(8, dtype=torch.int64)
+        with self.assertRaisesRegex(RuntimeError, "multiple of dtype itemsize"):
+            torch.ops.inductor._alloc_from_pool(base, 1, torch.int64, [1], [1])
+
+    def test_alloc_from_pool_rejects_negative_offset(self):
+        base = torch.arange(8, dtype=torch.int64)
+        with self.assertRaisesRegex(RuntimeError, "non-negative"):
+            torch.ops.inductor._alloc_from_pool(base, -8, torch.int64, [1], [1])
+
+    def test_alloc_from_pool_uint8_pool_int64_view(self):
+        # Inductor pools are uint8 bytes viewed as another dtype.
+        pool = torch.empty(64, dtype=torch.uint8)
+        pool.view(torch.int64).copy_(torch.arange(8, dtype=torch.int64))
+        last = torch.ops.inductor._alloc_from_pool(pool, 56, torch.int64, [1], [1])
+        self.assertEqual(last.item(), 7)
+        with self.assertRaisesRegex(RuntimeError, r"_alloc_from_pool:.*out of bounds"):
+            torch.ops.inductor._alloc_from_pool(pool, 64, torch.int64, [1], [1])
+
+    def test_alloc_from_pool_uint8_pool_float32_view(self):
+        pool = torch.empty(8, dtype=torch.uint8)
+        expected = torch.tensor([1.5, 2.5], dtype=torch.float32)
+        pool.view(torch.float32).copy_(expected)
+        view = torch.ops.inductor._alloc_from_pool(pool, 0, torch.float32, [2], [1])
+        self.assertEqual(view, expected)
+        last = torch.ops.inductor._alloc_from_pool(pool, 4, torch.float32, [1], [1])
+        self.assertEqual(last.item(), 2.5)
+        with self.assertRaisesRegex(RuntimeError, r"_alloc_from_pool:.*out of bounds"):
+            torch.ops.inductor._alloc_from_pool(pool, 8, torch.float32, [1], [1])
+
+    def test_alloc_from_pool_zero_numel_allows_large_offset(self):
+        # Matches as_strided / checkInBoundsForStorage: 0-extent views skip the
+        # byte bound, so a huge offset is accepted when size is empty.
+        base = torch.arange(8, dtype=torch.int64)
+        view = torch.ops.inductor._alloc_from_pool(base, 1 << 40, torch.int64, [0], [1])
+        self.assertEqual(view.numel(), 0)
+        self.assertEqual(view.storage_offset(), 1 << 37)
+
+    @config.patch(memory_planning=True)
+    def test_memory_planning_cpu_compile(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z):
+                t0 = x.matmul(y)
+                t1 = x.matmul(z)
+                t0 = x.transpose(0, 1).matmul(t1)
+                t1 = x.matmul(t0)
+                return t0.sum() + t1.sum()
+
+        f = Foo()
+        args = (
+            torch.randn(3, 2),
+            torch.randn(2, 4),
+            torch.randn(2, 3),
+        )
+        compiled = torch.compile(f)
+        self.assertEqual(compiled(*args), f(*args))
 
 
 @requires_gpu()
@@ -427,5 +500,4 @@ class TestMemoryPlanning(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_GPU:
-        run_tests()
+    run_tests()
