@@ -2967,7 +2967,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.nn.modules.utils._ntuple",
         "torch.nn.modules.utils._quadruple",
         "torch.nn.modules.utils._reverse_repeat_tuple",
-        "torch.nn.modules.utils.consume_prefix_in_state_dict_if_present",
         "torch.nn.parameter.is_lazy",
         "torch.norm",
         "torch.quantization.default_eval_fn",
