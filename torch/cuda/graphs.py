@@ -384,7 +384,7 @@ class CUDAGraph(_CUDAGraph):
         # stream off it without pinning the graph.
         self._retained = _RetainedCallbacks()
         self._retained_finalizer = weakref.finalize(self, self._retained.fire)
-        # When a consumer (e.g. the CUPTI monitor) has registered graph-destroy
+        # When a consumer (e.g. Cuspy) has registered graph-destroy
         # hooks, arm the per-graph state purge for this capture cycle. The callback
         # captures the exec-id SET OBJECT (empty now, filled as this graph
         # records/instantiates) and the module fan-out function, never self and never
@@ -1151,9 +1151,9 @@ class graph:
         annotation_config (dict, optional): Options for annotation recording, used when
             ``enable_annotations=True``. An unrecognized key or value raises. Currently
             supports ``"backend"``, which selects how ``mark_kernels`` scopes discover their
-            nodes: ``"auto"`` (default) uses CUPTI node-creation callbacks when the CUPTI
-            monitor already holds a subscription and otherwise walks the capture graph's
-            dependent edges; ``"cupti"`` requires the CUPTI path, bringing the monitor up if
+            nodes: ``"auto"`` (default) uses CUPTI node-creation callbacks when Cuspy
+            already holds a subscription and otherwise walks the capture graph's
+            dependent edges; ``"cupti"`` requires the CUPTI path, bringing Cuspy up if
             needed -- which prevents kineto from initializing, so a later
             :class:`torch.profiler.profile` records no GPU activity; ``"edge_walk"`` forces
             the walk, which cannot see nodes created while the current stream was not yet
@@ -1259,8 +1259,8 @@ class graph:
             elif force:
                 raise RuntimeError(
                     "annotation_config={'backend': 'cupti'} could not register CUPTI "
-                    "node-creation callbacks. This needs the cupti-python package and a "
-                    "CUPTI monitor able to subscribe; use 'auto' to fall back to the "
+                    "node-creation callbacks. This needs the cupti-python package and "
+                    "Cuspy able to subscribe; use 'auto' to fall back to the "
                     "dependent-edge walk instead."
                 )
 
