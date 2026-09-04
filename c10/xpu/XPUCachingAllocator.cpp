@@ -1989,6 +1989,36 @@ class DeviceCachingAllocator {
       }
     }
 
+    if (!deferred_blocks.empty()) {
+      auto pool_it = graph_pools.find(mempool_id);
+      if (pool_it != graph_pools.end()) {
+        auto* private_pool = pool_it->second.get();
+        auto context = maybeGatherContext(RecordContext::ALL);
+        std::vector<Block*> blocks_to_erase;
+        for (auto* block : deferred_blocks) {
+          if (block->pool->owner_PrivatePool == private_pool) {
+            // handle deferred blocks belonging to the pool when capture ends
+            remove_xpugraph_stream_uses(block);
+            if (block->stream_uses.empty()) {
+              // free if only stream uses are from capture; otherwise insert
+              // events to track pre-capture stream uses and free when events
+              // complete.
+              free_block(block, context);
+            } else {
+              insert_events(block);
+              if (block->event_count == 0) {
+                free_block(block, context);
+              }
+            }
+            blocks_to_erase.push_back(block);
+          }
+        }
+        for (auto* b : blocks_to_erase) {
+          deferred_blocks.erase(b);
+        }
+      }
+    }
+
     auto it = std::find_if(
         allocation_scopes_.begin(),
         allocation_scopes_.end(),
