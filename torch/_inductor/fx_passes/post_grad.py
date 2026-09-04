@@ -1340,6 +1340,10 @@ def remove_noop_ops(graph: torch.fx.Graph):
     inputs = OrderedSet[torch.fx.Node]()
     input_storages = OrderedSet[int | None]()
     output_storages = OrderedSet[int | None]()
+    partitioner_tags = [node.meta.get("partitioner_tag") for node in graph.nodes]
+    is_joint_graph = "is_forward" in partitioner_tags and (
+        "is_backward" in partitioner_tags or "must_be_in_backward" in partitioner_tags
+    )
 
     for node in graph.find_nodes(op="placeholder"):
         inputs.add(node)
@@ -1364,6 +1368,15 @@ def remove_noop_ops(graph: torch.fx.Graph):
             else:
                 src = src_index(node.args)
             if not isinstance(src, torch.fx.Node):
+                continue
+
+            # AOTAutograd inserts this clone so backward can save the value before
+            # the runtime epilogue mutates the input.
+            if (
+                is_joint_graph
+                and node.target is aten.clone.default
+                and src.meta.get("aot_runtime_epilogue_input_mutation", False)
+            ):
                 continue
 
             if node.target is torch.ops.aten.copy.default:

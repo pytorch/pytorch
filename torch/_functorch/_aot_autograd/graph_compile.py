@@ -61,7 +61,7 @@ from .autograd_cache import (
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
-from .descriptors import AOTOutput, PlainAOTOutput
+from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -94,6 +94,7 @@ from .schemas import (
 )
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import (
+    _is_primal,
     contain_metadata_mutation_ops,
     get_default_generator,
     make_boxed_func,
@@ -1983,6 +1984,24 @@ def _partition_joint_graph_into_fw_bw(
     if callable(torch._functorch.config.joint_custom_pass):
         # pyrefly: ignore [bad-assignment]
         fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
+
+    # The joint trace clones data-mutated grad inputs so backward sees their
+    # pre-mutation values. When the mutation is replayed by the runtime epilogue,
+    # the input placeholder is not a valid saved activation because it will be
+    # mutated after the AOT forward returns.
+    primals = [
+        node
+        for node in fx_g.graph.nodes
+        if _is_primal(node)
+        and not isinstance(node.meta.get("desc"), ForwardTokenAOTInput)
+    ]
+    for node, info in zip(primals, inner_meta.input_info):
+        if (
+            info.requires_grad
+            and info.mutates_data
+            and info.mutation_type == MutationType.MUTATED_OUT_GRAPH
+        ):
+            node.meta["aot_runtime_epilogue_input_mutation"] = True
 
     fw_module, bw_module = partition_fn(
         fx_g,
