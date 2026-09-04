@@ -198,6 +198,7 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
+    constant_fold_getattr_allowed,
     generic_delitem,
     generic_getattr,
     generic_getiter,
@@ -3365,7 +3366,7 @@ class InstructionTranslatorBase(
         try:
             result = generic_getattr(self, obj, attr)
         except Unsupported:
-            if not obj.is_python_constant():
+            if not obj.is_python_constant() or not constant_fold_getattr_allowed(obj):
                 raise
             source = AttrSource(obj.source, attr) if obj.source else None
             result = VariableTracker.build(
