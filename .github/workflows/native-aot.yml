@@ -1,0 +1,123 @@
+# Owner(s): ["module: dsl-native-ops"]
+name: CI for native-AOT embedded DSL kernels
+
+# Exercises the full native-AOT path: stage 2 of the build exports the DSL kernels and
+# embeds them in libtorch_cuda, then the test job asserts the wheel carries them and
+# runs the python_native suites on the GPU they were exported for. One build+test pair
+# per capability the topk declaration claims (its ARCHS): Blackwell and Hopper.
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/native-aot.yml
+      - tools/native_aot/**
+      - torch/_native/**
+      - torchgen/native_aot.py
+      - torchgen/native_aot_decl.py
+      - torchgen/native_aot_spec_grid.py
+      - test/python_native/**
+      # Stage 2 is reached from these shells, included by this CMake, and
+      # configured by this forwarding module.
+      - .ci/pytorch/build.sh
+      - .ci/pytorch/test.sh
+      - .ci/pytorch/common_utils.sh
+      - .ci/manywheel/build.sh
+      - caffe2/CMakeLists.txt
+      - cmake/EnvVarForwarding.cmake
+  workflow_dispatch:
+  schedule:
+    - cron: 15 7 * * *  # about 12:15am PDT
+  push:
+    tags:
+      - ciflow/native-aot/*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  linux-jammy-cuda13_0-py3_12-gcc11-build-native-aot-h100:
+    name: linux-jammy-cuda13.0-py3.12-gcc11-build-native-aot-h100
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "mt-"
+      runner: l-x86iavx512-16-128
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      build-environment: linux-jammy-cuda13.0-py3.12-gcc11-native-aot-h100
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11
+      # 9.0a, not 9.0: the two spellings are different nvcc targets, and the
+      # declaration's ARCHS claim the conditional one.
+      cuda-arch-list: '9.0a'
+      # Same reason as the B200 build below.
+      allow-reuse-old-whl: false
+      test-matrix: |
+        { include: [
+          { config: "native_aot", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-cuda13_0-py3_12-gcc11-test-native-aot-h100:
+    name: linux-jammy-cuda13.0-py3.12-gcc11-test-native-aot-h100
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda13_0-py3_12-gcc11-build-native-aot-h100
+    with:
+      timeout-minutes: 360
+      build-environment: ${{ needs.linux-jammy-cuda13_0-py3_12-gcc11-build-native-aot-h100.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda13_0-py3_12-gcc11-build-native-aot-h100.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_12-gcc11-build-native-aot-h100.outputs.test-matrix }}
+      aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+    secrets: inherit
+
+  linux-jammy-cuda13_0-py3_12-gcc11-build-native-aot-b200:
+    name: linux-jammy-cuda13.0-py3.12-gcc11-build-native-aot-b200
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "mt-"
+      runner: l-x86iavx512-16-128
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      build-environment: linux-jammy-cuda13.0-py3.12-gcc11-native-aot-b200
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11
+      cuda-arch-list: '10.0a'
+      # Never reuse a prebuilt wheel here: reuse_old_whl.ok_changed_file() treats
+      # every torch/**.py outside torch/csrc/ as needing no rebuild, but
+      # torch/_native/ops/ is a compile-time input to libtorch_cuda. A reused wheel
+      # ships the previous commit's kernels and still passes the test job's
+      # _native_aot_embedded() assertion.
+      allow-reuse-old-whl: false
+      test-matrix: |
+        { include: [
+          { config: "native_aot", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-cuda13_0-py3_12-gcc11-test-native-aot-b200:
+    name: linux-jammy-cuda13.0-py3.12-gcc11-test-native-aot-b200
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda13_0-py3_12-gcc11-build-native-aot-b200
+    with:
+      timeout-minutes: 360
+      build-environment: ${{ needs.linux-jammy-cuda13_0-py3_12-gcc11-build-native-aot-b200.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda13_0-py3_12-gcc11-build-native-aot-b200.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_12-gcc11-build-native-aot-b200.outputs.test-matrix }}
+      aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+    secrets: inherit
