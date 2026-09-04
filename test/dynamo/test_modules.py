@@ -36,6 +36,10 @@ except ImportError:
     import test_functions
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
 _variable = 0
 _variable1 = 0
 
@@ -1285,8 +1289,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         y = model(x)
 
     def test_module_forward_has_graph_break(self):
-        m = ModuleForwardHasGraphBreak()
-        x = torch.rand([10, 10])
+        m = ModuleForwardHasGraphBreak().to(device_type)
+        x = torch.rand([10, 10], device=device_type)
         ref = m(x)
         opt_m = torch.compile(m, backend="eager")
         res = opt_m(x)
@@ -3668,12 +3672,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return self.linear(x)
 
         torch.manual_seed(0)
-        model = SimpleModel()
+        model = SimpleModel().to(device_type)
 
         model.linear.register_forward_pre_hook(pre_forward_rename_hook)
         model.linear.register_forward_hook(post_forward_restore_hook)
 
-        input_tensor = torch.randn(4, 10)
+        input_tensor = torch.randn(4, 10, device=device_type)
 
         eager_output = model(input_tensor)
         if not hasattr(model.linear, "weight"):
@@ -3682,7 +3686,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             raise AssertionError("Expected model.linear to not have _tmp_weight")
 
         torch.manual_seed(0)
-        model_to_compile = SimpleModel()
+        model_to_compile = SimpleModel().to(device_type)
         model_to_compile.linear.register_forward_pre_hook(pre_forward_rename_hook)
         model_to_compile.linear.register_forward_hook(post_forward_restore_hook)
 
@@ -3725,8 +3729,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         def noop_hook(module, args, kwargs, output):
             pass
 
-        inp = torch.randn(4, 4)
-        model = NLayerModel(num_layers=20, dim=4)
+        inp = torch.randn(4, 4, device=device_type)
+        model = NLayerModel(num_layers=20, dim=4).to(device_type)
         output_eager = model(inp)
 
         # Set hooks for compiled layers

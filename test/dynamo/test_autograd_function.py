@@ -990,7 +990,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return Foo.apply(x)
 
-        x = torch.tensor([-2.0, 1.0, 3.0], requires_grad=True)
+        x = torch.tensor([-2.0, 1.0, 3.0], device=device_type, requires_grad=True)
         res = fn(x)
         self.assertEqual(res, Foo.apply(x))
         res.sum().backward()
@@ -1017,7 +1017,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return Foo.apply(x)
 
-        x = torch.tensor([1.0, 3.0], requires_grad=True)
+        x = torch.tensor([1.0, 3.0], device=device_type, requires_grad=True)
         res = fn(x)
         self.assertEqual(res, Foo.apply(x))
         res.sum().backward()
@@ -1448,8 +1448,8 @@ class GraphModule(torch.nn.Module):
             b = torch.rand(1, requires_grad=True)
             MyFn.apply(a)
 
-            a = torch.ones(2, requires_grad=True)
-            b = torch.ones(2, requires_grad=True)
+            a = torch.ones(2, device=device_type, requires_grad=True)
+            b = torch.ones(2, device=device_type, requires_grad=True)
             c = MyAdder.apply(a.clone(), b)
             c.sum().backward()
 
@@ -2027,7 +2027,7 @@ class GraphModule(torch.nn.Module):
             x, _ = MyCube.apply(x)
             return x
 
-        inp = torch.ones(2, requires_grad=True)
+        inp = torch.ones(2, device=device_type, requires_grad=True)
         out = fn(inp)
         out.sum().backward()
         self.assertEqual(out, inp**3)
@@ -2754,7 +2754,7 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return Foo.apply(x)
 
-        x = torch.randn(8, device="cpu", requires_grad=True)
+        x = torch.randn(8, device=device_type, requires_grad=True)
 
         # Eager reference
         x_ref = x.detach().clone().requires_grad_(True)
@@ -3382,7 +3382,7 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         def loss_fn(x):
             return compiled_fn(x).sum()
 
-        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        x = torch.tensor([1.0, 2.0], device=device_type, requires_grad=True)
         result = torch.func.grad(loss_fn)(x)
         self.assertEqual(result, torch.tensor([2.0, 2.0]))
 

@@ -38,6 +38,11 @@ from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
+
 def nontraceable_subclass(c):
     return torch._dynamo.config.patch("nontraceable_tensor_subclasses", {c})
 
@@ -1216,7 +1221,7 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
             res = x * y + z
             return res
 
-        x0 = torch.randn(2, 2)
+        x0 = torch.randn(2, 2, device=device_type)
         x1 = x0.clone()
 
         fn_opt = compile_full_eager(fn)
