@@ -186,7 +186,7 @@ torchrec_dlrm,pass,6,0,0
 
 
 
-tts_angular,pass,11,70,1
+tts_angular,pass,9,70,1
 
 
 
@@ -194,7 +194,7 @@ vgg16,pass,6,44,0
 
 
 
-vision_maskrcnn,fail_to_run,33,1239,8
+vision_maskrcnn,fail_to_run,33,1236,8
 
 
 

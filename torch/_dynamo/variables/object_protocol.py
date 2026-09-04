@@ -67,13 +67,6 @@ def vt_identity_compare(
     left_known = left_val is not NO_SUCH_SUBOBJ
     right_known = right_val is not NO_SUCH_SUBOBJ
 
-    # Different Python types can never be the same object.
-    try:
-        if left.python_type() is not right.python_type():
-            return ConstantVariable.create(False)
-    except NotImplementedError:
-        pass
-
     if left_known and right_known:
         return (
             ConstantVariable.create(True)
@@ -81,18 +74,10 @@ def vt_identity_compare(
             else ConstantVariable.create(False)
         )
 
-    # One side has a concrete backing object, the other doesn't.  We generally
-    # cannot prove they are different -- the unknown side might be a deferred
-    # representation (e.g. CallMethodVariable) of the same value.  But a
-    # NestedUserFunctionVariable is a function defined in the traced code, with
-    # fresh identity, so it can never be the same object as a known value.
+    # One side has a concrete backing object, the other doesn't — they can't
+    # be the same object.
     if left_known != right_known:
-        from .functions import NestedUserFunctionVariable
-
-        unknown = right if left_known else left
-        if isinstance(unknown, NestedUserFunctionVariable):
-            return ConstantVariable.create(False)
-        return None
+        return ConstantVariable.create(False)
 
     # Objects created during tracing: VT identity = Python identity. Exception
     # instances are mutable objects built during tracing, so two distinct VTs
@@ -114,6 +99,13 @@ def vt_identity_compare(
         ),
     ):
         return ConstantVariable.create(False)
+
+    # Different Python types can never be the same object.
+    try:
+        if left.python_type() is not right.python_type():
+            return ConstantVariable.create(False)
+    except NotImplementedError:
+        pass
 
     return None
 
@@ -2083,8 +2075,8 @@ def generic_issubclass(
 # The base VariableTracker.tp_getattro_impl tries object_generic_getattr()
 # first (MRO walk + descriptor protocol), falling back to const_getattr
 # on _UnhandledDescriptorError.  Callers of object_generic_getattr
-# directly must handle _UnhandledDescriptorError at steps 2 and 4
-# (unrecognized descriptor types).
+# directly must handle _UnhandledDescriptorError at every step (2, 4,
+# and 7), not just for unrecognized descriptor types.
 #
 # VTs with custom tp_getattro (TensorVariable, NNModuleVariable,
 # UserDefinedClassVariable, SuperVariable) override tp_getattro_impl.
@@ -2164,7 +2156,7 @@ def _resolve_descriptor_get(
 
 # BuiltinFunctionType is intentionally excluded: _resolve_descriptor_get
 # does not handle it, so it falls through to _UnhandledDescriptorError
-# and generic_getattr's graph-break fallback.
+# and generic_getattr's GetAttrVariable fallback.
 _METHOD_TYPES = (
     types.FunctionType,
     types.MethodDescriptorType,
@@ -2173,29 +2165,7 @@ _METHOD_TYPES = (
 
 
 def _is_method_type(type_attr: object) -> bool:
-    # pybind11 methods appear as `instancemethod` descriptors in the type
-    # __dict__, not as MethodDescriptorType. Treat them as methods so VTs with a
-    # custom call_method (e.g. DispatchKeySetVariable) dispatch through it.
-    return isinstance(
-        type_attr, _METHOD_TYPES
-    ) or torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
-
-
-# What each descriptor kind in _METHOD_TYPES becomes once bound to an instance.
-_BOUND_METHOD_TYPES: dict[type, type] = {
-    types.FunctionType: types.MethodType,
-    types.MethodDescriptorType: types.BuiltinMethodType,
-    types.WrapperDescriptorType: types.MethodWrapperType,
-}
-
-
-def _bound_method_type(type_attr: object) -> type | None:
-    """Type of `obj.name` when the MRO walk found `type_attr` for `name`.
-
-    None when unknown (e.g. a pybind11 instancemethod), so the resulting
-    CallMethodVariable keeps raising from python_type() rather than guessing.
-    """
-    return _BOUND_METHOD_TYPES.get(type(type_attr))
+    return isinstance(type_attr, _METHOD_TYPES)
 
 
 def _has_custom_call_method(obj: VariableTracker) -> bool:
@@ -2216,66 +2186,78 @@ def object_generic_getattr(
 
     https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1611-L1683
 
-    Implements the standard attribute lookup algorithm.  Each step
-    delegates to a hook on the VT so subclasses (UDOV in particular) can
-    customize source management, side-effects, and descriptor handling.
+    Implements the standard attribute lookup algorithm using the VT's
+    python_type() for MRO walking, and hooks on the VT for instance dict
+    and __getattr__ fallback.
 
     Steps:
-      1. obj.lookup_type_attr  — MRO walk
-      2. obj.resolve_data_descriptor — data descriptor invocation
-      3. obj.lookup_instance_dict — instance __dict__
-      4-5. obj.resolve_type_attr — non-data descriptor / plain class var
-      5b. obj.dynamic_getattr_fallback — attrs with non-standard storage
+      1. MRO walk on python_type() for type_attr
+      2. Data descriptor -> invoke tp_descr_get
+      3. Instance dict -> obj.lookup_instance_dict(tx, name)
+      4. Non-data descriptor -> invoke tp_descr_get
+      5. Plain class variable -> wrap in VT
+      6. __getattr__ fallback -> obj.call_getattr_fallback(tx, name)
       7. AttributeError
-
-    There is deliberately no step 6 (__getattr__): CPython chains to
-    __getattr__ in _Py_slot_tp_getattr_hook, one level above GenericGetAttr,
-    which is VariableTracker.tp_getattro_impl here.
     """
     from .user_defined import is_data_descriptor
 
-    # Step 0: dunders whose generic getset-descriptor resolution would lose
-    # Dynamo-side state (e.g. __dict__ must be the mutation-tracked dict).
-    shortcut = obj.lookup_dunder_shortcut(tx, name)
-    if shortcut is not None:
-        return shortcut
-
+    py_type = obj.python_type()
     source = obj.source and AttrSource(obj.source, name)
 
     # Step 1: MRO walk.
-    type_attr = obj.lookup_type_attr(tx, name)
+    type_attr = mro_lookup(py_type, name)
 
     # Step 2: Data descriptor takes priority over instance dict.
     if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
-        return obj.resolve_data_descriptor(tx, name, type_attr, source)
+        class_vt = VariableTracker.build(tx, py_type)
+        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
+        if result is not None:
+            return result
+        raise _UnhandledDescriptorError(
+            f"object_generic_getattr: unhandled data descriptor "
+            f"{type(type_attr)} for {name}"
+        )
 
     # Step 3: Instance dict (tp_dictoffset).
     instance_result = obj.lookup_instance_dict(tx, name)
     if instance_result is not None:
         return instance_result
 
-    # Steps 4-5: Non-data descriptor or plain class variable.
+    # Step 4: Non-data descriptor with __get__.
+    if type_attr is not NO_SUCH_SUBOBJ and hasattr(type(type_attr), "__get__"):
+        # If the VT dispatches this method through call_method (a hand-written
+        # override or a tp_methods entry), return a CallMethodVariable that
+        # dispatches through call_method instead of inlining the resolved
+        # method directly.  This preserves custom tracing logic (side effects,
+        # graph nodes, suppression) that MRO-based resolution via
+        # UserMethodVariable would bypass.
+        if _is_method_type(type_attr) and (
+            obj._lookup_tp_table(name, "tp_methods") is not None
+            or _has_custom_call_method(obj)
+        ):
+            return variables.CallMethodVariable(obj, name, source=source)
+
+        class_vt = VariableTracker.build(tx, py_type)
+        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
+        if result is not None:
+            return result
+        raise _UnhandledDescriptorError(
+            f"object_generic_getattr: unhandled non-data descriptor "
+            f"{type(type_attr)} for {name}"
+        )
+
+    # Step 5: Plain class variable (no __get__).
     if type_attr is not NO_SUCH_SUBOBJ:
-        return obj.resolve_type_attr(tx, name, type_attr, source)
+        return VariableTracker.build(tx, type_attr, source)
 
-    # Step 5b: Dynamic fallback for attrs with non-standard storage.
-    dynamic_result = obj.dynamic_getattr_fallback(tx, name)
-    if dynamic_result is not None:
-        return dynamic_result
+    # Step 6: __getattr__ fallback.
+    getattr_result = obj.call_getattr_fallback(tx, name)
+    if getattr_result is not None:
+        return getattr_result
 
-    # Step 7: Attribute not found.
-    try:
-        py_type = obj.python_type()
-        type_name = py_type.__name__
-    except NotImplementedError:
-        type_name = type(obj).__name__
-    # CPython sets AttributeError.name/.obj; user code (and our own reconstruct
-    # path) reads them, so populate both rather than just the message.
-    raise_observed_exception(
-        AttributeError,
-        tx,
-        args=[f"'{type_name}' object has no attribute '{name}'"],
-        kwargs={"name": variables.ConstantVariable.create(name), "obj": obj},
+    # Step 7: Attribute not found -- signal to caller to fall back.
+    raise _UnhandledDescriptorError(
+        f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
     )
 
 
@@ -2288,7 +2270,8 @@ def generic_getattr(
     """Dynamo's PyObject_GetAttr: attribute access dispatch.
 
     Checks side effects for pending attribute mutations, then dispatches
-    to obj.tp_getattro_impl(tx, name).  On NotImplementedError, graph-breaks.
+    to obj.tp_getattro_impl(tx, name).  On NotImplementedError, falls back
+    to GetAttrVariable (deferred resolution).
     """
     from .user_defined import is_data_descriptor
 
@@ -2329,15 +2312,10 @@ def generic_getattr(
             return result
 
     # Core dispatch: call the VT's tp_getattro_impl (tp_getattro).
+    source = obj.source and AttrSource(obj.source, name)
     try:
         return obj.tp_getattro_impl(tx, name)
     except AsPythonConstantNotImplementedError:
         raise
     except NotImplementedError:
-        unimplemented(
-            gb_type="Unresolved attribute access",
-            context=f"generic_getattr: {type(obj).__name__}.{name}",
-            explanation=f"Dynamo cannot resolve attribute '{name}' on "
-            f"{type(obj).__name__}.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
+        return variables.GetAttrVariable(obj, name, source=source)
