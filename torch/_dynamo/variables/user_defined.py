@@ -655,6 +655,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             AttributeError,
             tx,
             args=[f"type object '{self.value.__name__}' has no attribute '{name}'"],
+            kwargs={"name": variables.ConstantVariable.create(name), "obj": self},
         )
 
     def resolve_meta_data_descriptor(
