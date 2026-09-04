@@ -1,12 +1,13 @@
 # General CuTeDSL reduction kernel (K0) + the dispatcher for the whole fold-
 # reduction taxonomy. K0 is one @cute.kernel that handles ANY geometry (row,
 # column, n-D, transposed, sliced, reduce-all) via a TensorIterator-derived
-# offset decode -- the correctness floor, and for now the only kernel here.
-# `_reduce()` is the dispatcher every reduction enters: it decodes the geometry,
-# routes a full reduction to the two-stage `reduce_all`, and otherwise launches K0.
-# The specialized kernels (vectorized row / column / cross-CTA split) each add their
-# own branch to this dispatcher as they are introduced, so `fast_kind` below already
-# classifies the geometry they will claim -- nothing routes to them yet.
+# offset decode -- the correctness floor, and the COMBINE engine for the two-stage
+# drivers that follow (from_partials). `_reduce()` is the dispatcher every reduction
+# enters: it decodes the geometry and routes to the specialized kernels, each of which
+# wires its own branch in as it is introduced:
+#   contiguous last-dim, smem-fits   -> kernel_rowtile   (one-shot)
+#   every kept extent 1              -> reduce_all
+#   anything only K0 could serve     -> declined to aten by the cond
 #
 # ADDRESSING. TI coalesces any reduction into an iteration where a dim is REDUCED iff the output
 # stride along it is 0. The host passes compile-time (extent, element_stride) lists -- `red_dims`
@@ -494,7 +495,7 @@ def fast_kind(red_pairs, kept_pairs, nouts, has_index):
 
     "row"     : reduced axis is the single contiguous (stride-1) innermost run;
                 kept is a single run. Reshape to (prod(kept), prod(red)), reduce
-                last dim -> K1 / xcta. Serves any nouts / index trait.
+                last dim -> the row kernels / xcta. Any nouts / index trait.
     "col"     : kept axis is the single contiguous (stride-1) innermost run;
                 reduced is a single run. Reshape to (prod(red), prod(kept)),
                 reduce dim 0 -> K2. ONLY nouts==1 non-index (K2 is value-only).
@@ -517,6 +518,20 @@ def fast_kind(red_pairs, kept_pairs, nouts, has_index):
     return None
 
 
+# The one-shot stages a whole row tile, so its tile is ~N*dtype_bytes; it must fit the
+# ~228 KB B200 smem budget. Above that, route to the multi-CTA split (which caps each
+# chunk's tile). Use a conservative 192 KB so the reduction buffer + slack also fit.
+_SMEM_BUDGET = 192 * 1024
+# ... and the per-thread LOAD count must stay bounded. The fold walks ceil(N/(tpr*vec)) loads
+# per thread; that only gets out of hand when the vector width collapses to 1 (an odd or prime
+# N), where it becomes N/tpr. MEASURED, (8, N) sum vs ATen with the bound absent: N=32771 fp32
+# 34.1us vs 5.8 (0.17x), N=65537 bf16 76.4 vs 6.0 (0.08x), N=98299 bf16 95.4 vs 7.5 (0.08x).
+# Above the bound the cross-CTA split serves those instead, measured 1.93-2.41x of ATen on the
+# same shapes. 64 separates every measured good case (N=4099 at tpr 64 -> 64 loads, N=49152 at
+# vec 4 -> 48) from every bad one (128, 256). tile.MAX_UNROLL bounds the same quantity inside
+# the kernel; this is the gate's copy.
+_ONESHOT_MAX_LOADS = 64
+
 # K0 general (correctness-fallback) kernel config, as named DATA. K0 is the any-geometry
 # backstop (scalar/strided offset-decoded loads), NOT a perf path, so its knobs are
 # occupancy baselines, not a tuned surface. reduce-dim uses _K0_BLOCK threads/block;
@@ -524,6 +539,39 @@ def fast_kind(red_pairs, kept_pairs, nouts, has_index):
 _K0_BLOCK = 128
 _K0_ALL_BLOCK = 256
 _K0_ALL_GRID_MULT = 4
+
+
+def _oneshot_ok(x):
+    # One-shot: does the row fit its tile (~N elements of the input dtype) AND stay inside
+    # the per-thread load bound?
+    N = x.shape[-1]
+    if N * x.element_size() > _SMEM_BUDGET:
+        return False
+    from . import kernel_rowtile as rt
+
+    width = x.element_size() * 8
+    vec = math.gcd(N, 128 // width)
+    tpr = max(WARP, rt.row_config(N, width, 1).tpr)
+    return -(-N // (tpr * vec)) <= _ONESHOT_MAX_LOADS
+
+
+def _try_fast_row(trait, trait_key, x, out_dtypes, nouts):
+    # Fast path for reduction of the CONTIGUOUS last dim of a 2D problem. Sub-paths;
+    # returns the result tuple, or None if not handled:
+    #   smem-safe N  -> one-shot kernel_rowtile (1 or 2 outputs)
+    # The two-output one-shot serves max.dim/min.dim (value + index): no split, so the
+    # projected index is the true per-row column. A row too wide for the one-shot tile
+    # returns None, so K0 serves it until the cross-CTA split lands.
+    if x.dim() != 2 or x.stride(-1) != 1:
+        return None
+    N = x.shape[-1]
+    if N < 1:
+        return None
+    if nouts not in (1, 2) or not _oneshot_ok(x):
+        return None
+    from . import kernel_rowtile as rt
+
+    return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
 
 
 def _as_shape(out, out_shape):
@@ -560,6 +608,22 @@ def _reduce(trait, trait_key, x, dims, out_dtypes, nouts, block=_K0_BLOCK):
     if math.prod(out_shape) == 1 and nouts == 1 and x.is_contiguous():
         out = reduce_all(trait, trait_key, x, out_dtypes[0], block=block)
         return (_as_shape(out, out_shape),)
+
+    # Classify the POST-TI-coalesce geometry and route to a fast kernel through a dense 2D reshape,
+    # which is what puts a contiguous n-D reduction over its innermost axes on the row/col kernels
+    # rather than the ~5-8x-slower general one. The override cond declines anything returning None
+    # here, so `_reduce` only sees {row, col} on a real call; the general kernel below remains the
+    # correctness fallback for direct callers and for a fast kernel that declines.
+    if len(out_shape) > 0 and x.is_contiguous():
+        red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
+        has_index = getattr(trait, "has_index", False)
+        kind = fast_kind(red_pairs, kept_pairs, nouts, has_index)
+        red_n = x.numel() // max(1, math.prod(out_shape))
+        if kind == "row":
+            x2 = x.reshape(math.prod(out_shape), red_n)
+            fast = _try_fast_row(trait, trait_key, x2, out_dtypes, nouts)
+            if fast is not None:
+                return tuple(o.reshape(out_shape) for o in fast)
 
     outs = [torch.empty(out_shape, device=x.device, dtype=d) for d in out_dtypes]
     num_o = max(1, math.prod(out_shape))  # blocks (kept coordinates)
@@ -599,19 +663,29 @@ def _grid_size(L, block, sm_count, grid_mult=4):
 def reduce_all(
     trait, trait_key, x, out_dtype, block=_K0_ALL_BLOCK, grid_mult=_K0_ALL_GRID_MULT
 ):
-    # Full-tensor reduce-all via the two-stage split: stage 1 grid-strides the flat
-    # input into G chunks, stage 2 folds the G partials and projects once. This mirrors
-    # ATen's ctas_per_output structure and needs no reshape, so it serves ANY element
-    # count. Index traits
-    # (argmax/min) are served too: the (1, L) -> (C, L/C) reshape makes each sub-row's
-    # global column the flat index, and stage-1's index_chunks=C accumulates exactly
-    # that, so the winner's index is the true global flat index with no remap.
+    # Full-tensor reduce-all. A tensor that fits the one-shot's tile is served by the row
+    # kernel directly -- it is a single row of L elements, and the launch is ONE row, so the
+    # ladder's row-packing tpr would leave the whole device on a fraction of one CTA
+    # (see rt.single_row_config, which returns None when the ladder's pick already stands).
+    # Otherwise the two-stage split: stage 1 grid-strides the flat input into G chunks,
+    # stage 2 folds the G partials and projects once. That mirrors ATen's ctas_per_output
+    # structure and needs no reshape, so it serves ANY element count. Index traits are
+    # served too: with a single row the flat offset IS the column, so gidx_from="flat"
+    # gives the true global index with no remap.
     if not (x.is_cuda and x.is_contiguous()):
         raise AssertionError(
             f"reduce-all needs a contiguous CUDA input, got {x.device} {x.stride()}"
         )
     L = x.numel()
     xf = x.reshape(-1)
+    x2 = xf.view(1, -1)
+    if _oneshot_ok(x2):
+        from . import kernel_rowtile as rt
+
+        cfg = rt.single_row_config(L, x.element_size() * 8, trait.nfields)
+        kw = {} if cfg is None else {"tpr": cfg.tpr, "nt": cfg.nt}
+        (out,) = rt.reduce_row_tile(trait, trait_key, x2, [out_dtype], **kw)
+        return _as_shape(out, ())
     sm = torch.cuda.get_device_properties(x.device).multi_processor_count
     G = _grid_size(L, block, sm, grid_mult)
     chunk = (L + G - 1) // G

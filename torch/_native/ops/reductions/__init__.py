@@ -6,13 +6,13 @@
 #   kernel_general - K0: TensorIterator-driven general kernel, any geometry (row,
 #                    column, n-D, transposed, reduce-all); the correctness floor +
 #                    the _reduce/_try_fast_row dispatcher that routes to the fast paths.
+#   tile           - the shared load/fold datapath the fast kernels are built from.
+#   kernel_rowtile - the vectorized one-shot row reduction: a contiguous last dim
+#                    whose row fits one CTA tile, dynamic in BOTH M and N.
 #
-# The fast paths that K0's dispatcher routes to, and the aten op overrides that put
-# torch.sum / mean / var / ... on this package at all, arrive in later stages.
-#
-# The kernel modules import `cutlass`, so they are NOT imported here -- that
-# would pull the DSL runtime into `import torch` (the lazy-DSL-import contract;
-# see test_no_dsl_imports_after_import_torch). overrides.py binds them lazily.
+# The kernel modules import `cutlass`, so they are NOT imported here: that would pull the DSL
+# runtime into `import torch` (see test_no_dsl_imports_after_import_torch). overrides.py binds
+# them lazily.
 
 from .cutedsl_impl import register_to_dispatch
 
