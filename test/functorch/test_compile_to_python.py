@@ -1164,7 +1164,7 @@ call = runner.call
 
 
 instantiate_device_type_tests(
-    TestAOTCompileToPythonDevice, globals(), only_for=("cuda",)
+    TestAOTCompileToPythonDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
 
 
