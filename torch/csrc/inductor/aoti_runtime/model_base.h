@@ -334,6 +334,8 @@ inline void setUsePinnedAsyncConstantsCopy(bool enabled);
 inline bool usePinnedAsyncConstantsCopy();
 inline void setPinnedAsyncConstantsCopyStageBufferBytes(size_t bytes);
 inline size_t pinnedAsyncConstantsCopyStageBufferBytes();
+inline void setPinnedAsyncConstantsCopyCpuThreads(size_t threads);
+inline size_t pinnedAsyncConstantsCopyCpuThreads();
 } // namespace torch::aot_inductor
 
 // S646785: env-gated logging for the AOTI constant-load pipeline. Emits when
@@ -585,6 +587,7 @@ class ParallelStageCopyPool {
 class PinnedStagingPool {
  public:
   static constexpr size_t kDefaultBufferBytes = 64ULL * 1024 * 1024;
+  static constexpr size_t kMaxCpuCopyThreads = 16;
 
   // Returns nullptr on pinned-host alloc / stream / event creation failure
   // so callers can fall back to the synchronous copy path.
@@ -736,6 +739,12 @@ class PinnedStagingPool {
     // an hsa_queue_t on ROCm. Wait on this pool's own events rather than the
     // shared stream so an unrelated pool's in-flight copies do not gate this
     // destructor.
+    if (pending_bytes_ != 0) {
+      AOTI_LOG_LOADING(
+          "~PinnedStagingPool: destroyed with "
+          << pending_bytes_
+          << " unflushed staged bytes; finish() was not called");
+    }
     // A failed CPU-side synchronization primitive must not let pinned tensors
     // destruct while a worker can still be writing them.
     cpu_copy_pool_.reset();
@@ -863,34 +872,34 @@ class PinnedStagingPool {
       if (pending_bytes_ == 0) {
         acquireCurrentBuffer();
         pending_dst_begin_ = dst_bytes;
-      }
+      } else {
+        const auto* pending_dst_end = pending_dst_begin_ + pending_bytes_;
+        if (dst_bytes < pending_dst_end) {
+          // Overlapping or out-of-order destinations cannot share one
+          // contiguous H2D submission. Preserve correctness by flushing.
+          flushPending();
+          continue;
+        }
 
-      const auto* pending_dst_end = pending_dst_begin_ + pending_bytes_;
-      if (dst_bytes < pending_dst_end) {
-        // Overlapping or out-of-order destinations cannot share one
-        // contiguous H2D submission. Preserve correctness by flushing.
-        flushPending();
-        continue;
-      }
+        const size_t gap = static_cast<size_t>(dst_bytes - pending_dst_end);
+        const size_t available = buffer_bytes_ - pending_bytes_;
+        const size_t expected_gap =
+            (AOTI_CONST_ALIGNMENT -
+             reinterpret_cast<uintptr_t>(pending_dst_end) %
+                 AOTI_CONST_ALIGNMENT) %
+            AOTI_CONST_ALIGNMENT;
+        // Only include the exact padding inserted by compute_constant_blob().
+        // Any other gap may contain a live constant and requires a new window.
+        if (gap != expected_gap || gap > available) {
+          flushPending();
+          continue;
+        }
 
-      const size_t gap = static_cast<size_t>(dst_bytes - pending_dst_end);
-      const size_t available = buffer_bytes_ - pending_bytes_;
-      const size_t expected_gap =
-          (AOTI_CONST_ALIGNMENT -
-           reinterpret_cast<uintptr_t>(pending_dst_end) %
-               AOTI_CONST_ALIGNMENT) %
-          AOTI_CONST_ALIGNMENT;
-      // Only include the exact padding inserted by compute_constant_blob().
-      // Any other gap may contain a live constant and requires a new window.
-      if (gap != expected_gap || gap > available) {
-        flushPending();
-        continue;
-      }
-
-      if (gap > 0) {
-        std::memset(
-            static_cast<uint8_t*>(stage_[buf_]) + pending_bytes_, 0, gap);
-        pending_bytes_ += gap;
+        if (gap > 0) {
+          std::memset(
+              static_cast<uint8_t*>(stage_[buf_]) + pending_bytes_, 0, gap);
+          pending_bytes_ += gap;
+        }
       }
 
       const size_t chunk = std::min(buffer_bytes_ - pending_bytes_, remaining);
@@ -957,9 +966,10 @@ inline bool envFlagIsEnabled(const char* env) {
 // Returns a PinnedStagingPool when pinned async constant copies are enabled
 // and host pinning succeeds. Returns nullptr otherwise so callers fall back to
 // the synchronous copy path. Per-buffer size comes from
-// AOTI_COPY_STAGE_BUFFER_BYTES (default 64 MiB). Parallel CPU staging copies
-// are controlled by AOTI_COPY_STAGE_CPU_THREADS and are only enabled when the
-// caller identifies an eligible initial embedded-constant load.
+// AOTI_COPY_STAGE_BUFFER_BYTES (default 64 MiB). Eligible initial embedded-
+// constant loads are coalesced even with one CPU copy thread. Additional CPU
+// staging workers are controlled by AOTI_COPY_STAGE_CPU_THREADS or its C API
+// setter.
 inline std::unique_ptr<PinnedStagingPool> tryMakeConstantsStagingPool(
     bool use_copy_tasks = false) {
   if (!torch::aot_inductor::usePinnedAsyncConstantsCopy()) {
@@ -984,7 +994,6 @@ inline std::unique_ptr<PinnedStagingPool> tryMakeConstantsStagingPool(
     return bytes;
   }();
   static const size_t env_cpu_copy_threads = [] {
-    constexpr size_t kMaxCopyThreads = 16;
     const char* env = std::getenv("AOTI_COPY_STAGE_CPU_THREADS");
     if (env == nullptr || env[0] == '\0') {
       return size_t{1};
@@ -997,7 +1006,7 @@ inline std::unique_ptr<PinnedStagingPool> tryMakeConstantsStagingPool(
     try {
       const size_t threads = all_digits ? std::stoull(value) : 0;
       if (threads > 0) {
-        return std::min(threads, kMaxCopyThreads);
+        return std::min(threads, PinnedStagingPool::kMaxCpuCopyThreads);
       }
     } catch (const std::exception& error) {
       AOTI_LOG_LOADING(
@@ -1014,8 +1023,14 @@ inline std::unique_ptr<PinnedStagingPool> tryMakeConstantsStagingPool(
       torch::aot_inductor::pinnedAsyncConstantsCopyStageBufferBytes();
   const size_t buffer_bytes =
       explicit_buffer_bytes > 0 ? explicit_buffer_bytes : env_buffer_bytes;
+  const size_t explicit_cpu_copy_threads =
+      torch::aot_inductor::pinnedAsyncConstantsCopyCpuThreads();
+  const size_t cpu_copy_threads = std::min(
+      explicit_cpu_copy_threads > 0 ? explicit_cpu_copy_threads
+                                    : env_cpu_copy_threads,
+      PinnedStagingPool::kMaxCpuCopyThreads);
   return PinnedStagingPool::tryCreate(
-      buffer_bytes, use_copy_tasks, env_cpu_copy_threads);
+      buffer_bytes, use_copy_tasks, cpu_copy_threads);
 }
 
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
@@ -1073,9 +1088,11 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
 
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   void* data_ptr = std::malloc(num_bytes);
   AOTI_RUNTIME_CHECK(
       data_ptr, "Failed to allocate " + std::to_string(num_bytes) + " bytes");
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   auto deleter = [](void* ptr) { std::free(ptr); };
   return RAIIDataPtr(data_ptr, deleter);
 }
@@ -1124,6 +1141,22 @@ inline void setPinnedAsyncConstantsCopyStageBufferBytes(size_t bytes) {
 
 inline size_t pinnedAsyncConstantsCopyStageBufferBytes() {
   return pinnedAsyncConstantsCopyStageBufferBytesSetting().load(
+      std::memory_order_relaxed);
+}
+
+inline std::atomic<size_t>& pinnedAsyncConstantsCopyCpuThreadsSetting() {
+  // 0: use env/default fallback. Nonzero values are total CPU copy threads.
+  static std::atomic<size_t> threads{0};
+  return threads;
+}
+
+inline void setPinnedAsyncConstantsCopyCpuThreads(size_t threads) {
+  pinnedAsyncConstantsCopyCpuThreadsSetting().store(
+      threads, std::memory_order_relaxed);
+}
+
+inline size_t pinnedAsyncConstantsCopyCpuThreads() {
+  return pinnedAsyncConstantsCopyCpuThreadsSetting().load(
       std::memory_order_relaxed);
 }
 
@@ -2016,6 +2049,13 @@ class AOTInductorModelBase {
 // Codegen-ed classes can derive from this to keep pointers to loaded kernels.
 class AOTInductorModelKernelsBase {
  public:
+  AOTInductorModelKernelsBase() = default;
+  AOTInductorModelKernelsBase(const AOTInductorModelKernelsBase&) = delete;
+  AOTInductorModelKernelsBase(AOTInductorModelKernelsBase&&) noexcept = delete;
+  AOTInductorModelKernelsBase& operator=(const AOTInductorModelKernelsBase&) =
+      delete;
+  AOTInductorModelKernelsBase& operator=(
+      AOTInductorModelKernelsBase&&) noexcept = delete;
   // NOLINTNEXTLINE(modernize-use-equals-default)
   virtual ~AOTInductorModelKernelsBase() {
 #ifdef USE_CUDA

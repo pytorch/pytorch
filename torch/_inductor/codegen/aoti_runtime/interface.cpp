@@ -7,6 +7,7 @@
 #include <iostream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 // Stores the last error message from a failed AOTI runtime call so that
@@ -23,11 +24,11 @@ AOTIRuntimeError record_aoti_runtime_exception(
     const std::exception& e) noexcept {
   try {
     g_aoti_last_error = e.what();
-  } catch (...) {
+  } catch (...) { // NOLINT(bugprone-empty-catch)
   }
   try {
     std::cerr << "Error: " << e.what() << '\n';
-  } catch (...) {
+  } catch (...) { // NOLINT(bugprone-empty-catch)
   }
   return AOTI_RUNTIME_FAILURE;
 }
@@ -35,11 +36,11 @@ AOTIRuntimeError record_aoti_runtime_exception(
 AOTIRuntimeError record_unknown_aoti_runtime_exception() noexcept {
   try {
     g_aoti_last_error = "Unknown exception";
-  } catch (...) {
+  } catch (...) { // NOLINT(bugprone-empty-catch)
   }
   try {
     std::cerr << "Unknown exception occurred.\n";
-  } catch (...) {
+  } catch (...) { // NOLINT(bugprone-empty-catch)
   }
   return AOTI_RUNTIME_FAILURE;
 }
@@ -116,7 +117,7 @@ AOTIRuntimeError createModelImpl(
       // for CPU models.
       "cpu",
       "");
-  populate(*constant_map);
+  std::forward<Populate>(populate)(*constant_map);
   if (load_constants_from_blob) {
     model->load_constants();
   }
@@ -727,6 +728,12 @@ AOTIRuntimeError AOTInductorSetUsePinnedAsyncConstantsCopy(
 AOTIRuntimeError AOTInductorSetPinnedAsyncConstantsCopyStageBufferBytes(
     size_t bytes) AOTI_RUNTIME_TRY({
   torch::aot_inductor::setPinnedAsyncConstantsCopyStageBufferBytes(bytes);
+  return AOTI_RUNTIME_SUCCESS;
+})
+
+AOTIRuntimeError AOTInductorSetPinnedAsyncConstantsCopyCpuThreads(
+    size_t threads) AOTI_RUNTIME_TRY({
+  torch::aot_inductor::setPinnedAsyncConstantsCopyCpuThreads(threads);
   return AOTI_RUNTIME_SUCCESS;
 })
 
