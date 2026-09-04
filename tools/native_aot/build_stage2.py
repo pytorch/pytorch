@@ -543,7 +543,7 @@ def _cache_entries() -> dict[str, tuple[str, str]]:
     Last assignment wins, as in _cmake_cache_value. The doc line names the source of an
     entry EnvVarForwarding wrote ("From environment", "From env <NAME>").
 
-    The entry TYPE is deliberately not part of the value: a reconfigure re-declares
+    The entry TYPE is deliberately not part of the value: a reconfigure redeclares
     settled options as INTERNAL (USE_XCCL:BOOL=OFF becomes USE_XCCL:INTERNAL=OFF),
     which is CMake bookkeeping rather than a configuration change.
     """
