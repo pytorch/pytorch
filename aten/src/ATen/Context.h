@@ -454,7 +454,8 @@ class TORCH_API Context {
   void setAllowNativeAot(bool /*b*/);
   // Ops whose declaration is UNCONDITIONAL read this instead: their AOT
   // kernels are the implementation, so allowNativeAot must not mask them.
-  // Default false, flipped only by the private hatch for stock aten values.
+  // Default false; torch._native._unconditional_masked() is the only caller
+  // that flips it, so a numerics test can obtain stock aten values.
   bool maskUnconditionalNativeAot() const;
   void setMaskUnconditionalNativeAot(bool /*b*/);
 
