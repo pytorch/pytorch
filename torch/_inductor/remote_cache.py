@@ -289,6 +289,9 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
                 port=int(os.environ.get("TORCHINDUCTOR_REDIS_PORT", 6379)),
             )
 
+        ttl_str = os.environ.get("TORCHINDUCTOR_REDIS_EXPIRE")
+        self._ttl = int(ttl_str) if ttl_str is not None else None
+
     @override
     def _get(self, key: str) -> bytes | None:
         if not self._redis:
@@ -318,7 +321,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
 
         try:
             # pyrefly: ignore [missing-attribute]
-            self._redis.set(key, data)
+            self._redis.set(key, data, ex=self._ttl)
         # pyrefly: ignore [missing-attribute]
         except redis.exceptions.ConnectionError:
             # Redis is lazy and doesn't actually attempt to connect until the
