@@ -8,6 +8,7 @@ from torch._inductor import config
 from torch._inductor.kernel.decompose_k import (
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
     decomposeK,
+    get_blackwell_decompose_k_splits,
     lower_blackwell_decompose_k_partial,
 )
 from torch._inductor.lowering import lowerings
@@ -54,6 +55,31 @@ def _(a: torch.Tensor, b: torch.Tensor, two_ctas: bool) -> torch.Tensor:
     "requires NVIDIA SM100+",
 )
 class TestBlackwellDecomposeKPartial(TestCase):
+    def test_split_candidates(self):
+        one_cta = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[0]
+        two_cta_narrow = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[1]
+        two_cta_wide = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[2]
+
+        def splits(m, n, k, partial_config):
+            return get_blackwell_decompose_k_splits(m, n, k, 148, partial_config)
+
+        self.assertEqual(splits(256, 128, 11_091_857, one_cta), [74, 148])
+        self.assertEqual(splits(256, 128, 11_091_857, two_cta_narrow), [74, 148])
+        self.assertEqual(splits(256, 424, 973_138, one_cta), [19, 37])
+        self.assertEqual(splits(256, 424, 973_138, two_cta_wide), [37, 74])
+
+        # Alignment can make the nominal wave target leave an empty final
+        # partition; choose the first legal split above it.
+        self.assertEqual(splits(128, 256, 969_147, one_cta), [74, 149])
+
+        # Exact and uneven K use the same bounded, geometry-based candidates.
+        self.assertEqual(splits(256, 424, 973_248, one_cta), [19, 37])
+        self.assertEqual(splits(256, 424, 973_248, two_cta_wide), [37, 74])
+
+        # Do not manufacture a one-K-tile tail plan solely to fill the device.
+        self.assertEqual(splits(256, 128, 8_193, one_cta), [])
+        self.assertEqual(splits(256, 128, 8_193, two_cta_narrow), [])
+
     def _run(self, two_ctas: bool) -> None:
         config_index = 1 if two_ctas else 0
         partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]

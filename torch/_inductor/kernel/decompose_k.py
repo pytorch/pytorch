@@ -96,6 +96,59 @@ class DecomposeKSubgraphTemplate(SubgraphTemplate):
 decompose_k_subgraph_template = DecomposeKSubgraphTemplate()
 
 
+def _aligned_k_part(k: int, k_split: int, block_k: int) -> int:
+    return math.ceil(math.ceil(k / k_split) / block_k) * block_k
+
+
+def get_blackwell_decompose_k_splits(
+    m: int,
+    n: int,
+    k: int,
+    num_sms: int,
+    config: BlackwellBMMConfig,
+    max_workspace_bytes: int = 128 * 1024**2,
+) -> list[int]:
+    """Return one- and two-wave splits for one Triton partial-BMM schedule."""
+    if min(m, n, k, num_sms) <= 0:
+        return []
+
+    m_tiles = math.ceil(m / config.block_m)
+    if config.two_ctas:
+        if m_tiles < 2:
+            return []
+        m_tiles = math.ceil(m_tiles / 2) * 2
+
+    output_ctas_per_split = m_tiles * math.ceil(n / config.block_n)
+    if config.two_ctas:
+        clusters_per_split = output_ctas_per_split // 2
+        wave_numerator = num_sms // 2
+        wave_denominator = clusters_per_split
+    else:
+        wave_numerator = num_sms
+        wave_denominator = output_ctas_per_split
+
+    m_pad = m_tiles * config.block_m
+    workspace_bytes_per_split = m_pad * n * torch.float32.itemsize
+    max_workspace_split = max_workspace_bytes // workspace_bytes_per_split
+    max_nonempty_split = math.ceil(k / config.block_k)
+    max_split = min(max_workspace_split, max_nonempty_split)
+
+    candidates: list[int] = []
+    for waves in (1, 2):
+        target = max(2, math.ceil(waves * wave_numerator / wave_denominator))
+        search_span = math.ceil(wave_numerator / wave_denominator)
+        search_end = min(max_split, target + search_span)
+        for k_split in range(target, search_end + 1):
+            k_part = _aligned_k_part(k, k_split, config.block_k)
+            if k_part < 2 * config.block_k:
+                break
+            if (k_split - 1) * k_part < k:
+                if k_split not in candidates:
+                    candidates.append(k_split)
+                break
+    return candidates
+
+
 def _blackwell_decompose_k_partial_kwargs(
     mat1,
     mat2,
@@ -186,10 +239,7 @@ def lower_blackwell_decompose_k_partial(
         m_tiles = math.ceil(m_tiles / 2) * 2
 
     expected_m_pad = m_tiles * partial_config.block_m
-    expected_k_part = (
-        math.ceil(math.ceil(k / int(k_split)) / partial_config.block_k)
-        * partial_config.block_k
-    )
+    expected_k_part = _aligned_k_part(k, int(k_split), partial_config.block_k)
     if int(m_pad) != expected_m_pad or int(k_part) != expected_k_part:
         raise AssertionError("decompose-K plan geometry does not match its config")
 
@@ -233,11 +283,7 @@ def blackwell_decompose_k_partial(a, b, k_split, config_index):
         m_tiles = (m_tiles + 1) // 2 * 2
 
     m_pad = m_tiles * config.block_m
-    k_part = (
-        ((k + k_split - 1) // k_split + config.block_k - 1)
-        // config.block_k
-        * config.block_k
-    )
+    k_part = _aligned_k_part(k, k_split, config.block_k)
     partial_flat = inductor_prims.blackwell_decompose_k_partial(
         a,
         b,
