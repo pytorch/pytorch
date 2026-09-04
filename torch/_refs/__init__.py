@@ -5717,6 +5717,18 @@ def linspace(
     if not isinstance(dtype, torch.dtype):
         raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
 
+    # Eager truncates integer endpoints toward zero before interpolating
+    # (see linspace_kernel); match that here.
+    if utils.is_integer_dtype(dtype):
+        if isinstance(start, FloatLike):
+            start = sym_int(start)
+        elif isinstance(start, TensorLikeType):
+            start = torch.trunc(start)
+        if isinstance(end, FloatLike):
+            end = sym_int(end)
+        elif isinstance(end, TensorLikeType):
+            end = torch.trunc(end)
+
     # steps does not participate in the computation of the dtype
     torch._check_type(
         isinstance(steps, IntLike),
