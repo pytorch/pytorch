@@ -11,6 +11,8 @@
 
 namespace c10d {
 
+// Returns Python GC counters in generation order:
+// [generation 0, generation 1, generation 2].
 // Registered by the Python bindings when available.
 typedef std::optional<std::array<int64_t, 3>> (*gc_count_getter_t)();
 
