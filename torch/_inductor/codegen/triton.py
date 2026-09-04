@@ -2412,9 +2412,9 @@ class TritonOverrides(OpOverrides):
         # approximate divide the result matches neither eager nor tl.sigmoid, so fall
         # back to the intrinsic unless both knobs are on.
         if (
-            config.numerics == "strict"
-            or config.eager_numerics.use_pytorch_libdevice
-        ) and config.use_eager_division_rounding():
+            config.should_use_pytorch_libdevice()
+            and config.use_eager_division_rounding()
+        ):
             denominator = f"(1.0 + libdevice.exp(-({x})))"
             return f"triton.language.div_rn(1.0, {denominator})"
         return f"tl.sigmoid({x})"
@@ -2491,9 +2491,10 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def log(x):
-        if config.eager_numerics.use_pytorch_libdevice:
-            # Strict numerics should use the backend math library entry point.
-            # On ROCm this maps to OCML and avoids Triton's generic log lowering.
+        if config.should_use_pytorch_libdevice():
+            # Strict numerics, or an explicit opt-in, uses the backend math library
+            # entry point. On ROCm this maps to OCML and avoids Triton's generic log
+            # lowering.
             return f"libdevice.log({x})"
         return f"tl_math.log({x})"
 
