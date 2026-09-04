@@ -47,6 +47,7 @@ from ..exc import (
     ObservedTypeError,
     ObservedUserStopIteration,
     raise_observed_exception,
+    raise_runtime_error,
     raise_type_error,
     raise_value_error,
     unimplemented,
@@ -67,6 +68,7 @@ from ..source import (
 from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
+    check_positional,
     check_unspec_or_constant_args,
     check_unspec_python_args,
     cmp_name_to_op_mapping,
@@ -75,6 +77,7 @@ from ..utils import (
     get_fake_value,
     is_tensor_getset_descriptor,
     istype,
+    no_keywords,
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
@@ -2750,9 +2753,84 @@ class BuiltinVariable(BaseBuiltinVariable):
         return generic_issubclass(tx, left_ty, right_ty)
 
     def call_super(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
     ) -> VariableTracker:
-        return variables.SuperVariable(a, b)
+        # Mirrors CPython's super_init_impl, which validates both arguments
+        # and computes/caches `su_obj_type` eagerly at construction time
+        # (not lazily, on first attribute access):
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L11405-L11441
+        no_keywords(tx, "super", kwargs)
+        check_positional(tx, "super()", len(args), 0, 2)
+        if len(args) == 1:
+            # 1-arg `super(type)` (an unbound proxy) has no VT construction
+            # site to reach this and needs no frame introspection -- just
+            # not implemented yet.
+            unimplemented(
+                gb_type="1-arg super not implemented",
+                context=f"call_super {args}",
+                explanation="Dynamo requires the two-argument form "
+                "super(type, object_or_type); it cannot yet resolve the "
+                "implicit object for one-argument super(type).",
+                hints=[
+                    "Use two-argument super(type, object_or_type).",
+                ],
+            )
+        elif len(args) == 0:
+            code = tx.f_code
+            if code.co_argcount == 0:
+                # https://github.com/python/cpython/blob/e76aa128fea8691525b482a211bef6b1c514019d/Objects/typeobject.c#L11367-L11371
+                raise_runtime_error(tx, "super(): no arguments")
+            if "__class__" not in tx.cell_and_freevars():
+                # https://github.com/python/cpython/blob/e76aa128fea8691525b482a211bef6b1c514019d/Objects/typeobject.c#L11423-L11427
+                raise_runtime_error(tx, "super(): __class__ cell not found")
+            first_arg_name = code.co_varnames[0]
+            if first_arg_name not in tx.symbolic_locals:
+                # https://github.com/python/cpython/blob/e76aa128fea8691525b482a211bef6b1c514019d/Objects/typeobject.c#L11388-L11392
+                raise_runtime_error(tx, "super(): arg[0] deleted")
+            args = (
+                tx.output.side_effects.load_cell(tx._cellvar("__class__")),
+                tx.symbolic_locals[first_arg_name].unwrap(),
+            )
+        typevar, obj = args
+        if not issubclass(typevar.python_type(), type):
+            raise_type_error(
+                tx,
+                f"super() argument 1 must be a type, not {typevar.python_type_name()}",
+            )
+        if not typevar.is_python_constant():
+            unimplemented(
+                gb_type="super() with non-constant type argument",
+                context=f"super({typevar}, {obj})",
+                explanation="Dynamo cannot trace super() with a non-constant type argument.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        search_type = typevar.as_python_constant()
+        obj_type: type | None = None
+        obj_type_source: Source | None = None
+        b_type = obj.python_type()
+        if issubclass(obj.python_type(), type):
+            # `b` is itself a class/type
+            obj_type = obj.as_python_constant()
+            obj_type_source = obj.source
+            obj_desc = f"type {obj_type.__name__}"
+        else:
+            obj_type = b_type
+            obj_type_source = obj.source and TypeSource(obj.source)
+            obj_desc = f"instance of {obj.python_type_name()}"
+
+        if search_type is not None and obj_type is not None and not issubclass(obj_type, search_type):
+            raise_type_error(
+                tx,
+                f"super(type, obj): obj ({obj_desc}) is not an instance "
+                f"or subtype of type ({search_type.__name__}).",
+            )
+
+        return variables.SuperVariable(
+            typevar, obj, obj_type=obj_type, obj_type_source=obj_type_source
+        )
 
     def call_next(
         self,
