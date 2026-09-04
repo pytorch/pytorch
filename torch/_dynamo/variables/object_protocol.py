@@ -2083,8 +2083,8 @@ def generic_issubclass(
 # The base VariableTracker.tp_getattro_impl tries object_generic_getattr()
 # first (MRO walk + descriptor protocol), falling back to const_getattr
 # on _UnhandledDescriptorError.  Callers of object_generic_getattr
-# directly must handle _UnhandledDescriptorError at every step (2, 4,
-# and 7), not just for unrecognized descriptor types.
+# directly must handle _UnhandledDescriptorError at steps 2 and 4
+# (unrecognized descriptor types).
 #
 # VTs with custom tp_getattro (TensorVariable, NNModuleVariable,
 # UserDefinedClassVariable, SuperVariable) override tp_getattro_impl.
@@ -2216,79 +2216,67 @@ def object_generic_getattr(
 
     https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1611-L1683
 
-    Implements the standard attribute lookup algorithm using the VT's
-    python_type() for MRO walking, and hooks on the VT for instance dict
-    and __getattr__ fallback.
+    Implements the standard attribute lookup algorithm.  Each step
+    delegates to a hook on the VT so subclasses (UDOV in particular) can
+    customize source management, side-effects, and descriptor handling.
 
     Steps:
-      1. MRO walk on python_type() for type_attr
-      2. Data descriptor -> invoke tp_descr_get
-      3. Instance dict -> obj.lookup_instance_dict(tx, name)
-      4. Non-data descriptor -> invoke tp_descr_get
-      5. Plain class variable -> wrap in VT
-      6. __getattr__ fallback -> obj.call_getattr_fallback(tx, name)
+      1. obj.lookup_type_attr  — MRO walk
+      2. obj.resolve_data_descriptor — data descriptor invocation
+      3. obj.lookup_instance_dict — instance __dict__
+      4-5. obj.resolve_type_attr — non-data descriptor / plain class var
+      5b. obj.dynamic_getattr_fallback — attrs with non-standard storage
       7. AttributeError
+
+    There is deliberately no step 6 (__getattr__): CPython chains to
+    __getattr__ in _Py_slot_tp_getattr_hook, one level above GenericGetAttr,
+    which is VariableTracker.tp_getattro_impl here.
     """
     from .user_defined import is_data_descriptor
 
-    py_type = obj.python_type()
+    # Step 0: dunders whose generic getset-descriptor resolution would lose
+    # Dynamo-side state (e.g. __dict__ must be the mutation-tracked dict).
+    shortcut = obj.lookup_dunder_shortcut(tx, name)
+    if shortcut is not None:
+        return shortcut
+
     source = obj.source and AttrSource(obj.source, name)
 
     # Step 1: MRO walk.
-    type_attr = mro_lookup(py_type, name)
+    type_attr = obj.lookup_type_attr(tx, name)
 
     # Step 2: Data descriptor takes priority over instance dict.
     if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
-        class_vt = VariableTracker.build(tx, py_type)
-        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
-        if result is not None:
-            return result
-        raise _UnhandledDescriptorError(
-            f"object_generic_getattr: unhandled data descriptor "
-            f"{type(type_attr)} for {name}"
-        )
+        return obj.resolve_data_descriptor(tx, name, type_attr, source)
 
     # Step 3: Instance dict (tp_dictoffset).
     instance_result = obj.lookup_instance_dict(tx, name)
     if instance_result is not None:
         return instance_result
 
-    # Step 4: Non-data descriptor with __get__.
-    if type_attr is not NO_SUCH_SUBOBJ and hasattr(type(type_attr), "__get__"):
-        # If the VT dispatches this method through call_method (a hand-written
-        # override or a tp_methods entry), return a CallMethodVariable that
-        # dispatches through call_method instead of inlining the resolved
-        # method directly.  This preserves custom tracing logic (side effects,
-        # graph nodes, suppression) that MRO-based resolution via
-        # UserMethodVariable would bypass.
-        if _is_method_type(type_attr) and (
-            obj._lookup_tp_table(name, "tp_methods") is not None
-            or _has_custom_call_method(obj)
-        ):
-            return variables.CallMethodVariable(
-                obj, name, py_type=_bound_method_type(type_attr), source=source
-            )
-
-        class_vt = VariableTracker.build(tx, py_type)
-        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
-        if result is not None:
-            return result
-        raise _UnhandledDescriptorError(
-            f"object_generic_getattr: unhandled non-data descriptor "
-            f"{type(type_attr)} for {name}"
-        )
-
-    # Step 5: Plain class variable (no __get__).
+    # Steps 4-5: Non-data descriptor or plain class variable.
     if type_attr is not NO_SUCH_SUBOBJ:
-        return VariableTracker.build(tx, type_attr, source)
+        return obj.resolve_type_attr(tx, name, type_attr, source)
 
-    # Step 6: __getattr__ fallback.
-    getattr_result = obj.call_getattr_fallback(tx, name)
-    if getattr_result is not None:
-        return getattr_result
+    # Step 5b: Dynamic fallback for attrs with non-standard storage.
+    dynamic_result = obj.dynamic_getattr_fallback(tx, name)
+    if dynamic_result is not None:
+        return dynamic_result
 
     # Step 7: Attribute not found.
-    raise_observed_exception(AttributeError, tx)
+    try:
+        py_type = obj.python_type()
+        type_name = py_type.__name__
+    except NotImplementedError:
+        type_name = type(obj).__name__
+    # CPython sets AttributeError.name/.obj; user code (and our own reconstruct
+    # path) reads them, so populate both rather than just the message.
+    raise_observed_exception(
+        AttributeError,
+        tx,
+        args=[f"'{type_name}' object has no attribute '{name}'"],
+        kwargs={"name": variables.ConstantVariable.create(name), "obj": obj},
+    )
 
 
 def generic_getattr(

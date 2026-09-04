@@ -90,7 +90,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
-from .object_protocol import generic_str
+from .object_protocol import generic_str, object_generic_getattr
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
@@ -394,11 +394,11 @@ class SuperVariable(VariableTracker):
             attr_name = args[0].value  # type: ignore[attr-defined]
             # object.__getattribute__ IS PyObject_GenericGetAttr, which never
             # touches __getattr__ (that chain lives one level up, in
-            # _Py_slot_tp_getattr_hook).  generic_getattr is now a
+            # _Py_slot_tp_getattr_hook).  object_generic_getattr is now a
             # faithful GenericGetAttr, so no flag is needed here.
             # https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1611-L1683
             if isinstance(self.objvar, UserDefinedObjectVariable):
-                return self.objvar.generic_getattr(tx, attr_name)
+                return object_generic_getattr(tx, self.objvar, attr_name)
 
             attr_value = None
             try:
