@@ -11,10 +11,15 @@ from torch.distributed.fsdp._flat_param import (
     FlatParamShardMetadata,
     HandleShardingStrategy,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTestContinuous
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_distributed import requires_world_size
+from torch.testing._internal.common_fsdp import DISTRIBUTED_BACKEND, FSDPTestContinuous
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -33,22 +38,57 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestFlattenParams(FSDPTestContinuous):
-    """Tests parameter flattening and shard metadata logic."""
+class FlattenParamsTestBase(FSDPTestContinuous):
+    """Device-agnostic base.
+
+    FSDPTestContinuous inherits the module-level ``DEVICE_TYPE`` /
+    ``DEVICE_COUNT`` / ``DISTRIBUTED_BACKEND`` globals from ``common_fsdp``,
+    which only recognize cuda/hpu/xpu. Override the device-resolution hooks so
+    the test runs on any accelerator (incl. out-of-tree PrivateUse1 backends)
+    once instantiated via ``instantiate_device_type_tests``. Mirrors the
+    ``DTensorPPTestBase`` pattern in PR #192051: the intermediate base holds
+    ``backend_str`` so the device-specific generated class inherits it rather
+    than ports it (a ported classmethod cannot see the variant's device_type).
+
+    World size is clamped to 1 since these unit tests either exercise only
+    the flattening logic or check sharding subroutines directly without
+    requiring multiple ranks.
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def _resolved_device_type(cls) -> str:
+        dt = cls.device_type
+        if dt == "privateuse1":
+            dt = torch._C._get_privateuse1_backend_name()
+        return dt
+
+    @classmethod
+    def backend_str(cls) -> str:
+        try:
+            return dist.get_default_backend_for_device(cls._resolved_device_type())
+        except ValueError:
+            # Devices without a registered default backend (e.g. ``hpu`` unless
+            # the vendor extension registers ``hccl`` via ``register_backend``):
+            # fall back to the historical ``common_fsdp`` ``DISTRIBUTED_BACKEND``
+            # ("hccl" on HPU), preserving the pre-refactor behavior.
+            return DISTRIBUTED_BACKEND
 
     @property
     def world_size(self) -> int:
         # Clamp the world size to 1 since these unit tests either exercise only
         # the flattening logic or check sharding subroutines directly without
-        # requiring multiple ranks
+        # requiring multiple ranks.
         return 1
 
+
+class TestFlattenParams(FlattenParamsTestBase):
+    """Tests parameter flattening and shard metadata logic."""
+
     def _get_default_config(self):
-        device_type = (
-            acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-        )
         return {
-            "device": torch.device(device_type),
+            "device": torch.device(self._resolved_device_type()),
             "sharding_strategy": HandleShardingStrategy.FULL_SHARD,
             "offload_params": False,
             "mp_param_dtype": None,
@@ -87,8 +127,12 @@ class TestFlattenParams(FSDPTestContinuous):
             dec_layer.linear2.weight = enc_layer.linear2.weight
         return module
 
-    @skip_if_lt_x_gpu(1)
-    def test_partial_flattening(self):
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_partial_flattening(self, device):
         """Tests flattening some submodules but not others."""
         self.run_subtests(
             {"half": [False, True]},
@@ -144,7 +188,12 @@ class TestFlattenParams(FSDPTestContinuous):
             all(p.dtype == new_dtype for p in module.encoder.layers[0].parameters())
         )
 
-    def test_flatten_nothing(self):
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_flatten_nothing(self, device):
         """
         Tests that constructing a ``FlatParamHandle`` with no parameters
         raises an error.
@@ -168,8 +217,12 @@ class TestFlattenParams(FSDPTestContinuous):
                 **self._get_default_config(),
             )
 
-    @skip_if_lt_x_gpu(1)
-    def test_empty_module(self):
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_empty_module(self, device):
         """
         Tests flattening an empty module (i.e. one without any parameters).
         """
@@ -196,7 +249,12 @@ class TestFlattenParams(FSDPTestContinuous):
 
         return EmptyModule()
 
-    def test_numel_without_shared_params(self):
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_numel_without_shared_params(self, device):
         """
         Tests that numel is preserved after flattening when there are no shared
         parameters in the module.
@@ -212,7 +270,12 @@ class TestFlattenParams(FSDPTestContinuous):
             module = module.half()
         self._test_numel(module)
 
-    def test_numel_with_shared_params(self):
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_numel_with_shared_params(self, device):
         """
         Tests that numel is preserved after flattening when there are shared
         parameters in the module.
@@ -238,8 +301,12 @@ class TestFlattenParams(FSDPTestContinuous):
         )
         self.assertEqual(ref_numel, flat_param_handle.flat_param.numel())
 
-    @skip_if_lt_x_gpu(1)
-    def test_output_without_shared_params(self):
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_output_without_shared_params(self, device):
         """
         Tests a forward pass after flattening when there are no shared
         parameters in the module.
@@ -255,8 +322,12 @@ class TestFlattenParams(FSDPTestContinuous):
             module = module.half()
         self._test_output(module)
 
-    @skip_if_lt_x_gpu(1)
-    def test_output_with_shared_params(self):
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_output_with_shared_params(self, device):
         """
         Tests a forward pass after flattening when there are shared parameters
         in the module.
@@ -285,8 +356,12 @@ class TestFlattenParams(FSDPTestContinuous):
         input = module.get_input(device, dtype)
         return module(*input)
 
-    @skip_if_lt_x_gpu(1)
-    def test_pnorm_after_step_with_shared_params(self):
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_pnorm_after_step_with_shared_params(self, device):
         """
         Tests for parameter Frobenius norm parity after an optimizer step when
         there are shared parameters in the module. If the parameter sharing is
@@ -316,7 +391,12 @@ class TestFlattenParams(FSDPTestContinuous):
         optim.step()
         return torch.norm(torch.stack([p.detach().norm() for p in module.parameters()]))
 
-    def test_flat_param_shard_metadata_unaligned(self):
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_flat_param_shard_metadata_unaligned(self, device):
         """
         Tests that ``FlatParameter`` shard metadata are computed as expected
         without any explicit alignment padding.
@@ -467,7 +547,12 @@ class TestFlattenParams(FSDPTestContinuous):
             ),
         )
 
-    def test_flat_param_shard_metadata_aligned_full_precision(self):
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_flat_param_shard_metadata_aligned_full_precision(self, device):
         """
         Tests that ``FlatParameter`` shard metadata are computed as expected
         with alignment padding and parameter full precision.
@@ -520,7 +605,12 @@ class TestFlattenParams(FSDPTestContinuous):
             ),
         )
 
-    def test_flat_param_shard_metadata_aligned_mixed_precision(self):
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_flat_param_shard_metadata_aligned_mixed_precision(self, device):
         """
         Tests that ``FlatParameter`` shard metadata are computed as expected
         with alignment padding and parameter mixed precision.
@@ -601,8 +691,13 @@ class TestFlattenParams(FSDPTestContinuous):
             msg=lambda msg: f"{msg}\n{handle.shard_metadata()}, {expected}",
         )
 
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize("memory_format", [torch.contiguous_format, torch.channels_last])
-    def test_flat_param_shard_metadata_with_memory_format(self, memory_format):
+    def test_flat_param_shard_metadata_with_memory_format(self, device, memory_format):
         """
         Tests that ``FlatParameter`` shard metadata are computed as expected
         with alignment padding and parameter full precision.
@@ -650,8 +745,12 @@ class TestFlattenParams(FSDPTestContinuous):
             ),
         )
 
-    @skip_if_lt_x_gpu(1)
-    def test_writeback_orig_params_no_shard(self):
+    @requires_world_size(1)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
+    def test_writeback_orig_params_no_shard(self, device):
         class EmbeddingModel(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -681,7 +780,12 @@ class TestFlattenParams(FSDPTestContinuous):
         self.assertEqual(out.shape, torch.Size([]))
 
 
-instantiate_parametrized_tests(TestFlattenParams)
+instantiate_device_type_tests(
+    TestFlattenParams,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
