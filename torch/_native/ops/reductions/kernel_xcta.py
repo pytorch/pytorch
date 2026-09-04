@@ -27,6 +27,7 @@ from .._cutedsl.plan_cache import cached_plan
 from . import (  # safe: kernel_general imports us only lazily
     kernel_general as _RB,
     kernel_rowtile as _rt,
+    tile,
 )
 
 
@@ -102,15 +103,10 @@ def _split_C(N, vec, smem_budget_elems, subrow_target=None):
 
 
 class FusedTwoStage:
-    # BOTH stage launches in ONE @cute.jit region -> one cute.compile artifact, one
-    # host-side fn() call. Two cuLaunchKernel still issue on the device (serialized
-    # on the stream, stage 2 sees stage 1's writes), but the expensive Python/
-    # framework dispatch + arg marshalling is paid ONCE instead of twice. Keeps the
-    # GOOD two-stage kernels (full grid, no cluster cap) AND graph-capturability.
-    #
-    # s1 is a kernel_rowtile.RowTile (final=False); s2 a kernel_general.ReduceBlock
-    # (from_partials). Both expose a bound @cute.kernel `.kernel`; we replicate their
-    # __call__ launch bodies here back-to-back.
+    # BOTH stage launches in ONE @cute.jit region: one compile artifact and one host-side call, so
+    # the Python dispatch and arg marshalling are paid once. The two cuLaunchKernel still issue
+    # separately, serialized on the stream. s1 is a row-axis tile.TileReduce (final=False), s2 a
+    # ReduceBlock (from_partials); this replicates their __call__ launch bodies back-to-back.
     def __init__(self, s1, s2):
         self.s1 = s1
         self.s2 = s2
@@ -130,11 +126,14 @@ class FusedTwoStage:
         stream: cuda.CUstream,
     ):
         s1 = self.s1
-        # --- stage 1 launch (mirrors RowTile.__call__) ---
+        # --- stage 1 launch (mirrors tile.TileReduce.__call__) ---
         # The tile row kernel with final=False: it writes the RAW per-field accumulator of
         # each sub-row. Its fold is ROLLED, so the sub-row length arrives as runtime args
-        # (nchunks/nwaves) and distinct N in a vec class share ONE compiled kernel.
-        s1.kernel(mX, parts, s1_nchunks, s1_nwaves, project_n).launch(
+        # (nchunks/nwaves) and distinct N in a vec class share ONE compiled kernel. tma_atom
+        # is None: a sub-row here is wide enough that the direct load is already coalesced.
+        # q/npar are the col axis's split args: None here, since an unused Int32 param is
+        # not free (see tile.TileReduce.kernel).
+        s1.kernel([mX], parts, s1_nchunks, s1_nwaves, project_n, None, None).launch(
             grid=[cute.ceil_div(mX.shape[0], const_expr(s1.rows_per_block)), 1, 1],
             block=[const_expr(s1.nt), 1, 1],
             stream=stream,
@@ -307,7 +306,17 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
     s1_counts = (Int32(s // svec), Int32(-(-(s // svec) // tpr)))
 
     def _make_s1():
-        return _rt.RowTile(trait, torch2cute[x.dtype], s, tpr, nt, nouts, False, unroll)
+        return tile.TileReduce(
+            trait,
+            torch2cute[x.dtype],
+            "row",
+            s,
+            tpr=tpr,
+            nt=nt,
+            nouts=nouts,
+            final=False,
+            unroll=unroll,
+        )
 
     def _fake_in():
         # 2D row-major, both extents dynamic: mode 1 divisible by the sub-row vec width, so one
