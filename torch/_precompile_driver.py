@@ -200,8 +200,8 @@ def _eager_forward(*args):
     user_flat, _runtime_in_spec = _pytree.tree_flatten(tuple(user_inputs))
     if IN_SPEC is not None and _runtime_in_spec != _pytree.treespec_loads(IN_SPEC):
         _fail(
-            "precompile: runtime inputs have a different structure than the traced "
-            "example inputs (invariant 3); they must match in nesting and count."
+            "precompile: runtime inputs have a different structure than the inputs "
+            "traced at capture (invariant 3); they must match in nesting and count."
         )
     # Reject a SHAPE / DTYPE / DEVICE mismatch (invariants 3 and 6) up front. Mirrors the
     # inductor driver checks (keep the two drivers in sync). The eager backend has no
@@ -291,8 +291,8 @@ def _inductor_forward(*args):
     user_flat, _runtime_in_spec = _pytree.tree_flatten(tuple(user_inputs))
     if IN_SPEC is not None and _runtime_in_spec != _pytree.treespec_loads(IN_SPEC):
         _fail(
-            "precompile: runtime inputs have a different structure than the traced "
-            "example inputs (invariant 3); they must match in nesting and count."
+            "precompile: runtime inputs have a different structure than the inputs "
+            "traced at capture (invariant 3); they must match in nesting and count."
         )
     # Reject a SHAPE / DTYPE / DEVICE / BOUNDS mismatch (invariants 3 and 6) up front.
     # Mirrors the eager driver checks (keep the two drivers in sync). Stride/memory-format
