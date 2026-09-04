@@ -5064,6 +5064,7 @@ class InstructionTranslatorBase(
 
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
+            fn.annotate = attr
             attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
             fn.annotations = attr
         elif flags & 0x08:
