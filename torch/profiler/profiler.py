@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
 from typing import Any, TYPE_CHECKING
@@ -40,6 +41,8 @@ __all__ = [
     "tensorboard_trace_handler",
     "profile",
     "ExecutionTraceObserver",
+    "PerformanceMetricsConfig",
+    "ProfilerActivityConfig",
 ]
 PROFILER_STEP_NAME = "ProfilerStep"
 
@@ -120,17 +123,95 @@ class _ITraceObserver(ABC):
         pass
 
 
+class _ProfilerExtensionConfig(ABC):
+    """Additional profiler configuration serialized as key-value entries."""
+
+    @abstractmethod
+    def _to_config_entries(self) -> dict[str, str]:
+        pass
+
+
+@dataclass
+class PerformanceMetricsConfig(_ProfilerExtensionConfig):
+    """Configure hardware performance-counter metric collection.
+
+    This configuration collects hardware counters.
+
+    Args:
+        metric_names (list[str]): Backend-specific hardware metric names to collect.
+        sampling_interval_ms (float, optional): CUDA CUPTI-monitor sampling
+            interval in milliseconds. Defaults to 1 millisecond.
+        lookback_window_ms (float, optional): CUDA CUPTI-monitor look-back
+            window in milliseconds. This bounds the recent sample history
+            retained for decoding; the capacity is the look-back window divided
+            by the sampling interval. Defaults to 10 seconds.
+
+    CUDA PM sampling uses the current CUDA device.
+    """
+
+    metric_names: list[str]
+    sampling_interval_ms: float | None = None
+    lookback_window_ms: float | None = None
+
+    def _to_config_entries(self) -> dict[str, str]:
+        config = {"PERFORMANCE_METRICS": ",".join(self.metric_names)}
+        if self.sampling_interval_ms is not None:
+            config["PERFORMANCE_METRICS_SAMPLING_INTERVAL_MS"] = str(
+                self.sampling_interval_ms
+            )
+        if self.lookback_window_ms is not None:
+            config["PERFORMANCE_METRICS_LOOKBACK_WINDOW_MS"] = str(
+                self.lookback_window_ms
+            )
+        return config
+
+
+@dataclass
+class ProfilerActivityConfig:
+    """Configure collection for an activity group.
+
+    Args:
+        activity_types (list[str], optional): Fine-grained activity types to
+            collect. ``None`` collects the group's default activity types,
+            while an empty list collects none.
+        profiler_configs (list): Additional profiler configurations associated
+            with this activity group, such as :class:`PerformanceMetricsConfig`.
+    """
+
+    activity_types: list[str] | None = None
+    profiler_configs: list[_ProfilerExtensionConfig] = field(default_factory=list)
+
+
+def _get_profiler_extensions(
+    config: ProfilerActivityConfig,
+) -> dict[str, str]:
+    profiler_extensions = {}
+    for profiler_config in config.profiler_configs:
+        if not isinstance(profiler_config, _ProfilerExtensionConfig):
+            raise TypeError(
+                f"Unsupported profiler config type: {type(profiler_config).__name__}"
+            )
+        profiler_extensions.update(profiler_config._to_config_entries())
+    return profiler_extensions
+
+
 def _parse_activities(
-    activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]],
-) -> tuple[set[ProfilerActivity], dict[ProfilerActivity, set[str]]]:
-    """Parse a mixed activities list into a set of activities and a filter dict.
+    activities: Iterable[
+        ProfilerActivity | dict[ProfilerActivity, list[str] | ProfilerActivityConfig]
+    ],
+) -> tuple[
+    set[ProfilerActivity],
+    dict[ProfilerActivity, ProfilerActivityConfig],
+]:
+    """Parse selected activities and their configurations.
 
     Each item is either a bare ``ProfilerActivity`` (collect all defaults) or a
-    ``dict[ProfilerActivity, list[str]]`` (collect only the named subset).
-    An empty list value (e.g. ``{CUDA: []}``) means collect nothing for that group.
+    dict containing an activity-type name list or activity configuration. An
+    empty activity-type list collects no activity events for that group;
+    configured profiler extensions may still collect data.
     """
     parsed_activities: set[ProfilerActivity] = set()
-    activity_filters: dict[ProfilerActivity, set[str]] = {}
+    activity_configs: dict[ProfilerActivity, ProfilerActivityConfig] = {}
     for item in activities:
         if isinstance(item, ProfilerActivity):
             if item in parsed_activities:
@@ -141,10 +222,12 @@ def _parse_activities(
                 if key in parsed_activities:
                     raise ValueError(f"Activity {key} specified more than once")
                 parsed_activities.add(key)
-                activity_filters[key] = set(val)
+                if not isinstance(val, ProfilerActivityConfig):
+                    val = ProfilerActivityConfig(activity_types=val)
+                activity_configs[key] = val
         else:
             raise TypeError(f"Expected ProfilerActivity or dict, got {type(item)}")
-    return parsed_activities, activity_filters
+    return parsed_activities, activity_configs
 
 
 class _KinetoProfile:
@@ -208,7 +291,10 @@ class _KinetoProfile:
     def __init__(
         self,
         *,
-        activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]]
+        activities: Iterable[
+            ProfilerActivity
+            | dict[ProfilerActivity, list[str] | ProfilerActivityConfig]
+        ]
         | None = None,
         record_shapes: bool = False,
         profile_memory: bool = False,
@@ -222,10 +308,10 @@ class _KinetoProfile:
         post_processing_timeout_s: float | None = None,
     ) -> None:
         if activities is not None:
-            self.activities, self.activity_filters = _parse_activities(activities)
+            self.activities, self.activity_configs = _parse_activities(activities)
         else:
             self.activities = supported_activities()
-            self.activity_filters: dict[ProfilerActivity, set[str]] = {}
+            self.activity_configs: dict[ProfilerActivity, ProfilerActivityConfig] = {}
         self.record_shapes = record_shapes
         self.with_flops = with_flops
         self.profile_memory = profile_memory
@@ -337,6 +423,12 @@ class _KinetoProfile:
             )
         if (self.profiler is None) or (not self.acc_events):
             use_device = None if self._use_cuspy else self.use_device
+            activity_filters = {}
+            profiler_extensions = {}
+            for activity, config in self.activity_configs.items():
+                if config.activity_types is not None:
+                    activity_filters[activity] = set(config.activity_types)
+                profiler_extensions.update(_get_profiler_extensions(config))
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
                 use_device=use_device,
@@ -350,9 +442,8 @@ class _KinetoProfile:
                 acc_events=self.acc_events,
                 custom_trace_id_callback=self.custom_trace_id_callback,
                 post_processing_timeout_s=self.post_processing_timeout_s,
-                activity_filters=self.activity_filters
-                if self.activity_filters
-                else None,
+                activity_filters=activity_filters or None,
+                _profiler_extensions=profiler_extensions,
             )
         if self._use_cuspy:
             from torch.profiler._cuspy.observers.profiler import ProfilerObserver
@@ -1056,7 +1147,10 @@ class profile(_KinetoProfile):
     def __init__(
         self,
         *,
-        activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]]
+        activities: Iterable[
+            ProfilerActivity
+            | dict[ProfilerActivity, list[str] | ProfilerActivityConfig]
+        ]
         | None = None,
         schedule: Callable[[int], ProfilerAction] | None = None,
         on_trace_ready: Callable[..., Any] | None = None,
