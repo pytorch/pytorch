@@ -21,6 +21,7 @@ import collections
 import functools
 import sys
 import types
+import weakref
 from collections.abc import Callable, Iterator
 from typing import Any, cast, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
@@ -58,9 +59,9 @@ from .base import (
     AttributeMutationNew,
     AttrMutationKind,
     GetSet,
-    getset_read,
     Method,
     NO_SUCH_SUBOBJ,
+    readonly_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -76,6 +77,7 @@ from .object_protocol import (
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
+    from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .functions import UserFunctionVariable
@@ -490,7 +492,7 @@ class ConstDictVariable(VariableTracker):
         from .iter import DictIterator
 
         if self.source and not is_constant_source(self.source):
-            install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+            self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
         return DictIterator(self.items)
 
@@ -1227,7 +1229,9 @@ class DictViewVariable(VariableTracker):
     # dictview_mapping getset returns a read-only mappingproxy of the underlying
     # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
     tp_getset = {
-        "mapping": GetSet(getset_read(lambda s: MappingProxyVariable(s.dv_dict))),
+        "mapping": GetSet(
+            lambda s, _: MappingProxyVariable(s.dv_dict), readonly_setter
+        ),
     }
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -1625,8 +1629,22 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
 
     def __init__(self, item: VariableTracker, tx: "InstructionTranslatorBase") -> None:
         self.item = item
-        self.side_effects = tx.output.side_effects
+        self.output_graph_weakref = weakref.ref(tx.output)
         self.item_dict = self.get_value___dict__(tx, item)
+
+    @property
+    def side_effects(self) -> "SideEffects":
+        """
+        Resolved per access, not captured in __init__: speculate_subgraph
+        replaces the table after tracing a HOP body, so a captured one would
+        be stale and its mutations never replayed. It would also form a cycle
+        (the table owns this proxy via store_attr_mutations) that keeps
+        keepalive tensors alive until a full GC.
+        """
+        output_graph = self.output_graph_weakref()
+        if output_graph is None:
+            raise AssertionError("output_graph weakref is dead")
+        return output_graph.side_effects
 
     def _maybe_unwrap_key(self, key: kV) -> str:
         Hasher = HashableTracker
