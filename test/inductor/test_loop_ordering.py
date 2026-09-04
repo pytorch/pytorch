@@ -2461,6 +2461,83 @@ class TestSplitIterationRanges(MockSchedulerTest):
                 [[sympy.Integer(2)], []],
             )
 
+    @staticmethod
+    def _unbacked_size_like():
+        """An unbacked symint constrained size-like, as a sympy symbol."""
+        from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+        symint = V.graph.sizevars.shape_env.create_unbacked_symint()
+        _constrain_range_for_size(symint)
+        return symint.node.expr
+
+    def test_unbacked_leftover_extent_raises_cant_split(self):
+        """Leftover extent is an unbacked size-like symbol.
+
+        Same shape as test_leftover_extent_raises_cant_split, but the
+        unconsumed group extent is unbacked rather than a constant. The
+        leftover check must not try to resolve it to a concrete hint:
+        guarding_hint_or_throw raises GuardOnDataDependentSymNode, which is not
+        a CantSplit, so it escapes the `except CantSplit` in every caller and
+        aborts the whole compile instead of just skipping the fusion.
+        """
+        from torch._inductor.codegen.simd import CantSplit, SIMDKernel
+
+        u0 = self._unbacked_size_like()
+
+        # groups=[2, u0], lengths=[[2], []]: size 2 maps onto group 0, leaving
+        # group 1 (extent u0) unconsumed -> remaining=[1, u0].
+        with self.assertRaises(CantSplit):
+            SIMDKernel._split_iteration_ranges(
+                [sympy.Integer(2), u0],
+                [[sympy.Integer(2)], []],
+            )
+
+    def test_is_compatible_false_for_unbacked_leftover(self):
+        """is_compatible answers False rather than propagating.
+
+        This is the contract _try_reindex_pointwise_for_reduction relies on: it
+        asks is_compatible whether a pointwise can be reindexed onto a
+        reduction's groups and expects a bool back, so anything that escapes
+        turns a skipped fusion into a lowering failure.
+        """
+        from torch._inductor.codegen.simd import SIMDKernel
+
+        u0 = self._unbacked_size_like()
+
+        self.assertFalse(
+            SIMDKernel.is_compatible(
+                [sympy.Integer(2), u0],
+                [[sympy.Integer(2)], []],
+            )
+        )
+
+    def test_backed_leftover_extent_still_splits(self):
+        """A backed leftover extent that resolves to 1 still splits.
+
+        Guards against over-tightening the leftover check to
+        statically_known_equals, which cannot prove s0 == 1 for a backed symbol
+        and would silently stop fusing on every dynamic-shape model. Resolving
+        a backed symbol here is fine, it just installs a guard.
+        """
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.codegen.simd import SIMDKernel
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        s0 = V.graph.sizevars.shape_env.create_symbol(
+            1,
+            ConstantSource("s0"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+            do_not_specialize_zero_one=True,
+        )
+        # Guard the guard: a specialized-away s0 would make this test vacuous.
+        self.assertNotEqual(s0, sympy.Integer(1))
+
+        new_ranges, _ = SIMDKernel._split_iteration_ranges(
+            [sympy.Integer(2), s0],
+            [[sympy.Integer(2)], []],
+        )
+        self.assertEqual(new_ranges[0], [sympy.Integer(2)])
+
 
 class TestIndexInversion(TestCase):
     @classmethod
