@@ -55,6 +55,11 @@ def manual_seed(seed) -> torch._C.Generator:
             `[-0x8000_0000_0000_0000, 0xffff_ffff_ffff_ffff]`. Otherwise, a RuntimeError
             is raised. Negative inputs are remapped to positive values with the formula
             `0xffff_ffff_ffff_ffff + seed`.
+
+    .. seealso::
+        For a stateless, JAX-style PRNG API (explicit ``key``, ``split``,
+        ``fold_in``) that does not touch global generator state, see the
+        experimental :mod:`torch.func._random` module.
     """
     return _manual_seed_impl(seed)
 
