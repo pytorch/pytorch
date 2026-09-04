@@ -118,7 +118,7 @@ MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format = Mem
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
 // Determines whether a tensor is too large to use MPSGraph
-bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI = true);
+bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI = true, bool checkLinearOffset = false);
 
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());

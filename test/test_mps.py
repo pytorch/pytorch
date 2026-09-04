@@ -11068,6 +11068,26 @@ class TestLargeTensors(TestCaseMPS):
         torch.mps.empty_cache()
 
     @serialTest()
+    @largeTensorTest("8GB", device='mps')
+    def test_64bit_cat(self):
+        # https://github.com/pytorch/pytorch/issues/189960
+        # cat chose its int32 kernel from per-dim sizes alone, so an output
+        # with numel > 2**31 but every dim < 2**31 wrapped the kernel's linear
+        # output offset, writing out of bounds and leaving the tail stale.
+        rows, cols_half = 32769, 32768  # output numel = 2**31 + 65536
+        a = torch.ones(rows, cols_half, dtype=torch.int8, device='mps')
+        b = torch.full((rows, cols_half), 2, dtype=torch.int8, device='mps')
+        out = torch.cat([a, b], dim=1)
+        expected_row = torch.cat([torch.ones(cols_half, dtype=torch.int8),
+                                  torch.full((cols_half,), 2, dtype=torch.int8)])
+        boundary_row = (1 << 31) // (2 * cols_half)  # first row past the int32 offset boundary
+        for row in (0, boundary_row - 1, boundary_row, rows - 1):
+            self.assertEqual(out[row].cpu(), expected_row)
+        del a, b, out
+        gc.collect()
+        torch.mps.empty_cache()
+
+    @serialTest()
     def test_rand_4b(self):
         # Used to crash with NDArray dimension length > INT_MAX on MPSGraph;
         # the Metal-kernel path decomposes via `iter.with_32bit_indexing()`.
