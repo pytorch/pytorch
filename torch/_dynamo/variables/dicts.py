@@ -22,7 +22,7 @@ import functools
 import sys
 import types
 from collections.abc import Callable, Iterator
-from typing import Any, cast, TYPE_CHECKING, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING, Union
 
 from torch.utils._pytree import MappingKey
 
@@ -33,13 +33,19 @@ from ..bytecode_transformation import (
     create_dup_top,
     create_instruction,
 )
-from ..exc import raise_observed_exception, raise_type_error, unimplemented
+from ..exc import (
+    raise_observed_exception,
+    raise_type_error,
+    TorchDynamoException,
+    unimplemented,
+)
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
+    is_from_skip_guard_source,
 )
 from ..utils import (
     _item_debug_repr,
@@ -84,6 +90,10 @@ if TYPE_CHECKING:
 # - Implement hash_impl(self, tx) on the VariableTracker subclass (or rely on the
 #   base class default which uses get_real_python_backed_value())
 # - Implement tp_richcompare_impl() for key equality
+
+
+class _StaleInstanceDict(NotImplementedError):
+    """The live instance __dict__ is behind stores Dynamo has already traced."""
 
 
 def pydict_check(obj: VariableTracker) -> bool:
@@ -500,6 +510,11 @@ class ConstDictVariable(VariableTracker):
     ) -> VariableTracker:
         from . import DictBuiltinVariable
 
+        if not self.is_mutable():
+            # Mirrors mp_ass_subscript_impl: a slot cannot decline by returning
+            # None, so hand back to the base, which graph-breaks. Without this
+            # the mutation below asserts internally.
+            return super().tp_init_impl(tx, args, kwargs)
         temp_dict_vt = DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
         tx.output.side_effects.mutation(self)
         self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
@@ -621,7 +636,9 @@ class ConstDictVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
+    ) -> VariableTracker | None:
+        if not self.is_mutable():
+            return None
         self.should_reconstruct_all = True
         tx.output.side_effects.mutation(self)
         self.items.clear()
@@ -790,25 +807,184 @@ class ConstDictVariable(VariableTracker):
         self.install_dict_keys_match_guard()
         return VariableTracker.build(tx, len(self.items))
 
+    def _instance_dict(self, tx: "InstructionTranslatorBase") -> dict[str, Any]:
+        """The real object's instance __dict__.
+
+        Returns an empty dict when this object cannot hold instance attributes
+        or holds none. Raises NotImplementedError when that cannot be
+        established, and _StaleInstanceDict when Dynamo has already traced
+        stores into an aliased tracker for the very same dict. Never conflate
+        the three: "empty" gets baked into the trace, the others must not be.
+        Sole resolver, so every caller applies one policy on which sources are
+        usable.
+        """
+        if self.python_type().__dictoffset__ == 0 or self.source is None:
+            # No tp_dictoffset means no instance attributes are possible. A
+            # sourceless tracker has no source to guard, so it can only be
+            # treated as empty; that is exact for the sites that build a fresh
+            # dict, and unobserved-but-approximate for SourcelessBuilder's
+            # OrderedDict handler, which wraps a pre-existing object.
+            return {}
+
+        # install_guard silently drops a SkipGuardSource guard and no-ops
+        # entirely under skip_guard_install, so a successful call is not proof
+        # that a guard exists. An answer that cannot be guarded must not be
+        # baked into the trace.
+        if (
+            is_from_skip_guard_source(self.source)
+            or tx.output.tracing_context.guards_context.skip_install
+        ):
+            raise NotImplementedError
+
+        try:
+            obj = tx.output.resolve_source_value(self.source)
+            instance_dict = object.__getattribute__(obj, "__dict__")
+        except TorchDynamoException:
+            raise
+        except Exception as e:
+            raise NotImplementedError from e
+
+        # The same dict can also arrive as an ordinary dict argument (e.g. as
+        # the resume function's local after a graph break). Stores into such a
+        # tracker replay only at region exit, so the live dict read above is
+        # stale for the purpose of reading an attribute off the object.
+        aliased = tx.output.side_effects.id_to_variable.get(id(instance_dict))
+        if aliased is not None and tx.output.side_effects.is_modified(aliased):
+            raise _StaleInstanceDict
+        return instance_dict
+
+    def _instance_dict_lookup(self, tx: "InstructionTranslatorBase", name: str) -> Any:
+        """Read *name* out of the real object's instance __dict__ under a guard.
+
+        Returns NO_SUCH_SUBOBJ when the attribute is absent; raises whatever
+        _instance_dict raises. The HASATTR guard covers the absent answer too:
+        that is what makes defining the attribute later recompile.
+        """
+        instance_dict = self._instance_dict(tx)
+        if self.source is not None and self.python_type().__dictoffset__ != 0:
+            try:
+                install_guard(
+                    self.source.make_guard(
+                        functools.partial(GuardBuilder.HASATTR, attr=name)
+                    )
+                )
+            except TorchDynamoException:
+                raise
+            except Exception as e:
+                # make_guard raises for an unguardable source (CONSTANT,
+                # ephemeral) and install_guard for TempLocalSource.
+                raise NotImplementedError from e
+        return instance_dict.get(name, NO_SUCH_SUBOBJ)
+
+    def rebuild_misses_instance_attrs(self, tx: "InstructionTranslatorBase") -> bool:
+        """Whether as_python_constant() would drop instance attributes.
+
+        The rebuilt dict carries none, so this is just "does the real object
+        have any" -- asked of the instance, not the type: an OrderedDict that
+        holds none is reproduced exactly, and gating on the type instead would
+        break every OrderedDict, including nn.Module's hook dicts. Shares
+        _instance_dict's taxonomy rather than repeating it, so this and
+        _instance_dict_lookup can never disagree about which sources are usable
+        or about a stale aliased dict. A False answer gets baked into the
+        trace, so it is only given once the instance dict's key set is guarded.
+        """
+        try:
+            if self._instance_dict(tx):
+                return True
+            self._install_instance_dict_keys_guard()
+            return False
+        except NotImplementedError:
+            # Includes _StaleInstanceDict. Cannot establish it is safe, so
+            # assume the worst; every attribute query on this tracker declines
+            # too, so no frame ends up with two contradictory answers.
+            return True
+
+    def _install_instance_dict_keys_guard(self) -> None:
+        """Guard the key set of this object's instance __dict__, so that the
+        object gaining an attribute recompiles. Raises NotImplementedError when
+        the source cannot carry the guard, like _instance_dict_lookup, so the
+        caller declines instead of baking in an unguarded answer.
+        """
+        if self.source is None or self.python_type().__dictoffset__ == 0:
+            return
+        try:
+            install_guard(
+                AttrSource(self.source, "__dict__").make_guard(
+                    GuardBuilder.DICT_KEYS_MATCH
+                )
+            )
+        except TorchDynamoException:
+            raise
+        except Exception as e:
+            raise NotImplementedError from e
+
+    def _unimplemented_stale_read(self, name: str) -> NoReturn:
+        unimplemented(
+            gb_type="stale instance __dict__ read",
+            context=f"{self.python_type()}.{name}",
+            explanation=(
+                "The instance __dict__ of this object has pending stores that "
+                "only replay when the compiled region exits, so reading the "
+                "attribute now would see a stale value."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        try:
+            subobj = self._instance_dict_lookup(tx, name)
+        except _StaleInstanceDict:
+            # Deferring here would be a wrong answer, not a deferral:
+            # restore_stack rebuilds a GetAttrVariable BEFORE
+            # codegen_update_mutated replays the pending stores, so the read
+            # would still observe the pre-replay dict.
+            self._unimplemented_stale_read(name)
+        except NotImplementedError:
+            # Undeterminable (unguardable source, guards suppressed): fall
+            # through to generic_getattr's GetAttrVariable, i.e. what dicts did
+            # before this hook existed. That defers the read to runtime rather
+            # than answering "absent".
+            return None
+        if subobj is NO_SUCH_SUBOBJ or self.source is None:
+            return None
+        return VariableTracker.build(tx, subobj, AttrSource(self.source, name))
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
-        # dict not allow setting arbitrary attributes.  OrderedDict and
-        # defaultdict allow arbitrary setattr, but not deletion of default attrs
+        # No _hasattr_check_side_effects() here: it needs is_attribute_mutation,
+        # and dict trackers carry ValueMutation, so it can never fire. This is
+        # only safe while setattr on a dict tracker always graph-breaks; if that
+        # gains support, hasattr will silently disagree with getattr unless a
+        # pending-store consult is added here.
+        #
+        # Only a type with a non-zero tp_dictoffset (OrderedDict) can hold
+        # instance attributes; for a plain dict the class alone decides.
+        # collections.defaultdict is absent on purpose: it is modelled by
+        # DefaultDictVariable(UserDefinedDictVariable) and never reaches here.
         cls = self.python_type()
-        if any(
-            cls is t for t in (dict, collections.OrderedDict, collections.defaultdict)
-        ):
-            if hasattr(cls, name):
-                return ConstantVariable.create(True)
-            if cls is dict:
-                return ConstantVariable.create(False)
+        if name == "__dict__":
+            # Asking the class would answer from type.__dict__, which every
+            # class has; the instance only has one when tp_dictoffset != 0.
+            return ConstantVariable.create(cls.__dictoffset__ != 0)
+        if hasattr(cls, name):
+            return ConstantVariable.create(True)
+        try:
+            found = self._instance_dict_lookup(tx, name) is not NO_SUCH_SUBOBJ
+        except _StaleInstanceDict:
+            self._unimplemented_stale_read(name)
+        except NotImplementedError:
+            pass
+        else:
+            return ConstantVariable.create(found)
 
-        msg = f"hasattr on {cls} is not supported"
+        reason = "the instance __dict__ could not be read under a guard"
         unimplemented(
             gb_type="unsupported hasattr operation",
-            context=f"Class {cls}",
-            explanation=msg,
+            context=f"hasattr({cls.__name__}, {name!r}): {reason}",
+            explanation=f"hasattr on {cls} is not supported: {reason}",
             hints=[
                 "Consider using a regular dictionary instead",
                 *graph_break_hints.SUPPORTABLE,
@@ -857,6 +1033,28 @@ class ConstDictVariable(VariableTracker):
         return eq_result
 
     def tp_getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
+        if name == "__dict__" and self.python_type().__dictoffset__ != 0:
+            # Dynamo cannot soundly model the instance __dict__ as a view: reuse
+            # of an already-tracked dict under a source of mismatching locality
+            # is unguarded (make_dupe_guard's TODO(voz), guards.py:5769), so the
+            # view's stores can replay onto the wrong object.
+            # NB: bespoke dispatch rather than a tp_getset entry, because the
+            # tp_getset/tp_members migration has not reached ConstDictVariable
+            # yet (MappingProxyVariable below already has a table).
+            unimplemented(
+                gb_type="unsupported __dict__ access on a dict subclass",
+                context=f"{self.python_type()}.__dict__",
+                explanation=(
+                    "Dynamo cannot model the instance __dict__ of a dict "
+                    "subclass as a view; stores through it are not guaranteed "
+                    "to reach the right object."
+                ),
+                hints=[
+                    "Use attribute access instead of the __dict__ mapping.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
         # DictGuardManager does not support getattr_manager for plain dicts,
         # so AttrSource chains through a dict source break guard creation.
         # Return CallMethodVariable directly for methods, bypassing the
@@ -875,12 +1073,19 @@ class OrderedDictVariable(ConstDictVariable):
     # OrderedDict exposes no tp_getset / tp_members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
 
+    # NB: both mutators below need the is_mutable() gate their dict siblings
+    # have. Immutable OrderedDictVariables are reachable, e.g. nn.Module hook
+    # dicts (nn_module.py builds NNModuleHooksDictVariable with no
+    # mutation_type); without the gate they assert inside
+    # side_effects.mutation() instead of graph-breaking.
     def move_to_end(
         self: "OrderedDictVariable",
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
+    ) -> VariableTracker | None:
+        if not self.is_mutable():
+            return None
         self.install_dict_keys_match_guard()
         tx.output.side_effects.mutation(self)
         if args[0] not in self:
@@ -900,7 +1105,9 @@ class OrderedDictVariable(ConstDictVariable):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
+    ) -> VariableTracker | None:
+        if not self.is_mutable():
+            return None
         if not self.items:
             raise_observed_exception(
                 KeyError, tx, args=["popitem(): dictionary is empty"]
