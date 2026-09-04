@@ -20,10 +20,11 @@ void THXPMemPool_init(PyObject* module) {
           [](std::shared_ptr<c10::xpu::XPUCachingAllocator::XPUAllocator>
                  allocator,
              bool is_user_created,
-             bool use_on_oom) {
+             bool use_on_oom,
+             bool no_split) {
             torch::utils::device_lazy_init(at::kXPU);
             return std::make_shared<::at::xpu::MemPool>(
-                std::move(allocator), is_user_created, use_on_oom);
+                std::move(allocator), is_user_created, use_on_oom, no_split);
           }))
       .def_property_readonly("id", &::at::xpu::MemPool::id)
       .def("use_count", &::at::xpu::MemPool::use_count);
