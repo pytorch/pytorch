@@ -38,7 +38,7 @@ from ..utils import (
     tracked_repr,
     unpack_iterable,
 )
-from .base import Member, Method, ValueMutationNew, VariableTracker
+from .base import Member, Method, readonly_setter, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
 
@@ -874,7 +874,7 @@ class OrderedSetVariable(SetVariable):
 
         return ConstDictVariable(self.items, mutation_type=ValueMutationNew())  # type: ignore[bad-argument-type]
 
-    tp_members = {"_dict": Member(_get_internal_dict, None)}
+    tp_members = {"_dict": Member(_get_internal_dict, readonly_setter)}
 
     def debug_repr(self) -> str:
         if not self.items:

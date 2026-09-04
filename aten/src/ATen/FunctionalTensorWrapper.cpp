@@ -3,10 +3,11 @@
 
 #include <ATen/core/IListRef.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
 
 #include <c10/util/irange.h>
+
+#include <atomic>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -794,17 +795,29 @@ void mutate_view_meta(const at::Tensor& self, const std::shared_ptr<functionaliz
   self_impl->mutate_view_meta(meta);
 }
 
+namespace {
+// Constant-initialized, so registering from another translation unit's static
+// initializer cannot race with this one's construction.
+std::atomic<MultiOutputViewMarker> multi_output_view_marker{nullptr};
+}
+
+void setMultiOutputViewMarker(MultiOutputViewMarker fn) {
+  multi_output_view_marker.store(fn, std::memory_order_release);
+}
+
 Tensor apply_view_meta_sequence(
     const Tensor& base,
     const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence) {
   Tensor r = base;
   for (auto& vm : sequence) {
     r = vm->forward(r);
-    if (vm->is_multi_output && at::impl::HasVariableHooks()) {
+    if (vm->is_multi_output) {
       // See [Note: multi-output view replay]. `forward` rebuilt this output as
       // a single-output view, so autograd does not know it came from an op
       // returning several views and would let the user mutate it in place.
-      at::impl::GetVariableHooks()->mark_multi_output_view(r);
+      if (auto mark = multi_output_view_marker.load(std::memory_order_acquire)) {
+        mark(r);
+      }
     }
   }
   return r;

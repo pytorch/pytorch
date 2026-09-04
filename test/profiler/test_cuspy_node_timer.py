@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: profiler"]
 """Tests for ``NodeTimerObserver`` -- the minimal always-on per-graph-node timing
-consumer of the CUPTI monitor. Collection runs through the monitor, so these need
-CUDA + libcupti >= 13.3 (gated the same way as the rest of the monitor suite)."""
+consumer of Cuspy. Collection runs through Cuspy, so these need
+CUDA + libcupti >= 13.3 (gated the same way as the rest of the Cuspy suite)."""
 
 import unittest
 
@@ -31,8 +31,8 @@ def _capture_relu_graph() -> "torch.cuda.CUDAGraph":
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
-class TestCuptiNodeTimerCUDA(TestCase):
-    """NodeTimerObserver collection through the CUPTI monitor (not via profile)."""
+class TestCuspyNodeTimerCUDA(TestCase):
+    """NodeTimerObserver collection through Cuspy (not via profile)."""
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_node_timer_collects_kernel_spans(self):
@@ -41,11 +41,11 @@ class TestCuptiNodeTimerCUDA(TestCase):
         # (graph_node_id, start, end) numpy columns. Eager kernels share node 0.
         import numpy as np
 
-        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
 
         obs = NodeTimerObserver()
         if not obs.available:
-            self.skipTest("CUPTI monitor unavailable (v2 subscribe failed)")
+            self.skipTest("Cuspy unavailable (v2 subscribe failed)")
         try:
             x = torch.randn(256, 256, device="cuda")
             for _ in range(4):
@@ -53,8 +53,8 @@ class TestCuptiNodeTimerCUDA(TestCase):
             x.sum().item()
             torch.cuda.synchronize()
             # drain()'s own flush is plain/best-effort, so deterministically deliver
-            # everything via the monitor's sync flush, then drain.
-            obs._monitor.flush(sync=True)
+            # everything via Cuspy's sync flush, then drain.
+            obs._cuspy.flush(sync=True)
             gnode, start, end, stream = obs.drain()
             # drain() resets; with no new work the next drain is empty.
             _, start2, _, _ = obs.drain()
@@ -77,14 +77,14 @@ class TestCuptiNodeTimerCUDA(TestCase):
         # With eager naming on (default), eager kernels bracketed by annotate(name) resolve
         # to that region via the correlation_id -> external_id -> name join, and
         # drain_annotated() returns {name: [(start, end), ...]}.
-        from torch.profiler._cupti.observers.base import ObserverAnnotationSettings
-        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+        from torch.profiler._cuspy.observers.base import ObserverAnnotationSettings
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
 
         obs = NodeTimerObserver(
             annotations=ObserverAnnotationSettings(support_eager_annotations=True)
         )
         if not obs.available:
-            self.skipTest("CUPTI monitor unavailable (v2 subscribe failed)")
+            self.skipTest("Cuspy unavailable (v2 subscribe failed)")
         try:
             x = torch.randn(128, 128, device="cuda")
             with obs.annotate("regionA"):
@@ -93,7 +93,7 @@ class TestCuptiNodeTimerCUDA(TestCase):
                 x.sum().item()
                 torch.cuda.synchronize()
             # drain_annotated()'s flush is best-effort; deliver deterministically first.
-            obs._monitor.flush(sync=True)
+            obs._cuspy.flush(sync=True)
             spans = obs.drain_annotated()
         finally:
             obs.close()
@@ -108,17 +108,17 @@ class TestCuptiNodeTimerCUDA(TestCase):
         # A kernel launched under an inner (unnamed) external-correlation push -- as a
         # collective would push, leaf and innermost -- nested inside a named region
         # still resolves to that region. The single-kind record carries only the inner
-        # id; node_timer recovers the enclosing region from the monitor's active-id
+        # id; node_timer recovers the enclosing region from Cuspy's active-id
         # chain at dispatch.
-        from torch.profiler._cupti.observers.base import ObserverAnnotationSettings
-        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+        from torch.profiler._cuspy.observers.base import ObserverAnnotationSettings
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
 
         obs = NodeTimerObserver(
             annotations=ObserverAnnotationSettings(support_eager_annotations=True)
         )
         if not obs.available:
-            self.skipTest("CUPTI monitor unavailable (v2 subscribe failed)")
-        mon = obs._monitor
+            self.skipTest("Cuspy unavailable (v2 subscribe failed)")
+        mon = obs._cuspy
         try:
             x = torch.randn(128, 128, device="cuda")
             with obs.annotate("outer"):
@@ -146,18 +146,18 @@ class TestCuptiNodeTimerCUDA(TestCase):
     def test_node_timer_drain_annotated_unnamed_bucket(self):
         # With no annotations configured, drain_annotated() doesn't drop or raise --
         # every span lands in the "" bucket.
-        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
 
         obs = NodeTimerObserver()
         if not obs.available:
-            self.skipTest("CUPTI monitor unavailable (v2 subscribe failed)")
+            self.skipTest("Cuspy unavailable (v2 subscribe failed)")
         try:
             x = torch.randn(128, 128, device="cuda")
             for _ in range(3):
                 x = torch.relu(x @ x)
             x.sum().item()
             torch.cuda.synchronize()
-            obs._monitor.flush(sync=True)
+            obs._cuspy.flush(sync=True)
             spans = obs.drain_annotated()
         finally:
             obs.close()
@@ -172,19 +172,19 @@ class TestCuptiNodeTimerCUDA(TestCase):
         # consumers can key per-node timing. NodeTimerObserver must surface those ids.
         import numpy as np
 
-        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
 
         obs = NodeTimerObserver()
         if not obs.available:
-            self.skipTest("CUPTI monitor unavailable (v2 subscribe failed)")
+            self.skipTest("Cuspy unavailable (v2 subscribe failed)")
         try:
             g = _capture_relu_graph()
-            obs._monitor.flush(sync=True)
+            obs._cuspy.flush(sync=True)
             obs.drain()  # discard warmup spans; keep only the replayed graph nodes
             for _ in range(3):
                 g.replay()
             torch.cuda.synchronize()
-            obs._monitor.flush(sync=True)
+            obs._cuspy.flush(sync=True)
             gnode, start, end, stream = obs.drain()
         finally:
             obs.close()
@@ -202,8 +202,8 @@ class TestCuptiNodeTimerCUDA(TestCase):
         # Graph-first naming: a graph_annotation_resolver maps each captured node id to
         # a region name, and drain_annotated() buckets the replayed spans under it --
         # no extra record kinds, and it survives replay (unlike the eager join).
-        from torch.profiler._cupti.observers.base import ObserverAnnotationSettings
-        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+        from torch.profiler._cuspy.observers.base import ObserverAnnotationSettings
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
 
         obs = NodeTimerObserver(
             annotations=ObserverAnnotationSettings(
@@ -215,15 +215,15 @@ class TestCuptiNodeTimerCUDA(TestCase):
             )
         )
         if not obs.available:
-            self.skipTest("CUPTI monitor unavailable (v2 subscribe failed)")
+            self.skipTest("Cuspy unavailable (v2 subscribe failed)")
         try:
             g = _capture_relu_graph()
-            obs._monitor.flush(sync=True)
+            obs._cuspy.flush(sync=True)
             obs.drain_annotated()  # discard warmup spans
             for _ in range(3):
                 g.replay()
             torch.cuda.synchronize()
-            obs._monitor.flush(sync=True)
+            obs._cuspy.flush(sync=True)
             spans = obs.drain_annotated()
         finally:
             obs.close()
@@ -242,20 +242,20 @@ class TestCuptiNodeTimerCUDA(TestCase):
         # enables MEMCPY -- a cross-device copy_ then drains as a timed span.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
 
         obs = NodeTimerObserver(kinds=(ActivityKind.MEMCPY2,))
         # MEMCPY2 pulls in MEMCPY implicitly (else CUPTI emits no MEMCPY2 records).
         self.assertIn(int(ActivityKind.MEMCPY), {int(k) for k in obs._kinds})
         if not obs.available:
-            self.skipTest("CUPTI monitor unavailable (v2 subscribe failed)")
+            self.skipTest("Cuspy unavailable (v2 subscribe failed)")
         try:
             a = torch.randn(1024, 1024, device="cuda:0")
             b = torch.empty(1024, 1024, device="cuda:1")
             for _ in range(4):
                 b.copy_(a)
             torch.cuda.synchronize()
-            obs._monitor.flush(sync=True)
+            obs._cuspy.flush(sync=True)
             gnode, start, end, stream = obs.drain()
         finally:
             obs.close()
@@ -275,7 +275,7 @@ class TestNodeTimerBucketName(TestCase):
     ``_cupti_stubs``, which is what TEST_CUPTI gates on."""
 
     def test_shapes(self):
-        from torch.profiler._cupti.observers.node_timer import _bucket_name
+        from torch.profiler._cuspy.observers.node_timer import _bucket_name
 
         self.assertEqual(_bucket_name({"name": "region", "stream": 61}), "region")
         self.assertEqual(_bucket_name("region"), "region")

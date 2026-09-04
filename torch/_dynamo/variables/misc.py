@@ -80,6 +80,9 @@ from .base import (
     Member,
     Method,
     NO_SUCH_SUBOBJ,
+    readonly_setter,
+    Setter,
+    unmodeled_setter,
     VariableTracker,
 )
 from .constant import ConstantVariable
@@ -2384,7 +2387,9 @@ class ContextVarVariable(VariableTracker):
         "reset": Method(reset),
     }
     # contextvars.ContextVar.name is a read-only member.
-    tp_members = {"name": Member(getset_build(lambda s: s.cv_obj.name))}
+    tp_members = {
+        "name": Member(getset_build(lambda s: s.cv_obj.name), readonly_setter)
+    }
 
 
 class RandomClassVariable(VariableTracker):
