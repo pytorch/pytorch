@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 import random
 from typing import NamedTuple, TypeAlias
 
@@ -481,7 +480,9 @@ def fuzz_non_contiguous_dense_tensor(
     return tensor
 
 
-def fuzz_scalar(spec, seed: int | None = None) -> float | int | bool | complex:
+def fuzz_scalar(
+    spec: ScalarSpec, seed: int | None = None
+) -> float | int | bool | complex:
     """
     Create a Python scalar value from a ScalarSpec.
 
