@@ -452,12 +452,22 @@ void nccl_reduce_scatter_offset(
           if (use_multimem) {
             reduce_scatter_offset_kernel<scalar_t, true>
                 <<<ctas_j, RS_THREADS_PER_CTA, 0, stream>>>(
-                    window, info, fixed_dim_size, col_sharded, outer_stride, devcomm);
+                    window,
+                    info,
+                    fixed_dim_size,
+                    col_sharded,
+                    outer_stride,
+                    devcomm);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           } else {
             reduce_scatter_offset_kernel<scalar_t, false>
                 <<<ctas_j, RS_THREADS_PER_CTA, 0, stream>>>(
-                    window, info, fixed_dim_size, col_sharded, outer_stride, devcomm);
+                    window,
+                    info,
+                    fixed_dim_size,
+                    col_sharded,
+                    outer_stride,
+                    devcomm);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           }
         }
