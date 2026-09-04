@@ -24,6 +24,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model_gpu,
     copy_tests,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import skipCUDAIf
 
 
@@ -339,6 +340,7 @@ class BinaryFoldingTemplate(TestCase):
 if HAS_CPU and not torch.backends.mps.is_available():
 
     class FreezingCpuTests(TestCase):
+        hw_classification = HardwareClassification.CPU
         common = check_model
         device = "cpu"
         autocast = torch.cpu.amp.autocast
@@ -380,6 +382,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 if HAS_GPU:
 
     class FreezingGpuTests(TestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
         common = check_model_gpu
         device = GPU_TYPE
         autocast = torch.amp.autocast(device_type=GPU_TYPE)
