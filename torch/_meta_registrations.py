@@ -3658,7 +3658,7 @@ def meta_avg_pool3d_backward(
 
 @register_meta(aten._adaptive_avg_pool2d.default)
 def meta_adaptive_avg_pool2d(self, output_size):
-    torch._check(
+    torch._check_value(
         self.ndim == 3 or self.ndim == 4,
         lambda: f"Expected 3D or 4D tensor, but got {self.shape}",
     )
@@ -3692,11 +3692,11 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
             lambda: f"adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero \
                       size for non-batch dimensions, {grad_out.shape} with dimension {i} being empty",
         )
-    torch._check(
+    torch._check_value(
         ndim == 3 or ndim == 4,
         lambda: f"adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got {self.shape}",
     )
-    torch._check(
+    torch._check_value(
         self.dtype == grad_out.dtype,
         lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}",
     )

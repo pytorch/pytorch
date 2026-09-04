@@ -823,7 +823,21 @@ class TestPoolingNNDevice(NNTestCase):
     def test_adaptive_avg_pooling_backward_fails(self, device):
         grad_output = torch.randn(1, 2, 7, device=device)
         input = torch.randn(1, 2, 3, 3, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected dimensions"):
+        with self.assertRaisesRegex(ValueError, "Expected dimensions"):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
+
+        grad_output = torch.randn(1, 3, 7, 7, device=device)
+        input = torch.randn(1, 2, 3, 3, device=device)
+        with self.assertRaisesRegex(ValueError, "must have the same size at dim"):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
+
+        # channels_last takes the channel count from input and strides
+        # grad_output with it, so it runs off grad_output rather than grad_input
+        grad_output = torch.randn(1, 2, 7, 7, device=device)
+        grad_output = grad_output.to(memory_format=torch.channels_last)
+        input = torch.randn(1, 3, 3, 3, device=device)
+        input = input.to(memory_format=torch.channels_last)
+        with self.assertRaisesRegex(ValueError, "must have the same size at dim"):
             torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
 
         grad_output = torch.randn(1, 2, 7, 7, device=device)

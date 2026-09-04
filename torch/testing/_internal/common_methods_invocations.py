@@ -3563,7 +3563,9 @@ def error_inputs_adaptive_avg_pool1d(opinfo, device, **kwargs):
                      error_regex="'output_size' should contain one int")
 
     # error inputs for output_size lesser than 0
+    # adaptive_avg_pool1d forwards to adaptive_avg_pool2d, which raises ValueError
     yield ErrorInput(SampleInput(make_arg((1, 1, 1)), output_size=(-1,)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
@@ -3595,10 +3597,11 @@ def error_inputs_adaptive_avg_pool2d(opinfo, device, **kwargs):
 
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), output_size=()),
-                     error_regex="output_size must be 2")
+                     error_type=ValueError, error_regex="output_size must be 2")
 
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1)), output_size=(-1, 0)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 
