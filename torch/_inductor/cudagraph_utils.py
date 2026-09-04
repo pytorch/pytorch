@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, Literal, TYPE_CHECKING, TypeVar
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters, get_metrics_context
 from torch._inductor.utils import GraphPartitionMap, InputType
 from torch._subclasses.fake_tensor import get_plain_tensors, is_fake
@@ -340,6 +341,21 @@ def _get_use_stack_trace(node: torch.fx.Node) -> str | None:
     return None
 
 
+def _graph_capture_device_type() -> str:
+    """Device type driving cudagraph capture in this process (cudagraph trees
+    assumes a single accelerator per process); falls back to "cuda" when no
+    accelerator is available.
+
+    CUDA takes priority whenever it is available: current_accelerator()
+    prefers a registered PrivateUse1 backend, so on a CUDA machine that merely
+    imported an out-of-tree backend library the CUDA cudagraph path must not
+    be rerouted through the accelerator branch."""
+    if torch.cuda.is_available():
+        return "cuda"
+    acc = torch.accelerator.current_accelerator()
+    return acc.type if acc is not None else "cuda"
+
+
 def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> str | None:
@@ -362,25 +378,42 @@ def check_multiple_devices_or_any_cpu_nodes(
         len(device_node_mapping) == 1
         and next(iter(device_node_mapping.keys())).type == "cuda"
     ):
+        # NB: this CUDA-only check is what actually keeps DeviceInterface.
+        # GraphOps's device-agnostic capture path (torch/_dynamo/
+        # device_interface.py) unreachable for other backends today - it is
+        # not itself a capability gate for GraphOps, it just happens to
+        # only admit backends GraphOps already fully supports (CUDA).
+        # Relaxing this to admit other device types is deliberately out of
+        # scope here; see the GraphOps class docstring for what needs to
+        # happen first (a real is_supported()-style probe) before this can
+        # safely change.
         return None
 
     keys_repr = (repr(key) for key in device_node_mapping)
     return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")
 
 
-def check_caching_allocator_for_cudagraphs() -> str | None:
+def check_caching_allocator_for_cudagraphs(
+    device_type: str | None = None,
+) -> str | None:
     """Skip cudagraphs when the CUDA/HIP caching allocator is disabled
     (via ``torch.cuda.caching_allocator_enable(False)`` or the env-var
     bypass ``PYTORCH_NO_(CUDA|HIP)_MEMORY_CACHING``). Cudagraph capture
     pools allocations through the caching allocator; with it bypassed,
     capture appears to succeed but pool tracking diverges (see
     check_memory_pool in cudagraph_trees.py), surfacing as 'storage data
-    ptrs not allocated in pool ...' at replay time."""
-    if (
-        torch.cuda.is_available()
-        # pyrefly: ignore [missing-attribute]
-        and not torch._C._cuda_cudaCachingAllocator_is_enabled()
-    ):
+    ptrs not allocated in pool ...' at replay time.
+
+    device_type: the device actually being lowered, when the caller has it
+    (e.g. from a real device_node_mapping). Falls back to the process-global
+    heuristic only when the caller has no better answer."""
+    try:
+        di = get_interface_for_device(device_type or _graph_capture_device_type())
+    except NotImplementedError:
+        # Accelerators without a registered DeviceInterface were silently
+        # ignored by the previous CUDA-only check; keep that behavior.
+        return None
+    if di.is_available() and not di.GraphOps.caching_allocator_enabled():
         return format_default_skip_message(
             "cudagraph capture requires the caching allocator; "
             "current allocator is uncached"
@@ -391,10 +424,13 @@ def check_caching_allocator_for_cudagraphs() -> str | None:
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> str | None:
-    return (
-        check_caching_allocator_for_cudagraphs()
-        or check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
+    device_type = next(
+        (d.type for d in device_node_mapping if d.type not in ("cpu", "meta")),
+        None,
     )
+    return check_caching_allocator_for_cudagraphs(
+        device_type
+    ) or check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
 
 
 def log_cudagraph_skip_and_bump_counter(msg: str) -> None:

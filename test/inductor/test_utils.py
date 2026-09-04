@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import builtins
+import contextlib
 import importlib.util
 import os
 import sys
@@ -13,12 +14,14 @@ from unittest import mock
 from sympy import I, Max, Min, Symbol, sympify
 
 import torch
-from torch._dynamo.device_interface import DeviceInterface
+from torch._dynamo import device_interface as device_interface_module
+from torch._dynamo.device_interface import CudaInterface, DeviceInterface
 from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor import config as inductor_config
 from torch._inductor.compile_fx import _get_subgraph_names
+from torch._inductor.cudagraph_trees import CUDAGraphTreeManager
 from torch._inductor.fx_utils import (
     _is_fake_tensor_same,
     count_flops_fx,
@@ -41,6 +44,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TestCase,
     xfailIfNoAcceleratorTriton,
@@ -1259,6 +1263,126 @@ class TestHasTriton(TestCase):
         # if the ordering regresses, _GPUTooOldForTriton escapes instead of False.
         iface = _make_triton_interface(capable=False, raise_exc=_GPUTooOldForTriton())
         self.assertFalse(self._run([("fake", iface)]))
+
+
+class TestGraphOpsContract(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_base_graph_ops_defaults(self):
+        ops = DeviceInterface.GraphOps
+        # Safe defaults for backends that have not been adapted.
+        self.assertTrue(ops.caching_allocator_enabled())
+        self.assertIsNone(ops.memory_snapshot())
+        with self.assertRaises(NotImplementedError):
+            ops.graph_pool_handle()
+
+    def test_base_make_graph_uses_accelerator_graph(self):
+        # Backends without an override construct the registry-backed
+        # accelerator graph, carrying the pool at construction time.
+        # capture_error_mode="default" because it is the only mode every
+        # GraphImplInterface is required to support (e.g. XPUGraphImpl warns
+        # and falls back to default for anything else).
+        with mock.patch(
+            "torch.accelerator.Graph", return_value=mock.sentinel.graph
+        ) as graph_cls:
+            result = DeviceInterface.GraphOps.make_graph((1, 2))
+        self.assertIs(result, mock.sentinel.graph)
+        graph_cls.assert_called_once_with(pool=(1, 2), capture_error_mode="default")
+
+    def test_base_capture_context_enters_stream_then_graph(self):
+        # The base capture context switches to the capture stream first, then
+        # enters the graph object (which is itself the capture context).
+        order = []
+        stream = mock.MagicMock()
+        stream.__enter__.side_effect = lambda *a: order.append("stream")
+        graph = mock.MagicMock()
+        graph.__enter__.side_effect = lambda *a: order.append("graph")
+        with DeviceInterface.GraphOps.capture_context(graph, stream, None):
+            self.assertEqual(order, ["stream", "graph"])
+        self.assertTrue(stream.__exit__.called)
+        self.assertTrue(graph.__exit__.called)
+
+    def test_cuda_graph_ops_forward_to_legacy_capture(self):
+        # CUDA must keep its legacy CUDAGraph object and torch.cuda.graph
+        # capture context, with pool/capture_error_mode passed at capture time.
+        with mock.patch(
+            "torch.cuda.CUDAGraph", return_value=mock.sentinel.cuda_graph
+        ) as graph_cls:
+            self.assertIs(
+                CudaInterface.GraphOps.make_graph((1, 2)), mock.sentinel.cuda_graph
+            )
+        graph_cls.assert_called_once_with()
+
+        with mock.patch(
+            "torch.cuda.graph", return_value=mock.sentinel.capture_cm
+        ) as capture:
+            result = CudaInterface.GraphOps.capture_context(
+                mock.sentinel.cuda_graph, mock.sentinel.stream, (1, 2)
+            )
+        self.assertIs(result, mock.sentinel.capture_cm)
+        capture.assert_called_once_with(
+            mock.sentinel.cuda_graph,
+            stream=mock.sentinel.stream,
+            pool=(1, 2),
+            capture_error_mode="thread_local",
+        )
+
+    def test_manager_init_drives_pool_handle_then_make_graph_then_capture(self):
+        # Integration test: registers a stub DeviceInterface (no real
+        # hardware, no CUDA/XPU GraphOps override) and constructs a real
+        # CUDAGraphTreeManager, exercising the actual
+        # graph_pool_handle -> make_graph -> capture_context call chain
+        # (only torch.accelerator.Graph itself is mocked). This is what
+        # would have caught the base make_graph's capture_error_mode
+        # regressing, or graph_pool_handle no longer running before
+        # make_graph.
+        calls = []
+
+        class _FakeGraphOps(DeviceInterface.GraphOps):
+            @staticmethod
+            def graph_pool_handle():
+                calls.append("graph_pool_handle")
+                return (11, 22)
+
+        class _FakeGraphInterface(DeviceInterface):
+            device = contextlib.nullcontext
+            Stream = mock.MagicMock
+            GraphOps = _FakeGraphOps
+
+            @staticmethod
+            def synchronize(device=None):
+                pass
+
+            @staticmethod
+            def current_stream():
+                return mock.MagicMock()
+
+        fake_graph = mock.MagicMock(name="fake_graph")
+        # Ensure the real registry is already initialized before we patch it:
+        # get_interface_for_device() lazily calls init_device_reg() on first
+        # use, and init_device_reg() writes into whatever dict object
+        # "device_interfaces" currently names. Patching in a temporary dict
+        # (via mock.patch.dict below) before that first lazy init would let
+        # init_device_reg() populate the temporary dict instead of the real
+        # one, then set the module's "already initialized" flag — silently
+        # and permanently breaking every real device lookup for the rest of
+        # the process once the patch is undone.
+        device_interface_module.get_interface_for_device("cpu")
+        self.addCleanup(torch._C._set_cached_tensors_enabled, False)
+        with (
+            mock.patch.dict(
+                device_interface_module.device_interfaces,
+                {"fakegraphdev": _FakeGraphInterface},
+            ),
+            mock.patch("torch.accelerator.Graph", return_value=fake_graph) as graph_cls,
+        ):
+            manager = CUDAGraphTreeManager(device_index=0, device_type="fakegraphdev")
+
+        self.assertEqual(calls, ["graph_pool_handle"])
+        graph_cls.assert_called_once_with(pool=(11, 22), capture_error_mode="default")
+        self.assertIs(manager.graph, fake_graph)
+        self.assertTrue(fake_graph.__enter__.called)
+        self.assertTrue(fake_graph.__exit__.called)
 
 
 if __name__ == "__main__":

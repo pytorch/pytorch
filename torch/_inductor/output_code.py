@@ -284,6 +284,7 @@ def cudagraph_post_compile(
         device_index = next(iter(compiled_graph.device_idxs))
         cudagraphify_kwargs = dict(
             device_index=device_index,
+            device_type=compiled_graph.device_type,
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
@@ -414,6 +415,7 @@ def cudagraph_partition_post_compile(
             cudagraphify,
             static_input_idxs=tuple(partition_metadata.static_input_idxs),
             device_index=device_index,
+            device_type=compiled_graph.device_type,
             stack_traces=partition_metadata.stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
@@ -531,6 +533,7 @@ class CompiledFxGraph(OutputCode):
     cache_linemap: list[tuple[int, str]] | None
     device_types: OrderedSet[str]
     device_idxs: OrderedSet[int]
+    device_type: str
     mutated_inputs: OrderedSet[str]
     mutated_input_idxs: OrderedSet[int]
     constants: dict[str, torch.Tensor] | None
@@ -611,6 +614,7 @@ class CompiledFxGraph(OutputCode):
         # TODO - ordered set
         self.device_types = OrderedSet(graph.device_types)
         self.device_idxs = OrderedSet(graph.device_idxs)
+        self.device_type = graph.device_type
         self.mutated_inputs = OrderedSet(graph.mutated_inputs)
         self.mutated_input_idxs = OrderedSet(graph.mutated_input_idxs)
 

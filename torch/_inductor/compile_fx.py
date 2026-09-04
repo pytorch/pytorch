@@ -2209,6 +2209,7 @@ def cudagraphify(
     static_input_idxs: Sequence[int] = (),
     *,
     device_index: int,
+    device_type: str = "cuda",
     stack_traces: list[str | None],
     is_backward: bool,
     is_inference: bool,
@@ -2227,6 +2228,7 @@ def cudagraphify(
         cudagraphify_fn = functools.partial(
             new_cudagraphify_impl,
             device_index=device_index,
+            device_type=device_type,
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
@@ -2240,6 +2242,7 @@ def cudagraphify(
     else:
         cudagraphify_fn = functools.partial(
             cudagraphify_impl,
+            device_type=device_type,
             kernel_free_cudagraph=kernel_free_cudagraph,
         )
 
@@ -2285,6 +2288,7 @@ def cudagraphify_impl(
     inputs: list[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
     *,
+    device_type: str = "cuda",
     kernel_free_cudagraph: bool = False,
 ) -> Callable[[list[InputType]], Any]:
     """
@@ -2325,20 +2329,26 @@ def cudagraphify_impl(
         if isinstance(x, torch.Tensor) and idx not in static_input_idxs:
             index_expanded_dims_and_copy_(static_inputs[idx], x, expanded_dims)
 
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    device_interface = get_interface_for_device(device_type)
+
     # warmup
-    torch.cuda.synchronize()
-    stream = torch.cuda.Stream()
-    stream.wait_stream(torch.cuda.current_stream())
+    device_interface.synchronize()
+    stream = device_interface.Stream()
+    stream.wait_stream(device_interface.current_stream())
     # copy static_inputs because it will be cleared in model
-    with torch.cuda.stream(stream):
+    with device_interface.stream(stream):
         model(list(static_inputs))
     stream.synchronize()
-    torch.cuda.current_stream().wait_stream(stream)
-    torch.cuda.synchronize()
+    device_interface.current_stream().wait_stream(stream)
+    device_interface.synchronize()
 
     # record
-    graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
+    graph: torch.cuda.CUDAGraph | torch.accelerator.Graph = (
+        device_interface.GraphOps.make_graph()
+    )
+    with device_interface.GraphOps.capture_context(graph, stream, None):
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
