@@ -39,6 +39,8 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
     skipIfHpu,
@@ -194,6 +196,8 @@ def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
 
 
 class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _validate(
         self,
         fn,
@@ -798,91 +802,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         # rand decomps do not have have numerical results as eager
         self._validate(fn, backend, x, skip_check=True)
 
-    @skipIfHpu
-    @torch._functorch.config.patch(recompute_views=True)
-    @torch._inductor.config.patch(fx_graph_cache=False)
-    def test_tags_must_save_tensor_that_has_backward_hook(self):
-        def my_post_forward_hook(submod, args, output):
-            output.register_hook(my_backward_hook)
-            return output
-
-        def my_backward_hook(grad):
-            return grad
-
-        class MySubmod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                y = torch.matmul(x, x)
-                z = y * y
-                return z
-
-        class MyMod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.submod = MySubmod()
-                self.norm = torch.nn.LayerNorm(4)
-
-            def forward(self, x):
-                out = torch.utils.checkpoint.checkpoint(
-                    self.submod, x, use_reentrant=False
-                )
-                norm_out = self.norm(out)
-                return norm_out
-
-        def _factory_fn():
-            mod = MyMod()
-            x = torch.ones(4, 4, dtype=torch.float32, requires_grad=True)
-            backend = "inductor"
-            return mod, x, backend
-
-        mod_no_hook, x, backend = _factory_fn()
-        mod_no_hook_fwd_outputs = set()
-
-        with torch._inductor.config.patch(
-            post_grad_custom_pre_pass=functools.partial(
-                collect_fwd_graph_outputs, fwd_outputs=mod_no_hook_fwd_outputs
-            )
-        ):
-            self._validate(
-                mod_no_hook, backend, x, fullgraph=True, compiled_autograd=True
-            )
-
-        torch._dynamo.reset()
-        mod_with_hook, x, backend = _factory_fn()
-        mod_with_hook.submod.register_forward_hook(my_post_forward_hook)
-        mod_with_hook_fwd_outputs = set()
-
-        with torch._inductor.config.patch(
-            post_grad_custom_pre_pass=functools.partial(
-                collect_fwd_graph_outputs, fwd_outputs=mod_with_hook_fwd_outputs
-            )
-        ):
-            self._validate(
-                mod_with_hook, backend, x, fullgraph=True, compiled_autograd=True
-            )
-
-        # If `z` has a backward hook, result of `z = y * y` should also be saved in addition to the usual saved tensors.
-        mod_no_hook_fwd_outputs_no_primal = {
-            x for x in mod_no_hook_fwd_outputs if not x.startswith("primals_")
-        }
-        mod_with_hook_fwd_outputs_no_primal = {
-            x for x in mod_with_hook_fwd_outputs if not x.startswith("primals_")
-        }
-        additional_saved_tensors = (
-            mod_with_hook_fwd_outputs_no_primal - mod_no_hook_fwd_outputs_no_primal
-        )
-        expected_additional_saved_tensors = {"mul"}
-        self.assertEqual(
-            additional_saved_tensors,
-            expected_additional_saved_tensors,
-            lambda msg: f"""{msg}\n
-Expected additional saved tensors: {expected_additional_saved_tensors} but got: {additional_saved_tensors}.
-Non-primal fwd outputs from model w/ backward hook: {mod_with_hook_fwd_outputs_no_primal}.
-Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no_primal}.""",
-        )
-
     @requires_gpu_and_triton
     def test_fallback(self, device):
         def gn(x, y):
@@ -1050,38 +969,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             ),
             partition_fn=partition_fn,
         )
-
-    def test_sac_with_partial_context_fn(self):
-        class CustomPolicy:
-            def __init__(self):
-                super().__init__()
-
-            def __call__(self, ctx, out, func, *args, **kwargs):
-                return CheckpointPolicy.MUST_SAVE
-
-        def f(x, y):
-            return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
-
-        context_fn1 = functools.partial(
-            create_selective_checkpoint_contexts, CustomPolicy()
-        )
-
-        def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(
-                f,
-                x,
-                y,
-                use_reentrant=False,
-                context_fn=context_fn1,
-            )
-
-        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
-        a = torch.randn(4, 4, requires_grad=True, device="cpu")
-        b = torch.randn(4, 4, requires_grad=True, device="cpu")
-
-        expected = fn(a, b)
-        result = opt_fn(a, b)
-        self.assertEqual(result, expected)
 
     @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
@@ -1678,152 +1565,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             self._validate(fn, backend, x, skip_check=not preserve_rng_state)
             self._compare_orig_and_checkpointed_fns(gn, fn, x)
 
-    @requires_gpu_and_triton
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @parametrize(
-        "partition_fn",
-        [
-            min_cut_rematerialization_partition,
-            default_partition,
-        ],
-    )
-    def test_compile_selective_checkpoint_invalid_context(self, partition_fn):
-        def gn(x, y):
-            return torch.sigmoid(torch.matmul(x, y)) * y
-
-        def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(
-                gn,
-                x,
-                y,
-                use_reentrant=False,
-                context_fn=_invalid_context_gen,
-            )
-
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
-
-        fw_compiler = functools.partial(
-            count_ops,
-            freq=1,
-            op=torch.ops.aten.mm.default,
-        )
-        bw_compiler = functools.partial(
-            count_ops,
-            freq_ge=2,
-            op=torch.ops.aten.mm.default,
-        )
-        backend = aot_autograd(
-            fw_compiler=fw_compiler,
-            bw_compiler=bw_compiler,
-            partition_fn=partition_fn,
-        )
-        with self.assertRaisesRegex(
-            Exception, "must generate a tuple of two `TorchDispatchMode`s"
-        ):
-            self._validate(fn, backend, x, y)
-
-    @requires_gpu_and_triton
-    @parametrize(
-        "partition_fn",
-        [
-            min_cut_rematerialization_partition,
-            default_partition,
-        ],
-    )
-    def test_compile_selective_checkpoint_parametrization(self, partition_fn):
-        def sac_policy():
-            def _recomp_policy():
-                def _custom_policy(ctx, func, *args, **kwargs):
-                    to_recompute = func in {
-                        torch.ops.aten.mul.Tensor,
-                        torch.ops.aten.sigmoid.default,
-                    }
-                    return (
-                        CheckpointPolicy.MUST_RECOMPUTE
-                        if to_recompute
-                        else CheckpointPolicy.MUST_SAVE
-                    )
-
-                return _custom_policy
-
-            return create_selective_checkpoint_contexts(_recomp_policy())
-
-        class Parametrization(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def parametrization(self, x):
-                return torch.sigmoid(torch.mul(x, x))
-
-            def forward(self, x):
-                return checkpoint(
-                    self.parametrization, x, use_reentrant=False, context_fn=sac_policy
-                )
-
-        def apply_parametrization(model):
-            modules = list(model.modules())
-
-            for mod in modules:
-                params_dict = dict(mod.named_parameters(recurse=False))
-                for p_name, p in params_dict.items():
-                    mod.register_parameter(p_name, nn.Parameter(p))
-                    nn.utils.parametrize.register_parametrization(
-                        mod, p_name, Parametrization(), unsafe=True
-                    )
-
-            return model
-
-        class MLPModule(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                torch.manual_seed(5)
-                self.net1 = nn.Linear(16, 16, bias=False)
-
-            def forward(self, x):
-                return self.net1(x)
-
-            def reset_parameters(self):
-                self.net1.reset_parameters()
-
-        fw_compiler = functools.partial(
-            count_ops,
-            freqs=[1, 1],
-            ops=[torch.ops.aten.mul.Tensor, torch.ops.aten.sigmoid.default],
-        )
-        bw_compiler = functools.partial(
-            count_ops,
-            freqs=[
-                # 1 from mul recompute, 1 from mul backward
-                # w/o CSE, we have one extra mul
-                3 if partition_fn is default_partition else 2,
-                1,
-            ],
-            ops=[torch.ops.aten.mul.Tensor, torch.ops.aten.sigmoid.default],
-        )
-
-        backend = aot_autograd(
-            fw_compiler=fw_compiler,
-            bw_compiler=bw_compiler,
-            partition_fn=partition_fn,
-        )
-
-        model = MLPModule()
-        model = apply_parametrization(model)
-        model_compiled = torch.compile(
-            copy.deepcopy(model), backend=backend, fullgraph=True
-        )
-        input = torch.randn(8, 16, requires_grad=True)
-        input_compiled = copy.deepcopy(input)
-
-        out = model(input)
-        out.sum().backward()
-        out_compiled = model_compiled(input_compiled)
-        out_compiled.sum().backward()
-
-        self.assertEqual(out, out_compiled)
-        self.assertEqual(input.grad, input_compiled.grad)
-
     @skipIfXpu(msg="XPU has some known limitations on flash attention.")
     @requires_gpu_and_triton
     def test_autocast_flash_attention(self, device):
@@ -2001,8 +1742,357 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         # Check that the sdpa op is recomputed in the backward graph
         self.assertTrue(count_ops(bwd_graph, [], freq=1, op=sdpa_op))
 
+
+instantiate_device_type_tests(
+    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
+)
+
+
+class ActivationCheckpointingViaTagsGenericTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def _validate(
+        self,
+        fn,
+        backend,
+        *args,
+        skip_check=False,
+        fullgraph=True,
+        compiled_autograd=False,
+    ):
+        cloned_args = []
+        for arg in args:
+            cloned_args.append(arg.detach().clone().requires_grad_(arg.requires_grad))
+
+        cloned_fn = copy.deepcopy(fn)
+
+        torch.manual_seed(0)
+        expected = fn(*args)
+        expected.sum().backward()
+
+        torch.manual_seed(0)
+        compiled_fn = torch.compile(cloned_fn, fullgraph=fullgraph, backend=backend)
+        ctx = contextlib.nullcontext()
+        if compiled_autograd:
+            ctx = torch._dynamo.compiled_autograd._enable(
+                lambda gm: torch.compile(gm, fullgraph=fullgraph, backend=backend)
+            )
+        with ctx:
+            result = compiled_fn(*cloned_args)
+            result.sum().backward()
+
+        if not skip_check:
+            self.assertEqual(
+                result,
+                expected,
+                msg="Output mismatch between torch.compile and eager versions",
+            )
+            for arg, cloned_arg in zip(args, cloned_args):
+                self.assertEqual(
+                    arg.grad,
+                    cloned_arg.grad,
+                    msg="Gradient mismatch between torch.compile and eager versions",
+                )
+
+    def _get_sac_annotations(self, checkpointed_fn, policy_fn, decompositions=None):
+        annotations = []
+
+        def capture_partition(joint_gm, joint_args, **kwargs):
+            for node in joint_gm.graph.nodes:
+                if node.op == "call_function":
+                    recompute = node.meta.get("recompute", None)
+                    if recompute is not None:
+                        annotations.append(
+                            f"{node.name}: {node.target} -> {recompute.name}"
+                        )
+            return min_cut_rematerialization_partition(joint_gm, joint_args, **kwargs)
+
+        backend = aot_autograd(
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=capture_partition,
+            decompositions=decompositions,
+        )
+
+        def fn(x):
+            return checkpoint(
+                checkpointed_fn,
+                x,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts, policy_fn
+                ),
+            )
+
+        x = torch.randn(4, requires_grad=True)
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend=backend)
+        out = compiled(x)
+        out.sum().backward()
+        return "\n".join(annotations)
+
+    @skipIfHpu
+    @torch._functorch.config.patch(recompute_views=True)
+    @torch._inductor.config.patch(fx_graph_cache=False)
+    def test_tags_must_save_tensor_that_has_backward_hook(self):
+        def my_post_forward_hook(submod, args, output):
+            output.register_hook(my_backward_hook)
+            return output
+
+        def my_backward_hook(grad):
+            return grad
+
+        class MySubmod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = torch.matmul(x, x)
+                z = y * y
+                return z
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = MySubmod()
+                self.norm = torch.nn.LayerNorm(4)
+
+            def forward(self, x):
+                out = torch.utils.checkpoint.checkpoint(
+                    self.submod, x, use_reentrant=False
+                )
+                norm_out = self.norm(out)
+                return norm_out
+
+        def _factory_fn():
+            mod = MyMod()
+            x = torch.ones(4, 4, dtype=torch.float32, requires_grad=True)
+            backend = "inductor"
+            return mod, x, backend
+
+        mod_no_hook, x, backend = _factory_fn()
+        mod_no_hook_fwd_outputs = set()
+
+        with torch._inductor.config.patch(
+            post_grad_custom_pre_pass=functools.partial(
+                collect_fwd_graph_outputs, fwd_outputs=mod_no_hook_fwd_outputs
+            )
+        ):
+            self._validate(
+                mod_no_hook, backend, x, fullgraph=True, compiled_autograd=True
+            )
+
+        torch._dynamo.reset()
+        mod_with_hook, x, backend = _factory_fn()
+        mod_with_hook.submod.register_forward_hook(my_post_forward_hook)
+        mod_with_hook_fwd_outputs = set()
+
+        with torch._inductor.config.patch(
+            post_grad_custom_pre_pass=functools.partial(
+                collect_fwd_graph_outputs, fwd_outputs=mod_with_hook_fwd_outputs
+            )
+        ):
+            self._validate(
+                mod_with_hook, backend, x, fullgraph=True, compiled_autograd=True
+            )
+
+        # If `z` has a backward hook, result of `z = y * y` should also be saved in addition to the usual saved tensors.
+        mod_no_hook_fwd_outputs_no_primal = {
+            x for x in mod_no_hook_fwd_outputs if not x.startswith("primals_")
+        }
+        mod_with_hook_fwd_outputs_no_primal = {
+            x for x in mod_with_hook_fwd_outputs if not x.startswith("primals_")
+        }
+        additional_saved_tensors = (
+            mod_with_hook_fwd_outputs_no_primal - mod_no_hook_fwd_outputs_no_primal
+        )
+        expected_additional_saved_tensors = {"mul"}
+        self.assertEqual(
+            additional_saved_tensors,
+            expected_additional_saved_tensors,
+            lambda msg: f"""{msg}\n
+Expected additional saved tensors: {expected_additional_saved_tensors} but got: {additional_saved_tensors}.
+Non-primal fwd outputs from model w/ backward hook: {mod_with_hook_fwd_outputs_no_primal}.
+Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no_primal}.""",
+        )
+
+    def test_sac_with_partial_context_fn(self):
+        class CustomPolicy:
+            def __init__(self):
+                super().__init__()
+
+            def __call__(self, ctx, out, func, *args, **kwargs):
+                return CheckpointPolicy.MUST_SAVE
+
+        def f(x, y):
+            return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
+
+        context_fn1 = functools.partial(
+            create_selective_checkpoint_contexts, CustomPolicy()
+        )
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                f,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=context_fn1,
+            )
+
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+        a = torch.randn(4, 4, requires_grad=True, device="cpu")
+        b = torch.randn(4, 4, requires_grad=True, device="cpu")
+
+        expected = fn(a, b)
+        result = opt_fn(a, b)
+        self.assertEqual(result, expected)
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_invalid_context(self, partition_fn):
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y)) * y
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=_invalid_context_gen,
+            )
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+
+        fw_compiler = functools.partial(
+            count_ops,
+            freq=1,
+            op=torch.ops.aten.mm.default,
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            freq_ge=2,
+            op=torch.ops.aten.mm.default,
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        with self.assertRaisesRegex(
+            Exception, "must generate a tuple of two `TorchDispatchMode`s"
+        ):
+            self._validate(fn, backend, x, y)
+
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_parametrization(self, partition_fn):
+        def sac_policy():
+            def _recomp_policy():
+                def _custom_policy(ctx, func, *args, **kwargs):
+                    to_recompute = func in {
+                        torch.ops.aten.mul.Tensor,
+                        torch.ops.aten.sigmoid.default,
+                    }
+                    return (
+                        CheckpointPolicy.MUST_RECOMPUTE
+                        if to_recompute
+                        else CheckpointPolicy.MUST_SAVE
+                    )
+
+                return _custom_policy
+
+            return create_selective_checkpoint_contexts(_recomp_policy())
+
+        class Parametrization(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def parametrization(self, x):
+                return torch.sigmoid(torch.mul(x, x))
+
+            def forward(self, x):
+                return checkpoint(
+                    self.parametrization, x, use_reentrant=False, context_fn=sac_policy
+                )
+
+        def apply_parametrization(model):
+            modules = list(model.modules())
+
+            for mod in modules:
+                params_dict = dict(mod.named_parameters(recurse=False))
+                for p_name, p in params_dict.items():
+                    mod.register_parameter(p_name, nn.Parameter(p))
+                    nn.utils.parametrize.register_parametrization(
+                        mod, p_name, Parametrization(), unsafe=True
+                    )
+
+            return model
+
+        class MLPModule(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                torch.manual_seed(5)
+                self.net1 = nn.Linear(16, 16, bias=False)
+
+            def forward(self, x):
+                return self.net1(x)
+
+            def reset_parameters(self):
+                self.net1.reset_parameters()
+
+        fw_compiler = functools.partial(
+            count_ops,
+            freqs=[1, 1],
+            ops=[torch.ops.aten.mul.Tensor, torch.ops.aten.sigmoid.default],
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            freqs=[
+                # 1 from mul recompute, 1 from mul backward
+                # w/o CSE, we have one extra mul
+                3 if partition_fn is default_partition else 2,
+                1,
+            ],
+            ops=[torch.ops.aten.mul.Tensor, torch.ops.aten.sigmoid.default],
+        )
+
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+
+        model = MLPModule()
+        model = apply_parametrization(model)
+        model_compiled = torch.compile(
+            copy.deepcopy(model), backend=backend, fullgraph=True
+        )
+        input = torch.randn(8, 16, requires_grad=True)
+        input_compiled = copy.deepcopy(input)
+
+        out = model(input)
+        out.sum().backward()
+        out_compiled = model_compiled(input_compiled)
+        out_compiled.sum().backward()
+
+        self.assertEqual(out, out_compiled)
+        self.assertEqual(input.grad, input_compiled.grad)
+
     @requires_distributed()
-    @requires_gpu_and_triton
     def test_distributed_utils_checkpoint_wrapper(self):
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             checkpoint_wrapper as dist_checkpoint_wrapper,
@@ -2030,7 +2120,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(ref, res)
 
     @requires_distributed()
-    @requires_gpu_and_triton
     def test_dynamo_does_not_trace_getattr_as_top_frame(self):
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             CheckpointWrapper,
@@ -2323,43 +2412,6 @@ class GraphModule(torch.nn.Module):
         with torch._dynamo.config.patch(capture_profiler_record_function=True):
             self._validate(fn, backend, x, y)
 
-    def _get_sac_annotations(self, checkpointed_fn, policy_fn, decompositions=None):
-        annotations = []
-
-        def capture_partition(joint_gm, joint_args, **kwargs):
-            for node in joint_gm.graph.nodes:
-                if node.op == "call_function":
-                    recompute = node.meta.get("recompute", None)
-                    if recompute is not None:
-                        annotations.append(
-                            f"{node.name}: {node.target} -> {recompute.name}"
-                        )
-            return min_cut_rematerialization_partition(joint_gm, joint_args, **kwargs)
-
-        backend = aot_autograd(
-            fw_compiler=nop,
-            bw_compiler=nop,
-            partition_fn=capture_partition,
-            decompositions=decompositions,
-        )
-
-        def fn(x):
-            return checkpoint(
-                checkpointed_fn,
-                x,
-                use_reentrant=False,
-                context_fn=functools.partial(
-                    create_selective_checkpoint_contexts, policy_fn
-                ),
-            )
-
-        x = torch.randn(4, requires_grad=True)
-        torch._dynamo.reset()
-        compiled = torch.compile(fn, backend=backend)
-        out = compiled(x)
-        out.sum().backward()
-        return "\n".join(annotations)
-
     def test_pre_mode_decomp_has_sac_ignored_ops(self):
         SAVE_OPS = {
             torch.ops.aten.sin.default,
@@ -2438,6 +2490,93 @@ getitem_1: <built-in function getitem> -> MUST_SAVE
 sum_1: aten.sum.default -> PREFER_RECOMPUTE
 cos: aten.cos.default -> PREFER_RECOMPUTE""",
         )
+
+    def test_region_activation_memory_budget_validation(self):
+        region_activation_memory_budget = (
+            torch.autograd.graph.region_activation_memory_budget
+        )
+        with self.assertRaisesRegex(TypeError, "expects a float"):
+            region_activation_memory_budget(True)
+        with self.assertRaisesRegex(TypeError, "expects a float"):
+            region_activation_memory_budget("0.5")
+        with self.assertRaisesRegex(ValueError, r"\[0, 1\]"):
+            region_activation_memory_budget(2.0)
+        with self.assertRaisesRegex(ValueError, r"\[0, 1\]"):
+            region_activation_memory_budget(-0.1)
+
+    def test_region_activation_memory_budget_eager_raises(self):
+        """Using the context manager outside a torch.compile region is an error."""
+        with self.assertRaisesRegex(RuntimeError, "inside a torch.compile region"):
+            with torch.autograd.graph.region_activation_memory_budget(0.5):
+                pass
+
+    def test_region_activation_memory_budget_conflict_raises(self):
+        """Two different budgets in one graph (no graph break) is an error: the
+        partitioner applies a single budget per graph."""
+
+        def fn(x, y):
+            with torch.autograd.graph.region_activation_memory_budget(0.3):
+                a = (torch.mm(x, y) + 1).relu()
+            with torch.autograd.graph.region_activation_memory_budget(0.8):
+                return (torch.mm(a, y) + 1).relu()
+
+        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+        y = torch.randn(8, 8, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "conflicting budgets"):
+            cfn(x, y).sum().backward()
+
+    def test_region_activation_memory_budget_partial_annotation_raises(self):
+        """Annotating only part of a graph is rejected: the budget is applied
+        graph-wide, so it must cover the entire forward."""
+
+        def fn(x, y):
+            with torch.autograd.graph.region_activation_memory_budget(0.3):
+                a = (torch.mm(x, y) + 1).relu()
+            # This op is outside the region -> partial annotation.
+            return (a * 2).relu()
+
+        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+        y = torch.randn(8, 8, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "must cover the entire forward"):
+            cfn(x, y).sum().backward()
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_region_activation_memory_budget_distinct_per_invoke_subgraph_raises(self):
+        """Different budgets in two invoke_subgraph regions of a single graph are
+        rejected: the agreement check recurses into nested subgraphs, so the
+        outermost graph sees both budgets. Use a graph break for different
+        budgets."""
+        from torch.compiler import nested_compile_region
+
+        wa = torch.randn(8, 8, requires_grad=True)
+        wb = torch.randn(8, 8, requires_grad=True)
+
+        @nested_compile_region
+        def region_a(x):
+            with torch.autograd.graph.region_activation_memory_budget(0.3):
+                return (x @ wa).relu()
+
+        @nested_compile_region
+        def region_b(x):
+            with torch.autograd.graph.region_activation_memory_budget(0.8):
+                return (x @ wb).relu()
+
+        def fn(x):
+            return region_b(region_a(x)).sum()
+
+        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "conflicting budgets"):
+            cfn(x).backward()
+
+
+instantiate_parametrized_tests(ActivationCheckpointingViaTagsGenericTests)
+
+
+class ActivationCheckpointingViaTagsCUDA(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_region_activation_memory_budget_reduces_act_mem(self):
@@ -2625,57 +2764,6 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         self.assertGreater(mem_a_recomp, mem_both_recomp)
         self.assertGreater(mem_b_recomp, mem_both_recomp)
 
-    def test_region_activation_memory_budget_validation(self):
-        region_activation_memory_budget = (
-            torch.autograd.graph.region_activation_memory_budget
-        )
-        with self.assertRaisesRegex(TypeError, "expects a float"):
-            region_activation_memory_budget(True)
-        with self.assertRaisesRegex(TypeError, "expects a float"):
-            region_activation_memory_budget("0.5")
-        with self.assertRaisesRegex(ValueError, r"\[0, 1\]"):
-            region_activation_memory_budget(2.0)
-        with self.assertRaisesRegex(ValueError, r"\[0, 1\]"):
-            region_activation_memory_budget(-0.1)
-
-    def test_region_activation_memory_budget_eager_raises(self):
-        """Using the context manager outside a torch.compile region is an error."""
-        with self.assertRaisesRegex(RuntimeError, "inside a torch.compile region"):
-            with torch.autograd.graph.region_activation_memory_budget(0.5):
-                pass
-
-    def test_region_activation_memory_budget_conflict_raises(self):
-        """Two different budgets in one graph (no graph break) is an error: the
-        partitioner applies a single budget per graph."""
-
-        def fn(x, y):
-            with torch.autograd.graph.region_activation_memory_budget(0.3):
-                a = (torch.mm(x, y) + 1).relu()
-            with torch.autograd.graph.region_activation_memory_budget(0.8):
-                return (torch.mm(a, y) + 1).relu()
-
-        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        x = torch.randn(8, 8, requires_grad=True)
-        y = torch.randn(8, 8, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "conflicting budgets"):
-            cfn(x, y).sum().backward()
-
-    def test_region_activation_memory_budget_partial_annotation_raises(self):
-        """Annotating only part of a graph is rejected: the budget is applied
-        graph-wide, so it must cover the entire forward."""
-
-        def fn(x, y):
-            with torch.autograd.graph.region_activation_memory_budget(0.3):
-                a = (torch.mm(x, y) + 1).relu()
-            # This op is outside the region -> partial annotation.
-            return (a * 2).relu()
-
-        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        x = torch.randn(8, 8, requires_grad=True)
-        y = torch.randn(8, 8, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "must cover the entire forward"):
-            cfn(x, y).sum().backward()
-
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_region_activation_memory_budget_covers_invoke_subgraph(self):
@@ -2727,35 +2815,6 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         torch._dynamo.reset()
         recompute = torch.compile(build(0.0), backend="aot_eager", fullgraph=True)
         self.assertEqual(get_act_mem(lambda: recompute(x)), 0)
-
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    def test_region_activation_memory_budget_distinct_per_invoke_subgraph_raises(self):
-        """Different budgets in two invoke_subgraph regions of a single graph are
-        rejected: the agreement check recurses into nested subgraphs, so the
-        outermost graph sees both budgets. Use a graph break for different
-        budgets."""
-        from torch.compiler import nested_compile_region
-
-        wa = torch.randn(8, 8, requires_grad=True)
-        wb = torch.randn(8, 8, requires_grad=True)
-
-        @nested_compile_region
-        def region_a(x):
-            with torch.autograd.graph.region_activation_memory_budget(0.3):
-                return (x @ wa).relu()
-
-        @nested_compile_region
-        def region_b(x):
-            with torch.autograd.graph.region_activation_memory_budget(0.8):
-                return (x @ wb).relu()
-
-        def fn(x):
-            return region_b(region_a(x)).sum()
-
-        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        x = torch.randn(8, 8, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "conflicting budgets"):
-            cfn(x).backward()
 
 
 class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase):
@@ -2816,6 +2875,8 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def count_op(self, gm, target):
         return sum(1 for n in gm.graph.nodes if n.target == target)
@@ -3027,84 +3088,6 @@ def forward(self, arg0_1, arg1_1):
                     node = SimpleNamespace(target=op, args=tuple(args), kwargs={})
 
                     self.assertEqual(is_rng_op(node), expected)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_ac_rematerialize_with_sdpa_dropout_zero(self):
-        from torch.nn.attention import sdpa_kernel, SDPBackend
-
-        cases = []
-        if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
-            cases.append((SDPBackend.EFFICIENT_ATTENTION, torch.float32))
-        if PLATFORM_SUPPORTS_FLASH_ATTENTION:
-            cases.append((SDPBackend.FLASH_ATTENTION, torch.float16))
-        if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
-            cases.append((SDPBackend.CUDNN_ATTENTION, torch.float16))
-        if not cases:
-            self.skipTest("No fused SDPA backends available")
-        sdpa_ops = {
-            torch.ops.aten.scaled_dot_product_attention.default,
-            torch.ops.aten._scaled_dot_product_cudnn_attention.default,
-            torch.ops.aten._scaled_dot_product_flash_attention.default,
-            torch.ops.aten._scaled_dot_product_efficient_attention.default,
-            torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default,
-        }
-
-        def policy_fn(ctx, op, *args, **kwargs):
-            if op in sdpa_ops:
-                return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
-            return torch.utils.checkpoint.CheckpointPolicy.PREFER_SAVE
-
-        context_fn = functools.partial(
-            torch.utils.checkpoint.create_selective_checkpoint_contexts, policy_fn
-        )
-
-        for backend, dtype in cases:
-            with self.subTest(backend=backend, dtype=dtype):
-                torch._dynamo.reset()
-                q = torch.randn(
-                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
-                )
-                k = torch.randn(
-                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
-                )
-                v = torch.randn(
-                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
-                )
-
-                def fwd_bwd_with_sdpa(q, k, v):
-                    with sdpa_kernel(backend):
-                        z = torch.utils.checkpoint.checkpoint(
-                            lambda q, k, v: F.scaled_dot_product_attention(
-                                q, k, v, dropout_p=0.0
-                            ),
-                            q,
-                            k,
-                            v,
-                            use_reentrant=False,
-                            context_fn=context_fn,
-                        )
-                        loss = z.sum()
-                        dq, dk, dv = _grad(loss, (q, k, v))
-
-                    return z.detach(), dq, dk, dv
-
-                result_with, gm_with = self._compile_and_capture(
-                    fwd_bwd_with_sdpa, True, (q, k, v)
-                )
-                torch._dynamo.reset()
-                result_without, _ = self._compile_and_capture(
-                    fwd_bwd_with_sdpa, False, (q, k, v)
-                )
-                eager_inputs = tuple(
-                    t.detach().clone().requires_grad_(True) for t in (q, k, v)
-                )
-                result_eager = fwd_bwd_with_sdpa(*eager_inputs)
-
-                for actual, expected in zip(result_with, result_without):
-                    self.assertEqual(actual, expected)
-                for actual, expected in zip(result_with, result_eager):
-                    self.assertEqual(actual, expected)
-                self.assertEqual(sum(self.count_op(gm_with, op) for op in sdpa_ops), 2)
 
     def test_ac_rematerialize_with_no_annotations(self):
         x = torch.randn(4, 4, requires_grad=True)
@@ -3359,7 +3342,6 @@ def forward(self, arg0_1):
         self.assertEqual(ref, result)
         self.assertEqual(x_ref.grad, x_test.grad)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_multiple_user_phase_annotations_errors(self):
         x = torch.randn(4, 4, requires_grad=True)
         w = torch.randn(4, 4, requires_grad=True)
@@ -3380,7 +3362,6 @@ def forward(self, arg0_1):
         with self.assertRaisesRegex(RuntimeError, "backward regions annotated"):
             self._compile_and_capture(fn, True, (x, w))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_user_phase_annotation_with_extra_autograd_grad(self):
         """Only the user-annotated backward region gets rematerialization."""
         x = torch.randn(4, 4, requires_grad=True)
@@ -3532,13 +3513,120 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self._compile_and_capture(TwoBackwards(), True, (x,))
 
 
-instantiate_device_type_tests(
-    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
-)
+class RematerializeACNodesPassCUDA(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def count_op(self, gm, target):
+        return sum(1 for n in gm.graph.nodes if n.target == target)
+
+    def _compile_and_capture(self, fn, remat_using_tags_for_fwd_loss_bwd_graph, inputs):
+        captured_gm = None
+
+        def compiler(gm, example_inputs):
+            nonlocal captured_gm
+            captured_gm = gm
+            return gm.forward
+
+        backend = aot_autograd(
+            fw_compiler=compiler,
+            bw_compiler=None,
+            partition_fn=None,
+        )
+
+        with (
+            torch._functorch.config.patch(
+                remat_using_tags_for_fwd_loss_bwd_graph=remat_using_tags_for_fwd_loss_bwd_graph
+            ),
+            torch._dynamo.config.patch(trace_autograd_ops=True),
+        ):
+            compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+            result = compiled_fn(*inputs)
+
+        return result, captured_gm
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_ac_rematerialize_with_sdpa_dropout_zero(self):
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        cases = []
+        if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
+            cases.append((SDPBackend.EFFICIENT_ATTENTION, torch.float32))
+        if PLATFORM_SUPPORTS_FLASH_ATTENTION:
+            cases.append((SDPBackend.FLASH_ATTENTION, torch.float16))
+        if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+            cases.append((SDPBackend.CUDNN_ATTENTION, torch.float16))
+        if not cases:
+            self.skipTest("No fused SDPA backends available")
+        sdpa_ops = {
+            torch.ops.aten.scaled_dot_product_attention.default,
+            torch.ops.aten._scaled_dot_product_cudnn_attention.default,
+            torch.ops.aten._scaled_dot_product_flash_attention.default,
+            torch.ops.aten._scaled_dot_product_efficient_attention.default,
+            torch.ops.aten._scaled_dot_product_fused_attention_overrideable.default,
+        }
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op in sdpa_ops:
+                return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+            return torch.utils.checkpoint.CheckpointPolicy.PREFER_SAVE
+
+        context_fn = functools.partial(
+            torch.utils.checkpoint.create_selective_checkpoint_contexts, policy_fn
+        )
+
+        for backend, dtype in cases:
+            with self.subTest(backend=backend, dtype=dtype):
+                torch._dynamo.reset()
+                q = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+                k = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+                v = torch.randn(
+                    2, 4, 128, 64, device="cuda", dtype=dtype, requires_grad=True
+                )
+
+                def fwd_bwd_with_sdpa(q, k, v):
+                    with sdpa_kernel(backend):
+                        z = torch.utils.checkpoint.checkpoint(
+                            lambda q, k, v: F.scaled_dot_product_attention(
+                                q, k, v, dropout_p=0.0
+                            ),
+                            q,
+                            k,
+                            v,
+                            use_reentrant=False,
+                            context_fn=context_fn,
+                        )
+                        loss = z.sum()
+                        dq, dk, dv = _grad(loss, (q, k, v))
+
+                    return z.detach(), dq, dk, dv
+
+                result_with, gm_with = self._compile_and_capture(
+                    fwd_bwd_with_sdpa, True, (q, k, v)
+                )
+                torch._dynamo.reset()
+                result_without, _ = self._compile_and_capture(
+                    fwd_bwd_with_sdpa, False, (q, k, v)
+                )
+                eager_inputs = tuple(
+                    t.detach().clone().requires_grad_(True) for t in (q, k, v)
+                )
+                result_eager = fwd_bwd_with_sdpa(*eager_inputs)
+
+                for actual, expected in zip(result_with, result_without):
+                    self.assertEqual(actual, expected)
+                for actual, expected in zip(result_with, result_eager):
+                    self.assertEqual(actual, expected)
+                self.assertEqual(sum(self.count_op(gm_with, op) for op in sdpa_ops), 2)
 
 
 class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCase):
     """Tests for non-strict tracing flag interaction with checkpoint."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @staticmethod
     def _count_backward_regions(gm):
@@ -3865,6 +3953,8 @@ def forward(self, arg0_1, arg1_1):
 
 
 class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @requires_gpu_and_triton
     def test_checkpoint_recompute_preserves_nested_fx_trace_policy(self):
         from torch._guards import tracing, TracingContext
