@@ -21,6 +21,7 @@ from cutlass import const_expr, Float32, Float64, Int32, Int64
 
 import torch
 
+from ...cutedsl.dtypes import torch2cute
 from .._cutedsl import launch as _L
 from .._cutedsl.plan_cache import cached_plan
 from . import (  # safe: kernel_general imports us only lazily
@@ -230,7 +231,7 @@ def _reduce_row_xcta(
         )
     if geom is None:  # memoized refusal (prime / poorly-factored N) -> K0
         return None
-    C, s, wrap_in, fn, rvals, kvals, cnt, pn, s1nc, s1nw = geom
+    C, s, fn, rvals, kvals, cnt, pn, s1nc, s1nw = geom
 
     # One fused launch. Scratch partials sized to THIS M*C (allocated per call since M
     # varies); input + partials + output all dynamic-M so the cached kernel serves any
@@ -242,9 +243,9 @@ def _reduce_row_xcta(
     ]
     outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes]
     fn(
-        wrap_in(sub),
-        [_L.cute_tensor_dynM(p, ndim=1) for p in parts],
-        [_L.cute_tensor_dynM(o, ndim=1) for o in outs],
+        _L.read_only(sub),
+        list(parts),
+        list(outs),
         rvals,
         kvals,
         cnt,
@@ -309,7 +310,7 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
     def _make_s1():
         return tile.TileReduce(
             trait,
-            _L.torch2cute[x.dtype],
+            torch2cute[x.dtype],
             "row",
             s,
             tpr=tpr,
@@ -319,8 +320,15 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
             unroll=unroll,
         )
 
-    def wrap_in(t):
-        return _L.cute_tensor_dynMN(t, svec, align=align, read_only=True)
+    def _fake_in():
+        # 2D row-major, both extents dynamic: mode 1 divisible by the sub-row vec width, so one
+        # compiled kernel serves every sub-row length in that vec class.
+        return _L.fake_compact(
+            torch2cute[x.dtype], (_L.sym(), _L.sym(svec)), order=(1, 0), align=align
+        )
+
+    def _fake_1d(dtype):
+        return _L.fake_compact(torch2cute[dtype], (_L.sym(),))
 
     def _build():
         s1 = _make_s1()
@@ -341,26 +349,20 @@ def _build_geom(trait, trait_key, x, out_dtypes, nouts, M, N, block, subrow_targ
             block=block,
         )
         fop = FusedTwoStage(s1, s2)
-        # Dynamic-M seed wrappers; the compiled fn then serves any M.
-        sub0 = x.reshape(M * C, s)
-        parts0 = [
-            torch.empty(M * C, device=device, dtype=_PART_TORCH[trait.fdtypes[f]])
-            for f in range(trait.nfields)
-        ]
-        cparts0 = [_L.cute_tensor_dynM(p, ndim=1) for p in parts0]
-        outs0 = [torch.empty(M, device=device, dtype=d) for d in out_dtypes]
+        # Descriptors only -- no seed tensors to allocate, and every extent dynamic so the compiled
+        # fn serves any M.
         return _L.compile_kernel(
             fop,
-            wrap_in(sub0),
-            cparts0,
-            [_L.cute_tensor_dynM(o, ndim=1) for o in outs0],
+            _fake_in(),
+            [_fake_1d(_PART_TORCH[trait.fdtypes[f]]) for f in range(trait.nfields)],
+            [_fake_1d(d) for d in out_dtypes],
             *_s2_args(C, M, N),
             *s1_counts,
             _L.stream(),
         )
 
     fn = cached_plan(_PLAN, pkey, _build, op=f"aten::{trait_key}")
-    return (C, s, wrap_in, fn, *_s2_args(C, M, N), *s1_counts)
+    return (C, s, fn, *_s2_args(C, M, N), *s1_counts)
 
 
 def _s2_args(C, M, N):
