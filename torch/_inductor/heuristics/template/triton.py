@@ -38,6 +38,7 @@ from ...utils import (
     get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
+    rocm_gfx_arch,
     TMA_DESCRIPTOR_SIZE,
     triton_type,
     using_b200,
@@ -1653,13 +1654,15 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             ROCmGemmConfig(256, 256, 64, self.default_num_stages, 8, group_m=4),
         ]
 
-        # Exhaustive search for mm configs
+        # Exhaustive search for mm configs. num_stages is deliberately not an axis
+        # here: _filter_configs forces every config to self.default_num_stages, so
+        # enumerating it would only produce duplicates that get deduped later.
         self.exhaustive_configs: list[BaseConfig] = [
             ROCmGemmConfig(
                 BLOCK_M,
                 BLOCK_N,
                 BLOCK_K,
-                num_stages,
+                self.default_num_stages,
                 num_warps,
                 group_m=group_m,
                 matrix_instr_nonkdim=matrix_instr_nonkdim,
@@ -1669,7 +1672,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
             )
-            for num_stages in [1, self.default_num_stages]
             for num_warps in [4, 8]
             for group_m in [4, 8, 16]
             for matrix_instr_nonkdim in [0, 16]
@@ -1704,6 +1706,25 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.float16, 256): ROCmFlexConfig(32, 32, 1, 8, kpack=default_kpack),
         }
 
+        # Backward defaults measured on gfx950. Only the head dims covered here were
+        # measured; anything else keeps the shared ROCm values below. The block shape
+        # and num_stages=2 have to move together: on gfx950 either one alone is a
+        # regression at head_dim 128, while the pair is a gain at both head dims.
+        self.gfx950_default_flex_bwd_config = {
+            (torch.bfloat16, 64): ROCmFlexBwDConfig(
+                32, 128, 128, 32, 2, 4, kpack=default_kpack
+            ),
+            (torch.bfloat16, 128): ROCmFlexBwDConfig(
+                32, 128, 128, 32, 2, 4, kpack=default_kpack
+            ),
+            (torch.float16, 64): ROCmFlexBwDConfig(
+                32, 128, 128, 32, 2, 4, kpack=default_kpack
+            ),
+            (torch.float16, 128): ROCmFlexBwDConfig(
+                32, 128, 128, 32, 2, 4, kpack=default_kpack
+            ),
+        }
+
         # RDNA3 (gfx11xx) optimal configs profiled on gfx1151 (head_dim=256).
         # Three seq_len tiers to match CU occupancy on 16-CU RDNA3:
         #   short  (seq < 128): BLOCK_M=16, tiny tiles keep all CUs busy
@@ -1724,6 +1745,19 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         self.rdna3_default_flex_config = {
             (torch.bfloat16, 256): ROCmFlexConfig(64, 16, 1, 4, waves_per_eu=2),
             (torch.float16, 256): ROCmFlexConfig(64, 16, 1, 4, waves_per_eu=2),
+        }
+
+        # Selection is an exact match on the gfx target, so a target only gets
+        # values that were measured on it. gfx numbers neither order by
+        # capability nor identify the product line -- gfx1250 is MI450, a CDNA5
+        # part -- so there is no direction along which tuning can be inherited.
+        # Targets absent here fall back to the shared ROCm defaults below.
+        self.flex_fwd_config_by_arch = {
+            "gfx942": self.gfx942_default_flex_config,
+            "gfx950": self.gfx950_default_flex_config,
+        }
+        self.flex_bwd_config_by_arch = {
+            "gfx950": self.gfx950_default_flex_bwd_config,
         }
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
@@ -1910,7 +1944,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
-        capability = torch.cuda.get_device_capability()
         default_kpack = get_default_kpack()
 
         if head_dim <= 256:
@@ -1932,14 +1965,10 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                     default_config = self.rdna3_default_flex_config.get(
                         (dtype, head_dim), default_config
                     )
-            elif capability >= (9, 5):  # gfx950 (MI350X/MI355X)
-                default_config = self.gfx950_default_flex_config.get(
-                    (dtype, head_dim), default_config
-                )
-            elif capability >= (9, 4):  # gfx942 (MI300X/MI325X)
-                default_config = self.gfx942_default_flex_config.get(
-                    (dtype, head_dim), default_config
-                )
+            else:
+                default_config = self.flex_fwd_config_by_arch.get(
+                    rocm_gfx_arch(), {}
+                ).get((dtype, head_dim), default_config)
         else:
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(32, 16, 1, 4, kpack=default_kpack)
@@ -1962,10 +1991,15 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         default_kpack = get_default_kpack()
+        arch_bwd_config = self.flex_bwd_config_by_arch.get(rocm_gfx_arch(), {}).get(
+            (dtype, head_dim)
+        )
         if dtype == torch.float32:
             default_config = ROCmFlexBwDConfig(
                 16, 16, 16, 16, 1, 4, kpack=default_kpack
             )
+        elif arch_bwd_config is not None:
+            default_config = arch_bwd_config
         elif head_dim <= 256:
             if head_dim == 64:
                 default_config = ROCmFlexBwDConfig(
