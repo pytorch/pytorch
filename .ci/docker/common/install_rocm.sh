@@ -76,6 +76,13 @@ install_rocm() {
 }
 
 install_almalinux() {
+    # repair_wheel.py's rocm_os_deps() bundles /usr/lib64/libnuma.so.1 into
+    # torch/lib so rocSHMEM's dlopen("libnuma.so") resolves off $ORIGIN. It
+    # skips deps that are absent on the builder, so without numactl-libs here
+    # the wheel silently ships without it. See the Ubuntu branch above, which
+    # needs libnuma for the same reason.
+    yum install -y numactl-libs
+
     # The manywheel build intentionally uses only the common ROCm environment.
     # Its produced wheel resolves ROCm at runtime via RPATH (see repair_wheel.py),
     # so unlike Ubuntu CI it must not add ROCm to LD_LIBRARY_PATH.

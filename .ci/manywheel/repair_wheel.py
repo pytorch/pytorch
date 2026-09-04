@@ -271,6 +271,14 @@ def rocm_bundle(
     for os_lib in rocm_os_deps():
         if os_lib.is_file():
             libs.append(BundledLib(src=os_lib, dest_name=os_lib.name))
+        else:
+            # Silently omitting one of these produces a wheel that imports but
+            # misbehaves at runtime, and it took a release candidate to notice.
+            print(
+                f"WARNING: OS dependency not present on the builder, "
+                f"not bundled into the wheel: {os_lib}",
+                file=sys.stderr,
+            )
 
     archs = rocm_arch_filter(os.environ.get("PYTORCH_ROCM_ARCH", ""))
     aux: list[AuxFile] = []
