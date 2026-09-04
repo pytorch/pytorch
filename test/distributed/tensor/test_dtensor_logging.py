@@ -8,13 +8,19 @@ from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor.debug import _clear_sharding_prop_cache
-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
-@requires_cuda
 class TestDTensorLogging(TestCase):
     """Test DTensor logging."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def tearDown(self):
         super().tearDown()
@@ -28,10 +34,10 @@ class TestDTensorLogging(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda"
 
-    def test_sharding_prop_cache_logging(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+    def test_sharding_prop_cache_logging(self, device):
+        device_type = torch.device(device).type
+        mesh = DeviceMesh(device_type, list(range(self.world_size)))
 
         log_records = []
         handler = logging.Handler()
@@ -46,7 +52,9 @@ class TestDTensorLogging(TestCase):
         dispatch_logger.addHandler(handler)
 
         # Test simple miss/hit
-        x_dt = DTensor.from_local(torch.randn(2, 4), mesh, [Shard(0)], run_check=False)
+        x_dt = DTensor.from_local(
+            torch.randn(2, 4, device=device), mesh, [Shard(0)], run_check=False
+        )
         x_dt + x_dt  # miss
         x_dt + x_dt  # hit
 
@@ -55,16 +63,18 @@ class TestDTensorLogging(TestCase):
         x_dt1 + x_dt1
 
         # Test miss with different shapes
-        x_dt2 = DTensor.from_local(torch.randn(4, 4), mesh, [Shard(0)], run_check=False)
+        x_dt2 = DTensor.from_local(
+            torch.randn(4, 4, device=device), mesh, [Shard(0)], run_check=False
+        )
         x_dt2 + x_dt2
 
-        self.assertExpectedInline(
+        self.assertEqual(
             log_string(),
-            """\
-sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[4, 4](S(0)))
+            f"""\
+sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), '{device_type}', stride=(1,))) -> Spec(f32[4, 4](S(0)))
 sharding_prop HIT (C++ fast path): aten::add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0))), 4822678189205111) -> Spec(f32[4, 4](S(0)))
-sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](R)), Spec(f32[4, 4](R))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[4, 4](R))
-sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(f32[8, 4](S(0)))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[8, 4](S(0)))""",
+sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](R)), Spec(f32[4, 4](R))) on DeviceMesh((2,), '{device_type}', stride=(1,))) -> Spec(f32[4, 4](R))
+sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(f32[8, 4](S(0)))) on DeviceMesh((2,), '{device_type}', stride=(1,))) -> Spec(f32[8, 4](S(0)))""",
         )
 
         # Test Python LRU cache, directly with ShardingPropagator
@@ -86,16 +96,17 @@ sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(
         )
         propagator.propagate_op_sharding(op_schema)  # Python cache miss
         propagator.propagate_op_sharding(op_schema)  # Python cache hit
-        self.assertExpectedInline(
+        self.assertEqual(
             log_string(),
-            """\
-sharding_prop python cache MISS: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[4, 4](S(0)))
-sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[4, 4](S(0)))""",
+            f"""\
+sharding_prop python cache MISS: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), '{device_type}', stride=(1,))) -> Spec(f32[4, 4](S(0)))
+sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), '{device_type}', stride=(1,))) -> Spec(f32[4, 4](S(0)))""",
         )
 
-    def test_logging_level_change_resets_cpp_cache(self):
+    def test_logging_level_change_resets_cpp_cache(self, device):
         """setLevel on the dispatch logger resets the C++ cached logging flag."""
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_type = torch.device(device).type
+        mesh = DeviceMesh(device_type, list(range(self.world_size)))
         dispatch_logger = logging.getLogger("torch.distributed.tensor._dispatch")
 
         log_records: list[logging.LogRecord] = []
@@ -103,7 +114,9 @@ sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[
         handler.emit = lambda record: log_records.append(record)
         dispatch_logger.addHandler(handler)
 
-        x_dt = DTensor.from_local(torch.randn(2, 4), mesh, [Shard(0)], run_check=False)
+        x_dt = DTensor.from_local(
+            torch.randn(2, 4, device=device), mesh, [Shard(0)], run_check=False
+        )
 
         # With logging off, the C++ hit path should produce no records.
         dispatch_logger.setLevel(logging.WARNING)
@@ -121,6 +134,14 @@ sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[
         self.assertEqual(len(log_records), 2)
         self.assertIn("MISS", log_records[0].getMessage())
         self.assertIn("HIT", log_records[1].getMessage())
+
+
+instantiate_device_type_tests(
+    TestDTensorLogging,
+    globals(),
+    except_for=["cpu", "privateuse1"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
