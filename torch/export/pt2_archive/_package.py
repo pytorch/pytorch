@@ -6,6 +6,7 @@ import os
 import pickle
 import tempfile
 import zipfile
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any, IO, TYPE_CHECKING, TypeAlias
 from typing_extensions import TypeIs
@@ -1083,6 +1084,7 @@ def load_pt2(
     f: FileLike,
     *,
     expected_opset_version: dict[str, int] | None = None,
+    aoti_model_names: Collection[str] | None = None,
     run_single_threaded: bool = False,
     num_runners: int = 1,
     device_index: int = -1,
@@ -1097,6 +1099,9 @@ def load_pt2(
 
         expected_opset_version (Optional[Dict[str, int]]): A map of opset names
          to expected opset versions
+
+        aoti_model_names (Optional[Collection[str]]): Names of AOTInductor models
+            to load. By default, all AOTInductor models are loaded.
 
         num_runners (int): Number of runners to load AOTInductor artifacts
 
@@ -1148,7 +1153,7 @@ def load_pt2(
         extra_files = _load_extra_files(archive_reader, file_names)
 
         # Get a list of AOTI model names
-        aoti_model_names: set[str] = set()
+        discovered_aoti_model_names: set[str] = set()
         for file in file_names:
             if file.startswith(AOTINDUCTOR_DIR):
                 file_end = file[
@@ -1160,7 +1165,9 @@ def load_pt2(
                 model_name = file_end.split("/")[
                     0
                 ]  # split "model_name/...cpp" into "model_name"
-                aoti_model_names.add(model_name)
+                if aoti_model_names is not None and model_name not in aoti_model_names:
+                    continue
+                discovered_aoti_model_names.add(model_name)
                 if load_weights_from_disk and file.endswith("weights_config.json"):
                     weight_map = json.loads(archive_reader.read_string(file))
                     weight_maps[model_name] = weight_map
@@ -1173,7 +1180,7 @@ def load_pt2(
                 weights[weight_file_name] = loaded_weight
 
     if isinstance(f, (io.IOBase, IO)):
-        if len(aoti_model_names) > 0:
+        if len(discovered_aoti_model_names) > 0:
             # Workaround for AOTIModelPackageLoader not reading buffers
             with tempfile.NamedTemporaryFile(suffix=".pt2") as tf:
                 f.seek(0)
@@ -1189,7 +1196,7 @@ def load_pt2(
                         num_runners,
                         device_index,
                     )
-                    for model_name in aoti_model_names
+                    for model_name in discovered_aoti_model_names
                 }
         else:
             aoti_runners = {}
@@ -1202,11 +1209,11 @@ def load_pt2(
                 num_runners,
                 device_index,
             )
-            for model_name in aoti_model_names
+            for model_name in discovered_aoti_model_names
         }
 
     if weight_maps:
-        for model_name in aoti_model_names:
+        for model_name in discovered_aoti_model_names:
             model_weights = {}
             for weight_name, (file, shape, stride, storage_offset) in weight_maps[
                 model_name

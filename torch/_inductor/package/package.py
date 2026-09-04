@@ -113,6 +113,7 @@ def load_package(
         try:
             pt2_contents = load_pt2(
                 path,
+                aoti_model_names=(model_name,),
                 run_single_threaded=run_single_threaded,
                 num_runners=num_runners,
                 device_index=device_index,
