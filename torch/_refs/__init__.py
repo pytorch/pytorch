@@ -6724,15 +6724,9 @@ def log_normal(self, mean=1, std=2, generator=None):
 
 
 # NOTE: the device and dtype will be ignored when shape is None
+# NOTE: normal follows its native overload's output dtype instead of promoting.
 @register_decomposition(aten.normal)
 @out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=(
-        "mean",
-        "std",
-    ),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
 def normal(
     mean=0,
     std=1,
@@ -6766,6 +6760,11 @@ def normal(
         size = _broadcast_shapes(*(t.shape for t in tensors))
         dtype = tensors[0].dtype
         device = tensors[0].device
+
+        if isinstance(mean, TensorLike):
+            mean = _maybe_convert_to_dtype(mean, dtype)
+        if isinstance(std, TensorLike):
+            std = _maybe_convert_to_dtype(std, dtype)
     else:
         torch._check(
             not isinstance(mean, TensorLike) and not isinstance(std, TensorLike),
@@ -6788,6 +6787,7 @@ def normal(
 
 @register_decomposition(aten.normal_)
 def normal_(self, mean=0, std=1, *, generator=None):
+    # pyrefly: ignore [unexpected-keyword]
     return normal(mean, std, self.shape, out=self, generator=generator)
 
 
