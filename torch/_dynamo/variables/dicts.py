@@ -117,7 +117,8 @@ class ConstDictVariable(VariableTracker):
 
     def __init__(
         self,
-        items: dict[VariableTracker, VariableTracker],
+        items: dict[VariableTracker, VariableTracker]
+        | dict[HashableTracker, VariableTracker],
         **kwargs: Any,
     ) -> None:
         # .clone() pass these arguments in kwargs but they're recreated a few
@@ -159,7 +160,7 @@ class ConstDictVariable(VariableTracker):
         self.should_reconstruct_all = (
             not is_from_local_source(self.source) if self.source else True
         )
-        self.original_items = items.copy()
+        self.original_items = {key.vt: value for key, value in self.items.items()}
         # Re-entrancy guard for is_python_constant against self-referential
         # dicts. Both forms re-enter this same instance's is_python_constant, so
         # a per-instance flag suffices.

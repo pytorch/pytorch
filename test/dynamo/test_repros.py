@@ -8594,6 +8594,27 @@ SavedForBackwardsAOTOutput(idx=5)""",
         )
         self.assertEqual(result.dtype, torch.float32)
 
+    def test_call_with_kwarg(self):
+        # Python <= 3.12 compiles a call with a literal keyword argument to
+        # KW_NAMES (pushes the arg names tuple into co_consts) followed by
+        # CALL, rather than 3.13+'s CALL_KW (which pushes the names tuple
+        # onto the stack). The KW_NAMES handler stashes the names via
+        # `self.kw_names = ConstantVariable.create(value=kw_names)`, but
+        # ConstantVariable.create() routes tuple values to TupleVariable, not
+        # ConstantVariable -- so `self.kw_names` ends up a TupleVariable, and
+        # CALL's `self.kw_names.value` (only ConstantVariable has `.value`)
+        # raises AttributeError. Every compiled call with a literal keyword
+        # argument hits this on 3.11/3.12.
+        def helper(a, b=1):
+            return a + b
+
+        def fn(x):
+            return helper(x, b=2)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_empty_out_shape_mismatch_dynamic(self):
         def f(size, out):
             return torch.empty(size, out=out, dtype=torch.float32)
