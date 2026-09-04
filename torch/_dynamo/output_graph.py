@@ -910,8 +910,10 @@ class OutputGraph(OutputGraphCommon):
         self.torch_function_mode_enabled = torch._C._is_torch_function_mode_enabled()
 
         # Used to wrap the compiled graph at runtime with
-        # DisableTorchFunctionSubclass to prevent double dispatch.
+        # DisableTorchFunctionSubclass / DisableTorchFunction to prevent
+        # double dispatch.
         self.torch_function_subclass_inlined = False
+        self.torch_function_mode_inlined = False
 
         # Tracks if the output graph has a user defined allowed function in the
         # graph. This is used later to determine if we should fallback to eager
@@ -3052,19 +3054,28 @@ class OutputGraph(OutputGraphCommon):
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
 
-            # If __torch_function__ subclass dispatch was inlined during
-            # tracing, wrap the compiled graph to disable __torch_function__
-            # at runtime, preventing double dispatch (the C++ dispatcher
-            # would otherwise re-trigger __torch_function__ on subclass
-            # inputs that the graph already handles).
-            if self.torch_function_subclass_inlined:
+            # If __torch_function__ dispatch was inlined during tracing, wrap
+            # the compiled graph to disable __torch_function__ at runtime,
+            # preventing double dispatch (the C++ dispatcher would otherwise
+            # re-trigger __torch_function__ on subclass inputs that the graph
+            # already handles, and an active TorchFunctionMode would re-run
+            # on every op of the graph).
+            if self.torch_function_mode_inlined:
                 real_compiled_fn = compiled_fn
 
                 def _tf_disabled_wrapper(*args, **kwargs):
-                    with torch._C.DisableTorchFunctionSubclass():
+                    with torch._C.DisableTorchFunction():
                         return real_compiled_fn(*args, **kwargs)
 
                 compiled_fn = _tf_disabled_wrapper
+            elif self.torch_function_subclass_inlined:
+                real_compiled_fn = compiled_fn
+
+                def _tf_subclass_disabled_wrapper(*args, **kwargs):
+                    with torch._C.DisableTorchFunctionSubclass():
+                        return real_compiled_fn(*args, **kwargs)
+
+                compiled_fn = _tf_subclass_disabled_wrapper
 
             compiled_fn = disable(
                 compiled_fn, reason="do not trace Dynamo-compiled graph"

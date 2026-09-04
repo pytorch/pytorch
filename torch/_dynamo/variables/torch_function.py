@@ -322,6 +322,7 @@ class SymbolicTorchFunctionState:
         args: Iterable[Any],
         kwargs: dict[str, Any],
     ) -> Any:
+        tx.output.torch_function_mode_inlined = True
         with self._pop_mode_for_inlining() as cur_mode:
             return cur_mode.call_torch_function(tx, fn, types, args, kwargs)
 
@@ -545,10 +546,19 @@ def dispatch_torch_function(
     fn: VariableTracker,
     args: Iterable[Any],
     kwargs: dict[str, Any],
+    relevant_args: Iterable[VariableTracker] | None = None,
 ) -> Any:
-    """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args"""
+    """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args
 
-    all_args = _get_all_args(args, kwargs)
+    ``relevant_args`` restricts the overload search to an explicit set of
+    values, matching ``torch.overrides.handle_torch_function``.
+    """
+
+    all_args = (
+        _get_all_args(args, kwargs)
+        if relevant_args is None
+        else _flatten_vts(relevant_args)
+    )
     overloaded_args = _get_overloaded_args(
         [arg for arg in all_args if has_torch_function(arg)],
         _get_subclass_type,
