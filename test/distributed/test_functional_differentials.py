@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-import unittest
 from functools import partial, wraps
 
 import torch
@@ -1062,14 +1061,6 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
                 self.assertIsNotNone(input_tensor.grad)
                 self.assertEqual(input_tensor.grad, expected_grad)
 
-    # Known-broken: under torch.compile the coalesced min/max backward returns
-    # all-zero grads (eager is correct). The AOT joint graph is right, but
-    # Inductor's lowering of the multi-output wait_tensors op mishandles waiting
-    # the forward's coalesced output again in the backward: unlike the
-    # single-tensor wait_tensor (which gets an alias inserted), the re-wait
-    # yields wrong data, so the `input == output` extremum mask is all-False.
-    # Fixing that lives in torch/_inductor comm lowering, out of scope here.
-    @unittest.expectedFailure
     @with_comms
     def test_all_reduce_coalesced_min_max_ties_compile(self):
         """coalesced min/max backward splits grad evenly across ties under compile.

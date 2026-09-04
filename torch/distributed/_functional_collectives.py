@@ -670,6 +670,24 @@ torch.library.register_autograd(
 )
 
 
+def wait_tensors_backward(ctx, grad_outputs: list[torch.Tensor]):
+    # Identity, matching wait_tensor: wait is a synchronization primitive, so
+    # each gradient flows through unchanged. The single Tensor[] input takes the
+    # list of per-element grads.
+    return (grad_outputs,)
+
+
+def wait_tensors_setup_context(ctx, inputs, output):
+    return
+
+
+torch.library.register_autograd(
+    "_c10d_functional::wait_tensors",
+    wait_tensors_backward,
+    setup_context=wait_tensors_setup_context,
+)
+
+
 def _reduce_op_type(op: str | ReduceOp):
     """Normalize a reduce op to a lowercase str or a ReduceOp.RedOpType.
 
