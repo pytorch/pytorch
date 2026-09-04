@@ -231,7 +231,7 @@ class FuzzTemplate:
         )
 
         if arg_operations:
-            for i, (node_id, spec) in enumerate(arg_operations):
+            for i, (_node_id, spec) in enumerate(arg_operations):
                 arg_name = f"arg_{i}"
 
                 if isinstance(spec, ScalarSpec):

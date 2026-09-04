@@ -18,10 +18,10 @@ class NestedModule(nn.Module):
 
         sub_mods = []
         if depth > 0:
-            for i in range(width):
+            for _i in range(width):
                 sub_mods.append(NestedModule(depth - 1, width))
         else:
-            for i in range(width):
+            for _i in range(width):
                 sub_mods.append(nn.ReLU())
         self.sub_mods = nn.Sequential(*sub_mods)
         self.a = 2
