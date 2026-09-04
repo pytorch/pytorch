@@ -40,6 +40,7 @@ Export runs in stage 2, after torch is built, so a builder module may import tor
 from __future__ import annotations
 
 import os
+import platform
 import re
 
 
@@ -186,6 +187,21 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
         warm_up()
         cls._warmed_up = True
 
+    # The host ISA the exported .o targets. Unset, the DSL compiles its host stubs for
+    # the BUILD machine's CPU, so a builder with AVX512 emits AVX512 module loaders
+    # that raise SIGILL on any CPU without it -- and which instructions appear depends
+    # on the builder, so one commit is portable or not depending on which runner took
+    # the job. Pinned to the baseline aten targets: torch compiles general code for the
+    # compiler default and keeps AVX2/AVX512 in runtime-dispatched copies
+    # (CPU_CAPABILITY_FLAGS in cmake/Codegen.cmake), which a kernel loader cannot do.
+    # Export-only, so no device code changes and the JIT route's SASS is unaffected.
+    # An unset -mcpu under an explicit triple is that triple's generic CPU, not the
+    # host's, which is what aarch64 wants.
+    _HOST_TARGETS = {
+        "x86_64": "llvm -mtriple=x86_64-unknown-linux-gnu -mcpu=x86-64",
+        "aarch64": "llvm -mtriple=aarch64-unknown-linux-gnu",
+    }
+
     def export(self, b: dict, out_dir: str, arch: str | None = None) -> dict:
         import cutlass.cute as cute
 
@@ -193,6 +209,12 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
         # the op's JIT wrapper passes, minus --enable-tvm-ffi, which would change
         # the exported ABI; otherwise the two routes' SASS diverges.
         opts = b.get("options")
+        # A declaration that sets its own wins, so an op needing a specific host CPU
+        # is not silently overridden.
+        host_target = self._HOST_TARGETS.get(platform.machine())
+        if host_target and "--host-target" not in (opts or ""):
+            host_opt = f"--host-target '{host_target}'"
+            opts = f"{opts} {host_opt}" if opts else host_opt
         if arch:
             # --gpu-arch outranks the CUTE_DSL_ARCH env var, so one process can
             # export for several arches.
