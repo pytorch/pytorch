@@ -435,6 +435,8 @@ inductor_override_kwargs["cpu"] = {
         "atol": 1e-3,
         "rtol": 1e-4,
     },
+    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("addbmm", f16): {"reference_in_float": False},
     # Following tests are failing with strict comparison but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", u8): {"atol": 1, "rtol": 0},
@@ -579,6 +581,8 @@ inductor_override_kwargs["cuda"] = {
         "grad_atol": 2e-3,
         "grad_rtol": 1e-3,
     },
+    ("special.i1", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
+    ("special.i1e", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -592,9 +596,17 @@ inductor_override_kwargs["xpu"] = {
     "randn": {"assert_equal": False},
     "nn.functional.rrelu": {"check_gradient": False},
     # XPU
+    # Mirrors the CUDA override from #189872; the fp16 backward gap is the
+    # same eager-vs-inductor intermediate-precision difference on XPU.
+    ("special.i1", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
+    ("special.i1e", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
     ("cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
     ("baddbmm", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
+    ("combinations", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 0.01,
+    },  # inductor does accum in fp16
     ("angle", f64): {"reference_in_float": True},
     ("asin", f16): {"reference_in_float": True},
     ("asin", f32): {"reference_in_float": True, "atol": 1e-4, "rtol": 1e-4},
@@ -1434,7 +1446,7 @@ class TestInductorOpInfo(TestCase):
                 self.has_rng_op = False
 
             def __torch_dispatch__(self, func, types, args, kwargs=None):
-                kwargs = kwargs if kwargs else {}
+                kwargs = kwargs or {}
                 if torch.Tag.nondeterministic_seeded in func.tags:
                     self.has_rng_op = True
 

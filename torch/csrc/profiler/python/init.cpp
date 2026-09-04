@@ -5,11 +5,10 @@
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <c10/util/overloaded.h>
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
-#include <torch/csrc/profiler/cupti/monitor_python.h>
+#include <torch/csrc/profiler/cuspy/cuspy_python.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
@@ -741,10 +740,8 @@ void initPythonBindings(PyObject* module) {
       .def(py::init<>())
       .def("to_unix_ns", &ApproximateClockPyConverter::to_unix_ns);
   m.def("_get_approximate_time", []() { return c10::getApproximateTime(); });
-  initCuptiMonitorBindings(m);
-  if (PyModule_AddType(m.ptr(), &THPCapturedTracebackType) < 0) {
-    throw python_error();
-  }
+  initCuspyBindings(m);
+  TORCH_CHECK_PYTHON(PyModule_AddType(m.ptr(), &THPCapturedTracebackType) >= 0);
   m.def(
       "gather_traceback",
       CapturedTraceback::gather,
@@ -807,17 +804,12 @@ void initPythonBindings(PyObject* module) {
   RecordFunctionFast_Type.tp_init = RecordFunctionFast_init;
   RecordFunctionFast_Type.tp_new = RecordFunctionFast_new;
 
-  if (PyType_Ready(&RecordFunctionFast_Type) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&RecordFunctionFast_Type) >= 0);
 
-  Py_INCREF(&RecordFunctionFast_Type);
-  if (PyModule_AddObject(
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObjectRef(
           m.ptr(),
           "_RecordFunctionFast",
-          (PyObject*)&RecordFunctionFast_Type) != 0) {
-    Py_DECREF(&RecordFunctionFast_Type);
-    throw python_error();
-  }
+          (PyObject*)&RecordFunctionFast_Type) == 0);
 }
 } // namespace torch::profiler
