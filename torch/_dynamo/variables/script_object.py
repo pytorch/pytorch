@@ -405,11 +405,12 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
             elif is_opaque_constant_type(real_obj_type):
                 return super().tp_getattro_impl(tx, name)
 
-            elif name in ("__bool__", "__len__") and not hasattr(real_obj, name):
-                # Special case: __bool__ and __len__ are used for truthiness checks.
-                # If they're not registered and the real object doesn't have them,
-                # raise ObservedAttributeError so the caller can fall back to
-                # treating the object as truthy (Python default behavior)
+            elif not hasattr(real_obj, name):
+                # The real object has no such attribute, so the observable
+                # behavior is an AttributeError.  This lets hasattr() and
+                # getattr(obj, name, default) work on unregistered members,
+                # and lets truthiness checks fall back to the Python default
+                # when __bool__/__len__ are absent.
                 raise_observed_exception(AttributeError, tx)
 
             else:
