@@ -180,6 +180,17 @@ def register_run_and_save_rng_state_op():
     def impl_xpu(op, *args, **kwargs):
         return torch.xpu.get_rng_state(), op(*args, **kwargs)
 
+    @run_and_save_rng_state.py_impl(DispatchKey.PrivateUse1)
+    def impl_privateuse1(op, *args, **kwargs):
+        # Contract: a PrivateUse1 backend opts into these two HOPs the same
+        # way as the in-tree backends -- by implementing get_rng_state and
+        # set_rng_state on its device module. This is separate from
+        # register_graphsafe_rng_device_type, which gates the distinct
+        # graphsafe_run_with_rng_state HOP (generator-based, not module-based).
+        device_type = get_device(args, kwargs)
+        device_mod = torch._utils._get_device_module(device_type)
+        return device_mod.get_rng_state(), op(*args, **kwargs)
+
     @run_and_save_rng_state.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(op, *args, **kwargs):
         impl_map = {
@@ -188,6 +199,11 @@ def register_run_and_save_rng_state_op():
             "hpu": impl_hpu,
             "xpu": impl_xpu,
         }
+        # PrivateUse1 backends (e.g. "npu") are resolved at call time via
+        # PyTorch's own registration mechanism, so no backend name is hardcoded.
+        privateuse1_name = torch._C._get_privateuse1_backend_name()
+        if privateuse1_name and privateuse1_name != "privateuseone":
+            impl_map[privateuse1_name] = impl_privateuse1
         device = get_device(args, kwargs)
         if device not in impl_map:
             raise AssertionError(f"Backend not supported for {device}")
@@ -261,6 +277,18 @@ def register_run_with_rng_state_op():
         torch.xpu.set_rng_state(current_state)
         return out
 
+    @run_with_rng_state.py_impl(DispatchKey.PrivateUse1)
+    def impl_privateuse1(rng_state, op, *args, **kwargs):
+        # See impl_privateuse1 under run_and_save_rng_state for the contract.
+        # State restore is unconditional (matches impl_cuda/cpu/hpu/xpu).
+        device_type = get_device(args, kwargs)
+        device_mod = torch._utils._get_device_module(device_type)
+        current_state = device_mod.get_rng_state()
+        device_mod.set_rng_state(rng_state)
+        out = op(*args, **kwargs)
+        device_mod.set_rng_state(current_state)
+        return out
+
     @run_with_rng_state.py_impl(ProxyTorchDispatchMode)
     def impl_proxy_dispatch_mode(mode, rng_state, op, *args, **kwargs):
         # TODO: you don't need to do this, the dispatch here already disabled
@@ -282,6 +310,11 @@ def register_run_with_rng_state_op():
             "hpu": impl_hpu,
             "xpu": impl_xpu,
         }
+        # PrivateUse1 backends (e.g. "npu") are resolved at call time via
+        # PyTorch's own registration mechanism, so no backend name is hardcoded.
+        privateuse1_name = torch._C._get_privateuse1_backend_name()
+        if privateuse1_name and privateuse1_name != "privateuseone":
+            impl_map[privateuse1_name] = impl_privateuse1
         device = get_device(args, kwargs)
         if device not in impl_map:
             raise AssertionError(f"Backend not supported for {device}")
