@@ -24,6 +24,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import hashlib
 import importlib
 import inspect
 import io
@@ -766,14 +767,17 @@ class GuardManagerWrapper:
                 self.construct_manager_string(child_mgr, body)
 
     def leaf_fingerprint(self) -> set[tuple[str, str]]:
-        """The leaf guards this tree checks, as comparable (class, payload).
+        """The C++ leaf guards this tree checks, as comparable (class, payload).
 
         Used to tell a tree rebuilt from a pickle apart from the tree the live
         capture built. Only LEAVES: a node line carries the type of the guarded
         value, which is a Tensor live and a FakeTensor reconstructed, so it
         differs on every artifact. Depth is excluded for the same reason -- the
         same guard can sit at a different depth without meaning anything
-        different.
+        different. Lambda and relational guards are left out: a lambda's
+        identity is its generated name, not stable across a rebuild, and a
+        relational guard is installed on the runtime side only. So drift over
+        this fingerprint is drift in the C++ leaf checks, never in a lambda.
         """
         found: set[tuple[str, str]] = set()
 
@@ -4278,6 +4282,11 @@ _FAKE_TENSOR_RESERVED_ATTRIBUTES = frozenset(
     {"_fake_device", "fake_mode", "pytype", "dispatch_keys"}
 )
 
+# Attributes carried even when their value would otherwise be pruned: the marking
+# flag is an interned ``True``, so _keep would drop it, but a guard rebuilt over
+# the tensor reads it to decide whether to check _dynamo_dynamic_range.
+_ALWAYS_CARRIED_TENSOR_ATTRIBUTES = frozenset({"_has_dynamo_dim_marking"})
+
 
 @functools.cache
 def _get_unsupported_types() -> tuple[type, ...]:
@@ -4306,7 +4315,7 @@ def _get_unsupported_types() -> tuple[type, ...]:
 # the live build never made means reconstruction lost something the guard reads.
 # A ContextVar rather than a module global: a torch.compile on another thread
 # must neither record into a capture's set nor clobber a second session's.
-_LIVE_LEAF_GUARDS: ContextVar[set[tuple[str, str]] | None] = ContextVar(
+_LIVE_LEAF_GUARDS: ContextVar[dict[bytes, set[tuple[str, str]]] | None] = ContextVar(
     "precompile_live_leaf_guards", default=None
 )
 
@@ -4359,15 +4368,17 @@ def _companion_attribute_guards(
 
 @contextlib.contextmanager
 def record_live_guard_leaves(
-    leaves: set[tuple[str, str]] | None = None,
-) -> Generator[set[tuple[str, str]], None, None]:
-    """Record the leaves of every guard built on THIS thread into ``leaves``.
+    leaves: dict[bytes, set[tuple[str, str]]] | None = None,
+) -> Generator[dict[bytes, set[tuple[str, str]]], None, None]:
+    """Record each live guard build's leaves into ``leaves``, keyed by pickle.
 
-    A session installs its own set around each capture call, so calls made from
-    several threads all record into the one set the drift check reads.
+    A session installs its own dict around each capture call, so calls made
+    from several threads all record into the one dict the drift check reads.
+    The key is the sha256 of the guards_state the build produced, so a rebuild
+    is later compared against the SAME variant's live leaves.
     """
     if leaves is None:
-        leaves = set()
+        leaves = {}
     token = _LIVE_LEAF_GUARDS.set(leaves)
     try:
         yield leaves
@@ -4428,8 +4439,29 @@ def _is_interned_singleton(value: Any) -> bool:
     )
 
 
-# The bookkeeping torch.nn.Module.__init__ installs on every module.
-_NN_MODULE_STATE_ATTRS = frozenset(vars(torch.nn.Module()))
+def _pickles_by_default(obj: Any) -> bool:
+    """Whether ``obj`` round-trips as ``type(obj).__new__`` plus its ``__dict__``.
+
+    Attribute pruning is only sound for that protocol. A custom __reduce_ex__
+    (enum.Enum's is ``(cls, (self._value_,))``), __getstate__ or __setstate__
+    reads attributes no guard named and gets the sentinel instead.
+    """
+    cls = type(obj)
+    return (
+        cls.__reduce_ex__ is object.__reduce_ex__
+        and cls.__reduce__ is object.__reduce__
+        and getattr(cls, "__getstate__", None) is getattr(object, "__getstate__", None)
+        and not hasattr(cls, "__setstate__")
+    )
+
+
+# The exact-container bookkeeping nn.Module.__init__ installs: __getattr__ indexes
+# the three dicts on every attribute miss, and none of these ever reached
+# reducer_override before persistent_id existed. Hook OrderedDicts are not
+# listed: they were, and stay, pruned unless a guard reads them.
+_NN_MODULE_STATE_ATTRS = frozenset(
+    {"_parameters", "_buffers", "_modules", "_non_persistent_buffers_set"}
+)
 
 
 class GuardsStatePickler(FunctionPicklerBase):
@@ -4459,7 +4491,12 @@ class GuardsStatePickler(FunctionPicklerBase):
         cls, tensor: torch.Tensor, state: dict[str, Any]
     ) -> None:
         for name, value in state.items():
-            object.__setattr__(tensor, name, value)
+            if name == "grad":
+                # A pruned .grad comes back as the _Missing sentinel; assigning
+                # it would raise, and an unguarded grad is not needed anyway.
+                tensor.grad = value if isinstance(value, torch.Tensor) else None
+            else:
+                object.__setattr__(tensor, name, value)
 
     def _carried_tensor_attributes(self, obj: torch.Tensor) -> dict[str, Any] | None:
         """The plain Python attributes of ``obj`` that a guard can reach.
@@ -4473,14 +4510,20 @@ class GuardsStatePickler(FunctionPicklerBase):
         state = getattr(obj, "__dict__", None)
         if not state:
             return None
-        is_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
-            obj, torch._subclasses.FakeTensor
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        # A FakeTensor and a traceable wrapper subclass both keep their own
+        # bookkeeping in __dict__; the reconstructor sets it, so carrying it would
+        # accrete a fresh copy on every round trip.
+        owns_bookkeeping = (
+            isinstance(obj, torch._subclasses.FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+            or is_traceable_wrapper_subclass(obj)
         )
         carried: dict[str, Any] = {}
         for name, value in state.items():
-            if is_fake and name in _FAKE_TENSOR_OWNED_ATTRIBUTES:
+            if owns_bookkeeping and name in _FAKE_TENSOR_OWNED_ATTRIBUTES:
                 continue
-            if not self._keep(value):
+            if name not in _ALWAYS_CARRIED_TENSOR_ATTRIBUTES and not self._keep(value):
                 continue
             if name in _FAKE_TENSOR_RESERVED_ATTRIBUTES:
                 raise torch._dynamo.exc.PackageError(
@@ -4791,11 +4834,16 @@ class GuardsStatePickler(FunctionPicklerBase):
                         self.guard_tree_values[id(inner)] = inner
                     inner_data.append((attr, inner))
 
-                carried = self._carried_tensor_attributes(obj)
-                if carried is not None:
-                    for attr in attrs:
-                        carried.pop(attr, None)
-                    carried = carried or None
+                carried = self._carried_tensor_attributes(obj) or {}
+                for attr in attrs:
+                    carried.pop(attr, None)
+                # The outer subclass .grad is a tensor attribute, not a __dict__
+                # entry, so _carried_tensor_attributes misses it; carry it here so
+                # a guard chained through .grad can be rebuilt. reducer_override
+                # prunes it to _Missing if unguarded, and _restore drops that.
+                if obj.is_leaf or obj.retains_grad:
+                    carried["grad"] = obj.grad
+                carried = carried or None
                 return (
                     type(self)._unpickle_traceable_wrapper_subclass,
                     (
@@ -4984,6 +5032,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             and not inspect.ismodule(obj)
             and not isinstance(obj, (torch.nn.Module, torch.Tensor))
             and not type(obj).__module__.startswith("torch.")
+            and _pickles_by_default(obj)
         ):
             # Any object the guard tree reached, not just an nn.Module. A guarded
             # object that is NOT a module -- a train pipeline, a wrapper holding a
@@ -5047,7 +5096,8 @@ class GuardsStatePickler(FunctionPicklerBase):
         Mirrors its substitution rules, in its order: a precompile handle, a
         value in missing_values, a _Missing that came back from a previous
         serialization, a non-meta tensor or nn.Module the guard tree does not
-        reach, a PyCapsule, a type in _get_unsupported_types(), and a function
+        reach, a distributed_c10d.Work the guard tree does not reach, a
+        PyCapsule, a type in _get_unsupported_types(), and a function
         whose qualified name resolves to a different object while the guard
         tree does not reach it. A reducer that needs to know whether its own
         output will round-trip asks here rather than reading the value, because
@@ -5060,6 +5110,10 @@ class GuardsStatePickler(FunctionPicklerBase):
         if isinstance(obj, torch.Tensor) and obj.device.type != "meta":
             return id(obj) not in self.guard_tree_values
         if isinstance(obj, torch.nn.Module):
+            return id(obj) not in self.guard_tree_values
+        if hasattr(torch.distributed, "distributed_c10d") and isinstance(
+            obj, torch.distributed.distributed_c10d.Work
+        ):
             return id(obj) not in self.guard_tree_values
         if (
             obj.__class__.__module__ == "builtins"
@@ -5083,11 +5137,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         is needed -- only the attributes a guard actually reads. The rest is
         replaced by the _Missing sentinel, which is what keeps an unpicklable
         bystander (a generator, a live iterator, a C handle) from taking the
-        frame down with it.
-
-        This applies to every guarded user object, not only nn.Module: a class
-        whose __setstate__ or __reduce__ reads a pruned attribute sees _Missing
-        at load.
+        frame down with it. Only objects that pickle by default protocol are
+        pruned (see _pickles_by_default): a custom __setstate__ or __reduce__
+        would read a pruned attribute and see _Missing at load.
         """
         is_module = isinstance(obj, torch.nn.Module)
         for name, attr in vars(obj).items():
@@ -5096,7 +5148,6 @@ class GuardsStatePickler(FunctionPicklerBase):
             if is_module and name in _NN_MODULE_STATE_ATTRS:
                 # nn.Module.__getattr__ indexes these, so a pruned one turns
                 # every attribute miss on the loaded module into a TypeError.
-                # Their elements are still pruned one by one.
                 continue
             if id(attr) in self.guard_tree_values:
                 continue
@@ -5193,14 +5244,15 @@ def _offending_value_path(
             seen.add(id(value))
             if value is target:
                 return f"\n  reached via: {path}"
-            if isinstance(value, (list, tuple)):
+            if isinstance(value, (list, tuple, set, frozenset, OrderedSet)):
                 queue.extend((f"{path}[{i}]", v) for i, v in enumerate(value))
             elif isinstance(value, dict):
-                queue.extend(
-                    (f"{path}[{k!r}]", v)
-                    for k, v in value.items()
-                    if isinstance(k, (str, int))
-                )
+                for i, (k, v) in enumerate(value.items()):
+                    if isinstance(k, (str, int)):
+                        queue.append((f"{path}[{k!r}]", v))
+                    else:
+                        queue.append((f"{path}.keys()[{i}]", k))
+                        queue.append((f"{path}.values()[{i}]", v))
             elif isinstance(value, types.FunctionType):
                 # A function a guard is rooted at is pickled by value, defaults,
                 # kwdefaults and closure cells included (its __dict__ is walked
@@ -5484,19 +5536,26 @@ class CheckFunctionManager:
             # Each build_guards call resets and repopulates code_list and
             # guard_types on the guards it is given, and serialize_guards reads
             # guard_types off whichever build ran last. Build the entries -- a
-            # snapshot of the unfiltered inspection build -- first whenever the
-            # RUNTIME build is going to need them, so the snapshot is one
-            # consistent build over all guards. A serialization-only filter does
-            # not: with no runtime filter the runtime build sees every guard, so
-            # it IS the inspection build and its builder answers the same
-            # questions.
-            if guard_filter_fn is not None:
+            # snapshot of the unfiltered inspection build -- before the runtime
+            # and save builds, so the snapshot is one consistent build over all
+            # guards and the inspection build never overwrites the export info
+            # of the build that gets serialized.
+            serialization_filter = (
+                serialization_guard_filter_fn if save_guards else None
+            )
+            # The saved copy is built separately whenever it may differ from
+            # the live guards: an explicit capture never saves from the runtime
+            # build, and a serialization filter applies to the saved copy only.
+            separate_save_build = save_guards and (
+                explicit_capture or serialization_filter is not None
+            )
+            if guard_filter_fn is not None or serialization_filter is not None:
                 build_filter_entries()
 
             runtime_guards = (
                 apply_filter(guard_filter_fn) if guard_filter_fn else all_guards
             )
-            runtime_save_guards = save_guards and not explicit_capture
+            runtime_save_guards = save_guards and not separate_save_build
             builder, guard_manager = self.build_guards(
                 runtime_guards,
                 existing_diff_guard_sources,
@@ -5513,19 +5572,16 @@ class CheckFunctionManager:
 
             serialized_guards = runtime_guards
             serialization_builder = builder
-            if save_guards and explicit_capture:
-                if serialization_guard_filter_fn is None:
-                    raise AssertionError(
-                        "explicit capture requires a serialization guard filter"
-                    )
-                serialized_guards = apply_filter(serialization_guard_filter_fn)
+            if separate_save_build:
+                if serialization_filter is not None:
+                    serialized_guards = apply_filter(serialization_filter)
                 serialization_builder, _ = self.build_guards(
                     serialized_guards,
                     existing_diff_guard_sources,
                     f_code,
                     output_graph,
                     True,
-                    guard_filter_fn=serialization_guard_filter_fn,
+                    guard_filter_fn=serialization_filter,
                 )
                 # Value pruning keys off the guard tree: anything the tree does
                 # not reach is replaced by a placeholder. Dropping a guard must
@@ -5539,14 +5595,6 @@ class CheckFunctionManager:
                     **builder.guard_tree_values,
                     **serialization_builder.guard_tree_values,
                 }
-            # Only from a LIVE build. Recording a reconstruction's leaves would
-            # let a reconstruction bug whitelist itself.
-            live_leaves = _LIVE_LEAF_GUARDS.get()
-            if live_leaves is not None and not output_graph.skip_guards_check:
-                live_leaves.update(
-                    serialization_builder.guard_manager.leaf_fingerprint()
-                )
-
             self.guard_manager = guard_manager
             self.compile_check_fn(builder, runtime_guards, guard_fail_fn)
 
@@ -5634,6 +5682,22 @@ class CheckFunctionManager:
                     f"Guard evaluation failed: {str(e)}",
                     traceback=traceback.format_exc().split("\n"),
                 )
+
+        # Key this LIVE build's leaves by the pickle it wrote, so a rebuild is
+        # compared against the leaves of the SAME variant rather than the union
+        # of every variant's -- which would hide a rebuild drifting into a
+        # check another variant made live. Only a live build: recording a
+        # reconstruction's leaves would let a reconstruction bug whitelist
+        # itself.
+        live_leaves = _LIVE_LEAF_GUARDS.get()
+        if (
+            live_leaves is not None
+            and self.guards_state is not None
+            and not output_graph.skip_guards_check
+        ):
+            live_leaves[hashlib.sha256(self.guards_state).digest()] = (
+                serialization_builder.guard_manager.leaf_fingerprint()
+            )
 
         # TODO: don't do the string rep, do something more structured here
         torch._logging.trace_structured(
