@@ -1102,6 +1102,10 @@ def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:
     return trampoline_autograd_apply
 
 
+# The pristine C classmethod descriptor behind torch.autograd.Function.apply.
+_ORIG_FUNCTION_APPLY = torch._C._FunctionBase.__dict__["apply"]
+
+
 class AutogradFunctionVariable(VariableTracker):
     """represents a torch.autograd.Function subclass"""
 
@@ -1138,6 +1142,31 @@ class AutogradFunctionVariable(VariableTracker):
             )
         )
         return variables.ConstantVariable.create(hasattr(self.fn_cls, name))
+
+    def _resolve_patched_apply(
+        self, tx: "InstructionTranslatorBase", descriptor: object
+    ) -> VariableTracker | None:
+        """Trace ``cls.apply`` when ``Function.apply`` has been monkey patched.
+
+        Libraries replace ``torch.autograd.Function.apply`` with a Python
+        descriptor to intercept every ``apply`` call (e.g. to route it through
+        ``__torch_function__``).  Resolve the attribute the way CPython would:
+        ``descriptor.__get__(None, cls)``.  Guards installed on the raw class
+        ``__dict__`` entry recompile once the patch is removed.
+        """
+        get_fn = inspect.getattr_static(type(descriptor), "__get__", None)
+        if not isinstance(get_fn, types.FunctionType):
+            return None
+        descriptor_source = self._get_raw_attribute_source(tx, "apply")
+        if descriptor_source is None:
+            return None
+        descriptor_var = VariableTracker.build(tx, descriptor, descriptor_source)
+        return variables.UserMethodVariable(
+            get_fn,
+            descriptor_var,
+            source_fn=AttrSource(TypeSource(descriptor_source), "__get__"),
+            source=AttrSource(descriptor_source, "__get__"),
+        ).call_function(tx, [variables.ConstantVariable.create(None), self], {})
 
     def _resolve_kwargs(
         self,
@@ -1444,6 +1473,11 @@ class AutogradFunctionVariable(VariableTracker):
     ) -> VariableTracker:
         source = AttrSource(self.source, name) if self.source is not None else None
         if name == "apply":
+            apply_attr = inspect.getattr_static(self.fn_cls, "apply", None)
+            if apply_attr is not _ORIG_FUNCTION_APPLY:
+                resolved = self._resolve_patched_apply(tx, apply_attr)
+                if resolved is not None:
+                    return resolved
             return GetAttrVariable(self, name, py_type=types.MethodType, source=source)
         if source is None:
             return GetAttrVariable(self, name)

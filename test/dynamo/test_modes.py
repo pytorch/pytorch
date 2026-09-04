@@ -1034,6 +1034,71 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), expected)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_monkey_patched_autograd_function_apply(self):
+        from torch.overrides import handle_torch_function, has_torch_function
+
+        class ApplyDescriptor:
+            def __init__(self, orig):
+                self._orig = orig
+
+            def __get__(self, obj, cls=None):
+                orig_method = self._orig.__get__(obj, cls)
+
+                def wrapper(*args, **kwargs):
+                    tensors = tuple(a for a in args if isinstance(a, torch.Tensor))
+                    if has_torch_function(tensors):
+                        return handle_torch_function(
+                            orig_method, tensors, *args, **kwargs
+                        )
+                    return orig_method(*args, **kwargs)
+
+                return wrapper
+
+        class ApplyMode(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                kwargs = kwargs or {}
+                out = func(*args, **kwargs)
+                if getattr(func, "__name__", None) == "apply":
+                    out.apply_cls = func.__self__
+                return out
+
+        class Double(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2
+
+        def fn(x):
+            y = Double.apply(x)
+            return y, y + 1
+
+        x = torch.ones(2, requires_grad=True)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        orig_apply = torch.autograd.Function.__dict__["apply"]
+        torch.autograd.Function.apply = ApplyDescriptor(orig_apply)
+        try:
+            with ApplyMode():
+                ref = fn(x)
+                res = opt_fn(x)
+                self.assertEqual(opt_fn(x), ref)
+            self.assertEqual(res, ref)
+            self.assertIs(res[0].apply_cls, Double)
+            res[1].sum().backward()
+            self.assertEqual(x.grad, torch.full((2,), 2.0))
+        finally:
+            torch.autograd.Function.apply = orig_apply
+        self.assertEqual(cnt.frame_count, 1)
+        # Removing the patch changes the class dict entry, so the guard fails
+        # and the recompiled function no longer dispatches apply to the mode.
+        with ApplyMode():
+            res = opt_fn(x)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertFalse(hasattr(res[0], "apply_cls"))
+
 
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(
