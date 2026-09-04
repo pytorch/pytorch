@@ -282,12 +282,24 @@ class FunctionPicklerBase(pickle.Pickler):
 
     @staticmethod
     def _apply_function_state(fn: types.FunctionType, state: tuple[Any, ...]) -> None:
-        defaults, kwdefaults, attributes, globals_snapshot, doc = state
+        (
+            defaults,
+            kwdefaults,
+            attributes,
+            globals_snapshot,
+            doc,
+            annotations,
+            type_params,
+        ) = state
         fn.__defaults__ = defaults
         fn.__kwdefaults__ = kwdefaults
-        # FunctionType took __doc__ from the code object; functools.wraps
-        # overwrote it on the live function, and a guard rooted there rebakes.
+        # FunctionType took __doc__/__annotations__/__type_params__ from the code
+        # object; functools.wraps overwrote them on the live function and a guard
+        # rooted there rebakes, so restore what the reducer captured.
         fn.__doc__ = doc
+        fn.__annotations__ = annotations
+        if type_params is not None:
+            fn.__type_params__ = type_params
         fn.__dict__.update(attributes)
         if globals_snapshot is not None:
             fn.__globals__.update(globals_snapshot)
@@ -334,7 +346,16 @@ class FunctionPicklerBase(pickle.Pickler):
             unpickle = type(self)._unpickle_fn_from_module
         else:
             unpickle = type(self)._unpickle_fn_from_snapshot
-        state = (defaults, kwdefaults, attributes, globals_snapshot, fn.__doc__)
+        type_params = getattr(fn, "__type_params__", None)
+        state = (
+            defaults,
+            kwdefaults,
+            attributes,
+            globals_snapshot,
+            fn.__doc__,
+            fn.__annotations__,
+            type_params,
+        )
         return unpickle, args, state, None, None, type(self)._apply_function_state
 
 
