@@ -20,6 +20,9 @@ from quantization.core.test_quantized_op import TestDynamicQuantizedOps  # noqa:
 from quantization.core.test_quantized_op import TestComparatorOps  # noqa: F401
 from quantization.core.test_quantized_op import TestPadding  # noqa: F401
 from quantization.core.test_quantized_op import TestQuantizedEmbeddingOps  # noqa: F401
+from quantization.core.test_quantized_op import TestQuantizedEmbeddingOpsCUDA  # noqa: F401
+from quantization.core.test_quantized_op import TestQuantizedOpsCUDNN  # noqa: F401
+from quantization.core.test_quantized_op import TestQuantizedLinearCUDNN  # noqa: F401
 from quantization.core.test_quantized_op import TestQuantizedWithMinMax  # noqa: F401
 # 2. Quantized Functional/Workflow Ops
 from quantization.core.test_quantized_functional import TestQuantizedFunctionalOps  # noqa: F401
