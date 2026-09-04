@@ -10,24 +10,65 @@ from torch._inductor.lowering import make_fallback, make_pointwise, register_low
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import ops
-from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    skipIfRocm,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
     HAS_CPU,
-    HAS_GPU,
-    requires_gpu,
+    HAS_TRITON,
+    requires_triton,
 )
 
 
 # These tests check issues for lowerings that aren't in the main pytorch repo
 class TestCustomLowering(InductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_register_lowering_custom_dict(self):
+        custom_lowering_dict = {}
+
+        from torch._inductor.lowering import register_lowering
+
+        @torch.library.custom_op("helion_test::foo", mutates_args={})
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        @register_lowering(
+            torch.ops.helion_test.foo, lowering_dict=custom_lowering_dict
+        )
+        def foo_lowering(x):
+            return x
+
+        if torch.ops.helion_test.foo not in custom_lowering_dict:
+            raise AssertionError
+        if torch.ops.helion_test.foo in torch._inductor.lowering.lowerings:
+            raise AssertionError
+
+    @config.patch(joint_graph_constant_folding=False)
+    def test_constant_creation(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.tensor(1)
+
+        make_fallback(torch.ops.aten.lift_fresh_copy.default)
+        self.assertTrue(
+            torch.allclose(torch.compile(M())(torch.ones(3)), torch.ones(3) + 1)
+        )
+
+
+class TestCustomLoweringAccel(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
         cls.test_inductor_ops = torch.library.Library(  # noqa: SCOPED_LIBRARY
             "test_inductor_ops", "DEF"
         )
-        cls.device_list = ["Meta", "CUDA", "XPU"]
+        cls.device_list = ["Meta", "CUDA", "XPU", "PRIVATEUSEONE"]
         for device in cls.device_list:
             setattr(
                 cls,
@@ -108,6 +149,7 @@ class TestCustomLowering(InductorTestCase):
         cls.impl_meta.impl("jagged_to_padded_dense", j2pd_meta)
         cls.impl_cuda.impl("jagged_to_padded_dense", j2pd_gpu)
         cls.impl_xpu.impl("jagged_to_padded_dense", j2pd_gpu)
+        cls.impl_privateuseone.impl("jagged_to_padded_dense", j2pd_gpu)
 
     @classmethod
     def _register_asm_op(cls):
@@ -150,36 +192,15 @@ class TestCustomLowering(InductorTestCase):
             torch.ops.test_inductor_ops.add_custom, type_promotion_kind=None
         )(add_custom_lowering)
 
-    def test_register_lowering_custom_dict(self):
-        custom_lowering_dict = {}
-
-        from torch._inductor.lowering import register_lowering
-
-        @torch.library.custom_op("helion_test::foo", mutates_args={})
-        def foo(x: torch.Tensor) -> torch.Tensor:
-            return x
-
-        @register_lowering(
-            torch.ops.helion_test.foo, lowering_dict=custom_lowering_dict
-        )
-        def foo_lowering(x):
-            return x
-
-        if torch.ops.helion_test.foo not in custom_lowering_dict:
-            raise AssertionError
-        if torch.ops.helion_test.foo in torch._inductor.lowering.lowerings:
-            raise AssertionError
-
-    @requires_gpu()
-    @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
-    def test_jagged_to_padded_dense_sanity_cuda(self):
+    @requires_triton()
+    def test_jagged_to_padded_dense_sanity(self, device):
         def fn(inp, offsets, max_seq_len):
             return torch.ops.test_inductor_ops.jagged_to_padded_dense(
                 inp, offsets, max_seq_len, 60.0
             )
 
-        inp = torch.rand((9, 96), device=GPU_TYPE)
-        offsets = torch.tensor([0, 2, 5, 9], dtype=torch.int32, device=GPU_TYPE)
+        inp = torch.rand((9, 96), device=device)
+        offsets = torch.tensor([0, 2, 5, 9], dtype=torch.int32, device=device)
         max_seq_len = 4
 
         res = fn(inp, offsets, max_seq_len)
@@ -196,20 +217,19 @@ class TestCustomLowering(InductorTestCase):
             fn(inp, offsets, max_seq_len), fn_opt(inp, offsets, max_seq_len)
         )
 
-    @requires_gpu()
-    @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
-    def test_jagged_to_padded_dense_zero_size(self):
+    @requires_triton()
+    def test_jagged_to_padded_dense_zero_size(self, device):
         # Previously, the masking was being completely stripped for the
         # masked load of the input value. That would lead to an IMA
         # because cuda was trying to read index 0 of a zero-size tensor.
         def fn(inp, offsets, max_seq_len):
-            inp = torch.bmm(inp, torch.ones((1, 96, 1), device=GPU_TYPE)).view((0, 1))
+            inp = torch.bmm(inp, torch.ones((1, 96, 1), device=device)).view((0, 1))
             return torch.ops.test_inductor_ops.jagged_to_padded_dense(
                 inp, offsets, max_seq_len, 60.0
             )
 
-        inp = torch.rand((1, 0, 96), device=GPU_TYPE)
-        offsets = torch.zeros(1025, device=GPU_TYPE, dtype=torch.int32)
+        inp = torch.rand((1, 0, 96), device=device)
+        offsets = torch.zeros(1025, device=device, dtype=torch.int32)
         max_seq_len = 20
 
         fn_opt = torch.compile(fn)
@@ -218,66 +238,56 @@ class TestCustomLowering(InductorTestCase):
             fn(inp, offsets, max_seq_len), fn_opt(inp, offsets, max_seq_len)
         )
 
-    @requires_gpu()
+    @requires_triton()
     @skipIfRocm
     @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
-    @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
-    def test_tanh_approx(self):
+    def test_tanh_approx(self, device):
         def fn(inp):
             return torch.ops.test_inductor_ops.tanh_approx(inp)
 
-        inp = torch.randn(32, device=GPU_TYPE)
+        inp = torch.randn(32, device=device)
         fn_opt = torch.compile(fn)
 
         a = torch.tanh(inp)
         b = fn_opt(inp)
         self.assertEqual(a, b)
 
-    @requires_gpu()
+    @requires_triton()
     @skipIfRocm
     @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
-    @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
-    def test_reused_inline_asm_realized(self):
+    def test_reused_inline_asm_realized(self, device):
         def fn(inp):
             y = torch.ops.test_inductor_ops.tanh_approx(inp)
             return y.sum(dim=0), y.sum(dim=1)
 
-        inp = torch.randn(32, 64, device=GPU_TYPE)
+        inp = torch.randn(32, 64, device=device)
         expected = (torch.tanh(inp).sum(dim=0), torch.tanh(inp).sum(dim=1))
         actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), inp)
 
         self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
         self.assertEqual("\n".join(code).count("tanh.approx.f32"), 1)
 
-    @requires_gpu()
+    @requires_triton()
     @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
-    @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
-    def test_multi_inp_asm(self):
+    def test_multi_inp_asm(self, device):
         def fn(a, b):
             return torch.ops.test_inductor_ops.add_custom(a, b)
 
-        a = torch.randn(32, device=GPU_TYPE)
-        b = torch.randn(32, device=GPU_TYPE)
+        a = torch.randn(32, device=device)
+        b = torch.randn(32, device=device)
         fn_opt = torch.compile(fn)
 
         out1 = a + b
         out2 = fn_opt(a, b)
         self.assertEqual(out1, out2)
 
-    @config.patch(joint_graph_constant_folding=False)
-    def test_constant_creation(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return x + torch.tensor(1)
 
-        make_fallback(torch.ops.aten.lift_fresh_copy.default)
-        self.assertTrue(
-            torch.allclose(torch.compile(M())(torch.ones(3)), torch.ones(3) + 1)
-        )
-
+instantiate_device_type_tests(
+    TestCustomLoweringAccel, globals(), allow_xpu=True, except_for="cpu"
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or HAS_TRITON:
         run_tests(needs="filelock")
