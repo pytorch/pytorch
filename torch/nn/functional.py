@@ -420,14 +420,14 @@ See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
     input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iT \times iH , iW)`
-    kernel_size: size of the pooling region. Can be a single number or a
+    kernel_size: size of the pooling region. Can be a single number, a single-element tuple or a
       tuple `(kT, kH, kW)`
-    stride: stride of the pooling operation. Can be a single number or a
+    stride: stride of the pooling operation. Can be a single number, a single-element tuple or a
       tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`. Should be at most half
-      of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
-      Default: 0
+      single number, a single-element tuple or a tuple `(padT, padH, padW)`.
+      Should be at most half of effective kernel size, that
+      is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape
     count_include_pad: when True, will include the zero-padding in the
@@ -781,9 +781,9 @@ def max_pool2d_with_indices(
 
     Args:
         input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`, minibatch dim optional.
-        kernel_size: size of the pooling region. Can be a single number or a
+        kernel_size: size of the pooling region. Can be a single number, a single-element tuple or a
             tuple `(kH, kW)`
-        stride: stride of the pooling operation. Can be a single number or a
+        stride: stride of the pooling operation. Can be a single number, a single-element tuple or a
             tuple `(sH, sW)`. Default: :attr:`kernel_size`
         padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
         dilation: The stride between elements within a sliding window, must be > 0.
@@ -871,10 +871,10 @@ def max_pool3d_with_indices(
 
     Args:
         input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iD, iH , iW)`, minibatch dim optional.
-        kernel_size: size of the pooling region. Can be a single number or a
-                     tuple `(kT, kH, kW)`
-        stride: stride of the pooling operation. Can be a single number or a
-                tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
+        kernel_size: size of the pooling region. Can be a single number, a single-element tuple
+                     or a tuple `(kT, kH, kW)`
+        stride: stride of the pooling operation. Can be a single number, a single-element tuple
+                or a tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
         padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
         dilation: The stride between elements within a sliding window, must be > 0.
         ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
