@@ -2598,6 +2598,7 @@ if TYPE_CHECKING:
     # Fixup segment_reduce visibility
     _segment_reduce = segment_reduce
     del segment_reduce  # noqa: F821
+    from torch._C._VariableFunctions import _assert_async as assert_async
 
 # Ops not to be exposed in `torch` namespace,
 # mostly helper ops.
@@ -2614,6 +2615,10 @@ for __name in dir(_C._VariableFunctions):
         # TODO: Once the undocumented FC window is passed, remove the line below
         globals()[__name] = __obj
         __name = "_" + __name
+    # Public alias; the underscored name is kept for backward compatibility
+    if __name == "_assert_async":
+        globals()[__name] = __obj
+        __name = "assert_async"
     globals()[__name] = __obj
     if not __name.startswith("_"):
         __all__.append(__name)
