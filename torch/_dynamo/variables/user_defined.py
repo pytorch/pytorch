@@ -5064,66 +5064,82 @@ class DefaultDictVariable(UserDefinedDictVariable):
     }
 
 
-class UserDefinedSetVariable(UserDefinedObjectVariable):
+class UserDefinedSetVariable(UserDefinedObjectVariable, SetVariable):
     """
     Represents user defined objects that are subclasses of set.
-
-    Internally, it uses a SetVariable to represent the set part of the
-    variable tracker. For everything else, it falls back to
-    UserDefinedObjectVariable.
     """
+
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *SetVariable._nonvar_fields,
+    }
 
     def __init__(
         self,
         value: object,
-        set_vt: SetVariable | FrozensetVariable | None = None,
+        items: Iterable[VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
-        from .builder import SourcelessBuilder
+        super().__init__(value, items=items if items is not None else [], **kwargs)
+        self._base_methods = set_methods
 
+    def _new_set(self, items: "Iterable[HashableTracker]") -> "SetVariable":
+        # A new set built from a set subclass (union, difference, ...) is a plain
+        # set in CPython, not the subclass.  Also avoids SetVariable._new_set's
+        # type(self)(items), which would misfire on this class's (value, items)
+        # constructor.
+        return SetVariable(list(items), mutation_type=ValueMutationNew())
+
+
+class UserDefinedFrozensetVariable(UserDefinedObjectVariable, FrozensetVariable):
+    """
+    Represents user defined objects that are subclasses of frozenset.
+    """
+
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *FrozensetVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        value: object,
+        items: Iterable[VariableTracker | HashableTracker] | None = None,
+        init_args: list[VariableTracker] | None = None,
+        **kwargs: Any,
+    ) -> None:
         tx = kwargs.pop("tx", None)
-        super().__init__(value, **kwargs)
-
-        python_type = set if isinstance(value, set) else frozenset
-        self._base_methods = set_methods if python_type is set else frozenset_methods
-
-        if set_vt is None:
-            if self.source is not None:
-                raise AssertionError(
-                    "set_vt must be constructed by builder.py when source is present"
-                )
-            if python_type is set:
-                # set is initialized later
-                self._base_vt = variables.SetVariable(
-                    set(),
-                    mutation_type=ValueMutationNew(),
-                )
+        if items is None:
+            # frozenset is immutable: frozenset.__new__(cls, iterable) populates
+            # the content at construction (__init__ is a no-op), so materialize
+            # from the __new__ args.  Mirror call_frozenset's do-not-rehash fast
+            # path: reuse a set/dict operand's stored HashableTracker keys rather
+            # than re-hashing every element.
+            if init_args:
+                arg = init_args[0]
+                if isinstance(arg, (SetVariable, ConstDictVariable)):
+                    items = list(arg.items.keys())
+                else:
+                    items = unpack_iterable(tx, arg)
             else:
-                init_args = kwargs.get("init_args", {})
-                self._base_vt = SourcelessBuilder.create(tx, python_type).call_function(  # type: ignore[assignment]
-                    tx, init_args, {}
-                )
-        else:
-            self._base_vt = set_vt
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None after initialization")
+                items = []
+        super().__init__(value, items=items, init_args=init_args, **kwargs)
+        self._base_methods = frozenset_methods
 
-    def as_python_constant(self) -> object:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in as_python_constant")
-        return self._base_vt.as_python_constant()
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        check_positional(tx, self.python_type_name(), len(args), 0, 1)
+        return FrozensetVariable.tp_init_impl(self, tx, args, kwargs)
 
-    @property
-    def set_items(self) -> set[Any]:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in set_items")
-        return self._base_vt.set_items  # pyrefly: ignore[missing-attribute]
-
-    @property
-    def items(self) -> dict[HashableTracker, VariableTracker]:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in items")
-        return self._base_vt.items  # pyrefly: ignore[missing-attribute]
+    def _new_set(self, items: "Iterable[HashableTracker]") -> "FrozensetVariable":
+        # A new frozenset built from a frozenset subclass is a plain frozenset in
+        # CPython, not the subclass.  Also avoids SetVariable._new_set's
+        # type(self)(items), which would misfire on this class's constructor.
+        return FrozensetVariable(list(items), mutation_type=ValueMutationNew())
 
 
 class UserDefinedListVariable(UserDefinedObjectVariable, ListVariable):
