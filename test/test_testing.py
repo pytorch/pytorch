@@ -2782,6 +2782,36 @@ class TestTestParametrizationDeviceType(TestCase):
         if x == 1 or y == 6:
             raise RuntimeError('Boom')
 
+    def test_parametrize_callable_fixed(self, device):
+
+        class TestParametrized(TestCase):
+            @parametrize("arg_name", lambda _: ["a", "b", "c"])
+            def test_foo(self, device, arg_name):
+                pass
+
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(
+            TestParametrized,
+            locals_dict,
+            only_for=device,
+        )
+
+        device_cls = locals_dict[f"TestParametrized{self.device_type.upper()}"]
+
+        self.assertEqual(
+            _get_test_names_for_test_class(device_cls),
+            [
+                f"{device_cls.__name__}.test_foo_arg_name_a_{self.device_type}",
+                f"{device_cls.__name__}.test_foo_arg_name_b_{self.device_type}",
+                f"{device_cls.__name__}.test_foo_arg_name_c_{self.device_type}",
+            ],
+        )
+
+
+    @parametrize("backend", lambda device_cls: [device_cls.device_type])
+    def test_parametrize_callable_backend(self, device, backend):
+        self.assertEqual(torch.device(device).type, backend)
+
 
 instantiate_parametrized_tests(TestTestParametrization)
 instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
