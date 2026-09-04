@@ -93,17 +93,10 @@ META_LABEL_PREFIX = "mt-"
 META_CANARY_LABEL_PREFIX = "c-mt-"
 LF_LABEL_PREFIX = "lf-"
 
-# The EC2 autoscaler runners declared in test-infra's scale-config.yml hang
-# per-runner AMI `variants:` off an experiment name, reached by prefixing the
-# runner type with it: the wincanary variant of windows.12xlarge is
-# wincanary.windows.12xlarge. That is how a new Windows AMI gets exercised
-# before rollout, and the ARC prefixes above cannot express it.
-#
-# Deliberately limited to the AMI-variant experiments. Fleet selection is NOT
-# folded in: `lf` runs at a percentage rollout over ALL workflows, so deriving
-# a prefix from it would silently move Windows builds onto another fleet for
-# every run that happens to be sampled. Anything not listed here leaves the
-# prefix empty and the caller lands on the bare label it uses today.
+# Experiments naming a scale-config AMI variant, selected by prefixing the
+# runner type: wincanary.windows.12xlarge. Fleet experiments are excluded on
+# purpose -- lf rolls out over ALL workflows and would move Windows builds off
+# their fleet as a side effect.
 SCALE_CONFIG_VARIANT_EXPERIMENTS = frozenset({"wincanary", "wincanarylf"})
 
 AMD_SANDBOX_EXPERIMENT = "amd-sandbox"
@@ -136,8 +129,6 @@ class RunnerPrefixResult(NamedTuple):
     # Dedicated prefix for the amd-sandbox experiment, exposed via its own output
     # (amd-sandbox-label-type) instead of being folded into ``prefix``.
     amd_sandbox_prefix: str = ""
-    # Dot-scheme prefix for the scale-config (EC2) fleets, exposed via
-    # scale-config-label-type. Empty means the default Meta scale-config fleet.
     scale_config_prefix: str = ""
 
 
@@ -548,8 +539,6 @@ def get_runner_prefix(
 
     lf_enabled = False
     amd_sandbox_prefix = ""
-    # Non-fleet experiments enabled for this run, in the order encountered.
-    # These name scale-config AMI `variants:` (e.g. wincanary).
     scale_config_experiments: list[str] = []
     for experiment_name, experiment_settings in settings.experiments.items():
         if not experiment_settings.all_branches and is_exception_branch(branch):
@@ -675,8 +664,8 @@ def get_runner_prefix(
             elif experiment_name in SCALE_CONFIG_VARIANT_EXPERIMENTS:
                 scale_config_experiments.append(experiment_name)
                 log.info(
-                    f"Experiment '{experiment_name}' enabled; it names a scale-config "
-                    "AMI variant and is offered on scale-config-label-type."
+                    f"Experiment '{experiment_name}' enabled; offering it on "
+                    "scale-config-label-type."
                 )
             else:
                 log.info(
@@ -691,8 +680,6 @@ def get_runner_prefix(
     else:
         prefix = META_CANARY_LABEL_PREFIX if is_canary else META_LABEL_PREFIX
 
-    # AMI-variant prefix: "" when no variant experiment is enabled, otherwise
-    # "<variant>.", e.g. "wincanary." -> wincanary.windows.12xlarge.
     if len(scale_config_experiments) > 1:
         log.error(
             "Only one scale-config AMI variant can be enabled for a job at any time. "

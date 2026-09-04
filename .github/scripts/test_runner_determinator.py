@@ -862,8 +862,7 @@ if __name__ == "__main__":
 
 
 class TestScaleConfigPrefix(TestCase):
-    """scale-config-label-type names a scale-config AMI variant. Only the
-    wincanary/wincanarylf experiments drive it; fleet selection must not."""
+    """Only wincanary/wincanarylf drive scale-config-label-type."""
 
     SETTINGS = """
 experiments:
@@ -891,24 +890,21 @@ experiments:
         self.assertEqual("", self._result("plainuser").scale_config_prefix)
 
     def test_lf_alone_does_not_set_a_prefix(self) -> None:
-        # lf runs at a percentage rollout over ALL workflows; it must not move
-        # Windows builds onto another fleet as a side effect.
+        # lf rolls out over ALL workflows; it must not relocate Windows builds.
         self.assertEqual("", self._result("lfuser").scale_config_prefix)
         self.assertEqual("", self._result("lfuser", is_canary=True).scale_config_prefix)
 
     def test_wincanary(self) -> None:
-        # wincanary is an AMI variant of windows.12xlarge
         self.assertEqual("wincanary.", self._result("wcuser").scale_config_prefix)
 
     def test_wincanarylf(self) -> None:
         self.assertEqual("wincanarylf.", self._result("wclfuser").scale_config_prefix)
 
     def test_lf_does_not_compose_with_the_variant(self) -> None:
-        # Opting into both yields the variant alone, never "lf.wincanarylf."
+        # never "lf.wincanarylf."
         self.assertEqual("wincanarylf.", self._result("bothuser").scale_config_prefix)
 
     def test_arc_label_type_is_untouched(self) -> None:
-        # label-type keeps the ARC scheme so Linux workflows are unaffected
         self.assertEqual("mt-", self._result("plainuser").prefix)
         self.assertEqual("lf-", self._result("lfuser").prefix)
         self.assertEqual("c-mt-", self._result("plainuser", is_canary=True).prefix)

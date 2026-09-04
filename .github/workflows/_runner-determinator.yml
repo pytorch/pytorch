@@ -61,11 +61,7 @@ on:
         description: Runner prefix for the "amd-sandbox" experiment (empty when not enabled)
         value: ${{ jobs.runner-determinator.outputs.amd-sandbox-label-type }}
       scale-config-label-type:
-        description: >-
-          Runner prefix for the scale-config (EC2) fleets, which use a dot scheme
-          ("", "lf.", "lf.c.") and expose AMI variants keyed by experiment name.
-          Windows binary builds consume this instead of label-type, which carries
-          the ARC prefixes (mt-/c-mt-/lf-).
+        description: Scale-config AMI variant prefix, e.g. "wincanary." (empty when none)
         value: ${{ jobs.runner-determinator.outputs.scale-config-label-type }}
       # Deprecated empty-string alias kept only so the MI350/gfx950 workflows that
       # still reference amd-do-label-type resolve to a bare (unprefixed) label,
