@@ -14,9 +14,12 @@ from torch._logging._internal import TorchLogsFormatter, trace_log
 from torch._native.instrumentation import (
     CompileEvent,
     instrument_cutedsl_compile,
+    instrument_flydsl_compile,
+    instrument_helion_kernel,
     instrument_triton_kernel,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.logging_utils import log_settings, preserve_log_state
 
 
 # No shared tlparse harness exists in torch (see test/dynamo/test_structured_trace.py,
@@ -91,6 +94,24 @@ class _FakeJitCache:
         )
 
 
+class _FakeHelionBoundKernel:
+    def __init__(self):
+        self._compile_cache = {"config": object()}
+
+
+class _FakeHelionKernel:
+    def __init__(self):
+        self._bound_kernels = {}
+        self.raise_on_call = False
+        self.cache_key = "helion-cache"
+
+    def __call__(self, variant="v0"):
+        if self.raise_on_call:
+            raise RuntimeError("helion boom")
+        self._bound_kernels.setdefault(variant, _FakeHelionBoundKernel())
+        return "launched"
+
+
 class _CapturingHandler(logging.Handler):
     def __init__(self):
         super().__init__()
@@ -100,23 +121,28 @@ class _CapturingHandler(logging.Handler):
         self.records.append(record)
 
 
+# Both sinks are gated on this off-by-default artifact, so tests asserting on
+# emitted output have to turn it on first.
+_ARTIFACT = "native_dsl_compile"
+_ARTIFACT_LOG_QNAME = f"torch._native.instrumentation.__{_ARTIFACT}"
+
+
 class _LoggerCaptureTest(TestCase):
-    """Captures the native_dsl logger so tests can assert on emitted lines."""
+    """Captures the artifact logger so tests can assert on emitted lines."""
 
     def setUp(self):
         super().setUp()
-        self.log = logging.getLogger("torch._native.instrumentation")
-        self._orig_level = self.log.level
+        self._log_settings = log_settings(f"+{_ARTIFACT}")
+        self.log = logging.getLogger(_ARTIFACT_LOG_QNAME)
         self._orig_propagate = self.log.propagate
-        self.log.setLevel(logging.INFO)
-        self.log.propagate = False
+        self.log.propagate = False  # keep the lines off stderr
         self.handler = _CapturingHandler()
         self.log.addHandler(self.handler)
 
     def tearDown(self):
         self.log.removeHandler(self.handler)
-        self.log.setLevel(self._orig_level)
         self.log.propagate = self._orig_propagate
+        self._log_settings.close()
         super().tearDown()
 
     @property
@@ -182,6 +208,45 @@ class TestInstrumentation(_LoggerCaptureTest):
         self.assertEqual(len(self.messages), 1)
         self.assertIn("error", self.messages[0])
 
+    def test_callable_op_label_used_in_log(self):
+        # op may be a callable evaluated per-call (e.g. to derive the aten
+        # symbol from the compile args).
+        fake = _FakeJitCache()
+        compile_fn = instrument_cutedsl_compile(lambda N, K: f"aten::topk_{N}")(fake)
+
+        compile_fn(256, 64)
+
+        self.assertIn("aten::topk_256", self.messages[0])
+
+    def test_op_label_failure_preserves_result(self):
+        # The label callback runs in the finally block; if it raises it must not
+        # turn a successful compile into a failure. Falls back to a safe label.
+        fake = _FakeJitCache()
+
+        def bad_op(*args, **kwargs):
+            raise ValueError("label boom")
+
+        compile_fn = instrument_cutedsl_compile(bad_op)(fake)
+
+        result = compile_fn(256, 64)  # must not raise
+        self.assertIsNotNone(result)
+        self.assertEqual(len(self.messages), 1)
+        self.assertIn("<op-label-error>", self.messages[0])
+
+    def test_op_label_failure_preserves_original_error(self):
+        # If the wrapped fn raises, a failing label callback must not mask the
+        # original exception.
+        fake = _FakeJitCache()
+        fake.raise_on_call = True
+
+        def bad_op(*args, **kwargs):
+            raise ValueError("label boom")
+
+        compile_fn = instrument_cutedsl_compile(bad_op)(fake)
+
+        with self.assertRaises(RuntimeError):  # original "boom", not ValueError
+            compile_fn(256, 64)
+
     def test_cache_attrs_forwarded(self):
         fake = _FakeJitCache()
         compile_fn = instrument_cutedsl_compile("aten::topk")(fake)
@@ -190,6 +255,19 @@ class TestInstrumentation(_LoggerCaptureTest):
         # them reachable so it's a drop-in replacement.
         self.assertTrue(hasattr(compile_fn, "cache_info"))
         self.assertEqual(compile_fn.cache_info().misses, 0)
+
+    def test_flydsl_cache_attrs_forwarded(self):
+        from torch._native.flydsl.cache import flydsl_jit_cache
+
+        @flydsl_jit_cache
+        def compile_fn(key):
+            return key
+
+        instrumented = instrument_flydsl_compile("aten::_fused_rms_norm")(compile_fn)
+        self.assertEqual(instrumented("key"), "key")
+        self.assertEqual(instrumented.cache_info().currsize, 1)
+        instrumented.cache_clear()
+        self.assertEqual(instrumented.cache_info().currsize, 0)
 
     def test_works_without_cache_info(self):
         # A plain callable (no cache_info) must still be timed and reported,
@@ -205,10 +283,10 @@ class TestInstrumentation(_LoggerCaptureTest):
         self.assertEqual(calls, [(256, 64)])
         self.assertEqual(len(self.messages), 1)
 
-    def test_no_work_when_not_listening(self):
-        # With no listener (logger above INFO, no trace handlers), the wrapper
-        # must run the wrapped fn but skip all instrumentation: no log line,
-        # and crucially no key_fn call (user code we shouldn't run for nothing).
+    def test_no_work_when_artifact_disabled(self):
+        # With the artifact off, the wrapper must run the wrapped fn but skip
+        # all instrumentation: no log line, and crucially no key_fn call (user
+        # code we shouldn't run for nothing).
         key_calls = []
 
         def key_fn(N, K):
@@ -218,15 +296,8 @@ class TestInstrumentation(_LoggerCaptureTest):
         fake = _FakeJitCache()
         compile_fn = instrument_cutedsl_compile("aten::topk", key_fn=key_fn)(fake)
 
-        self.log.setLevel(logging.WARNING)
-        saved = list(trace_log.handlers)
-        for h in saved:
-            trace_log.removeHandler(h)
-        try:
+        with preserve_log_state():
             compile_fn(256, 64)
-        finally:
-            for h in saved:
-                trace_log.addHandler(h)
 
         self.assertEqual(fake.misses, 1)  # wrapped fn still ran
         self.assertEqual(key_calls, [])  # ... but no instrumentation work
@@ -340,6 +411,46 @@ class TestTritonKernelInstrumentation(_LoggerCaptureTest):
         self.assertEqual(kernel.cache_key, "abc123")
 
 
+class TestHelionKernelInstrumentation(_LoggerCaptureTest):
+    def _kernel(self, op="aten::add", key_fn=None):
+        return instrument_helion_kernel(op, key_fn=key_fn)(_FakeHelionKernel())
+
+    def test_first_call_reports_compiled(self):
+        kernel = self._kernel()
+        self.assertEqual(kernel(), "launched")
+        self.assertIn("[helion]", self.messages[0])
+        self.assertIn("compiled", self.messages[0])
+        self.assertIn("misses=1", self.messages[0])
+
+    def test_repeated_call_reports_cache_hit(self):
+        kernel = self._kernel()
+        kernel("v0")
+        kernel("v0")
+        self.assertIn("compiled", self.messages[0])
+        self.assertIn("cache_hit", self.messages[1])
+
+    def test_new_variant_recompiles(self):
+        kernel = self._kernel()
+        kernel("v0")
+        kernel("v1")
+        self.assertIn("compiled", self.messages[1])
+        self.assertIn("misses=2", self.messages[1])
+
+    def test_error_is_reported_and_reraised(self):
+        fake = _FakeHelionKernel()
+        fake.raise_on_call = True
+        kernel = instrument_helion_kernel("aten::add")(fake)
+        with self.assertRaisesRegex(RuntimeError, "helion boom"):
+            kernel()
+        self.assertIn("error", self.messages[0])
+
+    def test_raw_kernel_and_attributes_are_exposed(self):
+        fake = _FakeHelionKernel()
+        kernel = instrument_helion_kernel("aten::add")(fake)
+        self.assertIs(kernel.helion_kernel, fake)
+        self.assertEqual(kernel.cache_key, "helion-cache")
+
+
 class TestTlparseOutput(TestCase):
     """The instrumentation's whole point on production jobs is tlparse-
     retrievable artifacts. Assert the structured-trace plumbing actually
@@ -348,8 +459,18 @@ class TestTlparseOutput(TestCase):
 
     def setUp(self):
         super().setUp()
+        self._log_settings = log_settings(f"+{_ARTIFACT}")
         self.old_level = trace_log.level
         trace_log.setLevel(logging.DEBUG)
+
+        # Own trace_log's handler list outright. _init_logs() (run by
+        # log_settings) installs LazyTraceHandler, which unregisters itself on
+        # its first emit -- and mutating the list mid-dispatch makes
+        # Logger.callHandlers skip the handler right after it, silently
+        # dropping the first record from ours.
+        self._saved_handlers = list(trace_log.handlers)
+        for h in self._saved_handlers:
+            trace_log.removeHandler(h)
 
         # Raw trace file in the on-disk format tlparse consumes, written via
         # the same TorchLogsFormatter(trace=True) that TORCH_TRACE installs.
@@ -378,6 +499,9 @@ class TestTlparseOutput(TestCase):
         self.raw_file.close()
         os.unlink(self.raw_file.name)
         trace_log.setLevel(self.old_level)
+        for h in self._saved_handlers:
+            trace_log.addHandler(h)
+        self._log_settings.close()
         super().tearDown()
 
     def _emit_one(self):
@@ -395,6 +519,16 @@ class TestTlparseOutput(TestCase):
             if getattr(r, "metadata", {}).get("artifact", {}).get("name")
             == "native_dsl_compile"
         ]
+
+    def test_no_artifact_when_disabled(self):
+        # Regression test: a job collecting a structured trace (trace_log has
+        # handlers, as it does here) must not get a record per op call without
+        # an explicit TORCH_LOGS opt-in.
+        with preserve_log_state():
+            for _ in range(10):
+                self._emit_one()
+
+        self.assertEqual(self._artifact_records(), [])
 
     def test_emits_artifact_record(self):
         self._emit_one()
@@ -498,13 +632,25 @@ def _decorator_names(fn_node):
 # (instrument names) / the DSL (jit name); test_required_decorators_exist
 # enforces the instrumentation ones.
 _DSL_INSTRUMENTATION_RULES = (
-    # (dsl, jit_decorator, instrument_decorator, combined_decorator)
+    # (dsl, jit_decorator(s), instrument_decorator, combined_decorator)
     ("triton", "triton.jit", "instrument_triton_kernel", "instrumented_triton_cache"),
     (
         "cutedsl",
         "jit_cache",
         "instrument_cutedsl_compile",
         "instrumented_cutedsl_cache",
+    ),
+    (
+        "flydsl",
+        "flydsl_jit_cache",
+        "instrument_flydsl_compile",
+        "instrumented_flydsl_cache",
+    ),
+    (
+        "helion",
+        ("helion.kernel", "helion.jit", "helion.experimental.aot_kernel"),
+        "instrument_helion_kernel",
+        "instrumented_helion_kernel",
     ),
 )
 
@@ -515,7 +661,10 @@ def _is_instrumented(decos, jit_deco, instrument_deco, combined_deco):
     Either the one-shot combined decorator, or the explicit jit + instrument
     stack.
     """
-    return combined_deco in decos or (jit_deco in decos and instrument_deco in decos)
+    jit_decos = (jit_deco,) if isinstance(jit_deco, str) else jit_deco
+    return combined_deco in decos or (
+        any(deco in decos for deco in jit_decos) and instrument_deco in decos
+    )
 
 
 def _scan_for_missing_instrumentation(source, label):
@@ -533,14 +682,16 @@ def _scan_for_missing_instrumentation(source, label):
         if not isinstance(node, ast.FunctionDef):
             continue
         decos = _decorator_names(node)
-        for _, jit_deco, instrument_deco, combined_deco in _DSL_INSTRUMENTATION_RULES:
-            if jit_deco in decos or combined_deco in decos:
+        for dsl, jit_deco, instrument_deco, combined_deco in _DSL_INSTRUMENTATION_RULES:
+            jit_decos = (jit_deco,) if isinstance(jit_deco, str) else jit_deco
+            if any(deco in decos for deco in jit_decos) or combined_deco in decos:
                 n_compile_sites += 1
                 if not _is_instrumented(
                     decos, jit_deco, instrument_deco, combined_deco
                 ):
                     violations.append(
-                        f"{label}:{node.lineno} {node.name} has @{jit_deco} but "
+                        f"{label}:{node.lineno} {node.name} has an uninstrumented "
+                        f"{dsl} decorator but "
                         f"is not instrumented (use @{combined_deco}, or add "
                         f"@{instrument_deco})"
                     )
@@ -674,6 +825,16 @@ class TestInstrumentationCoverage(TestCase):
                 "@instrument_cutedsl_compile('aten::x')\n@jit_cache\ndef c(): ...\n",
                 "@instrumented_cutedsl_cache('aten::x')\ndef c(): ...\n",
             ),
+            "flydsl": (
+                "@flydsl_jit_cache\ndef f(): ...\n",
+                "@instrument_flydsl_compile('aten::x')\n@flydsl_jit_cache\ndef f(): ...\n",
+                "@instrumented_flydsl_cache('aten::x')\ndef f(): ...\n",
+            ),
+            "helion": (
+                "@helion.kernel\ndef h(): ...\n",
+                "@instrument_helion_kernel('aten::x')\n@helion.kernel\ndef h(): ...\n",
+                "@instrumented_helion_kernel('aten::x')\ndef h(): ...\n",
+            ),
         }
         for dsl, (bad, explicit_ok, combined_ok) in templates.items():
             bad_v, bad_n = _scan_for_missing_instrumentation(bad, f"<{dsl}-bad>")
@@ -686,6 +847,18 @@ class TestInstrumentationCoverage(TestCase):
                 v, n = _scan_for_missing_instrumentation(src, f"<{dsl}-{form}>")
                 self.assertEqual(n, 1, f"{dsl}/{form}: scan missed the site")
                 self.assertEqual(v, [], f"{dsl}/{form}: wrongly flagged")
+
+        aot_v, aot_n = _scan_for_missing_instrumentation(
+            "@helion.experimental.aot_kernel\ndef h(): ...\n", "<helion-aot-bad>"
+        )
+        self.assertEqual(aot_n, 1)
+        self.assertEqual(len(aot_v), 1)
+
+        jit_v, jit_n = _scan_for_missing_instrumentation(
+            "@helion.jit\ndef h(): ...\n", "<helion-jit-bad>"
+        )
+        self.assertEqual(jit_n, 1)
+        self.assertEqual(len(jit_v), 1)
 
     def test_no_raw_cute_compile_calls(self):
         # Caching is compulsory for cutedsl compiles: every cute.compile() must

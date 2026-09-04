@@ -67,7 +67,7 @@ with torch.cuda.device(1):
 
 ## TensorFloat-32 (TF32) on Ampere (and later) devices
 
-After Pytorch 2.9, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way, and
+After PyTorch 2.9, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way, and
 suggest to use the new APIs for better control.
 We can set float32 precision per backend and per operators. We can also override the global setting for a specific operator.
 
@@ -79,9 +79,35 @@ torch.backends.cudnn.conv.fp32_precision = "tf32"
 torch.backends.cudnn.rnn.fp32_precision = "tf32"
 ```
 
-The fp32_precision can be set to `ieee` or `tf32` for `cuda/cudnn`.
-`ieee` fp32_precision indicate that we will use `FP32` as internal computation precision.
-`tf32` fp32_precision indicate that we will allow to use `TF32` as internal computation precision.
+The `fp32_precision` setting can be set to `ieee` or `tf32` for CUDA matmuls
+and cuDNN. `ieee` uses FP32 for internal computation, while `tf32` allows TF32
+for internal computation.
+
+With a CUDA 12.9 or newer build, CUDA matmuls also accept `bfx9`, which allows
+cuBLAS to use its BF16x9 algorithm:
+
+```python
+torch.backends.cuda.matmul.fp32_precision = "bfx9"
+```
+
+This mode keeps the inputs and output in FP32 while allowing cuBLAS to decompose
+each input into three BF16 values and evaluate the resulting nine BF16 products
+with FP32 accumulation. The decomposition retains all FP32 input bits, but the
+resulting arithmetic is not IEEE-754 compliant and its relative accuracy is
+workload-dependent. The BF16x9 algorithm is available on GPUs with compute
+capability 10.0 or 10.3. On other NVIDIA GPU architectures, cuBLAS accepts the
+mode but uses native FP32 because no BF16x9 implementation is available. `bfx9`
+requires a PyTorch build with CUDA 12.9 or newer and is valid only for
+`torch.backends.cuda.matmul.fp32_precision`; using it for a generic, cuDNN, or
+MKLDNN precision setting raises an error. Setting `bfx9` on an older CUDA build
+or ROCm raises an error.
+
+As with `tf32`, operations implemented using CUDA GEMM can inherit the matmul
+precision setting, including slow or naive convolution fallbacks. Under
+`torch.compile`, FP32 matmuls using `bfx9` remain ATen/cuBLAS calls because
+Triton's `bf16x3` and `bf16x6` modes do not implement the full nine-product
+algorithm. Fused Triton kernels that cannot preserve `bfx9`, such as FP32
+FlexAttention, warn once and use IEEE precision instead.
 
 We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.
 
@@ -344,6 +370,8 @@ As an exception, several functions such as {meth}`~torch.Tensor.to` and
 {meth}`~torch.Tensor.copy_` admit an explicit {attr}`non_blocking` argument,
 which lets the caller bypass synchronization when it is unnecessary.
 Another exception is CUDA streams, explained below.
+
+(cuda-stream-semantics)=
 
 ### CUDA streams
 

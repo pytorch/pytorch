@@ -9,6 +9,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/aminmax.h>
+#include <ATen/ops/cat.h>
 #include <ATen/ops/sum.h>
 #endif
 #include <c10/util/irange.h>
@@ -46,10 +47,8 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
   const int64_t weight_stride = has_weight ? weight.value().stride(0) : -1;
   const int64_t D = input.size(1);
-  size_t bin_edges_numel = 0;
   TORCH_INTERNAL_ASSERT(int64_t(bin_edges.size()) == D);
   for (const auto dim : c10::irange(D)) {
-    bin_edges_numel += bin_edges[dim].numel();
     TORCH_INTERNAL_ASSERT(hist_output.size(dim) + 1 == bin_edges[dim].numel());
   }
 
@@ -58,21 +57,23 @@ void histogramdd_kernel_impl(Tensor& hist_output,
     return;
   }
 
-  std::vector<input_t> bin_seq(bin_edges_numel);
   std::vector<int64_t> num_bin_edges(D);
   std::vector<input_t> leftmost_edge(D);
   std::vector<input_t> rightmost_edge(D);
-  size_t bin_seq_offset = 0;
 
+  std::vector<Tensor> bin_edges_dev;
+  bin_edges_dev.reserve(D);
   for (const auto dim : c10::irange(D)) {
-    for (const auto elem_idx : c10::irange(bin_edges[dim].numel())) {
-      bin_seq[bin_seq_offset + elem_idx] = (bin_edges[dim][elem_idx].item().to<input_t>());
-    }
-    num_bin_edges[dim] = bin_edges[dim].numel();
-    leftmost_edge[dim] = bin_seq[bin_seq_offset];
-    rightmost_edge[dim] = bin_seq[bin_seq_offset + num_bin_edges[dim] - 1];
-    bin_seq_offset += num_bin_edges[dim];
+    const Tensor& dim_edges = bin_edges[dim];
+    bin_edges_dev.push_back(dim_edges.to(input.device()));
+    num_bin_edges[dim] = dim_edges.numel();
+    leftmost_edge[dim] = dim_edges[0].item().to<input_t>();
+    rightmost_edge[dim] = dim_edges[num_bin_edges[dim] - 1].item().to<input_t>();
   }
+  // The kernel indexes the edges linearly, so they must be contiguous. cat already
+  // returns a contiguous tensor; the single dimension case can be a view of the
+  // caller's out= tensor.
+  const Tensor bin_seq_t = (D == 1 ? bin_edges_dev[0] : at::cat(bin_edges_dev)).contiguous();
 
   // for MPSProfiler
   auto allTensorsList = bin_edges.vec();
@@ -122,22 +123,26 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       id<MTLComputePipelineState> histogramPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(histogramPSO, "histogram", allTensorsList);
+      getMPSProfiler().beginProfileKernel(histogramPSO, "histogram", allTensorsList, mpsStream);
 
       [computeEncoder setComputePipelineState:histogramPSO];
-      mtl_setArgs(computeEncoder, input, weight, thread_histograms, stridedIndicesBuffer, D);
-      [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset atIndex:5];
-      mtl_setArgs<6>(computeEncoder,
-                     num_bin_edges,
-                     leftmost_edge,
-                     rightmost_edge,
-                     thread_histograms.strides(),
-                     bin_selection_algorithm,
-                     weight_stride);
+      mtl_setArgs(computeEncoder,
+                  input,
+                  weight,
+                  thread_histograms,
+                  stridedIndicesBuffer,
+                  D,
+                  bin_seq_t,
+                  num_bin_edges,
+                  leftmost_edge,
+                  rightmost_edge,
+                  thread_histograms.strides(),
+                  bin_selection_algorithm,
+                  weight_stride);
 
       mtl_dispatch1DJob(computeEncoder, histogramPSO, numThreads);
 
-      getMPSProfiler().endProfileKernel(histogramPSO);
+      getMPSProfiler().endProfileKernel(histogramPSO, mpsStream);
     }
   });
   at::sum_out(hist_output, thread_histograms, /*dim=*/{0});

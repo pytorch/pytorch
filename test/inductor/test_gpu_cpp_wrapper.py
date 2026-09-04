@@ -14,12 +14,13 @@ from torch._inductor import config
 from torch._inductor.codegen.common import TritonScratchWorkspace
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.cpp_wrapper_gpu import (
+    _launch_pdl_cpp_literal,
     CppWrapperGpu,
     DeferredTritonCallWrapper,
 )
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import IndentedBuffer
+from torch._inductor.utils import DualIndentedBuffer, IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -153,8 +154,12 @@ class TestGpuWrapper(InductorTestCase):
         debug_sync = IndentedBuffer()
         wrapper.generate_debug_sync(debug_sync)
         code = debug_sync.getvalue()
-        self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
-        self.assertIn("DeviceSynchronize", code)
+        if torch.version.hip is not None:
+            self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
+            self.assertIn("DeviceSynchronize", code)
+        else:
+            self.assertIn("CUDA_DRIVER_CHECK", code)
+            self.assertIn("CtxSynchronize", code)
         self.assertNotIn("torch.cuda.synchronize()", code)
 
         wrapper.prefix = IndentedBuffer()
@@ -166,8 +171,12 @@ class TestGpuWrapper(InductorTestCase):
         ):
             wrapper._codegen_entry_impl_prologue()
         code = wrapper.prefix.getvalue()
-        self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
-        self.assertIn("DeviceSynchronize", code)
+        if torch.version.hip is not None:
+            self.assertIn("AOTI_RUNTIME_CUDA_CHECK", code)
+            self.assertIn("DeviceSynchronize", code)
+        else:
+            self.assertIn("CUDA_DRIVER_CHECK", code)
+            self.assertIn("CtxSynchronize", code)
         self.assertNotIn("torch.cuda.synchronize()", code)
 
         wrapper.device = "xpu"
@@ -318,6 +327,32 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn("aoti_custom_ops::forward_maybe_weighted", code)
         self.assertIn("c10::IValue(at::Tensor())", code)
 
+    @skipIfXpu(msg="tests CUDA TMA helper codegen")
+    def test_tma_descriptor_separates_global_and_kernel_shapes(self):
+        if torch.version.hip is not None:
+            self.skipTest("requires CUDA TMA helpers")
+
+        helpers = CUDADeviceOpOverrides().tma_descriptor_helpers()
+        self.assertNotIn("int32_t* shape", helpers)
+        self.assertIn("uint64_t* shape", helpers)
+        self.assertIn("int32_t kernel_shape[5];", helpers)
+        self.assertIn("uint64_t global_shape[5];", helpers)
+        self.assertIn("uint64_t dim = shape[i];", helpers)
+
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        wrapper.arg_var_id = itertools.count()
+        launch_args = wrapper.generate_args_decl(
+            IndentedBuffer(),
+            ["descriptor"],
+            [torch.float32],
+            ["tensordesc<fp32[16, 32]>"],
+        )
+        self.assertEqual(
+            launch_args,
+            "&var_0.m, &var_0.kernel_shape[0], &var_0.kernel_shape[1], "
+            "&var_0.strides[0], &var_0.strides[1]",
+        )
+
     @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
     def test_cpp_scratch_scales_with_grid_size_for_tma(self):
         scratch_def, scratch_var = CUDADeviceOpOverrides().cpp_scratch(
@@ -334,8 +369,13 @@ class TestGpuWrapper(InductorTestCase):
 
     @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
     def test_triton_wrapper_scales_scratch_with_num_ctas(self):
+        class FakeDeviceCodegen:
+            @staticmethod
+            def cpp_kernel_launch_supports_pdl():
+                return True
+
         class FakeWrapper:
-            device = "cuda"
+            device_codegen = FakeDeviceCodegen()
 
             def __init__(self):
                 self.scratch_spaces = None
@@ -373,6 +413,139 @@ class TestGpuWrapper(InductorTestCase):
         ).generate_launch_kernel(prefix, wrapper, "kernel_var", params)
 
         self.assertEqual(wrapper.scratch_spaces, {"global_scratch": 256 * 8})
+
+    @parametrize(
+        "triton_meta,expected",
+        [
+            (None, "false"),
+            ({}, "false"),
+            ({"launch_pdl": False}, "false"),
+            ({"launch_pdl": True}, "true"),
+            ({"launch_pdl": 0}, "false"),
+            ({"launch_pdl": 1}, "true"),
+            ({"launch_pdl": None}, "false"),
+            (
+                {"launch_pdl": False, "backend_options": {"launch_pdl": True}},
+                "true",
+            ),
+            (
+                {"launch_pdl": True, "backend_options": {"launch_pdl": False}},
+                "false",
+            ),
+        ],
+    )
+    def test_launch_pdl_cpp_literal(self, triton_meta, expected):
+        self.assertEqual(_launch_pdl_cpp_literal(triton_meta), expected)
+
+    @parametrize("enable_kernel_profile", [False, True])
+    @parametrize("supports_pdl,launch_pdl_arg", [(True, ", true"), (False, "")])
+    def test_triton_wrapper_forwards_launch_pdl(
+        self, enable_kernel_profile, supports_pdl, launch_pdl_arg
+    ):
+        class FakeDeviceCodegen:
+            @staticmethod
+            def cpp_kernel_launch_supports_pdl():
+                return supports_pdl
+
+        class FakeWrapper:
+            device_codegen = FakeDeviceCodegen()
+
+            @staticmethod
+            def generate_args_decl(
+                prefix,
+                call_args,
+                arg_types,
+                arg_signatures,
+                is_triton_kernel=True,
+                scratch_spaces=None,
+            ):
+                return ""
+
+        prefix = IndentedBuffer()
+        params = {
+            "triton_meta": {
+                "signature": {"x": "*fp32"},
+                "constants": {},
+                "launch_pdl": True,
+            },
+            "def_args": ["x"],
+            "call_args": ["x"],
+            "config": {},
+            "num_warps": 4,
+            "shared_mem": 0,
+        }
+        with config.patch({"cpp.enable_kernel_profile": enable_kernel_profile}):
+            DeferredTritonCallWrapper(
+                wrapper_name="wrapper",
+                kernel_name="kernel",
+                kernel_name_to_body={},
+                arg_types=[torch.float32],
+            ).generate_launch_kernel(prefix, FakeWrapper(), "kernel_var", params)
+
+        self.assertIn(
+            "launchKernel(kernel_var, grid_0, grid_1, grid_2, 4, 0, "
+            f"kernel_args_, stream_{launch_pdl_arg});",
+            prefix.getvalue(),
+        )
+
+    @parametrize("supports_pdl,launch_pdl_arg", [(True, ", true"), (False, "")])
+    def test_lazy_triton_wrapper_forwards_launch_pdl(
+        self, supports_pdl, launch_pdl_arg
+    ):
+        class FakeDeviceCodegen:
+            @staticmethod
+            def cpp_device_ptr():
+                return "CUdeviceptr"
+
+            @staticmethod
+            def cpp_kernel_launch_supports_pdl():
+                return supports_pdl
+
+        class FakeWrapper:
+            device_codegen = FakeDeviceCodegen()
+
+            @staticmethod
+            def generate_args_decl(
+                prefix,
+                call_args,
+                arg_types,
+                arg_signatures,
+                is_triton_kernel=True,
+                scratch_spaces=None,
+            ):
+                return ""
+
+            @staticmethod
+            def codegen_dtype(dtype):
+                return "at::ScalarType::Byte"
+
+            @staticmethod
+            def codegen_device(device):
+                return "c10::DeviceType::CUDA, 0"
+
+        prefix = DualIndentedBuffer()
+        deferred = DeferredTritonCallWrapper(
+            wrapper_name="wrapper",
+            kernel_name="kernel",
+            kernel_name_to_body={},
+            arg_types=[torch.float32],
+            triton_meta={
+                "signature": {"x": "*fp32"},
+                "constants": {},
+                "launch_pdl": True,
+            },
+        )
+        deferred._generate_lazy_launch(prefix, FakeWrapper(), ["x"], ["x"])
+
+        expected_args = (
+            "grid_0, grid_1, grid_2, kernel_result.num_warps, "
+            f"kernel_result.shared_mem, kernel_args_, stream_{launch_pdl_arg}"
+        )
+        self.assertIn(f"launchKernel(kernel, {expected_args});", prefix.getvalue())
+        self.assertIn(
+            f"launchKernel(kernels_.kernel, {expected_args});",
+            prefix.aot.getvalue(),
+        )
 
     @parametrize("per_subkernel_blocks", [False, True])
     def test_lazy_compile_combo_kernel_default_config(self, per_subkernel_blocks):
@@ -1017,6 +1190,7 @@ if RUN_GPU:
         BaseTest("test_custom_op_1"),
         BaseTest("test_custom_op_2"),
         BaseTest("test_custom_op_3"),
+        BaseTest("test_efficient_zero_tensor_avoids_oom"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),

@@ -76,6 +76,12 @@ class AotAutograd:
         self.__name__ = "compiler_fn"
         self.kwargs: AotAutogradKwargs = kwargs
 
+    # Read at fire time (not snapshotted) so the hook can be set on fw_compiler
+    # even after aot_autograd() is constructed. Only fw_compiler is consulted.
+    @property
+    def _dynamo_backend_init(self) -> Any | None:
+        return getattr(self.kwargs.get("fw_compiler"), "_dynamo_backend_init", None)
+
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: Sequence[Any], **kwargs: Any
     ) -> Callable[..., Any]:
@@ -96,19 +102,13 @@ class AotAutograd:
 
         # NB: don't delete counter increment
         counters["aot_autograd"]["total"] += 1
-        use_fallback = False
-
-        if use_fallback:
-            log.debug("Unable to use AOT Autograd because graph has mutation")
-            counters["aot_autograd"]["not_ok"] += 1
-            return gm
 
         def wrap_bw_compiler(bw_compiler_fn: Callable[P, R]) -> Callable[..., R]:
             def _wrapped_bw_compiler(*args: P.args, **kwargs: P.kwargs) -> R:
                 # Note [Wrapping bw_compiler in disable]
                 # The two disables here:
                 # - stop TorchDynamo from trying to compile the bw_compiler function itself
-                # - stop TorchDynamo from trying to compile our the generated backwards pass bw_compiler produces
+                # - stop TorchDynamo from trying to compile the generated backwards pass bw_compiler produces
 
                 return disable(
                     disable(
@@ -125,10 +125,9 @@ class AotAutograd:
         bw_compiler = self.kwargs.get("bw_compiler") or self.kwargs["fw_compiler"]
 
         if isinstance(bw_compiler, SerializableAOTDispatchCompiler):
-            bw_compiler.compiler_fn = wrap_bw_compiler(bw_compiler.compiler_fn)
-        elif getattr(bw_compiler, "_is_wrapped_bw_compiler", False):
-            bw_compiler.compiler_fn = bw_compiler  # pyrefly: ignore [missing-attribute]
-        else:
+            if not getattr(bw_compiler.compiler_fn, "_is_wrapped_bw_compiler", False):
+                bw_compiler.compiler_fn = wrap_bw_compiler(bw_compiler.compiler_fn)
+        elif not getattr(bw_compiler, "_is_wrapped_bw_compiler", False):
             bw_compiler = wrap_bw_compiler(bw_compiler)
 
         self.kwargs["bw_compiler"] = bw_compiler
@@ -210,13 +209,13 @@ def fake_tensor_unsupported(fn: Callable[[Any, list[Any], Any], R]) -> Any:
 
 def device_from_inputs(example_inputs: Iterable[Any]) -> torch.device:
     for x in example_inputs:
-        if hasattr(x, "device"):
+        if isinstance(x, torch.Tensor):
             return x.device
     return torch.device("cpu")  # Default fallback
 
 
 def dtype_from_inputs(example_inputs: Iterable[Any]) -> torch.dtype:
     for x in example_inputs:
-        if hasattr(x, "dtype"):
+        if isinstance(x, torch.Tensor):
             return x.dtype
     return torch.float32  # Default fallback

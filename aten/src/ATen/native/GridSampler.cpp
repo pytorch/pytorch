@@ -4,10 +4,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/GridSamplerKernel.h>
-#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -718,8 +716,7 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
                                        bool align_corners) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
-  check_grid_sampler_common(input, grid);
-  check_grid_sampler_2d(input, grid);
+  check_grid_sampler_2d_backward(input, grid, grad_output);
 
   const auto interpolation_mode = static_cast<GridSamplerInterpolation>(interpolation_mode_);
   const auto padding_mode = static_cast<GridSamplerPadding>(padding_mode_);
@@ -980,8 +977,7 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
                              std::array<bool,2> output_mask) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
-  check_grid_sampler_common(input, grid);
-  check_grid_sampler_2d(input, grid);
+  check_grid_sampler_2d_backward(input, grid, grad_output);
 
   // AVX gather instructions use signed 32-bit offsets to gather float values.
   // Check for possible overflow and fallback to scalar implementation
@@ -1027,8 +1023,7 @@ grid_sampler_3d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
                              std::array<bool,2> output_mask) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
-  check_grid_sampler_common(input, grid);
-  check_grid_sampler_3d(input, grid, interpolation_mode);
+  check_grid_sampler_3d_backward(input, grid, grad_output, interpolation_mode);
 
   return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "grid_sampler_3d_backward_cpu", [&] {
     return grid_sampler_3d_backward_cpu_impl<scalar_t>(

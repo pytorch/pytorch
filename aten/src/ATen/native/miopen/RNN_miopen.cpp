@@ -1,14 +1,15 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/RNN.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/Config.h>
-#include <ATen/InitialTensorOptions.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/TensorUtils.h>
 
 #include <ATen/cuda/CUDAConfig.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+
+#include <mutex>
+#include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -55,11 +56,14 @@ namespace at::native {
 #include <ATen/miopen/Types.h>
 #include <ATen/miopen/Utils.h>
 
+#include <ATen/hip/HIPGeneratorImpl.h>
+
 #include <ATen/TensorUtils.h>
 
 #include <c10/hip/HIPCachingAllocator.h>
-
-#include <rocrand/rocrand_xorwow.h>
+#include <c10/hip/HIPEvent.h>
+#include <c10/hip/HIPFunctions.h>
+#include <c10/hip/HIPGraphsC10Utils.h>
 
 #include <functional>
 #include <iterator>
@@ -74,22 +78,96 @@ namespace at::native {
 
 namespace {
 
+    // Mirrors the cuDNN DropoutState pattern (cudnn/RNN.cpp): one PRNG state
+    // buffer per device, shared across threads and models, with a host mutex
+    // for cross-thread exclusion and a CUDAEvent for inter-stream ordering.
+    // The event matters because every training forward re-seeds the buffer
+    // (see RNNDescriptors); without it a reseed on one stream could race RNN
+    // kernels still reading the buffer on another.
     struct DropoutState {
-        DropoutState(size_t size) : size(size), data(NULL) {
-            data = c10::cuda::CUDACachingAllocator::raw_alloc(size);
-        }
+        DropoutState() = default;
         DropoutState(const DropoutState&) = delete;
         DropoutState(DropoutState&&) = delete;
         DropoutState& operator=(DropoutState&&) = delete;
         ~DropoutState() {
-            if (data) {
-                c10::cuda::CUDACachingAllocator::raw_delete(data);
+            free_buffer();
+        }
+
+        void ensure_buffer(size_t required_size) {
+            if (data == nullptr) {
+                data = c10::cuda::CUDACachingAllocator::raw_alloc(required_size);
+                size = required_size;
             }
         }
 
-        size_t size;
-        void* data;
+        void free_buffer() {
+            if (data) {
+                if (event) {
+                    event->synchronize();
+                }
+                c10::cuda::CUDACachingAllocator::raw_delete(data);
+                data = nullptr;
+                size = 0;
+            }
+        }
+
+        void lock() {
+            // NB: We can't skip the mutex even when event is undefined, because
+            // someone could define it before we get to unlock().
+            mutex.lock();
+            if (event) {
+                // See Note [DropoutState and CUDA graph capture] in cudnn/RNN.cpp;
+                // only sync on the event if it was recorded in the same capture
+                // state (uncaptured, or the same capture) as the current stream.
+                capture_id_last_lock =
+                    c10::cuda::currentStreamCaptureIdMayInitCtx().value_or(0);
+                if (capture_id_last_lock == capture_id_last_unlock) {
+                    event->block(c10::cuda::getCurrentCUDAStream());
+                }
+            }
+        }
+
+        void unlock() {
+            if (event) {
+                event->record();
+                capture_id_last_unlock =
+                    c10::cuda::currentStreamCaptureIdMayInitCtx().value_or(0);
+                TORCH_INTERNAL_ASSERT(capture_id_last_unlock == capture_id_last_lock);
+            }
+            mutex.unlock();
+        }
+
+        size_t size = 0;
+        void* data = nullptr;
+        std::mutex mutex;
+        std::optional<c10::cuda::CUDAEvent> event;
+        // hipStreamGetCaptureInfo never reports a capture id of 0, so 0 serves
+        // as the sentinel for "not capturing".
+        c10::cuda::CaptureId_t capture_id_last_lock = 0;
+        c10::cuda::CaptureId_t capture_id_last_unlock = 0;
     };
+
+    // Each state is ~0.75 MB and allocated lazily, so caching one per device is
+    // cheap. Process-lifetime state; released via _miopen_clear_dropout_state().
+    std::vector<std::unique_ptr<DropoutState>>& dropout_state_cache() {
+        static std::vector<std::unique_ptr<DropoutState>> cache(
+            static_cast<size_t>(c10::cuda::device_count()));
+        return cache;
+    }
+
+    std::mutex& dropout_state_cache_mutex() {
+        static std::mutex mut;
+        return mut;
+    }
+
+    DropoutState& get_dropout_state(c10::DeviceIndex device) {
+        std::lock_guard<std::mutex> lock(dropout_state_cache_mutex());
+        auto& slot = dropout_state_cache().at(device);
+        if (!slot) {
+            slot = std::make_unique<DropoutState>();
+        }
+        return *slot;
+    }
 
 } // anonymous
 
@@ -136,14 +214,14 @@ struct RNNDescriptorParams {
                 {
                     std::ostringstream oss;
                     oss << "unrecognized miopen RNN mode " << fn_mode;
-                    TORCH_CHECK(false, oss.str());
+                    TORCH_CHECK(false, std::move(oss).str());
                 }
         }
     }
 
-    void set_dropout(double dropout_rate, uint64_t dropout_seed = 0) {
-        this->dropout_rate = dropout_rate;
-        // TODO: Implement seed setting for RNN dropout
+    void set_dropout(double dropout_rate, bool train, uint64_t dropout_seed = 0) {
+        // Zero dropout when not training, mirroring the cuDNN path (see cudnn/RNN.cpp).
+        this->dropout_rate = train ? dropout_rate : 0.0;
         this->dropout_seed = dropout_seed;
     }
 
@@ -242,8 +320,9 @@ struct RNNParams {
 
 struct RNNDescriptors {
     RNNDescriptor rnn_desc;
-    static thread_local DropoutDescriptor dropout_desc;
-    static thread_local std::unique_ptr<DropoutState> dropout_states;
+    // Per-call descriptor; must outlive the kernels enqueued with rnn_desc,
+    // which this object's lifetime guarantees (same as the cuDNN path).
+    DropoutDescriptor dropout_desc;
     std::vector<TensorDescriptor> x_descs;
     std::vector<TensorDescriptor> y_descs;
     TensorDescriptor hx_desc;
@@ -251,21 +330,47 @@ struct RNNDescriptors {
     TensorDescriptor cx_desc;
     TensorDescriptor cy_desc;
 
-    RNNDescriptors(const RNNParams& fn, miopenHandle_t handle, Tensor x, Tensor y, Tensor hx, Tensor cx) {
+    // dropout_state must be non-null when fn.rnn.dropout_rate != 0.0 and must
+    // already be locked by the caller; the caller holds the lock until the RNN
+    // kernels using this descriptor have been enqueued.
+    RNNDescriptors(const RNNParams& fn, miopenHandle_t handle, Tensor x, Tensor y, Tensor hx, Tensor cx, DropoutState* dropout_state = nullptr, bool reseed_dropout = false) {
         if (fn.rnn.dropout_rate == 0.0) {
             rnn_desc = fn.rnn.descriptor();
         } else {
-            if (!dropout_states) {
+            TORCH_INTERNAL_ASSERT(dropout_state != nullptr);
+            bool need_alloc = dropout_state->data == nullptr;
+            if (need_alloc) {
+                // Allocating the state during capture would place the buffer in
+                // the capture's private memory pool (freed with the graph), and
+                // seeding launches a PRNG init kernel that would be baked into
+                // the graph. Require a warmup iteration outside capture instead,
+                // like the cuDNN path.
+                TORCH_CHECK(
+                    c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
+                        c10::cuda::CaptureStatus::None,
+                    "MIOpen RNN dropout state cannot be initialized during CUDA "
+                    "graph capture. Run the RNN once outside of capture (e.g. a "
+                    "warmup iteration) before capturing it.");
                 size_t states_size_in_bytes = 0;
                 MIOPEN_CHECK(miopenDropoutGetStatesSize(handle, &states_size_in_bytes));
-                size_t states_size = states_size_in_bytes / sizeof(rocrand_state_xorwow);
+                dropout_state->ensure_buffer(states_size_in_bytes);
+                // The event is created lazily here, when we know the device.
+                if (!dropout_state->event.has_value()) {
+                    dropout_state->event.emplace();
+                }
+            }
 
-                dropout_states = std::make_unique<DropoutState>(states_size * sizeof(rocrand_state_xorwow));
-
+            if (need_alloc || reseed_dropout) {
+                // (Re)seed the PRNG state, which regenerates the dropout mask.
+                // The MIOpen dropout kernel does not persist advanced PRNG state
+                // across launches, so every training forward must re-seed with a
+                // fresh seed to obtain an independent mask. The backward pass does
+                // not reseed: it replays the mask saved in reserveSpace during the
+                // forward pass, keeping forward/backward consistent within a step.
                 dropout_desc.set(handle,
                                  fn.rnn.dropout_rate,
-                                 dropout_states->data,
-                                 dropout_states->size,
+                                 dropout_state->data,
+                                 dropout_state->size,
                                  fn.rnn.dropout_seed,
                                  false,
                                  false,
@@ -273,11 +378,10 @@ struct RNNDescriptors {
             } else {
                 dropout_desc.restore(handle,
                                     fn.rnn.dropout_rate,
-                                    dropout_states->data,
-                                    dropout_states->size,
+                                    dropout_state->data,
+                                    dropout_state->size,
                                     fn.rnn.dropout_seed,
-                                    // use_mask flag must be true in order to continue from a saved RNG state
-                                    true,
+                                    false,
                                     false,
                                     miopenRNGType_t::MIOPEN_RNG_PSEUDO_XORWOW);
             }
@@ -311,10 +415,18 @@ struct RNNDescriptors {
     }
 };
 
-// We need to store both the dropout descriptor and state thread locally to avoid multithreading issues
-thread_local DropoutDescriptor RNNDescriptors::dropout_desc {};
-// Each state is 0.75 MB so there is no problem in caching all of them for each thread
-thread_local std::unique_ptr<DropoutState> RNNDescriptors::dropout_states { nullptr };
+// Releases the cached per-device MIOpen RNN dropout state buffers. This is
+// process-lifetime state that empty_cache() cannot reclaim on its own. Each
+// buffer waits on its last-use event before being freed.
+void _miopen_clear_dropout_state() {
+  std::lock_guard<std::mutex> cache_lock(dropout_state_cache_mutex());
+  for (auto& slot : dropout_state_cache()) {
+    if (slot) {
+      std::lock_guard<DropoutState> state_lock(*slot);
+      slot->free_buffer();
+    }
+  }
+}
 
 Tensor permute_wei_for_miopen(Tensor wei, int64_t mode)
 {
@@ -569,8 +681,39 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     auto handle = getMiopenHandle();
     miopenRNNAlgo_t algo = miopenRNNdefault;
     fn.rnn.set_algo(algo);
-    fn.rnn.set_dropout(fn_dropout);
-    RNNDescriptors descs(fn, handle, x, y, hx, cx);
+
+    // Derive a fresh dropout seed from the default generator on each training
+    // forward so every step gets an independent mask. Using the generator keeps
+    // this reproducible under torch.manual_seed(). The MIOpen dropout kernel does
+    // not advance its PRNG state across launches, so re-seeding here is what
+    // produces mask variation step-to-step.
+    // During graph capture a host-side seed cannot be derived (the generator
+    // forbids philox_engine_inputs while capturing), so skip the reseed: the
+    // state keeps the seed from the last uncaptured forward and the captured
+    // graph replays a fixed mask, matching the cuDNN path under capture.
+    const bool capturing = c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
+        c10::cuda::CaptureStatus::None;
+    uint64_t dropout_seed = 0;
+    if (fn_train && fn_dropout != 0.0 && !capturing) {
+        auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
+            std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+        std::lock_guard<std::mutex> lock(gen->mutex_);
+        auto philox = gen->philox_engine_inputs(1);
+        // philox.first is the generator seed (constant within a manual_seed run);
+        // philox.second is a per-call offset that increments each forward. Combining
+        // them yields a distinct seed per step that rocrand_init mixes internally.
+        dropout_seed = philox.first + philox.second;
+    }
+    fn.rnn.set_dropout(fn_dropout, fn_train, dropout_seed);
+    DropoutState* dropout_state = nullptr;
+    std::unique_lock<DropoutState> dropout_lock;
+    if (fn.rnn.dropout_rate != 0.0) {
+        // Hold the per-device state lock until the RNN kernels below have been
+        // enqueued; unlock() records the inter-stream ordering event.
+        dropout_state = &get_dropout_state(c10::cuda::current_device());
+        dropout_lock = std::unique_lock<DropoutState>(*dropout_state);
+    }
+    RNNDescriptors descs(fn, handle, x, y, hx, cx, dropout_state, /*reseed_dropout=*/fn_train && !capturing);
 
     FilterDescriptor w_desc;
     auto num_weights = get_num_weights(handle, descs.rnn_desc, descs.x_descs[0], datatype);
@@ -707,8 +850,16 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
 
     miopenRNNAlgo_t algo = miopenRNNdefault;
     fn.rnn.set_algo(algo);
-    fn.rnn.set_dropout(fn_dropout);
-    RNNDescriptors descs(fn, handle, x, y, hx, cx);
+    fn.rnn.set_dropout(fn_dropout, fn_train);
+    DropoutState* dropout_state = nullptr;
+    std::unique_lock<DropoutState> dropout_lock;
+    if (fn.rnn.dropout_rate != 0.0) {
+        // Hold the per-device state lock until the RNN kernels below have been
+        // enqueued; unlock() records the inter-stream ordering event.
+        dropout_state = &get_dropout_state(c10::cuda::current_device());
+        dropout_lock = std::unique_lock<DropoutState>(*dropout_state);
+    }
+    RNNDescriptors descs(fn, handle, x, y, hx, cx, dropout_state);
 
     FilterDescriptor w_desc;
     w_desc.set(weight_buf, 3);
@@ -802,8 +953,16 @@ std::vector<Tensor> miopen_rnn_backward_weight(
 
     miopenRNNAlgo_t algo = miopenRNNdefault;
     fn.rnn.set_algo(algo);
-    fn.rnn.set_dropout(fn_dropout);
-    RNNDescriptors descs(fn, handle, x, y, hx, cx);
+    fn.rnn.set_dropout(fn_dropout, fn_train);
+    DropoutState* dropout_state = nullptr;
+    std::unique_lock<DropoutState> dropout_lock;
+    if (fn.rnn.dropout_rate != 0.0) {
+        // Hold the per-device state lock until the RNN kernels below have been
+        // enqueued; unlock() records the inter-stream ordering event.
+        dropout_state = &get_dropout_state(c10::cuda::current_device());
+        dropout_lock = std::unique_lock<DropoutState>(*dropout_state);
+    }
+    RNNDescriptors descs(fn, handle, x, y, hx, cx, dropout_state);
 
     FilterDescriptor w_desc;
     w_desc.set(weight_buf, 3);
@@ -918,13 +1077,21 @@ std::pair<Tensor, hidden_type> _miopen_impl(
 
     Tensor dropout_state = at::empty({0}, input.options());
 
-    auto miopen_output = at::miopen_rnn(
-        input, params, has_biases ? 4 : 2,
-        hx, cx, static_cast<int>(mode), hidden_size, num_layers, /*batch_first=*/false,
-        dropout_p, train, bidirectional, batch_sizes, dropout_state);
+    // On failure clear any pending HIP error before propagating, so the
+    // native fallback (see miopen_rnn_probe in RNN.cpp, a CPU translation
+    // unit that cannot clear HIP state itself) starts from a clean context.
+    try {
+        auto miopen_output = at::miopen_rnn(
+            input, params, has_biases ? 4 : 2,
+            hx, cx, static_cast<int>(mode), hidden_size, num_layers, /*batch_first=*/false,
+            dropout_p, train, bidirectional, batch_sizes, dropout_state);
 
-    return {std::get<0>(miopen_output),
-        pack_hidden<hidden_type>(std::get<1>(miopen_output), std::get<2>(miopen_output))};
+        return {std::get<0>(miopen_output),
+            pack_hidden<hidden_type>(std::get<1>(miopen_output), std::get<2>(miopen_output))};
+    } catch (...) {
+        (void)hipGetLastError();
+        throw;
+    }
 }
 
 template<typename hidden_type>
@@ -937,13 +1104,20 @@ std::pair<Tensor, hidden_type> _miopen_impl(
 
     Tensor dropout_state = at::empty({0}, input.options());
 
-    auto miopen_output = at::miopen_rnn(
-        input, params, has_biases ? 4 : 2,
-        hx, cx, static_cast<int>(mode), hidden_size, num_layers, batch_first, dropout_p,
-        train, bidirectional, /*batch_sizes=*/{}, dropout_state);
+    // See the batched overload above: clear pending HIP errors on failure so
+    // the native fallback starts from a clean context.
+    try {
+        auto miopen_output = at::miopen_rnn(
+            input, params, has_biases ? 4 : 2,
+            hx, cx, static_cast<int>(mode), hidden_size, num_layers, batch_first, dropout_p,
+            train, bidirectional, /*batch_sizes=*/{}, dropout_state);
 
-    return {std::get<0>(miopen_output),
-        pack_hidden<hidden_type>(std::get<1>(miopen_output), std::get<2>(miopen_output))};
+        return {std::get<0>(miopen_output),
+            pack_hidden<hidden_type>(std::get<1>(miopen_output), std::get<2>(miopen_output))};
+    } catch (...) {
+        (void)hipGetLastError();
+        throw;
+    }
 }
 
 #define ONE_HIDDEN_RNN(NAME, MODE)                                             \
