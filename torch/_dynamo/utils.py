@@ -2974,6 +2974,7 @@ common_constant_types: set[type] = {
     torch.iinfo,
     torch.nn.attention.SDPBackend,
     torch.cuda._CudaDeviceProperties,
+    torch.xpu._XpuDeviceProperties,
     # Pytree key types (frozen dataclasses used in tree_map_with_path)
     torch.utils._pytree.SequenceKey,
     torch.utils._pytree.MappingKey,
