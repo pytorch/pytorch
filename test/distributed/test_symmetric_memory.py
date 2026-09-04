@@ -74,19 +74,27 @@ def _captured_kernel_nodes_and_edges(graph):
     from torch.cuda._utils import _check_cuda_bindings
 
     raw = graph.raw_cuda_graph()
-    _, num_nodes = _check_cuda_bindings(cuda_runtime.cudaGraphGetNodes(raw, 0))
-    nodes, _ = _check_cuda_bindings(cuda_runtime.cudaGraphGetNodes(raw, num_nodes))
+    _, num_nodes = _check_cuda_bindings(cuda_runtime.cudaGraphGetNodes(raw, numNodes=0))
+    nodes, _ = _check_cuda_bindings(
+        cuda_runtime.cudaGraphGetNodes(raw, numNodes=num_nodes)
+    )
     kernels = [
         int(node)
         for node in nodes
         if _check_cuda_bindings(cuda_runtime.cudaGraphNodeGetType(node))
         == cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeKernel
     ]
-    _, _, num_edges = _check_cuda_bindings(cuda_runtime.cudaGraphGetEdges(raw, 0))
-    from_nodes, to_nodes, _ = _check_cuda_bindings(
-        cuda_runtime.cudaGraphGetEdges(raw, num_edges)
+    # Four values: cudaGraphGetEdges carries an edge-data array from CUDA 13
+    # on. Same shape as torch/cuda/graphs.py.
+    edges = []
+    _, _, _, num_edges = _check_cuda_bindings(
+        cuda_runtime.cudaGraphGetEdges(raw, numEdges=0)
     )
-    edges = [(int(a), int(b)) for a, b in zip(from_nodes, to_nodes)]
+    if num_edges > 0:
+        from_nodes, to_nodes, _edge_data, _ = _check_cuda_bindings(
+            cuda_runtime.cudaGraphGetEdges(raw, numEdges=num_edges)
+        )
+        edges = [(int(a), int(b)) for a, b in zip(from_nodes, to_nodes)]
     return kernels, edges
 
 
