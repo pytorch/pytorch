@@ -41,6 +41,10 @@ bool THPStorage_init(PyObject* module);
 void THPStorage_postInit(PyObject* module);
 
 void THPStorage_assertNotNull(THPStorage* storage);
+// Builds the torch._utils._InvalidDataPtr sentinel that data_ptr() returns
+// to Python when the storage's data pointer is invalid (see
+// c10::StorageImpl::DataPtrCheck).
+PyObject* THPStorage_invalidDataPtr(const c10::StorageImpl& impl);
 TORCH_PYTHON_API void THPStorage_assertNotNull(PyObject* obj);
 
 TORCH_PYTHON_API extern PyTypeObject THPStorageType;

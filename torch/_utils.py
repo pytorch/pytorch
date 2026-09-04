@@ -1529,3 +1529,70 @@ def remove_os_environ_hook() -> None:
     os.unsetenv = _original_os_unsetenv
     _original_os_putenv = None
     _original_os_unsetenv = None
+
+
+class _InvalidDataPtr:
+    """Returned by ``Tensor.data_ptr()`` and ``UntypedStorage.data_ptr()`` when the
+    storage's data pointer is invalid (see ``c10::StorageImpl::DataPtrCheck``), for
+    example because FSDP freed it. Compares equal to 0 and is falsy so
+    "is this storage freed" checks keep working. Any other use records an API usage
+    event and then either behaves as 0 or raises ``RuntimeError``, per ``throw``.
+    """
+
+    __slots__ = ("_msg", "_throw")
+
+    def __init__(self, msg: str, throw: bool) -> None:
+        self._msg = msg
+        self._throw = throw
+
+    def _use(self) -> int:
+        torch._C._log_api_usage_once("torch.storage.invalid_data_ptr_use")
+        if self._throw:
+            raise RuntimeError(self._msg)
+        return 0
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, _InvalidDataPtr):
+            return True
+        return isinstance(other, int) and other == 0
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __repr__(self) -> str:
+        return f"<invalid data_ptr: {self._msg}>"
+
+    def __format__(self, spec: str) -> str:
+        return repr(self) if spec == "" else format(self._use(), spec)
+
+    def __hash__(self) -> int:
+        return hash(self._use())
+
+    def __index__(self) -> int:
+        return self._use()
+
+    def __int__(self) -> int:
+        return self._use()
+
+    def __float__(self) -> float:
+        return float(self._use())
+
+
+def _forward_to_int(name: str) -> Callable[..., Any]:
+    def method(self: _InvalidDataPtr, *args: Any) -> Any:
+        return getattr(self._use(), name)(*args)
+
+    return method
+
+
+for _name in (  # noqa: SIM905
+    "__neg__ __pos__ __abs__ __lt__ __le__ __gt__ __ge__ __add__ __radd__ __sub__ "
+    "__rsub__ __mul__ __rmul__ __floordiv__ __rfloordiv__ __truediv__ __rtruediv__ "
+    "__mod__ __rmod__ __divmod__ __rdivmod__ __pow__ __rpow__ __lshift__ "
+    "__rlshift__ __rshift__ __rrshift__ __and__ __rand__ __or__ __ror__ __xor__ "
+    "__rxor__ __invert__"
+).split():
+    setattr(_InvalidDataPtr, _name, _forward_to_int(_name))

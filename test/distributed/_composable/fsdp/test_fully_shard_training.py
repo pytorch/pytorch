@@ -186,9 +186,18 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             else:
                 self._assert_tensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
+            params_before_reshard = list(model.parameters())
             model.reshard()  # however, we can manually reshard
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
+            if not reshard_after_forward:
+                # Stale references to the unsharded parameters have freed
+                # storage; data_ptr() hands back an inert sentinel
+                for param in params_before_reshard:
+                    self.assertIsInstance(
+                        param.data_ptr(), torch._utils._InvalidDataPtr
+                    )
+                    self.assertTrue(param.data_ptr() == 0)
 
         # Multiple FSDP groups
         for reshard_after_forward in (True, False, 2, None):

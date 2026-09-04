@@ -12,6 +12,7 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
+#include "torch/csrc/Storage.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/python_arg_parsing.h"
@@ -172,6 +173,12 @@ static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
     return handle_torch_function(self_, "data_ptr", args);
   }
   auto& self = THPVariable_Unpack(self_);
+  if (self.has_storage()) {
+    auto* impl = self.storage().unsafeGetStorageImpl();
+    if (C10_UNLIKELY(impl->data_ptr_check() != c10::StorageImpl::DataPtrCheck::None)) {
+      return THPStorage_invalidDataPtr(*impl);
+    }
+  }
   return wrap(self.data_ptr());
   END_HANDLE_TH_ERRORS
 }
