@@ -481,7 +481,11 @@ void initDynamoBindings(PyObject* torch) {
           "isolate_recompiles_id", &PrecompileEntry::isolate_recompiles_id);
 
   py::class_<ExtraState>(m, "_ExtraState")
-      .def("invalidate", &ExtraState::invalidate);
+      .def(
+          "invalidate",
+          &ExtraState::invalidate,
+          py::arg("deleted_guard_manager"),
+          py::arg("live_guard_manager"));
 
   py::enum_<FrameAction>(m, "_FrameAction")
       .value("DEFAULT", FrameAction::DEFAULT)
