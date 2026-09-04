@@ -104,6 +104,7 @@ from .object_protocol import (
     _NO_DEFAULT,
     binary_iop,
     binary_op,
+    constant_fold_getattr_allowed,
     generic_delitem,
     generic_getattr,
     generic_getitem,
@@ -2380,6 +2381,20 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, dir(arg.fn))
         # Enable specialized VTs for constants to work with dir()
         if arg.is_python_constant():
+            is_dict = isinstance(arg, ConstDictVariable)
+            if is_dict and arg.rebuild_misses_instance_attrs(tx):
+                # as_python_constant() rebuilds the dict, so dir() of it omits
+                # every instance attribute -- which would contradict what
+                # hasattr() reports for the same name.
+                unimplemented(
+                    gb_type="unsupported dir() on a rebuilt container",
+                    context=f"dir({arg.python_type_name()})",
+                    explanation=(
+                        "Dynamo models this value by rebuilding it, so dir() "
+                        "would miss the instance attributes the real object has."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             return VariableTracker.build(tx, dir(arg.as_python_constant()))
         return None
 
@@ -3482,6 +3497,8 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             # if all args are python constants, evaluate getattr() directly rather
             # than propagating a graph break from tp_getattro_impl.
             if not check_unspec_or_constant_args(args, kwargs):
+                raise
+            if not constant_fold_getattr_allowed(args[0]):
                 raise
             try:
                 result = getattr(*[a.as_python_constant() for a in args])
