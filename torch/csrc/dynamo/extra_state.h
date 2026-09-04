@@ -331,18 +331,6 @@ void set_extra_state(PyCodeObject* code, ExtraState* extra_state);
 // the final owner of these references.
 ExtraState* init_and_set_extra_state(PyCodeObject* code);
 
-// Create a new cache entry at extra_state holding on to guarded_code.
-// Ownership contract
-// args
-//  - extra_state: Borrowed
-//  - guarded_code: Borrowed
-// return:
-//  - cache_entry: Borrowed reference
-CacheEntry* create_cache_entry(
-    ExtraState* extra_state,
-    PyObject* guraded_code,
-    PyObject* callback);
-
 // Extracts the backend fn from the callback.
 PyObject* get_backend(PyObject* callback);
 // Turn on the cache-key lookup inside get_backend. Called once, when the first
@@ -357,6 +345,25 @@ void enable_precompile_cache_keys();
 // when absent, WITHOUT raising; name must be an interned str. Defined in
 // cache_entry.cpp; use this instead of py::hasattr on hot frame paths.
 PyObject* lookup_optional(py::handle handle, PyObject* name);
+
+// Create a new cache entry at extra_state holding on to guarded_code. Only
+// called from C++ (the frame evaluator), so it lives outside the extern "C"
+// block: the new entry's code (owned) and trace annotation are filled into the
+// caller's py::object / std::string under the cache lock, and the returned
+// pointer must not be dereferenced after this returns -- a concurrent clear
+// can destroy the entry the moment the lock drops.
+// Ownership contract
+// args
+//  - extra_state: Borrowed
+//  - guarded_code: Borrowed
+// return:
+//  - cache_entry: Borrowed reference
+CacheEntry* create_cache_entry(
+    ExtraState* extra_state,
+    PyObject* guraded_code,
+    PyObject* callback,
+    py::object* code_out,
+    std::string* trace_annotation_out);
 
 // Lookup the cache held by extra_state. Only called from C++ (the frame
 // evaluator), so it lives outside the extern "C" block: trace_annotation is

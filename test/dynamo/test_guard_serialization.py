@@ -295,6 +295,22 @@ def _none_cell_base(x):
 NONE_CELL_WRAPPED = none_cell_wrapper(_none_cell_base)
 
 
+def _doc_base(x):
+    """base doc"""
+    return x * 2
+
+
+def doc_wrapper(func):
+    @functools.wraps(func)
+    def wrapper(x):
+        return func(x)
+
+    return wrapper
+
+
+DOC_WRAPPED = doc_wrapper(_doc_base)
+
+
 class UnpicklableGuardedDefault:
     def __init__(self):
         self.flag = 2.0
@@ -886,7 +902,27 @@ class _HolderWithGenerators:
         self.cfg = {"a": 1}
 
 
+class _PipelineWithSetstate:
+    def __init__(self):
+        self.stages = ["a", "b"]
+        self.n = len(self.stages)
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.n = len(self.stages)
+
+
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
+    def test_guarded_object_with_a_custom_setstate_is_pickled_whole(self):
+        # Attribute pruning assumes the default pickle protocol; a __setstate__
+        # that recomputes a field from an unguarded one would read _Missing.
+        p = _PipelineWithSetstate()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(p): p}, {}, {}, buf).dump({"p": p})
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())
+        self.assertEqual(out["p"].stages, ["a", "b"])
+        self.assertEqual(out["p"].n, 2)
+
     # Pickler-level: these drive GuardsStatePickler directly rather than
     # through a capture, so none of TestGuardSerialization's setup applies.
 
@@ -1143,14 +1179,19 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         state.output_graph = _Scope()
         state.output_graph.local_scope = {"x": _Scope()}
         state.output_graph.global_scope = {"g": _Scope()}
+        from torch._guards import GuardsSet
+
         internal = _Scope()
         internal.lock = threading.RLock()
-        state.output_graph.guards = [internal]
+        # The real shape: a GuardsSet wrapping an OrderedSet, which the walk
+        # has to descend like a list.
+        state.output_graph._guards = GuardsSet()
+        state.output_graph._guards.inner.add(internal)
 
         roots = _scope_roots(state.output_graph)
         self.assertEqual(len(roots), 2)
         self.assertIn(
-            "state.output_graph.guards[0].lock",
+            "state.output_graph._guards.inner[0].lock",
             _offending_value_path(state, internal.lock, roots),
         )
 
@@ -1158,7 +1199,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # rooting at state does not make the common report worse.
         shared = threading.RLock()
         state.output_graph.local_scope["x"].it = shared
-        state.output_graph.guards.append(shared)
+        state.output_graph._guards.inner.add(shared)
         self.assertIn(
             "local_scope['x'].it",
             _offending_value_path(state, shared, _scope_roots(state.output_graph)),
@@ -1316,6 +1357,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
         finally:
             cell.cell_contents = None
+
+    def test_guard_rooted_at_wrapper_preserves_copied_doc(self):
+        # functools.wraps copies the wrapped function's __doc__ onto a wrapper
+        # whose own code object has none. Rebuilt from the code object alone
+        # the wrapper reads None, the EQUALS_MATCH rebakes against it at load,
+        # and the guard fails forever with no load error.
+        def fn(x):
+            if DOC_WRAPPED.__doc__ == "base doc":
+                x = x + 1
+            return DOC_WRAPPED(x)
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+        DOC_WRAPPED.__doc__ = "other"
+        try:
+            self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
+        finally:
+            DOC_WRAPPED.__doc__ = "base doc"
 
     def test_fqn_mismatched_function_rejects_a_new_global(self):
         # len(func.__globals__) installs SEQUENCE_LENGTH (derived

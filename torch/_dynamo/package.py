@@ -145,7 +145,7 @@ class FunctionPicklerBase(pickle.Pickler):
     decides what a rebuilt function carries; this class fixes HOW it is rebuilt
     so a fix in one pickler cannot be missed in the other.
 
-    Defaults, __dict__, and the globals snapshot travel as pickle STATE, applied
+    Defaults, __doc__, __dict__, and the globals snapshot travel as pickle STATE, applied
     after memoization, so `wrapper.me = wrapper` and module-scope cycles end.
     A closure cell is a reduce ARGUMENT: a function closing over itself is
     reduced twice, and save_reduce's recursive-object fallback (present in both
@@ -228,9 +228,12 @@ class FunctionPicklerBase(pickle.Pickler):
 
     @staticmethod
     def _apply_function_state(fn: types.FunctionType, state: tuple[Any, ...]) -> None:
-        defaults, kwdefaults, attributes, globals_snapshot = state
+        defaults, kwdefaults, attributes, globals_snapshot, doc = state
         fn.__defaults__ = defaults
         fn.__kwdefaults__ = kwdefaults
+        # FunctionType took __doc__ from the code object; functools.wraps
+        # overwrote it on the live function, and a guard rooted there rebakes.
+        fn.__doc__ = doc
         fn.__dict__.update(attributes)
         if globals_snapshot is not None:
             fn.__globals__.update(globals_snapshot)
@@ -277,7 +280,7 @@ class FunctionPicklerBase(pickle.Pickler):
             unpickle = type(self)._unpickle_fn_from_module
         else:
             unpickle = type(self)._unpickle_fn_from_snapshot
-        state = (defaults, kwdefaults, attributes, globals_snapshot)
+        state = (defaults, kwdefaults, attributes, globals_snapshot, fn.__doc__)
         return unpickle, args, state, None, None, type(self)._apply_function_state
 
 
@@ -656,25 +659,28 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
 def _cpu_codegen_target_problem(
     cached: _CpuCodegenTarget, current: _CpuCodegenTarget | None
 ) -> str | None:
-    """Why code built for ``cached`` cannot run on this host, or None.
+    """Why code generated for ``cached`` cannot be built and run here, or None.
 
-    Vector ISAs nest (an avx512 host runs avx2 code), so the artifact's ISA
-    only has to be one this host can build for; simdlen and march change the
-    emitted code and must match exactly.
+    The artifact carries kernel source tiled for the ISA pick_vec_isa() made at
+    codegen, and the loading host compiles that source with the flags of its
+    own pick_vec_isa(). The two must agree, so every component is compared
+    exactly; a wider host ISA is not a superset here, its masked loads
+    zero-fill the lanes the narrower tiling never wrote.
     """
     if current is None:
         return (
             "This host has no usable CPU codegen target (no C++ toolchain or no "
             "supported vector ISA), so it cannot run inductor CPU kernels."
         )
-    from torch._inductor import cpu_vec_isa
-
     machine, vec_isa, simdlen, march = cached
     if machine != current[0]:
         return f"The artifact was built for machine {machine!r}, this host is {current[0]!r}."
-    host_isas = sorted(str(isa) for isa in cpu_vec_isa.valid_vec_isa_list())
-    if vec_isa not in host_isas:
-        return f"The artifact needs vector ISA {vec_isa!r}; this host can build for {host_isas}."
+    if vec_isa != current[1]:
+        return (
+            f"The artifact's CPU kernels were generated for vector ISA {vec_isa!r}; "
+            f"this host would compile them for {current[1]!r}. Set ATEN_CPU_CAPABILITY "
+            "or torch._inductor.config.cpp.simdlen so the host picks the same ISA."
+        )
     if simdlen != current[2]:
         return f"The artifact was built with simdlen={simdlen!r}, this host uses {current[2]!r}."
     if march != current[3]:
@@ -1060,10 +1066,6 @@ class CompilePackage:
         # runtime-only and NOT serialized: it describes this capture session, not
         # the artifact, and it must not affect what install() serves.
         self._truncated_frames: set[str] = set()
-        # A frame can enter Dynamo yet produce no guarded code for one exercised
-        # variant (for example, an unsupported or empty resume path). Keep that
-        # distinct from resume code that was generated but never executed.
-        self._uncovered_frames: set[str] = set()
         self._device_types: set[str] = set()
         self._system_info: SystemInfo | None = None
         # Set when the CPU codegen target changed between compiles of one
@@ -1242,13 +1244,6 @@ class CompilePackage:
             yield
         finally:
             entry.has_compile_id = True
-            # "Uncovered" means the frame produced NO guarded code at all, which
-            # is the case install() skip_code()s and save() reports as a gap. A
-            # frame that hit the recompile limit has working variants and is
-            # reported as truncated instead; counting it here too made the
-            # uncovered error text ("no guarded variants at all") false for it.
-            if not entry.guarded_codes and not entry.bypassed:
-                self._uncovered_frames.add(code.co_name)
             self._current_entry = None
 
     def add_guarded_code(
@@ -1348,7 +1343,15 @@ class CompilePackage:
 
     @property
     def uncovered_frames(self) -> frozenset[str]:
-        return frozenset(self._uncovered_frames)
+        # Entered Dynamo yet holds no guarded code, which is exactly what
+        # install() skip_code()s. Resume code that was generated but never
+        # executed has no compile id and is not a gap; a frame that hit the
+        # recompile limit has working variants and is reported as truncated.
+        return frozenset(
+            code.co_name
+            for code, entry in self._codes.items()
+            if entry.has_compile_id and not entry.guarded_codes and not entry.bypassed
+        )
 
     def guarded_code_count(self, code: types.CodeType) -> int:
         entry = self._codes.get(code)
@@ -1478,6 +1481,21 @@ class CompilePackage:
         # mint. Every reference to them lives in some frame's dynamo bytecode,
         # remapped below.
         renames = _resume_global_renames(self._codes.values(), self._install_token)
+        # Registered before anything is installed, so a failed install is still
+        # torn down when the package dies. The callback must not capture self
+        # (it would never fire); it works off the containers the loop below
+        # fills in place, which uninstall() rebinds rather than mutates, so an
+        # explicit uninstall + reinstall cannot be undone by a stale finalizer.
+        self._uninstall_finalizer = weakref.finalize(
+            self,
+            _uninstall_abandoned_package,
+            self._installed_globals,
+            self._installed_precompile_codes,
+            self._installed_precompile_region_id,
+            self._install_owner,
+        )
+        # Not at interpreter exit: module dicts and the frame cache are torn down.
+        self._uninstall_finalizer.atexit = False
         for code, entry in self._codes.items():
             context = (
                 _compile_frame_context(code)
@@ -1602,20 +1620,6 @@ class CompilePackage:
                         self._installed_precompile_region_id,
                         self._install_owner,
                     )
-        # The callback must not capture self (it would never fire); it works
-        # off the very containers install() just populated, which uninstall()
-        # rebinds rather than mutates, so an explicit uninstall + reinstall
-        # cannot be undone by a stale finalizer.
-        self._uninstall_finalizer = weakref.finalize(
-            self,
-            _uninstall_abandoned_package,
-            self._installed_globals,
-            self._installed_precompile_codes,
-            self._installed_precompile_region_id,
-            self._install_owner,
-        )
-        # Not at interpreter exit: module dicts and the frame cache are torn down.
-        self._uninstall_finalizer.atexit = False
 
     def code_entries(self) -> Iterable["_DynamoCodeCacheEntry"]:
         """The per-frame entries, for a caller that edits them before they are
