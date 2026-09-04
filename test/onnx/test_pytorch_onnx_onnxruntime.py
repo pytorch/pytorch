@@ -44,7 +44,7 @@ from torch.onnx import errors
 from torch.onnx._internal.torchscript_exporter import verification
 from torch.onnx._internal.torchscript_exporter._type_utils import JitScalarType
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfNoLapack
+from torch.testing._internal.common_utils import HardwareClassification, skipIfNoLapack
 
 
 def _init_test_generalized_rcnn_transform():
@@ -166,6 +166,8 @@ def _parametrize_rnn_args(arg_name):
 )
 @common_utils.instantiate_parametrized_tests
 class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_fuse_conv_bn1d(self):
         class Fuse(torch.nn.Module):
             def __init__(self) -> None:
