@@ -2561,4 +2561,3 @@ int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
 }
 
 } // namespace c10::xpu::XPUCachingAllocator
- 
