@@ -551,20 +551,55 @@ class TestAOTCompileToPython(TestCase):
 
     def test_helpers_imported_from_standalone_runtime_surface(self):
         # End-to-end lock for the stability contract: a graph closing over a runtime helper
-        # (here gen_alias_from_base, via output-alias regen) must import it from the
+        # (here the output-alias regeneration helpers) must import it from the
         # standalone_runtime surface, not its internal AOTAutograd location. A dropped or
         # aliased _known_helper_table entry would silently fall through to the internal
         # module. (ViewMetaSequence legitimately imports functional_utils, so this checks the
-        # specific helper expression, not the bare module name.)
+        # specific helper expressions, not the bare module name.)
         m = _ViewAlias().eval()
         x = torch.randn(4, 4)
         src, _cache = _compose(m, x)
-        self.assertIn(
-            "from torch._functorch._aot_autograd.standalone_runtime import "
+        for helper in (
             "gen_alias_from_base",
-            src,
+            "gen_aliases_from_multi_output_view",
+            "_multi_output_view_was_invalidated",
+            "_multi_output_views_were_invalidated",
+        ):
+            self.assertIn(
+                "from torch._functorch._aot_autograd.standalone_runtime import "
+                f"{helper}",
+                src,
+            )
+            self.assertNotIn(f"functional_utils.{helper}", src)
+
+    def test_multi_output_view_fallback_preserves_creation_meta(self):
+        class Unbind(torch.nn.Module):
+            def forward(self, x):
+                return x.unbind(0)
+
+        m = Unbind()
+        example = torch.randn(4, 3, requires_grad=True)
+        gm = _capture(m, example)
+        with functorch_config.patch(view_replay_for_aliased_outputs=False):
+            src, _cache = compile_to_python(gm, [example])
+
+        # compile_to_python captures its inference wrapper without grad_fn nodes,
+        # so it cannot group siblings by their shared UnbindBackward. It still
+        # must carry the multi-output marker through per-output reconstruction.
+        self.assertNotIn("gen_aliases_from_multi_output_view(", src)
+        self.assertIn("target_is_multi_output_view=True", src)
+        compiled = _exec(src)
+        leaf = torch.randn(4, 3, requires_grad=True)
+        outs = compiled([leaf + 0])
+        self.assertIn("AsStridedBackward", str(outs[0].grad_fn))
+        self.assertEqual(
+            torch._C._autograd._get_creation_meta(outs[0]),
+            torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE,
         )
-        self.assertNotIn("functional_utils.gen_alias_from_base", src)
+        with self.assertRaisesRegex(
+            RuntimeError, "functions do not allow the output views"
+        ):
+            outs[0].mul_(2)
 
     @parametrize("target", _EFFECTFUL_TARGETS)
     def test_rejects_effectful_op(self, target):

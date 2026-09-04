@@ -198,6 +198,18 @@ def _known_helper_table() -> dict[int, tuple[str, str]]:
             f"{_RT} gen_alias_from_base",
             "gen_alias_from_base",
         ),
+        id(rt.gen_aliases_from_multi_output_view): (
+            f"{_RT} gen_aliases_from_multi_output_view",
+            "gen_aliases_from_multi_output_view",
+        ),
+        id(rt._multi_output_view_was_invalidated): (
+            f"{_RT} _multi_output_view_was_invalidated",
+            "_multi_output_view_was_invalidated",
+        ),
+        id(rt._multi_output_views_were_invalidated): (
+            f"{_RT} _multi_output_views_were_invalidated",
+            "_multi_output_views_were_invalidated",
+        ),
         id(rt._unwrap_tensoralias): (
             f"{_RT} _unwrap_tensoralias",
             "_unwrap_tensoralias",

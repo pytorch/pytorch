@@ -854,6 +854,77 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch(
+        {"enable_autograd_cache": True, "view_replay_for_aliased_outputs": True}
+    )
+    def test_multi_output_view_replay(self):
+        def fn(a):
+            return tuple(out.unsqueeze(i % 2) for i, out in enumerate(a.unbind(0)))
+
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+
+        def run_and_check(miss, hit):
+            self._clear_dynamo_and_codecache()
+            inp = torch.rand(4, 3, requires_grad=True)
+            outs = compiled_fn(inp)
+            shared_unbind_nodes = [o.grad_fn.next_functions[0][0] for o in outs]
+            self.assertTrue(
+                all(node is shared_unbind_nodes[0] for node in shared_unbind_nodes)
+            )
+            for out in outs:
+                out.sum().backward()
+            self.assertEqual(inp.grad, torch.ones_like(inp))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], miss)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hit)
+
+        run_and_check(miss=1, hit=0)
+        run_and_check(miss=1, hit=1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch("enable_autograd_cache", True)
+    def test_multi_output_view_invalidation(self):
+        def fn(a, b):
+            before = a.unbind(0)
+            b.add_(1)
+            after = a.unbind(0)
+            return before[0], after[0], a.sum()
+
+        compiled_fn = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+
+        def run_and_check(miss, hit, shared_version_counter):
+            self._clear_dynamo_and_codecache()
+            if shared_version_counter:
+                leaf = torch.arange(18.0, requires_grad=True)
+                base = leaf.reshape(6, 3) + 1
+                a, b = base[:2], base[2:]
+            else:
+                storage = torch.arange(18.0).untyped_storage()
+                a = torch.empty(2, 3, requires_grad=True) + 0
+                b = torch.empty(4, 3, requires_grad=True) + 0
+                with torch.no_grad():
+                    a.set_(storage, 0, (2, 3), (3, 1))
+                    b.set_(storage, 6, (4, 3), (3, 1))
+            before, after, loss = compiled_fn(a, b)
+            if shared_version_counter:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "base or another view of its base has been modified inplace",
+                ):
+                    before.grad_fn
+            else:
+                self.assertIsNotNone(before.grad_fn)
+            self.assertIsNotNone(after.grad_fn)
+            loss.backward()
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], miss)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hit)
+
+        run_and_check(miss=1, hit=0, shared_version_counter=True)
+        run_and_check(miss=1, hit=1, shared_version_counter=False)
+        run_and_check(miss=1, hit=2, shared_version_counter=True)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
     )
     def test_invoke_subgraph(self):
