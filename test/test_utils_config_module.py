@@ -510,6 +510,176 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         revert()
         self.assertTrue(config.e_bool)
 
+    def _remove_added_config(self, name: str) -> None:
+        # add_config mutates _config / _compile_ignored_keys; undo so the shared
+        # fixture stays clean for the exact-dict tests in this file.
+        config._config.pop(name, None)
+        config._compile_ignored_keys.discard(name)
+        config._hash_dirty_var.set(True)
+        config._get_dict_dirty_keys_var.set(None)
+        config._get_dict_cache_var.set(None)
+
+    def test_add_config(self):
+        self.assertNotIn("ac_str", config.get_config_copy())
+        try:
+            config.add_config("ac_str", Config(default="x", value_type=str))
+            # readable / settable
+            self.assertEqual(config.ac_str, "x")
+            config.ac_str = "y"
+            self.assertEqual(config.ac_str, "y")
+            # surfaces in get_config_copy
+            self.assertIn("ac_str", config.get_config_copy())
+            # usable through config.patch (the compile_fx config_patches path)
+            with config.patch({"ac_str": "z"}):
+                self.assertEqual(config.ac_str, "z")
+            self.assertEqual(config.ac_str, "y")
+        finally:
+            self._remove_added_config("ac_str")
+
+    def test_add_config_default_is_hashed(self):
+        # Default compile_ignored=False: registered key participates in get_hash.
+        try:
+            config.add_config("ac_hashed_default", Config(default=False))
+            h0 = config.get_hash()
+            config.ac_hashed_default = True
+            self.assertNotEqual(config.get_hash(), h0)
+        finally:
+            self._remove_added_config("ac_hashed_default")
+
+    def test_add_config_compile_ignored_excludes_from_hash(self):
+        # compile_ignored=True opts a key out of get_hash() (but NOT out of the
+        # FX graph cache key, which comes from save_config_portable).
+        try:
+            config.add_config("ac_ignored", Config(default=False), compile_ignored=True)
+            h0 = config.get_hash()
+            config.ac_ignored = True
+            self.assertEqual(config.get_hash(), h0)
+        finally:
+            self._remove_added_config("ac_ignored")
+
+    def test_add_config_hash_participation(self):
+        # compile_ignored=False: registered key participates in get_hash.
+        try:
+            config.add_config(
+                "ac_hashed", Config(default=0, value_type=int), compile_ignored=False
+            )
+            h0 = config.get_hash()
+            config.ac_hashed = 1
+            self.assertNotEqual(config.get_hash(), h0)
+        finally:
+            self._remove_added_config("ac_hashed")
+
+    def test_add_config_invalidates_readonly_cache(self):
+        # A cached _get_dict result must reflect a key registered afterwards.
+        d0 = config._get_dict(readonly_values=True)
+        self.assertNotIn("ac_cached", d0)
+        try:
+            config.add_config("ac_cached", Config(default="x", value_type=str))
+            d1 = config._get_dict(readonly_values=True)
+            self.assertIn("ac_cached", d1)
+        finally:
+            self._remove_added_config("ac_cached")
+
+    def test_add_config_duplicate_raises(self):
+        try:
+            config.add_config("ac_dup", Config(default=False))
+            with self.assertRaises(AssertionError):
+                config.add_config("ac_dup", Config(default=True))
+        finally:
+            self._remove_added_config("ac_dup")
+
+    def test_add_config_invalid_name(self):
+        # Dotted names collide with SubConfigProxy nesting; non-identifier
+        # names are unreachable via attribute access. "\u212a" (Kelvin sign)
+        # is an identifier but NFKC-normalizes to "K": source access would
+        # compile to "K" while getattr() reaches the raw spelling.
+        for bad in ("ac.dotted", "1leading_digit", "with space", "for", "\u212a"):
+            with self.assertRaises(AssertionError):
+                config.add_config(bad, Config(default=False))
+            self.assertNotIn(bad, config._config)
+
+    def test_add_config_rejects_shadowing_name(self):
+        # Names that already resolve on the module -- ConfigModule methods,
+        # sub-config proxies, and install_config_module imports -- must be
+        # rejected: the entry would otherwise be exported by get_config_copy()
+        # / save_config_portable() (and enter the FX cache key) yet stay
+        # unreachable and unassignable via attribute access. `nested` is the
+        # SubConfigProxy case (the inductor analogue is `triton`).
+        for shadowing in ("patch", "get_config_copy", "get_hash", "nested"):
+            with self.assertRaises(AssertionError):
+                config.add_config(shadowing, Config(default=False))
+            self.assertNotIn(shadowing, config._config)
+
+    def test_add_config_visible_across_contexts(self):
+        # Regression: add_config must invalidate the readonly _get_dict cache
+        # in OTHER threads/contexts too. ContextVar.set() only affects the
+        # calling context, so structural invalidation must be context
+        # independent -- here, via len(self._config) in the cache key.
+        import threading
+
+        cache_done = threading.Event()
+        added = threading.Event()
+        observed: dict = {}
+
+        def other_thread():
+            d0 = config._get_dict(readonly_values=True)
+            observed["initially_absent"] = "ac_threaded" not in d0
+            cache_done.set()
+            added.wait(timeout=30)
+            d1 = config._get_dict(readonly_values=True)
+            observed["finally_present"] = "ac_threaded" in d1
+
+        t = threading.Thread(target=other_thread)
+        t.start()
+        try:
+            self.assertTrue(cache_done.wait(timeout=30))
+            config.add_config("ac_threaded", Config(default="x", value_type=str))
+            added.set()
+        finally:
+            t.join(timeout=30)
+            self._remove_added_config("ac_threaded")
+
+        self.assertFalse(t.is_alive(), "other thread did not finish in time")
+        self.assertTrue(observed.get("initially_absent"))
+        self.assertTrue(
+            observed.get("finally_present"),
+            "other thread did not observe key registered after it cached",
+        )
+
+    def test_add_config_hash_visible_across_contexts(self):
+        # Regression: get_hash() must observe add_config in OTHER contexts too.
+        # The hash cache / dirty flag are context-scoped ContextVars, so a
+        # context that hashed before registration would keep returning the old
+        # digest without the _hash_generation_var check.
+        import threading
+
+        hashed = threading.Event()
+        added = threading.Event()
+        observed: dict = {}
+
+        def other_thread():
+            observed["h0"] = config.get_hash()
+            hashed.set()
+            added.wait(timeout=30)
+            observed["h1"] = config.get_hash()
+
+        t = threading.Thread(target=other_thread)
+        t.start()
+        try:
+            self.assertTrue(hashed.wait(timeout=30))
+            config.add_config("ac_hash_threaded", Config(default="x", value_type=str))
+            added.set()
+        finally:
+            t.join(timeout=30)
+            self._remove_added_config("ac_hash_threaded")
+
+        self.assertFalse(t.is_alive(), "other thread did not finish in time")
+        self.assertNotEqual(
+            observed.get("h1"),
+            observed.get("h0"),
+            "other thread did not observe key registered after it hashed",
+        )
+
     def test_unittest_patch(self):
         with patch("torch.testing._internal.fake_config_module.e_bool", False):
             with patch("torch.testing._internal.fake_config_module.e_bool", False):
