@@ -638,18 +638,21 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
 
-    def test_missing_attribute_hasattr_graph_breaks(self):
+    def test_missing_attribute_hasattr(self):
         class Function(torch.autograd.Function):
             pass
 
         def fn(x):
-            return x, hasattr(Function, "missing")
+            return x + 1, hasattr(Function, "missing")
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Unsupported hasattr call",
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(2)
+        self.assertEqual(opt_fn(x), (x + 1, False))
+        self.assertEqual(cnt.frame_count, 1)
+        Function.missing = 1
+        self.assertEqual(opt_fn(x), (x + 1, True))
+        self.assertEqual(cnt.frame_count, 2)
 
     @parametrize("name", ("__name__", "__bases__"))
     def test_dunder_attribute_uses_generic_getattr(self, name):
