@@ -23,19 +23,21 @@ from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_
 from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
-from torch.testing._internal.common_distributed import (
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
-
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-BACKEND = torch.distributed.get_default_backend_for_device(device_type)
 
 
 def with_temp_dir(
@@ -84,15 +86,18 @@ class MyTestModule(torch.nn.Module):
 
 
 class TestFSSpec(ShardedTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
-    @with_comms(backend=BACKEND, init_rpc=False)
-    @requires_accelerator_dist_backend()
+    @with_comms(init_rpc=False)
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_fsspec(self):
+    def test_fsspec(self, device):
+        device_type = torch.device(device).type
         CHECKPOINT_DIR = self.temp_dir
 
         model = FSDP(MyTestModule().to(device_type))
@@ -162,11 +167,11 @@ class TestFSSpec(ShardedTensorTestBase):
             opt_at(optim, 0)["exp_avg_sq"], opt_at(optim_2, 0)["exp_avg_sq"]
         )
 
-    @with_comms(backend=BACKEND, init_rpc=False)
-    @requires_accelerator_dist_backend()
+    @with_comms(init_rpc=False)
+    @requires_capabilities(Capability.distributed.backend)
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_overwrite(self):
+    def test_overwrite(self, device):
         t1, t2 = torch.randn(10), torch.randn(10)
 
         dcp.save(
@@ -190,6 +195,8 @@ class TestFSSpec(ShardedTensorTestBase):
 
 
 class TestFileSystem(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @with_temp_dir
     def test_remove_on_fail(self):
         fs = FileSystem()
@@ -255,6 +262,13 @@ class TestFileSystem(TestCase):
         # os.sync() may be called on backends that don't support per-file fsync
         self.assertLessEqual(mock_os_sync.call_count, 2)
 
+
+instantiate_device_type_tests(
+    TestFSSpec,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
