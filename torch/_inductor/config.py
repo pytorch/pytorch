@@ -1817,6 +1817,11 @@ class cpp:
     simdlen: int | None = None
     min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "512"))
 
+    # Preserve IEEE 754 signed-zero tie results (-0./+0.) in generated min/max
+    # kernels. When False (default), codegen keeps the previous compare-based
+    # tie behavior. See https://github.com/pytorch/pytorch/issues/194347
+    strict_signed_zero: bool = False
+
     cxx: tuple[None, str] = (
         None,  # download gcc12 from conda-forge if conda is installed
         os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),

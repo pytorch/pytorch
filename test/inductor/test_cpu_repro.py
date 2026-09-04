@@ -155,6 +155,113 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    @parametrize("size", [1, 32, 40])
+    @parametrize("dtype", [torch.float64, torch.float32, torch.float16, torch.bfloat16])
+    @parametrize(
+        "op,x_value,y_value",
+        [
+            ("minimum", -0.0, 0.0),
+            ("minimum", 0.0, -0.0),
+            ("maximum", -0.0, 0.0),
+            ("maximum", 0.0, -0.0),
+        ],
+    )
+    @parametrize("strict_signed_zero", [True, False])
+    def test_minimum_maximum_signed_zero(
+        self, dtype, op, x_value, y_value, size, strict_signed_zero
+    ):
+        # With cpp.strict_signed_zero enabled, compiled min/max follow IEEE 754
+        # signed-zero tie semantics (minimum -> -0., maximum -> +0., regardless
+        # of operand order). With the default (disabled), codegen keeps the
+        # previous compare-based behavior, which resolves ties to the second
+        # operand. See https://github.com/pytorch/pytorch/issues/194347
+        def fn(x, y):
+            return getattr(torch, op)(x, y)
+
+        x = torch.full((size,), x_value, dtype=dtype)
+        y = torch.full((size,), y_value, dtype=dtype)
+        with config.patch("cpp.strict_signed_zero", strict_signed_zero):
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+
+        self.assertEqual(actual, torch.zeros_like(actual))
+        if strict_signed_zero:
+            expected_sign = op == "minimum"
+        else:
+            # Legacy compare-based lowering keeps the second operand on ties.
+            expected_sign = math.copysign(1.0, y_value) < 0
+        self.assertEqual(
+            torch.signbit(actual),
+            torch.full_like(actual, expected_sign, dtype=torch.bool),
+        )
+
+    @parametrize("size", [1, 8])
+    @parametrize("dtype", [torch.float64, torch.float32])
+    @parametrize("nan_position", ["first", "second"])
+    @parametrize("op", ["minimum", "maximum"])
+    @parametrize("strict_signed_zero", [True, False])
+    def test_minimum_maximum_nan_propagation(
+        self, dtype, op, nan_position, size, strict_signed_zero
+    ):
+        # The min/max lowerings propagate NaN from either input, independent
+        # of the signed-zero setting (issue #194347).
+        nan = float("nan")
+
+        def fn(x, y):
+            return getattr(torch, op)(x, y)
+
+        x = torch.full((size,), nan if nan_position == "first" else 1.0, dtype=dtype)
+        y = torch.full((size,), 1.0 if nan_position == "first" else nan, dtype=dtype)
+        with config.patch("cpp.strict_signed_zero", strict_signed_zero):
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+
+        self.assertTrue(torch.isnan(actual).all())
+
+    @parametrize("dtype", [torch.bool, torch.int32, torch.int64])
+    @parametrize("op", ["minimum", "maximum"])
+    def test_minimum_maximum_integral(self, op, dtype):
+        # Integral dtypes reach the same scalar helper via the integral
+        # branch; behavior must be unchanged there.
+        def fn(x, y):
+            return getattr(torch, op)(x, y)
+
+        if dtype is torch.bool:
+            x = torch.tensor([True, False, True])
+            y = torch.tensor([False, True, True])
+        else:
+            x = torch.tensor([1, 5, -3], dtype=dtype)
+            y = torch.tensor([2, 5, -7], dtype=dtype)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+
+        self.assertEqual(actual, fn(x, y))
+
+    def test_clamp_matches_eager(self):
+        # clamp/clamp_min route through the same min/max lowerings. The
+        # default configuration must remain byte-compatible with eager,
+        # including on +/- zero boundaries (issue #194347).
+        def clamp_fn(x):
+            return torch.clamp(x, -1.0, 1.0)
+
+        def clamp_min_fn(x):
+            return torch.clamp_min(x, -0.0)
+
+        x = torch.tensor([-2.0, -0.0, 0.0, 0.5, 2.0])
+        with config.patch("cpp.strict_signed_zero", False):
+            for fn in (clamp_fn, clamp_min_fn):
+                actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+                self.assertEqual(actual, fn(x))
+
+        # With strict signed-zero enabled, +/- zero ties resolve per IEEE 754:
+        # clamp_max(-0., -0.) is -0., clamp_max(+0., -0.) is -0., and any
+        # positive value clamps down to the -0. bound.
+        def clamp_max_fn(x):
+            return torch.clamp_max(x, -0.0)
+
+        expected = torch.tensor([-2.0, -0.0, -0.0, -0.0, -0.0])
+        with config.patch("cpp.strict_signed_zero", True):
+            actual = torch.compile(clamp_max_fn, backend="inductor", fullgraph=True)(x)
+            self.assertEqual(actual, expected)
+            self.assertEqual(torch.signbit(actual), torch.signbit(expected))
+
     @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
         def fn(x):

@@ -1007,11 +1007,15 @@ class CppOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def minimum(a, b):
+        if config.cpp.strict_signed_zero:
+            return f"min_preserve_signbit({a}, {b})"
         return f"min_propagate_nan({a}, {b})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
+        if config.cpp.strict_signed_zero:
+            return f"max_preserve_signbit({a}, {b})"
         return f"max_propagate_nan({a}, {b})"
 
     @staticmethod
@@ -1710,6 +1714,8 @@ class CppVecOverrides(CppOverrides):
                 raise AssertionError("expected b.dtype == torch.bool")
             a_cast, b_cast = unify_mask_base_type(V.kernel.compute, (a, b))
             return f"{a_cast} & {b_cast}"
+        elif config.cpp.strict_signed_zero:
+            return f"min_preserve_signbit_vec({a}, {b})"
         else:
             return f"at::vec::minimum({a}, {b})"
 
@@ -1720,6 +1726,8 @@ class CppVecOverrides(CppOverrides):
                 raise AssertionError("expected b.dtype == torch.bool")
             a_cast, b_cast = unify_mask_base_type(V.kernel.compute, (a, b))
             return f"{a_cast} | {b_cast}"
+        elif config.cpp.strict_signed_zero:
+            return f"max_preserve_signbit_vec({a}, {b})"
         else:
             return f"at::vec::maximum({a}, {b})"
 
