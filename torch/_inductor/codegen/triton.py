@@ -1328,6 +1328,15 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
     return decorator  # type: ignore[return-value]
 
 
+# Float dtypes for which numerics="strict" applies eager-matching pointwise fixups.
+_STRICT_FLOAT = (
+    torch.float16,
+    torch.bfloat16,
+    torch.float32,
+    torch.float64,
+)
+
+
 class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton e.g., ops.to_dtype(x,...) -> x.to(...)"""
 
@@ -1498,7 +1507,7 @@ class TritonOverrides(OpOverrides):
         if (
             x_dtype == torch.float32
             and y_dtype == torch.float32
-            and config.eager_numerics.division_rounding
+            and config.use_eager_division_rounding()
         ):
             # x / y in Triton is lowered to div.full which is approx
             # we want div_rn to adhere with eager
@@ -1597,11 +1606,26 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def minimum(a, b):
+        if config.numerics == "strict" and getattr(a, "dtype", None) in _STRICT_FLOAT:
+            # Eager min returns the NaN operand unchanged (first operand wins when both
+            # are NaN), preserving its payload; Triton's PropagateNan canonicalizes NaN to
+            # 0x7fffffff. Select the NaN operand explicitly and fall back to a plain min
+            # otherwise (which already matches eager on the +-0.0 tie).
+            return (
+                f"tl.where({a} != {a}, {a}, "
+                f"tl.where({b} != {b}, {b}, tl.minimum({a}, {b})))"
+            )
         return f"tl.minimum({a}, {b}, tl.PropagateNan.ALL)"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
+        if config.numerics == "strict" and getattr(a, "dtype", None) in _STRICT_FLOAT:
+            # See minimum: match eager's NaN-payload propagation (first operand wins).
+            return (
+                f"tl.where({a} != {a}, {a}, "
+                f"tl.where({b} != {b}, {b}, tl.maximum({a}, {b})))"
+            )
         return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
 
     @staticmethod
@@ -7184,9 +7208,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     @classmethod
     def triton_meta_common(cls) -> TritonMeta:
         return {
-            "enable_fp_fusion": not config.emulate_precision_casts,
+            "enable_fp_fusion": not config.should_emulate_precision_casts(),
             "launch_pdl": cls._enable_pdl_codegen(),
-            "disable_ftz": config.eager_numerics.disable_ftz,
+            "disable_ftz": config.should_disable_ftz(),
         }
 
     @classmethod
