@@ -34,6 +34,7 @@ import math
 import operator
 import os
 import re
+import struct
 import sys
 import textwrap
 import threading
@@ -1201,6 +1202,17 @@ def istype(obj: object, allowed_types: Any) -> bool:
     if isinstance(allowed_types, (tuple, list, set)):
         return type(obj) in allowed_types
     return type(obj) is allowed_types
+
+
+def constants_identical(a: Any, b: Any) -> bool:
+    """Value-identity comparison for specialized constants. Python float eq is
+    not value-identity: nan != nan while -0.0 == 0.0, so compare float/complex
+    by IEEE-754 bit pattern instead."""
+    if type(a) is float and type(b) is float:
+        return struct.pack(">d", a) == struct.pack(">d", b)
+    if type(a) is complex and type(b) is complex:
+        return struct.pack(">dd", a.real, a.imag) == struct.pack(">dd", b.real, b.imag)
+    return a == b
 
 
 _builtin_final_typing_classes: tuple[Any, ...] = tuple()

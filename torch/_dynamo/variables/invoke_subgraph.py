@@ -24,7 +24,7 @@ from torch._dynamo.guards import (
     UnsupportedGuardCheckSpec,
 )
 from torch._dynamo.source import SyntheticLocalSource
-from torch._dynamo.utils import _make_inlined, unpack_iterable
+from torch._dynamo.utils import _make_inlined, constants_identical, unpack_iterable
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
@@ -742,7 +742,7 @@ def is_reusable(
                     type(cur_vt.value),
                 )
                 return False
-            if cur_vt.value != cached_value:
+            if not constants_identical(cur_vt.value, cached_value):
                 # If both the cached and current arg have sources, source
                 # replacement in stamp_out will resolve the correct value.
                 cached_src = (
