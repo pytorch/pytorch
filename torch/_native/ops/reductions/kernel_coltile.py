@@ -9,6 +9,7 @@ from cutlass import Int32
 
 import torch
 
+from ...cutedsl.dtypes import torch2cute
 from .._cutedsl import launch as _L
 from .._cutedsl.plan_cache import cached_plan
 from . import tile
@@ -93,7 +94,7 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
     pc = C >= _C_THREAD_STAGE2  # (P, C) for a thread-per-column stage 2, else (C, P)
     op = tile.TileReduce(
         trait,
-        _L.torch2cute[x.dtype],
+        torch2cute[x.dtype],
         "col",
         C,
         nt=nt,
@@ -111,13 +112,21 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
     )
     dsts = [out] if single else parts
 
-    def _wrap():
+    def _fake():
+        # Compile-time descriptors; both input extents dynamic, mode 1 divisible by vec.
         # nwaves belongs to the ROW axis: None, not a dummy -- an unused Int32 param costs
         # 1.27x here (see tile.TileReduce.kernel). project_n carries the reduced extent,
         # which is also what the per-block chunk bound is measured against.
         return (
-            [_L.cute_tensor_dynMN(x, vec, align=align, read_only=True)],
-            [_L.cute_tensor_dynM(d, ndim=1) for d in dsts],
+            [
+                _L.fake_compact(
+                    torch2cute[x.dtype],
+                    (_L.sym(), _L.sym(vec)),
+                    order=(1, 0),
+                    align=align,
+                )
+            ],
+            [_L.fake_compact(torch2cute[d.dtype], (_L.sym(),)) for d in dsts],
             nchunks,
             None,  # nwaves: the row axis's
             nrows,
@@ -133,8 +142,21 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
     # align is baked in by _compile, and the _VEC_MAX cap means equal vec no longer implies
     # equal alignment the way the row path's uncapped vec does -- so key it.
     key = ("coltile", trait_key, x.dtype, out_dtype, align) + op.cache_sig
-    build = lambda: _compile(op, *_wrap())  # noqa: E731
-    cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_wrap())
+    build = lambda: _compile(op, *_fake())  # noqa: E731
+    cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(
+        [_L.read_only(x)],
+        list(dsts),
+        nchunks,
+        None,
+        nrows,
+        q,
+        Int32(npar),
+        None,
+        None,
+        None,
+        None,
+        _stream(),
+    )
     if single:
         return out
 
@@ -161,15 +183,15 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
     # Stage 2 is the SAME body in combine mode: nchunks carries the column count (one
     # thread each), nrows the true reduced extent for project, and q is unused.
     op2 = tile.TileReduce(
-        trait, _L.torch2cute[x.dtype], "col", C, nt=nt, vec=1, combine=True
+        trait, torch2cute[x.dtype], "col", C, nt=nt, vec=1, combine=True
     )
 
-    def _wrap2():
+    def _fake2():
         # nchunks carries the column count (one thread each), project_n the true reduced extent
         # for the projection; the row axis's nwaves and the split's q are unused -> None.
         return (
-            [_L.cute_tensor_dynM(pp, ndim=1) for pp in parts],
-            [_L.cute_tensor_dynM(out, ndim=1)],
+            [_L.fake_compact(torch2cute[pp.dtype], (_L.sym(),)) for pp in parts],
+            [_L.fake_compact(torch2cute[out.dtype], (_L.sym(),))],
             Int32(C),
             None,  # nwaves
             Int32(R),
@@ -184,6 +206,19 @@ def reduce_col_tile(trait, trait_key, x, out_dtype, nt=None, npar=None, vec=None
 
     pdt = tuple(pp.dtype for pp in parts)
     key2 = ("coltile2", trait_key, x.dtype, out_dtype, pdt) + op2.cache_sig
-    build2 = lambda: _compile(op2, *_wrap2())  # noqa: E731
-    cached_plan(_CACHE, key2, build2, op=f"aten::{trait_key}")(*_wrap2())
+    build2 = lambda: _compile(op2, *_fake2())  # noqa: E731
+    cached_plan(_CACHE, key2, build2, op=f"aten::{trait_key}")(
+        [_L.read_only(pp) for pp in parts],
+        [out],
+        Int32(C),
+        None,
+        Int32(R),
+        None,
+        Int32(npar),
+        None,
+        None,
+        None,
+        None,
+        _stream(),
+    )
     return out

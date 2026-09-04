@@ -7,18 +7,28 @@
 # machinery (traits / launch) only does work once compiled into a kernel and is
 # exercised by the reduction-override suites that build on it.
 
+import sys
 import unittest
 
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
+
+
+# hw_caps reaches cutlass transitively, so the guard has to precede the import rather than decorate
+# the class -- on an image without the runtime, a module-level import fails collection for the whole
+# file instead of skipping it. sys.exit keeps a direct `python test_hw_caps.py` a success.
+if not TEST_CUTEDSL:
+    sys.stderr.write("CuTeDSL not available\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("CuTeDSL not available")
+
+from torch._native.ops._cutedsl.hw_caps import caps
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
-@skipIfNoCuteDSL
 class TestHWCaps(TestCase):
     def _caps(self):
-        from torch._native.ops._cutedsl.hw_caps import caps
-
         return caps()
 
     def test_max_warps_per_sm(self):
