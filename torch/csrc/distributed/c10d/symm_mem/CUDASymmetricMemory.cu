@@ -79,9 +79,13 @@ AllocationRef::~AllocationRef() {
     TORCH_CHECK(
         false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
+  } catch (const std::exception& e) {
+    TORCH_WARN(
+        "AllocationRef::~AllocationRef() ignoring error during teardown: ",
+        e.what());
   } catch (...) {
-    // CUDAGuard construction or DriverAPI::get() can still throw when the
-    // context is broken; never let it escape a destructor.
+    TORCH_WARN(
+        "AllocationRef::~AllocationRef() ignoring unknown error during teardown");
   }
 }
 
