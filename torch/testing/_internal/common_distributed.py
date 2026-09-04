@@ -1283,6 +1283,8 @@ class DistributedTestBase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
         self._spawn_processes()
 
     def tearDown(self):
@@ -1744,8 +1746,11 @@ def _dynamo_dist_per_rank_init(
     if backend is None:
         backend = c10d.get_default_backend_for_device(device_type)
 
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "6789"
+    # The spawning test process picks the port (see DistributedTestBase.setUp)
+    # so that all ranks agree on it; a fixed port collides with other test
+    # processes running concurrently on the same host.
+    os.environ.setdefault("MASTER_ADDR", "localhost")
+    os.environ.setdefault("MASTER_PORT", "6789")
     if init_pg:
         if fake_pg:
             store = torch.testing._internal.distributed.fake_pg.FakeStore()
