@@ -1748,6 +1748,7 @@ TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = bool(hasattr(torch, "hpu") and torch.hpu.is_available())
+TEST_MTIA = LazyVal(lambda: hasattr(torch, "mtia") and torch.mtia.is_available())  # type: ignore[call-arg]
 TEST_CUDA = torch.cuda.is_available()
 TEST_ACCELERATOR = LazyVal(lambda: torch.accelerator.is_available())  # type: ignore[call-arg]
 TEST_MULTIACCELERATOR = LazyVal(lambda: torch.accelerator.device_count() > 1)  # type: ignore[call-arg]
