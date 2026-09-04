@@ -21,7 +21,7 @@ from torch._higher_order_ops.invoke_subgraph import (
 )
 from torch._inductor.output_code import RegionalOutputCode
 from torch._inductor.test_case import run_tests
-from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
+from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.fx._graph_pickler import GraphPickler
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.fx.passes.regional_inductor_invoke_subgraph import (
@@ -638,99 +638,6 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
             body.append(line)
         return "\n".join(body)
 
-    @requires_gpu_and_triton
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    def test_nested_region_inductor_config_persistent_reduction_codegen(self):
-        # triton.persistent_reductions=False set only on the region forces its
-        # reduction to be looped (triton_red_*) while the parent keeps its
-        # persistent kernel (triton_per_*).
-        nested_config = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"triton.persistent_reductions": False}
-        )
-
-        @torch.compiler.nested_compile_region(options=nested_config)
-        def g(x):
-            return torch.softmax(x, dim=-1) + 1
-
-        def fn(x):
-            y = torch.softmax(x, dim=-1) * 2
-            return g(y)
-
-        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        x = torch.randn(4096, 256, device=device_type)
-        result, codes = run_and_get_code(lambda: opt_fn(x))
-
-        self.assertEqual(result, fn(x))
-        self.assertEqual(len(codes), 1)
-        region_code = self._generated_fn_body(codes[0], "def repeated_subgraph0(")
-        parent_code = self._generated_fn_body(codes[0], "def call(self, args):")
-        self.assertIn("triton_red_", region_code)
-        self.assertNotIn("triton_per_", region_code)
-        self.assertIn("triton_per_", parent_code)
-
-    @requires_gpu_and_triton
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    def test_nested_region_separate_fw_bw_inductor_config(self):
-        # A region can compile its forward and backward under different inductor
-        # configs. The forward keeps persistent reductions (default) while the
-        # backward is forced to looped reductions via bw_inductor_config_patches.
-        nested_config = get_invoke_subgraph_compile_options(
-            bw_inductor_config_patches={"triton.persistent_reductions": False},
-        )
-
-        @torch.compiler.nested_compile_region(options=nested_config)
-        def g(x):
-            return torch.softmax(x, dim=-1)
-
-        def fn(x):
-            return (g(x) * 3).sum()
-
-        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        x = torch.randn(4096, 256, device=device_type, requires_grad=True)
-        result, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
-
-        self.assertEqual(result, fn(x))
-        self.assertEqual(len(codes), 2)
-        fw_code, bw_code = codes
-        # Forward region keeps its persistent reduction; the backward region is
-        # looped, so only the backward reflects bw_inductor_config_patches.
-        self.assertIn("triton_per_", fw_code)
-        self.assertIn("triton_red_", bw_code)
-        self.assertNotIn("triton_per_", bw_code)
-
-    @requires_gpu_and_triton
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    def test_nested_region_fw_bw_inductor_config_both_set(self):
-        # Forward and backward set to different explicit configs: the forward
-        # forces persistent reductions, the backward forces looped ones. Each
-        # direction's own region is compiled under its own config.
-        nested_config = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"triton.persistent_reductions": True},
-            bw_inductor_config_patches={"triton.persistent_reductions": False},
-        )
-
-        @torch.compiler.nested_compile_region(options=nested_config)
-        def g(x):
-            return torch.softmax(x, dim=-1)
-
-        def fn(x):
-            return (g(x) * 3).sum()
-
-        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        x = torch.randn(4096, 256, device=device_type, requires_grad=True)
-        result, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
-
-        self.assertEqual(result, fn(x))
-        self.assertEqual(len(codes), 2)
-        fw, bw = codes
-        fw_region = self._generated_fn_body(fw, "def partitioned_fw_subgraph_0_0(")
-        bw_region = self._generated_fn_body(bw, "def partitioned_bw_subgraph_0_0(")
-        # Forward region is persistent; backward region is looped.
-        self.assertIn("triton_per_", fw_region)
-        self.assertNotIn("triton_red_", fw_region)
-        self.assertIn("triton_red_", bw_region)
-        self.assertNotIn("triton_per_", bw_region)
-
     def test_custom_decomposition(self):
         # Test that custom decompositions are applied to the subgraph.
 
@@ -1190,14 +1097,14 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
     def test_default_inductor_config_keeps_autotune_compiler_local(self):
         nested_config = get_invoke_subgraph_compile_options()
         self.assertEqual(nested_config.inductor_config_patches, {})
-        nested_config.inductor_config_patches["triton.persistent_reductions"] = False
+        nested_config.inductor_config_patches["fallback_by_default"] = True
         observed_configs = []
 
         def compile_fx_inner(gm, example_inputs):
             observed_configs.append(
                 (
                     torch._inductor.config.triton.autotune_at_compile_time,
-                    torch._inductor.config.triton.persistent_reductions,
+                    torch._inductor.config.fallback_by_default,
                 )
             )
 
@@ -1214,7 +1121,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
             torch._inductor.config.patch(
                 {
                     "triton.autotune_at_compile_time": False,
-                    "triton.persistent_reductions": True,
+                    "fallback_by_default": False,
                 }
             ),
         ):
@@ -1223,29 +1130,10 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                     raise AssertionError("Expected an Inductor compiler")
                 compiler(self._empty_graph_module(), [])
 
-        self.assertEqual(observed_configs, [(True, False), (True, False)])
+        self.assertEqual(observed_configs, [(True, True), (True, True)])
 
     @parametrize("direction", ("forward", "backward"))
-    @parametrize(
-        "config_key,config_value",
-        (
-            ("cpp_wrapper", True),
-            ("cudagraph_unsafe_unbacked_ops", []),
-            ("graph_partition", True),
-            ("max_autotune", True),
-            ("post_grad_custom_post_pass", lambda _: None),
-            ("post_grad_custom_pre_pass", lambda _: None),
-            ("triton.autotune_at_compile_time", True),
-            ("triton.cudagraph_min_partition_size", 1),
-            ("triton.cudagraph_skip_dynamic_graphs", True),
-            ("triton.cudagraphs", True),
-            ("triton.cudagraph_trees", True),
-            ("triton.multi_kernel", True),
-        ),
-    )
-    def test_unsupported_nested_region_inductor_config(
-        self, direction, config_key, config_value
-    ):
+    def test_unsupported_nested_region_inductor_config(self, direction):
         config_arg = (
             "fw_inductor_config_patches"
             if direction == "forward"
@@ -1253,10 +1141,11 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         )
         with self.assertRaisesRegex(
             ValueError,
-            f"Inductor config key '{config_key}' is not supported in {direction}",
+            "Inductor config key 'triton.persistent_reductions' "
+            f"is not supported in {direction}",
         ):
             get_invoke_subgraph_compile_options(
-                **{config_arg: {config_key: config_value}}
+                **{config_arg: {"triton.persistent_reductions": False}}
             )
 
     def test_nested_region_options_validate_direct_construction(self):

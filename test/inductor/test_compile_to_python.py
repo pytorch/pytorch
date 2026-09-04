@@ -420,39 +420,6 @@ class TestInductorCompileToPythonContract(TestCase):
         with self.assertRaises(TypeError):
             compile_to_python("not a graph module", [])
 
-    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
-    def test_revalidates_mutated_nested_region_config(self):
-        from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
-        from torch._inductor.exc import InductorError
-
-        m = _Pointwise().eval()
-        x = torch.randn(4)
-        gm = _capture(m, x)
-
-        patches = {}
-        nested_config = NestedCompileRegionOptions(inductor_config_patches=patches)
-        body_graph = torch.fx.Graph()
-        body_graph.output(())
-        body = torch.fx.GraphModule({}, body_graph)
-        body.meta["nested_region_config"] = nested_config
-        gm.add_module("region", body)
-        with gm.graph.inserting_before(gm.graph.output_node()):
-            gm.graph.get_attr("region")
-        gm.recompile()
-
-        pass_calls = []
-
-        def forbidden_pass(graph):
-            pass_calls.append(graph)
-
-        patches["post_grad_custom_post_pass"] = forbidden_pass
-        with self.assertRaisesRegex(
-            InductorError,
-            "Inductor config key 'post_grad_custom_post_pass' is not supported",
-        ):
-            compile_to_python(gm, _flat_inputs(m, x))
-        self.assertEqual(pass_calls, [])
-
     def test_pins_override_conflicting_user_options(self):
         # The benchmark_harness/cpp_wrapper pins must beat conflicting user options so the
         # captured module stays the runnable python wrapper rather than a C++ wrapper or a

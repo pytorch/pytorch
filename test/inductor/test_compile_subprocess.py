@@ -82,7 +82,7 @@ test_failures = {
     # globals reaches a thread-local. is_skip rather than xfail because the
     # by-value fallback is dill-specific, so the test still passes where the
     # graph pickler does not go through dill.
-    "test_regional_codegen_only_config_cpp_wrapper": TestFailure(
+    "test_regional_fallback_by_default_invoke_subgraph": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
     # This manually constructs an FX graph with an OpOverloadPacket target to
