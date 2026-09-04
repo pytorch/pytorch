@@ -13,6 +13,7 @@ from torch.export import Dim
 from torch.export.experimental import _ExportPackage
 from torch.export.pt2_archive._package import _load_aoti
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
@@ -112,12 +113,12 @@ class TestAOTIPackageDeviceValidation(TestCase):
         class FakeAOTIModelPackageLoader:
             @staticmethod
             def load_metadata_from_package(file, model_name):
-                return {"AOTI_DEVICE_KEY": "accelerator"}
+                return {"AOTI_DEVICE_KEY": "cuda"}
 
             def __init__(self, *args, **kwargs):
                 raise RuntimeError(
-                    "Cannot load AOTInductor package for device 'accelerator' because "
-                    "ACCELERATOR is not available in this process."
+                    "Cannot load AOTInductor package for device 'cuda' because "
+                    "CUDA is not available in this process."
                 )
 
         with (
@@ -128,7 +129,7 @@ class TestAOTIPackageDeviceValidation(TestCase):
         ):
             with self.assertRaisesRegex(
                 RuntimeError,
-                "Cannot load AOTInductor package.*ACCELERATOR is not available",
+                "Cannot load AOTInductor package.*CUDA is not available",
             ):
                 _load_aoti("model.pt2", "model", False, 1, -1)
 
@@ -143,8 +144,8 @@ class TestAOTIPackageDeviceValidation(TestCase):
             mock.patch(
                 "torch._inductor.package.package.load_pt2",
                 side_effect=RuntimeError(
-                    "Cannot load AOTInductor package for device 'accelerator' because "
-                    "ACCELERATOR is not available in this process."
+                    "Cannot load AOTInductor package for device 'cuda' because "
+                    "CUDA is not available in this process."
                 ),
             ),
             mock.patch.object(
@@ -153,11 +154,15 @@ class TestAOTIPackageDeviceValidation(TestCase):
         ):
             with self.assertRaisesRegex(
                 RuntimeError,
-                "Cannot load AOTInductor package.*ACCELERATOR is not available",
+                "Cannot load AOTInductor package.*CUDA is not available",
             ):
                 load_package("model.pt2")
 
-    @parametrize("device_type", ["cuda"])
+    @parametrize("device_type", ["cuda", "xpu"])
+    @decorateIf(
+        unittest.skip("https://github.com/intel/torch-xpu-ops/issues/5156"),
+        lambda params: params["device_type"] == "xpu",
+    )
     def test_cpp_aoti_package_loader_validates_accelerator_availability(
         self, device_type
     ):
