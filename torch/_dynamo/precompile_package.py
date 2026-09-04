@@ -6,9 +6,9 @@ frame, each ``torch_dynamo_resume_in_*`` continuation created by a graph break,
 and every recompiled variant of each -- is captured into one serializable
 artifact on top of CompilePackage.
 
-The public surface is ``torch.compiler.precompile(..., tracer="dynamo")`` and
-``torch.compiler.precompile.load``; everything here, including
-PrecompileSession, is internal. This is distinct from
+Everything here is internal; the session that drives it and the
+``torch.compiler.precompile(..., tracer="dynamo")`` entry point build on these
+in later commits. This is distinct from
 ``torch._dynamo.config.caching_precompile``, which caches ``torch.compile``
 artifacts transparently without an explicit capture.
 
@@ -20,11 +20,11 @@ dropped guard is reported in ``PrecompileSummary.dropped_guards``.
 
 Before relying on an artifact:
 
-* Whatever the examples did not exercise is absent; ``summary().complete``
+* Whatever the examples did not exercise is absent; ``PrecompileSummary.complete``
   means complete for the observed calls only.
 * Non-tensor arguments and values crossing a graph break are guarded by
   equality, so the artifact serves only calls reproducing them
-  (``summary().wont_generalize``). ``dynamic=True`` helps with shapes, not
+  (``PrecompileSummary.wont_generalize``). ``dynamic=True`` helps with shapes, not
   with pinned values.
 * Identity guards cannot be serialized, so a rebound module or function is not
   noticed. ``risky_dropped_guards`` lints for configuration-like drops but is
@@ -153,9 +153,9 @@ class _AllowEmptyGraphsCallback(CatchErrorsWrapper):
 
     An uncovered no-op branch must become a guarded variant rather than Dynamo's
     ordinary eager-only SkipFrame, or one fallback call permanently skips that
-    frame and serving() can no longer detect it. Scoped to the callback rather
-    than to the whole call so that an unrelated compiled function running
-    eagerly inside it compiles on its own callback, with the ordinary SkipFrame.
+    frame and serving() can no longer detect it. Patched here as well as in
+    _capture_config so the package's own frames get it even when the callback
+    runs outside a capture-config scope.
     """
 
     def __call__(
@@ -242,9 +242,9 @@ def default_guard_filter_fn(
 
     Keeping these makes serialization raise for essentially every function, so
     every drop is recorded with its source name in
-    ``PrecompileSummary.dropped_guards``. ``save()`` does NOT refuse them by
-    default -- ``require_no_dropped_guards`` is False, because requiring none
-    would refuse essentially every model. The rail that is on is the risky-drop
+    ``PrecompileSummary.dropped_guards``. A caller is not refused for having
+    them, because requiring none would refuse essentially every model. The rail
+    that is on is the risky-drop
     lint, and a lint is not a proof. See ``risky_dropped_guards``.
     """
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
@@ -605,7 +605,7 @@ def _is_risky_drop(
     the implementation lives in a file the inlined-source checksum never sees,
     so capture and serve can disagree with every other rail passing. Waiving
     those is how this predicate failed open in an earlier round;
-    ``_RISKY_DROP_CORPUS`` in test_package.py is the regression net that keeps
+    ``_RISKY_DROP_CORPUS`` in test_precompile_package.py is the regression net that keeps
     them, and every other shape found so far, flagged.
 
     KNOWN GAP, and it is a wrong-answer one. EVERY waiver above judges the
@@ -996,7 +996,7 @@ def _is_noop_guard_type(guard_type: str) -> bool:
 # filter drops anyway, as unserializable) and process-wide compiler state. The
 # four sets form a total, disjoint classification of GuardBuilder's
 # guard-producing methods, pinned by
-# test_precompile.test_guard_policy_classification_is_total: a guard type in
+# test_precompile_package.test_guard_policy_classification_is_total: a guard type in
 # none of them -- i.e. any type added to GuardBuilder after this list -- is
 # KEPT unconditionally until someone classifies it here, so a new value-pinning
 # guard can never become silently droppable by default.
@@ -1182,8 +1182,8 @@ def varying_guard_slots(
     invariant and drop it. On a 62-frame ranking model that second case is 225
     of the 274 slots kept, so it is the majority of the answer, not an edge.
 
-    Everything else held identically in every variant, so it is not serialized:
-    see the rationale at the call site in ``torch._precompile``.
+    Everything else held identically in every variant, which is what licenses a
+    caller to leave it out of the serialized copy.
     """
     varying: set[tuple[str, str]] = set()
     for variants in guard_sets.values():
