@@ -67,6 +67,13 @@ def vt_identity_compare(
     left_known = left_val is not NO_SUCH_SUBOBJ
     right_known = right_val is not NO_SUCH_SUBOBJ
 
+    # Different Python types can never be the same object.
+    try:
+        if left.python_type() is not right.python_type():
+            return ConstantVariable.create(False)
+    except NotImplementedError:
+        pass
+
     if left_known and right_known:
         return (
             ConstantVariable.create(True)
@@ -74,10 +81,18 @@ def vt_identity_compare(
             else ConstantVariable.create(False)
         )
 
-    # One side has a concrete backing object, the other doesn't — they can't
-    # be the same object.
+    # One side has a concrete backing object, the other doesn't.  We generally
+    # cannot prove they are different -- the unknown side might be a deferred
+    # representation (e.g. CallMethodVariable) of the same value.  But a
+    # NestedUserFunctionVariable is a function defined in the traced code, with
+    # fresh identity, so it can never be the same object as a known value.
     if left_known != right_known:
-        return ConstantVariable.create(False)
+        from .functions import NestedUserFunctionVariable
+
+        unknown = right if left_known else left
+        if isinstance(unknown, NestedUserFunctionVariable):
+            return ConstantVariable.create(False)
+        return None
 
     # Objects created during tracing: VT identity = Python identity. Exception
     # instances are mutable objects built during tracing, so two distinct VTs
@@ -99,13 +114,6 @@ def vt_identity_compare(
         ),
     ):
         return ConstantVariable.create(False)
-
-    # Different Python types can never be the same object.
-    try:
-        if left.python_type() is not right.python_type():
-            return ConstantVariable.create(False)
-    except NotImplementedError:
-        pass
 
     return None
 
@@ -2156,7 +2164,7 @@ def _resolve_descriptor_get(
 
 # BuiltinFunctionType is intentionally excluded: _resolve_descriptor_get
 # does not handle it, so it falls through to _UnhandledDescriptorError
-# and generic_getattr's GetAttrVariable fallback.
+# and generic_getattr's graph-break fallback.
 _METHOD_TYPES = (
     types.FunctionType,
     types.MethodDescriptorType,
@@ -2165,7 +2173,29 @@ _METHOD_TYPES = (
 
 
 def _is_method_type(type_attr: object) -> bool:
-    return isinstance(type_attr, _METHOD_TYPES)
+    # pybind11 methods appear as `instancemethod` descriptors in the type
+    # __dict__, not as MethodDescriptorType. Treat them as methods so VTs with a
+    # custom call_method (e.g. DispatchKeySetVariable) dispatch through it.
+    return isinstance(
+        type_attr, _METHOD_TYPES
+    ) or torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
+
+
+# What each descriptor kind in _METHOD_TYPES becomes once bound to an instance.
+_BOUND_METHOD_TYPES: dict[type, type] = {
+    types.FunctionType: types.MethodType,
+    types.MethodDescriptorType: types.BuiltinMethodType,
+    types.WrapperDescriptorType: types.MethodWrapperType,
+}
+
+
+def _bound_method_type(type_attr: object) -> type | None:
+    """Type of `obj.name` when the MRO walk found `type_attr` for `name`.
+
+    None when unknown (e.g. a pybind11 instancemethod), so the resulting
+    CallMethodVariable keeps raising from python_type() rather than guessing.
+    """
+    return _BOUND_METHOD_TYPES.get(type(type_attr))
 
 
 def _has_custom_call_method(obj: VariableTracker) -> bool:
@@ -2235,7 +2265,9 @@ def object_generic_getattr(
             obj._lookup_tp_table(name, "tp_methods") is not None
             or _has_custom_call_method(obj)
         ):
-            return variables.CallMethodVariable(obj, name, source=source)
+            return variables.CallMethodVariable(
+                obj, name, py_type=_bound_method_type(type_attr), source=source
+            )
 
         class_vt = VariableTracker.build(tx, py_type)
         result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
@@ -2255,10 +2287,8 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # Step 7: Attribute not found -- signal to caller to fall back.
-    raise _UnhandledDescriptorError(
-        f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
-    )
+    # Step 7: Attribute not found.
+    raise_observed_exception(AttributeError, tx)
 
 
 def generic_getattr(
@@ -2270,8 +2300,7 @@ def generic_getattr(
     """Dynamo's PyObject_GetAttr: attribute access dispatch.
 
     Checks side effects for pending attribute mutations, then dispatches
-    to obj.tp_getattro_impl(tx, name).  On NotImplementedError, falls back
-    to GetAttrVariable (deferred resolution).
+    to obj.tp_getattro_impl(tx, name).  On NotImplementedError, graph-breaks.
     """
     from .user_defined import is_data_descriptor
 
@@ -2312,10 +2341,15 @@ def generic_getattr(
             return result
 
     # Core dispatch: call the VT's tp_getattro_impl (tp_getattro).
-    source = obj.source and AttrSource(obj.source, name)
     try:
         return obj.tp_getattro_impl(tx, name)
     except AsPythonConstantNotImplementedError:
         raise
     except NotImplementedError:
-        return variables.GetAttrVariable(obj, name, source=source)
+        unimplemented(
+            gb_type="Unresolved attribute access",
+            context=f"generic_getattr: {type(obj).__name__}.{name}",
+            explanation=f"Dynamo cannot resolve attribute '{name}' on "
+            f"{type(obj).__name__}.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )

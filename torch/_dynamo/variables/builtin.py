@@ -98,7 +98,7 @@ from .dicts import (
 )
 from .hashable import is_hashable
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
-from .misc import CellVariable, NullVariable, StringFormatVariable
+from .misc import CallMethodVariable, CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
     _NO_DEFAULT,
     binary_iop,
@@ -453,20 +453,18 @@ class BaseBuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # Declarative type-attribute dispatch, mirroring the consultation at the
-        # top of VariableTracker.getattro_impl. Inlined here because this
-        # override keeps its own GetAttrVariable fallback instead of delegating
-        # to super().
+        # top of VariableTracker.tp_getattro_impl. Inlined here because this
+        # override resolves the attribute off the underlying builtin instead of
+        # delegating to super().
         fn = self.as_python_constant()
         source = self.source and AttrSource(self.source, name)
-        attr = getattr(fn, name, None)
-        return variables.GetAttrVariable(
-            self, name, py_type=type(attr) if attr is not None else None, source=source
-        )
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(self.as_python_constant(), name))  # type: ignore[return-value]
+        try:
+            attr = getattr(fn, name)
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+        if callable(attr):
+            return CallMethodVariable(self, name, py_type=type(attr), source=source)
+        return VariableTracker.build(tx, attr, source)
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CPython meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
@@ -1114,16 +1112,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     def tensor_args(self, *args: VariableTracker) -> bool:
         any_tensor = False
         for arg in args:
-            if isinstance(arg, variables.GetAttrVariable):
-                return False
             any_tensor = any_tensor or arg.is_tensor()
         return any_tensor
 
     def tensor_args_type(self, arg_types: list[type]) -> bool:
         any_tensor = False
         for arg_type in arg_types:
-            if issubclass(arg_type, variables.GetAttrVariable):
-                return False
             any_tensor = any_tensor or issubclass(arg_type, variables.TensorVariable)
         return any_tensor
 
@@ -2788,21 +2782,16 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         # Declarative type-attribute dispatch (__name__, __bases__, __base__,
         # __flags__), mirroring the consultation at the top of
-        # VariableTracker.getattro_impl. Inlined because this override keeps its
-        # own object / GetAttrVariable handling below instead of delegating.
+        # VariableTracker.tp_getattro_impl. Inlined because this override reads
+        # the attribute straight off self.fn instead of delegating.
         source = self.source and AttrSource(self.source, name)
-        if self.fn is object:
-            # for object, we can just directly read the attribute
-            try:
-                value = getattr(self.fn, name)
-            except AttributeError:
-                raise_observed_exception(AttributeError, tx)
-            if not callable(value):
-                return VariableTracker.build(tx, value, source)
-        attr = getattr(self.fn, name, None)
-        return variables.GetAttrVariable(
-            self, name, py_type=type(attr) if attr is not None else None, source=source
-        )
+        try:
+            attr = getattr(self.fn, name)
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+        if callable(attr):
+            return CallMethodVariable(self, name, py_type=type(attr), source=source)
+        return VariableTracker.build(tx, attr, source)
 
     def call_delattr(
         self,
