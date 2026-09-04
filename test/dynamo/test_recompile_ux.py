@@ -545,7 +545,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             for thread in threads:
                 thread.start()
             for thread in threads:
-                thread.join()
+                thread.join(timeout=120)
+            self.assertFalse(any(t.is_alive() for t in threads), "a call wedged")
         finally:
             sys.setswitchinterval(prior_interval)
         raised = []

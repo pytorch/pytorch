@@ -52,7 +52,7 @@ class _PrecompileEntry:
 class _ExtraState:
     def invalidate(
         self,
-        guard_manager: GuardManagerWrapper,
+        deleted_guard_manager: GuardManagerWrapper,
         live_guard_manager: GuardManagerWrapper,
     ) -> None: ...
 

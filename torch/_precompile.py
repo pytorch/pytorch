@@ -230,7 +230,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Mapping
 
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.compiler._precompile_types import PrecompileSummary
@@ -371,14 +371,11 @@ class _InstalledArtifact:
         entry_factory: Callable[[], Callable[..., object]],
         *,
         check_fn: Callable[[Callable[..., object]], None] | None = None,
-        backend_keys: Sequence[str] = (),
     ) -> None:
         self._serve = serve
         self._entry_factory = entry_factory
         # Refuses a load(fn=...) target the artifact was not captured from.
         self._check_fn = check_fn
-        # PrecompileContext keys serve() records; unload() takes them back out.
-        self._backend_keys = backend_keys
         self._fn: Callable[..., object] | None = None
         self._inner: Any = None
         self._unloaded = False
@@ -433,23 +430,19 @@ class _InstalledArtifact:
         self.unload()
 
     def unload(self) -> None:
-        from torch._dynamo.precompile_context import PrecompileContext
-
         with self._install_lock:
             self._unloaded = True
             inner, self._inner = self._inner, None
         if inner is not None:
             inner.unload()
-            for key in self._backend_keys:
-                PrecompileContext.take_artifact(key)
 
 
 class PrecompileSession:
     r"""Execution-driven multi-graph capture session (internal).
 
-    :func:`precompile` drives one of these itself for ``tracer="dynamo"`` -- entering it,
-    running the example calls, and returning the finished ``(python_code, cache)`` -- so
-    callers never receive one.
+    :func:`precompile` will drive one of these itself for ``tracer="dynamo"`` -- entering
+    it, running the example calls, and returning the finished ``(python_code, cache)`` --
+    so callers never receive one. Not yet wired: ``tracer="dynamo"`` still raises.
     """
 
     def __init__(self, session: Any) -> None:
@@ -1780,7 +1773,14 @@ def _build_multigraph_python_source(
     parts.append("")
     parts.append("# The entry's defaults and closure values: a code object carries")
     parts.append("# neither, and the driver rebuilds the entry from one.")
-    parts.append(f"_ENTRY_BINDING = {_b64(entry_binding or {})!r}")
+    try:
+        binding_blob = _b64(entry_binding or {})
+    except Exception as e:
+        raise PrecompileError(
+            f"precompile cannot carry {entry.fn_name!r}'s default arguments in the "
+            f"artifact; defaults must be picklable ({type(e).__name__}: {e})."
+        ) from e
+    parts.append(f"_ENTRY_BINDING = {binding_blob!r}")
     parts.append("")
     parts.append("# " + "=" * 70)
     parts.append("# 2. Guard trees and transformed bytecode -- OPAQUE")
@@ -1804,10 +1804,12 @@ def _build_multigraph_python_source(
     # the guard trees and bytecode above. Emit that source where the backend can
     # produce it, and fall back to the pickle only for the rest (eager graphs, a
     # training graph, anything the lowering refused). The blocks are spliced
-    # sequentially into this module's namespace and each one's ``call`` is
-    # snapshotted immediately, because every block rebinds ``call`` / ``Runner``
-    # / ``async_compile``; the snapshot is what makes the shadowing harmless.
-    rendered = dict(rendered or {})
+    # sequentially into ONE namespace and resolve siblings late, so every
+    # top-level name a block defines is suffixed per slot and slot N's entry is
+    # ``call_sN`` (see _namespace_module_names).
+    from torch._dynamo.precompile_package import _namespace_module_names
+
+    rendered = _namespace_module_names(dict(rendered or {}))
     parts.append("# " + "=" * 70)
     if rendered:
         parts.append(f"# 3. Compiled subgraphs -- {len(rendered)} READABLE below")
@@ -1914,7 +1916,16 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
 
     entry_frames = [f for f in frames if f["is_entry"]]
     if not entry_frames:
-        return
+        captured = sorted(
+            SerializedCode.to_code_object(f["code"]).co_name for f in frames
+        )
+        raise PrecompileError(
+            f"precompile found no frame for the entry {entry.fn_name!r} among the "
+            f"frames Dynamo compiled {captured}; the artifact would have nothing to "
+            "dispatch. Capture a plain function or method whose own code object "
+            "Dynamo compiles, e.g. precompile(lambda m, x: m(x), "
+            "example_inputs=[(model, x)])."
+        )
     if not any(f["variants"] for f in entry_frames):
         # The entry frame having no variants has two very different causes, and
         # guessing the wrong one sends the caller restructuring code that was
@@ -1982,10 +1993,9 @@ def _reject_unreachable_frames(frames: list[dict[str, Any]], entry: Any) -> None
     """
     from torch._dynamo.package import SerializedCode
 
+    reachable = _reachable_frames(frames)
     unreachable = [
-        f
-        for f in frames
-        if not f["is_entry"] and not f["resume_names"] and f["variants"]
+        f for i, f in enumerate(frames) if f["variants"] and i not in reachable
     ]
     if unreachable:
         # Correct but under-compiled. A frame Dynamo compiled that is entered by
@@ -2726,6 +2736,14 @@ class _PrecompileApi:
         # a separate runtime.
         forward = _make_inlined_forward(python_code)
 
+        if meta.get("SERVING_MODE") == "installed":
+            # The exec above only built the handle; entering or calling it installs.
+            if not isinstance(forward, _InstalledArtifact):
+                raise PrecompileError(
+                    "python_code declares SERVING_MODE='installed' but its driver "
+                    "did not produce an installable handle; the artifact is malformed."
+                )
+            return PrecompiledCallable(forward)
         return PrecompiledModule._from_loaded(forward, backend=backend)
 
 
