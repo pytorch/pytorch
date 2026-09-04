@@ -57,7 +57,17 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfRocm,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -99,10 +109,46 @@ class SDPAWrapper(torch.nn.Module):
             return self.sdpa(*args, **kwargs)
 
 
-class RingAttentionTest(DTensorTestBase):
+class RingAttentionTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_is_causal_behavior(self) -> None:
+        _cp_options.enable_load_balance = False
+        self.assertEqual(
+            _is_causal_behavior(rank=0, world_size=4, i=0, is_causal=False),
+            _CausalBehavior.NOT_IS_CAUSAL,
+        )
+
+        ranks = [
+            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.SKIP],
+            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
+        ]
+        for rank, iters in enumerate(ranks):
+            for i, behavior in enumerate(iters):
+                self.assertEqual(
+                    _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
+                    behavior,
+                )
+
+        _cp_options.enable_load_balance = True
+        ranks = [
+            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
+            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
+        ]
+        for rank, iters in enumerate(ranks):
+            for i, behavior in enumerate(iters):
+                self.assertEqual(
+                    _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
+                    behavior,
+                )
+
+
+class RingAttentionTestDevice(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
-        return torch.cuda.device_count()
+        return torch.accelerator.device_count()
 
     @property
     def destroy_pg_upon_exit(self) -> bool:
@@ -110,12 +156,9 @@ class RingAttentionTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @skipIfRocm  # Missing _c10d_functional_autograd::all_to_all_single
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
-        "Does not support flash nor efficient attention",
-    )
+    @requires_capabilities(Capability.attention.fused_attention)
     @with_comms
-    def test_ring_attention_sdpa(self) -> None:
+    def test_ring_attention_sdpa(self, device) -> None:
         self.run_subtests(
             {
                 "is_causal": [True, False],
@@ -333,43 +376,11 @@ class RingAttentionTest(DTensorTestBase):
         torch.testing.assert_close(k.grad, cp_dk, atol=atol, rtol=rtol)
         torch.testing.assert_close(v.grad, cp_dv, atol=atol, rtol=rtol)
 
-    def test_is_causal_behavior(self) -> None:
-        _cp_options.enable_load_balance = False
-        self.assertEqual(
-            _is_causal_behavior(rank=0, world_size=4, i=0, is_causal=False),
-            _CausalBehavior.NOT_IS_CAUSAL,
-        )
-
-        ranks = [
-            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.SKIP],
-            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
-        ]
-        for rank, iters in enumerate(ranks):
-            for i, behavior in enumerate(iters):
-                self.assertEqual(
-                    _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
-                    behavior,
-                )
-
-        _cp_options.enable_load_balance = True
-        ranks = [
-            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
-            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
-        ]
-        for rank, iters in enumerate(ranks):
-            for i, behavior in enumerate(iters):
-                self.assertEqual(
-                    _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
-                    behavior,
-                )
-
     @skip_if_lt_x_gpu(2)
     @skipIfRocm
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     @with_comms
-    def test_context_parallel_sdpa_short_sequence(self) -> None:
+    def test_context_parallel_sdpa_short_sequence(self, device) -> None:
         old_load_balance = _cp_options.enable_load_balance
         try:
             _cp_options.enable_load_balance = True
@@ -537,6 +548,8 @@ class FlexAttentionWrapper(torch.nn.Module):
 
 
 class CPFlexAttentionTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -551,7 +564,8 @@ class CPFlexAttentionTest(DTensorTestBase):
         document_lengths: list[list[int]] | None = None,
     ) -> None:
         torch.use_deterministic_algorithms(True)
-        torch.cuda.manual_seed(1234)
+        device_mod = torch.get_device_module(self.device_type)
+        device_mod.manual_seed(1234)
 
         dtype = torch.float32
         bs = B if B > 1 else 8
@@ -678,10 +692,8 @@ class CPFlexAttentionTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
-    )
-    def test_cp_flex_attention_causal_mask(self) -> None:
+    @requires_capabilities(Capability.attention.flash_attention)
+    def test_cp_flex_attention_causal_mask(self, device) -> None:
         seq_length_list = [256 * self.world_size, 2048]
         load_balance_type_list = [
             "None",
@@ -745,10 +757,8 @@ class CPFlexAttentionTest(DTensorTestBase):
     # TODO: merge with the above test
     @skip_if_lt_x_gpu(2)
     @with_comms
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
-    )
-    def test_cp_flex_attention_document_mask(self) -> None:
+    @requires_capabilities(Capability.attention.flash_attention)
+    def test_cp_flex_attention_document_mask(self, device) -> None:
         random.seed(10)
 
         # parameters for testing
@@ -816,13 +826,15 @@ class CPFlexAttentionTest(DTensorTestBase):
 
 
 class TestCPCustomOps(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_flex_cp_custom_op(self) -> None:
+    def test_flex_cp_custom_op(self, device) -> None:
         mesh = init_device_mesh(
             device_type=self.device_type,
             mesh_shape=(self.world_size,),
@@ -847,13 +859,15 @@ class TestCPCustomOps(DTensorTestBase):
 
 
 class TestSharding(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_context_parallel_shard(self) -> None:
+    def test_context_parallel_shard(self, device) -> None:
         B = 4
         seq_len = 32
 
@@ -887,7 +901,7 @@ class TestSharding(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_context_parallel_shard_per_document_balance(self) -> None:
+    def test_context_parallel_shard_per_document_balance(self, device) -> None:
         # End-to-end regression through the real _context_parallel_shard path:
         # rearrange + shard randomized mixed-length documents and confirm each
         # rank receives an equal share of causal attention work.
@@ -926,7 +940,7 @@ class TestSharding(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_context_parallel_shard_with_positions(self) -> None:
+    def test_context_parallel_shard_with_positions(self, device) -> None:
         """Test context parallel sharding with expanded batch dimensions.
 
         This test validates the fix for buffer sharding when the batch dimension
@@ -975,11 +989,8 @@ class TestSharding(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
-        "Does not support flash nor efficient attention",
-    )
-    def test_attention_shard_without_cp(self) -> None:
+    @requires_capabilities(Capability.attention.fused_attention)
+    def test_attention_shard_without_cp(self, device) -> None:
         """Test that sharding on sequence dimension without CP enabled is not supported."""
         from torch.distributed.tensor import distribute_tensor, Replicate, Shard
 
@@ -1033,6 +1044,8 @@ class TestSharding(DTensorTestBase):
 class TestContextParallelStyle(DTensorTestBase):
     """Test suite for _ContextParallel.flex_input_fn argument handling"""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1063,7 +1076,7 @@ class TestContextParallelStyle(DTensorTestBase):
     @unittest.mock.patch(
         "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
     )
-    def test_flex_input_fn_all_positional(self, mock_allgather):
+    def test_flex_input_fn_all_positional(self, mock_allgather, device):
         """Test flex_input_fn with all positional arguments"""
         query, key, value = self._create_test_tensors()
         cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
@@ -1089,7 +1102,7 @@ class TestContextParallelStyle(DTensorTestBase):
     @unittest.mock.patch(
         "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
     )
-    def test_flex_input_fn_all_keyword(self, mock_allgather):
+    def test_flex_input_fn_all_keyword(self, mock_allgather, device):
         """Test flex_input_fn with all keyword arguments"""
         query, key, value = self._create_test_tensors()
         cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
@@ -1117,7 +1130,7 @@ class TestContextParallelStyle(DTensorTestBase):
     @unittest.mock.patch(
         "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
     )
-    def test_flex_input_fn_query_positional_kv_keyword(self, mock_allgather):
+    def test_flex_input_fn_query_positional_kv_keyword(self, mock_allgather, device):
         """Test with query positional, key/value keyword"""
         query, key, value = self._create_test_tensors()
         cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
@@ -1144,7 +1157,7 @@ class TestContextParallelStyle(DTensorTestBase):
     @unittest.mock.patch(
         "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
     )
-    def test_flex_input_fn_qk_positional_v_keyword(self, mock_allgather):
+    def test_flex_input_fn_qk_positional_v_keyword(self, mock_allgather, device):
         """Test with query/key positional, value keyword"""
         query, key, value = self._create_test_tensors()
         cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
@@ -1170,7 +1183,7 @@ class TestContextParallelStyle(DTensorTestBase):
     @unittest.mock.patch(
         "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
     )
-    def test_flex_input_fn_with_extra_args(self, mock_allgather):
+    def test_flex_input_fn_with_extra_args(self, mock_allgather, device):
         """Test with mixed positional/keyword and extra arguments"""
         query, key, value = self._create_test_tensors()
         cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
@@ -1202,6 +1215,8 @@ class TestContextParallelStyle(DTensorTestBase):
 class TestContextParallelStyleSDPA(DTensorTestBase):
     """Test suite for _ContextParallel.sdpa_input_fn argument handling"""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1222,7 +1237,7 @@ class TestContextParallelStyleSDPA(DTensorTestBase):
         return cp_style, device_mesh
 
     @with_comms
-    def test_sdpa_input_fn_all_positional(self):
+    def test_sdpa_input_fn_all_positional(self, device):
         """Test sdpa_input_fn with all positional arguments"""
         query, key, value = self._create_test_tensors()
         cp_style, device_mesh = self._setup_context()
@@ -1249,7 +1264,7 @@ class TestContextParallelStyleSDPA(DTensorTestBase):
         self.assertEqual(out_args[2].placements, [Shard(2)])
 
     @with_comms
-    def test_sdpa_input_fn_all_keyword(self):
+    def test_sdpa_input_fn_all_keyword(self, device):
         """Test sdpa_input_fn with all keyword arguments"""
         query, key, value = self._create_test_tensors()
         cp_style, device_mesh = self._setup_context()
@@ -1278,7 +1293,7 @@ class TestContextParallelStyleSDPA(DTensorTestBase):
         self.assertEqual(out_kwargs["value"].placements, [Shard(2)])
 
     @with_comms
-    def test_sdpa_input_fn_query_positional_kv_keyword(self):
+    def test_sdpa_input_fn_query_positional_kv_keyword(self, device):
         """Test sdpa_input_fn with query positional, key/value keyword"""
         query, key, value = self._create_test_tensors()
         cp_style, device_mesh = self._setup_context()
@@ -1306,15 +1321,7 @@ class TestContextParallelStyleSDPA(DTensorTestBase):
         self.assertEqual(out_kwargs["value"].placements, [Shard(2)])
 
 
-RingAttentionTestWithLocalTensor = create_local_tensor_test_class(
-    RingAttentionTest,
-    skipped_tests=[
-        # Need to make attention implementation local tensor friendly, e.g.
-        # rewrite "rank local" logic
-        "test_ring_attention_sdpa",
-        "test_context_parallel_sdpa_short_sequence",
-    ],
-)
+RingAttentionTestWithLocalTensor = create_local_tensor_test_class(RingAttentionTest)
 
 CPFlexAttentionTestWithLocalTensor = create_local_tensor_test_class(
     CPFlexAttentionTest,
@@ -1349,6 +1356,8 @@ class PerDocumentHeadTailLoadBalancerTest(TestCase):
     sequence into contiguous, equal, per-rank chunks, so the balancer must lay out
     its indices rank-major (each rank's head+tail chunks of *every* document
     grouped together) for the contiguous cut to land on rank boundaries."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @staticmethod
     def _causal_cost(doc_lengths: list[int]) -> list[int]:
@@ -1406,6 +1415,31 @@ class PerDocumentHeadTailLoadBalancerTest(TestCase):
         rearranged = lb._generate_indices()[0]
         restore = lb._generate_indices(restore=True)[0]
         self.assertEqual(rearranged[restore].tolist(), list(range(16)))
+
+
+instantiate_device_type_tests(
+    RingAttentionTestDevice, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    CPFlexAttentionTest, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestCPCustomOps, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestSharding, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(TestContextParallelStyle, globals())
+instantiate_device_type_tests(TestContextParallelStyleSDPA, globals())
+instantiate_device_type_tests(
+    CPFlexAttentionTestWithLocalTensor, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestCPCustomOpsWithLocalTensor, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestShardingWithLocalTensor, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
