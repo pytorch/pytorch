@@ -1013,6 +1013,27 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(opt_fn(x), fn(x))
 
+    def test_inlined_mode_not_reapplied_at_runtime(self):
+        class AddHundred(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                kwargs = kwargs or {}
+                out = super().__torch_function__(func, types, args, kwargs)
+                if func is torch.add:
+                    out = out + 100
+                return out
+
+        def fn(x):
+            return torch.add(x, 1) * 2
+
+        x = torch.zeros(2)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        with AddHundred():
+            expected = fn(x)
+            self.assertEqual(opt_fn(x), expected)
+            self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
+
 
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(

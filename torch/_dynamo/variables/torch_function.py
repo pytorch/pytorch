@@ -322,6 +322,7 @@ class SymbolicTorchFunctionState:
         args: Iterable[Any],
         kwargs: dict[str, Any],
     ) -> Any:
+        tx.output.torch_function_mode_inlined = True
         with self._pop_mode_for_inlining() as cur_mode:
             return cur_mode.call_torch_function(tx, fn, types, args, kwargs)
 
