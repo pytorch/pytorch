@@ -700,6 +700,53 @@ print(t.is_pinned())
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
 
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC or EXPANDABLE_SEGMENTS,
+        "the OOM log is specific to the native allocator's cudaMalloc path",
+    )
+    @unittest.skipIf(
+        IS_FBCODE or IS_SANDCASTLE, "glog may route c10 logs away from stderr"
+    )
+    # Same platform skips as test_out_of_memory_retry above: Windows/SM89+ does
+    # not reliably OOM past the free memory, Jetson segfaults on this pattern.
+    @unittest.skipIf(IS_WINDOWS and SM89OrLater, "Fails on windows with SM89+")
+    @unittest.skipIf(IS_JETSON, "Segmentation fault (core dumped)")
+    @skipIfRocmArch(MI350_ARCH)
+    @serialTest()
+    def test_oom_retry_message_logged_at_info(self):
+        # Regression test for #193195: the alloc_block OOM message fires on
+        # every failed cudaMalloc attempt (each one flags a costly
+        # release-and-retry cycle) but at INFO level, so recoverable retries
+        # are silent at the default WARNING log level and visible with
+        # TORCH_CPP_LOG_LEVEL=INFO. The message is written by C++ straight to
+        # stderr, so run the scenario in a subprocess and inspect its stderr.
+        marker = "memory allocation failed with OOM"
+        recoverable_script = """\
+import torch
+free, total = torch.cuda.mem_get_info()
+block = free // 32
+blocks = [torch.empty(block, dtype=torch.uint8, device="cuda") for _ in range(27)]
+del blocks  # freed but cached: the driver still sees the memory as used
+big = torch.empty(int(free * 0.7), dtype=torch.uint8, device="cuda")
+if torch.cuda.memory_stats()["num_alloc_retries"] < 1:
+    raise AssertionError("allocation did not exercise the release-and-retry path")
+print("RECOVERED")
+"""
+        for level, expect_message in (("WARNING", False), ("INFO", True)):
+            proc = subprocess.run(
+                [sys.executable, "-c", recoverable_script],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env={**os.environ, "TORCH_CPP_LOG_LEVEL": level},
+            )
+            self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+            self.assertIn("RECOVERED", proc.stdout)
+            if expect_message:
+                self.assertIn(marker, proc.stderr)
+            else:
+                self.assertNotIn(marker, proc.stderr)
+
     @serialTest()
     @unittest.skipIf(
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
