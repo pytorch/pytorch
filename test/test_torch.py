@@ -246,14 +246,39 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(_throws_on_data_ptr_access(fs))
             self.assertTrue(raises_on_data_ptr(fs))
 
-        # Storage armed to throw on the immutable data_ptr path.
-        s2 = torch.randn(4, device=device).untyped_storage()
+        # Storage armed to throw on the immutable data_ptr path. Python gets
+        # a sentinel that is inert for zero checks and raises on any other use.
+        t2 = torch.randn(4, device=device)
+        s2 = t2.untyped_storage()
         torch._C._set_storage_data_ptr_access_error_msg(s2._cdata, "invalid")
         self.assertTrue(_throws_on_data_ptr_access(s2))
-        self.assertTrue(raises_on_data_ptr(s2))
+        self.assertFalse(raises_on_data_ptr(s2))
+        for ptr in (s2.data_ptr(), t2.data_ptr()):
+            self.assertIsInstance(ptr, torch._utils._InvalidDataPtr)
+            self.assertTrue(ptr == 0)
+            self.assertFalse(ptr != 0)
+            self.assertFalse(ptr)
+            self.assertFalse(ptr == 1)
+            with self.assertRaisesRegex(RuntimeError, "invalid"):
+                int(ptr)
+            with self.assertRaisesRegex(RuntimeError, "invalid"):
+                hash(ptr)
+            with self.assertRaisesRegex(RuntimeError, "invalid"):
+                ptr + 1
+        with self.assertRaisesRegex(RuntimeError, "invalid"):
+            t2 + 1
+        # Log mode: same sentinel, but non-inert uses behave as 0.
+        torch._C._set_storage_data_ptr_access_log_msg(s2._cdata, "logged")
+        self.assertFalse(_throws_on_data_ptr_access(s2))
+        ptr = t2.data_ptr()
+        self.assertIsInstance(ptr, torch._utils._InvalidDataPtr)
+        self.assertEqual(int(ptr), 0)
+        self.assertEqual(ptr + 1, 1)
+        self.assertEqual(hash(ptr), hash(0))
         torch._C._clear_storage_data_ptr_access_error_msg(s2._cdata)
         self.assertFalse(_throws_on_data_ptr_access(s2))
         self.assertFalse(raises_on_data_ptr(s2))
+        self.assertIsInstance(s2.data_ptr(), int)
 
     @xfailIfTorchDynamo
     @onlyNativeDeviceTypes

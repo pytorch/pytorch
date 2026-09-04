@@ -3712,7 +3712,7 @@ if HAS_CUDA_AND_TRITON:
                 storage_impl_ptr, "storage is dead"
             )
             with self.assertRaisesRegex(Exception, "storage is dead"):
-                storage.data_ptr()
+                int(storage.data_ptr())
 
             torch._C._clear_storage_data_ptr_access_error_msg(storage_impl_ptr)
             storage.resize_(4 * x.element_size())
