@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from contextlib import contextmanager
 
 import torch
 from torch._utils import _dummy_type
@@ -6,7 +6,6 @@ from torch._utils import _dummy_type
 
 __all__ = [
     "Stream",
-    "StreamContext",
     "stream",
     "current_stream",
     "default_stream",
@@ -37,45 +36,26 @@ class Stream(torch._C._MPSStreamBase):
         return f"<torch.mps.Stream stream_id={self.stream_id}>"
 
 
-class StreamContext:
-    r"""Context-manager that selects a given stream.
+@contextmanager
+def stream(stream: Stream | None):
+    r"""Context manager that selects a given stream.
 
     MPS operators called within this context will be enqueued on the selected
     stream.
 
     Args:
-        Stream (Stream): selected stream. This manager is a no-op if it's
-        ``None``.
+        stream (Stream): selected stream. This manager is a no-op if it's ``None``.
     """
+    prev_stream = torch.mps.current_stream()
 
-    def __init__(self, stream: Optional["torch.mps.Stream"]):
-        self.stream = stream
+    if stream is not None:
+        torch.mps.set_stream(stream)
 
-        self.prev_stream = (
-            None if not torch.jit.is_scripting() else torch.mps.default_stream()
-        )
-
-    def __enter__(self):
-        if self.stream is None:
-            return
-        self.prev_stream = torch.mps.current_stream()
-
-        torch.mps.set_stream(self.stream)
-
-    def __exit__(self, type: Any, value: Any, traceback: Any):
-        if self.stream is None:
-            return
-        torch.mps.set_stream(self.prev_stream)  # type: ignore[arg-type]
-
-
-def stream(stream: Optional["torch.mps.Stream"]) -> StreamContext:
-    r"""Wrap around the Context-manager StreamContext that selects a given stream.
-
-    Arguments:
-        stream (Stream): selected stream. This manager is a no-op if it's
-            ``None``.
-    """
-    return StreamContext(stream)
+    try:
+        yield
+    finally:
+        if stream is not None:
+            torch.mps.set_stream(prev_stream)
 
 
 def current_stream() -> Stream:
@@ -89,7 +69,7 @@ def default_stream() -> Stream:
     return Stream(stream_id=0)
 
 
-def set_stream(stream: Stream):
+def set_stream(stream: Stream | None) -> None:
     r"""Set the current stream. Usage of this function is discouraged in favor
     of the :meth:`stream` context manager.
 
