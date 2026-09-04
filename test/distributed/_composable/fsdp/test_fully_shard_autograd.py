@@ -11,6 +11,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, OffloadPolicy
 from torch.nn.parallel.scatter_gather import _is_namedtuple
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -20,7 +21,11 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     MLP,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_HPU
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_HPU,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -31,6 +36,8 @@ device_type = torch.device(get_devtype())
 
 
 class TestFullyShardAutograd(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
@@ -44,7 +51,7 @@ class TestFullyShardAutograd(FSDPTest):
                 param.grad.div_(group.size())
 
     @skip_if_lt_x_gpu(2)
-    def test_unused_forward_output(self):
+    def test_unused_forward_output(self, device):
         """
         Tests that gradients propagate when running a backward where some
         forward output is not used to compute the loss, motivated by:
@@ -90,7 +97,7 @@ class TestFullyShardAutograd(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
-    def test_unused_forward_module(self):
+    def test_unused_forward_module(self, device):
         """
         Tests that gradients propagate when running a backward where some
         forward module is not used to compute the loss, motivated by:
@@ -132,7 +139,7 @@ class TestFullyShardAutograd(FSDPTest):
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
 
     @skip_if_lt_x_gpu(2)
-    def test_nontensor_activations(self):
+    def test_nontensor_activations(self, device):
         """
         Tests that gradients propagate when running forward with nontensor
         data structures wrapping the activations. This is mainly to test the
@@ -243,6 +250,8 @@ class TestFullyShardAutograd(FSDPTest):
 
 
 class TestFullyShardPostAccGradHookMultiThread(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 2
@@ -270,12 +279,14 @@ class TestFullyShardPostAccGradHookMultiThread(FSDPTestMultiThread):
 
 
 class TestFullyShardPostAccGradHookMultiProcess(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(torch.get_device_module(device_type).device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
-    def test_post_acc_grad_hook_optim_parity(self):
+    def test_post_acc_grad_hook_optim_parity(self, device):
         """
         Tests parity of running the optimizer via the post-accumulate-grad
         hook vs. normally.
@@ -341,6 +352,20 @@ class TestFullyShardPostAccGradHookMultiProcess(FSDPTest):
             for ref_param, param in zip(ref_model.parameters(), model.parameters()):
                 self.assertTrue(torch.equal(ref_param, param))
 
+
+instantiate_device_type_tests(
+    TestFullyShardAutograd,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestFullyShardPostAccGradHookMultiProcess,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
