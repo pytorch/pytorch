@@ -6623,6 +6623,26 @@ if HAS_CUDA_AND_TRITON:
             self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
             self.assertGreater(len(wrap_calls), 0)
 
+    if torch.cuda.is_available():
+
+    @torch.library.custom_op(
+        "test_cudagraph_empty_partition::unsafe_mul",
+        mutates_args=(),
+        tags=(torch._C.Tag.cudagraph_unsafe,),
+    )
+    def _test_cudagraph_empty_partition_unsafe_mul(x: torch.Tensor) -> torch.Tensor:
+        return x * 2.0
+
+    @_test_cudagraph_empty_partition_unsafe_mul.register_fake
+    def _(x: torch.Tensor) -> torch.Tensor:
+        return torch.empty_like(x)
+
+    from torch._inductor.lowering import make_fallback
+
+    make_fallback(
+        torch.ops.test_cudagraph_empty_partition.unsafe_mul.default
+    )
+
     class TestSAC(TestCase):
         def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):
@@ -7021,6 +7041,24 @@ if HAS_CUDA_AND_TRITON:
                 obs.op_outputs[aten.rand.default][1],
                 obs.op_outputs[aten.rand.default][2],
             )
+
+        @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
+        def test_cudagraph_empty_partition_raises_error(self):
+            """Verify RuntimeError is raised when partitions are empty and cudagraph_or_error=True"""
+
+            def f(x: torch.Tensor) -> torch.Tensor:
+                return _test_cudagraph_empty_partition_unsafe_mul(x)
+
+            with config.patch(
+                {
+                    "triton.cudagraph_trees": True,
+                    "triton.cudagraph_or_error": True,
+                    "graph_partition": True,
+                }
+            ):
+                compiled_fn = torch.compile(f, mode="reduce-overhead")
+                with self.assertRaisesRegex(RuntimeError, "skipping cudagraphs as len"):
+                    compiled_fn(torch.randn(4, device="cuda"))
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
     instantiate_parametrized_tests(TestCUDAGraphPolicy)
