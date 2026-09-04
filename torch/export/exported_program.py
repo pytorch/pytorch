@@ -737,6 +737,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # (3) graph_signature.user_inputs_to_mutate tells us buffer & input mutations
     # map (3) -> (2) for input order, -> (1) for input type
     user_inputs_index = {name: i for i, name in enumerate(graph_signature.user_inputs)}
+    backward_mutated_parameters = []
+    for name in graph_signature.inputs_mutated_in_backward:
+        input_spec = ep.graph_signature.input_specs[user_inputs_index[name]]
+        if input_spec.kind == InputKind.PARAMETER:
+            backward_mutated_parameters.append(input_spec.target)
+    if backward_mutated_parameters:
+        _raise_joint_parameter_mutation_error(backward_mutated_parameters)
     mutation_names = list(graph_signature.user_inputs_to_mutate.keys())
     expected_names = [node.name for node in new_outputs[: len(mutation_names)]]
     if mutation_names != expected_names:

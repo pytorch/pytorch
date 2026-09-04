@@ -732,6 +732,33 @@ def forward(self, args_0):
             def forward(self, x):
                 return (MutatesParamInBackward.apply(x, self.p).sum(),)
 
+        @torch.library.custom_op(
+            "test_experimental::mutates_param_in_backward", mutates_args=()
+        )
+        def mutates_param_in_backward(x: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
+            return x * p
+
+        @mutates_param_in_backward.register_fake
+        def _(x, p):
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            ctx.save_for_backward(inputs[1])
+
+        def backward(ctx, grad_output):
+            (p,) = ctx.saved_tensors
+            with torch.no_grad():
+                p.add_(1)
+            return grad_output * p, None
+
+        mutates_param_in_backward.register_autograd(
+            backward, setup_context=setup_context
+        )
+
+        class MutatesParamDuringExportedBackward(MutatesParam):
+            def forward(self, x):
+                return (mutates_param_in_backward(x, self.p).sum(),)
+
         error_msg = (
             "Mutating module parameters while exporting a joint "
             "forward/backward graph is not supported.*Only buffers can be "
@@ -763,6 +790,17 @@ def forward(self, args_0):
                 MutatesParam(), (torch.randn(4, requires_grad=True),)
             ).run_decompositions()
             _export_forward_backward(ep)
+
+        for decompose in (False, True):
+            with self.subTest(decompose=decompose):
+                ep = export(
+                    MutatesParamDuringExportedBackward(),
+                    (torch.randn(4, requires_grad=True),),
+                )
+                if decompose:
+                    ep = ep.run_decompositions()
+                with self.assertRaisesRegex(RuntimeError, error_msg):
+                    _export_forward_backward(ep)
 
     def test_joint_aot_buffer_mutation_still_allowed(self):
         class MutatesBuffer(torch.nn.Module):
