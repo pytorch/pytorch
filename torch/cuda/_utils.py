@@ -17,6 +17,16 @@ except ImportError:
     _cuda_bindings_runtime = None  # type: ignore[assignment]
     _HAS_CUDA_BINDINGS = False
 
+if _HAS_CUDA_BINDINGS and torch.version.hip is not None:
+    # cuda.bindings drives NVIDIA's CUDA runtime, so it is useless in a ROCm build --
+    # but it is an ordinary pip package that installs and imports perfectly well on a
+    # ROCm box, and only fails at the first actual call (cudaErrorInsufficientDriver).
+    # Report it as absent here so every caller degrades the way it already does when the
+    # package is missing, rather than each one having to recognize that failure.
+    _cuda_bindings_driver = None  # type: ignore[assignment]
+    _cuda_bindings_runtime = None  # type: ignore[assignment]
+    _HAS_CUDA_BINDINGS = False
+
 # The _get_device_index has been moved to torch.utils._get_device_index
 from torch._utils import _get_device_index as _torch_get_device_index
 

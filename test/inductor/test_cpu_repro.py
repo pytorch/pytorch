@@ -19,7 +19,7 @@ from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import CompileCounterWithBackend, rand_strided
 from torch._dynamo.utils import same
-from torch._inductor import config, cpu_vec_isa, metrics, test_operators
+from torch._inductor import config, cpu_vec_isa, ir, lowering, metrics, test_operators
 from torch._inductor.codegen.cpp import (
     CppKernelProxy,
     CppOverrides,
@@ -33,6 +33,7 @@ from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import fresh_cache, timed
+from torch._inductor.virtualized import ops
 from torch._prims_common import is_float_dtype
 from torch.autograd.functional import vjp
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -87,6 +88,40 @@ TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
 check_model = test_torchinductor.check_model
 skip_if_cpp_wrapper = test_torchinductor.skip_if_cpp_wrapper
+
+
+@torch.library.custom_op("inductor_stride_regression::make_output", mutates_args=())
+def make_output_with_unbound_stride(
+    x: torch.Tensor, weight: torch.Tensor
+) -> torch.Tensor:
+    m = x.shape[0]
+    n = weight.shape[1]
+    return torch.empty_strided(
+        (1, m, n), (n, 1, m), dtype=x.dtype, device=x.device
+    ).zero_()
+
+
+@make_output_with_unbound_stride.register_fake
+def make_output_with_unbound_stride_fake(
+    x: torch.Tensor, weight: torch.Tensor
+) -> torch.Tensor:
+    m = x.shape[0]
+    n = weight.shape[1]
+    return torch.empty_strided((1, m, n), (n, 1, m), dtype=x.dtype, device=x.device)
+
+
+@lowering.register_lowering(torch.ops.inductor_stride_regression.make_output.default)
+def lower_output_with_unbound_stride(x, weight):
+    def inner_fn(index):
+        return ops.constant(0.0, x.get_dtype())
+
+    return ir.Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=[1, x.get_size()[0], weight.get_size()[1]],
+    )
+
 
 requires_vectorization = unittest.skipUnless(
     cpu_vec_isa.valid_vec_isa_list() and os.getenv("ATEN_CPU_CAPABILITY") != "default",
@@ -1393,6 +1428,38 @@ class CPUReproTests(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(actual.shape, (m, out_features))
         self.assertEqual(actual.stride(), expected.stride())
+
+    def test_dynamic_output_stride_preserves_bound_singleton(self):
+        def fn(x):
+            return x.clone()
+
+        x = torch.randn(32).as_strided((1, 8), (13, 1))
+        expected = fn(x)
+        actual = torch.compile(fn, dynamic=True, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.stride(), expected.stride())
+
+    @config.patch(freezing=True)
+    @torch.no_grad()
+    def test_exact_output_stride_filters_unbound_singleton_stride(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Freezing removes this plain tensor from the runtime inputs.
+                self.weight = torch.randn(4, 8)
+
+            def forward(self, x):
+                return torch.ops.inductor_stride_regression.make_output(x, self.weight)
+
+        m, n = 3, 8
+        mod = Mod().eval()
+        x = torch.randn(m, 4)
+        expected = mod(x)
+        actual = torch.compile(mod, dynamic=True, fullgraph=True)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.stride(), (m * n, 1, m))
 
     @config.patch(implicit_fallbacks=True)
     def test_repeat_interleave(self):

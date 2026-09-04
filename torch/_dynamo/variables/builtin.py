@@ -85,6 +85,9 @@ from .base import (
     AsPythonConstantNotImplementedError,
     GetSet,
     Member,
+    Method,
+    readonly_setter,
+    unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -429,10 +432,10 @@ class BaseBuiltinVariable(VariableTracker):
         source = self.source and AttrSource(self.source, "__flags__")
         return VariableTracker.build(tx, fn.__flags__, source)
 
-    tp_getset = {"__bases__": GetSet(_type_get_bases, None)}
+    tp_getset = {"__bases__": GetSet(_type_get_bases, unmodeled_setter)}
     tp_members = {
-        "__base__": Member(_type_get_base, None),
-        "__flags__": Member(_type_get_flags, None),
+        "__base__": Member(_type_get_base, readonly_setter),
+        "__flags__": Member(_type_get_flags, readonly_setter),
     }
 
     @classmethod
@@ -604,7 +607,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return VariableTracker.build(tx, self.fn.__name__, source)
 
     tp_getset = {
-        "__name__": GetSet(_builtin_type_get_name, None),
+        "__name__": GetSet(_builtin_type_get_name, readonly_setter),
     }
 
     @classmethod
@@ -2439,6 +2442,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             (
                 variables.SetVariable,
                 variables.FrozensetVariable,
+                variables.DictKeySetVariable,
                 variables.ConstDictVariable,
             ),
         ):
@@ -3204,7 +3208,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         if isinstance(a, DictViewVariable):
             a = a.dv_dict
         if isinstance(
-            a, (ListVariable, ConstDictVariable, SetVariable, FrozensetVariable)
+            a,
+            (
+                ListVariable,
+                ConstDictVariable,
+                SetVariable,
+                FrozensetVariable,
+                variables.DictKeySetVariable,
+            ),
         ):
             return VariableTracker.build(tx, len(a.items) == 0)
         if isinstance(a, UserDefinedObjectVariable):
@@ -3240,6 +3251,18 @@ class DictBuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         return DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
+    def fromkeys(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+
+    tp_methods = {
+        "fromkeys": Method(fromkeys),
+    }
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -3262,11 +3285,6 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     [],
                     tx=tx,
                 )
-
-        if name == "fromkeys":
-            return DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, dict, *args, **kwargs
-            )
 
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
@@ -3379,7 +3397,13 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # CPython's do-not-rehash-dict-keys behavior when building a dict from
         # an existing set/frozenset/dict.
         if isinstance(
-            arg, (variables.SetVariable, variables.FrozensetVariable, ConstDictVariable)
+            arg,
+            (
+                variables.SetVariable,
+                variables.FrozensetVariable,
+                variables.DictKeySetVariable,
+                ConstDictVariable,
+            ),
         ):
             # HashableTracker keys are accepted by ConstDictVariable.__init__.
             return _make_result(dict.fromkeys(arg.items.keys(), value))  # type: ignore[arg-type]
