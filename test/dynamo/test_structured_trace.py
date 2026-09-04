@@ -14,16 +14,15 @@ from contextlib import contextmanager
 from unittest import skipIf
 
 import torch
-import torch._dynamo.test_case
-import torch._dynamo.testing
 import torch._logging.structured
 import torch.distributed as dist
 import torch.fx as fx
 from torch._inductor.test_case import TestCase
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_utils import find_free_port
-from torch.testing._internal.inductor_utils import HAS_XPU_AND_TRITON
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import find_free_port, HardwareClassification
+from torch.testing._internal.inductor_utils import HAS_TRITON, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
@@ -64,8 +63,8 @@ def inductor_error_fn(a):
     return output
 
 
-def inductor_schedule_fn(a):
-    output = a.add(torch.ones(1000, 1000, device=device_type))
+def inductor_schedule_fn(a, device):
+    output = a.add(torch.ones(1000, 1000, device=device))
     return output
 
 
@@ -221,7 +220,9 @@ def show_chrome_events(fn):
     return wrapper
 
 
-class StructuredTraceTest(TestCase):
+class _StructuredTraceTestBase(TestCase):
+    # Common base class for structured trace tests with shared setup/teardown and assertions.
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -307,6 +308,26 @@ class StructuredTraceTest(TestCase):
         finally:
             shutil.rmtree(out, ignore_errors=True)
 
+    @contextmanager
+    def _setup_runtime_estimates_capture(self):
+        """Helper to turn on and capture the combined 'inductor_runtime_and_tensor_meta' structured trace."""
+        payload_buffer = io.StringIO()
+        payload_handler = logging.StreamHandler(payload_buffer)
+        payload_handler.setLevel(logging.DEBUG)
+        payload_handler.setFormatter(StructuredTracePayloadFormatter())
+        payload_handler.addFilter(
+            StructuredTraceTestingFilter("inductor_runtime_and_tensor_meta")
+        )
+        trace_log.addHandler(payload_handler)
+        try:
+            yield payload_buffer
+        finally:
+            trace_log.removeHandler(payload_handler)
+
+
+class StructuredTraceTest(_StructuredTraceTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_compile_id_serialization_deserialization(self):
         cid = torch._guards.CompileId(
             frame_id=1,
@@ -334,76 +355,6 @@ class StructuredTraceTest(TestCase):
         for bad_cid in ["-/-", "-/1", "1/-", "!1/2", "!1/-/-"]:
             with self.assertRaises(ValueError):
                 torch._guards.CompileId.from_string(bad_cid)
-
-    @requires_gpu_and_triton
-    def test_schedule(self):
-        fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device=device_type))
-        self.assertExpectedInline(
-            self.buffer.getvalue(),
-            f"""\
-{{"dynamo_start": {{"stack": "STACK"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4000000}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1000, 1000], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1000, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['a']"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"dynamo_output_graph": {{"sizes": {{"l_a_": [1000, 1000], "ones": [1000, 1000], "add": [1000, 1000]}}}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aotautograd_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_inference_graph": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "after_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_runnable", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "inductor_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "triton_kernel_info", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "runtime_wrapper_orchestration", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"dynamo_cpp_guards_str": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"compilation_metrics_runtime": "METRICS", "frame_id": 0, "frame_compile_id": 0}}
-""",
-        )
-
-        self.assertParses()
-
-    @requires_gpu_and_triton
-    def test_gpugraphs(self):
-        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
-        fn_opt(torch.ones(1000, 1000, device=device_type))
-        self.assertExpectedInline(
-            self.buffer.getvalue(),
-            f"""\
-{{"dynamo_start": {{"stack": "STACK"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4000000}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device_type}', index=0)", "size": [1000, 1000], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1000, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['a']"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"dynamo_output_graph": {{"sizes": {{"l_a_": [1000, 1000], "ones": [1000, 1000], "add": [1000, 1000]}}}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aotautograd_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"aot_inference_graph": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "after_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_runnable", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "before_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "inductor_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "triton_kernel_info", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"artifact": {{"name": "runtime_wrapper_orchestration", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"dynamo_cpp_guards_str": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
-{{"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
-{{"compilation_metrics_runtime": "METRICS", "frame_id": 0, "frame_compile_id": 0}}
-""",
-        )
-
-        self.assertParses()
 
     @requires_tlparse
     def test_recompiles(self):
@@ -1311,22 +1262,6 @@ def forward(self, x_1: "f32[2][1]cpu"):
         finally:
             dist.destroy_process_group()
 
-    @contextmanager
-    def _setup_runtime_estimates_capture(self):
-        """Helper to turn on and capture the combined 'inductor_runtime_and_tensor_meta' structured trace."""
-        payload_buffer = io.StringIO()
-        payload_handler = logging.StreamHandler(payload_buffer)
-        payload_handler.setLevel(logging.DEBUG)
-        payload_handler.setFormatter(StructuredTracePayloadFormatter())
-        payload_handler.addFilter(
-            StructuredTraceTestingFilter("inductor_runtime_and_tensor_meta")
-        )
-        trace_log.addHandler(payload_handler)
-        try:
-            yield payload_buffer
-        finally:
-            trace_log.removeHandler(payload_handler)
-
     @requires_tlparse
     @requires_distributed()
     @requires_gpu_and_triton
@@ -1632,6 +1567,88 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 """{"graph_execution_order": [{"compile_id": "0/0"}, {"compile_id": "1/0"}]}""",
             )
             self.assertParses()
+
+
+class StructuredTraceTestDevice(_StructuredTraceTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipIf(not HAS_TRITON, "requires triton")
+    def test_schedule(self, device):
+        fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
+        fn_opt(torch.ones(1000, 1000, device=device), device=device)
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            f"""\
+{{"dynamo_start": {{"stack": "STACK"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4000000}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1000, 1000], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1000, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['a']"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"dynamo_output_graph": {{"sizes": {{"l_a_": [1000, 1000], "ones": [1000, 1000], "add": [1000, 1000]}}}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "aotautograd_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"aot_inference_graph": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "before_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "after_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "fx_graph_runnable", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "before_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "inductor_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "triton_kernel_info", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "runtime_wrapper_orchestration", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"dynamo_cpp_guards_str": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"compilation_metrics_runtime": "METRICS", "frame_id": 0, "frame_compile_id": 0}}
+""",
+        )
+
+        self.assertParses()
+
+    @skipIf(not HAS_TRITON, "requires triton")
+    def test_gpugraphs(self, device):
+        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
+        fn_opt(torch.ones(1000, 1000, device=device), device=device)
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            f"""\
+{{"dynamo_start": {{"stack": "STACK"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_storage": {{"id": 0, "describer_id": "ID", "size": 4000000}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_tensor": {{"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='{device}', index=0)", "size": [1000, 1000], "dynamo_hint_overrides": {{}}, "is_leaf": true, "stride": [1000, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"describe_source": {{"describer_id": "ID", "id": 0, "source": "L['a']"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"dynamo_output_graph": {{"sizes": {{"l_a_": [1000, 1000], "ones": [1000, 1000], "add": [1000, 1000]}}}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "aotautograd_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "before_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "after_pre_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "aot_forward_graph_fw_metadata", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"aot_inference_graph": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "torch._functorch.config", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "before_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "after_joint_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "fx_graph_runnable", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "before_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "inductor_post_grad_graph", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"inductor_output_code": {{"filename": "FILENAME", "file_path": "FILENAME"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "triton_kernel_info", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "fx_graph_cache_miss", "encoding": "json"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"artifact": {{"name": "runtime_wrapper_orchestration", "encoding": "string"}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"dynamo_cpp_guards_str": {{}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}}
+{{"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}}
+{{"compilation_metrics_runtime": "METRICS", "frame_id": 0, "frame_compile_id": 0}}
+""",
+        )
+
+        self.assertParses()
+
+
+instantiate_device_type_tests(
+    StructuredTraceTestDevice,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
