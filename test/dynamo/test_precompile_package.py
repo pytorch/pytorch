@@ -2,6 +2,7 @@
 
 import contextlib
 import dataclasses
+import gc
 import importlib
 import inspect
 import os
@@ -110,62 +111,6 @@ _BINDING_STACK_CASES = {
 }  # fmt: skip
 
 
-# One source LINE, so the two entries agree on file AND lineno: what separates
-# them can only come from the code body. This is the ACT2FN shape.
-# The stateless corpus shapes are plain functions; precompile_capture takes
-# either, and only the guard sources matter here.
-# The modules the corpus needs on disk, because a dispatch read off another
-# module cannot be spelled inside this file. Written under one directory so
-# they import each other by plain name, exactly as a user package would.
-# Every shape below was once a silent wrong answer on a serving machine that
-# somebody had to find by hand. _is_risky_drop regressed three review rounds
-# running -- each fix closed the previous round's false negative and opened a
-# new one -- so the shapes live in a table rather than in prose: adding one is
-# a single entry, and nothing here may ever stop being flagged. Each row names
-# the guard sources (by suffix) the risky-drop report must carry.
-# The other half of the corpus, and the half that keeps the report worth
-# reading: the lint only warns by default, so if ordinary code trips it the
-# warning is noise nobody audits and nobody ever opts into enforcement. Each
-# row names the identity guards (by suffix) that ARE dropped without being
-# flagged: torch internals, stdlib modules and their attributes, a global bound
-# to a def of its own name, reads off Dynamo's import aliases and its builtins
-# dict.
-# A value crossing a graph break or arriving as a non-tensor argument is
-# guarded by equality, so the artifact only serves inputs reproducing it, and
-# nothing else in the summary says so. Model config -- LayerNorm eps, Dropout p,
-# a plain int attribute -- is CONSTANT_MATCH too but constant for the model the
-# artifact is loaded onto; counting it would flag every model. Rows: builder,
-# args, the wont_generalize report, and a (type, source substring) guard that
-# must have been KEPT, so a row cannot pass by Dynamo not emitting the guard.
-# Rows: builder, example_inputs, text the invariants file must contain, and a
-# pattern it must not -- object ids, the per-process counter in Dynamo's
-# builtins-dict name, and the address install_global_by_id bakes into an
-# identifier ("<prefix>_<id(value)>_c<n>": `type(x) is torch.Tensor` installs
-# one) are all normalized so the file is stable enough to commit and diff.
-# Shapes where the guard that SPLIT two compilations must show up as varying
-# and never as an invariant of both. Rows: builder, capture kwargs, calls,
-# substrings some varying fact must carry, substrings some invariant fact must
-# carry, substrings no invariant fact may carry.
-# A pair that differs only after the break, so a resume function borrowed from
-# the wrong artifact still runs and still returns a number.
-# Content-addressing the resume code tells the first pair apart, but not two
-# instances of ONE model class: the same script captured in two processes
-# mints the same __resume_at_<offset>_<n> AND byte-identical resume code.
-# Rows: fn, the captured variants as (PRECOMPILE_CONFIG mode, extra args), one
-# uncaptured variant, guard types that must be emitted AND kept, and whether
-# save() has to be told the drops it reports are acknowledged risky ones.
-# functools.wraps copies __qualname__, so an instrumented wrapper around a
-# different callable passes the qualname check while being a different code
-# object.
-# CompilePackage rebinds the stored guards onto whatever callable it is given,
-# so load has to refuse anything but the captured callable itself; a __code__
-# that is present and None gets past the capture-side hasattr check.
-# How the saved artifact is damaged (None: the path is a directory, the
-# pre-single-file layout) and the error precompile_load must name it with.
-# A legacy package's empty frame installs a skip only in its region; whatever
-# global strategy the frame had before the load, or gained while loaded, has
-# to be what unload leaves. Rows: applied before the load, applied after it,
-# the (cur, recursive) strategy expected after unload.
 @instantiate_parametrized_tests
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def setUp(self):
@@ -413,11 +358,27 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(module.__dict__.get("g"), want)
         self.assertEqual(dynamo_package._GLOBAL_BINDINGS.get(module, {}), {})
 
-    # Every shape found to split a compilation while the report called it an
-    # invariant. The fingerprint has failed open three times -- shapes, then
-    # python type and conj/neg, then the dispatch key set -- each fix revealing
-    # the next, so the shapes are asserted here rather than described. A new
-    # one is one line. See _value_fingerprint.
+    def test_joining_a_dead_owners_binding_survives_its_cleanup(self):
+        # A package collected without uninstall() parks its cleanup when the
+        # registry lock is busy. A later install of the same artifact writes the
+        # same builtins dict under the same name; the drain must find the new
+        # owner on the binding and keep the name, not delete it as the dead
+        # package's leftover.
+        module = types.ModuleType("test_precompile_dead_owner")
+        shared = {}
+        dead = self._bare_package()
+        dead._install_global(module, "g", shared)
+        installed = dead._installed_globals
+        del dead
+        gc.collect()
+        dynamo_package._DEAD_PACKAGES.append(
+            dynamo_package._DeadPackageState(installed, [])
+        )
+        live = self._bare_package()
+        live._install_global(module, "g", shared)
+        self.assertIs(module.__dict__.get("g"), shared)
+        live.uninstall()
+        self.assertNotIn("g", module.__dict__)
 
 
 if __name__ == "__main__":

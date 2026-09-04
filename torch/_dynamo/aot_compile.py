@@ -210,13 +210,21 @@ class AOTCompiledFunction:
             if guard_scope is None:
                 guard_scope = self.fn.__globals__
             else:
-                # Dynamo mints __import_* aliases into the tracing process's
-                # globals and roots guards at them; a process that only loads
-                # never traced, so seed them here.
+                # Dynamo mints __import_* aliases and a __builtins_dict___N key
+                # into the tracing process's globals and roots guards at them;
+                # a process that only loads never traced, so seed them here.
+                # Mirrors the precompile load path in package.py.
+                from .output_graph import get_builtins_dict
+
                 import_sources = self._artifacts.runtime_env.import_sources
                 for alias, module_name in import_sources.items():
                     if alias not in guard_scope:
                         guard_scope[alias] = importlib.import_module(module_name)
+                builtins_key = (
+                    guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+                )
+                if builtins_key and builtins_key not in guard_scope:
+                    guard_scope[builtins_key] = get_builtins_dict(guard_scope)
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
@@ -545,9 +553,10 @@ class AOTCompiledModel:
 
         Guards on globals are evaluated, by reference, against the live
         ``__globals__`` of the function ``model.forward`` resolves to. That dict
-        is mutated: the ``__import_*`` aliases the artifact recorded at capture
-        are inserted (never overwriting an existing key) so guards rooted at
-        them resolve in a process that never traced. A guarded global the dict
+        is mutated: the ``__import_*`` aliases and the ``__builtins_dict___N``
+        key the artifact recorded at capture are inserted (never overwriting an
+        existing key) so guards rooted at them resolve in a process that never
+        traced. A guarded global the dict
         lacks fails the guard; there is no fallback to the serialized scope.
         The compiled bytecode itself still reads the globals serialized with
         the artifact, not this dict. Only when ``model.forward`` is neither a
