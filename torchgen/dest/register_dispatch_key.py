@@ -206,6 +206,88 @@ void check_inplace(const Tensor &self, IntArrayRef sizes, const TensorOptions &o
     ]
 
 
+# Dispatch keys whose structured wrappers manage a device guard in their
+# set_output functions (see maybe_set_guard in gen_class_set_output_body).
+GUARDED_SET_OUTPUT_KEYS = (
+    DispatchKey.CUDA,
+    DispatchKey.MPS,
+    DispatchKey.XPU,
+    DispatchKey.CompositeExplicitAutogradNonFunctional,
+)
+
+
+def structured_set_output_guard_type(backend_index: BackendIndex) -> str | None:
+    if backend_index.dispatch_key not in GUARDED_SET_OUTPUT_KEYS:
+        return None
+    if backend_index.dispatch_key == DispatchKey.CUDA:
+        return "c10::cuda::OptionalCUDAGuard"
+    # TODO: MPS should move to OptionalMPSGuard.
+    return "c10::OptionalDeviceGuard"
+
+
+# The set_output_strided/set_output_raw_strided overrides generated for every
+# structured operator only differ in the final super call; the rest of the
+# body is hoisted into these per-file helpers so it is emitted once per
+# Register file instead of once per operator (BOLT profiling showed thousands
+# of byte-identical copies of these bodies in libtorch).
+def gen_structured_set_output_helpers(backend_index: BackendIndex) -> list[str]:
+    if not gen_create_out_helper(backend_index):
+        return []
+
+    guard_type = structured_set_output_guard_type(backend_index)
+    if guard_type is not None:
+        guard_param = f"{guard_type}& guard_, "
+        maybe_set_guard = """\
+  auto current_device = guard_.current_device();
+  if (C10_UNLIKELY(current_device.has_value())) {
+    TORCH_INTERNAL_ASSERT(*current_device == options.device(),
+      "structured kernels don't support multi-device outputs");
+  } else {
+    guard_.reset_device(options.device());
+  }
+"""
+    else:
+        guard_param = ""
+        maybe_set_guard = ""
+
+    create_proxy = """\
+  if (maybe_proxy != nullptr) {
+    auto proxy = maybe_create_proxy(out, sizes, strides, options);
+    if (C10_UNLIKELY(proxy.has_value())) {
+      *maybe_proxy = std::move(proxy).value();
+    }
+  }
+"""
+
+    helpers = [
+        f"""
+void set_output_functional(
+    {guard_param}Tensor& output,
+    IntArrayRef sizes, IntArrayRef strides, const TensorOptions& options) {{
+{maybe_set_guard}  output = create_out(sizes, strides, options);
+}}
+""",
+        f"""
+void set_output_inplace(
+    {guard_param}const Tensor& out, std::optional<Tensor>* maybe_proxy,
+    IntArrayRef sizes, IntArrayRef strides, const TensorOptions& options) {{
+{maybe_set_guard}  check_inplace(out, sizes, options);
+{create_proxy}}}
+""",
+    ]
+    if gen_resize_out_helper(backend_index):
+        helpers.append(
+            f"""
+void set_output_out(
+    {guard_param}const Tensor& out, std::optional<Tensor>* maybe_proxy,
+    IntArrayRef sizes, IntArrayRef strides, const TensorOptions& options) {{
+{maybe_set_guard}  resize_out(out, sizes, strides, options);
+{create_proxy}}}
+"""
+        )
+    return helpers
+
+
 def gen_registration_helpers(backend_index: BackendIndex) -> list[str]:
     return [
         'C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")',
@@ -213,6 +295,7 @@ def gen_registration_helpers(backend_index: BackendIndex) -> list[str]:
         *gen_resize_out_helper(backend_index),
         *gen_check_inplace_helper(backend_index),
         *gen_maybe_create_proxy_helper(backend_index),
+        *gen_structured_set_output_helpers(backend_index),
         "C10_DIAGNOSTIC_POP()",
     ]
 
@@ -624,34 +707,12 @@ void set_output_{name}(
 """
 
     def gen_class_set_output_body(self, k: SchemaKind, maybe_create_proxy: bool) -> str:
-        if self.backend_index.dispatch_key in [
-            DispatchKey.CUDA,
-            DispatchKey.MPS,
-            DispatchKey.XPU,
-            DispatchKey.CompositeExplicitAutogradNonFunctional,
-        ]:
-            maybe_set_guard = """
-auto current_device = guard_.current_device();
-if (C10_UNLIKELY(current_device.has_value())) {
-  TORCH_INTERNAL_ASSERT(*current_device == options.device(),
-    "structured kernels don't support multi-device outputs");
-} else {
-  guard_.reset_device(options.device());
-}
-"""
-            maybe_set_guard_line = maybe_set_guard + "\n"
-        else:
-            maybe_set_guard_line = maybe_set_guard = ""
-
-        if maybe_create_proxy:
-            create_proxy = """
-auto maybe_proxy = maybe_create_proxy(out, sizes, strides, options);
-if (C10_UNLIKELY(maybe_proxy.has_value())) {
-    proxy_outputs_[output_idx] = std::move(maybe_proxy).value();
-}
-"""
-        else:
-            create_proxy = ""
+        guard_arg = (
+            "guard_, "
+            if structured_set_output_guard_type(self.backend_index) is not None
+            else ""
+        )
+        proxy_arg = "&proxy_outputs_[output_idx]" if maybe_create_proxy else "nullptr"
 
         if k is SchemaKind.functional:
             if self.backend_index.dispatch_key not in (
@@ -667,18 +728,11 @@ if (C10_UNLIKELY(maybe_proxy.has_value())) {
                     f"Unexpected dispatch key {self.backend_index.dispatch_key} "
                     "for functional schema"
                 )
-            return f"""{maybe_set_guard_line}
-outputs_[output_idx] = create_out(sizes, strides, options);"""
+            return f"set_output_functional({guard_arg}outputs_[output_idx], sizes, strides, options);"
         elif k is SchemaKind.inplace:
-            return f"""{maybe_set_guard_line}
-const auto& out = outputs_[output_idx].get();
-check_inplace(out, sizes, options);
-{create_proxy}"""
+            return f"set_output_inplace({guard_arg}outputs_[output_idx].get(), {proxy_arg}, sizes, strides, options);"
         elif k is SchemaKind.out:
-            return f"""{maybe_set_guard_line}
-const auto& out = outputs_[output_idx].get();
-resize_out(out, sizes, strides, options);
-{create_proxy}"""
+            return f"set_output_out({guard_arg}outputs_[output_idx].get(), {proxy_arg}, sizes, strides, options);"
         elif k is SchemaKind.mutable or k is SchemaKind.scratch:
             raise AssertionError(
                 f"{k} structured operators are currently not supported"
@@ -725,22 +779,8 @@ resize_out(out, sizes, strides, options);
         else:
             raise RuntimeError(f"Unsupported SchemaKind {k}")
 
-        if self.backend_index.dispatch_key == DispatchKey.CUDA:
-            guard_field = "c10::cuda::OptionalCUDAGuard guard_;"
-        elif (
-            self.backend_index.dispatch_key
-            == DispatchKey.CompositeExplicitAutogradNonFunctional
-        ):
-            guard_field = "c10::OptionalDeviceGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.MPS:
-            # TODO: Move to OptionalMPSGuard.
-            guard_field = "c10::OptionalDeviceGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.XPU:
-            guard_field = "c10::OptionalDeviceGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.MTIA:
-            guard_field = "c10::OptionalDeviceGuard guard_;"
-        else:
-            guard_field = ""
+        guard_type = structured_set_output_guard_type(self.backend_index)
+        guard_field = f"{guard_type} guard_;" if guard_type is not None else ""
 
         indent = " " * 4
         class_ctor_str = self.gen_class_ctor(k, class_name, len(f.func.returns))
