@@ -886,6 +886,16 @@
       ]
     }
   ],
+  "GB6404": [
+    {
+      "Gb_type": "Write to unmodeled getset/member attribute",
+      "Context": "{self}",
+      "Explanation": "Dynamo does not model writes to this attribute, which is writable in eager.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0058": [
     {
       "Gb_type": "Failed to set tensor attribute",
@@ -1229,6 +1239,17 @@
       "Context": "{type(self).__name__} has nb_negative slot but no nb_negative_impl override",
       "Explanation": "The type {self.python_type_name()} has an nb_negative C slot but the corresponding VariableTracker doesn't implement nb_negative_impl.",
       "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9193": [
+    {
+      "Gb_type": "Call to a time function",
+      "Context": "Called `{fn_name}()` inside a compiled region",
+      "Explanation": "Dynamo graph breaks on `{fn_name}()` so that the clock read occurs at the correct point relative to compiled operations.",
+      "Hints": [
+        "Move the `{fn_name}()` call outside the compiled function if the graph break is undesirable.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

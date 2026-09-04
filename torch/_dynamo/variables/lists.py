@@ -57,9 +57,9 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     GetSet,
-    getset_read,
     Member,
     Method,
+    readonly_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -1124,9 +1124,9 @@ class RangeVariable(BaseListVariable):
     # range_members: start/stop/step are Py_READONLY _Py_T_OBJECT members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c (range_members)
     tp_members = {
-        "start": Member(getset_read(lambda s: s.items[0])),
-        "stop": Member(getset_read(lambda s: s.items[1])),
-        "step": Member(getset_read(lambda s: s.items[2])),
+        "start": Member(lambda s, _: s.items[0], readonly_setter),
+        "stop": Member(lambda s, _: s.items[1], readonly_setter),
+        "step": Member(lambda s, _: s.items[2], readonly_setter),
     }
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
@@ -1655,7 +1655,7 @@ class DequeVariable(BaseListVariable):
     # deque_getset: maxlen is a read-only getset (deque_get_maxlen, no setter).
     # https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c (deque_getset)
     tp_getset = {
-        "maxlen": GetSet(getset_read(lambda s: s.maxlen)),
+        "maxlen": GetSet(lambda s, _: s.maxlen, readonly_setter),
     }
 
     def _clamp_maxlen(self, side: str) -> None:
@@ -2369,9 +2369,9 @@ class SliceVariable(VariableTracker):
     # slice_members: start/stop/step are Py_READONLY _Py_T_OBJECT members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/sliceobject.c (slice_members)
     tp_members = {
-        "start": Member(getset_read(lambda s: s.items[0])),
-        "stop": Member(getset_read(lambda s: s.items[1])),
-        "step": Member(getset_read(lambda s: s.items[2])),
+        "start": Member(lambda s, _: s.items[0], readonly_setter),
+        "stop": Member(lambda s, _: s.items[1], readonly_setter),
+        "step": Member(lambda s, _: s.items[2], readonly_setter),
     }
 
     def indices(
