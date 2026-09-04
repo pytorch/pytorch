@@ -4918,12 +4918,14 @@ class numpy_operator_wrapper(Generic[_P, R]):
         if kwargs:
             raise AssertionError(f"Expected no kwargs, got {kwargs}")
 
-        # pyrefly: ignore [bad-assignment]
-        args = (
-            tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
-        )
-        out = self.op(*args)
-        return numpy_to_tensor(out)
+        with torch._C.DisableTorchFunction():
+            # pyrefly: ignore [bad-assignment]
+            args = (
+                tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg
+                for arg in args
+            )
+            out = self.op(*args)
+            return numpy_to_tensor(out)
 
 
 @functools.lru_cache(maxsize=1)
