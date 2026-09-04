@@ -304,6 +304,10 @@ void ProcessGroupNCCL::initFromComm(
                      << rank_;
 }
 
+bool ProcessGroupNCCL::isInitialized() {
+  return init_state_ == InitializationState::INITIALIZED;
+}
+
 void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   checkInitialized();
   TORCH_CHECK(
