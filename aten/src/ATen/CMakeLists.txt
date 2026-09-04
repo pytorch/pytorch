@@ -853,18 +853,13 @@ if(USE_CUDA AND NOT USE_ROCM)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/include)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/tools/util/include)
 
+  # cufft comes from caffe2::cufft (cmake/Dependencies.cmake), which already
+  # tracks the public CAFFE2_STATIC_LINK_CUDA option; adding it here too
+  # duplicated it under the internal ATEN_STATIC_CUDA switch instead.
   if($ENV{ATEN_STATIC_CUDA})
-    if(CUDA_VERSION VERSION_LESS_EQUAL 12.9)
-      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-          ${CUDA_LIBRARIES}
-          CUDA::cusparse_static
-          CUDA::cufft_static_nocallback)
-    else()
-      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-          ${CUDA_LIBRARIES}
-          CUDA::cusparse_static
-          CUDA::cufft_static)
-    endif()
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+        ${CUDA_LIBRARIES}
+        CUDA::cusparse_static)
 
    if(NOT BUILD_LAZY_CUDA_LINALG)
      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
@@ -876,7 +871,6 @@ if(USE_CUDA AND NOT USE_ROCM)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}
       CUDA::cusparse
-      CUDA::cufft
     )
    if(NOT BUILD_LAZY_CUDA_LINALG)
      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
