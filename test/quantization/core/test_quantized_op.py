@@ -54,6 +54,7 @@ from torch.testing._internal.common_quantized import (
     supported_qengines,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_FBCODE,
     IS_MACOS,
@@ -471,6 +472,10 @@ class _QuantizedActivationTestMixin:
 
 
 class TestQuantizedOps(_QuantizedActivationTestMixin, TestCase):
+    # qint dtypes only dispatch to QuantizedCPU, so everything here is CPU-only.
+    # The handful of ops that also have a QuantizedCUDA kernel live in
+    # TestQuantizedOpsDevice.
+    hw_classification = HardwareClassification.CPU
 
     """Tests the correctness of the quantized::relu6 op."""
     def test_qrelu6(self):
@@ -3216,6 +3221,8 @@ class TestQuantizedOpsDevice(_QuantizedActivationTestMixin, TestCase):
     QuantizedXPU or QuantizedMPS kernel for any of these ops, hence the
     only_for below."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     """Tests the correctness of the quantized::relu op."""
     def test_qrelu(self, device):
         # override_qengines cannot be used here: it does not forward the
@@ -3280,6 +3287,12 @@ class TestQuantizedOpsDevice(_QuantizedActivationTestMixin, TestCase):
 
 
 class TestQuantizedOpsCUDNN(TestCase):
+    """Covers the cudnn kernels in aten/src/ATen/native/quantized/cudnn. The
+    QuantizedCPU kernels are tested in TestQuantizedOps and there is no
+    QuantizedXPU one, so unlike TestQuantizedOpsDevice this stays CUDA-only."""
+
+    hw_classification = HardwareClassification.CUDA
+
     # TODO: merge this test with test_max_pool2d
     """Tests 2D cudnn max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
@@ -3332,6 +3345,8 @@ class TestQuantizedMaxPool2dPT2EDevice(TestCase):
     plain (non-quantized) key on CPU and XPU only -- CUDA has just the
     QuantizedCUDA/cudnn variant -- hence the only_for below."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     def test_max_pool2d_pt2e(self, device):
         kernel_list = [2, 3]
@@ -3369,6 +3384,8 @@ class TestQuantizedMaxPool2dPT2EDevice(TestCase):
 
 class TestDynamicQuantizedOps(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
+    hw_classification = HardwareClassification.CPU
+
     @override_qengines
     @given(
         batch_size=st.integers(1, 4),
@@ -4054,6 +4071,8 @@ class TestDynamicQuantizedOps(TestCase):
 
 
 class TestQuantizedLinear(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def _test_qlinear_impl(self, batch_size, input_channels, output_channels, use_bias,
                            post_op, use_multi_dim_input, use_channelwise, **post_op_kwargs):
         decimal_val = 4
@@ -4939,6 +4958,7 @@ class TestQuantizedLinear(TestCase):
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
 class TestQuantizedEmbeddingOps(TestCase):
+    hw_classification = HardwareClassification.CPU
 
     def _test_embedding_bag_unpack_impl(self, pack_fn, unpack_fn, bit_rate, optimized_qparams, weights):
         data_type = weights.dtype
@@ -5411,6 +5431,8 @@ class TestQuantizedEmbeddingOps(TestCase):
 
 
 class TestQuantizedEmbeddingOpsCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     """ Tests that the CUDA quantized embedding_bag operators agree with their
         CPU counterparts. This covers the bit-field extraction the dequantization
         path is built on, which is shared by both bit widths. """
@@ -5762,6 +5784,8 @@ class TestQuantizedEmbeddingOpsCUDA(TestCase):
 
 
 class TestQuantizedConv(TestCase):
+    # Unclassified until the CUDA-only *_cudnn tests and test_benchmark move out.
+
     def _test_qconv_unpack_impl(self, qconv_prepack_fn, qconv_unpack_fn, inputs,
                                 strides, i_pads, o_pads, channelwise):
         (X_data, W_data, bias_data, groups, transposed) = inputs
@@ -8832,6 +8856,8 @@ class TestQuantizedConv(TestCase):
 
 
 class TestPadding(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @given(batch_size=st.integers(1, 64),
            channels=st.integers(1, 64),
            width=st.integers(16, 128),
@@ -8919,6 +8945,8 @@ class TestPadding(TestCase):
                      "This Pytorch Build has not been built with or does not support QNNPACK")
 class TestQNNPackOps(TestCase):
     """Tests the correctness of the quantized::qnnpack_relu op."""
+    hw_classification = HardwareClassification.CPU
+
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams(dtypes=torch.quint8,
                                           zero_point_min=0,
@@ -9397,6 +9425,8 @@ class TestQNNPackOps(TestCase):
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
     """Tests the element-wise equality ops."""
+    hw_classification = HardwareClassification.CPU
+
     @given(A=hu.tensor(shapes=((3, 4, 5),),
                        qparams=hu.qparams()),
            B=hu.tensor(shapes=((5,), (1, 5), (1, 1, 5), (4, 5), (3, 4, 5)),
@@ -9469,6 +9499,8 @@ class TestComparatorOps(TestCase):
 """Tests the correctness of the quantized::embedding_bag_(byte|4bit|2bit)_prepack_with_rowwise_min_max ops."""
 class TestQuantizedWithMinMax(TestCase):
     """Validates that the *rowwsie_min_max* quantization functions are equivalent to the ones without it."""
+    hw_classification = HardwareClassification.CPU
+
     def test_quantize_tensor_with_min_max(self):
         num_rows_list = [1, 2, 10, 100]
         num_cols_list = [4, 8, 16, 32, 64, 128]
