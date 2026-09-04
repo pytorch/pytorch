@@ -1712,7 +1712,7 @@ class TestGraphDestroyHooks(TestCase):
 # Pure registry-lifecycle logic, no CUDA needed. Seeds the module-level kernel
 # annotation map directly and checks that remove_kernel_annotations purges only the
 # requested exec graph ids (tools_id >> 32). (The graph dependency map lives on the
-# profiler observer, not the module, and is exercised in the CUPTI monitor suite.)
+# profiler observer, not the module, and is exercised in the Cuspy suite.)
 class TestRemoveKernelAnnotations(TestCase):
     @staticmethod
     def _tools_id(graph_id, node_id):
@@ -1941,11 +1941,11 @@ class TestGraphGlobalLifecycleHooks(TestCase):
 
 
 def _cupti_backend_available():
-    """Whether the CUPTI annotation backend can be exercised: cupti-python present and the
-    monitor able to subscribe. Probed by actually bringing an observer up, since
+    """Whether the CUPTI annotation backend can be exercised: cupti-python present and
+    Cuspy able to subscribe. Probed by actually bringing an observer up, since
     ``has_live_subscription`` is false until something holds a subscription."""
     try:
-        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
     except ImportError:
         return False
     try:
@@ -1961,9 +1961,7 @@ def _cupti_backend_available():
     _is_tools_id_unavailable(),
     "cudaGraphNodeGetToolsId not available (needs cuda-compat >= 13.1)",
 )
-@unittest.skipIf(
-    not _cupti_backend_available(), "requires a CUPTI monitor able to subscribe"
-)
+@unittest.skipIf(not _cupti_backend_available(), "requires Cuspy able to subscribe")
 class TestCuptiAnnotationBackend(TestCase):
     """``annotation_config={"backend": "cupti"}``: nodes are attributed as CUPTI reports their creation
     rather than by walking the capture graph's dependent edges."""
@@ -1975,9 +1973,9 @@ class TestCuptiAnnotationBackend(TestCase):
         ctx = torch.autograd.grad_mode.set_multithreading_enabled(False)
         ctx.__enter__()
         self.addCleanup(ctx.__exit__, None, None, None)
-        # Holding an observer keeps the monitor subscribed, which is what makes the CUPTI
+        # Holding an observer keeps Cuspy subscribed, which is what makes the CUPTI
         # backend selectable (and what "auto" probes for).
-        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
 
         self.observer = NodeTimerObserver()
         close = getattr(self.observer, "close", None)
