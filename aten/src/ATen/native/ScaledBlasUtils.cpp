@@ -407,7 +407,7 @@ void validate_scaled_mm_v2_inputs(
     c10::SymInt expected_b_elems;
     // Layout the count belongs to. ROCm accepts two layouts that differ only
     // in padding, so the count alone is ambiguous without naming one.
-    const char* scale_layout;
+    const char* scale_layout = "";
     // The arch/version gate for SWIZZLE_32_8 lives in the kernel, which can
     // query the device, so a request for it on an unsupported arch reaches this
     // size check first whenever the two layouts' counts differ. Name the
