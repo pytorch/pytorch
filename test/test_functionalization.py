@@ -6,6 +6,7 @@ import unittest
 from contextlib import nullcontext
 
 import torch
+import torch.autograd.forward_ad as fwAD
 from torch._dispatch.python import (
     enable_crossref_functionalize,
     enable_python_dispatcher,
@@ -14,6 +15,7 @@ from torch._subclasses.functional_tensor import (
     dispatch_functionalize,
     FunctionalTensor,
     FunctionalTensorMode,
+    PythonFunctionalizeAPI,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
@@ -2136,6 +2138,83 @@ def forward(self, x_1):
             )
         )(x)
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
+
+    def test_python_functionalization_unpack_dual(self):
+        x = torch.tensor([1.0, 2.0])
+        tangent = torch.tensor([3.0, 4.0])
+
+        def f(dual):
+            output = dual + dual
+            inspected_tangent = fwAD.unpack_dual(dual).tangent
+            return output, inspected_tangent + 1
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, tangent)
+            expected_output, expected_tangent = f(dual)
+            actual_output, actual_tangent = dispatch_functionalize(f)(dual)
+            expected_primal, expected_propagated_tangent = fwAD.unpack_dual(
+                expected_output
+            )
+            actual_primal, actual_propagated_tangent = fwAD.unpack_dual(actual_output)
+
+        self.assertEqual(actual_primal, expected_primal)
+        self.assertEqual(actual_propagated_tangent, expected_propagated_tangent)
+        self.assertEqual(actual_tangent, expected_tangent)
+
+    def test_python_functionalization_unpack_dual_without_tangent(self):
+        x = torch.tensor([1.0, 2.0])
+        with fwAD.dual_level():
+            tangent = dispatch_functionalize(
+                lambda tensor: fwAD.unpack_dual(tensor).tangent
+            )(x)
+        self.assertIsNone(tangent)
+
+    def test_python_functionalization_unpack_dual_repr(self):
+        # Printing an unpacked dual's primal/tangent (or the dual itself) while
+        # still inside the functionalized region must not crash the process.
+        x = torch.tensor([1.0, 2.0])
+        tangent = torch.tensor([3.0, 4.0])
+
+        def f(dual):
+            primal, dual_tangent = fwAD.unpack_dual(dual)
+            for wrapper in (primal, dual_tangent, dual):
+                self.assertIn("FunctionalTensor(", repr(wrapper))
+            return dual + dual
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, tangent)
+            result = dispatch_functionalize(f)(dual)
+            out_primal, out_tangent = fwAD.unpack_dual(result)
+        self.assertEqual(out_primal, x + x)
+        self.assertEqual(out_tangent, tangent + tangent)
+
+    def test_python_functionalization_unpack_dual_fresh_tangent(self):
+        # The unpacked tangent has value semantics: mutating it is not written
+        # back through the dual, matching the C++ Functionalize kernel.
+        x = torch.tensor([1.0, 2.0])
+        tangent = torch.tensor([3.0, 4.0])
+
+        def f(dual):
+            fwAD.unpack_dual(dual).tangent.add_(10.0)
+            return fwAD.unpack_dual(dual).tangent
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, tangent)
+            reinspected = dispatch_functionalize(f)(dual)
+        self.assertEqual(reinspected, tangent)
+
+    def test_python_functionalization_unpack_dual_unwrap_tensors(self):
+        # PythonFunctionalizeAPI.unwrap_tensors reconstructs a dual with no
+        # externally active mode, matching wrap_tensors (higher-order-op path).
+        x = torch.tensor([1.0, 2.0])
+        tangent = torch.tensor([3.0, 4.0])
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, tangent)
+            api = PythonFunctionalizeAPI()
+            wrapped = api.wrap_tensors((dual,))
+            (unwrapped,) = api.unwrap_tensors(wrapped)
+            recovered = fwAD.unpack_dual(unwrapped).tangent
+        self.assertEqual(recovered, tangent)
 
     def test_python_functionalization_to_dense(self):
         maybe_disable = torch._C._ExcludeDispatchKeyGuard(
