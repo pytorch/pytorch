@@ -14320,6 +14320,11 @@ Arguments:
 Returns:
     Generator: An torch.Generator object.
 
+.. seealso::
+    :class:`torch.Generator` is stateful. For a stateless, key-based PRNG API
+    (``key``, ``split``, ``fold_in``, ``uniform``, ``normal``, ``randint``,
+    ``bits``), see the experimental :mod:`torch.func._random` module.
+
 Example::
 
     >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
