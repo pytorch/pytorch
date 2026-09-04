@@ -1,6 +1,7 @@
 # Owner(s): ["module: functorch"]
 import contextlib
 import functools
+import random
 import unittest
 
 import torch
@@ -13106,6 +13107,47 @@ class <lambda>(torch.nn.Module):
 
         y = torch.ones(4, requires_grad=False)
         self.check(M, (y,), device, dynamic)
+
+    # https://github.com/pytorch/pytorch/issues/195970
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @parametrize("compile_mode", ["direct", "aot_eager", "inductor"])
+    def test_while_loop_constant_false_cond_mutation(self, device, compile_mode):
+        def f(state):
+            def cond_fn(i):
+                random.random()
+                state.add_(1)
+                return False
+
+            def body_fn(i):
+                return (i + 1,)
+
+            return torch.while_loop(
+                cond_fn,
+                body_fn,
+                (torch.zeros((), dtype=torch.int64, device=state.device),),
+            )
+
+        rng_state = random.getstate()
+        try:
+            random.seed(0)
+            expected_rng = random.Random(0)
+            expected_rng.random()
+            expected_rng.random()
+            expected_next_random = expected_rng.random()
+            fn = (
+                f
+                if compile_mode == "direct"
+                else torch.compile(f, backend=compile_mode, fullgraph=True)
+            )
+            state = torch.zeros((), device=device)
+            with torch.no_grad():
+                for _ in range(2):
+                    result = fn(state)
+            self.assertEqual(result[0], 0)
+            self.assertEqual(state, 2)
+            self.assertEqual(random.random(), expected_next_random)
+        finally:
+            random.setstate(rng_state)
 
     # https://github.com/pytorch/pytorch/issues/195327
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
