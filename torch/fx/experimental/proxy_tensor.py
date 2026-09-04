@@ -2189,7 +2189,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         ] = {}
         from torch._inductor import config
 
-        self.emulate_precision_casts: bool = config.emulate_precision_casts
+        self.emulate_precision_casts: bool = config.should_emulate_precision_casts()
 
     @count
     def __torch_dispatch__(
