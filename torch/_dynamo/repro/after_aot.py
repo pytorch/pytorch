@@ -1015,12 +1015,20 @@ def isolate_fails(
 
         stdout.seek(0)
         stderr.seek(0)
+        # The subprocess is a crashing repro; its stdout/stderr can contain
+        # non-UTF-8 bytes (e.g. a ROCm/HIP runtime abort). Decode leniently so
+        # the minifier still reports output and writes repro.py instead of dying
+        # with UnicodeDecodeError.
         print(
-            textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "),
+            textwrap.indent(
+                stdout.read().decode("utf-8", errors="replace"), prefix=">>  "
+            ),
             file=sys.stdout,
         )
         print(
-            textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "),
+            textwrap.indent(
+                stderr.read().decode("utf-8", errors="replace"), prefix=">>  "
+            ),
             file=sys.stderr,
         )
         # print(f"Isolated test failed - {file_name}")
