@@ -2400,6 +2400,22 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
 
+    def test_reduced_loss_storage_size(self):
+        # gh-185647: a reduced (mean/sum) loss is a scalar and must not retain
+        # storage sized for the full elementwise result.
+        x = torch.rand(3, 64, 64)
+        y = torch.rand(3, 64, 64)
+        itemsize = x.element_size()
+        for loss_fn in (F.mse_loss, F.smooth_l1_loss, F.l1_loss, F.huber_loss):
+            for reduction in ('mean', 'sum'):
+                out = loss_fn(x, y, reduction=reduction)
+                self.assertEqual(out.numel(), 1)
+                self.assertEqual(out.untyped_storage().nbytes(), itemsize)
+            # reduction='none' returns the full elementwise result, unchanged.
+            none_out = loss_fn(x, y, reduction='none')
+            self.assertEqual(none_out.shape, x.shape)
+            self.assertEqual(none_out.untyped_storage().nbytes(), x.numel() * itemsize)
+
     def test_weighted_mse_loss(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
         targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
