@@ -25,6 +25,8 @@ _save_config_ignore = [
     # callable configs with uuid() for caching, or raw callables
     "activation_memory_budget_runtime_estimator",
     "activation_memory_budget_solver",
+    # process-local id() keys; serializing them would only poison cache keys
+    "activation_memory_budget_by_module_id",
 ]
 
 
@@ -200,6 +202,29 @@ remat_using_tags_for_fwd_loss_bwd_graph = True
 # the activation memory budget.
 # NOTE: This *cannot* be treated as
 activation_memory_budget = 1.0
+
+# Per-module activation memory budgets, keyed by id() of the nn.Module.
+#
+# A joint graph whose forward lies wholly inside one configured module uses that
+# module's budget instead of activation_memory_budget; every other graph is
+# untouched. Empty (the default) disables the feature entirely.
+#
+# Keyed by id() rather than FQN because that is what survives: node.meta
+# ["nn_module_stack"] maps id(module) -> (source_expression, type), and the
+# source expression degrades to a stack temporary ("L['___stack0']") in frames
+# Dynamo resumes after a graph break, while the id stays exact.
+#
+# Register the target's whole subtree, e.g.
+# {id(sub): 0.5 for sub in target.modules()}, not just the target. Dynamo only
+# records a module in nn_module_stack when it is entered through
+# Module.__call__, so once a graph break turns a module's forward into its own
+# compilation unit the module itself disappears from the stack and only its
+# children remain -- registering just the target would resolve nothing on
+# exactly the graphs this is meant for. Ops written directly in that frame's
+# body carry no nn_module_stack at all and simply follow the rest of the graph.
+#
+# Process-local and meaningless to serialize, hence _save_config_ignore below.
+activation_memory_budget_by_module_id: dict[int, float] = {}
 
 # This controls how we estimate the runtime when deciding what the cheapest
 # operators to recompute are. The 3 options are

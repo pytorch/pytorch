@@ -4144,6 +4144,93 @@ def classify_nodes(
     )
 
 
+def _budget_from_module_config(node: fx.Node) -> float | None:
+    """Budget configured for the innermost module this node came from, if any.
+
+    node.meta["nn_module_stack"] maps id(module) -> (source_expression, type)
+    for every module enclosing the node. Matching on the id keeps this correct
+    in frames Dynamo resumed after a graph break, where the source expression
+    has decayed to a stack temporary.
+    """
+    stack = node.meta.get("nn_module_stack")
+    if not stack:
+        return None
+    by_id = config.activation_memory_budget_by_module_id
+    best_budget: float | None = None
+    for module_id in stack:
+        # Dynamo stores the key as str(id(module)); accept an int-keyed config
+        # too, since that is the natural way to build one from live modules.
+        key = (
+            int(module_id)
+            if isinstance(module_id, str) and module_id.isdigit()
+            else module_id
+        )
+        budget = by_id.get(key, by_id.get(module_id))
+        if budget is not None:
+            # The stack runs outermost to innermost, so the last match is the
+            # deepest and a child's budget overrides its parent's. Ordering
+            # decides this rather than the source expression, which decays to a
+            # stack temporary in frames Dynamo resumed after a graph break --
+            # exactly the frames this feature exists to serve.
+            best_budget = float(budget)
+    return best_budget
+
+
+def _resolve_module_memory_budget(
+    joint_graph: fx.Graph, node_info: NodeInfo, default: float
+) -> float:
+    """Resolve config.activation_memory_budget_by_module_id for this joint graph.
+
+    The partitioner applies one budget per graph, so a configured budget is used
+    only when the graph's whole forward lies inside a single configured module.
+    A graph that straddles a module boundary keeps the default and says so,
+    rather than applying a budget to ops it was not meant for.
+
+    Only ops that carry an nn_module_stack can vote. Ops written directly in the
+    body of the frame Dynamo is compiling have no nn_module_stack at all --
+    Dynamo records a module only when it is entered through Module.__call__, and
+    a frame that a graph break turned into its own compilation unit was not.
+    Those ops therefore can never match anything, and counting them as being
+    outside the module would make this unsatisfiable for precisely the graphs
+    the feature exists to serve. They stay with whatever the rest of the graph
+    resolves to.
+    """
+    budgets: OrderedSet[float] = OrderedSet()
+    outside = 0
+    for node in joint_graph.nodes:
+        if node.op != "call_function" or not node_info.is_required_fw(node):
+            continue
+        if not node.meta.get("nn_module_stack"):
+            continue
+        budget = _budget_from_module_config(node)
+        if budget is None:
+            outside += 1
+        else:
+            budgets.add(budget)
+
+    if not budgets:
+        return default
+    if len(budgets) > 1 or outside:
+        log.warning(
+            "activation_memory_budget_by_module_id: graph spans more than one "
+            "budget (budgets=%s, %d forward op(s) outside any configured "
+            "module), so the global budget %s is used for it. Isolate the "
+            "module into its own graph to have its budget applied.",
+            sorted(budgets),
+            outside,
+            default,
+        )
+        return default
+    resolved = next(iter(budgets))
+    log.info(
+        "activation_memory_budget_by_module_id: using %s for this graph instead "
+        "of the global budget %s.",
+        resolved,
+        default,
+    )
+    return resolved
+
+
 def min_cut_rematerialization_partition(
     joint_module: fx.GraphModule,
     _joint_inputs: Any,
@@ -4313,6 +4400,13 @@ def min_cut_rematerialization_partition(
                 f"Unannotated ops: {[n.name for n in unannotated_fw_ops]}."
             )
         memory_budget = next(iter(all_budgets))
+    elif config.activation_memory_budget_by_module_id:
+        # 4. Per-module budgets keyed by FQN. Resolved from nn_module_stack, so
+        #    it is unaffected by where Dynamo cut frames. Only consulted when no
+        #    region annotation applies, so the two never fight.
+        memory_budget = _resolve_module_memory_budget(
+            joint_graph, node_info, memory_budget
+        )
     saved_values = choose_saved_values_set(
         joint_graph,
         node_info,

@@ -607,6 +607,22 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             if (budget := _get_memory_budget_annotation(node)) is not None
         )
 
+        # activation_memory_budget_by_module_id is in _save_config_ignore, so the
+        # saved config cannot invalidate the cache when a budget changes. Record
+        # the budget each node resolves to rather than the id() keys, which are
+        # process-local and would miss on every run. Resolving per node is also
+        # what separates permutations: swapping which module gets which budget
+        # leaves the set of configured values identical while changing the
+        # budget the partitioner applies, so keying on that set alone would
+        # serve a stale artifact. Set only while the feature is in use, so a
+        # default config leaves the key untouched.
+        if config.activation_memory_budget_by_module_id:
+            from torch._functorch.partitioners import _budget_from_module_config
+
+            self.module_activation_memory_budgets: tuple[float | None, ...] = tuple(
+                _budget_from_module_config(node) for node in gm.graph.nodes
+            )
+
         # Note: We use the live config module, not self.autograd_config (the
         # saved config), because activation_memory_budget_runtime_estimator and
         # activation_memory_budget_solver are excluded from save_config (in
