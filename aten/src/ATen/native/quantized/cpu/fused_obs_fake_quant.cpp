@@ -235,6 +235,10 @@ at::Tensor fused_moving_avg_obs_fake_quant(
   if (self.sym_numel() == 0) {
     return self.clone();
   }
+  TORCH_CHECK(
+      !per_row_fake_quant || ch_axis >= 0,
+      "Error in fused_moving_avg_obs_fake_quant: ch_axis must be non-negative "
+      "when per_row_fake_quant is true");
   auto res = at::_fused_moving_avg_obs_fq_helper(
       self,
       observer_on,
