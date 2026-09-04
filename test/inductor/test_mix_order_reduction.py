@@ -22,7 +22,9 @@ from torch.testing._internal.common_utils import (
     parametrize,
     recover_orig_fp32_precision,
     skipIfXpu,
+    TEST_XPU,
 )
+from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import has_triton_tma_device
 
@@ -123,6 +125,53 @@ class MixOrderReductionTest(TestBase):
         self.assertEqual(
             inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
+        )
+
+    @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
+    def test_same_order_reductions_with_non_common_strided_read(self):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x, y):
+            return x.sum(dim=1), (x * y.t()).sum(dim=1)
+
+        M = N = 8192
+        x = torch.randn(M, N, device=GPU_TYPE)
+        y = torch.randn(N, M, device=GPU_TYPE)
+
+        opt_f = torch.compile(f)
+
+        ref = f(x, y)
+        act = opt_f(x, y)
+
+        self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            0,
+            metrics.codegen_mix_order_reduction,
+            "same-order reductions must not be classified as mix-order",
+        )
+
+    @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
+    def test_square_mix_order_reductions_non_strict(self):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        M = N = 8192
+        x = torch.randn(M, N, device=GPU_TYPE)
+
+        opt_f = torch.compile(f)
+
+        ref = f(x)
+        act = opt_f(x)
+
+        self.assertTrue(same(ref, act, tol=1e-3), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            1,
+            metrics.codegen_mix_order_reduction,
+            "square reductions with opposite common-read access should use mix-order",
         )
 
     def test_xmask(self):
@@ -828,6 +877,50 @@ class MixOrderReductionTest(TestBase):
         # a single mix order reduction kernel get shared
         FileCheck().check_count("MixOrderReductionGrid", 1, exactly=True).run(wrapper)
 
+    @parametrize("split_reductions", (False, True))
+    def test_chained_modulated_norm_shared_table(self, split_reductions):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/193061
+
+        The grads of the chunk()-ed shared table assemble into one buffer via
+        cat, so the mix-order reduction outputs have NonOwningLayout. The
+        final reduction must write through the view instead of rebinding the
+        name, otherwise the second norm's slice grads are never written.
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        M, N = 32768, 512
+        eps = 1e-6
+
+        def f(x, table):
+            mods = table.chunk(4, dim=1)
+            for i in range(2):
+                shift, scale = mods[2 * i], mods[2 * i + 1]
+                x = x + (F.layer_norm(x, x.shape[-1:], eps=eps) * (1 + scale) + shift)
+            return x.square().mean()
+
+        x = torch.randn(1, M, N, device=GPU_TYPE)
+        table = torch.randn(1, 4, N, device=GPU_TYPE, requires_grad=True)
+
+        (ref_grad,) = torch.autograd.grad(f(x, table), table)
+        act = torch.compile(
+            f,
+            options={
+                "split_reductions": split_reductions,
+            },
+        )(x, table)
+        (act_grad,), (wrapper,) = utils.run_and_get_code(
+            lambda: torch.autograd.grad(act, table)
+        )
+
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+        # the slice grads alias the shared cat buffer: the final reduction
+        # must be written through the view, never bound to a fresh tensor
+        FileCheck().check(".copy_(workspace_").run(wrapper)
+        self.assertNotIn("= workspace_", wrapper)
+        torch.testing.assert_close(ref_grad, act_grad, atol=1e-4, rtol=1e-4)
+
     @inductor_config.patch(split_reductions=False)
     def test_dont_fuse_nodes_that_introduce_producer_consumer_rel(self):
         """
@@ -898,7 +991,12 @@ class MixOrderReductionTest(TestBase):
         mock_get_common_read.return_value = "common_read"
         from sympy import Integer
 
-        mock_get_numel_rnumel.return_value = (Integer(1), Integer(1))
+        mock_get_numel_rnumel.side_effect = [
+            (Integer(2), Integer(1)),
+            (Integer(1), Integer(2)),
+            (Integer(2), Integer(1)),
+            (Integer(1), Integer(2)),
+        ]
         mock_is_split_reduction.return_value = False
 
         mock_node_1.read_writes = mock.Mock()
@@ -1339,10 +1437,11 @@ class OverFusionTest(TestBase):
     regression. See #179423.
     """
 
-    @skipIfXpu(
-        msg="XPU selects Flash Attention for SDPA backward; the current SYCL TLA"
-        "implementation does not guarantee precision on PVC. Re-enable once oneDNN"
-        "adds SDPA backward support. See https://github.com/intel/torch-xpu-ops/issues/4094"
+    @unittest.skipIf(
+        TEST_XPU and not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+        "XPU: SYCL TLA backward does not guarantee precision on non-Xe2 devices. "
+        "Re-enable once oneDNN adds SDPA backward support. "
+        "See https://github.com/intel/torch-xpu-ops/issues/4094",
     )
     @inductor_config.patch(
         {

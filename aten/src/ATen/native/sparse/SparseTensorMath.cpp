@@ -19,6 +19,8 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/SparseTensorUtils.h>
 
+#include <numeric>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -32,7 +34,6 @@
 #include <ATen/ops/_sparse_sum_native.h>
 #include <ATen/ops/_sparse_sparse_matmul.h>
 #include <ATen/ops/_sparse_mm_reduce_impl.h>
-#include <ATen/ops/_sparse_mm_reduce_impl_native.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/addmm.h>
@@ -69,7 +70,6 @@
 #include <ATen/ops/zero_native.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
-#include <ATen/ops/zeros_native.h>
 #include <ATen/ops/index.h>
 #endif
 
@@ -1867,7 +1867,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
           int64_t input_idx = input_indices_1D_accessor[i];
           int64_t l = 0, r = grad_nnz - 1;
           while (l <= r) {
-            int64_t m = l + (r - l) / 2;
+            int64_t m = std::midpoint(l, r);
             if (grad_indices_1D_accessor[m] == input_idx) {
               // grad_input_values[i].copy_(grad_values_expand[m])
               copy_iter_local.unsafe_replace_operand(0, gIv_data + i * gIv_stride);
@@ -1924,7 +1924,7 @@ static scalar_t binary_search_strided_rightmost(scalar_t search_val, TensorAcces
   bool done_searching = false;
 
   while (!done_searching) {
-    mid_ind = left_ind + (right_ind - left_ind) / 2;
+    mid_ind = std::midpoint(left_ind, right_ind);
     scalar_t mid_val = sorted_arr_accessor[sorted_arr_begin_idx + mid_ind];
 
     if (mid_val > search_val) {
