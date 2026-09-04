@@ -4184,6 +4184,73 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             )
             torch._dynamo.reset()
 
+    def test_numpy_operator_with_default_device_context(self):
+        def fn(input_image):
+            rounded = np.round(input_image)
+            return rounded * 64.0, 64.0 * rounded, None
+
+        x = np.ones((2, 3, 4), dtype=np.uint8)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        # CPU is sufficient to exercise DeviceContext/TorchFunctionMode handling.
+        with torch.device("cpu"):
+            result = opt_fn(x)
+
+        expected = fn(x)
+        self.assertEqual(type(result[0]), np.ndarray)
+        self.assertEqual(type(result[1]), np.ndarray)
+        self.assertEqual(result, expected)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_operator_ignores_torch_function_mode(self):
+        class RewriteMultiply(torch.overrides.TorchFunctionMode):
+            def __init__(self):
+                self.multiply_count = 0
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if func in (torch.mul, torch.multiply):
+                    self.multiply_count += 1
+                    return args[0]
+                return func(*args, **(kwargs or {}))
+
+        def fn(x):
+            return x * 4.0
+
+        x = np.arange(4, dtype=np.float32)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        mode = RewriteMultiply()
+
+        with mode:
+            result = opt_fn(x)
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(mode.multiply_count, 0)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_operator_with_tensor_subclass(self):
+        class DisabledTorchFunctionTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+        def fn(array, tensor):
+            return tensor * array
+
+        array = np.arange(4, dtype=np.float32)
+        tensor = torch.arange(1, 5, dtype=torch.float32).as_subclass(
+            DisabledTorchFunctionTensor
+        )
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        with torch.device("cpu"):
+            expected = fn(array, tensor)
+            result = opt_fn(array, tensor)
+
+        self.assertIs(type(result), type(expected))
+        self.assertEqual(result, expected)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_numpy_ndarray_graph_break(self):
         def fn(x):
             a = x.numpy()
