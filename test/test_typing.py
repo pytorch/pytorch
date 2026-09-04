@@ -252,6 +252,18 @@ class TestTyping(TestCase):
             _test_reveal(path, marker, error_line, 1 + lineno)
 
 
+class TestGeneratedTypingFiles(TestCase):
+    def test_native_function_type_tests_are_current(self) -> None:
+        from tools.typing.gen_native_function_type_tests import (
+            DEFAULT_OUTPUT,
+            render_native_function_type_tests,
+        )
+
+        with open(DEFAULT_OUTPUT, encoding="utf-8") as f:
+            actual = f.read()
+        self.assertEqual(actual, render_native_function_type_tests())
+
+
 instantiate_parametrized_tests(TestTyping)
 
 if __name__ == "__main__":
