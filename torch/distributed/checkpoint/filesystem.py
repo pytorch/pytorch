@@ -269,8 +269,12 @@ class _StorageWriterTransforms:
                 return self.raw.write(b)
 
             def close(self):
+                # Flushes any internal buffers of this writer or attached transformers,
+                # but does NOT eagerly flush the underlying raw file/cloud stream per item.
+                # The raw stream will be cleanly flushed and closed once all items in the
+                # file are written, avoiding unnecessary flush/sync overhead (especially on
+                # cloud storage backends like GCS/S3).
                 self.flush()
-                self.raw.flush()
                 # but not close.
 
         transform_to = cast(IO[bytes], NoCloseWriter(raw_stream))
