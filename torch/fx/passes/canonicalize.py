@@ -45,11 +45,17 @@ _IN_PLACE_OPERATORS = frozenset(
 
 
 # Operator namespaces whose ordering relative to surrounding compute is
-# load-bearing (comm/compute overlap, in-place collective reuse). Deliberately
-# limited to functional collectives; `symm_mem` and `_dtensor` have similar
-# concerns but are not covered yet.
+# load-bearing (comm/compute overlap, in-place collective reuse). `symm_mem`
+# additionally carries synchronization primitives (nvshmem_wait_for_signal),
+# where reordering compute across the wait breaks the sync contract rather than
+# just costing overlap.
 _ORDER_SENSITIVE_NAMESPACES = frozenset(
-    {"_c10d_functional", "_c10d_functional_autograd"}
+    {
+        "_c10d_functional",
+        "_c10d_functional_autograd",
+        "symm_mem",
+        "_dtensor",
+    }
 )
 
 
