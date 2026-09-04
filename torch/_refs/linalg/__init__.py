@@ -42,7 +42,7 @@ def _check_norm_dtype(dtype: torch.dtype | None, x_dtype: torch.dtype, fn_name: 
     Checks related to the dtype kwarg in `linalg.*norm` functions
     """
     if dtype is not None:
-        torch._check(
+        torch._check_not_implemented(
             utils.is_float_dtype(dtype) or utils.is_complex_dtype(dtype),
             lambda: f"{fn_name}: dtype should be floating point or complex. Got {dtype}",
         )
