@@ -426,11 +426,15 @@ class TestPublicBindings(TestCase):
                 "torch._native.ops.scatter_add.",
                 "torch._native.ops.topk.",
                 "torch._vendor.quack",
-                "torch.profiler._cupti.",
+                "torch.profiler._cuspy.",
             )
+            dsl_names = ("triton", "flydsl")
             if (
                 mod in private_allowlist
-                or (mod.startswith("torch._native.ops.") and "triton" in mod)
+                or (
+                    mod.startswith("torch._native.ops.")
+                    and any(dsl in mod for dsl in dsl_names)
+                )
                 or mod.startswith(cuda_dep_prefixes)
             ):
                 if self._is_mod_public(mod):

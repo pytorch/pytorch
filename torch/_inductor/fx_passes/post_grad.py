@@ -55,6 +55,7 @@ from ..utils import (
     decode_device,
     get_all_devices,
     get_gpu_type,
+    is_bf16x9_matmul,
     is_gpu,
     is_pointwise_use,
     OPTIMUS_EXCLUDE_POST_GRAD,
@@ -998,6 +999,10 @@ def is_valid_mm_plus_mm(match: Match):
 
     if mat1_val is None or mat2_val is None or mat3_val is None or mat4_val is None:
         return False
+    if is_bf16x9_matmul(mat1_val.device.type, mat1_val.dtype) or is_bf16x9_matmul(
+        mat3_val.device.type, mat3_val.dtype
+    ):
+        return False
 
     *_b1, m1, k1 = mat1_val.shape
     *_b2, k2, n1 = mat2_val.shape
@@ -1027,9 +1032,19 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
-def pointless_cumsum_non_scalar_check(match: Match) -> bool:
+def pointless_cumsum_check(match: Match) -> bool:
     # Scalar cumsum is already handled directly by lowering.cumsum.
-    return len(match.kwargs["shape"]) > 0
+    if len(match.kwargs["shape"]) == 0:
+        return False
+    # A symbolic fill_value arrives as an fx Node, which the replacement's int() and
+    # * both reject. A boolean full stays folded: bool(Node) is True, the right
+    # saturation for every nonzero fill and the wrong one for a zero fill, but
+    # declining is worse today - inductor's own full(..., dtype=bool) lowering drops
+    # the bool cast for a symbolic int fill (#194062). Drop the exemption when that
+    # lands.
+    return is_boolean_dtype(match.kwargs["dtype"]) or not isinstance(
+        match.kwargs["fill_value"], torch.fx.Node
+    )
 
 
 @register_graph_pattern(
@@ -1048,7 +1063,7 @@ def pointless_cumsum_non_scalar_check(match: Match) -> bool:
         KeywordArg("dim"),
         _users=MULTIPLE,
     ),
-    extra_check=pointless_cumsum_non_scalar_check,
+    extra_check=pointless_cumsum_check,
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
 )
@@ -1325,6 +1340,10 @@ def remove_noop_ops(graph: torch.fx.Graph):
     inputs = OrderedSet[torch.fx.Node]()
     input_storages = OrderedSet[int | None]()
     output_storages = OrderedSet[int | None]()
+    partitioner_tags = [node.meta.get("partitioner_tag") for node in graph.nodes]
+    is_joint_graph = "is_forward" in partitioner_tags and (
+        "is_backward" in partitioner_tags or "must_be_in_backward" in partitioner_tags
+    )
 
     for node in graph.find_nodes(op="placeholder"):
         inputs.add(node)
@@ -1349,6 +1368,15 @@ def remove_noop_ops(graph: torch.fx.Graph):
             else:
                 src = src_index(node.args)
             if not isinstance(src, torch.fx.Node):
+                continue
+
+            # AOTAutograd inserts this clone so backward can save the value before
+            # the runtime epilogue mutates the input.
+            if (
+                is_joint_graph
+                and node.target is aten.clone.default
+                and src.meta.get("aot_runtime_epilogue_input_mutation", False)
+            ):
                 continue
 
             if node.target is torch.ops.aten.copy.default:
@@ -1476,8 +1504,9 @@ def _propagate_triton_eager_input_vals(
         return
 
     _, eager_kwargs = eager_input_vals
+    dropped = ("tensors_to_clone", "tensor_bases")
     mutation_eager_kwargs = {
-        key: value for key, value in eager_kwargs.items() if key != "tensors_to_clone"
+        key: value for key, value in eager_kwargs.items() if key not in dropped
     }
     # The dense decomposition introduces clones plus the mutation HOP, but only
     # the mutation HOP should receive the eager-mode tensor metadata.

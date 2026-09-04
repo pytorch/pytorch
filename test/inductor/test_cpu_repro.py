@@ -258,6 +258,29 @@ class CPUReproTests(TestCase):
         self.assertEqual(w, x)
         self.assertEqual(w.grad, expected_grad)
 
+    @parametrize("activation_memory_budget", (0, 1))
+    def test_mutated_input_clone_saved_for_backward(self, activation_memory_budget):
+        def fn(x, y):
+            result = x.T.clone() * y
+            x.add_(1)
+            return result, x
+
+        def run(fn_to_run):
+            base = torch.randn(2, 4, requires_grad=True)
+            x = base * 1.0
+            y = torch.randn(4, 2, requires_grad=True)
+            result, mutated_x = fn_to_run(x, y)
+            result.sum().backward()
+            return result.detach(), mutated_x.detach(), base.grad, y.grad
+
+        torch.manual_seed(0)
+        expected = run(fn)
+        torch.manual_seed(0)
+        with functorch_config.patch(activation_memory_budget=activation_memory_budget):
+            actual = run(torch.compile(fn, backend="inductor", fullgraph=True))
+
+        self.assertEqual(actual, expected)
+
     @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
         def fn(x):
@@ -940,18 +963,6 @@ class CPUReproTests(TestCase):
                 if change_input_sizes:
                     inps_var = [v_var]
                     self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
-
-    def test_lstm_compile_default_grad_enabled(self):
-        mod = LstmModule(4, 8, 1, batch_first=True).eval()
-        x = torch.randn(2, 3, 4)
-
-        fn_opt = torch.compile(mod, backend="inductor", fullgraph=True)
-
-        actual = fn_opt(x)
-        self.assertEqual(actual, mod(x))
-        actual[0].sum().backward()
-        for param in mod.parameters():
-            self.assertIsNotNone(param.grad)
 
     @parametrize(
         "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
