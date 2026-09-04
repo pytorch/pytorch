@@ -1894,7 +1894,7 @@ static double std_var_all_cpu(const Tensor& self, double correction, bool take_s
   const double sum_dx2 = at::parallel_reduce(
       0, iter.numel(), at::internal::GRAIN_SIZE, 0.0, reduction, std::plus<>{});
 
-  const auto var = [&] () __ubsan_ignore_float_divide_by_zero__ {
+  const auto var = [&] () {
     return sum_dx2 / std::max(0.0, self.numel() - correction);
   }();
   const auto result = take_sqrt ? std::sqrt(var) : var;
