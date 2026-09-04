@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
-"""Chrome-trace observer for the CUPTI activity multiplexer: accumulates the monitor's
-decoded records + trace metadata into the window dict monitor_trace splices into a Kineto
-trace. Collection, annotation join, and window management live here."""
+"""Chrome-trace observer for the CUPTI activity multiplexer: accumulates Cuspy's
+decoded records + trace metadata into the window dict ``trace`` splices into a
+Kineto trace. Collection, annotation join, and window management live here."""
 
 from __future__ import annotations
 
@@ -16,15 +16,14 @@ import numpy as np
 from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
 import torch
-from torch.profiler._cupti.cupti_python import OVERHEAD_KIND_NAMES
-from torch.profiler._cupti.monitor_trace import merge_trace_window_into_chrome_trace
-from torch.profiler._cupti.observers.base import (
-    CuptiMonitorObserver,
+from torch.profiler._cuspy.cupti_python import OVERHEAD_KIND_NAMES
+from torch.profiler._cuspy.observers.base import (
+    CuspyObserver,
     default_graph_annotation_resolver,
     ObserverAnnotationSettings,
 )
-from torch.profiler._cupti.observers.observation_window import WindowFinalizerMixin
-from torch.profiler._cupti.records import (
+from torch.profiler._cuspy.observers.observation_window import WindowFinalizerMixin
+from torch.profiler._cuspy.records import (
     Api,
     CudaEvent,
     Environment,
@@ -38,6 +37,7 @@ from torch.profiler._cupti.records import (
     Overhead,
     Sync,
 )
+from torch.profiler._cuspy.trace import merge_trace_window_into_chrome_trace
 
 
 if TYPE_CHECKING:
@@ -239,7 +239,7 @@ ENVIRONMENT_FIELDS: dict[ActivityKind, set[Field]] = {
 }
 
 
-class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
+class ProfilerObserver(WindowFinalizerMixin, CuspyObserver):
     """Accumulates decoded records and exports them as chrome-trace windows. A window opens
     at trace start (:meth:`open_window`), closes at stop (:meth:`close_window`), and its
     merge + write is deferred until the records are naturally delivered -- no device sync on
@@ -277,7 +277,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         # shared process-global recorder; None unless enabled. See _attach_event_node_ids.
         self._event_node_recorder: Any = None
         if enable_event_node_ids:
-            from torch.profiler._cupti._event_nodes import _EventNodeRecorder
+            from torch.profiler._cuspy._event_nodes import _EventNodeRecorder
 
             self._event_node_recorder = _EventNodeRecorder()
             self._event_node_recorder.arm()
@@ -306,7 +306,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             selection,
             annotations=ObserverAnnotationSettings(
                 graph_annotation_resolver=default_graph_annotation_resolver,
-                # Node->node dependency arrows are opt-in at the monitor level (extra work at
+                # Node->node dependency arrows are opt-in at Cuspy level (extra work at
                 # graph instantiate + arrow rendering): the observer records the topology into
                 # its own map and draws the arrows only when this is set.
                 record_graph_dependencies=enable_graph_dependencies,
@@ -329,8 +329,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
                 self._destroy_hook_handles.append(
                     register_graph_destroy_hook(recorder.purge_exec_ids)
                 )
-        # Opt-in PM sampling (true SM-active % + DRAM-throughput %) is a feature of the CUPTI
-        # monitor: it registers us as a consumer (with our metrics) of the current device's shared
+        # Opt-in PM sampling (true SM-active % + DRAM-throughput %) is a Cuspy feature:
+        # it registers us as a consumer (with our metrics) of the current device's shared
         # session, delivering decoded frames to on_pm_samples (they render as GPU counter tracks).
         # Off by default; also a no-op when no metrics are configured (pm_metrics).
         self._pm_metrics = list(pm_metrics or [])
@@ -344,8 +344,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         # records (via _timed_frames); no separate buffer. Per-device max start_ns delivered:
         # a monotonic guard so each sample is enqueued at most once.
         self._pm_last_ns: dict[int, int] = {}
-        if self._pm_enabled and self._monitor is not None:
-            self._monitor.request_pm_sampling(self.on_pm_samples, self._pm_metrics)
+        if self._pm_enabled and self._cuspy is not None:
+            self._cuspy.request_pm_sampling(self.on_pm_samples, self._pm_metrics)
 
     def _boundary_clock_ns(self) -> int:
         # Stamp the boundary in the converted clock the events' start_ns use (convert_time
@@ -395,9 +395,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         for kind_str, frame in ext:
             if kind_str == "external_correlation":
                 self._resolve_user_external_ids(frame)
-        meta = (
-            self._monitor.take_external_metadata() if self._monitor is not None else {}
-        )
+        meta = self._cuspy.take_external_metadata() if self._cuspy is not None else {}
         with self._lock:
             self._timed_frames.extend(timed)
             self._ext_frames.extend(ext)
@@ -406,14 +404,14 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
 
     def _resolve_user_external_ids(self, frame: dict[str, Any]) -> None:
         """Override each EXTERNAL_CORRELATION row's ``user_external_id`` with the innermost
-        ENCLOSING named-region id (via the monitor's live active-id chain), so a kernel
+        ENCLOSING named-region id (via Cuspy's live active-id chain), so a kernel
         nested below a named region gets that region's name. Defaults to the raw id."""
-        if self._monitor is None:
+        if self._cuspy is None:
             return
         names = set(self.annotation_names())
         if not names:
             return
-        chain = self._monitor.external_id_chain
+        chain = self._cuspy.external_id_chain
         resolved = frame["user_external_id"].tolist()
         cache: dict[int, int] = {}
         for i, eid in enumerate(frame["external_id"].tolist()):
@@ -435,10 +433,10 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         with self._lock:
             self._thread_resource_map.setdefault(pid, {})[opaque_tid] = sys_tid
 
-    # --- async window API (the cupti_monitor profiler backend drives these) ----
+    # --- async window API (the cuspy profiler backend drives these) ----
 
     def on_pm_samples(self, frame: dict[str, Any]) -> None:
-        # Monitor flush-thread hook: enqueue the frame as a timed frame so each finalized window
+        # Cuspy flush-thread hook: enqueue the frame as a timed frame so each finalized window
         # slices its [start, boundary) samples (a frame spanning a boundary is split like any other
         # timed frame -- see _finalize_window). Keep only samples newer than the last per device:
         # decode drains (each delivered once, in increasing start_ns), so this is a cheap monotonic
@@ -504,7 +502,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
             if w is None:
                 return
             w["cpu"] = os.fspath(cpu_trace_path)
-            # Monitor traces are always gzipped (chrome JSON or .pftrace alike); the writer
+            # Cuspy traces are always gzipped (chrome JSON or .pftrace alike); the writer
             # keys gzip + format off the suffix.
             out = os.fspath(output_path)
             w["out"] = out if out.endswith(".gz") else out + ".gz"
@@ -517,8 +515,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
         cover the windows, force-draining only if it stalls."""
         # Release PM sampling first: its final tail decode must land in _timed_frames BEFORE the
         # windows finalize, so those samples can be sliced into the closing window.
-        if self._pm_enabled and self._monitor is not None:
-            self._monitor.release_pm_sampling(self.on_pm_samples)
+        if self._pm_enabled and self._cuspy is not None:
+            self._cuspy.release_pm_sampling(self.on_pm_samples)
         if getattr(self, "_boundaries", None) is not None:
             sync = force
             if not force:
@@ -543,8 +541,8 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
 
     def _collect_delivered(self, *, sync: bool) -> None:
         # Events build in _on_activities as buffers arrive; only flush the tail at teardown.
-        if sync and self._monitor is not None:
-            self._monitor.flush(sync=True)
+        if sync and self._cuspy is not None:
+            self._cuspy.flush(sync=True)
 
     def _window_watermark_ns(self) -> int:
         with self._lock:
@@ -632,7 +630,7 @@ class ProfilerObserver(WindowFinalizerMixin, CuptiMonitorObserver):
 
 
 # --- raw columns -> named-column frames --------------------------------------
-# Turn the monitor's per-kind columns ({field_id: array}) into named numpy columns the merge
+# Turn Cuspy's per-kind columns ({field_id: array}) into named numpy columns the merge
 # consumes directly. Owns column shape, demangling, clock conversion, and graph-annotation
 # resolution -- on the worker thread while the active-id chain is live.
 
@@ -730,7 +728,7 @@ def _attach_event_node_ids(
     ce = columns.get("cuda_event")
     if ce is None or not len(ce["event_id"]):
         return
-    from torch.profiler._cupti._event_nodes import resolve_window
+    from torch.profiler._cuspy._event_nodes import resolve_window
 
     corr_exec_pairs: list[tuple[int, int]] = []
     for kind_str in ("kernel", "gpu_memcpy", "gpu_memset"):
@@ -858,7 +856,7 @@ def _demangle_column(names: Any) -> Any:
 def _resolve_annotation_column(resolver, gnid: Any) -> Any:
     """Per-row graph annotation as an object column. None resolver -> all-None column, no
     calls. The resolver is memoized per graph_node_id by the observer (see
-    CuptiMonitorObserver._annotation_resolver), so distinct nodes resolve once for its
+    CuspyObserver._annotation_resolver), so distinct nodes resolve once for its
     lifetime."""
     n = len(gnid)
     out = np.empty(n, dtype=object)
@@ -895,8 +893,8 @@ LOGICAL_LANE_BASE = 100_000
 def _resolve_lane_columns(lane_resolver, frame: dict[str, Any]) -> Any:
     """Per-row (logical_lane, lane_name) for graphed ops. Graphed rows (graph_node_id != 0)
     get the resolver's (lane, name), or keep their CUDA stream when it returns None; eager rows
-    keep their CUDA stream and no name (the monitor names those "stream N"). The resolver is
-    keyed and memoized on graph_node_id by the observer (see CuptiMonitorObserver._lane_resolver),
+    keep their CUDA stream and no name (Cuspy names those "stream N"). The resolver is
+    keyed and memoized on graph_node_id by the observer (see CuspyObserver._lane_resolver),
     so distinct nodes resolve once for its lifetime.
 
     A resolver returns an ordinal in its own space, which is placed in the reserved lane range
@@ -1115,7 +1113,7 @@ def _environment_columns(cols, convert, resolver):
     del resolver
     # DATA is the union's first 8 bytes (u64): the primary metric pair (e.g. POWER ->
     # power | powerLimit<<32, SPEED -> smClock | memoryClock<<32). Split by environment_kind
-    # in the consumer (monitor_trace) into the counter tracks.
+    # in the consumer (trace) into the counter tracks.
     return {
         "start_ns": convert(cols[Environment.TIMESTAMP.id]),
         "device_id": cols[Environment.DEVICE_ID.id].astype(np.int64),
