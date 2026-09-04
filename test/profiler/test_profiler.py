@@ -2170,6 +2170,16 @@ class TestProfiler(TestCase):
             ),
             {"PERFORMANCE_METRICS": ""},
         )
+        with (
+            patch("torch.cuda.current_device", return_value=3),
+            patch("torch.profiler.profiler.prof.profile") as kineto_profile,
+        ):
+            p.prepare_trace()
+        self.assertEqual(
+            kineto_profile.call_args.kwargs["_profiler_extensions"]
+            ["PERFORMANCE_METRICS_DEVICE_ID"],
+            "3",
+        )
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_invalid_type_name(self):
