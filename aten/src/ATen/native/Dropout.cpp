@@ -82,6 +82,9 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
     return multiply<inplace>(input, at::zeros({}, input.options()));
   }
 
+  TORCH_CHECK_TYPE(input.is_floating_point() || input.is_complex(),
+      "dropout only supports floating point and complex dtypes, but got ", input.scalar_type());
+
   at::Tensor b; // used for alpha_dropout only
   // The dropout mask is real-valued; for complex inputs allocate it in the real
   // value type so bernoulli_ (which has no complex kernel) can fill it.
