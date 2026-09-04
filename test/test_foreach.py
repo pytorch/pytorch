@@ -2233,7 +2233,6 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
 
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     @parametrize(
         "label,a_dtype,b_dtype,K,expected",
         [
@@ -2258,7 +2257,6 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
         self.assertEqual(_can_use_nvmath_cublaslt_grouped_mm(A, B), expected)
 
     # One case per _foreach_mm_route branch; reads only metadata, does not require GPU.
-    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     @parametrize(
         "label,dtype,shapes,available,expected",
         [
