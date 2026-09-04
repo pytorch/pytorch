@@ -866,7 +866,9 @@ class SideEffects:
             # Includes collections.OrderedDict and its subclasses; the
             # UserDefinedDictVariable picks an OrderedDict-backed store.
             variable_cls = variables.UserDefinedDictVariable
-        elif issubclass(user_cls, (set, frozenset)):
+        elif issubclass(user_cls, frozenset):
+            variable_cls = variables.UserDefinedFrozensetVariable
+        elif issubclass(user_cls, set):
             variable_cls = variables.UserDefinedSetVariable
         elif issubclass(user_cls, tuple):
             if is_namedtuple_cls(user_cls):
