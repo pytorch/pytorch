@@ -59,7 +59,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     set_default_dtype,
-    skipIfRocmVersionAtLeast,
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
@@ -3304,7 +3303,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
 
-    @skipIfRocmVersionAtLeast([7, 14])
     @onlyAccelerator
     @largeTensorTest("12GB")
     @serialTest()
@@ -4021,6 +4019,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         and _get_cudnn_version() is not None
         and (91000 < _get_cudnn_version() < 91500)
     )
+    @expectedFailureMPS
     def test_depthwise_conv_64bit_indexing(self, device):
         x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
             memory_format=torch.channels_last
