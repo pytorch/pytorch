@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import dataclasses
+import gc
 import importlib
 import inspect
 import os
@@ -112,62 +113,6 @@ _BINDING_STACK_CASES = {
 }  # fmt: skip
 
 
-# One source LINE, so the two entries agree on file AND lineno: what separates
-# them can only come from the code body. This is the ACT2FN shape.
-# The stateless corpus shapes are plain functions; precompile_capture takes
-# either, and only the guard sources matter here.
-# The modules the corpus needs on disk, because a dispatch read off another
-# module cannot be spelled inside this file. Written under one directory so
-# they import each other by plain name, exactly as a user package would.
-# Every shape below was once a silent wrong answer on a serving machine that
-# somebody had to find by hand. _is_risky_drop regressed three review rounds
-# running -- each fix closed the previous round's false negative and opened a
-# new one -- so the shapes live in a table rather than in prose: adding one is
-# a single entry, and nothing here may ever stop being flagged. Each row names
-# the guard sources (by suffix) the risky-drop report must carry.
-# The other half of the corpus, and the half that keeps the report worth
-# reading: the lint only warns by default, so if ordinary code trips it the
-# warning is noise nobody audits and nobody ever opts into enforcement. Each
-# row names the identity guards (by suffix) that ARE dropped without being
-# flagged: torch internals, stdlib modules and their attributes, a global bound
-# to a def of its own name, reads off Dynamo's import aliases and its builtins
-# dict.
-# A value crossing a graph break or arriving as a non-tensor argument is
-# guarded by equality, so the artifact only serves inputs reproducing it, and
-# nothing else in the summary says so. Model config -- LayerNorm eps, Dropout p,
-# a plain int attribute -- is CONSTANT_MATCH too but constant for the model the
-# artifact is loaded onto; counting it would flag every model. Rows: builder,
-# args, the wont_generalize report, and a (type, source substring) guard that
-# must have been KEPT, so a row cannot pass by Dynamo not emitting the guard.
-# Rows: builder, example_inputs, text the invariants file must contain, and a
-# pattern it must not -- object ids, the per-process counter in Dynamo's
-# builtins-dict name, and the address install_global_by_id bakes into an
-# identifier ("<prefix>_<id(value)>_c<n>": `type(x) is torch.Tensor` installs
-# one) are all normalized so the file is stable enough to commit and diff.
-# Shapes where the guard that SPLIT two compilations must show up as varying
-# and never as an invariant of both. Rows: builder, capture kwargs, calls,
-# substrings some varying fact must carry, substrings some invariant fact must
-# carry, substrings no invariant fact may carry.
-# A pair that differs only after the break, so a resume function borrowed from
-# the wrong artifact still runs and still returns a number.
-# Content-addressing the resume code tells the first pair apart, but not two
-# instances of ONE model class: the same script captured in two processes
-# mints the same __resume_at_<offset>_<n> AND byte-identical resume code.
-# Rows: fn, the captured variants as (PRECOMPILE_CONFIG mode, extra args), one
-# uncaptured variant, guard types that must be emitted AND kept, and whether
-# save() has to be told the drops it reports are acknowledged risky ones.
-# functools.wraps copies __qualname__, so an instrumented wrapper around a
-# different callable passes the qualname check while being a different code
-# object.
-# CompilePackage rebinds the stored guards onto whatever callable it is given,
-# so load has to refuse anything but the captured callable itself; a __code__
-# that is present and None gets past the capture-side hasattr check.
-# How the saved artifact is damaged (None: the path is a directory, the
-# pre-single-file layout) and the error precompile_load must name it with.
-# A legacy package's empty frame installs a skip only in its region; whatever
-# global strategy the frame had before the load, or gained while loaded, has
-# to be what unload leaves. Rows: applied before the load, applied after it,
-# the (cur, recursive) strategy expected after unload.
 @instantiate_parametrized_tests
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def setUp(self):
@@ -415,6 +360,28 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(module.__dict__.get("g"), want)
         self.assertEqual(dynamo_package._GLOBAL_BINDINGS.get(module, {}), {})
 
+    def test_joining_a_dead_owners_binding_survives_its_cleanup(self):
+        # A package collected without uninstall() parks its cleanup when the
+        # registry lock is busy. A later install of the same artifact writes the
+        # same builtins dict under the same name; the drain must find the new
+        # owner on the binding and keep the name, not delete it as the dead
+        # package's leftover.
+        module = types.ModuleType("test_precompile_dead_owner")
+        shared = {}
+        dead = self._bare_package()
+        dead._install_global(module, "g", shared)
+        installed = dead._installed_globals
+        del dead
+        gc.collect()
+        dynamo_package._DEAD_PACKAGES.append(
+            dynamo_package._DeadPackageState(installed, [])
+        )
+        live = self._bare_package()
+        live._install_global(module, "g", shared)
+        self.assertIs(module.__dict__.get("g"), shared)
+        live.uninstall()
+        self.assertNotIn("g", module.__dict__)
+
     def test_source_graph_module_copies_are_isolated(self):
         # _src and the exec'd forward are shared between copies; everything else
         # nn.Module keeps on an instance is state, hook dicts included, and a
@@ -447,14 +414,55 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(original(x), x + 100)
         self.assertEqual(dup(x), x + 1)  # live isolation
         self.assertEqual(pickle.loads(pickle.dumps(dup))(x), x + 1)
-        # And an instance pickles its CURRENT state, not its load-time state.
+        # And an instance pickles its CURRENT parameters/buffers/submodules,
+        # not its load-time ones (other nn.Module state still comes from _src).
         self.assertEqual(pickle.loads(pickle.dumps(original))(x), x + 100)
 
-    # Every shape found to split a compilation while the report called it an
-    # invariant. The fingerprint has failed open three times -- shapes, then
-    # python type and conj/neg, then the dispatch key set -- each fix revealing
-    # the next, so the shapes are asserted here rather than described. A new
-    # one is one line. See _value_fingerprint.
+    def test_eager_artifact_round_trips_a_hop_graph_as_source(self):
+        # GraphModule.__reduce__ re-traces the generated source at load; cond
+        # rejects the Proxy and autocast enter/exit EXECUTE and leave no node.
+        # The top level must travel as source, its HOP bodies as real Graphs.
+        from torch._dynamo.precompile_context import (
+            _SourceGraphModule,
+            EagerCacheArtifact,
+        )
+
+        def fn(x):
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                y = torch.cond(x.sum() > 0, lambda t: t.sin(), lambda t: t.cos(), (x,))
+            return y + 1
+
+        gms = []
+
+        def backend(gm, example_inputs):
+            gms.append(gm)
+            return gm.forward
+
+        x = torch.randn(3)
+        torch.compile(fn, backend=backend, fullgraph=True)(x)
+        (gm,) = gms
+        artifact = EagerCacheArtifact(key="k", content=gm.forward)
+        loaded = pickle.loads(pickle.dumps(artifact)).after_deserialization()
+        module = loaded.__self__
+        self.assertIsInstance(module, _SourceGraphModule)
+        self.assertFalse(hasattr(module, "graph"))
+        self.assertTrue(module._modules)
+        for sub in module._modules.values():
+            self.assertIsInstance(sub, torch.fx.GraphModule)
+            self.assertGreater(len(sub.graph.nodes), 0)
+        self.assertEqual(loaded(x), gm.forward(x))
+        self.assertEqual(loaded(-x.abs()), gm.forward(-x.abs()))
+        # Re-serializing a loaded artifact goes through _SourceGraphModule.__reduce__.
+        reloaded = pickle.loads(pickle.dumps(pickle.loads(pickle.dumps(artifact))))
+        self.assertEqual(reloaded.after_deserialization()(x), gm.forward(x))
+
+    def test_take_artifact_removes_the_staged_backend(self):
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+
+        PrecompileContext.record_artifact(EagerCacheArtifact(key="k", content=None))
+        self.assertEqual(PrecompileContext.take_artifact("k").key, "k")
+        self.assertIsNone(PrecompileContext.take_artifact("k"))
+        self.assertIsNone(PrecompileContext.serialize_artifact_by_key("k"))
 
 
 if __name__ == "__main__":
