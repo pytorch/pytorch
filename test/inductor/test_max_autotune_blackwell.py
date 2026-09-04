@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import unittest
+from unittest import mock
 
 import torch
 from torch._inductor import config
@@ -477,6 +478,96 @@ class TestMaxAutotuneBlackwell(TestCase):
             FileCheck().check_count(make_desc_api, 1, exactly=True).run(code[0])
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+
+    def test_resolved_host_tma_descriptor_args_symbolic_block_shape(self):
+        from types import SimpleNamespace
+
+        from torch._inductor.codegen.triton import TritonKernel
+
+        # A block shape naming an autotuned kernel arg stays a name for the
+        # launcher to look up per config; anything else resolves to a value.
+        signature = [SimpleNamespace(name="XBLOCK")]
+        kernel = SimpleNamespace(
+            args=SimpleNamespace(python_argdefs=lambda: ([], [], signature, [])),
+            persistent_reduction=False,
+            host_tma_descriptor_args={
+                "in_ptr0": SimpleNamespace(
+                    block_shape=["XBLOCK", 128, "YBLOCK"],
+                    shape=[1024, "s0"],
+                    strides=["s0", 1],
+                )
+            },
+        )
+
+        resolved = TritonKernel.resolved_host_tma_descriptor_args(kernel)
+
+        self.assertEqual(
+            resolved["in_ptr0"],
+            {
+                "block_shape": ["XBLOCK", 128, "YBLOCK"],
+                "shape": [1024, "s0"],
+                "strides": ["s0", 1],
+            },
+        )
+        # An already-resolved dict passes through untouched.
+        kernel.host_tma_descriptor_args = {"in_ptr1": {"block_shape": [64]}}
+        self.assertEqual(
+            TritonKernel.resolved_host_tma_descriptor_args(kernel),
+            {"in_ptr1": {"block_shape": [64]}},
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_host_side_tma_signature_upgraded_at_precompile(self):
+        from torch._inductor.runtime import triton_heuristics
+
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        a = torch.randn(1024, 1024).to(torch.float16).to(GPU_TYPE)
+        b = torch.randn(1024, 1024).to(torch.float16).to(GPU_TYPE)
+
+        captured: list[dict] = []
+        orig = triton_heuristics.CachingAutotuner._create_compile_meta
+
+        def _spy(self, cfg):
+            meta = orig(self, cfg)
+            if self.inductor_meta.get("host_tma_descriptor_args"):
+                captured.append(dict(meta["signature"]))
+            return meta
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.enable_host_side_tma": True,
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+                }
+            ),
+            mock.patch.object(
+                triton_heuristics.CachingAutotuner, "_create_compile_meta", _spy
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(mm), a, b)
+
+        torch.testing.assert_close(actual, mm(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(captured, "no host-side TMA kernel was precompiled")
+        upgraded = [
+            ty
+            for sig in captured
+            for ty in sig.values()
+            if isinstance(ty, str) and ty.startswith("tensordesc<")
+        ]
+        self.assertTrue(upgraded, f"no arg upgraded to tensordesc<>: {captured}")
+        # Block dims must be concrete by this point: the launcher resolves the
+        # autotuned symbol per config.
+        FileCheck().check_regex(r"tensordesc<\w+\[\d+, \d+\]>").run("\n".join(upgraded))
+        # The upgrade is the launcher's job now, so codegen must not have
+        # already baked it into the generated module.
+        FileCheck().check_not("tensordesc<").run(code[0])
 
 
 @instantiate_parametrized_tests
