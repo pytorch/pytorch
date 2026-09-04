@@ -2389,6 +2389,8 @@ class BenchmarkRunner:
                 accuracy_status = "eager_two_runs_differ"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
+            correct_rerun_result = None
+
             # Support multiple accuracy check runs for flaky models
             accuracy_check_runs = self.get_accuracy_check_runs(name)
             pass_count = 0
