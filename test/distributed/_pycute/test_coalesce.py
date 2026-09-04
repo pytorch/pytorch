@@ -40,13 +40,19 @@ Unit tests for _pycute.coalesce
 import logging
 
 from torch.distributed._pycute import *
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class TestCoalesce(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def helper_test_coalesce(self, layout, expected_coalesced_layout):
         layoutR = coalesce(layout)
 
