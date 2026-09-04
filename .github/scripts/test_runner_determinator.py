@@ -881,9 +881,9 @@ experiments:
 """
     ALL = frozenset({"lf", "wincanary", "wincanarylf"})
 
-    def _result(self, user: str, is_canary: bool = False) -> rd.RunnerPrefixResult:
+    def _result(self, user: str) -> rd.RunnerPrefixResult:
         return rd.get_runner_prefix(
-            self.SETTINGS, (user, user), "somebranch", self.ALL, frozenset(), is_canary
+            self.SETTINGS, (user, user), "somebranch", self.ALL, frozenset()
         )
 
     def test_no_variant_means_no_prefix(self) -> None:
@@ -892,7 +892,6 @@ experiments:
     def test_lf_alone_does_not_set_a_prefix(self) -> None:
         # lf rolls out over ALL workflows; it must not relocate Windows builds.
         self.assertEqual("", self._result("lfuser").scale_config_prefix)
-        self.assertEqual("", self._result("lfuser", is_canary=True).scale_config_prefix)
 
     def test_wincanary(self) -> None:
         self.assertEqual("wincanary.", self._result("wcuser").scale_config_prefix)
@@ -907,5 +906,4 @@ experiments:
     def test_arc_label_type_is_untouched(self) -> None:
         self.assertEqual("mt-", self._result("plainuser").prefix)
         self.assertEqual("lf-", self._result("lfuser").prefix)
-        self.assertEqual("c-mt-", self._result("plainuser", is_canary=True).prefix)
         self.assertEqual("lf-", self._result("bothuser").prefix)
