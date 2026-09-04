@@ -60,6 +60,7 @@ from ..utils import (
     use_flydsl_gemm_template,
     use_nv_universal_gemm_template,
     use_triton_blackwell_tma_template,
+    use_triton_bmg_template,
     use_triton_scaling_template,
     use_triton_template,
     use_triton_tma_template,
@@ -116,6 +117,24 @@ persistent_mm_template = TritonTemplate(
     name="mm_persistent",
     grid=persistent_mm_grid,
     source=load_kernel_template("triton_persistent_mm"),
+)
+
+# BMG (Battlemage/Xe2) optimized persistent MM template
+# Uses block2D pointers for hardware descriptor DMA with automatic
+# software pipelining via num_stages to exploit DPAS/SEND on BMG's architecture
+bmg_persistent_mm_template = TritonTemplate(
+    name="mm_bmg_persistent",
+    grid=persistent_mm_grid,
+    source=load_kernel_template("triton_bmg_persistent_mm"),
+)
+
+# BMG tiled 2D template for small M (1-32)
+# Non-persistent, 2D grid (grid_m, grid_n), block_ptr loads
+# Focuses on maximizing DRAM bandwidth for memory-bound shapes
+bmg_tiled2d_mm_template = TritonTemplate(
+    name="mm_bmg_tiled2d",
+    grid=mm_grid,
+    source=load_kernel_template("triton_bmg_tiled2d_mm"),
 )
 
 
@@ -777,6 +796,11 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         layout, enable_int32=True, check_max_autotune=False
     ):
         templates_to_use.append(mm_template)
+        # BMG-optimized persistent template with block2D and automatic software pipelining
+        if use_triton_bmg_template(layout, check_max_autotune=False):
+            templates_to_use.append(bmg_persistent_mm_template)
+            # Tiled 2D template for small M (bandwidth-bound)
+            templates_to_use.append(bmg_tiled2d_mm_template)
 
     # Single unified call for all templates
     choices.extend(
