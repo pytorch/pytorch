@@ -282,6 +282,9 @@ class AliasDb {
   ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard Elements (one for each unique mutable type)
   ska::flat_hash_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
+  // Caches the resolved wildcard Element per declared type (keyed by TypePtr
+  // identity) to avoid re-resolving the mutable-type set on repeat lookups.
+  ska::flat_hash_map<TypePtr, std::optional<Element*>> wildcardTypeCache_;
   Element* getWildcard(const TypePtr& type) const;
   std::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
   void addContainedTypesToFreshElement(
