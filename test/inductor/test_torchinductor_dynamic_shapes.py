@@ -1565,6 +1565,29 @@ class TestInductorDynamic(DynamicShapesTestCase):
         # Test backward pass as well - this is where the bug manifested
         out_compiled.sum().backward()
 
+    def test_dynamic_cat_non_leading_dim_fallback(self):
+        import torch
+
+        def nested_cat_add(q1, k1, v1a, v1b, q2, k2, v2a, v2b):
+            v1 = v1a + v1b
+            v2 = v2a + v2b
+            g1 = torch.cat([q1, k1, v1], dim=-1)
+            g2 = torch.cat([q2, k2, v2], dim=-1)
+            return torch.cat([g1, g2], dim=-1)
+
+        widths = [16, 8, 8, 16, 8, 8]
+        inputs = [torch.randn(4, w, device=self.device_type) for w in widths]
+
+        # Mark the non-leading dimension (dim=1) as dynamic
+        for t in inputs:
+            torch._dynamo.mark_dynamic(t, 1)
+
+        compiled_fn = torch.compile(nested_cat_add, dynamic=True)
+
+        expected = nested_cat_add(*inputs)
+        actual = compiled_fn(*inputs)
+
+        self.assertEqual(actual, expected)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_combinations_dynamic(self):
         def f(x):

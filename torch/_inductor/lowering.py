@@ -2399,6 +2399,14 @@ def cat(inputs, dim=0):
     if cpu_device:
         return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
+    # GPU Fallback: Avoid slow symint div/mod in Triton by using ATen's extern kernel
+    if config.fallback_dynamic_cat and any(
+        isinstance(s, sympy.Expr) and s.free_symbols
+        for inp in inputs
+        for s in inp.get_size()[1:]
+    ):
+        return TensorBox(ir.ConcatKernel.create(inputs, dim))
+
     def op_count(x):
         if isinstance(x, (TensorBox, ir.StorageBox)):
             return op_count(unwrap_tensor(x))

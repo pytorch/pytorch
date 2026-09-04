@@ -744,6 +744,11 @@ max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 fallback_by_default: bool = False
 
 
+# Fall back to the ATen cat kernel when a non-leading cat dim is symbolic, to avoid
+# symbolic int64 modulo/division in the generated indexing.
+fallback_dynamic_cat: bool = True
+
+
 # This config allows selective decomposition of certain operators in the graph.
 # Currently the only use case is to patch the same-name config in functorch, for
 # inductor lite mode. See more details in [Note: Selective Decomposition]
