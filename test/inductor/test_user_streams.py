@@ -1520,10 +1520,10 @@ class GraphModule(torch.nn.Module):
             normalize_gm(counter.graphs[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]", L_x_: "f32[32, 32]"):
+    def forward(self, L_x_: "f32[32, 32]", L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]"):
+        l_x_ = L_x_
         l_w1_ = L_w1_
         l_w2_ = L_w2_
-        l_x_ = L_x_
 
         get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
@@ -1598,11 +1598,11 @@ class GraphModule(torch.nn.Module):
             normalize_gm(counter.graphs[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]", L_w3_: "f32[32, 32]", L_x_: "f32[32, 32]"):
+    def forward(self, L_x_: "f32[32, 32]", L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]", L_w3_: "f32[32, 32]"):
+        l_x_ = L_x_
         l_w1_ = L_w1_
         l_w2_ = L_w2_
         l_w3_ = L_w3_
-        l_x_ = L_x_
 
         get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 
@@ -1695,10 +1695,10 @@ class GraphModule(torch.nn.Module):
             normalize_gm(counter.graphs[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]", L_x_: "f32[32, 32]"):
+    def forward(self, L_x_: "f32[32, 32]", L_w1_: "f32[32, 32]", L_w2_: "f32[32, 32]"):
+        l_x_ = L_x_
         l_w1_ = L_w1_
         l_w2_ = L_w2_
-        l_x_ = L_x_
 
         get_external_object_by_index = torch__dynamo_graph_bytecode_inputs_get_external_object_by_index(1);  get_external_object_by_index = None
 

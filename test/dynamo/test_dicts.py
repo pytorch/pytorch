@@ -2340,7 +2340,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         torch.compile(model, backend=backend)(inp)
         return [n.name for n in backend.graphs[0].graph.nodes if n.op != "placeholder"]
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_dict_order_canonical_graph(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -2373,7 +2372,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         names2 = self._get_graph_node_names(model, d2)
         self.assertEqual(names1, names2)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_canonical_graph_placeholders_are_out_of_scope(self):
         # Pins the documented scope limit: canonicalization normalizes interior
         # nodes only. Placeholders keep their trace-order position and names
@@ -2421,7 +2419,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         # docstring in output_graph._canonicalize_graph must be updated.
         self.assertNotEqual(ph1, ph2)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_dict_order_canonical_graph_correctness(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -2445,7 +2442,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_result, compiled_result1)
         self.assertEqual(eager_result, compiled_result2)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_dict_order_canonical_graph_aot_eager(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -2486,7 +2482,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         bw_names2 = [n.name for n in backend2.bw_graphs[0].graph.nodes]
         self.assertEqual(bw_names1, bw_names2)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_dict_order_canonical_graph_idempotent(self):
         from torch._dynamo.output_graph import _canonicalize_graph
 
@@ -2509,7 +2504,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         names_twice = [n.name for n in graph.nodes]
         self.assertEqual(names_once, names_twice)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_canonical_graph_overlapping_unsqueeze_with_mutation(self):
         def f(x, y):
             x.add_(1)
@@ -2527,7 +2521,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_canonical_graph_barrier_preserves_order(self):
         from torch._dynamo.output_graph import _canonicalize_graph
 
@@ -2549,7 +2542,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         # neg must come after the barrier even though it only depends on x
         self.assertGreater(neg_idx, barrier_idx)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_canonical_graph_in_place_ops_are_barriers(self):
         def f(x, y):
             a = y * 2
@@ -2628,7 +2620,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
             names4 = self._get_graph_node_names(model, d2)
         self.assertEqual(names3, names4)
 
-    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_canonical_graph_is_safe_to_reorder(self):
         import operator
 
