@@ -365,10 +365,6 @@ def _create_nested_fn(
     return func
 
 
-# funcobject.c gained the __annotate__ getset in 3.14, and functools.wraps
-# copies it (it is in WRAPPER_ASSIGNMENTS), so every function VT must model it.
-_HAS_ANNOTATE_SLOT = sys.version_info >= (3, 14)
-
 fn_known_dunder_attrs = {
     "__annotations__",
     "__builtins__",
@@ -381,8 +377,6 @@ fn_known_dunder_attrs = {
     "__name__",
     "__module__",
 }
-if _HAS_ANNOTATE_SLOT:
-    fn_known_dunder_attrs.add("__annotate__")
 
 
 def fn_getattro_impl(
@@ -419,12 +413,6 @@ class BaseUserFunctionVariable(VariableTracker):
     # Materialized per-instance once accessed/assigned.
     annotations: "VariableTracker | None" = None
 
-    # funcobject.c func_annotate (3.14+): likewise a dedicated slot. Dynamo
-    # evaluates the annotate function eagerly into `annotations`, but keeps it
-    # here too because __annotate__ is readable (and is in
-    # functools.WRAPPER_ASSIGNMENTS).
-    annotate: "VariableTracker | None" = None
-
     def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
@@ -450,9 +438,6 @@ class BaseUserFunctionVariable(VariableTracker):
         if name == "__setattr__":
             if args[0].is_constant_match("__annotations__"):
                 self.annotations = args[1]
-                return ConstantVariable.create(None)
-            if _HAS_ANNOTATE_SLOT and args[0].is_constant_match("__annotate__"):
-                self.annotate = args[1]
                 return ConstantVariable.create(None)
             return self.get_dict_vt(tx).call_method(
                 tx, "__setitem__", list(args), kwargs
@@ -519,12 +504,6 @@ class BaseUserFunctionVariable(VariableTracker):
             )
         return self.annotations
 
-    def _get_annotate(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # func_get_annotate returns the annotate function or None.
-        if self.annotate is None:
-            return ConstantVariable.create(None)
-        return self.annotate
-
     def _get_type_params(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.get_dict_vt(tx).getitem_or_default(
             "__type_params__",
@@ -549,8 +528,6 @@ class BaseUserFunctionVariable(VariableTracker):
         "__annotations__": GetSet(_get_annotations),
         "__type_params__": GetSet(_get_type_params),
     }
-    if _HAS_ANNOTATE_SLOT:
-        tp_getset["__annotate__"] = GetSet(_get_annotate)
     tp_members = {
         "__doc__": Member(lambda s, tx: s._get_named_attr(tx, "__doc__")),
         "__module__": Member(lambda s, tx: s._get_named_attr(tx, "__module__")),
@@ -847,10 +824,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         "__annotations__": GetSet(lambda s, tx: s._fn_getattr(tx, "__annotations__")),
         "__type_params__": GetSet(lambda s, tx: s._fn_getattr(tx, "__type_params__")),
     }
-    if _HAS_ANNOTATE_SLOT:
-        tp_getset["__annotate__"] = GetSet(
-            lambda s, tx: s._fn_getattr(tx, "__annotate__")
-        )
     tp_members = {
         "__doc__": Member(lambda s, tx: s._fn_getattr(tx, "__doc__")),
         "__module__": Member(lambda s, tx: s._fn_getattr(tx, "__module__")),
@@ -4573,48 +4546,6 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
-    def _meth_qualname(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # meth_get__qualname__: a module __self__ gives the bare name, a type
-        # __self__ gives "<self>.<name>", any other __self__ gives
-        # "<type(self)>.<name>", so a subclass receiver reports the subclass
-        # ([].append is 'list.append', L([]).append is 'L.append').
-        name = self.descriptor.__name__
-        if self.obj.is_python_constant():
-            obj = self.obj.as_python_constant()
-            if isinstance(obj, types.ModuleType):
-                return ConstantVariable.create(name)
-            owner = obj if isinstance(obj, type) else type(obj)
-        else:
-            owner = self.obj.python_type()
-        return ConstantVariable.create(f"{owner.__qualname__}.{name}")
-
-    def _meth_module(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # m_module is NULL (-> None) for a method produced by binding a method or
-        # classmethod descriptor; a builtin function taken straight out of a type
-        # dict (e.g. Tensor.__torch_dispatch__) keeps its own module.
-        module = (
-            self.descriptor.__module__
-            if isinstance(self.descriptor, types.BuiltinFunctionType)
-            else None
-        )
-        return ConstantVariable.create(module)
-
-    # meth_getsets / meth_members: every row comes from the descriptor's m_ml or
-    # from __self__ itself, so none of them force self.obj to a python constant.
-    # https://github.com/python/cpython/blob/v3.14.0/Objects/methodobject.c#L316-L392
-    tp_getset = {
-        "__name__": GetSet(
-            lambda s, tx: ConstantVariable.create(s.descriptor.__name__)
-        ),
-        "__qualname__": GetSet(_meth_qualname),
-        "__self__": GetSet(lambda s, tx: s.obj),
-        "__doc__": GetSet(lambda s, tx: ConstantVariable.create(s.descriptor.__doc__)),
-        "__text_signature__": GetSet(
-            lambda s, tx: ConstantVariable.create(s.descriptor.__text_signature__)
-        ),
-    }
-    tp_members = {"__module__": Member(_meth_module)}
-
     def as_python_constant(self) -> Any:
         obj = self.obj.as_python_constant()
         if isinstance(self.descriptor, types.ClassMethodDescriptorType):
@@ -4962,18 +4893,6 @@ class GetSetDescriptorVariable(VariableTracker):
             raise _UnhandledDescriptorError(
                 f"Cannot resolve getset_descriptor '{attr_name}' "
                 f"on {type(obj).__name__}"
-            )
-        # _saved_* descriptors on autograd Nodes trigger checkpoint
-        # recomputation hooks when __get__ is called.  Graph-break
-        # instead of executing the side-effecting getter during tracing.
-        if attr_name.startswith("_saved_") and isinstance(
-            obj_value, torch.autograd.graph.Node
-        ):
-            from .object_protocol import _UnhandledDescriptorError
-
-            raise _UnhandledDescriptorError(
-                f"Cannot resolve _saved_* descriptor '{attr_name}' "
-                f"on autograd Node during tracing"
             )
         try:
             resolved = self.descriptor.__get__(obj_value, type(obj_value))
