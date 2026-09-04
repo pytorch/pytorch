@@ -562,27 +562,43 @@ def _remove_zero_bias_from_efficient_attention(
     if config.numerics == "strict":
         return
 
-    target = aten._scaled_dot_product_efficient_attention.default
-    for node in gm.graph.find_nodes(op="call_function", target=target):
-        if len(node.args) < 4 or not isinstance(node.args[3], torch.fx.Node):
-            continue
-        bias = node.args[3]
-        # TODO: Also remove zero bias from the backward for training performance.
-        value = uniform_values.get(bias)
-        fake_bias = bias.meta.get("val")
-        if (
-            not isinstance(fake_bias, torch.Tensor)
-            or not fake_bias.dtype.is_floating_point
-            or value != 0.0
-        ):
-            continue
-        args = list(node.args)
-        args[3] = None
-        node.args = tuple(args)
+    targets = (
+        (aten._scaled_dot_product_efficient_attention.default, 3),
+        (aten._scaled_dot_product_efficient_attention_backward.default, 4),
+    )
+    for target, bias_index in targets:
+        for node in gm.graph.find_nodes(op="call_function", target=target):
+            bias = node.args[bias_index]
+            if not isinstance(bias, torch.fx.Node):
+                continue
+            if target is aten._scaled_dot_product_efficient_attention_backward.default:
+                # Backward positional argument 10 is a four-element bool sequence:
+                # [..., compute_grad_bias]. Thus grad_input_mask[3] says whether backward
+                # must produce grad_bias, which requires retaining the bias. This is
+                # rare for a proven-zero bias, but can occur for a differentiable
+                # expression such as parameter * 0.
+                grad_input_mask = node.args[10]
+                compute_bias_gradient = grad_input_mask[3]
+                if compute_bias_gradient:
+                    continue
+            value = uniform_values.get(bias)
+            fake_bias = bias.meta.get("val")
+            if (
+                not isinstance(fake_bias, torch.Tensor)
+                or not fake_bias.dtype.is_floating_point
+                or value != 0.0
+            ):
+                continue
+            args = list(node.args)
+            args[bias_index] = None
+            node.args = tuple(args)
 
 
 def constant_fold_uniform_value(gm: torch.fx.GraphModule):
-    """Fold uniform constants and algebraic no-ops, including efficient attention with an all-zero additive bias to no bias."""
+    """Fold uniform constants and algebraic no-ops.
+
+    This includes replacing an all-zero additive efficient-attention bias with no bias.
+    """
     with torch.utils._python_dispatch._disable_current_modes():
         aten = torch.ops.aten
 
