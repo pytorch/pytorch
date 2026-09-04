@@ -11,6 +11,7 @@ Both share one underlying registry dict and cascading fallback lookup.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import logging
 from typing import Any, TYPE_CHECKING
 
@@ -26,6 +27,11 @@ _HEURISTIC_REGISTRY: dict[tuple[str | None, ...], Any] = {}
 # This intentionally covers both template and codegen entries.
 _TEMPLATE_HEURISTIC_REGISTRY = _HEURISTIC_REGISTRY
 _HEURISTIC_CACHE: dict[tuple[str | None, ...], Any] = {}
+
+_CODEGEN_HEURISTIC_MODULES = {
+    "pointwise": "torch._inductor.heuristics.triton_codegen.pointwise",
+    "reduction": "torch._inductor.heuristics.triton_codegen.reduction",
+}
 
 log = logging.getLogger(__name__)
 
@@ -200,10 +206,11 @@ def get_codegen_heuristic(name: str, device_type: str) -> CodegenConfigHeuristic
 
     heuristic_class = _lookup(name, device_type, None)
 
-    if heuristic_class is None:
-        # Lazily import codegen heuristics to trigger registration
-        import torch._inductor.heuristics.triton_codegen  # noqa: F401
-
+    if (
+        heuristic_class is None
+        and (module_name := _CODEGEN_HEURISTIC_MODULES.get(name)) is not None
+    ):
+        importlib.import_module(module_name)
         heuristic_class = _lookup(name, device_type, None)
 
     if heuristic_class is None:
