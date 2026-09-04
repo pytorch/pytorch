@@ -27,8 +27,6 @@ if torch.backends.mps.is_available():
             "cholesky_inverse",
             "float_power",
             "geqrf",
-            "linalg.eig",
-            "linalg.eigvals",
             "linalg.inv",
             "linalg.inv_ex",
             "linalg.ldl_factor",
@@ -64,8 +62,6 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST: dict[str, list | None] = {
             # Failures due to lack of op implementation on MPS backend
-            "linalg.eig": None,
-            "linalg.eigvals": None,
             "hash_tensor": None,
             "heaviside": None,
             # "kthvalue": None,
@@ -539,6 +535,12 @@ if torch.backends.mps.is_available():
             "linalg.householder_product": None,
             "linalg.lstsq": [torch.float32],
             "linalg.lstsqgrad_oriented": [torch.float32],
+            # The gradient of a non-symmetric eigendecomposition depends on the
+            # eigenvector phase and on the order the eigenvalues are produced
+            # in, neither of which is fixed by the math. Invariant-based
+            # coverage lives in TestLinalgMPS.test_eig_invariants.
+            "linalg.eig": None,
+            "linalg.eigvals": None,
             # Correctness issues
             # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
             # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
