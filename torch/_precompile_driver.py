@@ -668,14 +668,26 @@ def _build_installed_forward():
     def _entry_function():
         # The entry records no qualname to resolve -- it is the callable handed
         # to precompile, not something reached from a module -- so rebuild a
-        # function around its code object. Capture refuses an entry whose
-        # closure or defaults this could not reproduce, and load(fn=...) lets a
-        # caller supply the real function instead.
+        # function around its code object. A code object carries no defaults,
+        # so they come back from the artifact; without them a defaulted
+        # parameter is simply absent at the served call and every guard misses.
+        # Capture refuses a closure entry. load(fn=...) lets a caller supply the
+        # real function.
         code_entry = cache_entry.dynamo.codes[0]
         code = SerializedCode.to_code_object(code_entry.python_code)
-        return types.FunctionType(
-            code, sys.modules[code_entry.python_module].__dict__, code.co_name
+        binding = (
+            pickle.loads(base64.b64decode(_ENTRY_BINDING)) if _ENTRY_BINDING else {}
         )
+        f = types.FunctionType(
+            code,
+            sys.modules[code_entry.python_module].__dict__,
+            code.co_name,
+            binding.get("defaults"),
+        )
+        kwdefaults = binding.get("kwdefaults")
+        if kwdefaults:
+            f.__kwdefaults__ = dict(kwdefaults)
+        return f
 
     def _serve(fn):
         from torch._dynamo.precompile_context import PrecompileContext
