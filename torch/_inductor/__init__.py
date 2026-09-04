@@ -148,6 +148,9 @@ def aoti_compile_and_package(
             f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
         )
 
+    if isinstance(package_path, os.PathLike):
+        package_path = os.fspath(package_path)
+
     inductor_configs = inductor_configs or {}
     inductor_configs["aot_inductor.package"] = True
 
