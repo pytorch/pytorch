@@ -12,6 +12,7 @@ import transformers
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils import _pytree as torch_pytree
 
 
@@ -34,6 +35,8 @@ class _WithExport:
 
 @common_utils.instantiate_parametrized_tests
 class DynamoExporterTest(common_utils.TestCase, _WithExport):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_insert_contiguous_between_transpose_and_view(self):
         class Model(torch.nn.Module):
             def forward(self, query, key, value):
@@ -966,6 +969,8 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
 
 @common_utils.instantiate_parametrized_tests
 class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_group_norm_opset_21(self):
         class Model(torch.nn.Module):
             def forward(self, x):
