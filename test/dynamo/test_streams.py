@@ -221,6 +221,15 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
             self.assertNotIn(DeviceInterface.Stream, in_graph_classes)
             self.assertNotIn(DeviceInterface.Event, in_graph_classes)
 
+    def test_stream_variable_python_type_uses_wrapped_value_type(self):
+        from torch._dynamo.variables.streams import StreamVariable
+
+        class FakeStream:
+            device = torch.device("cpu")
+
+        stream_var = StreamVariable(None, FakeStream())  # type: ignore[arg-type]
+        self.assertIs(stream_var.python_type(), FakeStream)
+
     def test_full_barrier_forward_deps_respect_partition(self) -> None:
         from torch._functorch._aot_autograd.streams import _collect_sync_forward_deps
 
