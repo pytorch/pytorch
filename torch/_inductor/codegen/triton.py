@@ -1328,6 +1328,17 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
     return decorator  # type: ignore[return-value]
 
 
+# Float dtypes for which numerics="strict" applies eager-matching pointwise fixups,
+# mapped to the same-width integer type used for sign-bit manipulation.
+_STRICT_FLOAT_INT_TY = {
+    torch.float16: "tl.int16",
+    torch.bfloat16: "tl.int16",
+    torch.float32: "tl.int32",
+    torch.float64: "tl.int64",
+}
+_STRICT_FLOAT = tuple(_STRICT_FLOAT_INT_TY)
+
+
 class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton e.g., ops.to_dtype(x,...) -> x.to(...)"""
 
@@ -1487,6 +1498,26 @@ class TritonOverrides(OpOverrides):
     def abs(x):
         return f"tl_math.abs({x})"
 
+    @staticmethod
+    def neg(x):
+        x_dtype = getattr(x, "dtype", None)
+        if config.numerics == "strict" and x_dtype in _STRICT_FLOAT_INT_TY:
+            # Eager `neg` flips the IEEE sign bit for finite/inf/zero values but
+            # canonicalizes NaN, which is not a single primitive: Triton's `-x` (and any
+            # `x * -1.0` / `-0.0 - x`) folds to `0.0 - x` or `fneg`. `0.0 - x` canonicalizes
+            # NaN like eager but collapses both +-0.0 to +0.0; `fneg` keeps zero sign but
+            # sign-flips the NaN payload. So keep `0.0 - x` (== `-x`) for the general case
+            # and only special-case zeros with an explicit sign-bit flip.
+            int_ty = _STRICT_FLOAT_INT_TY[x_dtype]
+            sign_bit = -(1 << (torch.finfo(x_dtype).bits - 1))
+            flip = (
+                f"(({x}).to({int_ty}, bitcast=True) ^ "
+                f"tl.full([], {sign_bit}, {int_ty})).to("
+                f"{triton_type(x_dtype)}, bitcast=True)"
+            )
+            return f"tl.where({x} == 0, {flip}, -{x})"
+        return f"-{x}"
+
     # TODO - register these ops as having divergent dtype
     # output if doing graph pass to remove consecutive casts
 
@@ -1498,7 +1529,7 @@ class TritonOverrides(OpOverrides):
         if (
             x_dtype == torch.float32
             and y_dtype == torch.float32
-            and config.eager_numerics.division_rounding
+            and config.use_eager_division_rounding()
         ):
             # x / y in Triton is lowered to div.full which is approx
             # we want div_rn to adhere with eager
@@ -1597,11 +1628,26 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def minimum(a, b):
+        if config.numerics == "strict" and getattr(a, "dtype", None) in _STRICT_FLOAT:
+            # Eager min returns the NaN operand unchanged (first operand wins when both
+            # are NaN), preserving its payload; Triton's PropagateNan canonicalizes NaN to
+            # 0x7fffffff. Select the NaN operand explicitly and fall back to a plain min
+            # otherwise (which already matches eager on the +-0.0 tie).
+            return (
+                f"tl.where({a} != {a}, {a}, "
+                f"tl.where({b} != {b}, {b}, tl.minimum({a}, {b})))"
+            )
         return f"tl.minimum({a}, {b}, tl.PropagateNan.ALL)"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
+        if config.numerics == "strict" and getattr(a, "dtype", None) in _STRICT_FLOAT:
+            # See minimum: match eager's NaN-payload propagation (first operand wins).
+            return (
+                f"tl.where({a} != {a}, {a}, "
+                f"tl.where({b} != {b}, {b}, tl.maximum({a}, {b})))"
+            )
         return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
 
     @staticmethod
@@ -7184,9 +7230,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     @classmethod
     def triton_meta_common(cls) -> TritonMeta:
         return {
-            "enable_fp_fusion": not config.emulate_precision_casts,
+            "enable_fp_fusion": not config.should_emulate_precision_casts(),
             "launch_pdl": cls._enable_pdl_codegen(),
-            "disable_ftz": config.eager_numerics.disable_ftz,
+            "disable_ftz": config.should_disable_ftz(),
         }
 
     @classmethod
