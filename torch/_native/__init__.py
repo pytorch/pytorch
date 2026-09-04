@@ -72,44 +72,50 @@ with warnings.catch_warnings():
 
 @cache
 def _native_aot_embedded() -> bool:
-    """True iff this libtorch_cuda was linked with AOT kernel artifacts.
+    """True iff this build ships AOT kernels for its declared ops.
 
-    Probes the _native_aot covers custom op, which every shipped artifact set
-    registers from a static initializer. A build whose stage 2 never ran has no
-    registrations and its wrapper stubs fall through to the stock impls. Nothing
-    here initializes CUDA.
-
-    Note that TORCH_DISABLE_NATIVE_AOT=1 masks the kernels without unlinking them,
-    so this still returns True.
+    Answers what the build contains, not whether the kernels may run: a build made
+    without stage 2 has none, and every op falls back to its ordinary aten
+    implementation. Says nothing about set_aot_enabled(), which can mask kernels
+    that are present. Touches no device.
     """
     try:
-        embedded = any(
+        return any(
             schema.name.startswith("_native_aot::")
             for schema in torch._C._jit_get_all_schemas()
         )
     except Exception:
-        embedded = False
-    if embedded and os.getenv("TORCH_DISABLE_NATIVE_AOT") == "1":
-        torch._C._set_native_aot_enabled(False)
-    return embedded
-
-
-_native_aot_embedded()
+        return False
 
 
 def set_aot_enabled(enabled: bool) -> None:
-    """Toggle at::globalContext().allowNativeAot(), the switch every generated stub
-    consultation checks, so False gives stock-aten behavior even with the AOT kernel
-    library loaded.
+    """Turn the embedded AOT kernels off (or back on) for this process.
 
-    Does NOT reach ops whose declaration is UNCONDITIONAL, whose kernels are the
-    implementation rather than a faster route to the same answer; use
-    _unconditional_masked() for one of those."""
+    With them off every op computes the same answers through its ordinary aten
+    implementation, so this is the switch to use when comparing against stock
+    PyTorch. Takes effect immediately, on calls already in flight.
+
+    Does NOT reach ops whose kernels ARE the implementation rather than a faster
+    route to the same answer; use _unconditional_masked() for one of those."""
     torch._C._set_native_aot_enabled(enabled)
 
 
 def aot_enabled() -> bool:
     return torch._C._get_native_aot_enabled()
+
+
+def _apply_env_opt_out() -> None:
+    """Honour TORCH_DISABLE_NATIVE_AOT=1 at import, once.
+
+    Separate from _native_aot_embedded(), which is cached and answers a question about
+    the build; this reads configuration and changes state. Gated on that answer so the
+    switch keeps its default on a build that ships no kernels, where it means nothing.
+    """
+    if os.getenv("TORCH_DISABLE_NATIVE_AOT") == "1" and _native_aot_embedded():
+        set_aot_enabled(False)
+
+
+_apply_env_opt_out()
 
 
 @contextlib.contextmanager
@@ -122,16 +128,13 @@ def _unconditional_masked():
     to obtain stock aten values. Not a user knob: masking an unconditional override
     changes what the op computes. Combine with python_native.<dsl>.disabled(), which
     masks everything else; this only lifts the exemptions."""
-    from torch._native.registry import _set_mask_unconditional, _unconditional_is_masked
+    from torch._native.registry import _set_mask_unconditional
 
-    # Read both previous values before mutating either, or a failure between the
-    # two leaves the mask latched on for the rest of the process.
-    previous_jit = _unconditional_is_masked()
-    previous_aot = torch._C._get_native_aot_unconditional_masked()
+    # One flag serves both mechanisms (see registry._unconditional_is_masked), and
+    # setting it also rebuilds the routers, so overrides and AOT kernels cannot
+    # disagree about whether the exemption is lifted.
+    previous = _set_mask_unconditional(True)
     try:
-        _set_mask_unconditional(True)
-        torch._C._set_native_aot_unconditional_masked(True)
         yield
     finally:
-        torch._C._set_native_aot_unconditional_masked(previous_aot)
-        _set_mask_unconditional(previous_jit)
+        _set_mask_unconditional(previous)
