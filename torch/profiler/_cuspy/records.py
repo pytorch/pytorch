@@ -8,14 +8,14 @@ kind (rather than whole records). The available fields per kind are the generate
 :class:`~_records_base.Ctype` for decode. Those catalogs are generated from the CUPTI
 ABI (cupti_activity.h) at build time -- cupti-python does not expose the enums.
 
-This module *curates* which of those fields the monitor selects per kind (:data:`FIELDS`)
-and derives the lookups the monitor/observers need. The selection is the editorial part
+This module *curates* which of those fields Cuspy selects per kind (:data:`FIELDS`)
+and derives the lookups Cuspy/observers need. The selection is the editorial part
 that can't be generated: it bounds record size and per-buffer decode cost.
 
-The monitor does NOT compute record byte layouts: it requires libcupti >= 13.3, which
+Cuspy does NOT compute record byte layouts: it requires libcupti >= 13.3, which
 reports each kind's packed record layout (field offsets/sizes, record size) via
 ``pBufferCompleteInfo->ppRecordLayouts``. The native layer parses that and attaches it to
-each completed buffer; the monitor decodes a buffer against that captured layout, using
+each completed buffer; Cuspy decodes a buffer against that captured layout, using
 :data:`FIELD_CTYPE` only to interpret each field's bytes (signed/unsigned/float/str).
 """
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-from torch.profiler._cupti._cupti_stubs import (
+from torch.profiler._cuspy._cupti_stubs import (
     Api,
     CudaEvent,
     Environment,
@@ -36,7 +36,7 @@ from torch.profiler._cupti._cupti_stubs import (
     Overhead,
     Synchronization,
 )
-from torch.profiler._cupti._records_base import Ctype, Field
+from torch.profiler._cuspy._records_base import Ctype, Field
 
 
 # Short alias kept for the SYNCHRONIZATION catalog (the generated name is Synchronization).
@@ -76,7 +76,7 @@ def _all_fields(catalog: type) -> tuple[Field, ...]:
     return tuple(sorted(v for v in vars(catalog).values() if isinstance(v, Field)))
 
 
-# The only curation: which activity kinds the monitor supports and their generated catalog.
+# The only curation: which activity kinds Cuspy supports and their generated catalog.
 # RUNTIME and DRIVER share the Api catalog. FIELDS / CORRELATION_FIELD / GRAPH_NODE_FIELD all
 # derive from this, so adding a kind here is the single edit needed.
 _CATALOGS: dict[int, type] = {
@@ -94,7 +94,7 @@ _CATALOGS: dict[int, type] = {
     ActivityKind.ENVIRONMENT: Environment,
 }
 
-# kind -> the fields the v2 monitor selects: all decodable fields of the generated catalog
+# kind -> the fields the v2 Cuspy selects: all decodable fields of the generated catalog
 # (struct/opaque fields are dropped at decode by their size).
 FIELDS: dict[int, tuple[Field, ...]] = {
     kind: _all_fields(cat) for kind, cat in _CATALOGS.items()
@@ -138,6 +138,6 @@ GRAPH_NODE_FIELD: dict[int, int] = {
 
 # A record layout as captured by CUPTI (pBufferCompleteInfo->ppRecordLayouts) and attached
 # to a completed buffer by the native layer: a list of
-# (kind, record_size, [(field_id, offset, size), ...]). This is what the monitor decodes
+# (kind, record_size, [(field_id, offset, size), ...]). This is what Cuspy decodes
 # against -- no spec/computed layout.
 RecordLayouts = list[tuple[int, int, list[tuple[int, int, int]]]]

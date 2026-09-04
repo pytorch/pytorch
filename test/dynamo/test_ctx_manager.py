@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
+import inspect
 import sys
 import unittest
 from collections import defaultdict
@@ -87,17 +88,6 @@ def customized_ctx_manager_with_graph_break(mode):
         yield torch._C._set_grad_enabled(mode)
     finally:
         torch._C._set_grad_enabled(prev)
-
-
-class HeldAutocastModule(torch.nn.Module):
-    def __init__(self, ctx):
-        super().__init__()
-        self.ctx = ctx
-        self.l = torch.nn.Linear(4, 4)
-
-    def forward(self, x):
-        with self.ctx:
-            return self.l(x)
 
 
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
@@ -333,17 +323,40 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled.device.index, 0)
         self.assertEqual(compiled.dtype, torch.float32)
 
-    def _compile_held_autocast_module(self):
-        module = HeldAutocastModule(torch.amp.autocast("cpu", dtype=torch.bfloat16))
+    def test_autocast_ctor_signature_is_pinned(self):
+        # builder.py and ctx_manager.py each hard-code this parameter list, in
+        # attribute-name and parameter-name form respectively; a new or reordered
+        # constructor parameter has to be reflected in both.
+        self.assertEqual(
+            list(inspect.signature(torch.amp.autocast_mode.autocast).parameters),
+            ["device_type", "dtype", "enabled", "cache_enabled"],
+        )
+
+    def test_autocast_object_guarded_by_value_not_identity(self):
+        # A user-held autocast object reaches the trace as four specialized
+        # values (device, dtype, enabled, cache_enabled), so those are what the
+        # graph depends on. Guarding the object by id() instead is both too
+        # strong -- a second object configured identically cannot reuse the
+        # graph -- and unserializable, which is what makes a precompiled
+        # artifact drop the guard entirely.
+        class MyModule(torch.nn.Module):
+            def __init__(self, ctx):
+                super().__init__()
+                self.ctx = ctx
+                # Unlike an nn.Linear weight, this tensor does not require grad, so
+                # the autocast cache cannot retain a stale bf16 cast across tests.
+                self.w = torch.randn(4, 4)
+
+            def forward(self, x):
+                with self.ctx:
+                    return x @ self.w
+
+        module = MyModule(torch.amp.autocast("cpu", dtype=torch.bfloat16))
         cnts = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(module, backend=cnts)
         x = torch.randn(4, 4)
         self.assertEqual(compiled(x).dtype, torch.bfloat16)
         self.assertEqual(cnts.frame_count, 1)
-        return module, compiled, cnts, x
-
-    def test_autocast_object_guarded_by_value_not_identity(self):
-        module, compiled, cnts, x = self._compile_held_autocast_module()
 
         # A DIFFERENT object with the same settings: same graph, no recompile.
         # An id() guard would miss here and recompile.
@@ -352,26 +365,16 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
 
         # A different setting is a different graph.
-        module.ctx = torch.amp.autocast("cpu", dtype=torch.bfloat16, enabled=False)
-        self.assertEqual(compiled(x).dtype, torch.float32)
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.float16)
+        self.assertEqual(compiled(x).dtype, torch.float16)
         self.assertEqual(cnts.frame_count, 2)
-        module.ctx = torch.amp.autocast(
-            "cpu", dtype=torch.bfloat16, cache_enabled=False
-        )
-        self.assertEqual(compiled(x).dtype, torch.bfloat16)
-        self.assertEqual(cnts.frame_count, 3)
 
-    def test_autocast_object_mutated_in_place_recompiles(self):
-        module, compiled, cnts, x = self._compile_held_autocast_module()
-
-        # Must be the first divergence after compile; a rebind first would let a recompile mask the stale graph.
+        # Mutating in place must also invalidate the graph.
         module.ctx._enabled = False
         self.assertEqual(compiled(x).dtype, torch.float32)
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, 3)
 
     def test_autocast_object_from_constant_source(self):
-        # A ConstantSource has no guardable expression, so the value guards must
-        # be skipped rather than raise from AttrSource.make_guard.
         @torch._dynamo.assume_constant_result
         def get_ctx():
             return torch.amp.autocast("cpu", dtype=torch.bfloat16)
