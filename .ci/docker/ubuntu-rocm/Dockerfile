@@ -5,6 +5,7 @@ FROM ubuntu:${UBUNTU_VERSION}
 ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND noninteractive
+ENV PIP_NO_CACHE_DIR=1
 
 # Set AMD gpu targets to build for
 ARG PYTORCH_ROCM_ARCH
@@ -24,17 +25,15 @@ ARG KATEX
 COPY ./common/install_docs_reqs.sh install_docs_reqs.sh
 RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
-# Install python (via deadsnakes) into a venv and the CI requirements
-ARG PYTHON_VERSION
-ARG PYTHON_FREETHREADED
-ENV PYTHON_VERSION=$PYTHON_VERSION
-ENV PYTHON_FREETHREADED=$PYTHON_FREETHREADED
-ENV VENV_PATH=/opt/python-${PYTHON_VERSION}-venv
-ENV VIRTUAL_ENV=${VENV_PATH}
-ENV PATH=${VENV_PATH}/bin:$PATH
-COPY requirements-ci.txt /opt/requirements-ci.txt
-COPY ./common/install_python.sh install_python.sh
-RUN bash ./install_python.sh && rm install_python.sh /opt/requirements-ci.txt
+# Install conda and other packages (e.g., numpy, pytest)
+ARG ANACONDA_PYTHON_VERSION
+ARG BUILD_ENVIRONMENT
+ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
+ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
+COPY requirements-ci.txt /opt/conda/requirements-ci.txt
+COPY ./common/install_conda.sh install_conda.sh
+COPY ./common/common_utils.sh common_utils.sh
+RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION
@@ -48,40 +47,14 @@ RUN bash ./install_clang.sh && rm install_clang.sh
 
 # Install rocm
 ARG ROCM_VERSION
+ARG THEROCK_INDEX_URL
+ARG USE_MSLK
 ENV ROCM_VERSION=${ROCM_VERSION}
-# install_rocm.sh reads BUILD_ENVIRONMENT (nightly gfx950 family detection)
-ARG BUILD_ENVIRONMENT
-ENV BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}
-RUN mkdir ci_commit_pins
-COPY ./common/common_utils.sh common_utils.sh
-COPY ./ci_commit_pins/rocm-composable-kernel.txt ci_commit_pins/rocm-composable-kernel.txt
 COPY ./common/install_rocm.sh install_rocm.sh
-RUN bash ./install_rocm.sh
-RUN rm install_rocm.sh common_utils.sh
-RUN rm -r ci_commit_pins
-COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_magma.sh ${ROCM_VERSION}; fi
-RUN rm install_rocm_magma.sh
-COPY ./common/install_rocSHMEM.sh install_rocSHMEM.sh
-RUN bash ./install_rocSHMEM.sh ${ROCM_VERSION}
-RUN rm install_rocSHMEM.sh
-ADD ./common/install_miopen.sh install_miopen.sh
-RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_miopen.sh ${ROCM_VERSION}; fi && rm install_miopen.sh
-ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
-RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_drm.sh /usr ; fi && rm install_rocm_drm.sh
+RUN bash ./install_rocm.sh && rm install_rocm.sh
 
-# Default ROCm environment; /etc/rocm_env.sh (created by install_rocm.sh) may
-# override these at runtime for different install methods (tarballs vs wheels).
-ENV ROCM_PATH=/opt/rocm \
-    ROCM_HOME=/opt/rocm \
-    ROCM_SOURCE_DIR=/opt/rocm \
-    ROCM_BIN=/opt/rocm/bin \
-    ROCM_CMAKE=/opt/rocm \
-    ROCM_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode \
-    HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode \
-    MAGMA_HOME=/opt/rocm/magma
-ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
-ENV LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH:-}
+# ROCm environment is written by install_rocm.sh to /etc/rocm_env.sh and sourced
+# by CI scripts. TheRock installs ROCm under the Python environment, not /opt/rocm.
 
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
@@ -89,12 +62,11 @@ ENV LC_ALL C.UTF-8
 # Install amdsmi
 COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh
-# install_amdsmi.sh runs `pip install` as root, which can leave venv files
-# root-owned; hand the venv back to jenkins (mirrors ubuntu/Dockerfile).
-RUN chown -R jenkins:jenkins ${VENV_PATH}
 RUN rm install_amdsmi.sh
 
 ARG INDUCTOR_BENCHMARKS
+ARG ANACONDA_PYTHON_VERSION
+ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/huggingface-requirements.txt huggingface-requirements.txt
@@ -114,8 +86,17 @@ RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
 
 
+# Install Rust toolchain (needed to build the torch._rust extension).
+COPY ./common/install_rust.sh install_rust.sh
+COPY ./ci_commit_pins/rust.txt rust.txt
+ENV RUSTUP_HOME /opt/rust
+ENV CARGO_HOME /opt/rust
+ENV PATH /opt/rust/bin:$PATH
+RUN bash ./install_rust.sh && rm install_rust.sh rust.txt
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
+COPY ./common/patches /opt/cache/patches
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
 
@@ -127,7 +108,10 @@ RUN rm install_openmpi.sh
 # Install rocm-origami
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/rocm-origami.txt rocm-origami.txt
-RUN bash -c 'source common_utils.sh && env_run pip install "rocm-origami==$(cat rocm-origami.txt)"' && rm -f common_utils.sh rocm-origami.txt
+RUN bash -c 'source /etc/rocm_env.sh && source common_utils.sh && env_run pip install "rocm-origami==$(cat rocm-origami.txt)"' && rm -f common_utils.sh rocm-origami.txt
+
+ARG BUILD_ENVIRONMENT
+ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
 USER jenkins
 CMD ["bash"]

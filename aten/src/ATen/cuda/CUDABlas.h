@@ -15,9 +15,19 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/BlasBackend.h>
+#include <ATen/Context.h>
 #include <ATen/OpMathType.h>
 
 namespace at::cuda::blas {
+
+inline bool useBF16x9() {
+  // NoTF32Guard is the existing force-IEEE override for CUDA FP32 matmul, so
+  // it must also suppress other non-IEEE modes.
+  return !at::NoTF32Guard::should_disable_fp32_reduced_precision() &&
+      at::globalContext().float32Precision(
+          at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
+      at::Float32Precision::BF16X9;
+}
 
 // RAII guard that sets the CuBLAS pointer mode and restores it to
 // its previous value when the guard is destroyed
@@ -122,7 +132,21 @@ bool gemm_and_bias(
     const Dtype* bias,
     C_Dtype* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
+    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None,
+    // Pass a non-null c_ptr to compute D = alpha * A @ B + beta * C with C and D
+    // at distinct addresses, which avoids having to copy C into D first.
+    // c_ptr and bias are mutually exclusive (asserted): a bias is applied by the
+    // epilogue with beta == 0, so there is no C operand to point elsewhere. The
+    // two live in one function because everything around the operands -- the
+    // reduction-scheme masks, SM carveout, alignment preferences and heuristic
+    // selection -- is identical, and duplicating it drifts.
+    // c_ld is the leading dimension of C, which need not match result_ld: C and
+    // D are separate tensors and may be padded differently.
+    // beta is ignored when a bias is supplied, since the epilogue applies the
+    // bias and the GEMM accumulates with beta == 0.
+    const C_Dtype* c_ptr = nullptr,
+    int64_t c_ld = 0,
+    at::opmath_type<Dtype> beta = 1);
 
 void int8_gemm(
     bool transpose_mat1,

@@ -1,8 +1,10 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for nb_bool / generic_bool: bool() via PyObject_IsTrue in Dynamo."""
+"""Tests for nb_bool / generic_is_true: bool() via PyObject_IsTrue in Dynamo."""
 
 import collections
 import enum
+import sys
+import unittest
 
 import torch
 
@@ -14,10 +16,16 @@ class _Color(enum.Enum):
 
 import torch.nn
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+)
 
 
+@torch._dynamo.config.patch("enable_trace_unittest", True)
 class NbBoolTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # --- Scalar constants (ConstantVariable path) ---
 
     @make_dynamo_test
@@ -117,6 +125,20 @@ class NbBoolTests(TestCase):
     def test_nonempty_range(self):
         self.assertEqual(bool(range(5)), True)
 
+    @make_dynamo_test
+    def test_empty_deque(self):
+        self.assertEqual(bool(collections.deque()), False)
+
+    @make_dynamo_test
+    def test_nonempty_deque(self):
+        self.assertEqual(bool(collections.deque([1, 2])), True)
+
+    @unittest.skipIf(sys.version_info >= (3, 11), "deque lost nb_bool in 3.11")
+    @make_dynamo_test
+    def test_deque_dunder_bool(self):
+        self.assertEqual(collections.deque().__bool__(), False)
+        self.assertEqual(collections.deque([1, 2]).__bool__(), True)
+
     # --- dict subclasses ---
 
     @make_dynamo_test
@@ -214,30 +236,34 @@ class NbBoolTests(TestCase):
                 return self
 
         def fn(a, obj):
-            if obj:
-                return a + 1
-            return a - 1
+            try:
+                if obj:
+                    return a + 1
+                return a - 1
+            except TypeError as e:
+                return str(e)
 
         x = torch.rand(4)
-        compiled = torch.compile(fn, backend="eager")
-        with self.assertRaisesRegex(
-            TypeError, "__bool__ should return bool, returned MyObj"
-        ):
-            compiled(x, MyObj())
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        out = compiled(x, MyObj())
+        self.assertTrue(type(out) is str)
+        self.assertEqual(out, fn(x, MyObj()))
 
     def test_bool_user_defined_object_raises_typeerror(self):
         class Baz(int):
             def __bool__(self):
                 return self
 
-        @torch.compile(backend="eager")
         def fn(obj):
-            return bool(obj)
+            try:
+                bool(obj)
+            except TypeError as e:
+                return str(e)
 
-        with self.assertRaisesRegex(
-            TypeError, "__bool__ should return bool, returned Baz"
-        ):
-            fn(Baz())
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        out = opt_fn(Baz())
+        self.assertTrue(type(out) is str)
+        self.assertEqual(fn(Baz()), out)
 
     # --- Blocked slot: __bool__ = None ---
 
@@ -248,16 +274,12 @@ class NbBoolTests(TestCase):
         obj = NoBool()
 
         def fn(x):
-            try:
-                return str(bool(obj))
-            except TypeError as e:
-                return str(e)
+            with self.assertRaises(TypeError):
+                str(bool(obj))
+            return x.sin()
 
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         eager_result = fn(torch.tensor(0))
-        self.assertTrue(
-            "NoneType" in result or "cannot be interpreted as a boolean" in result
-        )
         self.assertEqual(result, eager_result)
 
     # --- Metaclass with __bool__ (UserDefinedClassVariable path) ---
@@ -305,6 +327,30 @@ class NbBoolTests(TestCase):
         x = torch.randn(4)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), compiled(x))
+
+    # --- int-typed VTs with no runtime object ---
+
+    def test_fake_id_bool(self):
+        # id() of an object minted during tracing yields a FakeIdVariable,
+        # whose python_type is int and so fills nb_bool.
+        def fn(x):
+            tmp = [1, 2, 3]
+            return x + 1, bool(id(tmp))
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_data_ptr_bool_graph_breaks(self):
+        # A data pointer is only known at runtime, so its truth value cannot be
+        # decided at trace time (torch.empty(0).data_ptr() is 0).
+        def fn(x):
+            return bool(x.data_ptr())
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Data pointer truth value"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(4))
 
     # --- Tensor (TensorVariable path) ---
 
