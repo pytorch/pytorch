@@ -1959,7 +1959,7 @@ def _compile(
             check_fn = dynamo_output.build_guards(
                 code,
                 hooks=hooks,
-                save=package is not None,
+                save=output.package is not None,
                 cache_entries=cache_entries,
             )
 
