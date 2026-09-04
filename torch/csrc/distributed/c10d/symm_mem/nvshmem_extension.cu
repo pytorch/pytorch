@@ -34,6 +34,13 @@
 #include <nvshmem.h>
 #include <nvshmemx.h>
 
+// NVSHMEM_VENDOR_VERSION selects the tile reduce API in the tile_reduce_kernel.
+// If this variable is not defined, the default value is 0 which would make the shim
+// fall back to the 3.4.5 way of calling tile reduce.
+#if !defined(NVSHMEM_VENDOR_VERSION)
+#error "NVSHMEM_VENDOR_VERSION is not defined! Cannot select the tile reduce API!"
+#endif
+
 namespace c10d::nvshmem_extension {
 
 #define THREADS_PER_BLOCK 512
@@ -1028,7 +1035,7 @@ __global__ void tile_reduce_kernel(
   auto block_src_tensor = nvshmemx::Tensor(block_src_ptr, block_layout);
   auto block_dst_tensor = nvshmemx::Tensor(block_dst_ptr, block_layout);
 
-  // Making these empty to avoid nvshmemx::tile_sum_reduce_block() from doing
+  // Making these empty to avoid nvshmemx::tile_sum_rooted_reduce_block() from doing
   // additional range checks
   auto start_coord = nvshmemx::make_shape();
   auto boundary = nvshmemx::make_shape();
@@ -1036,8 +1043,13 @@ __global__ void tile_reduce_kernel(
   // Use one-shot pull to reduce the tile
   uint64_t flag = 0;
   constexpr auto algo = nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI;
-  nvshmemx::tile_sum_reduce_block<decltype(block_src_tensor), decltype(block_dst_tensor), decltype(boundary), algo>(
+  #if NVSHMEM_VENDOR_VERSION >= 30519
+    nvshmemx::tile_sum_rooted_reduce_block<decltype(block_src_tensor), decltype(block_dst_tensor), decltype(boundary), algo>(
       team, block_src_tensor, block_dst_tensor, start_coord, boundary, root, flag /* unused */);
+  #else
+    nvshmemx::tile_sum_reduce_block<decltype(block_src_tensor), decltype(block_dst_tensor), decltype(boundary), algo>(
+      team, block_src_tensor, block_dst_tensor, start_coord, boundary, root, flag /* unused */);
+  #endif
 
   // Wait for the operation to complete
   nvshmemx::tile_collective_wait<algo>(team, flag /* unused */);
@@ -1136,8 +1148,8 @@ void multi_root_tile_reduce(
   int i = 0, my_tile_idx = 0, root = world_size;
   // Note: if there is no tile for the current rank, my_tile_idx will remain
   // initial value 0, and root will remain `world_size`. This is OK. In
-  // `nvshmemx::tile_sum_reduce_block`, this rank would skip the reduction
-  // operation, but would still participate in the barrier.
+  // `nvshmemx::tile_sum_rooted_reduce_block`, this rank would skip the reduction
+  // operation, but would still participate in the barrier. (confirmed in NVSHMEM 3.7.2)
   for (auto& in_tile : in_tiles) {
     TORCH_CHECK(in_tile.dim() == 2, "Only 2D tensors are supported");
     c10d::symmetric_memory::rendezvous(in_tile, group_name);
