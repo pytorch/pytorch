@@ -1406,12 +1406,22 @@ class TritonOverrides(OpOverrides):
             # values when converting from floating types.
             # optimization - if source type is known and it's not a floating type, then
             # do not apply conversion to the intermediate type.
-            return f"{x}.to(tl.int16).to(tl.uint8)"
+            # Under strict numerics, match c10 which narrows floats through int64.
+            intermediate = "tl.int64" if config.numerics == "strict" else "tl.int16"
+            return f"{x}.to({intermediate}).to(tl.uint8)"
 
         if use_compute_types:
             out_dtype = triton_compute_type(dtype)
         else:
             out_dtype = triton_store_type(dtype)
+
+        if (
+            config.numerics == "strict"
+            and (src_dtype is None or src_dtype.is_floating_point)
+            and dtype in (torch.int8, torch.int16)
+        ):
+            # CUDA narrows signed float casts through int32; match eager under strict.
+            return f"{x}.to(tl.int32).to({out_dtype})"
 
         if (
             src_dtype is not None
@@ -2186,9 +2196,7 @@ class TritonOverrides(OpOverrides):
         inf_bits = uint32_const(0x7F800000)
         nan = TritonOverrides._f32_const_from_bits(0x7FFFFFFF)
         result = gen(f"tl.where({hi_bits} > {inf_bits}, {nan}, {result})")
-        is_inf = gen(
-            f"({x_bits} == {inf_bits}) | ({y_bits} == {inf_bits})", torch.bool
-        )
+        is_inf = gen(f"({x_bits} == {inf_bits}) | ({y_bits} == {inf_bits})", torch.bool)
         inf = TritonOverrides._f32_const_from_bits(0x7F800000)
         return gen(f"tl.where({is_inf}, {inf}, {result})")
 
