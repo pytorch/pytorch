@@ -15,6 +15,7 @@ from torch._dynamo.testing import (
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
+    associative_scan_op,
 )
 from torch._higher_order_ops.cudagraph_conditional_nodes import (
     ControlFlowOpWarmupDispatchMode,
@@ -33,9 +34,15 @@ from torch._subclasses.functional_tensor import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import SM70OrLater
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     decorateIf,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -1613,6 +1620,7 @@ def forward(self, pred_1, x_1):
             idx = torch.tensor([i])
             self.assertEqual(functional_f(idx, x), f(idx, x))
 
+    @skipIfTorchDynamo("don't test compile on compile")
     def test_switch_functionalized_input_mutation(self):
         def branch_mutating(inp_x):
             view_x = inp_x.view(inp_x.shape)
@@ -1626,13 +1634,54 @@ def forward(self, pred_1, x_1):
             return switch(idx, (branch_mutating, branch_clean), (inp_x,))
 
         x = torch.ones(4, 5)
-        # Tensor index -> tracing mode -> mutation check fires in switch_func.
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
-            "switch_branch0",
-        ):
-            make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
+
+        def g(idx, inp_x):
+            inp_x = inp_x.clone()
+            return switch(idx, (branch_mutating, branch_clean), (inp_x,))
+
+        from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
+
+        backend = AotEagerAndRecordGraphs()
+        torch._dynamo.reset()
+        with torch.no_grad():
+            result = torch.compile(g, backend=backend, fullgraph=True)(
                 torch.tensor([0]), x
+            )
+        expected = branch_mutating(x.clone())
+        self.assertEqual(result, expected)
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[4, 5]", arg1_1: "i64[1]"):
+        clone: "f32[4, 5]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        clamp: "i64[1]" = torch.ops.aten.clamp.default(arg1_1, 0, 1);  arg1_1 = None
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        getitem: "f32[]" = auto_functionalized_v2[0];  auto_functionalized_v2 = None
+        return (getitem,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 5]"):
+            view: "f32[4, 5]" = torch.ops.aten.view.default(arg0_1, [4, 5])
+            add: "f32[4, 5]" = torch.ops.aten.add.Tensor(view, 1);  view = None
+            view_1: "f32[4, 5]" = torch.ops.aten.view.default(add, [4, 5]);  add = None
+            view_2: "f32[4, 5]" = torch.ops.aten.view.default(view_1, [4, 5])
+            sin: "f32[4, 5]" = torch.ops.aten.sin.default(view_2);  view_2 = None
+            sum_1: "f32[]" = torch.ops.aten.sum.default(sin);  sin = None
+            copy_: "f32[4, 5]" = torch.ops.aten.copy_.default(arg0_1, view_1);  arg0_1 = view_1 = copy_ = None
+            return (sum_1,)
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 5]"):
+            cos: "f32[4, 5]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+            sum_1: "f32[]" = torch.ops.aten.sum.default(cos);  cos = None
+            return (sum_1,)
+""",
             )
 
     def test_switch_with_tensor_closure(self):
@@ -1849,6 +1898,37 @@ def forward(self, pred_1, x_1):
         # Clamped above-range index picks branch N-1.
         self.assertEqual(f_huge(x), branch2(x))
 
+    @skipIfTorchDynamo("mark_dynamic cannot be traced under dynamo_wrapped")
+    def test_switch_symint_index_clamped(self):
+        def branch0(inp_x):
+            return inp_x.sin()
+
+        def branch1(inp_x):
+            return inp_x.cos()
+
+        def branch2(inp_x):
+            return inp_x.abs()
+
+        branches = (branch0, branch1, branch2)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(idx_carrier, inp_x):
+            idx = idx_carrier.shape[0] - 5
+            return switch(idx, branches, (inp_x,))
+
+        x = torch.randn(4)
+
+        # shape[0] - 5 is negative -> clamps to branch0.
+        idx_carrier = torch.zeros(2)
+        torch._dynamo.mark_dynamic(idx_carrier, 0)
+        self.assertEqual(f(idx_carrier, x), branch0(x))
+
+        # shape[0] - 5 == 3 (above range) -> clamps to branch2.
+        torch._dynamo.reset()
+        idx_carrier = torch.zeros(8)
+        torch._dynamo.mark_dynamic(idx_carrier, 0)
+        self.assertEqual(f(idx_carrier, x), branch2(x))
+
     def test_switch_nn_module_branches(self):
         # Each branch is a different nn.Module whose parameters are
         # captured as free variables. Dynamo must lift the parameters of
@@ -1939,6 +2019,365 @@ def forward(self, pred_1, x_1):
             result = switch(torch.tensor(idx), [branch0, branch1, branch2], operands)
             expected = fn(operands[0])
             self.assertEqual(result, expected)
+
+    @parametrize("idx", [0, 1, 2, -5, 99])
+    def test_switch_autograd_basic(self, idx):
+        def branch0(x):
+            return x.sin()
+
+        def branch1(x):
+            return (x + 42).cos()
+
+        def branch2(x):
+            return (x * 3.14).tanh() + x
+
+        branches = (branch0, branch1, branch2)
+        expected_fn = branches[min(max(0, idx), len(branches) - 1)]
+
+        x = torch.randn(4, requires_grad=True)
+        result = switch(torch.tensor(idx), branches, (x,))
+        self.assertEqual(result, expected_fn(x))
+
+        grad_out = torch.ones_like(result)
+        grads = torch.autograd.grad(result, (x,), grad_out)
+        expected_grads = torch.autograd.grad(expected_fn(x), (x,), grad_out)
+        self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_make_fx_two_switches(self):
+        def branch0(x):
+            return x.sin()
+
+        def branch1(x):
+            return x.cos()
+
+        branches = (branch0, branch1)
+
+        def f(idx, x):
+            result = switch(idx, branches, (x,))
+            grad_out = torch.ones_like(result)
+            return torch.autograd.grad(result, (x,), grad_out)
+
+        x = torch.randn(4, requires_grad=True)
+        gm = make_fx(f)(torch.tensor(1), x)
+        switch_calls = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target is torch.ops.higher_order.switch
+        ]
+        self.assertEqual(len(switch_calls), 2)
+
+        grads = f(torch.tensor(1), x)
+        expected_grads = torch.autograd.grad(
+            branch1(x), (x,), torch.ones_like(branch1(x))
+        )
+        self.assertEqual(grads, expected_grads)
+
+    def test_switch_autograd_nested(self):
+        def true_fn(x):
+            def inner0(y):
+                return (y * 2).sin()
+
+            def inner1(y):
+                return (y + 1).cos()
+
+            def inner2(y):
+                return y.tanh()
+
+            return switch(torch.tensor(1), (inner0, inner1, inner2), (x,))
+
+        def mid_fn(x):
+            def inner0(y):
+                return (y + 3).sin()
+
+            def inner1(y):
+                return (y * 0.5).cos()
+
+            return switch(torch.tensor(0), (inner0, inner1), (x,))
+
+        def false_fn(x):
+            def inner0(y):
+                return y.relu()
+
+            def inner1(y):
+                return (y - 1).sigmoid()
+
+            def inner2(y):
+                return (y**2).cos()
+
+            return switch(torch.tensor(2), (inner0, inner1, inner2), (x,))
+
+        branches = (true_fn, mid_fn, false_fn)
+        for i, fn in enumerate(branches):
+            x = torch.randn(4, requires_grad=True)
+            result = switch(torch.tensor(i), branches, (x,))
+            self.assertEqual(result, fn(x))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (x,), grad_out)
+            expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_mixed_require_grad(self):
+        def branch0(x, y, z):
+            return x * y * z
+
+        def branch1(x, y, z):
+            return x + y + z
+
+        def branch2(x, y, z):
+            return (x - y) * z
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=False)
+
+        branches = (branch0, branch1, branch2)
+        for i, fn in enumerate(branches):
+            result = switch(torch.tensor(i), branches, (x, y, x))
+            self.assertEqual(result, fn(x, y, x))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (x,), grad_out)
+            expected_grads = torch.autograd.grad(fn(x, y, x), (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_pytree_input(self):
+        def branch0(x):
+            return x["t"][0] + x["t"][1]["b"] * x["t"][2][0]
+
+        def branch1(x):
+            return x["t"][0] * (x["t"][2][0] / x["t"][1]["b"])
+
+        def branch2(x):
+            return x["t"][0] - x["t"][1]["b"] + x["t"][2][0]
+
+        a = torch.randn(4, requires_grad=True)
+        b = torch.randn(4, requires_grad=True)
+        c = torch.randn(4, requires_grad=True)
+
+        branches = (branch0, branch1, branch2)
+        for i, fn in enumerate(branches):
+            operands = ({"t": [a, {"b": b}, (c,)]},)
+            result = switch(torch.tensor(i), branches, operands)
+            self.assertEqual(result, fn(operands[0]))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (a, b, c), grad_out)
+            expected_grads = torch.autograd.grad(fn(operands[0]), (a, b, c), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
+    def test_switch_autograd_pytree_not_all_inputs_used(self):
+        def branch0(x):
+            return x["t"][0] + x["t"][1]["b"]
+
+        def branch1(x):
+            return x["t"][0] * (x["t"][2][0] / x["t"][1]["b"])
+
+        def branch2(x):
+            return x["t"][2][0].clone()
+
+        a = torch.randn(4, requires_grad=True)
+        b = torch.randn(4, requires_grad=True)
+        c = torch.randn(4, requires_grad=True)
+
+        branches = (branch0, branch1, branch2)
+        for i, fn in enumerate(branches):
+            operands = ({"t": [a, {"b": b}, (c,)]},)
+            result = switch(torch.tensor(i), branches, operands)
+            self.assertEqual(result, fn(operands[0]))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (a, b, c), grad_out, allow_unused=True)
+            expected_grads = torch.autograd.grad(
+                fn(operands[0]),
+                (a, b, c),
+                grad_out,
+                allow_unused=True,
+                materialize_grads=True,
+            )
+            self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_pytree_output(self):
+        def branch0(x):
+            return {"res": [x.sin(), (x.cos(),)]}
+
+        def branch1(x):
+            return {"res": [x.cos(), (x.tanh(),)]}
+
+        def branch2(x):
+            return {"res": [x.tanh(), (x.sin(),)]}
+
+        branches = (branch0, branch1, branch2)
+        for i, fn in enumerate(branches):
+            x = torch.randn(4, requires_grad=True)
+            result = switch(torch.tensor(i), branches, (x,))
+            expected = fn(x)
+            self.assertEqual(result, expected)
+
+            result_flat, _ = pytree.tree_flatten(result)
+            expected_flat, _ = pytree.tree_flatten(expected)
+            grad_out = [torch.ones_like(g) for g in result_flat]
+            grads = torch.autograd.grad(result_flat, (x,), grad_out)
+            expected_grads = torch.autograd.grad(expected_flat, (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_grad_through_params(self):
+        nn_module = torch.nn.Linear(4, 4)
+
+        def branch0(x):
+            return nn_module(x)
+
+        def branch1(x):
+            return x * nn_module(x)
+
+        def branch2(x):
+            return nn_module(x).relu()
+
+        branches = (branch0, branch1, branch2)
+        x = torch.randn(4, requires_grad=True)
+        for i, fn in enumerate(branches):
+            result = switch(torch.tensor(i), branches, (x,))
+            self.assertEqual(result, fn(x))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(
+                result, (nn_module.weight,), grad_out, retain_graph=True
+            )
+            expected_grads = torch.autograd.grad(
+                fn(x), (nn_module.weight,), grad_out, retain_graph=True
+            )
+            self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_inner_tensor(self):
+        def branch0(x):
+            return torch.abs((x**2).sin())
+
+        def branch1(x):
+            y = torch.ones(4, requires_grad=False) * 42
+            return (x * y).cos()
+
+        def branch2(x):
+            z = torch.full((4,), 0.5, requires_grad=False)
+            return (x + z).tanh()
+
+        branches = (branch0, branch1, branch2)
+        for i, fn in enumerate(branches):
+            x = torch.randn(4, requires_grad=True)
+            result = switch(torch.tensor(i), branches, (x,))
+            self.assertEqual(result, fn(x))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (x,), grad_out)
+            expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_symint_index(self):
+        def branch0(x):
+            return x.sin()
+
+        def branch1(x):
+            return x.cos()
+
+        def branch2(x):
+            return x.tanh()
+
+        branches = (branch0, branch1, branch2)
+
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(i, x):
+            index = torch.arange(i).size(0)
+            return switch(index, branches, (x,))
+
+        for i, fn in enumerate(branches):
+            x = torch.randn(4, requires_grad=True)
+            result = f(i, x)
+            self.assertEqual(result, fn(x))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (x,), grad_out)
+            expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+    @parametrize("aux", ["none", "int_equal", "int_divergent"])
+    def test_switch_autograd_non_tensor_output_leaves(self, aux):
+        if aux == "none":
+            aux_vals = (None, None, None)
+        elif aux == "int_equal":
+            aux_vals = (7, 7, 7)
+        else:  # int_divergent
+            aux_vals = (0, 1, 2)
+
+        def make_branch(op, a):
+            def branch(x):
+                return op(x), a
+
+            return branch
+
+        ops = (torch.sin, torch.cos, torch.tanh)
+        branches = tuple(make_branch(op, a) for op, a in zip(ops, aux_vals))
+
+        for i, (op, a) in enumerate(zip(ops, aux_vals)):
+            x = torch.randn(4, requires_grad=True)
+            t, n = switch(torch.tensor(i), branches, (x,))
+
+            expected_t = op(x)
+            self.assertEqual(t, expected_t)
+            if a is None:
+                self.assertIsNone(n)
+            else:
+                self.assertEqual(n, a)
+
+            grad_out = torch.ones_like(t)
+            grads = torch.autograd.grad(t, (x,), grad_out)
+            expected_grads = torch.autograd.grad(expected_t, (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
+
+    def test_switch_autograd_multiple_tensor_outputs(self):
+        def branch0(x):
+            return x.sin(), x.cos()
+
+        def branch1(x):
+            return x.tanh(), x.relu()
+
+        def branch2(x):
+            return x.sigmoid(), (x**2).sin()
+
+        branches = (branch0, branch1, branch2)
+        for i, fn in enumerate(branches):
+            x = torch.randn(4, requires_grad=True)
+            outs = switch(torch.tensor(i), branches, (x,))
+            expected = fn(x)
+            self.assertEqual(outs, expected)
+
+            grad_outs = [torch.ones_like(o) for o in outs]
+            expected_grad_outs = [torch.ones_like(o) for o in expected]
+            grads = torch.autograd.grad(list(outs), (x,), grad_outs)
+            expected_grads = torch.autograd.grad(
+                list(expected), (x,), expected_grad_outs
+            )
+            self.assertEqual(expected_grads, grads)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_switch_autograd_gpu(self):
+        def branch0(x):
+            return x.sin()
+
+        def branch1(x):
+            return x.cos()
+
+        def branch2(x):
+            return x.tanh()
+
+        branches = (branch0, branch1, branch2)
+        for i, fn in enumerate(branches):
+            x = torch.randn(4, requires_grad=True, device="cuda")
+            result = switch(torch.tensor(i, device="cuda"), branches, (x,))
+            self.assertEqual(result, fn(x))
+
+            grad_out = torch.ones_like(result)
+            grads = torch.autograd.grad(result, (x,), grad_out)
+            expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
+            self.assertEqual(expected_grads, grads)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_map_gpu(self):
@@ -2927,25 +3366,63 @@ def forward(self, pred_1, x_1):
         self.assertEqual(counter[0], 1)
 
     @skipIfTorchDynamo("don't test compile on compile")
-    def test_scan_init_scanned_0(self):
-        # Only init and no input
-        x = torch.randn(3, 1, 2, device=torch.device("cpu"))
-        init = torch.randn(3, 2, device=torch.device("cpu"))
-        dim = 1
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    def test_scan_zero_length(self, reverse, compile_mode):
+        def body_same(c, x):
+            y = c + x
+            return y, y.clone()
 
-        # Scan dimension is 0
-        init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
-        inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
+        def body_reduce(c, x):
+            # y shape and dtype both differ from the xs slice.
+            y = c + x
+            return y, y.sum(dim=-1).to(torch.float64).clone()
+
+        def body_struct(c, x):
+            # xs is a 2-tuple, but the body emits a single ys leaf.
+            x0, x1 = x
+            y = c + x0 + x1
+            return y, y.clone()
+
+        cases = [
+            (body_same, torch.tensor([0.0, 1.0]), torch.zeros(0, 2), 0),
+            (body_reduce, torch.arange(6.0).reshape(2, 3), torch.ones(0, 2, 3), 0),
+            (body_reduce, torch.arange(6.0).reshape(2, 3), torch.ones(2, 0, 3), 1),
+            (body_struct, torch.zeros(2), (torch.ones(0, 2), torch.ones(0, 2)), 0),
+        ]
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        for body, init, xs, dim in cases:
+            result = scan_fct(body, init, xs, dim=dim, reverse=reverse)
+            expected = _fake_scan(body, init, xs, dim=dim, reverse=reverse)
+            self.assertEqual(result, expected)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @parametrize("reverse", [False, True])
+    def test_scan_zero_length_autograd(self, reverse):
+        init = torch.randn(2, 3, requires_grad=True)
+        xs = torch.randn(0, 2, 3, requires_grad=True)
+
+        def body(c, x):
+            y = torch.sin(c + x)
+            return y, y.clone()
+
+        carry, ys = scan(body, init, xs, reverse=reverse)
+        (carry.sum() + ys.sum()).backward()
+        # No steps run, so the carry passes through to init (grad of ones) and xs
+        # receives a correctly-shaped zero-length gradient.
+        self.assertEqual(init.grad, torch.ones_like(init))
+        self.assertEqual(xs.grad.shape, xs.shape)
+
+    def test_scan_unequal_scan_dim_size(self):
+        def body(c, x):
+            x0, x1 = x
+            y = c + x0 + x1
+            return y, y.clone()
+
         with self.assertRaisesRegex(
-            RuntimeError,
-            "All xs leaves must at least have.*",
+            RuntimeError, "All xs leaves must have the same scan dimension size"
         ):
-            scan(
-                get_scan_combine_fn("add", False),
-                init,
-                inp,
-                dim=dim,
-            )
+            scan(body, torch.zeros(2), (torch.ones(0, 2), torch.ones(5, 2)))
 
     @skipIfTorchDynamo("don't test compile on compile")
     def test_scan_init_non_tensor(self):
@@ -3758,6 +4235,65 @@ class GraphModule(torch.nn.Module):
                 compiled_loss,
             )
 
+    @skipIfTorchDynamo("not a dynamo test")
+    @parametrize("layers", [1, 2, 3])
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    # donated_buffer defaults to False;
+    @torch._functorch.config.patch(donated_buffer=True)
+    def test_scan_chained_closure_gradient_inductor(self, layers):
+        B, T, D, DT = 2, 8, 4, 0.1
+
+        def make_grads(backend):
+            torch.manual_seed(0)
+            cells = []
+            params = []
+            for _ in range(layers):
+                gp = torch.full((D,), 0.4, requires_grad=True)
+                gm = torch.full((D,), 0.2, requires_grad=True)
+                po = torch.zeros(D, requires_grad=True)
+                cells.append((gp, gm, po))
+                params += [gp, gm, po]
+            phi = torch.randn(B, T, D)
+
+            def scan_rollout(cell, x):
+                gp, gm, po = cell
+
+                def combine(carry, frame):
+                    g = torch.tanh(frame + po)
+                    state = carry + DT * (gp * g - gm * carry)
+                    return state, state.clone()
+
+                return scan(combine, torch.zeros(B, D), x, dim=1)[1]
+
+            def loop_rollout(cell, x):
+                gp, gm, po = cell
+                state, hist = torch.zeros(B, D), []
+                for t in range(x.shape[1]):
+                    g = torch.tanh(x[:, t] + po)
+                    state = state + DT * (gp * g - gm * state)
+                    hist.append(state)
+                return torch.stack(hist, dim=1)
+
+            rollout = loop_rollout if backend is None else scan_rollout
+
+            def chain(x):
+                for cell in cells:
+                    x = rollout(cell, x)
+                return x
+
+            torch._dynamo.reset()
+            fn = (
+                torch.compile(chain, fullgraph=True, backend=backend)
+                if backend is not None
+                else chain
+            )
+            fn(phi).square().sum().backward()
+            return [p.grad.clone() for p in params]
+
+        ref = make_grads(None)
+        got = make_grads("inductor")
+        self.assertEqual(ref, got)
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -4110,12 +4646,12 @@ class GraphModule(torch.nn.Module):
             """\
 def forward(self, fct_1, init_1, xs_1):
     flip = torch.ops.aten.flip.default(xs_1, [0])
-    sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
-    sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
-    sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
+    sym_size_int = torch.ops.aten.sym_size.int(init_1, 1)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 2)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(xs_1, 1)
+    sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4));  scan_combine_graph_0 = init_1 = flip = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  scan_combine_graph_0 = init_1 = flip = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     flip_1 = torch.ops.aten.flip.default(getitem_1, [0]);  getitem_1 = None
@@ -4268,6 +4804,190 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         ):
             scan(fct_carry_output_alias, init, inp, dim=0)
 
+    def test_scan_length_validation_pass(self):
+        def add(c, x):
+            return c + x, (c + x).clone()
+
+        init = torch.tensor(0.0)
+        xs = torch.arange(4, dtype=torch.float32)
+        result = scan(add, init, xs, length=4)
+        expected = _fake_scan(add, init, xs)
+        self.assertEqual(result, expected)
+
+    def test_scan_length_validation_mismatch(self):
+        def add(c, x):
+            return c + x, (c + x).clone()
+
+        init = torch.tensor(0.0)
+        xs = torch.arange(4, dtype=torch.float32)
+        with self.assertRaisesRegex(
+            RuntimeError, r"length=3.*does not match xs size.*4"
+        ):
+            scan(add, init, xs, length=3)
+
+    def test_scan_length_negative_raises(self):
+        def body(c, x):
+            return c + 1.0, (c + 1.0).clone()
+
+        init = torch.tensor(0.0)
+        with self.assertRaisesRegex(
+            RuntimeError, r"length must be a non-negative integer"
+        ):
+            scan(body, init, None, length=-1)
+
+    def test_scan_xs_empty_tuple_length_eager(self):
+        # Empty pytree xs (()) is treated the same as xs=None when length is given.
+        def body(c, x):
+            if x is not None:
+                raise RuntimeError(f"expected x to be None, got {x}")
+            return c + 1.0, (c + 1.0).clone()
+
+        init = torch.tensor(0.0)
+        carry, ys = scan(body, init, (), length=4)
+        self.assertEqual(carry, torch.tensor(4.0))
+        self.assertEqual(ys, torch.tensor([1.0, 2.0, 3.0, 4.0]))
+
+    @parametrize("length", [4, 0])
+    def test_scan_xs_none_length_body_uses_x_raises(self, length):
+        # combine_fn that dereferences x must raise regardless of length.
+        def bad_body(c, x):
+            return c + x, (c + x).clone()
+
+        init = torch.tensor(0.0)
+        with self.assertRaisesRegex(
+            (RuntimeError, TypeError), r"unsupported operand type.*NoneType"
+        ):
+            scan(bad_body, init, None, length=length)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("output", ["tensor", "none"])
+    @parametrize("autograd", [False, True])
+    def test_scan_xs_none_length(self, compile_mode, output, autograd):
+        if output == "tensor":
+
+            def body(c, x):
+                return torch.sin(c), torch.sin(c).clone()
+        else:
+
+            def body(c, x):  # noqa: E306
+                return torch.sin(c), None
+
+        init = torch.tensor(0.5, requires_grad=autograd)
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        if output == "none" and autograd:
+            # None ys + autograd is not yet supported; pin the limitation so this
+            # starts failing (and prompts an update) once support is added.
+            with self.assertRaises(RuntimeError):
+                result = scan_fct(body, init, None, length=3)
+                torch.autograd.grad(result[0], init, torch.ones_like(result[0]))
+            return
+
+        result = scan_fct(body, init, None, length=3)
+        result_exp = _fake_scan(body, init, None, length=3)
+        self.assertEqual(result, result_exp)
+
+        if autograd:
+            self.check_autograd(result, result_exp, (init,))
+
+    @skipIfNoDynamoSupport
+    def test_scan_xs_none_length_make_fx_none_output(self):
+        def body(c, x):
+            return torch.sin(c), None
+
+        init = torch.tensor(0.5)
+        gm = make_fx(lambda i: scan(body, i, None, length=3))(init)
+        result = gm(init)
+        result_exp = _fake_scan(body, init, None, length=3)
+        self.assertEqual(result, result_exp)
+
+    @parametrize("output", ["tensor", "none"])
+    def test_scan_xs_none_length_zero(self, output):
+        if output == "tensor":
+
+            def body(c, x):
+                return c, (c * 2).clone()
+
+            init = torch.tensor([1.0, 2.0, 3.0])
+            carry, ys = scan(body, init, None, length=0)
+            self.assertEqual(carry, init)
+            self.assertEqual(ys.shape, torch.Size([0, 3]))
+            self.assertEqual(ys.dtype, init.dtype)
+        else:
+
+            def body(c, x):  # noqa: E306
+                return c + 1.0, None
+
+            init = torch.tensor(0.0)
+            carry, ys = scan(body, init, None, length=0)
+            self.assertEqual(carry, init)
+            self.assertIsNone(ys)
+        expected = _fake_scan(body, init, None, length=0)
+        self.assertEqual((carry, ys), expected)
+
+    @skipIfNoDynamoSupport
+    @parametrize("output", ["tensor", "none"])
+    def test_scan_xs_none_length_zero_compile(self, output):
+        if output == "tensor":
+
+            def body(c, x):
+                return c, (c * 2).clone()
+
+            init = torch.tensor([1.0, 2.0, 3.0])
+        else:
+
+            def body(c, x):  # noqa: E306
+                return c + 1.0, None
+
+            init = torch.tensor(0.0)
+
+        @torch.compile(fullgraph=True)
+        def f(i):
+            return scan(body, i, None, length=0)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"scan\(\) with length=0 and no xs tensors is not supported under torch\.compile",
+        ):
+            f(init)
+
+    def test_scan_xs_none_length_vmap(self):
+        def body(c, x):
+            return c + 1.0, (c + 1.0).clone()
+
+        batch_init = torch.arange(3, dtype=torch.float32)
+        batched_carry, batched_ys = torch.vmap(lambda i: scan(body, i, None, length=4))(
+            batch_init
+        )
+        self.assertEqual(batched_carry, batch_init + 4.0)
+        expected_ys = torch.stack([batch_init + k for k in range(1, 5)], dim=1)
+        self.assertEqual(batched_ys, expected_ys)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    @skipIfNoDynamoSupport
+    def test_scan_xs_none_length_dynamic_compile(self):
+        def body(c, x):
+            return c + 1.0, (c + 1.0).clone()
+
+        init = torch.tensor(0.0)
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        cc = CompileCounterWithBackend("eager")
+
+        @torch.compile(backend=cc, fullgraph=True, dynamic=True)
+        def f(i, length):
+            return scan(body, i, None, length=length)
+
+        r4 = f(init, 4)
+        self.assertEqual(r4, (torch.tensor(4.0), torch.tensor([1.0, 2.0, 3.0, 4.0])))
+        r6 = f(init, 6)
+        self.assertEqual(
+            r6, (torch.tensor(6.0), torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+        )
+        f(init, 4)  # should hit cache, no new compilation
+        self.assertEqual(cc.frame_count, 1)
+
 
 class AssociativeScanModels:
     @staticmethod
@@ -4377,368 +5097,25 @@ class AssociativeScanModels:
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class AssociativeScanTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
 
-    def _check_autograd(self, result, result_exp, autograd_param):
-        grad_param = [p for p in autograd_param if p.requires_grad]
-
-        result_flatten, _ = pytree.tree_flatten(result)
-        result_exp_flatten, _ = pytree.tree_flatten(result_exp)
-        result_flatten = [r for r in result_flatten if r.requires_grad]
-        result_exp_flatten = [r for r in result_exp_flatten if r.requires_grad]
-
-        # Check the result and parameter lists
-        if len(result_flatten) != len(result_exp_flatten):
-            raise AssertionError(
-                "The number of elements requiring gradients is different for the results and the expected results"
-            )
-
-        grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
-        expected_grads = torch.autograd.grad(
-            result_exp_flatten, grad_param, grad_exp_init
-        )
-        grad_init = [torch.ones_like(el) for el in result_flatten]
-        grads = torch.autograd.grad(result_flatten, grad_param, grad_init)
-
-        self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
-
-    def _run_test(self, model, model_fake, inputs, autograd_param=None):
-        result = model(inputs)
-        result_exp = model_fake(inputs)
-        self.assertEqual(result, result_exp)
-
-        if autograd_param is not None and any(
-            par.requires_grad for par in autograd_param
-        ):
-            result_flat = pytree.tree_leaves(result)
-            result_exp_flat = pytree.tree_leaves(result_exp)
-            exp_grad_mask = [bool(r.requires_grad) for r in result_exp_flat]
-
-            self._check_autograd(
-                [r for r, m in zip(result_flat, exp_grad_mask) if m],
-                [r for r, m in zip(result_exp_flat, exp_grad_mask) if m],
-                autograd_param,
-            )
-
-        # Return the result of the functions under test for further investigations
-        return result
-
-    def _prepare_fake_kwargs(self, original_kwargs):
-        kwargs_fake = original_kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
-        return kwargs_fake
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [False, True])
-    # Skipping the combination of combine_mode=pointwise and device=cpu
-    # as the current implementation of pointwise does only support CUDA device
-    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
-    # as the current implementation does not support lifted arguments
-    @decorateIf(
-        unittest.skip,
-        lambda params: (
-            params["combine_mode"] == "pointwise"
-            and (
-                params["device"] == torch.device("cpu")
-                or params["compile_mode"] == "compile_dynamic_shape"
-            )
-        ),
-    )
-    # # Skipping this combination as there is a CPP compilation failure that
-    # # may be unrelated to associative_scan itself. There is a dedicated tests for
-    # # this case below.
-    # @decorateIf(
-    #     unittest.skip,
-    #     lambda params: (
-    #         params["compile_mode"] == "compile_dynamic_shape"
-    #         and params["combine_mode"] == "generic"
-    #         and params["device"] == torch.device("cpu")
-    #         and params["autograd"]
-    #     ),
-    # )
-    def test_associative_scan_compile(
-        self, combine_mode, reverse, compile_mode, device, autograd
-    ):
-        x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_mode": combine_mode,
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        results = self._run_test(
-            model=AssociativeScanModels.Simple(**kwargs),
-            model_fake=AssociativeScanModels.Simple(**kwargs_fake),
-            inputs=x,
-            autograd_param=None if not autograd else (x,),
-        )
-
-        if not reverse:
-            results_torch = []
-            for op_pt in [torch.cumsum, torch.cumprod]:
-                results_torch.append(op_pt(x, 0))
-            self.assertEqual(results, results_torch)
-
-        # Jax Examples
-        x = torch.arange(
-            0, 4, device=device, dtype=torch.float32, requires_grad=autograd
-        )
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": get_scan_combine_fn("add", True),
-            "combine_mode": combine_mode,
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        result = self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=x,
-            autograd_param=None if not autograd else (x,),
-        )
-
-        if not reverse:
-            results_torch = torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.float32)
-        else:
-            results_torch = torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.float32)
-
-        self.assertEqual(result, results_torch)
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [False, True])
-    # Skipping the combination of combine_mode=pointwise and device=cpu
-    # as the current implementation of pointwise does only support CUDA device
-    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
-    # as the current implementation does not support lifted arguments
-    @decorateIf(
-        unittest.skip,
-        lambda params: (
-            params["combine_mode"] == "pointwise"
-            and (
-                params["device"] == torch.device("cpu")
-                or params["compile_mode"] == "compile_dynamic_shape"
-            )
-        ),
-    )
-    def test_associative_scan_dim(
-        self, combine_mode, compile_mode, reverse, device, autograd
-    ):
-        import random
-
-        random.seed(1234)
-
-        num_dims = [random.randint(2, 5) for _ in range(4)]
-        for num_dim in num_dims:
-            # To avoid triggering automatic dynamic shape
-            torch._dynamo.reset()
-            shapes = [random.randint(1, 9) for _ in range(num_dim)]
-            rnd_scan_dim = random.randint(0, num_dim - 1)
-            x = torch.randn(*shapes, device=device, requires_grad=autograd)
-
-            kwargs = {
-                "dim": rnd_scan_dim,
-                "reverse": reverse,
-                "compile_mode": compile_mode,
-                "combine_mode": combine_mode,
-            }
-            kwargs_fake = self._prepare_fake_kwargs(kwargs)
-            results = self._run_test(
-                model=AssociativeScanModels.Simple(**kwargs),
-                model_fake=AssociativeScanModels.Simple(**kwargs_fake),
-                inputs=x,
-                autograd_param=None if not autograd else (x,),
-            )
-
-            if not reverse:
-                results_torch = []
-                for op_pt in [torch.cumsum, torch.cumprod]:
-                    results_torch.append(op_pt(x, 0))
-                self.assertEqual(results, results_torch)
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @unittest.expectedFailure
-    def test_associative_scan_dim_shape_failure(self, compile_mode, combine_mode):
-        num_dims = [2]
-        for num_dim in num_dims:
-            shapes = [9 for _ in range(num_dim)]
-            rnd_scan_dim = 0
-            x = torch.randn(*shapes, device=torch.device("cuda"))
-
-            kwargs = {
-                "dim": rnd_scan_dim,
-                "reverse": True,
-                "compile_mode": "compile",
-                "combine_mode": "generic",
-            }
-            kwargs_fake = self._prepare_fake_kwargs(kwargs)
-            self._run_test(
-                model=AssociativeScanModels.Simple(**kwargs),
-                model_fake=AssociativeScanModels.Simple(**kwargs_fake),
-                inputs=x,
-            )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [False, True])
-    # Skipping the combination of combine_mode=pointwise and device=cpu
-    # as the current implementation of pointwise does only support CUDA device
-    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
-    # as the current implementation does not support lifted arguments
-    @decorateIf(
-        unittest.skip,
-        lambda params: (
-            params["combine_mode"] == "pointwise"
-            and (
-                params["device"] == torch.device("cpu")
-                or params["compile_mode"] == "compile_dynamic_shape"
-            )
-        ),
-    )
-    def test_associative_scan_tuple(
-        self, compile_mode, combine_mode, reverse, device, autograd
-    ):
-        x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
-        y = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
-        inp = (x, y)
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": get_scan_combine_fn("tuple_fct", True),
-            "combine_mode": combine_mode,
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=inp,
-            autograd_param=None if not autograd else inp,
-        )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [False, True])
-    def test_associative_scan_expand_in_combine_fn(
-        self, compile_mode, reverse, device, autograd
-    ):
-        x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
-
+    def test_associative_scan_pointwise_cpu_lowering_error(self):
         def combine_fn(x, y):
-            return x * torch.sum(y, -1).expand(x.shape)
+            return x + y
 
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": combine_fn,
-            "combine_mode": "generic",
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=x,
-            autograd_param=None if not autograd else (x,),
-        )
+        class M(torch.nn.Module):
+            def forward(self, xs):
+                return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [False, True])
-    def test_associative_scan_non_contiguous_tensor(
-        self, compile_mode, reverse, device, autograd
-    ):
-        x = (
-            torch.arange(30, device=device, dtype=torch.float32, requires_grad=autograd)
-            .view(10, 3)
-            .t()
-        )
-        if x.is_contiguous():
-            raise AssertionError("Expected x to not be contiguous")
+        from torch._inductor.exc import InductorError
 
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": get_scan_combine_fn("add", True),
-            "combine_mode": "generic",
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=x,
-            autograd_param=None if not autograd else (x,),
-        )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [False, True])
-    # Skipping the combination of combine_mode=pointwise and device=cpu
-    # as the current implementation of pointwise does only support CUDA device
-    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
-    # as the current implementation does not support lifted arguments
-    @decorateIf(
-        unittest.skip,
-        lambda params: (
-            params["combine_mode"] == "pointwise"
-            and (
-                params["device"] == torch.device("cpu")
-                or params["compile_mode"] == "compile_dynamic_shape"
-            )
-        ),
-    )
-    def test_associative_scan_complex_pytree(
-        self, compile_mode, combine_mode, reverse, device, autograd
-    ):
-        x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
-        y = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
-        z = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
-        inp = {"i": x, "j": ([y], [{"o": z}])}
-
-        kwargs = {
-            "dim": 0,
-            "reverse": reverse,
-            "compile_mode": compile_mode,
-            "combine_fn": get_scan_combine_fn("complex_pointwise", True),
-            "combine_mode": combine_mode,
-        }
-        kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        self._run_test(
-            model=AssociativeScanModels.CombineFn(**kwargs),
-            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-            inputs=inp,
-            autograd_param=None if not autograd else (x, y, z),
-        )
+        xs = torch.randn(8, 4)
+        with self.assertRaisesRegex(InductorError, "is not supported on cpu"):
+            torch.compile(M(), fullgraph=True)(xs)
 
     @skipIfTorchDynamo("don't test compile on compile")
     @skipIfNoDynamoSupport
@@ -4870,12 +5247,139 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    def test_associative_scan_sparse_tensor(self):
+        x = torch.tensor(
+            [[[0.0, 0], [1.0, 2.0]], [[0.0, 0], [3.0, 4.0]], [[0.0, 0], [5.0, 6.0]]]
+        ).to_sparse()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "xs leaves must dense Tensors.*",
+        ):
+            associative_scan(
+                get_scan_combine_fn("add", True), x, 0, combine_mode="generic"
+            )
+
+    def test_associative_scan_wrong_pytree(self):
+        def fct_wrong_pytree(x, y):
+            return {
+                "i": x["i"] * y["j"][0][0],
+                "k": torch.tensor(0.0),
+                "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
+            }
+
+        x = torch.randn(3, 2, 2)
+        y = torch.randn(3, 2, 2)
+        z = torch.randn(3, 2, 2)
+        inp = {"i": x, "j": ([y], [{"o": z}])}
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Combine_fn received wrong number of arguments.*",
+        ):
+            associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
+
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@skipIfNoDynamoSupport
+class AssociativeScanTestsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        torch._dynamo.reset()
+        super().setUp()
+
+    def _check_autograd(self, result, result_exp, autograd_param):
+        grad_param = [p for p in autograd_param if p.requires_grad]
+
+        result_flatten, _ = pytree.tree_flatten(result)
+        result_exp_flatten, _ = pytree.tree_flatten(result_exp)
+        result_flatten = [r for r in result_flatten if r.requires_grad]
+        result_exp_flatten = [r for r in result_exp_flatten if r.requires_grad]
+
+        # Check the result and parameter lists
+        if len(result_flatten) != len(result_exp_flatten):
+            raise AssertionError(
+                "The number of elements requiring gradients is different for the results and the expected results"
+            )
+
+        grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
+        expected_grads = torch.autograd.grad(
+            result_exp_flatten, grad_param, grad_exp_init
+        )
+        grad_init = [torch.ones_like(el) for el in result_flatten]
+        grads = torch.autograd.grad(result_flatten, grad_param, grad_init)
+
+        self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
+
+    def _run_test(self, model, model_fake, inputs, autograd_param=None):
+        result = model(inputs)
+        result_exp = model_fake(inputs)
+        self.assertEqual(result, result_exp)
+
+        if autograd_param is not None and any(
+            par.requires_grad for par in autograd_param
+        ):
+            result_flat = pytree.tree_leaves(result)
+            result_exp_flat = pytree.tree_leaves(result_exp)
+            exp_grad_mask = [bool(r.requires_grad) for r in result_exp_flat]
+
+            self._check_autograd(
+                [r for r, m in zip(result_flat, exp_grad_mask) if m],
+                [r for r, m in zip(result_exp_flat, exp_grad_mask) if m],
+                autograd_param,
+            )
+
+        # Return the result of the functions under test for further investigations
+        return result
+
+    def _prepare_fake_kwargs(self, original_kwargs):
+        kwargs_fake = original_kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
+        return kwargs_fake
+
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("autograd", [False, True])
+    @parametrize("dim", [0, 1])
+    # pointwise only supports CUDA and does not support compile_dynamic_shape
+    # (lifted arguments), so skip those combinations as in test_associative_scan_compile.
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (
+                params["device"] == "cpu"
+                or params["compile_mode"] == "compile_dynamic_shape"
+            )
+        ),
+    )
+    def test_associative_scan_zero_length(
+        self, device, combine_mode, reverse, compile_mode, autograd, dim
+    ):
+        shape = [2, 4, 3]
+        shape[dim] = 0
+        x = torch.randn(*shape, device=device, requires_grad=autograd)
+        kwargs = {
+            "dim": dim,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.Simple(**kwargs),
+            model_fake=AssociativeScanModels.Simple(**kwargs_fake),
+            inputs=x,
+            autograd_param=None if not autograd else (x,),
+        )
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("autograd", [False, True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -4886,13 +5390,320 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
+                or params["compile_mode"] == "compile_dynamic_shape"
+            )
+        ),
+    )
+    def test_associative_scan_compile(
+        self, device, combine_mode, reverse, compile_mode, autograd
+    ):
+        x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        results = self._run_test(
+            model=AssociativeScanModels.Simple(**kwargs),
+            model_fake=AssociativeScanModels.Simple(**kwargs_fake),
+            inputs=x,
+            autograd_param=None if not autograd else (x,),
+        )
+
+        if not reverse:
+            results_torch = []
+            for op_pt in [torch.cumsum, torch.cumprod]:
+                results_torch.append(op_pt(x, 0))
+            self.assertEqual(results, results_torch)
+
+        # Jax Examples
+        x = torch.arange(
+            0, 4, device=device, dtype=torch.float32, requires_grad=autograd
+        )
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("add", True),
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        result = self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=x,
+            autograd_param=None if not autograd else (x,),
+        )
+
+        if not reverse:
+            results_torch = torch.tensor([0.0, 1.0, 3.0, 6.0], dtype=torch.float32)
+        else:
+            results_torch = torch.tensor([6.0, 6.0, 5.0, 3.0], dtype=torch.float32)
+
+        self.assertEqual(result, results_torch)
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("autograd", [False, True])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (
+                params["device"] == "cpu"
+                or params["compile_mode"] == "compile_dynamic_shape"
+            )
+        ),
+    )
+    def test_associative_scan_dim(
+        self, device, combine_mode, compile_mode, reverse, autograd
+    ):
+        import random
+
+        random.seed(1234)
+
+        num_dims = [random.randint(2, 5) for _ in range(4)]
+        for num_dim in num_dims:
+            # To avoid triggering automatic dynamic shape
+            torch._dynamo.reset()
+            shapes = [random.randint(1, 9) for _ in range(num_dim)]
+            rnd_scan_dim = random.randint(0, num_dim - 1)
+            x = torch.randn(*shapes, device=device, requires_grad=autograd)
+
+            kwargs = {
+                "dim": rnd_scan_dim,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+                "combine_mode": combine_mode,
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            results = self._run_test(
+                model=AssociativeScanModels.Simple(**kwargs),
+                model_fake=AssociativeScanModels.Simple(**kwargs_fake),
+                inputs=x,
+                autograd_param=None if not autograd else (x,),
+            )
+
+            if not reverse:
+                results_torch = []
+                for op_pt in [torch.cumsum, torch.cumprod]:
+                    results_torch.append(op_pt(x, 0))
+                self.assertEqual(results, results_torch)
+
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @unittest.expectedFailure
+    def test_associative_scan_dim_shape_failure(
+        self, device, compile_mode, combine_mode
+    ):
+        num_dims = [2]
+        for num_dim in num_dims:
+            shapes = [9 for _ in range(num_dim)]
+            rnd_scan_dim = 0
+            x = torch.randn(*shapes, device=device)
+
+            kwargs = {
+                "dim": rnd_scan_dim,
+                "reverse": True,
+                "compile_mode": "compile",
+                "combine_mode": "generic",
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            self._run_test(
+                model=AssociativeScanModels.Simple(**kwargs),
+                model_fake=AssociativeScanModels.Simple(**kwargs_fake),
+                inputs=x,
+            )
+
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_associative_scan_pointwise_mixed_device_lowering_error(self, device):
+        def combine_fn(x, y):
+            return (x[0] + y[0], x[1] + y[1])
+
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return associative_scan(
+                    combine_fn, (a, b), dim=0, combine_mode="pointwise"
+                )
+
+        from torch._inductor.exc import InductorError
+
+        a = torch.randn(8, 4, device=device)
+        b = torch.randn(8, 4, device="cpu")
+        with self.assertRaisesRegex(InductorError, "is not supported on cpu"):
+            torch.compile(M(), fullgraph=True)(a, b)
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("autograd", [False, True])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (
+                params["device"] == "cpu"
+                or params["compile_mode"] == "compile_dynamic_shape"
+            )
+        ),
+    )
+    def test_associative_scan_tuple(
+        self, device, compile_mode, combine_mode, reverse, autograd
+    ):
+        x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        y = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        inp = (x, y)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("tuple_fct", True),
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+            autograd_param=None if not autograd else inp,
+        )
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("autograd", [False, True])
+    def test_associative_scan_expand_in_combine_fn(
+        self, device, compile_mode, reverse, autograd
+    ):
+        x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+
+        def combine_fn(x, y):
+            return x * torch.sum(y, -1).expand(x.shape)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=x,
+            autograd_param=None if not autograd else (x,),
+        )
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("autograd", [False, True])
+    def test_associative_scan_non_contiguous_tensor(
+        self, device, compile_mode, reverse, autograd
+    ):
+        x = (
+            torch.arange(30, device=device, dtype=torch.float32, requires_grad=autograd)
+            .view(10, 3)
+            .t()
+        )
+        if x.is_contiguous():
+            raise AssertionError("Expected x to not be contiguous")
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("add", True),
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=x,
+            autograd_param=None if not autograd else (x,),
+        )
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("autograd", [False, True])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (
+                params["device"] == "cpu"
+                or params["compile_mode"] == "compile_dynamic_shape"
+            )
+        ),
+    )
+    def test_associative_scan_complex_pytree(
+        self, device, compile_mode, combine_mode, reverse, autograd
+    ):
+        x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        y = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        z = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+        inp = {"i": x, "j": ([y], [{"o": z}])}
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("complex_pointwise", True),
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+            autograd_param=None if not autograd else (x, y, z),
+        )
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("autograd", [False, True])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
+    # as the current implementation does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
             )
         ),
     )
     def test_associative_scan_downstream_scan_matmul(
-        self, combine_mode, compile_mode, reverse, device, autograd
+        self, device, combine_mode, compile_mode, reverse, autograd
     ):
         def first_chain_fct(scan_fct, inp, **kwargs):
             o = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
@@ -4918,12 +5729,10 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -4934,13 +5743,13 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
             )
         ),
     )
     def test_associative_scan_downstream_scan_scan(
-        self, combine_mode, compile_mode, reverse, device, autograd
+        self, device, combine_mode, compile_mode, reverse, autograd
     ):
         def first_chain_fct(scan_fct, inp, **kwargs):
             o1 = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
@@ -4967,13 +5776,11 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse_first", [False, True])
     @parametrize("same_direction", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -4984,24 +5791,18 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
             )
         ),
     )
-    # Skipping the autograd=True because
-    # associative_scan does currently not support gradients for lifted parameters
-    @decorateIf(
-        unittest.skip,
-        lambda params: (params["combine_mode"] == "pointwise" and params["autograd"]),
-    )
     def test_associative_scan_downstream_scan_scan_different_dim(
         self,
+        device,
         combine_mode,
         compile_mode,
         reverse_first,
         same_direction,
-        device,
         autograd,
     ):
         reverse_second = reverse_first if same_direction else not reverse_first
@@ -5031,17 +5832,16 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    # TODO: Does not work because of the usage of vmap within associative_scan
-    # TODO: Re-enable additional parameters again once this issues has been resolved
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    # TODO: NestedFn does not accept the kwargs passed here (dim, reverse, ...),
+    # so this fails at model construction. Fix NestedFn's signature to re-enable.
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
     @unittest.expectedFailure
-    def test_associative_scan_nested(self):
+    def test_associative_scan_nested(self, device):
         combine_mode = "pointwise"
         compile_mode = "eager"
         reverse_first = False
         same_direction = False
-        device = torch.device("cuda")
 
         reverse_second = reverse_first if same_direction else not reverse_first
 
@@ -5081,15 +5881,13 @@ class GraphModule(torch.nn.Module):
             inputs=inp,
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("loop_type", ["for"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_associative_scan_loop_in_combine_fn(
-        self, compile_mode, loop_type, reverse, device, autograd
+        self, device, compile_mode, loop_type, reverse, autograd
     ):
         def combine_fn(x, y):
             cnt = torch.zeros_like(y[0, :])
@@ -5133,14 +5931,13 @@ class GraphModule(torch.nn.Module):
 
     # TODO: Does not work because of the usage of vmap within associative_scan
     # TODO: Re-enable additional parameters again once this issues has been resolved
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
     @unittest.expectedFailure
-    def test_associative_scan_loop_in_combine_fn_failure(self):
+    def test_associative_scan_loop_in_combine_fn_failure(self, device):
         compile_mode = "none"
         loop_type = "while"
         reverse = False
-        device = torch.device("cuda")
 
         def combine_fn(x, y):
             _cnt = torch.zeros_like(y[0, :])
@@ -5168,23 +5965,21 @@ class GraphModule(torch.nn.Module):
             inputs=inp,
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of compile_mode=compile_dynamic_shape
     # as the current implementation does not support lifted arguments
     @decorateIf(
         unittest.skip,
         lambda params: (
-            params["device"] == torch.device("cpu")
+            params["device"] == "cpu"
             or params["compile_mode"] == "compile_dynamic_shape"
         ),
     )
     def test_associative_scan_cond_in_combine_fn(
-        self, compile_mode, reverse, device, autograd
+        self, device, compile_mode, reverse, autograd
     ):
         def combine_fn(x, y):
             val = cond(torch.sum(y) > 0.0, lambda y: y.clone(), lambda y: 1.0 - y, (y,))
@@ -5209,13 +6004,12 @@ class GraphModule(torch.nn.Module):
 
     # TODO: Does not work because of the usage of vmap within associative_scan
     # TODO: Re-enable additional parameters again once this issues has been resolved
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
     @unittest.expectedFailure
-    def test_associative_scan_map_in_combine_fn(self):
+    def test_associative_scan_map_in_combine_fn(self, device):
         compile_mode = "none"
         reverse = False
-        device = torch.device("cuda")
 
         def combine_fn(x, y):
             def body(x, y):
@@ -5241,14 +6035,12 @@ class GraphModule(torch.nn.Module):
             inputs=inp,
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_associative_scan_vmap_in_combine_fn(
-        self, compile_mode, reverse, device, autograd
+        self, device, compile_mode, reverse, autograd
     ):
         def combine_fn(x, y):
             def body(x):
@@ -5275,20 +6067,18 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of associative_scan and device=cpu
     # as the current implementation of pointwise does only support CUDA device
     @decorateIf(
         unittest.skip,
-        lambda params: (params["device"] == torch.device("cpu")),
+        lambda params: (params["device"] == "cpu"),
     )
     def test_associative_scan_non_pointwise_generic(
-        self, reverse, compile_mode, device, autograd
+        self, device, reverse, compile_mode, autograd
     ):
         x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
 
@@ -5307,12 +6097,10 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (x,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
@@ -5323,13 +6111,13 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
             )
         ),
     )
     def test_associative_scan_binary_operator(
-        self, compile_mode, combine_mode, reverse, device, autograd
+        self, device, compile_mode, combine_mode, reverse, autograd
     ):
         state_dim = 20
         timesteps = 10
@@ -5354,12 +6142,10 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else elements,
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_associative_scan_different_input_size(self, compile_mode, reverse, device):
+    def test_associative_scan_different_input_size(self, device, compile_mode, reverse):
         batch = 5
         hidden_dim = 3
         length = 10
@@ -5392,32 +6178,24 @@ class GraphModule(torch.nn.Module):
             inputs=elements,
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_different_input_size_wrong_dim(self):
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_associative_scan_different_input_size_wrong_dim(self, device):
         batch = 5
         hidden_dim = 3
         length = 10
         dstate = 7
 
-        deltaA = torch.randn(
-            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
-        )
-        deltaB_u = torch.randn(
-            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
-        )
-        C = torch.randn((batch, dstate, length), device=torch.device("cuda"))
-        x = torch.randn(
-            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
-        )
-        y = torch.randn(
-            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
-        )
+        deltaA = torch.randn((batch, hidden_dim, length, dstate), device=device)
+        deltaB_u = torch.randn((batch, hidden_dim, length, dstate), device=device)
+        C = torch.randn((batch, dstate, length), device=device)
+        x = torch.randn((batch, hidden_dim, length, dstate), device=device)
+        y = torch.randn((batch, hidden_dim, length, dstate), device=device)
         elements = (x, deltaA, deltaB_u, C, y)
 
         with self.assertRaisesRegex(
             ValueError,
-            "All xs leaves must at least have.*",
+            "All xs leaves must have at least 'dim \\+ 1' dimensions",
         ):
             associative_scan(
                 get_scan_combine_fn("different_input_size_operator", True),
@@ -5426,12 +6204,10 @@ class GraphModule(torch.nn.Module):
                 combine_mode="pointwise",
             )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combine_mode=pointwise
     # as the current implementation of associative_scan lowering
@@ -5441,7 +6217,7 @@ class GraphModule(torch.nn.Module):
         lambda params: (params["combine_mode"] == "pointwise"),
     )
     def test_associative_scan_freevars_simple(
-        self, compile_mode, combine_mode, reverse, device, autograd
+        self, device, compile_mode, combine_mode, reverse, autograd
     ):
         H = torch.rand(2, device=device, requires_grad=autograd)
 
@@ -5479,12 +6255,10 @@ class GraphModule(torch.nn.Module):
                 autograd_param=None if not autograd else (inp, *param),
             )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combine_mode=pointwise
     # as the current implementation of associative_scan lowering
@@ -5494,7 +6268,7 @@ class GraphModule(torch.nn.Module):
         lambda params: (params["combine_mode"] == "pointwise"),
     )
     def test_associative_scan_freevars_nested(
-        self, compile_mode, combine_mode, reverse, device, autograd
+        self, device, compile_mode, combine_mode, reverse, autograd
     ):
         H1 = torch.rand(4, 5, device=device, requires_grad=autograd)
         H2 = torch.rand(4, 1, device=device, requires_grad=autograd)
@@ -5556,12 +6330,10 @@ class GraphModule(torch.nn.Module):
                 autograd_param=None if not autograd else (inp, *param),
             )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combine_mode=pointwise
     # as the current implementation of associative_scan lowering
@@ -5571,7 +6343,7 @@ class GraphModule(torch.nn.Module):
         lambda params: (params["combine_mode"] == "pointwise"),
     )
     def test_associative_scan_freevars_fct(
-        self, compile_mode, combine_mode, reverse, device, autograd
+        self, device, compile_mode, combine_mode, reverse, autograd
     ):
         def additional_fct_no_add_inp(x, y):
             return x * y
@@ -5597,14 +6369,12 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     def test_associative_scan_freevars_fct_generic(
-        self, compile_mode, reverse, device, autograd
+        self, device, compile_mode, reverse, autograd
     ):
         def additional_fct_no_add_inp(x, y):
             return x * y
@@ -5637,12 +6407,10 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
     # Skipping the combine_mode=pointwise
     # as the current implementation of associative_scan lowering
@@ -5652,7 +6420,7 @@ class GraphModule(torch.nn.Module):
         lambda params: (params["combine_mode"] == "pointwise"),
     )
     def test_associative_scan_freevars_shape_check(
-        self, compile_mode, combine_mode, reverse, device, autograd
+        self, device, compile_mode, combine_mode, reverse, autograd
     ):
         H = torch.eye(2, device=device, requires_grad=True)
 
@@ -5676,11 +6444,9 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (inp,),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("autograd", [False, True])
     # Skipping the combine_mode=pointwise
@@ -5691,7 +6457,7 @@ class GraphModule(torch.nn.Module):
         lambda params: (params["combine_mode"] == "pointwise"),
     )
     def test_associative_scan_freevars_pytree(
-        self, compile_mode, combine_mode, reverse, device, autograd
+        self, device, compile_mode, combine_mode, reverse, autograd
     ):
         xf = torch.randn(2, 2, device=device, requires_grad=autograd)
         yf = torch.randn(2, 2, device=device, requires_grad=autograd)
@@ -5732,12 +6498,10 @@ class GraphModule(torch.nn.Module):
             autograd_param=None if not autograd else (*pytree.tree_leaves(inp),),
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
     # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
@@ -5747,14 +6511,14 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
                 or torch.version.hip
             )
         ),
     )
     def test_associative_scan_partial_grad(
-        self, combine_mode, compile_mode, reverse, device
+        self, device, combine_mode, compile_mode, reverse
     ):
         import random
 
@@ -5792,12 +6556,10 @@ class GraphModule(torch.nn.Module):
                 autograd_param=inp,
             )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
     # Skipping the combination of combine_mode=pointwise and compile_mode=compile_dynamic_shape
@@ -5807,14 +6569,14 @@ class GraphModule(torch.nn.Module):
         lambda params: (
             params["combine_mode"] == "pointwise"
             and (
-                params["device"] == torch.device("cpu")
+                params["device"] == "cpu"
                 or params["compile_mode"] == "compile_dynamic_shape"
                 or torch.version.hip
             )
         ),
     )
     def test_associative_scan_partial_grad_no_grad(
-        self, combine_mode, compile_mode, reverse, device
+        self, device, combine_mode, compile_mode, reverse
     ):
         def mul_single_nograd(x, y):
             xy1 = x[0] * y[0]
@@ -5841,24 +6603,9 @@ class GraphModule(torch.nn.Module):
             autograd_param=inp[0:1],
         )
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    def test_associative_scan_sparse_tensor(self):
-        x = torch.tensor(
-            [[[0.0, 0], [1.0, 2.0]], [[0.0, 0], [3.0, 4.0]], [[0.0, 0], [5.0, 6.0]]]
-        ).to_sparse()
-
-        with self.assertRaisesRegex(
-            ValueError,
-            "xs leaves must dense Tensors.*",
-        ):
-            associative_scan(
-                get_scan_combine_fn("add", True), x, 0, combine_mode="generic"
-            )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_combine_fn_wrong_meta_in_combine_fn(self):
-        device = torch.device("cuda")
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_associative_scan_combine_fn_wrong_meta_in_combine_fn(self, device):
         B, N, C, H, W = 3, 3, 2, 3, 3
         x = torch.randn(B, N, C, H, W, device=device)
 
@@ -5866,9 +6613,7 @@ class GraphModule(torch.nn.Module):
             return (x + y).to(torch.int64)
 
         def fct_wrong_device(x, y):
-            return (x + y).to(
-                torch.device("cpu") if device.type == "cuda" else torch.device("cuda")
-            )
+            return (x + y).to("cpu")
 
         def fct_wrong_stride(x, y):
             return (x + y).to(memory_format=torch.channels_last)
@@ -5880,30 +6625,9 @@ class GraphModule(torch.nn.Module):
             ):
                 associative_scan(fct, x, 0)
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    def test_associative_scan_wrong_pytree(self):
-        def fct_wrong_pytree(x, y):
-            return {
-                "i": x["i"] * y["j"][0][0],
-                "k": torch.tensor(0.0),
-                "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
-            }
-
-        x = torch.randn(3, 2, 2)
-        y = torch.randn(3, 2, 2)
-        z = torch.randn(3, 2, 2)
-        inp = {"i": x, "j": ([y], [{"o": z}])}
-
-        with self.assertRaisesRegex(
-            AssertionError,
-            "Combine_fn received wrong number of arguments.*",
-        ):
-            associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_non_pointwise(self):
-        device = torch.device("cuda")
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_associative_scan_non_pointwise(self, device):
         x = torch.randn(3, 10, 2, device=device)
         with self.assertRaisesRegex(
             # Should be:
@@ -5917,10 +6641,46 @@ class GraphModule(torch.nn.Module):
                 combine_mode="pointwise",
             )
 
-    @requires_cuda
-    def test_associative_scan_input_mutation(self):
-        device = torch.device("cuda")
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_associative_scan_pointwise_multiple_additional_inputs_autograd(
+        self, device
+    ):
+        H1 = torch.rand(2, device=device, requires_grad=False)
+        H2 = torch.rand(2, device=device, requires_grad=False)
 
+        # Multiplicative body so bwys is non-unit: this is what exercises the
+        # bwys-alignment (torch.cat([bwys[1:], ones])) in the reversed backward scan.
+        # A purely additive body degenerates bwys to all-ones and hides alignment bugs.
+        # Multiplication by the constant freevars keeps combine_fn associative.
+        def combine_fn(x, y):
+            return x * y * H1 * H2
+
+        xs = torch.randn(4, 2, device=device, requires_grad=True)
+        result = associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+        result_ref = _fake_associative_scan(combine_fn, xs, dim=0)
+        self.assertEqual(result, result_ref)
+
+        grads = torch.autograd.grad(result.sum(), xs)
+        grads_ref = torch.autograd.grad(result_ref.sum(), xs)
+        self.assertEqual(grads, grads_ref)
+
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_associative_scan_pointwise_additional_input_requires_grad_raises(
+        self, device
+    ):
+        H = torch.rand(2, device=device, requires_grad=True)
+
+        def combine_fn(x, y):
+            return x + y + H
+
+        xs = torch.randn(4, 2, device=device, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "lifted parameters"):
+            associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+
+    @onlyAccelerator
+    def test_associative_scan_input_mutation(self, device):
         def fct_input_mutation(x, y):
             x.add_(1)
             return x + y
@@ -5936,10 +6696,8 @@ class GraphModule(torch.nn.Module):
         ):
             associative_scan(fct_input_mutation, x, 0)
 
-    @requires_cuda
-    def test_associative_scan_input_output_alias(self):
-        device = torch.device("cuda")
-
+    @onlyAccelerator
+    def test_associative_scan_input_output_alias(self, device):
         def fct_input_output_alias(x, y):
             return x[0], x[1] + y[1]
 
@@ -5956,11 +6714,9 @@ class GraphModule(torch.nn.Module):
         ):
             associative_scan(fct_input_output_alias, inp, 0)
 
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_output_output_alias(self):
-        device = torch.device("cuda")
-
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_associative_scan_output_output_alias(self, device):
         def fct_output_output_alias(x, y):
             c = x[0] + y[1]
             return c, c
@@ -5977,6 +6733,431 @@ class GraphModule(torch.nn.Module):
             r"Higher Order Operator: torch\.ops\.higher_order\.associative_scan",
         ):
             associative_scan(fct_output_output_alias, inp, 0)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_simple(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [_fake_associative_scan(combine_fn, x[i], dim=0) for i in range(x.shape[0])]
+        )
+        self.assertEqual(out, exp)
+        # See Note [associative_scan vmap coverage].
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_autograd(self, combine_mode):
+        # The stack's motivation is an efficient backward, so exercise autograd
+        # through vmap(associative_scan(...)): compare grads against the fake
+        # reference and run a full gradcheck in double precision.
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        x = torch.randn(3, 4, 2, device="cuda", requires_grad=True)
+        (grad,) = torch.autograd.grad(fn(x).sum(), x)
+        x_ref = x.detach().clone().requires_grad_(True)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(combine_fn, x_ref[i], dim=0)
+                for i in range(x_ref.shape[0])
+            ]
+        )
+        (grad_exp,) = torch.autograd.grad(exp.sum(), x_ref)
+        self.assertEqual(grad, grad_exp)
+
+        xd = torch.randn(2, 3, 2, dtype=torch.double, device="cuda", requires_grad=True)
+        self.assertTrue(torch.autograd.gradcheck(fn, (xd,)))
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_pytree(self, combine_mode):
+        xs = {
+            "a": torch.randn(3, 5, 2, device="cuda"),
+            "b": torch.randn(3, 5, 2, device="cuda"),
+        }
+
+        def combine_fn(l, r):
+            return {"a": l["a"] + r["a"], "b": l["b"] * r["b"]}
+
+        def fn(a, b):
+            def inner_fn(a, b):
+                return associative_scan(
+                    combine_fn, {"a": a, "b": b}, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=(0, 0))(a, b)
+
+        out = fn(xs["a"], xs["b"])
+        exp = {
+            k: torch.stack(
+                [
+                    _fake_associative_scan(
+                        combine_fn,
+                        {"a": xs["a"][i], "b": xs["b"][i]},
+                        dim=0,
+                    )[k]
+                    for i in range(xs["a"].shape[0])
+                ]
+            )
+            for k in ("a", "b")
+        }
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(xs["a"], xs["b"]), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_reverse(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a * b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, reverse=True, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(combine_fn, x[i], dim=0, reverse=True)
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_nested(self, combine_mode):
+        x = torch.randn(2, 3, 4, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(torch.vmap(inner_fn, in_dims=0), in_dims=0)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [
+                torch.stack(
+                    [
+                        _fake_associative_scan(combine_fn, x[i, j], dim=0)
+                        for j in range(x.shape[1])
+                    ]
+                )
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_additional_inputs(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
+        h = torch.randn(3, 2, device="cuda")
+
+        def fn(x, h):
+            def inner_fn(xi, hi):
+                def combine_fn(a, b):
+                    return a + b + hi
+
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=(0, 0))(x, h)
+
+        out = fn(x, h)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(lambda a, b: a + b + h[i], x[i], dim=0)
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x, h), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_scan_length_one(self, combine_mode):
+        x = torch.randn(3, 1, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        self.assertEqual(out, x)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), x)
+
+    @requires_cuda
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_associative_scan_in_vmap_pointwise_compile_error(self):
+        from torch._inductor.exc import InductorError
+
+        x = torch.randn(3, 4, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(combine_fn, xi, dim=0, combine_mode="pointwise")
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        with self.assertRaisesRegex(InductorError, "LoweringException"):
+            torch.compile(fn)(x)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_nonzero_in_dims(self, combine_mode):
+        x = torch.randn(4, 3, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=1)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(combine_fn, x[:, i], dim=0)
+                for i in range(x.shape[1])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_nonzero_out_dims(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0, out_dims=1)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(combine_fn, x[i], dim=0)
+                for i in range(x.shape[0])
+            ],
+            dim=1,
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_unbatched_additional_inputs(self, combine_mode):
+        x = torch.randn(3, 4, 2, device="cuda")
+        h = torch.randn(2, device="cuda")
+
+        def fn(x, h):
+            def inner_fn(xi, hi):
+                def combine_fn(a, b):
+                    return a + b + hi
+
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=(0, None))(x, h)
+
+        out = fn(x, h)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(lambda a, b: a + b + h, x[i], dim=0)
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x, h), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_nonzero_scan_dim(self, combine_mode):
+        # The frontend moves the scan dim to 0 (associative_scan.py movedim),
+        # while the batch rule parks the batch dim on the last axis; exercise the
+        # interaction with a scan dim that is neither 0 nor the batched axis.
+        x = torch.randn(3, 4, 5, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=1, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        exp = torch.stack(
+            [_fake_associative_scan(combine_fn, x[i], dim=1) for i in range(x.shape[0])]
+        )
+        self.assertEqual(out, exp)
+        # See Note [associative_scan vmap coverage].
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), exp)
+
+    @parametrize("combine_mode", ["generic", "pointwise"])
+    @requires_cuda
+    def test_associative_scan_in_vmap_zero_length_scan_dim(self, combine_mode):
+        # Size-0 scan dim under vmap: the frontend short-circuits (see the size-0
+        # note in associative_scan) and each batch element returns its input.
+        x = torch.randn(3, 0, 2, device="cuda")
+
+        def combine_fn(a, b):
+            return a + b
+
+        def fn(x):
+            def inner_fn(xi):
+                return associative_scan(
+                    combine_fn, xi, dim=0, combine_mode=combine_mode
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(x)
+
+        out = fn(x)
+        self.assertEqual(out, x)
+        # See Note [associative_scan vmap coverage].
+        if combine_mode == "generic":
+            self.assertEqual(torch.compile(fn)(x), x)
+
+    @skipIfTorchDynamo("not a dynamo test")
+    def test_associative_scan_in_vmap_unbatched_xs_error(self):
+        # Batched additional_inputs (hi) with unbatched xs: the combine_fn outputs
+        # become batched while xs is not, so the outputs' batch dims diverge from
+        # xs on later scan levels. This is not supported yet; the batch rule detects
+        # it up front and raises a clear error rather than a cryptic broadcast one.
+        # JAX broadcasts here instead of erroring; see
+        # https://github.com/pytorch/pytorch/pull/192654 for the same treatment.
+        xs = torch.randn(4, 2)
+        h = torch.randn(3, 2)
+
+        def vmap_fn(xs, h):
+            def inner_fn(hi):
+                def combine_fn(a, b):
+                    return a + b + hi
+
+                return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+
+            return torch.vmap(inner_fn, in_dims=0)(h)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "combine_fn outputs to keep the same batched arguments as its xs inputs",
+        ):
+            vmap_fn(xs, h)
+
+    @skipIfTorchDynamo("not a dynamo test")
+    def test_associative_scan_in_vmap_mixed_batched_pytree_error(self):
+        a = torch.randn(3, 5, 2)
+        b = torch.randn(5, 2)
+
+        def combine_fn(l, r):
+            return {"a": l["a"] + r["a"], "b": l["b"] * r["a"]}
+
+        def fn(a, b):
+            def inner_fn(ai):
+                return associative_scan(
+                    combine_fn, {"a": ai, "b": b}, dim=0, combine_mode="pointwise"
+                )
+
+            return torch.vmap(inner_fn, in_dims=0)(a)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "combine_fn outputs to keep the same batched arguments as its xs inputs",
+        ):
+            fn(a, b)
+
+    @skipIfTorchDynamo("not a dynamo test")
+    def test_associative_scan_op_in_vmap_eager(self):
+        x = torch.randn(3, 4, 2)
+
+        # The raw HOP receives the flattened operator: 2 * num_leaves args
+        # (lhs leaves, then rhs leaves), returning a list of num_leaves outputs.
+        def flat_combine_fn(lhs, rhs):
+            return [lhs + rhs]
+
+        def inner_fn(xi):
+            return associative_scan_op(flat_combine_fn, [xi], ())[0]
+
+        out = torch.vmap(inner_fn, in_dims=0)(x)
+        exp = torch.stack(
+            [
+                _fake_associative_scan(lambda a, b: a + b, x[i], dim=0)
+                for i in range(x.shape[0])
+            ]
+        )
+        self.assertEqual(out, exp)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
@@ -6125,10 +7306,11 @@ class TestControlFlowTraced(TestCase):
 def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor):
     l_inp_x_ = L_inp_x_
     l_idx_ = L_idx_
+    index = l_idx_.clamp(0, 2);  l_idx_ = None
     switch_branch0_0 = self.switch_branch0_0
     switch_branch1_0 = self.switch_branch1_0
     switch_branch2_0 = self.switch_branch2_0
-    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_,));  l_idx_ = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = None
+    switch = torch.ops.higher_order.switch(index, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_,));  index = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = None
     getitem = switch[0];  switch = None
     return (getitem,)""",
         )
@@ -6197,10 +7379,11 @@ def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_branch0_clos
     l_branch0_closure_0_cell_contents = L_branch0_closure_0_cell_contents
     l_branch1_closure_0_cell_contents = L_branch1_closure_0_cell_contents
     l_branch2_closure_0_cell_contents = L_branch2_closure_0_cell_contents
+    index = l_idx_.clamp(0, 2);  l_idx_ = None
     switch_branch0_0 = self.switch_branch0_0
     switch_branch1_0 = self.switch_branch1_0
     switch_branch2_0 = self.switch_branch2_0
-    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_, l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_contents, l_branch2_closure_0_cell_contents));  l_idx_ = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = l_branch0_closure_0_cell_contents = l_branch1_closure_0_cell_contents = l_branch2_closure_0_cell_contents = None
+    switch = torch.ops.higher_order.switch(index, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_, l_branch0_closure_0_cell_contents, l_branch1_closure_0_cell_contents, l_branch2_closure_0_cell_contents));  index = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = l_branch0_closure_0_cell_contents = l_branch1_closure_0_cell_contents = l_branch2_closure_0_cell_contents = None
     getitem = switch[0];  switch = None
     return (getitem,)""",
         )
@@ -6229,6 +7412,85 @@ def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch1
 def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch1_closure_0_cell_contents_branch1, l_branch2_closure_0_cell_contents_branch2):
     l_inp_x__1 = l_inp_x_
     add = l_inp_x__1 + l_branch2_closure_0_cell_contents_branch2;  l_inp_x__1 = l_branch2_closure_0_cell_contents_branch2 = None
+    return (add,)""",
+        )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_switch_lifted_args_dedup_check_graph(self):
+        a = torch.ones(2, 3)
+        b = torch.ones(2, 3) + 1
+        c = torch.ones(2, 3) * 2
+
+        # branch0 closes over {a, b}, branch1 over {a, b, c}, branch2 over {c}.
+        # No leaf is in *all* three -> shared block is empty; `a` is lifted by
+        # branches 0+1, `b` by branches 0+1, `c` by branches 1+2.
+        def branch0(inp_x):
+            return inp_x + a + b
+
+        def branch1(inp_x):
+            return inp_x + a + b + c
+
+        def branch2(inp_x):
+            return inp_x + c
+
+        def f(idx, inp_x):
+            return switch(idx, (branch0, branch1, branch2), (inp_x,))
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(f, backend=backend, fullgraph=True)(
+            torch.tensor([1]), torch.randn(2, 3)
+        )
+
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+        # The outer operand tuple lists `a`, `b`, `c` exactly once each, with
+        # no duplicates from the per-branch unique lists.
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_branch0_closure_0_cell_contents : torch.Tensor, L_branch0_closure_1_cell_contents : torch.Tensor, L_branch1_closure_2_cell_contents : torch.Tensor):
+    l_inp_x_ = L_inp_x_
+    l_idx_ = L_idx_
+    l_branch0_closure_0_cell_contents = L_branch0_closure_0_cell_contents
+    l_branch0_closure_1_cell_contents = L_branch0_closure_1_cell_contents
+    l_branch1_closure_2_cell_contents = L_branch1_closure_2_cell_contents
+    index = l_idx_.clamp(0, 2);  l_idx_ = None
+    switch_branch0_0 = self.switch_branch0_0
+    switch_branch1_0 = self.switch_branch1_0
+    switch_branch2_0 = self.switch_branch2_0
+    switch = torch.ops.higher_order.switch(index, [switch_branch0_0, switch_branch1_0, switch_branch2_0], (l_inp_x_, l_branch0_closure_0_cell_contents, l_branch0_closure_1_cell_contents, l_branch1_closure_2_cell_contents));  index = switch_branch0_0 = switch_branch1_0 = switch_branch2_0 = l_inp_x_ = l_branch0_closure_0_cell_contents = l_branch0_closure_1_cell_contents = l_branch1_closure_2_cell_contents = None
+    getitem = switch[0];  switch = None
+    return (getitem,)""",
+        )
+        # Every branch submodule shares the same placeholder signature,
+        # listing each of {a, b, c} once. The "_branch0" / "_branch2" suffixes
+        # reflect which branch first lifted the leaf.
+        self.assertExpectedInline(
+            gm.switch_branch0_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch0_closure_1_cell_contents_branch0, l_branch1_closure_2_cell_contents_branch1):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch0_closure_0_cell_contents_branch0;  l_inp_x__1 = l_branch0_closure_0_cell_contents_branch0 = None
+    add_1 = add + l_branch0_closure_1_cell_contents_branch0;  add = l_branch0_closure_1_cell_contents_branch0 = None
+    return (add_1,)""",
+        )
+        self.assertExpectedInline(
+            gm.switch_branch1_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch0_closure_1_cell_contents_branch0, l_branch1_closure_2_cell_contents_branch1):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch0_closure_0_cell_contents_branch0;  l_inp_x__1 = l_branch0_closure_0_cell_contents_branch0 = None
+    add_1 = add + l_branch0_closure_1_cell_contents_branch0;  add = l_branch0_closure_1_cell_contents_branch0 = None
+    add_2 = add_1 + l_branch1_closure_2_cell_contents_branch1;  add_1 = l_branch1_closure_2_cell_contents_branch1 = None
+    return (add_2,)""",
+        )
+        self.assertExpectedInline(
+            gm.switch_branch2_0.code.strip(),
+            """\
+def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch0_closure_1_cell_contents_branch0, l_branch1_closure_2_cell_contents_branch1):
+    l_inp_x__1 = l_inp_x_
+    add = l_inp_x__1 + l_branch1_closure_2_cell_contents_branch1;  l_inp_x__1 = l_branch1_closure_2_cell_contents_branch1 = None
     return (add,)""",
         )
 
@@ -6366,9 +7628,10 @@ def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_linear0_para
     l_linear0_parameters_bias_ = L_linear0_parameters_bias_
     l_linear1_parameters_weight_ = L_linear1_parameters_weight_
     l_linear1_parameters_bias_ = L_linear1_parameters_bias_
+    index = l_idx_.clamp(0, 1);  l_idx_ = None
     switch_branch0_0 = self.switch_branch0_0
     switch_branch1_0 = self.switch_branch1_0
-    switch = torch.ops.higher_order.switch(l_idx_, [switch_branch0_0, switch_branch1_0], (l_inp_x_, l_linear0_parameters_bias_, l_linear0_parameters_weight_, l_linear1_parameters_bias_, l_linear1_parameters_weight_));  l_idx_ = switch_branch0_0 = switch_branch1_0 = l_inp_x_ = l_linear0_parameters_bias_ = l_linear0_parameters_weight_ = l_linear1_parameters_bias_ = l_linear1_parameters_weight_ = None
+    switch = torch.ops.higher_order.switch(index, [switch_branch0_0, switch_branch1_0], (l_inp_x_, l_linear0_parameters_bias_, l_linear0_parameters_weight_, l_linear1_parameters_bias_, l_linear1_parameters_weight_));  index = switch_branch0_0 = switch_branch1_0 = l_inp_x_ = l_linear0_parameters_bias_ = l_linear0_parameters_weight_ = l_linear1_parameters_bias_ = l_linear1_parameters_weight_ = None
     getitem = switch[0];  switch = None
     return (getitem,)""",
         )
@@ -6577,6 +7840,197 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         for args in test_inputs:
             _check_compile_cudagraph_backend(self, f, args)
             _check_compile_many_backends_with_cudagraph(self, f, args)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_traced_cudagraphs(self):
+        def f(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                return acc + 2, iteration + 1
+
+            return while_loop(cond_fn, body_fn, (x, init_iter))
+
+        x = torch.randn(4).cuda()
+        limit = torch.tensor(3, device="cuda")
+
+        _check_compile_cudagraph_backend(self, f, [x, limit])
+        _check_compile_many_backends_with_cudagraph(self, f, [x, limit])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cuda_graph_replay_uses_runtime_condition(self):
+        def cond_fn(acc, iteration, limit):
+            return iteration < limit
+
+        def body_fn(acc, iteration, limit):
+            return acc + 2, iteration + 1
+
+        def f(x, iteration, limit):
+            return torch.ops.higher_order.while_loop(
+                cond_fn, body_fn, (x, iteration), (limit,)
+            )
+
+        x = torch.ones(4, device="cuda")
+        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
+        limit = torch.tensor(3, device="cuda")
+
+        side_stream = torch.cuda.Stream()
+        with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
+            f(x, iteration, limit)
+
+        graph = torch.cuda.CUDAGraph()
+        with (
+            torch.cuda.graph(graph, stream=side_stream),
+            CUDAGraphCaptureControlFlowOpDispatchMode(),
+        ):
+            out = f(x, iteration, limit)
+
+        torch.cuda.current_stream().wait_stream(side_stream)
+
+        for num_iters in [3, 0, 5]:
+            x.fill_(1)
+            iteration.zero_()
+            limit.fill_(num_iters)
+            graph.replay()
+            torch.cuda.synchronize()
+
+            self.assertEqual(out[0], torch.full_like(x, 1 + 2 * num_iters))
+            self.assertEqual(
+                out[1], torch.tensor(num_iters, dtype=torch.int64, device="cuda")
+            )
+            self.assertEqual(x, torch.ones_like(x))
+            self.assertEqual(iteration, torch.zeros_like(iteration))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cudagraph_kwargs_error(self):
+        def cond_fn(iteration):
+            return iteration < 1
+
+        def body_fn(iteration):
+            return (iteration + 1,)
+
+        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
+        args = (cond_fn, body_fn, (iteration,), ())
+        error = "CUDA graph conditional torch.while_loop does not support kwargs"
+
+        for mode_cls in (
+            CUDAGraphCaptureControlFlowOpDispatchMode,
+            ControlFlowOpWarmupDispatchMode,
+        ):
+            with (
+                self.subTest(mode=mode_cls.__name__),
+                self.assertRaisesRegex(RuntimeError, error),
+            ):
+                mode_cls().__torch_dispatch__(
+                    torch.ops.higher_order.while_loop,
+                    (),
+                    args,
+                    {"unexpected": True},
+                )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cudagraph_body_pytree_mismatch_error(self):
+        def cond_fn(iteration):
+            return iteration < 1
+
+        def body_fn(iteration):
+            return {"iteration": iteration + 1}
+
+        iteration = torch.zeros((), dtype=torch.int64, device="cuda")
+        graph = torch.cuda.CUDAGraph()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "body_fn should return the same pytree structure as carried_inputs",
+        ):
+            with (
+                torch.cuda.graph(graph),
+                CUDAGraphCaptureControlFlowOpDispatchMode(),
+            ):
+                torch.ops.higher_order.while_loop(cond_fn, body_fn, (iteration,), ())
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_inside_while_loop_cudagraphs(self):
+        def f(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                pred = iteration % 2 == 0
+                acc = torch.cond(
+                    pred,
+                    lambda acc: acc + 3,
+                    lambda acc: acc - 1,
+                    [acc],
+                )
+                return acc, iteration + 1
+
+            return torch.while_loop(cond_fn, body_fn, (x, init_iter))
+
+        x = torch.randn(4).cuda()
+        limit = torch.tensor(4, device="cuda")
+
+        _check_compile_cudagraph_backend(self, f, [x, limit])
+        _check_compile_many_backends_with_cudagraph(self, f, [x, limit])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_inside_cond_cudagraphs(self):
+        def add_loop(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                return acc + 2, iteration + 1
+
+            acc, _ = torch.while_loop(cond_fn, body_fn, (x, init_iter))
+            return acc
+
+        def sub_loop(x, limit):
+            init_iter = torch.zeros((), dtype=torch.int64, device=x.device)
+
+            def cond_fn(acc, iteration):
+                return iteration < limit
+
+            def body_fn(acc, iteration):
+                return acc - 1, iteration + 1
+
+            acc, _ = torch.while_loop(cond_fn, body_fn, (x, init_iter))
+            return acc
+
+        def f(x, pred, limit):
+            return torch.cond(pred, add_loop, sub_loop, [x, limit])
+
+        x = torch.randn(4).cuda()
+        limit = torch.tensor(3, device="cuda")
+
+        for pred in [torch.tensor(True).cuda(), torch.tensor(False).cuda()]:
+            _check_compile_cudagraph_backend(self, f, [x, pred, limit])
+            _check_compile_many_backends_with_cudagraph(self, f, [x, pred, limit])
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
@@ -10085,8 +11539,8 @@ class GraphModule(torch.nn.Module):
             sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0)
 
             rsub: "i64[]" = torch.ops.aten.rsub.Scalar(arg0_1, sym_size_int_1);  sym_size_int_1 = None
-            sub_1: "i64[]" = torch.ops.aten.sub.Tensor(rsub, 1);  rsub = None
-            _local_scalar_dense: "Sym(u7)" = torch.ops.aten._local_scalar_dense.default(sub_1);  sub_1 = None
+            sub: "i64[]" = torch.ops.aten.sub.Tensor(rsub, 1);  rsub = None
+            _local_scalar_dense: "Sym(u7)" = torch.ops.aten._local_scalar_dense.default(sub);  sub = None
             select: "f32[3, 3]" = torch.ops.aten.select.int(arg4_1, 0, _local_scalar_dense);  arg4_1 = _local_scalar_dense = None
             t: "f32[3, 3]" = torch.ops.aten.t.default(arg6_1);  arg6_1 = None
             t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
@@ -10097,14 +11551,14 @@ class GraphModule(torch.nn.Module):
             sum_1: "f32[1, 3]" = torch.ops.aten.sum.dim_IntList(arg1_1, [0], True)
             view: "f32[3]" = torch.ops.aten.view.default(sum_1, [3]);  sum_1 = None
             t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
-            mul_4: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
-            mul_5: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
-            add_7: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_5);  mm = mul_5 = None
-            add_8: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_7, mul_4);  add_7 = mul_4 = None
-            add_9: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-            add_10: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
-            add_11: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
-            return (add_9, add_8, add_10, add_11)
+            mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
+            mul_2: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
+            add_2: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_2);  mm = mul_2 = None
+            add_3: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_2, mul_1);  add_2 = mul_1 = None
+            add_4: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+            add_5: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
+            add_6: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
+            return (add_4, add_3, add_5, add_6)
 """,
             )
 
@@ -10597,73 +12051,61 @@ class GraphModule(torch.nn.Module):
         )(x, y)
         self.assertEqual(compiled_out, out)
 
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_cond_branch_closure_over_int_args(self, backend):
+        def f(rows: int, cols: int):
+            pred = torch.tensor(True)
+
+            def true_fn():
+                return torch.ones(rows, cols)
+
+            def false_fn():
+                return torch.zeros(rows, cols)
+
+            return torch.cond(pred, true_fn, false_fn)
+
+        compiled = torch.compile(f, backend=backend, dynamic=True, fullgraph=True)
+        self.assertEqual(compiled(5, 1000), f(5, 1000))
+
+        # differing sizes still fail on inductor (#189528), hence eager/aot_eager only
+        def g(rows: int, cols: int):
+            pred = torch.tensor(True)
+
+            def true_fn():
+                return torch.ones(rows, cols)
+
+            def false_fn():
+                return torch.zeros(rows, cols + 1)
+
+            return torch.cond(pred, true_fn, false_fn)
+
+        compiled = torch.compile(g, backend=backend, dynamic=True, fullgraph=True)
+        self.assertEqual(compiled(5, 7), g(5, 7))
+
 
 class TestAutoFunctionalizeControlFlow(TestCase):
-    def check(self, gen_fn, args, device, dynamic) -> torch.fx.GraphModule:
-        args = pytree.tree_map(lambda t: t.to(device=device), args)
-
-        def _clone(args):
-            return [
-                arg.clone() if isinstance(arg, torch.Tensor) else arg for arg in args
-            ]
-
-        def _new_fn():
-            mod_or_fn = gen_fn()
-            if isinstance(mod_or_fn, torch.nn.Module):
-                mod_or_fn.to(device)
-            return mod_or_fn
-
-        # Only support input mutation in inference
-        cloned_args = [_clone(args) for _ in range(3)]
-        with torch.no_grad():
-            mod0 = _new_fn()
-            exp = mod0(*cloned_args[0])
-        backend = AotEagerAndRecordGraphs()
-        torch._dynamo.reset()
-        with torch.no_grad():
-            mod1 = _new_fn()
-            eager_out = torch.compile(
-                mod1, backend=backend, fullgraph=True, dynamic=dynamic
-            )(*cloned_args[1])
-        torch._dynamo.reset()
-        with torch.no_grad():
-            mod2 = _new_fn()
-            inductor_out = torch.compile(
-                mod2, backend="inductor", fullgraph=True, dynamic=dynamic
-            )(*cloned_args[2])
-
-        self.assertEqual(exp, eager_out)
-        self.assertEqual(exp, inductor_out)
-        self.assertEqual(cloned_args[0], cloned_args[1])
-        self.assertEqual(cloned_args[0], cloned_args[2])
-
-        for k in mod0._buffers:
-            self.assertTrue(k in mod1._buffers and k in mod2._buffers)
-            self.assertEqual(mod0._buffers[k], mod1._buffers[k])
-            self.assertEqual(mod0._buffers[k], mod2._buffers[k])
-        return backend.fw_graphs[0]
-
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
+    @skipIfTorchDynamo()
     @parametrize("dynamic", [True, False])
-    def test_cond_auto_functionalize_input_mutation(self, device, dynamic):
+    def test_switch_auto_functionalize_input_mutation(self, dynamic):
+        device = "cpu"
+
         class M(torch.nn.Module):
             def forward(self, x, y):
-                def true_fn(x):
+                def branch_mut(x):
                     x.add_(1)
                     return x.sin()
 
                 x = x.clone()
-                ret = torch.cond(x.sum() > 0, true_fn, true_fn, (x,))
+                idx = (x.sum() > 0).long()
+                ret = switch(idx, (branch_mut, branch_mut), (x,))
                 return y + ret
 
         x, y = (
-            torch.randn(3, 4, requires_grad=True),
-            torch.randn(3, 4, requires_grad=True),
+            torch.randn(3, 4, requires_grad=False),
+            torch.randn(3, 4, requires_grad=False),
         )
-        fw_gm = self.check(M, (x, y), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
+        fw_gm = self._check_eager_and_aot_eager_only(M, (x, y), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic:
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
@@ -10673,10 +12115,13 @@ class <lambda>(torch.nn.Module):
 
         sum_1: "f32[]" = torch.ops.aten.sum.default(clone)
         gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+        _to_copy: "i64[]" = torch.ops.aten._to_copy.default(gt, dtype = torch.int64);  gt = None
+
+        clamp: "i64[]" = torch.ops.aten.clamp.default(_to_copy, 0, 1);  _to_copy = None
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
         _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.cond, pred = gt, true_fn = auto_functionalized_subgraph_0, false_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  gt = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
         getitem: "f32[3, 4]" = auto_functionalized_v2[0];  auto_functionalized_v2 = None
 
         add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg1_1, getitem);  arg1_1 = getitem = None
@@ -10698,31 +12143,30 @@ class <lambda>(torch.nn.Module):
 """,
             )
 
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
+    @skipIfTorchDynamo()
     @parametrize("dynamic", [True, False])
-    def test_cond_auto_functionalize_buffer_mutation(self, device, dynamic):
+    def test_switch_auto_functionalize_buffer_mutation(self, dynamic):
+        device = "cpu"
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer(
-                    "buf", torch.ones(8, requires_grad=False, device=device)
-                )
+                self.register_buffer("buf", torch.ones(8, requires_grad=False))
 
             def forward(self, p, x):
-                def true_fn(x):
+                def branch_mut(x):
                     x.add_(1)
                     self.buf.add_(1)
                     return x + self.buf
 
                 x = x.clone()
-                out = torch.cond(p, true_fn, true_fn, (x,))
+                idx = p.long()
+                out = switch(idx, (branch_mut, branch_mut), (x,))
                 return x + self.buf + out
 
-        p, x = torch.tensor(True), torch.randn(1, requires_grad=True)
-        fw_gm = self.check(M, (p, x), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
+        p, x = torch.tensor(True), torch.randn(1, requires_grad=False)
+        fw_gm = self._check_eager_and_aot_eager_only(M, (p, x), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic:
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
@@ -10730,10 +12174,13 @@ class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[1]", arg1_1: "b8[]", arg2_1: "f32[8]"):
         clone: "f32[1]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
 
+        _to_copy: "i64[]" = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.int64);  arg1_1 = None
+
+        clamp: "i64[]" = torch.ops.aten.clamp.default(_to_copy, 0, 1);  _to_copy = None
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
         _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.cond, pred = arg1_1, true_fn = auto_functionalized_subgraph_0, false_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg2_1, clone], _op_schema = _tree_spec_constant0);  arg1_1 = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg2_1, clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
         getitem: "f32[8]" = auto_functionalized_v2[0]
         getitem_1: "f32[8]" = auto_functionalized_v2[1]
         getitem_2: "f32[1]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
@@ -10764,36 +12211,36 @@ class <lambda>(torch.nn.Module):
 """,
             )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/181947")
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
+    @skipIfTorchDynamo()
     @parametrize("dynamic", [True, False])
-    def test_cond_auto_functionalize_union_input_mutation(self, device, dynamic):
+    def test_switch_auto_functionalize_union_input_mutation(self, dynamic):
+        device = "cpu"
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.register_buffer("buf", torch.ones(4, 3, requires_grad=False))
 
             def forward(self, x, y):
-                def true_fn(x):
+                def branch0(x):
                     x.add_(1)
                     return x.sin() @ self.buf
 
-                def false_fn(x):
+                def branch1(x):
                     self.buf.add_(1)
                     return x.sin() @ self.buf
 
                 x = x.clone()
-                ret = torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+                idx = (x.sum() > 0).long()
+                ret = switch(idx, (branch0, branch1), (x,))
                 return y + ret + x.sum() + self.buf.sum()
 
         x, y = (
             torch.randn(3, 4, requires_grad=False),
             torch.randn(1, requires_grad=False),
         )
-        fw_gm = self.check(M, (x, y), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
+        fw_gm = self._check_eager_and_aot_eager_only(M, (x, y), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic:
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
@@ -10803,10 +12250,13 @@ class <lambda>(torch.nn.Module):
 
         sum_1: "f32[]" = torch.ops.aten.sum.default(clone)
         gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+        _to_copy: "i64[]" = torch.ops.aten._to_copy.default(gt, dtype = torch.int64);  gt = None
+
+        clamp: "i64[]" = torch.ops.aten.clamp.default(_to_copy, 0, 1);  _to_copy = None
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
         _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.cond, pred = gt, true_fn = auto_functionalized_subgraph_0, false_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg1_1, clone], _op_schema = _tree_spec_constant0);  gt = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg1_1, clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
         getitem: "f32[3, 3]" = auto_functionalized_v2[0]
         getitem_1: "f32[4, 3]" = auto_functionalized_v2[1]
         getitem_2: "f32[3, 4]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
@@ -10835,242 +12285,6 @@ class <lambda>(torch.nn.Module):
             mm: "f32[3, 3]" = torch.ops.aten.mm.default(sin, add);  sin = None
             copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
             return (mm,)
-""",
-            )
-
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
-    @parametrize("dynamic", [True, False])
-    def test_while_loop_auto_functionalize_buffer_mutation(self, device, dynamic):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.register_buffer(
-                    "buf", torch.ones(8, requires_grad=False, device=device)
-                )
-
-            def forward(self, x):
-                def cond_fn(x):
-                    return x.sum() > 0
-
-                def body_fn(x):
-                    x_new = x.add(-1)
-                    self.buf.add_(-1)
-                    return (x_new + self.buf.sum(),)
-
-                x = x.clone()
-                out = while_loop(cond_fn, body_fn, (x,))
-                return x + self.buf.sum() + out[0]
-
-        x = torch.tensor([2.0, 1.0], requires_grad=False)
-        fw_gm = self.check(M, (x,), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
-            self.assertExpectedInline(
-                normalize_gm(fw_gm.print_readable(print_output=False)),
-                """\
-class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[2]", arg1_1: "f32[8]"):
-        clone: "f32[2]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-
-        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
-        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
-        _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.while_loop, cond_fn = auto_functionalized_subgraph_0, body_fn = auto_functionalized_subgraph_1, carried_input0 = clone, _additional_input0_base_index = 0, _all_bases = [arg1_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = _tree_spec_constant0 = None
-        getitem: "f32[2]" = auto_functionalized_v2[0]
-        getitem_1: "f32[8]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
-
-        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_1)
-        add: "f32[2]" = torch.ops.aten.add.Tensor(clone, sum_1);  clone = sum_1 = None
-        add_1: "f32[2]" = torch.ops.aten.add.Tensor(add, getitem);  add = getitem = None
-
-        copy_: "f32[8]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
-        return (add_1,)
-
-    class auto_functionalized_subgraph_0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[2]", arg1_1: "f32[8]"):
-            sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
-            gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
-            return gt
-
-    class auto_functionalized_subgraph_1(torch.nn.Module):
-        def forward(self, arg0_1: "f32[2]", arg1_1: "f32[8]"):
-            add: "f32[2]" = torch.ops.aten.add.Tensor(arg0_1, -1);  arg0_1 = None
-            add_1: "f32[8]" = torch.ops.aten.add.Tensor(arg1_1, -1)
-            sum_1: "f32[]" = torch.ops.aten.sum.default(add_1)
-            add_2: "f32[2]" = torch.ops.aten.add.Tensor(add, sum_1);  add = sum_1 = None
-            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg1_1, add_1);  arg1_1 = add_1 = copy_ = None
-            return (add_2,)
-""",
-            )
-
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
-    @parametrize("dynamic", [True, False])
-    def test_while_loop_auto_functionalize_multiple_buffer_mutation(
-        self, device, dynamic
-    ):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.register_buffer("buf1", torch.ones(4, device=device))
-                self.register_buffer("buf2", torch.zeros(4, device=device))
-
-            def forward(self, x):
-                def cond_fn(x):
-                    return x.sum() > 0
-
-                def body_fn(x):
-                    self.buf1.add_(x)
-                    self.buf2.add_(self.buf1)
-                    return (x - 1,)
-
-                return while_loop(cond_fn, body_fn, (x,))
-
-        x = torch.tensor([3.0, 2.0, 1.0, 1.0], requires_grad=False)
-        fw_gm = self.check(M, (x,), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
-            self.assertExpectedInline(
-                normalize_gm(fw_gm.print_readable(print_output=False)),
-                """\
-class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
-        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
-        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
-        _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.while_loop, cond_fn = auto_functionalized_subgraph_0, body_fn = auto_functionalized_subgraph_1, carried_input0 = arg0_1, _additional_input0_base_index = 0, _additional_input1_base_index = 1, _all_bases = [arg1_1, arg2_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = arg0_1 = _tree_spec_constant0 = None
-        getitem: "f32[4]" = auto_functionalized_v2[0]
-        getitem_1: "f32[4]" = auto_functionalized_v2[1]
-        getitem_2: "f32[4]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
-        copy_: "f32[4]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
-        copy__1: "f32[4]" = torch.ops.aten.copy_.default(arg2_1, getitem_2);  arg2_1 = getitem_2 = copy__1 = None
-        return (getitem,)
-
-    class auto_functionalized_subgraph_0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
-            sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
-            gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
-            return gt
-
-    class auto_functionalized_subgraph_1(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
-            add: "f32[4]" = torch.ops.aten.add.Tensor(arg1_1, arg0_1)
-            add_1: "f32[4]" = torch.ops.aten.add.Tensor(arg2_1, add)
-            sub: "f32[4]" = torch.ops.aten.sub.Tensor(arg0_1, 1);  arg0_1 = None
-            copy_: "f32[4]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
-            copy__1: "f32[4]" = torch.ops.aten.copy_.default(arg2_1, add_1);  arg2_1 = add_1 = copy__1 = None
-            return (sub,)
-""",
-            )
-
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
-    @parametrize("dynamic", [True, False])
-    def test_while_loop_auto_functionalize_buffer_in_cond(self, device, dynamic):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.register_buffer("counter", torch.tensor(0, device=device))
-
-            def forward(self, x):
-                def cond_fn(x):
-                    self.counter.add_(1)
-                    return self.counter < 3
-
-                def body_fn(x):
-                    return (x + 1,)
-
-                return while_loop(cond_fn, body_fn, (x,))
-
-        x = torch.tensor([0.0, 0.0], requires_grad=False)
-        fw_gm = self.check(M, (x,), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
-            self.assertExpectedInline(
-                normalize_gm(fw_gm.print_readable(print_output=False)),
-                """\
-class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[2]", arg1_1: "i64[]"):
-        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
-        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
-        _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.while_loop, cond_fn = auto_functionalized_subgraph_0, body_fn = auto_functionalized_subgraph_1, carried_input0 = arg0_1, _additional_input0_base_index = 0, _all_bases = [arg1_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = arg0_1 = _tree_spec_constant0 = None
-        getitem: "f32[2]" = auto_functionalized_v2[0]
-        getitem_1: "i64[]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
-        copy_: "i64[]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
-        return (getitem,)
-
-    class auto_functionalized_subgraph_0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[2]", arg1_1: "i64[]"):
-            add: "i64[]" = torch.ops.aten.add.Tensor(arg1_1, 1)
-            lt: "b8[]" = torch.ops.aten.lt.Scalar(add, 3)
-            copy_: "i64[]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
-            return lt
-
-    class auto_functionalized_subgraph_1(torch.nn.Module):
-        def forward(self, arg0_1: "f32[2]", arg1_1: "i64[]"):
-            add: "f32[2]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-            return (add,)
-""",
-            )
-
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
-    @parametrize("dynamic", [True, False])
-    def test_while_loop_auto_functionalize_captured_tensor_mutation(
-        self, device, dynamic
-    ):
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                def cond_fn(x):
-                    return x.sum() > 0
-
-                def body_fn(x):
-                    y.add_(-1)
-                    return (x + y.sum(),)
-
-                out = while_loop(cond_fn, body_fn, (x,))
-                return out[0] + y.sum()
-
-        x = torch.tensor([3.0, 2.0], requires_grad=False)
-        y = torch.ones(4, requires_grad=False)
-
-        fw_gm = self.check(M, (x, y), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
-            print(normalize_gm(fw_gm.print_readable(print_output=False)))
-            self.assertExpectedInline(
-                normalize_gm(fw_gm.print_readable(print_output=False)),
-                """\
-class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[2]", arg1_1: "f32[4]"):
-        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
-        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
-        _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.while_loop, cond_fn = auto_functionalized_subgraph_0, body_fn = auto_functionalized_subgraph_1, carried_input0 = arg0_1, _additional_input0_base_index = 0, _all_bases = [arg1_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = arg0_1 = _tree_spec_constant0 = None
-        getitem: "f32[2]" = auto_functionalized_v2[0]
-        getitem_1: "f32[4]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
-
-        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_1)
-        add: "f32[2]" = torch.ops.aten.add.Tensor(getitem, sum_1);  getitem = sum_1 = None
-
-        copy_: "f32[4]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
-        return (add,)
-
-    class auto_functionalized_subgraph_0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[2]", arg1_1: "f32[4]"):
-            sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
-            gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
-            return gt
-
-    class auto_functionalized_subgraph_1(torch.nn.Module):
-        def forward(self, arg0_1: "f32[2]", arg1_1: "f32[4]"):
-            add: "f32[4]" = torch.ops.aten.add.Tensor(arg1_1, -1)
-            sum_1: "f32[]" = torch.ops.aten.sum.default(add)
-            add_1: "f32[2]" = torch.ops.aten.add.Tensor(arg0_1, sum_1);  arg0_1 = sum_1 = None
-            copy_: "f32[4]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
-            return (add_1,)
 """,
             )
 
@@ -11387,6 +12601,646 @@ class <lambda>(torch.nn.Module):
             control_flow.map(body_fn, xs, buf)
 
 
+class TestAutoFunctionalizeControlFlowDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def check(self, gen_fn, args, device, dynamic) -> torch.fx.GraphModule:
+        args = pytree.tree_map(lambda t: t.to(device=device), args)
+
+        def _clone(args):
+            return [
+                arg.clone() if isinstance(arg, torch.Tensor) else arg for arg in args
+            ]
+
+        def _new_fn():
+            mod_or_fn = gen_fn()
+            if isinstance(mod_or_fn, torch.nn.Module):
+                mod_or_fn.to(device)
+            return mod_or_fn
+
+        # Only support input mutation in inference
+        cloned_args = [_clone(args) for _ in range(3)]
+        with torch.no_grad():
+            mod0 = _new_fn()
+            exp = mod0(*cloned_args[0])
+        backend = AotEagerAndRecordGraphs()
+        torch._dynamo.reset()
+        with torch.no_grad():
+            mod1 = _new_fn()
+            eager_out = torch.compile(
+                mod1, backend=backend, fullgraph=True, dynamic=dynamic
+            )(*cloned_args[1])
+        torch._dynamo.reset()
+        with torch.no_grad():
+            mod2 = _new_fn()
+            inductor_out = torch.compile(
+                mod2, backend="inductor", fullgraph=True, dynamic=dynamic
+            )(*cloned_args[2])
+
+        self.assertEqual(exp, eager_out)
+        self.assertEqual(exp, inductor_out)
+        self.assertEqual(cloned_args[0], cloned_args[1])
+        self.assertEqual(cloned_args[0], cloned_args[2])
+
+        for k in mod0._buffers:
+            self.assertTrue(k in mod1._buffers and k in mod2._buffers)
+            self.assertEqual(mod0._buffers[k], mod1._buffers[k])
+            self.assertEqual(mod0._buffers[k], mod2._buffers[k])
+        return backend.fw_graphs[0]
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_input_mutation(self, device, dynamic):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                def true_fn(x):
+                    x.add_(1)
+                    return x.sin()
+
+                x = x.clone()
+                ret = torch.cond(x.sum() > 0, true_fn, true_fn, (x,))
+                return y + ret
+
+        x, y = (
+            torch.randn(3, 4, requires_grad=True),
+            torch.randn(3, 4, requires_grad=True),
+        )
+        fw_gm = self.check(M, (x, y), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic and device != "cpu":
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[3, 4]"):
+        clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        sum_1: "f32[]" = torch.ops.aten.sum.default(clone)
+        gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.cond, pred = gt, true_fn = auto_functionalized_subgraph_0, false_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  gt = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        getitem: "f32[3, 4]" = auto_functionalized_v2[0];  auto_functionalized_v2 = None
+
+        add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg1_1, getitem);  arg1_1 = getitem = None
+        return (add,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]"):
+            add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(add)
+            copy_: "f32[3, 4]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (sin,)
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]"):
+            add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(add)
+            copy_: "f32[3, 4]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (sin,)
+""",
+            )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_buffer_mutation(self, device, dynamic):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "buf", torch.ones(8, requires_grad=False, device=device)
+                )
+
+            def forward(self, p, x):
+                def true_fn(x):
+                    x.add_(1)
+                    self.buf.add_(1)
+                    return x + self.buf
+
+                x = x.clone()
+                out = torch.cond(p, true_fn, true_fn, (x,))
+                return x + self.buf + out
+
+        p, x = torch.tensor(True), torch.randn(1, requires_grad=True)
+        fw_gm = self.check(M, (p, x), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic and device != "cpu":
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[1]", arg1_1: "b8[]", arg2_1: "f32[8]"):
+        clone: "f32[1]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.cond, pred = arg1_1, true_fn = auto_functionalized_subgraph_0, false_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg2_1, clone], _op_schema = _tree_spec_constant0);  arg1_1 = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        getitem: "f32[8]" = auto_functionalized_v2[0]
+        getitem_1: "f32[8]" = auto_functionalized_v2[1]
+        getitem_2: "f32[1]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
+
+        add: "f32[8]" = torch.ops.aten.add.Tensor(getitem_2, getitem_1);  getitem_2 = None
+        add_1: "f32[8]" = torch.ops.aten.add.Tensor(add, getitem);  add = getitem = None
+
+        copy_: "f32[8]" = torch.ops.aten.copy_.default(arg2_1, getitem_1);  arg2_1 = getitem_1 = copy_ = None
+        return (add_1,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[1]"):
+            add: "f32[1]" = torch.ops.aten.add.Tensor(arg1_1, 1)
+            add_1: "f32[8]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            add_2: "f32[8]" = torch.ops.aten.add.Tensor(add, add_1)
+            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg0_1, add_1);  arg0_1 = add_1 = copy_ = None
+            copy__1: "f32[1]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy__1 = None
+            return (add_2,)
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[1]"):
+            add: "f32[1]" = torch.ops.aten.add.Tensor(arg1_1, 1)
+            add_1: "f32[8]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            add_2: "f32[8]" = torch.ops.aten.add.Tensor(add, add_1)
+            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg0_1, add_1);  arg0_1 = add_1 = copy_ = None
+            copy__1: "f32[1]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy__1 = None
+            return (add_2,)
+""",
+            )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/181947")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_union_input_mutation(self, device, dynamic):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(4, 3, requires_grad=False))
+
+            def forward(self, x, y):
+                def true_fn(x):
+                    x.add_(1)
+                    return x.sin() @ self.buf
+
+                def false_fn(x):
+                    self.buf.add_(1)
+                    return x.sin() @ self.buf
+
+                x = x.clone()
+                ret = torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+                return y + ret + x.sum() + self.buf.sum()
+
+        x, y = (
+            torch.randn(3, 4, requires_grad=False),
+            torch.randn(1, requires_grad=False),
+        )
+        fw_gm = self.check(M, (x, y), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic and device != "cpu":
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[4, 3]", arg2_1: "f32[1]"):
+        clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        sum_1: "f32[]" = torch.ops.aten.sum.default(clone)
+        gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.cond, pred = gt, true_fn = auto_functionalized_subgraph_0, false_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg1_1, clone], _op_schema = _tree_spec_constant0);  gt = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        getitem: "f32[3, 3]" = auto_functionalized_v2[0]
+        getitem_1: "f32[4, 3]" = auto_functionalized_v2[1]
+        getitem_2: "f32[3, 4]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
+
+        add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg2_1, getitem);  arg2_1 = getitem = None
+        sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
+        add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
+        sum_3: "f32[]" = torch.ops.aten.sum.default(getitem_1)
+        add_2: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_1, sum_3);  add_1 = sum_3 = None
+
+        copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
+        return (add_2,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 3]", arg1_1: "f32[3, 4]"):
+            add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg1_1, 1)
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(add)
+            mm: "f32[3, 3]" = torch.ops.aten.mm.default(sin, arg0_1);  sin = arg0_1 = None
+            copy_: "f32[3, 4]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
+            return (mm,)
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 3]", arg1_1: "f32[3, 4]"):
+            add: "f32[4, 3]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
+            mm: "f32[3, 3]" = torch.ops.aten.mm.default(sin, add);  sin = None
+            copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (mm,)
+""",
+            )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_auto_functionalize_buffer_mutation(self, device, dynamic):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "buf", torch.ones(8, requires_grad=False, device=device)
+                )
+
+            def forward(self, x):
+                def cond_fn(x):
+                    return x.sum() > 0
+
+                def body_fn(x):
+                    x_new = x.add(-1)
+                    self.buf.add_(-1)
+                    return (x_new + self.buf.sum(),)
+
+                x = x.clone()
+                out = while_loop(cond_fn, body_fn, (x,))
+                return x + self.buf.sum() + out[0]
+
+        x = torch.tensor([2.0, 1.0], requires_grad=False)
+        fw_gm = self.check(M, (x,), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic and device != "cpu":
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2]", arg1_1: "f32[8]"):
+        clone: "f32[2]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.while_loop, cond_fn = auto_functionalized_subgraph_0, body_fn = auto_functionalized_subgraph_1, carried_input0 = clone, _additional_input0_base_index = 0, _all_bases = [arg1_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = _tree_spec_constant0 = None
+        getitem: "f32[2]" = auto_functionalized_v2[0]
+        getitem_1: "f32[8]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+
+        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_1)
+        add: "f32[2]" = torch.ops.aten.add.Tensor(clone, sum_1);  clone = sum_1 = None
+        add_1: "f32[2]" = torch.ops.aten.add.Tensor(add, getitem);  add = getitem = None
+
+        copy_: "f32[8]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
+        return (add_1,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[2]", arg1_1: "f32[8]"):
+            sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
+            gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+            return gt
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[2]", arg1_1: "f32[8]"):
+            add: "f32[2]" = torch.ops.aten.add.Tensor(arg0_1, -1);  arg0_1 = None
+            add_1: "f32[8]" = torch.ops.aten.add.Tensor(arg1_1, -1)
+            sum_1: "f32[]" = torch.ops.aten.sum.default(add_1)
+            add_2: "f32[2]" = torch.ops.aten.add.Tensor(add, sum_1);  add = sum_1 = None
+            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg1_1, add_1);  arg1_1 = add_1 = copy_ = None
+            return (add_2,)
+""",
+            )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_auto_functionalize_multiple_buffer_mutation(
+        self, device, dynamic
+    ):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf1", torch.ones(4, device=device))
+                self.register_buffer("buf2", torch.zeros(4, device=device))
+
+            def forward(self, x):
+                def cond_fn(x):
+                    return x.sum() > 0
+
+                def body_fn(x):
+                    self.buf1.add_(x)
+                    self.buf2.add_(self.buf1)
+                    return (x - 1,)
+
+                return while_loop(cond_fn, body_fn, (x,))
+
+        x = torch.tensor([3.0, 2.0, 1.0, 1.0], requires_grad=False)
+        fw_gm = self.check(M, (x,), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic and device != "cpu":
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.while_loop, cond_fn = auto_functionalized_subgraph_0, body_fn = auto_functionalized_subgraph_1, carried_input0 = arg0_1, _additional_input0_base_index = 0, _additional_input1_base_index = 1, _all_bases = [arg1_1, arg2_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = arg0_1 = _tree_spec_constant0 = None
+        getitem: "f32[4]" = auto_functionalized_v2[0]
+        getitem_1: "f32[4]" = auto_functionalized_v2[1]
+        getitem_2: "f32[4]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
+        copy_: "f32[4]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
+        copy__1: "f32[4]" = torch.ops.aten.copy_.default(arg2_1, getitem_2);  arg2_1 = getitem_2 = copy__1 = None
+        return (getitem,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
+            sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
+            gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+            return gt
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
+            add: "f32[4]" = torch.ops.aten.add.Tensor(arg1_1, arg0_1)
+            add_1: "f32[4]" = torch.ops.aten.add.Tensor(arg2_1, add)
+            sub: "f32[4]" = torch.ops.aten.sub.Tensor(arg0_1, 1);  arg0_1 = None
+            copy_: "f32[4]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
+            copy__1: "f32[4]" = torch.ops.aten.copy_.default(arg2_1, add_1);  arg2_1 = add_1 = copy__1 = None
+            return (sub,)
+""",
+            )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_auto_functionalize_buffer_in_cond(self, device, dynamic):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("counter", torch.tensor(0, device=device))
+
+            def forward(self, x):
+                def cond_fn(x):
+                    self.counter.add_(1)
+                    return self.counter < 3
+
+                def body_fn(x):
+                    return (x + 1,)
+
+                return while_loop(cond_fn, body_fn, (x,))
+
+        x = torch.tensor([0.0, 0.0], requires_grad=False)
+        fw_gm = self.check(M, (x,), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic and device != "cpu":
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2]", arg1_1: "i64[]"):
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.while_loop, cond_fn = auto_functionalized_subgraph_0, body_fn = auto_functionalized_subgraph_1, carried_input0 = arg0_1, _additional_input0_base_index = 0, _all_bases = [arg1_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = arg0_1 = _tree_spec_constant0 = None
+        getitem: "f32[2]" = auto_functionalized_v2[0]
+        getitem_1: "i64[]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        copy_: "i64[]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
+        return (getitem,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[2]", arg1_1: "i64[]"):
+            add: "i64[]" = torch.ops.aten.add.Tensor(arg1_1, 1)
+            lt: "b8[]" = torch.ops.aten.lt.Scalar(add, 3)
+            copy_: "i64[]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
+            return lt
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[2]", arg1_1: "i64[]"):
+            add: "f32[2]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+            return (add,)
+""",
+            )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_auto_functionalize_captured_tensor_mutation(
+        self, device, dynamic
+    ):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                def cond_fn(x):
+                    return x.sum() > 0
+
+                def body_fn(x):
+                    y.add_(-1)
+                    return (x + y.sum(),)
+
+                out = while_loop(cond_fn, body_fn, (x,))
+                return out[0] + y.sum()
+
+        x = torch.tensor([3.0, 2.0], requires_grad=False)
+        y = torch.ones(4, requires_grad=False)
+
+        fw_gm = self.check(M, (x, y), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic and device != "cpu":
+            print(normalize_gm(fw_gm.print_readable(print_output=False)))
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2]", arg1_1: "f32[4]"):
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.while_loop, cond_fn = auto_functionalized_subgraph_0, body_fn = auto_functionalized_subgraph_1, carried_input0 = arg0_1, _additional_input0_base_index = 0, _all_bases = [arg1_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = arg0_1 = _tree_spec_constant0 = None
+        getitem: "f32[2]" = auto_functionalized_v2[0]
+        getitem_1: "f32[4]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+
+        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_1)
+        add: "f32[2]" = torch.ops.aten.add.Tensor(getitem, sum_1);  getitem = sum_1 = None
+
+        copy_: "f32[4]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
+        return (add,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[2]", arg1_1: "f32[4]"):
+            sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
+            gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+            return gt
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[2]", arg1_1: "f32[4]"):
+            add: "f32[4]" = torch.ops.aten.add.Tensor(arg1_1, -1)
+            sum_1: "f32[]" = torch.ops.aten.sum.default(add)
+            add_1: "f32[2]" = torch.ops.aten.add.Tensor(arg0_1, sum_1);  arg0_1 = sum_1 = None
+            copy_: "f32[4]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
+            return (add_1,)
+""",
+            )
+
+    # https://github.com/pytorch/pytorch/issues/195327
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    @parametrize("mutate_in", ["cond", "body", "both"])
+    def test_while_loop_auto_functionalize_pre_mutated_tensor_mutation(
+        self, device, dynamic, mutate_in
+    ):
+        class M(torch.nn.Module):
+            def forward(self, y):
+                y.mul_(0.8)
+
+                def cond_fn(i, acc):
+                    if mutate_in in ("cond", "both"):
+                        y.mul_(0.5)
+                    return i < 2
+
+                def body_fn(i, acc):
+                    if mutate_in in ("body", "both"):
+                        y.add_(1.0)
+                    return i + 1, acc + y
+
+                i, acc = while_loop(
+                    cond_fn,
+                    body_fn,
+                    (
+                        torch.zeros((), dtype=torch.int64, device=y.device),
+                        torch.zeros_like(y),
+                    ),
+                )
+                return i, acc, y.clone()
+
+        y = torch.ones(4, requires_grad=False)
+        self.check(M, (y,), device, dynamic)
+
+    # https://github.com/pytorch/pytorch/issues/195327
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_auto_functionalize_pre_mutated_tensor_in_cond_zero_iter(
+        self, device, dynamic
+    ):
+        class M(torch.nn.Module):
+            def forward(self, y):
+                y.mul_(0.8)
+
+                def cond_fn(i, acc):
+                    y.mul_(0.5)
+                    return i < 0
+
+                def body_fn(i, acc):
+                    return i + 1, acc + y
+
+                i, acc = while_loop(
+                    cond_fn,
+                    body_fn,
+                    (
+                        torch.zeros((), dtype=torch.int64, device=y.device),
+                        torch.zeros_like(y),
+                    ),
+                )
+                return i, acc, y.clone()
+
+        y = torch.ones(4, requires_grad=False)
+        self.check(M, (y,), device, dynamic)
+
+    # cond_fn mutating a carried input alone is rejected by
+    # functionalization (auto-functionalization does not kick in because
+    # no captured tensor is mutated).
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_while_loop_cond_mutates_carry_raises(self, device):
+        def f(x):
+            def cond_fn(i, acc):
+                acc.mul_(0.99)
+                return i < 2
+
+            def body_fn(i, acc):
+                return i + 1, acc + 1.0
+
+            return while_loop(
+                cond_fn,
+                body_fn,
+                (torch.zeros((), dtype=torch.int64, device=x.device), x.clone()),
+            )
+
+        x = torch.ones(4, device=device)
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(
+                RuntimeError, "cond_fn might be modifying the input"
+            ),
+        ):
+            torch.compile(f, backend="inductor", fullgraph=True)(x)
+
+    # cond_fn mutates both a carried input and a pre-mutated captured
+    # tensor: the captured-tensor mutation makes auto-functionalization
+    # kick in, so the carry mutation reaches Inductor's while_loop
+    # lowering instead of being rejected up front. The carry's final
+    # value must come from body_fn's output, not the pre-loop buffer.
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_cond_mutates_carry_and_pre_mutated_tensor(
+        self, device, dynamic
+    ):
+        class M(torch.nn.Module):
+            def forward(self, y):
+                y.mul_(0.8)
+
+                def cond_fn(i, acc):
+                    acc.mul_(0.99)
+                    y.mul_(0.5)
+                    return i < 2
+
+                def body_fn(i, acc):
+                    return i + 1, acc + y
+
+                i, acc = while_loop(
+                    cond_fn,
+                    body_fn,
+                    (
+                        torch.zeros((), dtype=torch.int64, device=y.device),
+                        torch.zeros_like(y),
+                    ),
+                )
+                return i, acc, y.clone()
+
+        y = torch.ones(4, requires_grad=False)
+        self.check(M, (y,), device, dynamic)
+
+    # https://github.com/pytorch/pytorch/issues/195327
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_pre_mutated_tensor_in_cond_repeated_calls(
+        self, device, dynamic
+    ):
+        def f(state):
+            state.mul_(0.8)
+
+            def cond_fn(i, acc):
+                state.mul_(0.5)
+                return i < 2
+
+            def body_fn(i, acc):
+                return i + 1, acc + state
+
+            i, acc = while_loop(
+                cond_fn,
+                body_fn,
+                (
+                    torch.zeros((), dtype=torch.int64, device=state.device),
+                    torch.zeros_like(state),
+                ),
+            )
+            return i, acc, state.clone()
+
+        compiled = torch.compile(f, backend="inductor", fullgraph=True, dynamic=dynamic)
+        state_eager = torch.ones(4, device=device)
+        state_compiled = state_eager.clone()
+        with torch.no_grad():
+            for _ in range(3):
+                expected = f(state_eager)
+                actual = compiled(state_compiled)
+                self.assertEqual(expected, actual)
+                self.assertEqual(state_eager, state_compiled)
+
+
 _hop_schema_test_schema_types = [
     "bool",
     "int",
@@ -11401,7 +13255,6 @@ _hop_schema_test_schema_types = [
 
 
 @skipIfTorchDynamo("We don't expect users to torch.compile hop schema generation.")
-@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 class TestHopSchema(TestCase):
     def _get_example_val(self, ty: str):
         from torch.fx.experimental.sym_node import SymNode
@@ -11657,7 +13510,7 @@ class TestHopSchema(TestCase):
         )
         self.assertExpectedInline(
             str(schema),
-            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Any branch2_fn, Tensor operand0) -> (Tensor, SymInt)""",
+            """switch(Tensor index, Any branch0_fn, Any branch1_fn, Any branch2_fn, Tensor operand0) -> (Tensor, int)""",
         )
 
     def test_switch_gen_schema_matching_int_int_outputs(self):
@@ -11982,7 +13835,9 @@ class DynamicCondModel(torch.nn.Module):
     not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
 )
-class TestControlFlowNN(TestCase):
+class TestControlFlowNNCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_cond_in_NN(self):
         model = DynamicCondModel().cuda()
 
@@ -12004,7 +13859,9 @@ class TestControlFlowNN(TestCase):
     not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
 )
-class TestControlFlowAndRNG(TestCase):
+class TestControlFlowAndRNGCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @parametrize("rng_func", ["custom_generator", "default_generator"])
     def test_rng_with_conditional_nodes_errors(self, rng_func):
         pred = torch.tensor(True, device="cuda")
@@ -12053,14 +13910,20 @@ class TestControlFlowAndRNG(TestCase):
             self.assertEqual(out.shape, x.shape)
 
 
+only_for = ("cpu", "cuda")
+
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
 instantiate_parametrized_tests(TestAutoFunctionalizeControlFlow)
+instantiate_device_type_tests(
+    TestAutoFunctionalizeControlFlowDevice, globals(), only_for=only_for
+)
 
 instantiate_parametrized_tests(TestControlFlow)
 instantiate_parametrized_tests(AssociativeScanTests)
+instantiate_device_type_tests(AssociativeScanTestsDevice, globals(), only_for=only_for)
 
-instantiate_parametrized_tests(TestControlFlowAndRNG)
+instantiate_parametrized_tests(TestControlFlowAndRNGCUDA)
 
 if __name__ == "__main__":
     run_tests()

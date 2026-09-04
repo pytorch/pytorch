@@ -207,9 +207,11 @@ def _normalize_cuda_arch(arch: str) -> str:
     else:
         arch_num = int(arch)
 
-    if arch_num > 103:
-        log.warning("Detected CUDA architecture > 103: %s. Please file an issue.", arch)
+    if arch_num > 107:
+        log.warning("Detected CUDA architecture > 107: %s. Please file an issue.", arch)
         return str(arch_num)
+    if arch_num >= 107:
+        return "107"
     if arch_num >= 103:
         return "103"
     if arch_num >= 100:
@@ -305,18 +307,27 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
         )
         return {}
 
-    gen_arch = (
-        "100" if arch == "103" else arch
-    )  # CUTLASS SM103 generator only covers NVFB4; fallback to SM100 set
+    # SM103 and SM107 reuse the SM100 generator, but the CUTLASS manifest must keep
+    # their architecture-specific baseline rather than treating them as SM100.
+    if arch in ("103", "107"):
+        gen_arch = "100"
+        manifest_arch = f"{arch}a"
+    else:
+        gen_arch = manifest_arch = arch
+
     instantiation_level: str = config.cutlass.cutlass_instantiation_level
     args = CUTLASSArgs(
-        architectures=gen_arch,
+        architectures=manifest_arch,
         toolkit_version=version,
         instantiation_level=instantiation_level,
         operations=CUTLASS_OPERATION_KIND,
         device_type=device_type,
     )
     manifest = cutlass_manifest.Manifest(args)
+    if arch == "107":
+        # CUTLASS uses 103a as the SM100-family feature marker for architectures
+        # without INT8 UMMA. Keep the SM107 baseline while sharing that feature.
+        manifest.compute_capabilities_feature_set.append("103a")
 
     start_time = time.time()
     if device_type == "xpu":

@@ -21,7 +21,7 @@ import operator
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Sequence
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, cast, Literal, Protocol, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -60,6 +60,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.fx.node import Argument
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.types import FloatLikeType, IntLikeType
 from torch.utils._ordered_set import OrderedSet
@@ -67,6 +68,7 @@ from torch.utils._traceback import CapturedTraceback
 
 
 if TYPE_CHECKING:
+    from torch._functorch._aot_autograd.schemas import SubclassMeta, ViewAndMutationMeta
     from torch.fx.proxy import Proxy
 
 
@@ -107,11 +109,27 @@ def maybe_clone(x: torch.Tensor | None) -> torch.Tensor | None:
     return x
 
 
-def extract_bw_module(CompiledFunction: Any) -> Callable[..., Any]:
+class _AOTCompiledFunction(Protocol):
+    """Structural type for the AOTAutograd autograd.Function subclass that
+    compiled autograd retraces. The concrete class is generated locally inside
+    AOTAutograd, so we describe only the private attributes consumed here.
+    """
+
+    _lazy_backward_info: (
+        AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
+    )
+    metadata: "ViewAndMutationMeta"
+    maybe_subclass_metadata: "SubclassMeta | None"
+    _aot_id: int
+    _bw_prologue_fn: Callable[..., Any]
+    _bw_epilogue_fn: Callable[..., Any]
+
+
+def extract_bw_module(CompiledFunction: _AOTCompiledFunction) -> GraphModule:
     if isinstance(
         CompiledFunction._lazy_backward_info, AutogradLazyBackwardCompileInfo
     ):
-        return CompiledFunction._lazy_backward_info.bw_module
+        return cast(GraphModule, CompiledFunction._lazy_backward_info.bw_module)
     elif isinstance(
         CompiledFunction._lazy_backward_info, CachedAutogradLazyBackwardCompileInfo
     ):
@@ -480,8 +498,8 @@ class AutogradCompilerInstance:
         pinputs: Sequence[Any],
         psaved_tensors: Sequence[torch.Tensor],
         saved_tensors: Sequence[torch.Tensor],
-        pctx: Any,
-        ctx: Any,
+        pctx: "Proxy",
+        ctx: torch.autograd.function.BackwardCFunction,
         maybe_backward_state_idx: int | None,
         opaque_object_indices: list[int],
     ) -> Sequence[Any]:
@@ -496,7 +514,10 @@ class AutogradCompilerInstance:
         # If Dynamo graph capture were better, then we could add a node for the prologue
         # into the CA graph and have Dynamo trace into it.
 
-        psymints = [self.to_proxy(e) for e in ctx._get_compiled_autograd_symints()]
+        psymints = [
+            self.to_proxy(e)
+            for e in ctx._get_compiled_autograd_symints()  # type: ignore[attr-defined]
+        ]
 
         popaque_objects = [
             self.hooks_proxy[idx]  # type: ignore[index]
@@ -504,7 +525,7 @@ class AutogradCompilerInstance:
         ]
 
         # NOTE: we should only close over constants
-        CompiledFunction = ctx._forward_cls
+        CompiledFunction: _AOTCompiledFunction = ctx._forward_cls  # type: ignore[attr-defined]
         bw_module = extract_bw_module(CompiledFunction)
         metadata = CompiledFunction.metadata
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
@@ -565,15 +586,15 @@ class AutogradCompilerInstance:
 
             # set up the proxy inputs to bw_module
             # the calling convention is: [*symints, *args (primals and tangents), backward_state]
-            num_args = num_inputs(bw_module.graph)  # type: ignore[attr-defined]
+            num_args = num_inputs(bw_module.graph)
             pall_args = [
                 pgrads[i] for i in range(num_args - int(pbackward_state is not None))
             ]
             # replace the symints with our symints
-            symints = ctx._get_compiled_autograd_symints()
-            if len(symints) != len(ctx.symints):
+            symints = ctx._get_compiled_autograd_symints()  # type: ignore[attr-defined]
+            if len(symints) != len(ctx.symints):  # type: ignore[attr-defined]
                 raise AssertionError(
-                    f"symints length mismatch: {len(symints)} vs {len(ctx.symints)}"
+                    f"symints length mismatch: {len(symints)} vs {len(ctx.symints)}"  # type: ignore[attr-defined]
                 )
             psymints = [self.to_proxy(e) for e in symints]
             pall_args[: len(symints)] = psymints
@@ -599,7 +620,7 @@ class AutogradCompilerInstance:
                 # make it both informative and unique
                 return f"aot{deduped_aot_id}_{node_name}"
 
-            for node in bw_module.graph.nodes:  # type: ignore[attr-defined]
+            for node in bw_module.graph.nodes:
                 if node.op == "placeholder":
                     ph = pall_args[args_idx].node
                     ph.name = make_unique(node.name)
@@ -1059,14 +1080,6 @@ class AutogradCompilerInstance:
 
         return []
 
-    def is_sym_node(self, node: Any) -> bool:
-        return (
-            isinstance(node, torch.fx.Node)
-            and node.op == "call_function"
-            and node.target
-            in [torch.ops.aten.sym_size.int, torch.ops.aten.sym_numel.default]
-        )
-
     def dce(self) -> None:
         # Most of these removed nodes would have been removed during Dynamo and AOTDispatch
         # Remove some of these nodes earlier to improve compilation speed
@@ -1270,7 +1283,7 @@ class AutogradCompilerInstance:
         return runtime_wrapper, self.compiler_fn(graph)
 
     @staticmethod
-    def get_all_nodes(args: Sequence[Any]) -> list[torch.fx.Node]:
+    def get_all_nodes(args: Sequence[Argument]) -> list[torch.fx.Node]:
         # filter out non-Node args, like None
         nodes = [n for n in args if type(n) is torch.fx.Node]
         return nodes

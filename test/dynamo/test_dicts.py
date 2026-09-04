@@ -11,6 +11,7 @@ from collections import defaultdict, namedtuple, OrderedDict, UserDict
 from collections.abc import Callable
 from functools import partial
 from typing import Any, NamedTuple
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
@@ -22,6 +23,7 @@ import torch.utils.checkpoint
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
+from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     make_dynamo_test,
@@ -985,6 +987,93 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_weakkeydict_attr_proxy_key(self):
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+        root = Root()
+        tracer = _ModuleStackTracer(root)
+        proxy = tracer.proxy_type(root.child, "child")
+        states = weakref.WeakKeyDictionary({proxy: 1})
+
+        def fn(d, key, x):
+            offset = d[key]
+            return key(x) + offset
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(states, proxy, x), opt_fn(states, proxy, x))
+
+        sin_node = next(
+            node for node in backend.graphs[0].graph.nodes if node.name == "sin"
+        )
+        module_paths = [path for path, _ in sin_node.meta["nn_module_stack"].values()]
+        key_source = (
+            "L['args'][1]"
+            if torch._dynamo.config.debug_force_nested_calls
+            else "L['key']"
+        )
+        self.assertEqual(module_paths, [f"{key_source}.get_base()"])
+
+    def test_attr_proxy_cross_scope_reuse_guard(self):
+        class Cell(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.value = torch.tensor(-1.0)
+
+        first = Cell()
+        second = Cell()
+        tracer = _ModuleStackTracer(torch.nn.Module())
+        local_proxy = tracer.proxy_type(first, "local")
+        global_proxy = tracer.proxy_type(first, "global")
+        other_global_proxy = tracer.proxy_type(second, "other")
+
+        def local_proxy_first(proxy, x):
+            proxy.value = x
+            return _attr_proxy_global.value + 1  # noqa: F821
+
+        counter = torch._dynamo.testing.CompileCounter()
+        with patch.dict(
+            local_proxy_first.__globals__, {"_attr_proxy_global": global_proxy}
+        ):
+            opt_fn = torch.compile(local_proxy_first, backend=counter, fullgraph=True)
+
+            self.assertEqual(opt_fn(local_proxy, torch.tensor(2.0)), torch.tensor(3.0))
+            self.assertEqual(counter.frame_count, 1)
+
+            local_proxy_first.__globals__["_attr_proxy_global"] = other_global_proxy
+            first.value = torch.tensor(-1.0)
+            second.value = torch.tensor(-1.0)
+
+            self.assertEqual(opt_fn(local_proxy, torch.tensor(5.0)), torch.tensor(0.0))
+            self.assertEqual(counter.frame_count, 2)
+
+        def global_proxy_first(module, x):
+            _attr_proxy_global.value = x  # noqa: F821
+            return module.value + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        with patch.dict(
+            global_proxy_first.__globals__, {"_attr_proxy_global": global_proxy}
+        ):
+            opt_fn = torch.compile(global_proxy_first, backend=counter, fullgraph=True)
+
+            self.assertEqual(opt_fn(first, torch.tensor(2.0)), torch.tensor(3.0))
+            self.assertEqual(counter.frame_count, 1)
+
+            first.value = torch.tensor(-1.0)
+            second.value = torch.tensor(-1.0)
+
+            self.assertEqual(opt_fn(second, torch.tensor(5.0)), torch.tensor(0.0))
+            self.assertEqual(counter.frame_count, 2)
 
     def test_construct_user_dict_and_return(self):
         def fn(x):
@@ -2150,6 +2239,98 @@ class DictTests(torch._dynamo.test_case.TestCase):
         }
         self.assertNotEqual(structure1, structure2)
 
+    def test_stable_target_str(self):
+        # A call_function whose target is a plain Python function (e.g.
+        # torch.sym_not) must stringify to its qualified name, not its repr,
+        # which bakes in the per-process memory address and so differs across
+        # ranks (poisoning the cross-rank node_str hash).
+        from torch._functorch.partitioners import _stable_target_str
+
+        # Plain Python function: qualified name, no memory address.
+        self.assertEqual(_stable_target_str(torch.sym_not), "torch.sym_not")
+        self.assertNotIn("0x", _stable_target_str(torch.sym_not))
+        self.assertIn("0x", str(torch.sym_not))  # the behavior being fixed
+
+        # OpOverload targets: stable qualified name (matches the FX printer),
+        # never an address.
+        from torch.fx.node import _get_qualified_name
+
+        add = torch.ops.aten.add.Tensor
+        self.assertEqual(_stable_target_str(add), _get_qualified_name(add))
+        self.assertNotIn("0x", _stable_target_str(add))
+
+        # Non-callable targets (e.g. get_attr names) fall through to str().
+        self.assertEqual(_stable_target_str("_param_constant0"), "_param_constant0")
+
+        # Callables _get_qualified_name cannot resolve fall back to str().
+        class NoName:
+            def __call__(self):
+                return None
+
+        obj = NoName()
+        self.assertEqual(_stable_target_str(obj), str(obj))
+
+    def test_canonical_node_str_invariant_to_function_target_address(self):
+        # Regression test: two ranks tracing the same graph reference the same
+        # torch.sym_not function, but the function object lives at a different
+        # memory address in each process. The old code stringified the target
+        # with str(), baking that address into the cross-rank hash, so
+        # structurally identical graphs looked different and the sync was
+        # skipped. Simulate two ranks with two distinct function objects that
+        # share a qualified name but differ in repr (address).
+        import hashlib
+
+        from torch._functorch.partitioners import (
+            _canonical_node_names,
+            _stable_target_str,
+        )
+
+        def _make_sym_not():
+            def sym_not(x):
+                return not x
+
+            return sym_not
+
+        fn_rank0 = _make_sym_not()
+        fn_rank1 = _make_sym_not()
+        # Same qualified name, different repr (mimics differing addresses).
+        self.assertNotEqual(str(fn_rank0), str(fn_rank1))
+        self.assertEqual(_stable_target_str(fn_rank0), _stable_target_str(fn_rank1))
+
+        def build_graph(fn):
+            g = torch.fx.Graph()
+            p = g.placeholder("x")
+            p.meta["val"] = torch.tensor(True)
+            n = g.create_node("call_function", fn, (p,))
+            n.meta["val"] = torch.tensor(False)
+            g.output((n,))
+            return g
+
+        graph0 = build_graph(fn_rank0)
+        graph1 = build_graph(fn_rank1)
+
+        # Reconstruct the node_str hash the way _sync_decision_cross_ranks does.
+        def node_str(graph, stringify):
+            canonical = _canonical_node_names(graph)
+
+            def hash_str(n):
+                if n.op == "placeholder":
+                    return f"{canonical[n]}:{n.op}"
+                return f"{canonical[n]}:{n.op}:{stringify(n.target)}"
+
+            joined = "/".join(
+                hash_str(n) for n in sorted(graph.nodes, key=lambda n: canonical[n])
+            )
+            return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+        # Old behavior: str(target) bakes in the address -> hashes diverge.
+        self.assertNotEqual(node_str(graph0, str), node_str(graph1, str))
+        # Fixed behavior: _stable_target_str -> identical hashes.
+        self.assertEqual(
+            node_str(graph0, _stable_target_str),
+            node_str(graph1, _stable_target_str),
+        )
+
     def _get_graph_node_names(self, model, inp):
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
         torch.compile(model, backend=backend)(inp)
@@ -2269,8 +2450,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
         graph = backend.graphs[0].graph
 
         names_once = [n.name for n in graph.nodes]
-        graph2 = _canonicalize_graph(graph)
-        names_twice = [n.name for n in graph2.nodes]
+        _canonicalize_graph(graph)
+        names_twice = [n.name for n in graph.nodes]
         self.assertEqual(names_once, names_twice)
 
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
@@ -2387,12 +2568,18 @@ class DictTests(torch._dynamo.test_case.TestCase):
     def test_canonical_graph_is_safe_to_reorder(self):
         import operator
 
-        from torch._dynamo.output_graph import _is_safe_to_reorder
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
 
         graph = fx.Graph()
         x = graph.placeholder("x")
 
-        pure_call = graph.call_function(torch.relu, (x,))
+        # Reorderable call_function nodes must carry a tensor or symbolic
+        # example_value/val, as Dynamo attaches to every data-producing node.
+        def pure(node):
+            node.meta["example_value"] = torch.empty(0)
+            return node
+
+        pure_call = pure(graph.call_function(torch.relu, (x,)))
         self.assertTrue(_is_safe_to_reorder(pure_call))
 
         inplace_method = graph.call_method("add_", (x, x))
@@ -2405,10 +2592,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(_is_safe_to_reorder(iadd_node))
 
         # operator.invert is pure despite starting with "i"
-        invert_node = graph.call_function(operator.invert, (x,))
+        invert_node = pure(graph.call_function(operator.invert, (x,)))
         self.assertTrue(_is_safe_to_reorder(invert_node))
 
-        index_node = graph.call_function(operator.index, (x,))
+        index_node = pure(graph.call_function(operator.index, (x,)))
         self.assertTrue(_is_safe_to_reorder(index_node))
 
         # out= kwarg makes a node unsafe
@@ -2423,11 +2610,38 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(_is_safe_to_reorder(no_input_node))
 
         # _add_batch_dim / _remove_batch_dim are barriers
-        add_batch = graph.call_function(torch._add_batch_dim, (x, x, x))
+        add_batch = pure(graph.call_function(torch._add_batch_dim, (x, x, x)))
         self.assertFalse(_is_safe_to_reorder(add_batch))
 
-        remove_batch = graph.call_function(torch._remove_batch_dim, (x, x, x, x))
+        remove_batch = pure(graph.call_function(torch._remove_batch_dim, (x, x, x, x)))
         self.assertFalse(_is_safe_to_reorder(remove_batch))
+
+        # State functions that consume the token produced by their enter node
+        # (so the no-node-arguments heuristic misses them) are barriers:
+        # inference_mode via _side_effectful_functions, arbitrary ones (e.g.
+        # _sdpa_kernel, _maybe_exchange_device) via the lack of a tensor or
+        # symbolic example_value/val.
+        enter_node = graph.call_function(
+            torch.autograd.grad_mode._enter_inference_mode, (True,)
+        )
+        self.assertFalse(_is_safe_to_reorder(enter_node))
+        exit_node = graph.call_function(
+            torch.autograd.grad_mode._exit_inference_mode, (enter_node,)
+        )
+        self.assertFalse(_is_safe_to_reorder(exit_node))
+
+        def _fake_exit_fn(token):
+            pass
+
+        token_consumer = graph.call_function(_fake_exit_fn, (no_input_node,))
+        self.assertFalse(_is_safe_to_reorder(token_consumer))
+        self.assertTrue(_is_safe_to_reorder(pure(token_consumer)))
+
+        # HOPs are exempt from the value heuristic: graph passes (e.g. graph
+        # deduplication) create invoke_subgraph nodes without example_value/val.
+        hop = torch.ops.higher_order.invoke_subgraph
+        hop_node = graph.call_function(hop, (x, "subgraph_0", x))
+        self.assertTrue(_is_safe_to_reorder(hop_node))
 
 
 instantiate_parametrized_tests(DictTests)
@@ -2598,10 +2812,12 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         return super().tearDown()
 
     def assertEqual(self, x, y):
-        self.assertTrue(x == y, f"Expected {x} to be equal to {y}")
+        self.assertTrue(x == y, lambda msg: f"{msg}\nExpected {x} to be equal to {y}")
 
     def assertNotEqual(self, x, y):
-        self.assertFalse(x == y, f"Expected {x} to not be equal to {y}")
+        self.assertFalse(
+            x == y, lambda msg: f"{msg}\nExpected {x} to not be equal to {y}"
+        )
 
     @make_dynamo_test
     def test_dict_items_cmp_value_eq_raises(self):
@@ -2715,9 +2931,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         d4 |= d1
         self.assertEqual(d3, {"a": 1, "b": 3, "c": 4})
         self.assertEqual(d4, {"a": 1, "b": 2, "c": 4})
-
-        # Test with an iterable
-        d3, d4 = d1.copy(), d2.copy()
 
         # Test the __ior__ method
         d3, d4 = d1.copy(), d2.copy()
@@ -3005,7 +3218,10 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
             if self.thetype == other:
                 continue
             self.assertNotEqual(self.thetype, other)
-            self.assertTrue(self.thetype is not other, f"{self.thetype=}, {other=}")
+            self.assertTrue(
+                self.thetype is not other,
+                lambda msg: f"{msg}\n{self.thetype=}, {other=}",
+            )
 
     @make_dynamo_test
     def test_dict___iter__(self):
@@ -3200,10 +3416,12 @@ class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
         return super().tearDown()
 
     def assertEqual(self, x, y):
-        self.assertTrue(x == y, f"Expected {x} to be equal to {y}")
+        self.assertTrue(x == y, lambda msg: f"{msg}\nExpected {x} to be equal to {y}")
 
     def assertNotEqual(self, x, y):
-        self.assertFalse(x == y, f"Expected {x} to not be equal to {y}")
+        self.assertFalse(
+            x == y, lambda msg: f"{msg}\nExpected {x} to not be equal to {y}"
+        )
 
     class OrderedDictSubclass(OrderedDict):
         def get(self, key, default=None, /):

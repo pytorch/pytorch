@@ -54,6 +54,7 @@ from .. import config
 from ..backends.registry import CompilerFn, lookup_backend, register_debug_backend
 from ..debug_utils import clone_inputs_retaining_gradness
 from ..types import CompilerConfigProvider
+from . import _minifier_sanity_guard, ReproOptions
 
 
 log = logging.getLogger(__name__)
@@ -214,6 +215,7 @@ def generate_dynamo_fx_repro_string(
     return textwrap.dedent(
         f"""
 {generate_env_vars_string(stable_output=stable_output)}
+import math
 from math import inf
 import torch
 from torch import tensor, device
@@ -338,7 +340,6 @@ def dynamo_minifier_backend(
     try:
         compiled_gm = compiler_fn(gm, example_inputs)
         run_fwd_maybe_bwd(compiled_gm, example_inputs)  # type: ignore[arg-type]
-        raise ValueError("No issue was detected")
     except Exception as exc:
         orig_failure = str(exc)
         log.warning(
@@ -353,12 +354,16 @@ def dynamo_minifier_backend(
             compiler_fn=compiler_fn,
             orig_failure=orig_failure,
         )
-        minifier(
-            gm,
-            example_inputs,
-            module_fails=fails_fn,
-            dump_state=dump_state_fn,
-        )
+        with _minifier_sanity_guard() as sanity:
+            minifier(
+                gm,
+                example_inputs,
+                module_fails=fails_fn,
+                dump_state=dump_state_fn,
+            )
+        sanity.raise_if_failed(exc)
+    else:
+        raise ValueError("No issue was detected")
     return gm
 
 
@@ -384,12 +389,14 @@ def dynamo_accuracy_minifier_backend(
             compiler_fn=compiler_fn,  # type: ignore[arg-type]
         )
         dump_state_fn(fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs)
-        minifier(
-            gm,
-            example_inputs,
-            module_fails=fails_fn,
-            dump_state=dump_state_fn,
-        )
+        with _minifier_sanity_guard() as sanity:
+            minifier(
+                gm,
+                example_inputs,
+                module_fails=fails_fn,
+                dump_state=dump_state_fn,
+            )
+        sanity.raise_if_failed(AccuracyError("Bad accuracy detected."))
     else:
         log.error("Input graph does not fail accuracy testing")
     return gm
@@ -399,7 +406,7 @@ def backend_fails(
     gm: fx.GraphModule,
     example_inputs: Sequence[Any],
     compiler_fn: CompilerFn,
-    orig_failure: Sequence[Any],
+    orig_failure: str,
 ) -> bool:
     """
     Minifier uses this function to identify if the minified graph module fails
@@ -431,7 +438,9 @@ def backend_fails(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def run_load_args(options: Any, mod: torch.nn.Module, load_args: Any) -> list[Any]:
+def run_load_args(
+    options: ReproOptions, mod: torch.nn.Module, load_args: Any
+) -> list[Any]:
     if not hasattr(load_args, "_version"):
         log.warning(
             "load_args does not have a _version attribute, please file a bug to PyTorch "
@@ -457,7 +466,7 @@ def run_load_args(options: Any, mod: torch.nn.Module, load_args: Any) -> list[An
     return args
 
 
-def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
+def repro_minify(options: ReproOptions, mod: torch.nn.Module, load_args: Any) -> None:
     # Setup debug minifier compiler
     if not options.accuracy:
         compiler_fn = lookup_backend("dynamo_minifier_backend")
@@ -491,7 +500,7 @@ def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
         opt_mod(*args)
 
 
-def repro_run(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
+def repro_run(options: ReproOptions, mod: torch.nn.Module, load_args: Any) -> None:
     opt_mod = torch._dynamo.optimize(options.backend)(mod)
 
     if options.accuracy != "":
@@ -660,7 +669,7 @@ default settings on this script:
     if len(sys.argv) <= 1:
         args = [command, *sys.argv[1:]]
 
-    options = parser.parse_args(args)
+    options = cast(ReproOptions, parser.parse_args(args))
     COMMAND_FNS = {
         "minify": repro_minify,
         "run": repro_run,

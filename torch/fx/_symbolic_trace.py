@@ -7,6 +7,7 @@ import inspect
 import logging
 import math
 import os
+import threading
 import warnings
 from collections.abc import Callable, Iterable, Iterator
 from itertools import chain
@@ -17,7 +18,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_reference_type, is_opaque_type
+from torch._library.opaque_object import is_custom_class, is_opaque_symbolic_type
 
 from ._compatibility import compatibility
 from ._lazy_graph_module import _make_graph_module
@@ -41,7 +42,7 @@ _orig_module_getattr: Callable[..., Any] = torch.nn.Module.__getattr__
 
 _proxyable_classes: dict[type, None] = {}
 
-_is_fx_tracing_flag = False
+_is_fx_tracing_tls = threading.local()
 
 _ConstantAttributeType: TypeAlias = (
     torch.Tensor | torch.ScriptObject | FakeScriptObject | pytree.TreeSpec
@@ -61,13 +62,31 @@ def is_fx_tracing_warning() -> None:
     )
 
 
+def _set_is_fx_tracing(value: bool) -> None:
+    _is_fx_tracing_tls.flag = value
+
+
+def _get_is_fx_tracing() -> bool:
+    return getattr(_is_fx_tracing_tls, "flag", False)
+
+
+@contextlib.contextmanager
+def _is_fx_tracing_context(value: bool) -> Iterator[None]:
+    previous = _get_is_fx_tracing()
+    _set_is_fx_tracing(value)
+    try:
+        yield
+    finally:
+        _set_is_fx_tracing(previous)
+
+
 def is_fx_tracing() -> bool:
     is_fx_tracing_warning()
-    return _is_fx_tracing_flag
+    return _get_is_fx_tracing()
 
 
 def is_fx_symbolic_tracing() -> bool:
-    return _is_fx_tracing_flag and not torch.compiler.is_compiling()
+    return _get_is_fx_tracing() and not torch.compiler.is_compiling()
 
 
 @compatibility(is_backward_compatible=True)
@@ -244,7 +263,7 @@ class PHWithMeta(PHBase):
     def __init__(self, ph_key: str | None = None) -> None:
         super().__init__()
 
-        # Provide a hey for user to identify placeholder node during analysis
+        # Provide a key for user to identify placeholder node during analysis
         self.ph_key = ph_key
 
 
@@ -283,7 +302,7 @@ class Tracer(TracerBase):
     @compatibility(is_backward_compatible=True)
     def __init__(
         self,
-        autowrap_modules: tuple[ModuleType] = (math,),
+        autowrap_modules: tuple[ModuleType, ...] = (math,),
         autowrap_functions: tuple[Callable[..., Any], ...] = (),
         param_shapes_constant: bool = False,
     ) -> None:
@@ -296,7 +315,7 @@ class Tracer(TracerBase):
 
         Args:
 
-            autowrap_modules (Tuple[ModuleType]): defaults to `(math, )`,
+            autowrap_modules (Tuple[ModuleType, ...]): defaults to `(math, )`,
                 Python modules whose functions should be wrapped automatically
                 without needing to use fx.wrap(). Backward-compatibility for
                 this parameter is guaranteed.
@@ -340,6 +359,17 @@ class Tracer(TracerBase):
         self.num_calls: dict[str, int] = {}
         # Mapping of node name to module scope
         self.node_name_to_scope: dict[str, tuple[str, type]] = {}
+
+    @classmethod
+    def _graph_module_deserialization_tracer(cls, root: torch.nn.Module) -> "Tracer":
+        """Construct a tracer for replaying a serialized GraphModule.
+
+        GraphModule deserialization retraces generated forward code while treating
+        every submodule as a leaf. Tracers with required constructor arguments or
+        tracing-only behavior can override this hook. The reconstructed graph still
+        records the original tracer class.
+        """
+        return cls()
 
     _qualname_counter: dict[str, int] = collections.defaultdict(int)
 
@@ -428,7 +458,7 @@ class Tracer(TracerBase):
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
         if isinstance(a, _constant_attribute_types) or (
-            is_opaque_reference_type(type(a))
+            is_opaque_symbolic_type(type(a))
         ):
             qualname: str | None = self.tensor_attrs.get(a)
 
@@ -441,7 +471,7 @@ class Tracer(TracerBase):
                     base_name = "_torchbind_obj"
                 elif isinstance(a, pytree.TreeSpec):
                     base_name = "_tree_spec_constant"
-                elif is_opaque_type(type(a)):
+                elif is_custom_class(type(a)):
                     base_name = "_opaque_obj"
                 else:
                     raise RuntimeError(
@@ -794,9 +824,8 @@ class Tracer(TracerBase):
 
             A ``Graph`` representing the semantics of the passed-in ``root``.
         """
-        global _is_fx_tracing_flag
-        old_is_fx_tracing_flag = _is_fx_tracing_flag
-        _is_fx_tracing_flag = True
+        old_is_fx_tracing_flag = _get_is_fx_tracing()
+        _set_is_fx_tracing(True)
         try:
             if isinstance(root, torch.nn.Module):
                 # do real recompilation for _LazyGraphModule before retracing since the trace
@@ -928,7 +957,7 @@ class Tracer(TracerBase):
 
             raise
         finally:
-            _is_fx_tracing_flag = old_is_fx_tracing_flag
+            _set_is_fx_tracing(old_is_fx_tracing_flag)
         return self.graph
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "Tracer":

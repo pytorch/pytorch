@@ -20,6 +20,39 @@ requires_cuda_triton = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA")
 
 
 class TestControlDeps(InductorTestCase):
+    def test_control_deps_wraps_fallback_op(self):
+        def fn(x):
+            dependency = x + 1
+            fallback = torch.neg(x)
+            return dependency + fallback
+
+        def add_control_deps(graph):
+            from torch._inductor.fx_passes.control_dependencies import (
+                preserve_node_ordering,
+            )
+            from torch.utils._ordered_set import OrderedSet
+
+            add_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.add.Tensor
+            )
+            neg_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.neg.default
+            )
+            if len(add_nodes) != 2 or len(neg_nodes) != 1:
+                raise AssertionError("Unexpected graph structure")
+
+            fallback = neg_nodes[0]
+            fallback.meta["should_fallback"] = True
+            fallback.meta["custom"] = {"fallback_to_eager": True}
+            preserve_node_ordering(graph, {fallback: OrderedSet([add_nodes[0]])})
+            return graph
+
+        x = torch.randn(8)
+        with config.patch(post_grad_custom_post_pass=add_control_deps):
+            actual = torch.compile(fn)(x)
+
+        torch.testing.assert_close(actual, fn(x))
+
     @config.patch(reorder_for_locality=False)
     @requires_gpu()
     def test_control_deps_prevents_fusion(self):
@@ -497,8 +530,11 @@ class TestControlDeps(InductorTestCase):
         )
         self.assertTrue(
             void_names & referenced,
-            "no record_event void op appears as an additional_buffer_dep; "
-            f"void_names={void_names}, referenced={referenced}",
+            lambda msg: f"{msg}\n"
+            + (
+                "no record_event void op appears as an additional_buffer_dep; "
+                f"void_names={void_names}, referenced={referenced}"
+            ),
         )
 
     def test_reinplace_not_blocked_by_control_deps_ordering_dep(self):
@@ -648,6 +684,138 @@ class TestControlDeps(InductorTestCase):
                 all(c["barriers_nop"]),
                 "OrderingBarrier is_no_op() must be True",
             )
+
+    @requires_cuda_triton
+    def test_bidirectional_stream_sync_correctness(self):
+        """Regression: passthrough OrderingBarrier must be ordered after all subgraph ops.
+
+        Bidirectional stream sync exposes a bug where additional_buffer_deps was
+        keyed by barrier.get_name() (buffer name) instead of
+        barrier.get_operation_name() (operation name), so compute_dependencies
+        silently lost the ordering dep and the scheduler could place barrier2
+        before record_event1, producing wrong results.
+        """
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            event_s1 = torch.cuda.Event()
+            event_s2 = torch.cuda.Event()
+            with torch.cuda.stream(s1):
+                a = x * 2
+                event_s1.record(s1)
+            with torch.cuda.stream(s2):
+                event_s1.wait(s2)
+                b = a + 1
+                event_s2.record(s2)
+            with torch.cuda.stream(s1):
+                event_s2.wait(s1)
+                c = b * 2
+            s1.synchronize()
+            s2.synchronize()
+            return c
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        result, _ = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, expected)
+
+    @config.patch(reorder_for_locality=False)
+    @requires_gpu()
+    def test_subgraph_placeholders_need_not_be_contiguous(self):
+        """Placeholders need not be a contiguous prefix of the subgraph.
+
+        fx allows a placeholder to appear after other nodes, and lowering a
+        subgraph can put nodes between its placeholders -- decomposing a
+        host-to-device transfer of one operand does exactly that.  ``args``
+        holds one entry per placeholder, so the mapping has to be by
+        placeholder order rather than by node position.
+        """
+
+        def fn(a, b):
+            x = a + 1
+            y = b * 2
+            return x - y
+
+        def add_control_deps(graph):
+            from torch.utils._ordered_set import OrderedSet
+
+            sub_node = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.sub.Tensor
+            )[0]
+            dep_node = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.add.Tensor
+            )[0]
+            torch._inductor.fx_passes.control_dependencies.preserve_node_ordering(
+                graph, {sub_node: OrderedSet([dep_node])}
+            )
+
+            cd_node = graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.control_deps
+            )[0]
+            subgraph = getattr(graph.owning_module, cd_node.args[1].target)
+            placeholders = list(subgraph.graph.find_nodes(op="placeholder"))
+            if len(placeholders) != 2:
+                raise AssertionError(f"expected 2 placeholders, got {placeholders}")
+
+            # Put a node between the two placeholders.  It reads only the
+            # first, so every use stays dominated by its definition, and the
+            # body reads through it so it cannot be dropped as dead.  clone
+            # keeps the result identical to the un-mutated graph.
+            first, second = placeholders
+            with subgraph.graph.inserting_before(second):
+                cloned = subgraph.graph.call_function(
+                    torch.ops.aten.clone.default, (first,)
+                )
+            cloned.meta.update(first.meta)
+            first.replace_all_uses_with(cloned)
+            cloned.args = (first,)
+            subgraph.graph.lint()
+            subgraph.recompile()
+
+            positions = [
+                i for i, n in enumerate(subgraph.graph.nodes) if n.op == "placeholder"
+            ]
+            if positions == list(range(len(positions))):
+                raise AssertionError(
+                    f"placeholders still form a contiguous prefix: {positions}"
+                )
+            return graph
+
+        with torch._inductor.config.patch(post_grad_custom_post_pass=add_control_deps):
+            a = torch.rand([128, 64], device=GPU_TYPE)
+            b = torch.rand([128, 64], device=GPU_TYPE)
+            result = torch.compile(fn)(a, b)
+            torch.testing.assert_close(result, fn(a, b))
+
+    @requires_cuda_triton
+    def test_host_to_device_transfer_between_sync_passthroughs(self):
+        """The interleaving above, arrived at without touching the graph.
+
+        A CPU tensor and a CUDA tensor are both live across a stream sync, so
+        both are threaded through the sync's control_deps.  Lowering the CPU
+        one decomposes its transfer inside the subgraph, which leaves nodes
+        between the two placeholders.
+        """
+
+        def fn(x, w):
+            meta = torch.tensor(x.shape[-2], dtype=torch.long)
+            residual = x.sin()
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                out = x @ w
+            s.synchronize()
+            extra = meta.to(device=out.device, dtype=out.dtype)
+            return torch.cat((out, extra.expand(*out.shape[:-1], 1), residual), dim=-1)
+
+        x = torch.randn(8, 128, device="cuda", dtype=torch.bfloat16)
+        w = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        expected = fn(x, w)
+        with torch.no_grad():
+            result = torch.compile(fn, mode="reduce-overhead")(x, w)
+        torch.cuda.synchronize()
+        torch.testing.assert_close(result, expected)
 
 
 if __name__ == "__main__":

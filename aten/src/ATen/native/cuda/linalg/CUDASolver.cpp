@@ -1,4 +1,3 @@
-#include <ATen/Context.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cuda/linalg/CUDASolver.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -1805,6 +1804,7 @@ void xsyevd<c10::complex<double>, double>(
 #endif // USE_CUSOLVER_64_BIT
 
 // cuSOLVER Xgeev bindings (requires cuSOLVER >= 11.7.2, i.e. CUDA 12.8+)
+// hipSOLVER Xgeev bindings (requires ROCm >= 7.14)
 #if (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || (defined(USE_ROCM) && ROCM_VERSION >= 71400)
 
 template <>
