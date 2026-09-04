@@ -9,6 +9,11 @@
 # A tree fold cannot use `reduce` -- it needs each contribution separately -- so anything that
 # TRANSFORMS an element must say so in `leaf`, or a tree order silently folds raw values.
 #
+# reduce / combine / project are ATen's own names and semantics for this
+# (aten/src/ATen/native/SharedReduceOps.h). `leaf` is the addition a tree fold needs: ATen folds
+# serially from an identity, so its per-element transform can hide inside reduce (MeanOps::reduce is
+# combine(a, cast(b))), while a tree has no serial accumulator to hide it in.
+#
 # The ACCUMULATOR DTYPE is a parameter (`acc`), threaded through fdtypes and every literal, with the
 # identity taken from the dtype via _zero/_one/_pos_id/_neg_id so it is correct for any acc type. An
 # index field is Int32, or Int64 when the reduced extent can exceed 2^31.
