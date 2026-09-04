@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
-"""Blackwell partial-BMM lowering used by the decompose-K subgraph."""
+"""Decompose-K subgraph and Blackwell partial-BMM lowering."""
 
+import functools
 import math
 from typing import Any
 
@@ -8,7 +9,10 @@ import torch
 from torch._inductor import inductor_prims, ir
 from torch._inductor.lowering import register_lowering
 from torch._inductor.utils import get_num_sms
+from torch.fx.experimental.proxy_tensor import make_fx
 
+from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
+from ..ir import Buffer, Layout
 from .bmm import blackwell_ws_persistent_tma_bmm_template, BlackwellBMMConfig
 
 
@@ -21,6 +25,75 @@ BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS = (
     BlackwellBMMConfig(128, 128, 64, 4, 4, 1, 1, True, True),
     BlackwellBMMConfig(128, 256, 64, 6, 4, 2, 1, True, True),
 )
+
+
+def decomposeK(a, b, k_splits, bmm_backend="aten", bmm_config_index=-1):
+    """Compute an MM as independent K partitions followed by a reduction."""
+    m = a.shape[0]
+    k = a.shape[1]
+
+    if bmm_backend == "aten":
+        n = b.shape[1]
+        k_parts = k // k_splits
+        a_reshaped = torch.permute(a.reshape(m, k_splits, k_parts), (1, 0, 2))
+        b_reshaped = b.reshape(k_splits, k_parts, n)
+        result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
+    elif bmm_backend == "triton":
+        result = blackwell_decompose_k_partial(
+            a,
+            b,
+            k_splits,
+            bmm_config_index,
+        )
+    else:
+        raise AssertionError(f"unsupported decompose-K BMM backend: {bmm_backend}")
+
+    reduced_buf = torch.sum(result, 0)
+    return reduced_buf.to(a.dtype)
+
+
+class DecomposeKSubgraphTemplate(SubgraphTemplate):
+    def __init__(self):
+        super().__init__(name="decompose_k")
+
+    def generate(  # type: ignore[override]
+        self,
+        input_nodes: list[Buffer],
+        layout: Layout,
+        k_split: int,
+        bmm_backend: str = "aten",
+        bmm_config_index: int = -1,
+    ) -> SubgraphChoiceCaller:
+        from torch._dispatch.python import enable_python_dispatcher
+
+        from ..decomposition import select_decomp_table
+
+        name = f"decompose_k_mm_{k_split}_split_{bmm_backend}"
+        if bmm_backend == "triton":
+            name = f"{name}_config_{bmm_config_index}"
+        description = f"{k_split=}, {bmm_backend=}, {bmm_config_index=}"
+
+        with enable_python_dispatcher():
+            decompositions = select_decomp_table()
+            fn = make_fx(
+                functools.partial(
+                    decomposeK,
+                    k_splits=k_split,
+                    bmm_backend=bmm_backend,
+                    bmm_config_index=bmm_config_index,
+                ),
+                decompositions,
+            )
+            return super().generate(
+                name=name,
+                input_nodes=input_nodes,
+                layout=layout,
+                make_fx_graph=fn,
+                description=description,
+            )
+
+
+decompose_k_subgraph_template = DecomposeKSubgraphTemplate()
 
 
 def _blackwell_decompose_k_partial_kwargs(

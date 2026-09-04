@@ -35,6 +35,7 @@ class TestSubgraphChoice(TestCase):
         )
 
     def test_subgraph_decompose_k(self):
+        from torch._inductor.kernel.decompose_k import DecomposeKSubgraphTemplate
         from torch._inductor.kernel.mm import aten_mm
         from torch._inductor.kernel.mm_common import mm_args
 
@@ -56,9 +57,7 @@ class TestSubgraphChoice(TestCase):
 
             kPartitions = 256
 
-            decompose_k_subgraph_template = (
-                torch._inductor.kernel.mm.DecomposeKSugraphTemplate()
-            )
+            decompose_k_subgraph_template = DecomposeKSubgraphTemplate()
 
             decompose_k_subgraph_template.maybe_append_choice(
                 choices,
@@ -95,6 +94,7 @@ class TestSubgraphChoice(TestCase):
         torch.testing.assert_close(res, a_in @ b_in, atol=1e-1, rtol=1e-1)
 
     def test_subgraph_freeze_layout(self):
+        from torch._inductor.kernel.decompose_k import DecomposeKSubgraphTemplate
         from torch._inductor.kernel.mm_common import mm_args
 
         M, N, K = (4, 128, 14240)
@@ -125,9 +125,7 @@ class TestSubgraphChoice(TestCase):
 
             kPartitions = 2
 
-            decompose_k_subgraph_template = (
-                torch._inductor.kernel.mm.DecomposeKSugraphTemplate()
-            )
+            decompose_k_subgraph_template = DecomposeKSubgraphTemplate()
 
             decompose_k_subgraph_template.maybe_append_choice(
                 choices,

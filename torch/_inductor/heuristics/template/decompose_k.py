@@ -9,8 +9,10 @@ from torch._inductor import config
 from torch._inductor.heuristics.registry import register_template_heuristic
 
 from ...ir import get_free_symbols
-from ...kernel.decompose_k import BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS
-from ...kernel.mm import decompose_k_subgraph_template
+from ...kernel.decompose_k import (
+    BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
+    decompose_k_subgraph_template,
+)
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
 from ...utils import (
