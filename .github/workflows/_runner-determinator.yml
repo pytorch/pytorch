@@ -63,6 +63,9 @@ on:
       amd-dpx-label-type:
         description: Runner prefix for the "amd-dpx" experiment (empty when not enabled)
         value: ${{ jobs.runner-determinator.outputs.amd-dpx-label-type }}
+      scale-config-label-type:
+        description: Scale-config AMI variant prefix, e.g. "wincanary." (empty when none)
+        value: ${{ jobs.runner-determinator.outputs.scale-config-label-type }}
       ci-docker-hash:
         description: "Git tree hash of .ci/docker, used as the suffix of CI docker image tags"
         value: ${{ jobs.runner-determinator.outputs.ci-docker-hash }}
@@ -79,6 +82,7 @@ jobs:
       runner-label: ${{ steps.set-runner-info.outputs.runner-label }}
       amd-sandbox-label-type: ${{ steps.set-condition.outputs.amd-sandbox-label-type }}
       amd-dpx-label-type: ${{ steps.set-condition.outputs.amd-dpx-label-type }}
+      scale-config-label-type: ${{ steps.set-condition.outputs.scale-config-label-type }}
       ci-docker-hash: ${{ steps.ci-docker-hash.outputs.ci-docker-hash }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
