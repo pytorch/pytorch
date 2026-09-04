@@ -1338,15 +1338,20 @@ void test_aoti_observer(const std::string& device) {
   // A failing operation still reports on_end, with succeeded == false. Without
   // that flag a failed call would land in the observer's latency distribution
   // as if it had completed normally.
+  //
+  // Omitting a constant doesn't fail here (assert_all_constants warns and
+  // skips TensorConstants); a wrong-device one does, on any build.
   const size_t ends_before = observer->ends.size();
-  torch::inductor::TensorConstantMap missing_map;
-  missing_map.emplace("L__self___w_pre", new at::Tensor(at::randn({4, 4})));
+  torch::inductor::TensorConstantMap wrong_device_map;
+  wrong_device_map.emplace(
+      "L__self___w_pre",
+      new at::Tensor(at::randn({4, 4}, at::TensorOptions().device(at::kMeta))));
   try {
     runner->update_constant_buffer(
-        missing_map,
+        wrong_device_map,
         /* use_inactive = */ false,
         /* check_full_update = */ true);
-    ADD_FAILURE() << "expected an incomplete constants update to throw";
+    ADD_FAILURE() << "expected a constant on the wrong device to throw";
   } catch (const std::exception&) {
   }
   ASSERT_EQ(observer->ends.size(), ends_before + 1);
@@ -1362,7 +1367,7 @@ void test_aoti_observer(const std::string& device) {
   for (auto& pair : real_map) {
     delete pair.second;
   }
-  for (auto& pair : missing_map) {
+  for (auto& pair : wrong_device_map) {
     delete pair.second;
   }
 }
