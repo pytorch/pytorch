@@ -102,7 +102,14 @@ class modules(_TestParametrizer):
                                'context; use it with instantiate_device_type_tests() instead of '
                                'instantiate_parametrized_tests()')
 
-        for module_info in self.module_info_list:
+        # Order matters: module_allowlist filters first, then module_overrides adds
+        # decorators. This ensures module_overrides only applies to modules that
+        # passed the module_allowlist filter.
+        module_info_list = device_cls._apply_module_allowlist(self.module_info_list)
+        module_info_list = device_cls._apply_module_overrides(module_info_list)
+
+        module_info = check_exhausted_iterator = object()
+        for module_info in module_info_list:
             dtypes = set(module_info.supported_dtypes(device_cls.device_type))
             if self.allowed_dtypes is not None:
                 dtypes = dtypes.intersection(self.allowed_dtypes)
@@ -137,6 +144,12 @@ class modules(_TestParametrizer):
                     # Provides an error message for debugging before rethrowing the exception
                     print(f"Failed to instantiate {test_name} for module {module_info.name}!")
                     raise ex
+        if module_info is check_exhausted_iterator:
+            raise ValueError(
+                "An empty module_info_list was passed to @modules. Note that this may "
+                "result from reuse of a generator, or from a module_allowlist that "
+                "filtered out every entry."
+            )
 
 
 def get_module_common_name(module_cls):
