@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <algorithm>
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 
@@ -17,6 +18,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_scaled_addmm_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/_scaled_mm_native.h>
@@ -153,6 +155,61 @@ TORCH_META_FUNC(_scaled_mm_v2)(
       {self.size(0), mat2.size(1)},
       {},
       self.options().dtype(out_dtype_));
+}
+
+TORCH_META_FUNC(_scaled_addmm)(
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const at::ITensorListRef& scale_a,
+    at::IntArrayRef recipe_a,
+    at::IntArrayRef swizzle_a,
+    const at::ITensorListRef& scale_b,
+    at::IntArrayRef recipe_b,
+    at::IntArrayRef swizzle_b,
+    at::IntArrayRef contraction_dim,
+    const Scalar& beta,
+    const Scalar& alpha,
+    bool use_fast_accum) {
+  TORCH_CHECK_VALUE(
+      !alpha.isComplex() && !beta.isComplex(),
+      "torch._scaled_addmm only supports real alpha and beta values");
+  TORCH_CHECK_VALUE(self.dim() == 2, "input must be a matrix");
+  validate_scaled_mm_meta_inputs(
+      mat1,
+      mat2,
+      scale_a,
+      recipe_a,
+      swizzle_a,
+      scale_b,
+      recipe_b,
+      swizzle_b,
+      contraction_dim);
+
+  TORCH_CHECK_VALUE(
+      self.sym_size(0) == mat1.sym_size(0) &&
+          self.sym_size(1) == mat2.sym_size(1),
+      "input must have shape (",
+      mat1.sym_size(0),
+      ", ",
+      mat2.sym_size(1),
+      "), but got ",
+      self.sym_sizes());
+  TORCH_CHECK_VALUE(
+      self.scalar_type() == kBFloat16 || self.scalar_type() == kHalf ||
+          self.scalar_type() == kFloat,
+      "input must have dtype BFloat16, Half, or Float, but got ",
+      self.scalar_type());
+  TORCH_CHECK_VALUE(
+      self.stride(1) == 1 &&
+          self.stride(0) == std::max<int64_t>(1, self.size(1)),
+      "input must have canonical contiguous row-major strides");
+
+  set_output_raw_strided(
+      0,
+      {mat1.size(0), mat2.size(1)},
+      {},
+      self.options());
 }
 
 // V2: Grouped scaled matrix multiply. Shape inference + output allocation runs

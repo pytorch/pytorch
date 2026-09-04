@@ -7481,6 +7481,63 @@ def meta_scaled_mm_v2(
     return torch.empty(self.size(0), mat2.size(1), dtype=_out_dtype, device=self.device)
 
 
+@register_meta([aten._scaled_addmm.default])
+def meta_scaled_addmm(
+    self: torch.Tensor,
+    mat1: torch.Tensor,
+    mat2: torch.Tensor,
+    scale_a: list[torch.Tensor],
+    scale_recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[torch.Tensor],
+    scale_recipe_b: list[int],
+    swizzle_b: list[int],
+    contraction_dim: list[int] | None = None,
+    *,
+    beta=1,
+    alpha=1,
+    use_fast_accum: bool = False,
+):
+    torch._check(
+        not isinstance(alpha, complex) and not isinstance(beta, complex),
+        lambda: "torch._scaled_addmm only supports real alpha and beta values",
+    )
+    result = meta_scaled_mm_v2(
+        mat1,
+        mat2,
+        scale_a,
+        scale_recipe_a,
+        swizzle_a,
+        scale_b,
+        scale_recipe_b,
+        swizzle_b,
+        out_dtype=self.dtype,
+        contraction_dim=contraction_dim,
+        use_fast_accum=use_fast_accum,
+    )
+    torch._check(
+        self.dim() == 2,
+        lambda: f"input must be a matrix, but got {self.dim()} dimensions",
+    )
+    torch._check(
+        self.size(0) == result.size(0),
+        lambda: f"input dim 0 must be {result.size(0)}, but got {self.size(0)}",
+    )
+    torch._check(
+        self.size(1) == result.size(1),
+        lambda: f"input dim 1 must be {result.size(1)}, but got {self.size(1)}",
+    )
+    torch._check(
+        self.dtype in (torch.bfloat16, torch.float16, torch.float32),
+        lambda: f"input must have dtype BFloat16, Half, or Float, but got {self.dtype}",
+    )
+    torch._check(
+        self.stride(1) == 1 and self.stride(0) == torch.sym_max(1, self.size(1)),
+        lambda: "input must have canonical contiguous row-major strides",
+    )
+    return result
+
+
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
 @out_wrapper()
 def meta_scatter_reduce_two(self, dim, index, src, reduce, include_self=True):
