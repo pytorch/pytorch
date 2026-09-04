@@ -2429,6 +2429,37 @@
       ]
     }
   ],
+  "GB7765": [
+    {
+      "Gb_type": "stale instance __dict__ read",
+      "Context": "{self.python_type()}.{name}",
+      "Explanation": "The instance __dict__ of this object has pending stores that only replay when the compiled region exits, so reading the attribute now would see a stale value.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9739": [
+    {
+      "Gb_type": "unsupported __dict__ access on a dict subclass",
+      "Context": "{self.python_type()}.__dict__",
+      "Explanation": "Dynamo cannot model the instance __dict__ of a dict subclass as a view; stores through it are not guaranteed to reach the right object.",
+      "Hints": [
+        "Use attribute access instead of the __dict__ mapping.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6985": [
+    {
+      "Gb_type": "unsupported dir() on a rebuilt container",
+      "Context": "dir({arg.python_type_name()})",
+      "Explanation": "Dynamo models this value by rebuilding it, so dir() would miss the instance attributes the real object has.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0156": [
     {
       "Gb_type": "Unsupported method call",
@@ -3557,6 +3588,15 @@
     }
   ],
   "GB0217": [
+    {
+      "Gb_type": "unsupported hasattr operation",
+      "Context": "hasattr({cls.__name__}, {name}): {reason}",
+      "Explanation": "hasattr on {cls} is not supported: {reason}",
+      "Hints": [
+        "Consider using a regular dictionary instead",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "unsupported hasattr operation",
       "Context": "Class {cls}",
