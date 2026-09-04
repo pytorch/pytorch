@@ -9898,7 +9898,13 @@ class FallbackKernel(ExternKernelAlloc):
             elif isinstance(return_type, torch.IntType):
                 return export_schema.Argument.create(as_int=output)
             else:
-                raise RuntimeError(f"Unsupported return type {type(return_type)}")
+                # Name the op: the bare message gives no way to tell which
+                # extern kernel has the unsupported return. `target` is the op
+                # whose schema produced `return_type`.
+                raise RuntimeError(
+                    f"Unsupported return type {type(return_type)} for "
+                    f"target={target} schema={getattr(target, '_schema', None)}"
+                )
 
         if isinstance(target, torch._higher_order_ops.torchbind.CallTorchBind):
             returns = target.schema(args[0], args[1]).returns
