@@ -1451,20 +1451,6 @@ def invoke_subgraph_inductor_compile(
     return AOTCompiledArtifact(forward)
 
 
-def _invoke_subgraph_inductor_compile_with_autotune(
-    gm, example_inputs, inductor_config_patches, **kwargs
-):
-    from torch._inductor import config
-
-    with config.patch({"triton.autotune_at_compile_time": True}):
-        return invoke_subgraph_inductor_compile(
-            gm,
-            example_inputs,
-            inductor_config_patches=inductor_config_patches,
-            **kwargs,
-        )
-
-
 def get_invoke_subgraph_compile_options(
     fw_inductor_config_patches=None,
     decompositions=None,
@@ -1472,39 +1458,24 @@ def get_invoke_subgraph_compile_options(
     *,
     bw_inductor_config_patches=None,
 ):
-    fw_uses_default_autotune = fw_inductor_config_patches is None
     if fw_inductor_config_patches is None:
         fw_inductor_config_patches = {}
 
     # The backward uses bw_inductor_config_patches when set (independently of the
     # forward), otherwise it reuses the forward config.
-    bw_compiler_patches = (
+    bw_patches = (
         bw_inductor_config_patches
         if bw_inductor_config_patches is not None
         else fw_inductor_config_patches
     )
-    bw_uses_default_autotune = (
-        fw_uses_default_autotune and bw_inductor_config_patches is None
-    )
-
-    fw_compile = (
-        _invoke_subgraph_inductor_compile_with_autotune
-        if fw_uses_default_autotune
-        else invoke_subgraph_inductor_compile
-    )
-    bw_compile = (
-        _invoke_subgraph_inductor_compile_with_autotune
-        if bw_uses_default_autotune
-        else invoke_subgraph_inductor_compile
-    )
 
     fw_compiler = functools.partial(
-        fw_compile,
+        invoke_subgraph_inductor_compile,
         inductor_config_patches=fw_inductor_config_patches,
     )
     bw_compiler = functools.partial(
-        bw_compile,
-        inductor_config_patches=bw_compiler_patches,
+        invoke_subgraph_inductor_compile,
+        inductor_config_patches=bw_patches,
     )
 
     return NestedCompileRegionOptions(

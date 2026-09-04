@@ -5,7 +5,6 @@ import functools
 import sys
 import warnings
 from typing import Any, TYPE_CHECKING
-from unittest import mock
 
 import torch
 import torch._inductor.test_case
@@ -624,20 +623,6 @@ class RegionalInductorInvokeSubgraphTests(torch._inductor.test_case.TestCase):
             gm.graph.get_attr(target)
         gm.recompile()
 
-    @staticmethod
-    def _generated_fn_body(code, signature):
-        # Slice one function/method body out of generated wrapper code: the
-        # signature line plus every following line indented deeper than it.
-        start = code.index(signature)
-        indent = start - (code.rfind("\n", 0, start) + 1)
-        lines = code[start:].split("\n")
-        body = [lines[0]]
-        for line in lines[1:]:
-            if line.strip() and (len(line) - len(line.lstrip())) <= indent:
-                break
-            body.append(line)
-        return "\n".join(body)
-
     def test_custom_decomposition(self):
         # Test that custom decompositions are applied to the subgraph.
 
@@ -1093,44 +1078,6 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                     "invalid_config_key": True,
                 }
             )
-
-    def test_default_inductor_config_keeps_autotune_compiler_local(self):
-        nested_config = get_invoke_subgraph_compile_options()
-        self.assertEqual(nested_config.inductor_config_patches, {})
-        nested_config.inductor_config_patches["fallback_by_default"] = True
-        observed_configs = []
-
-        def compile_fx_inner(gm, example_inputs):
-            observed_configs.append(
-                (
-                    torch._inductor.config.triton.autotune_at_compile_time,
-                    torch._inductor.config.fallback_by_default,
-                )
-            )
-
-            def compiled(args):
-                return ()
-
-            compiled._boxed_call = True
-            return compiled
-
-        with (
-            mock.patch.object(
-                torch._inductor.compile_fx, "compile_fx_inner", compile_fx_inner
-            ),
-            torch._inductor.config.patch(
-                {
-                    "triton.autotune_at_compile_time": False,
-                    "fallback_by_default": False,
-                }
-            ),
-        ):
-            for compiler in (nested_config.fw_compiler, nested_config.bw_compiler):
-                if compiler is None:
-                    raise AssertionError("Expected an Inductor compiler")
-                compiler(self._empty_graph_module(), [])
-
-        self.assertEqual(observed_configs, [(True, True), (True, True)])
 
     @parametrize("direction", ("forward", "backward"))
     def test_unsupported_nested_region_inductor_config(self, direction):
