@@ -25,7 +25,8 @@ import inspect
 import json
 import statistics
 import time
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 import torch
 
@@ -55,7 +56,7 @@ _DTYPE_ALIASES = {
 }
 
 
-def resolve_dtype(dtype: Union[torch.dtype, str]) -> torch.dtype:
+def resolve_dtype(dtype: torch.dtype | str) -> torch.dtype:
     """Coerce a dtype spelling to a `torch.dtype`.
 
     Accepts a `torch.dtype` directly, or one of the `_DTYPE_ALIASES` spellings
@@ -70,9 +71,7 @@ def resolve_dtype(dtype: Union[torch.dtype, str]) -> torch.dtype:
     if not isinstance(dtype, str):
         raise ValueError(f"unsupported dtype {dtype!r}; expected a torch.dtype or str")
 
-    key = dtype.strip().lower()
-    if key.startswith("torch."):
-        key = key[len("torch.") :]
+    key = dtype.strip().lower().removeprefix("torch.")
     if key not in _DTYPE_ALIASES:
         raise ValueError(
             f"unsupported dtype {dtype!r}; expected one of "
@@ -81,11 +80,9 @@ def resolve_dtype(dtype: Union[torch.dtype, str]) -> torch.dtype:
     return _DTYPE_ALIASES[key]
 
 
-def dtype_name(dtype: Union[torch.dtype, str]) -> str:
+def dtype_name(dtype: torch.dtype | str) -> str:
     """`torch.bfloat16` -> `"bfloat16"`, for JSON-friendly output."""
-    text = str(resolve_dtype(dtype))
-    prefix = "torch."
-    return text[len(prefix) :] if text.startswith(prefix) else text
+    return str(resolve_dtype(dtype)).removeprefix("torch.")
 
 
 def _as_int_list(value: Any) -> list[int]:
@@ -124,7 +121,7 @@ class LLMBenchmarkConfig:
         default_factory=lambda: list(DEFAULT_DECODE_LENGTHS)
     )
     batch_sizes: list[int] = dataclasses.field(default_factory=lambda: [1])
-    dtype: Union[torch.dtype, str] = torch.bfloat16
+    dtype: torch.dtype | str = torch.bfloat16
     device: str = "cuda"
     sampling: str = "greedy"  # greedy | top-k | top-p
     top_k: int = 50
@@ -234,7 +231,7 @@ def prefill_flops(
 
 
 def kv_cache_bytes(
-    config: Any, batch_size: int, seq_len: int, dtype: Union[torch.dtype, str]
+    config: Any, batch_size: int, seq_len: int, dtype: torch.dtype | str
 ) -> int:
     """Resident bytes of a KV cache holding `seq_len` tokens.
 
@@ -261,7 +258,7 @@ def model_weight_bytes(model: torch.nn.Module) -> int:
     return sum(p.numel() * p.element_size() for p in model.parameters())
 
 
-def peak_bandwidth_gbps(device: Union[str, torch.device]) -> Optional[float]:
+def peak_bandwidth_gbps(device: str | torch.device) -> float | None:
     """Theoretical peak memory bandwidth in GB/s, or None if unknown.
 
     Decode is bandwidth bound, so this is the denominator for the achieved
@@ -284,7 +281,7 @@ def _time_calls(
     fn: Callable[[], Any],
     warmup: int,
     iters: int,
-    device: Union[str, torch.device],
+    device: str | torch.device,
 ) -> dict[str, Any]:
     """Warm up, synchronize, then time `iters` calls with a sync per call."""
     is_cuda = torch.device(device).type == "cuda" and torch.cuda.is_available()
@@ -346,15 +343,15 @@ def _set_cache_depth(cache: Any, depth: int) -> None:
 class LLMBenchmark:
     """Owns the generation loop so prefill and decode can be measured apart."""
 
-    def __init__(self, config: Optional[LLMBenchmarkConfig] = None) -> None:
+    def __init__(self, config: LLMBenchmarkConfig | None = None) -> None:
         self.config = config if config is not None else LLMBenchmarkConfig()
-        self.model: Optional[torch.nn.Module] = None
+        self.model: torch.nn.Module | None = None
         self.tokenizer: Any = None
         self.model_config: Any = None
-        self._compiled_generate: Optional[Callable[..., torch.Tensor]] = None
+        self._compiled_generate: Callable[..., torch.Tensor] | None = None
 
     # -- setup --------------------------------------------------------------
-    def setup_model(self, config: Optional[LLMBenchmarkConfig] = None):
+    def setup_model(self, config: LLMBenchmarkConfig | None = None):
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         config = config if config is not None else self.config
@@ -384,7 +381,8 @@ class LLMBenchmark:
     def _require_model(self) -> torch.nn.Module:
         if self.model is None:
             self.setup_model(self.config)
-        assert self.model is not None
+        if self.model is None:
+            raise AssertionError("setup_model did not populate self.model")
         return self.model
 
     def _vocab_size(self) -> int:
@@ -398,7 +396,9 @@ class LLMBenchmark:
         return min(sizes) if sizes else 32000
 
     # -- cache --------------------------------------------------------------
-    def make_cache(self, model: torch.nn.Module, max_cache_len: int, batch_size: int = 1):
+    def make_cache(
+        self, model: torch.nn.Module, max_cache_len: int, batch_size: int = 1
+    ):
         """Build a `StaticCache`, tolerating constructor drift across releases.
 
         transformers >= 5 takes only `(config, max_cache_len)` and infers batch,
@@ -444,7 +444,9 @@ class LLMBenchmark:
         return cache
 
     # -- inputs -------------------------------------------------------------
-    def build_prefill_inputs(self, prompt_length: int, batch_size: int = 1) -> torch.Tensor:
+    def build_prefill_inputs(
+        self, prompt_length: int, batch_size: int = 1
+    ) -> torch.Tensor:
         """Deterministic random `input_ids` of shape `[batch, prompt_length]`.
 
         Token identity does not affect prefill cost, and a seeded generator
@@ -503,7 +505,7 @@ class LLMBenchmark:
         return token, cache, position
 
     # -- phases -------------------------------------------------------------
-    def _logits_to_keep_name(self, model: Any) -> Optional[str]:
+    def _logits_to_keep_name(self, model: Any) -> str | None:
         """Name of the last-position slicing kwarg this model accepts, if any.
 
         Checks `forward` first, then the callable itself, so plain callables
@@ -580,7 +582,9 @@ class LLMBenchmark:
         last_hidden = hidden.last_hidden_state[:, -1:, :]
         return head(last_hidden), getattr(hidden, "past_key_values", None) or kv_cache
 
-    def prefill(self, model: torch.nn.Module, input_ids: torch.Tensor, kv_cache: Any = None):
+    def prefill(
+        self, model: torch.nn.Module, input_ids: torch.Tensor, kv_cache: Any = None
+    ):
         """Prompt pass. Returns `(logits, kv_cache)`."""
         batch_size, seq_len = input_ids.shape
         if kv_cache is None:
@@ -652,7 +656,7 @@ class LLMBenchmark:
         self,
         model: torch.nn.Module,
         input_ids: torch.Tensor,
-        max_new_tokens: Optional[int] = None,
+        max_new_tokens: int | None = None,
         kv_cache: Any = None,
     ) -> torch.Tensor:
         """Prefill plus a fixed number of decode steps.
@@ -710,7 +714,13 @@ class LLMBenchmark:
             "compile": bool(self.config.compile),
         }
 
-    def benchmark_prefill(self, prompt_length: int, batch_size: int = 1) -> dict[str, Any]:
+    def _time(self, fn: Callable[[], Any]) -> dict[str, Any]:
+        cfg = self.config
+        return _time_calls(fn, cfg.warmup, cfg.iters, cfg.device)
+
+    def benchmark_prefill(
+        self, prompt_length: int, batch_size: int = 1
+    ) -> dict[str, Any]:
         model = self._require_model()
         prompt_length = int(prompt_length)
         batch_size = int(batch_size)
@@ -722,7 +732,7 @@ class LLMBenchmark:
             _reset_cache(cache)
             self.prefill(model, input_ids, kv_cache=cache)
 
-        timing = _time_calls(run, self.config.warmup, self.config.iters, self.config.device)
+        timing = self._time(run)
 
         num_params = count_parameters(model)
         flops = prefill_flops(self.model_config, num_params, batch_size, prompt_length)
@@ -759,7 +769,7 @@ class LLMBenchmark:
             _set_cache_depth(cache, cache_depth)
             self.decode_step(model, token, cache, position)
 
-        timing = _time_calls(run, self.config.warmup, self.config.iters, self.config.device)
+        timing = self._time(run)
 
         seconds = timing["latency_ms_mean"] / 1e3
         weight_bytes = model_weight_bytes(model)
@@ -796,7 +806,7 @@ class LLMBenchmark:
         self,
         prompt_length: int,
         batch_size: int = 1,
-        max_new_tokens: Optional[int] = None,
+        max_new_tokens: int | None = None,
     ) -> dict[str, Any]:
         model = self._require_model()
         prompt_length = int(prompt_length)
@@ -812,7 +822,7 @@ class LLMBenchmark:
         def run() -> None:
             generate(model, input_ids, steps, kv_cache=cache)
 
-        timing = _time_calls(run, self.config.warmup, self.config.iters, self.config.device)
+        timing = self._time(run)
 
         seconds = timing["latency_ms_mean"] / 1e3
         new_tokens = batch_size * steps
@@ -838,7 +848,7 @@ class LLMBenchmark:
         )
         return result
 
-    def run_sweep(self, mode: Optional[str] = None) -> list[dict[str, Any]]:
+    def run_sweep(self, mode: str | None = None) -> list[dict[str, Any]]:
         mode = mode or "e2e"
         if mode not in LLM_MODES:
             raise ValueError(f"unsupported mode {mode!r}; expected one of {LLM_MODES}")
@@ -935,5 +945,12 @@ def run_llm_benchmark(args: Any) -> list[dict[str, Any]]:
     return results
 
 
-def main(args: Optional[list[str]] = None) -> list[dict[str, Any]]:
+def main(args: list[str] | None = None) -> list[dict[str, Any]]:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--float16", action="store_true", help="cast model to fp16")
+    add_llm_args(parser)
+    return run_llm_benchmark(parser.parse_args(args))
+
+
+if __name__ == "__main__":
+    main()
