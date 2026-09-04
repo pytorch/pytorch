@@ -941,15 +941,7 @@ def forward(self, x):
         self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
 
 
-@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
-@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
-class TestDeserialize(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
-    def setUp(self):
-        super().setUp()
-        init_torchbind_implementations()
-
+class _DeserializeGraphMixin:
     def _check_graph_nodes(self, gm1, gm2, _check_meta=True):
         # TODO: The _check_meta flag bypasses checking for
         # source_fn/nn_module_stack as there is an issue with
@@ -1111,6 +1103,16 @@ class TestDeserialize(TestCase):
             _check_graph(pre_dispatch=False)
         else:
             _check_graph(pre_dispatch=False)
+
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestDeserialize(_DeserializeGraphMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        init_torchbind_implementations()
 
     def test_deserialize_fake_tensor_constant_with_symbolic_size(self) -> None:
         class Foo(torch.nn.Module):
@@ -2646,6 +2648,7 @@ class TestPredispatchSerialization(TestCase):
         self.assertTrue(torch.allclose(exp_out, actual_out))
 
 
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -2882,11 +2885,14 @@ class TestSerializeAccelerator(TestCase):
         self.assertIsNotNone(triton_node)
 
 
-class TestDeserializeAccelerator(TestCase):
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestDeserializeAccelerator(_DeserializeGraphMixin, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    _check_graph_nodes = TestDeserialize._check_graph_nodes
-    check_graph = TestDeserialize.check_graph
+    def setUp(self):
+        super().setUp()
+        init_torchbind_implementations()
 
     def test_device(self, device) -> None:
         class MyModule(torch.nn.Module):
@@ -2906,6 +2912,7 @@ class TestDeserializeAccelerator(TestCase):
         self.check_graph(model, (inp,))
 
 
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSaveLoadAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
