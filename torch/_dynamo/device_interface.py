@@ -729,6 +729,25 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
     return device_interfaces.items()
 
 
+def _register_interface_for_privateuse1() -> None:
+    backend = torch._C._get_privateuse1_backend_name()
+    if not backend or backend == "privateuseone":
+        return
+    from torch.utils.backend_registration import _get_custom_mod_func
+    try:
+        get_device_interface_fn = _get_custom_mod_func("get_device_interface")
+        interface = get_device_interface_fn()
+        if interface is None or not issubclass(interface, DeviceInterface):
+            return
+        register_interface_for_device(backend, interface)
+        device_count_fn = _get_custom_mod_func("device_count")
+        if device_count_fn is not None:
+            for i in range(device_count_fn()):
+                register_interface_for_device(f"{backend}:{i}", interface)
+    except RuntimeError:
+        pass
+
+
 def init_device_reg() -> None:
     global _device_initialized
     register_interface_for_device("cuda", CudaInterface)
@@ -746,5 +765,7 @@ def init_device_reg() -> None:
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
     register_interface_for_device("tpu", TpuInterface)
+
+    _register_interface_for_privateuse1()
 
     _device_initialized = True
