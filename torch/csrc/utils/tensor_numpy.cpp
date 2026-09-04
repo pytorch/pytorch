@@ -440,12 +440,12 @@ at::Tensor tensor_from_cuda_array_interface(
     if (py_data == nullptr) {
       TORCH_CHECK_TYPE(false, "attribute `shape` data exist");
     }
-    if (!PyTuple_Check(py_data) || PyTuple_GET_SIZE(py_data) != 2) {
+    if (!PyTuple_Check(py_data) || PyTuple_GET_SIZE(py_data.get()) != 2) {
       TORCH_CHECK_TYPE(false, "`data` must be a 2-tuple of (int, bool)");
     }
-    data_ptr = PyLong_AsVoidPtr(PyTuple_GET_ITEM(py_data, 0));
+    data_ptr = PyLong_AsVoidPtr(PyTuple_GET_ITEM(py_data.get(), 0));
     TORCH_CHECK_PYTHON(data_ptr != nullptr || !PyErr_Occurred());
-    int read_only = PyObject_IsTrue(PyTuple_GET_ITEM(py_data, 1));
+    int read_only = PyObject_IsTrue(PyTuple_GET_ITEM(py_data.get(), 1));
     TORCH_CHECK_PYTHON(read_only != -1);
     if (read_only) {
       TORCH_CHECK_TYPE(
