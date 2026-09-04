@@ -938,16 +938,6 @@ void VariableHooks::set_grad_dtype(
   meta->set_grad_dtype(grad_dtype, self);
 }
 
-void VariableHooks::mark_multi_output_view(const at::TensorBase& self) const {
-  auto* meta = impl::get_view_autograd_meta(self);
-  // Only DEFAULT is ours to overwrite: a view created under no-grad or
-  // inference mode already holds a more specific reason to reject a mutation.
-  if (meta != nullptr && meta->has_bw_view() &&
-      meta->get_creation_meta() == CreationMeta::DEFAULT) {
-    meta->set_creation_meta(CreationMeta::MULTI_OUTPUT_NODE);
-  }
-}
-
 std::optional<at::ScalarType> AutogradMeta::grad_dtype(
     const at::TensorBase& self) const {
   if (allow_grad_dtype_mismatch_) {
