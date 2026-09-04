@@ -592,6 +592,12 @@ class TestControlDeps(InductorTestCase):
                 {
                     "barriers": barriers,
                     "barrier_source_names": [b.mutation_names[0] for b in barriers],
+                    "additional_buffer_deps": dict(V.graph.additional_buffer_deps),
+                    "buffer_names": {
+                        name
+                        for op in V.graph.operations
+                        if (name := op.get_buffer_name()) is not None
+                    },
                     "ordering_only_flags": [b.ordering_only for b in barriers],
                     "mutated_buffers": set(V.graph.mutated_buffers),
                 }
@@ -622,6 +628,27 @@ class TestControlDeps(InductorTestCase):
                 all(c["ordering_only_flags"]),
                 "all OrderingBarrier nodes must have ordering_only=True",
             )
+            for barrier in c["barriers"]:
+                barrier_op = barrier.get_operation_name()
+                barrier_name = barrier.get_name()
+                self.assertIn(
+                    barrier_op,
+                    c["additional_buffer_deps"],
+                    "OrderingBarrier deps must be keyed by operation name",
+                )
+                self.assertNotIn(
+                    barrier_name,
+                    c["additional_buffer_deps"],
+                    "OrderingBarrier deps must not be keyed by buffer name",
+                )
+                self.assertTrue(
+                    c["additional_buffer_deps"][barrier_op],
+                    "OrderingBarrier should depend on subgraph ops",
+                )
+                self.assertTrue(
+                    c["additional_buffer_deps"][barrier_op] <= c["buffer_names"],
+                    "OrderingBarrier deps must contain buffer names",
+                )
             for source_name in c["barrier_source_names"]:
                 self.assertNotIn(
                     source_name,
