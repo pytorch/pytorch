@@ -1697,8 +1697,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         produced (callers rely on the visitation order, e.g. for graph output
         ordering).
         """
-        from .hashable import HashableTracker
-
         if cache is None:
             cache = {}
 
@@ -1732,6 +1730,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             elif istype(cur, (dict, collections.OrderedDict)):
                 children = list(cur.values())
                 if visit_keys:
+                    # Deferred: visit() is a hot path (every stack value,
+                    # local, and mutated var), but visit_keys=True has a
+                    # single caller, so avoid paying this import otherwise.
+                    from .hashable import HashableTracker
+
                     children.extend(k.vt for k in cur if isinstance(k, HashableTracker))
             else:
                 continue

@@ -1462,7 +1462,18 @@ class OutputGraph(OutputGraphCommon):
             for value, msg in self._pending_event_record_violations
             if id(value) in escaped
         ]
-        self._pending_event_record_violations.clear()
+        # Only drop the entries resolved as escaped here; a violation that
+        # is still pending-but-not-yet-escaped is left in place so a later
+        # scan within this same compile_subgraph call can still catch it --
+        # close_local_generators and codegen_suffix run between the two
+        # scans and can make a pending event escape through a mutation this
+        # scan can't see yet. Anything left pending after the final scan
+        # never escaped and is correctly never raised.
+        self._pending_event_record_violations = [
+            (value, msg)
+            for value, msg in self._pending_event_record_violations
+            if id(value) not in escaped
+        ]
         if escaped_violations:
             raise RuntimeError("\n\n".join(escaped_violations))
 

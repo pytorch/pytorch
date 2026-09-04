@@ -2128,6 +2128,8 @@ class GraphModule(torch.nn.Module):
         # compiled region; an event created during tracing that never
         # escapes (not returned, not stored) cannot have one, so this
         # must compile.
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
         def fn(x):
             s = torch.Stream(device=device)
             e = torch.Event(device=device)
@@ -2137,8 +2139,19 @@ class GraphModule(torch.nn.Module):
                 e.wait()
             return x + 1
 
-        torch.compile(fn, backend="eager", fullgraph=True)(
+        torch.compile(fn, backend=backend, fullgraph=True)(
             torch.ones(2, 2, device=device)
+        )
+
+        self.assertEqual(len(backend.graphs), 1)
+        nodes = list(backend.graphs[0].graph.nodes)
+        self.assertTrue(
+            any(node.target is torch.ops.streams.record_event for node in nodes),
+            "record_event op not found in graph",
+        )
+        self.assertTrue(
+            any(node.target is torch.ops.streams.wait_event for node in nodes),
+            "wait_event op not found in graph",
         )
 
     def test_event_record_after_input_mutation_escapes_via_list(self, device):
@@ -2212,6 +2225,8 @@ class GraphModule(torch.nn.Module):
     ):
         # Same as the non-escaping test above but via stream.record_event()
         # instead of event.record().
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
         def fn(x):
             s = torch.Stream(device=device)
             with s:
@@ -2220,8 +2235,19 @@ class GraphModule(torch.nn.Module):
                 e.wait()
             return x + 1
 
-        torch.compile(fn, backend="eager", fullgraph=True)(
+        torch.compile(fn, backend=backend, fullgraph=True)(
             torch.ones(2, 2, device=device)
+        )
+
+        self.assertEqual(len(backend.graphs), 1)
+        nodes = list(backend.graphs[0].graph.nodes)
+        self.assertTrue(
+            any(node.target is torch.ops.streams.record_event for node in nodes),
+            "record_event op not found in graph",
+        )
+        self.assertTrue(
+            any(node.target is torch.ops.streams.wait_event for node in nodes),
+            "wait_event op not found in graph",
         )
 
     def test_event_record_after_input_mutation_non_escaping_generator_finally(
@@ -2231,6 +2257,8 @@ class GraphModule(torch.nn.Module):
         # block and never escapes -- close_local_generators traces the
         # finally bytecode after the first escape scan, so this exercises
         # the second scan at the end of compile_subgraph.
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
         def gen(s):
             try:
                 yield
@@ -2246,8 +2274,15 @@ class GraphModule(torch.nn.Module):
                 next(g)
             return x + 1
 
-        torch.compile(fn, backend="eager", fullgraph=True)(
+        torch.compile(fn, backend=backend, fullgraph=True)(
             torch.ones(2, 2, device=device)
+        )
+
+        self.assertEqual(len(backend.graphs), 1)
+        nodes = list(backend.graphs[0].graph.nodes)
+        self.assertTrue(
+            any(node.target is torch.ops.streams.record_event for node in nodes),
+            "record_event op not found in graph",
         )
 
     def test_event_record_after_input_mutation_escapes_via_generator_finally(
@@ -2268,6 +2303,36 @@ class GraphModule(torch.nn.Module):
             with s:
                 x.add_(1)
                 g = gen(s, holder)
+                next(g)
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device=device), []
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_generator_finally_deferred(
+        self, device
+    ):
+        # The event is created and recorded in the main function body, so
+        # it is pending but not escaping at the first escape scan (before
+        # close_local_generators runs). It only escapes afterward, when
+        # the generator's finally block appends it to a pre-existing list
+        # -- this must be caught by the second scan, not silently dropped
+        # by the first.
+        def gen(holder, e):
+            try:
+                yield
+            finally:
+                holder.append(e)
+
+        def fn(x, holder):
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                x.add_(1)
+                e.record()
+                g = gen(holder, e)
                 next(g)
             return x + 1
 
