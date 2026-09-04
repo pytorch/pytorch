@@ -661,6 +661,16 @@
       ]
     }
   ],
+  "GB2431": [
+    {
+      "Gb_type": "Attempted to access _saved_* attribute of autograd Node",
+      "Context": "attribute {attr_name} of {type(obj_value).__name__}",
+      "Explanation": "Accessing `{attr_name}` on an autograd Node can trigger checkpoint recomputation hooks, i.e. it has observable side effects, so Dynamo cannot run the getter at trace time.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0047": [
     {
       "Gb_type": "Encountered unconverted argument when attempting to inline",
@@ -5400,6 +5410,16 @@
       "Gb_type": "ContextVar.get() with non-constant default",
       "Context": "ContextVar('{self.cv_obj.name}').get(...)",
       "Explanation": "ContextVar.get() default argument must be a compile-time constant inside torch.compile.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2694": [
+    {
+      "Gb_type": "construct object with custom __del__",
+      "Context": "class={self.value.__name__}",
+      "Explanation": "Dynamo cannot preserve __del__-once semantics for an object whose class defines __del__; example-object materialization and cross-graph-break reconstruction would fire __del__ multiple times.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
