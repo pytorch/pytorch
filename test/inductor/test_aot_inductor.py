@@ -5260,6 +5260,28 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(M(), example_args)
 
+    def test_group_norm_fallback(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU GroupNorm uses the native fallback")
+
+        class M(torch.nn.Module):
+            def forward(self, x, weight, bias):
+                return torch.nn.functional.group_norm(x, 2, weight, bias)
+
+        example_inputs = (
+            torch.randn(2, 4, 3, 3),
+            torch.randn(4),
+            torch.randn(4),
+        )
+        package_path, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.compile, M(), example_inputs
+        )
+        actual = torch._inductor.aoti_load_package(package_path)(*example_inputs)
+        self.assertEqual(actual, M()(*example_inputs))
+        FileCheck().check("aoti_torch_cpu_native_group_norm").check_not(
+            "aoti_torch_proxy_executor_call_function"
+        ).run(code)
+
     def test_proxy_executor_permute(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
