@@ -14566,9 +14566,9 @@ Example::
 )
 
 add_docstr(
-    torch._assert_async,
+    torch.assert_async,
     r"""
-_assert_async(tensor) -> void
+assert_async(tensor, assert_msg=None) -> None
 
 Asynchronously assert that the contents of tensor are nonzero.  For CPU tensors,
 this is equivalent to ``assert tensor`` or ``assert tensor.is_nonzero()``; for
@@ -14578,10 +14578,20 @@ testing invariants in CUDA tensors without giving up performance.  This function
 is NOT intended to be used for regular error checking, as it will trash your CUDA
 context if the assert fails (forcing you to restart your PyTorch process.)
 
+``torch._assert_async`` is an alias of this function kept for backward
+compatibility.
+
 Args:
     tensor (Tensor): a one element tensor to test to see if it is nonzero.  Zero
         elements (including False for boolean tensors) cause an assertion failure
         to be raised.
+    assert_msg (str, optional): message to include in the error raised when the
+        assertion fails.
+
+Example::
+
+    >>> torch.assert_async(torch.tensor(1))
+    >>> torch.assert_async(torch.tensor(1), "value must be nonzero")
 """,
 )
 
