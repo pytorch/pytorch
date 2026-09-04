@@ -13778,6 +13778,41 @@ class TestAutogradForwardMode(TestCase):
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
+    def test_prod_higher_order_stability(self, device):
+        def f(x):
+            return 4000.0 * torch.prod(x)
+
+        # The old result / input path materializes inf because 4000 / 0.03
+        # ~= 133333 exceeds the FP16 maximum finite value of 65504, even
+        # though the true mixed Hessian result is exactly 4000.
+        x = torch.tensor(
+            [0.03, 1.0, 1.0, 1.0],
+            dtype=torch.float16,
+            device=device,
+            requires_grad=True,
+        )
+        v = torch.tensor([0.0, 1.0, 0.0, 0.0], dtype=torch.float16, device=device)
+        expected = torch.tensor(4000.0, dtype=torch.float16, device=device)
+
+        self.assertEqual(torch.autograd.functional.hessian(f, x)[0, 1], expected)
+        self.assertEqual(torch.autograd.functional.vhp(f, x, v)[1][0], expected)
+        self.assertEqual(torch.func.hessian(f)(x.detach())[0, 1], expected)
+
+        def f_dim(x):
+            return 4000.0 * torch.prod(x, dim=1).sum()
+
+        x_dim = x.detach().unsqueeze(0).requires_grad_()
+        v_dim = v.unsqueeze(0)
+        self.assertEqual(
+            torch.autograd.functional.hessian(f_dim, x_dim)[0, 0, 0, 1], expected
+        )
+        self.assertEqual(
+            torch.autograd.functional.vhp(f_dim, x_dim, v_dim)[1][0, 0], expected
+        )
+        self.assertEqual(
+            torch.func.hessian(f_dim)(x_dim.detach())[0, 0, 0, 1], expected
+        )
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
