@@ -643,6 +643,12 @@ def _clear_torch_ops_cache(op_defs):
         delattr(namespace, name)
         if name in namespace._dir:
             namespace._dir.remove(name)
+    if op_defs:
+        # Schema-derived memos are keyed on (qualname, overload names), which a
+        # teardown-then-redefine cycle reuses for a different schema. Kept last:
+        # this runs in a shutdown-time finalizer, so it must not be able to skip
+        # the deletions above.
+        torch._ops._out_arg_names_cached.cache_clear()
 
 
 def _del_library(

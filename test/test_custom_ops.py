@@ -6508,6 +6508,23 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         ]
         subprocess.check_output(cmd, shell=False)
 
+    def test_out_arg_names_not_stale_after_redefinition(self):
+        # torch._ops._out_arg_names memoizes on (qualname, overload names),
+        # which a teardown/redefine cycle reuses for a different schema, so
+        # _clear_torch_ops_cache has to drop the memo.
+        with torch.library._scoped_library("_torch_testing_out", "FRAGMENT") as lib:
+            lib.define("quux(Tensor x, *, Tensor(a!) out0) -> Tensor(a!)")
+            self.assertEqual(
+                torch._ops._out_arg_names(torch.ops._torch_testing_out.quux),
+                frozenset({"out0"}),
+            )
+        with torch.library._scoped_library("_torch_testing_out", "FRAGMENT") as lib:
+            lib.define("quux(Tensor x, *, Tensor(a!) out9) -> Tensor(a!)")
+            self.assertEqual(
+                torch._ops._out_arg_names(torch.ops._torch_testing_out.quux),
+                frozenset({"out9"}),
+            )
+
 
 class TestTypeConversion(TestCase):
     """In infer_schema(), we try to suggest a correct type when the type annotation is wrong."""
