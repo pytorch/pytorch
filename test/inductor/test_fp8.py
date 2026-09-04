@@ -1290,8 +1290,9 @@ class TestFP8Lowering(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @onlyCUDA
     @unittest.skipIf(
-        torch.cuda.is_available() and torch.cuda.get_device_capability() < (9, 0),
-        "128-element blockwise scaling requires CC 9.0+",
+        torch.version.hip is not None
+        or (torch.cuda.is_available() and torch.cuda.get_device_capability() < (9, 0)),
+        "main loop scaling template is registered for CUDA CC 9.0+ only",
     )
     @parametrize(
         "shape",
