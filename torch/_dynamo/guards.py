@@ -2980,8 +2980,9 @@ class GuardBuilder(GuardBuilderBase):
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: _constant_subclass_base_value(value),
-        eval_fn=lambda value, metadata: _constant_subclass_base_value(value)
-        == metadata,
+        eval_fn=lambda value, metadata: constants_identical(
+            _constant_subclass_base_value(value), metadata
+        ),
     )
     def CONSTANT_SUBCLASS_MATCH(self, guard: Guard) -> None:
         """Guard for subclasses of constant types (int, float, str, etc.).

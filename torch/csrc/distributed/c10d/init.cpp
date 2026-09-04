@@ -2157,8 +2157,9 @@ Example::
 
             std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
-              TORCH_CHECK_VALUE(
-                  worldSize.value() != 0, "TCPStore world size cannot be 0");
+              if (worldSize.value() == 0) {
+                throw py::value_error("TCPStore world size cannot be 0");
+              }
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
@@ -2221,7 +2222,9 @@ Arguments:
       .def(
           py::init([](const std::string& prefix,
                       c10::intrusive_ptr<::c10d::Store> store) {
-            TORCH_CHECK_VALUE(store, "store argument cannot be None");
+            if (!store) {
+              throw py::value_error("store argument cannot be None");
+            }
             return new ::c10d::PrefixStore(prefix, std::move(store));
           }),
           py::arg("prefix"),
@@ -3763,8 +3766,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               return ::c10d::ProcessGroupGloo::createDeviceForInterface(
                   interface, lazyInit);
             }
-            TORCH_CHECK_VALUE(
-                false, "Specify either `hostname` or `interface` argument.");
+            throw std::invalid_argument(
+                "Specify either `hostname` or `interface` argument.");
           },
           py::arg("hostname") = "",
           py::arg("interface") = "",

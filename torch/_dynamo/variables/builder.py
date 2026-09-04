@@ -1111,8 +1111,7 @@ class VariableBuilder:
             ErrorOnGraphBreakDecoratorContextManager,
         )
 
-        # Triton runtime types are shared across backends, including CPU.
-        if has_triton(include_cpu=True):
+        if has_triton():
             from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
         else:
@@ -1145,8 +1144,7 @@ class VariableBuilder:
             )
         if has_triton_tensor_descriptor_host_tma():
             from triton.tools.tensor_descriptor import TensorDescriptor
-        # The allocator hook is shared across Triton backends, including CPU.
-        if has_triton(include_cpu=True):
+        if has_triton():
             import triton as triton_mod
 
             if hasattr(triton_mod, "set_allocator"):

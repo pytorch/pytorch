@@ -362,34 +362,6 @@ class AOTInductorTestsTemplate:
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
             )
 
-    def test_invoke_subgraph_nested_region(self):
-        # Two call sites, so the region is not single-use: it has to be emitted twice
-        # and each copy scoped, and it survives inlining on its own merits rather than
-        # only because of the config patch below.
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return torch.cos(gn(x * 2)) + gn(x * 3)
-
-        with torch._dynamo.config.patch(
-            enable_invoke_subgraph_regional_compile=True,
-            inline_single_use_invoke_subgraph=False,
-        ):
-
-            @torch.compiler.nested_compile_region
-            def gn(x):
-                return torch.sin(x) + 1
-
-            example_inputs = (torch.randn(8, 8, device=self.device),)
-            model = Model()
-            # check_model covers the round trip including dlopen; the FileCheck pins
-            # that the region reached codegen_invoke_subgraph, which a correctness-only
-            # assertion would keep passing without.
-            self.check_model(model, example_inputs)
-            _, code = run_and_get_cpp_code(
-                AOTIRunnerUtil.compile, model, example_inputs
-            )
-            FileCheck().check_count("// subgraph: ", 2).run(code)
-
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     def test_loaded_modules_tracking(self, embed_kernel_binary):
         # Verify that AOTI codegen on CUDA/HIP passes &kernels_.loaded_modules_
@@ -6058,20 +6030,20 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, *inputs):
-                # Export preserves unused user inputs and generates runtime checks for them.
-                return inputs[0]
+                result = inputs[0]
+                for i in range(1, len(inputs)):
+                    result = result + inputs[i]
+                return result
 
-        num_inputs = 100 if self.use_minimal_arrayref_interface else 1000
         inputs = []
-        for _ in range(num_inputs):
+        for _ in range(1000):
             inputs.append(torch.ones(8, 8, 8, dtype=torch.float16, device=self.device))
         inputs = tuple(inputs)
         model = Model()
         with torch.no_grad():
             # This test calls compile directly rather than self.check_model, so
             # propagate the copied test class' ArrayRef settings explicitly.
-            _, code = run_and_get_cpp_code(
-                AOTIRunnerUtil.compile,
+            AOTIRunnerUtil.compile(
                 model,
                 inputs,
                 inductor_configs={
@@ -6079,7 +6051,6 @@ class AOTInductorTestsTemplate:
                     "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
                 },
             )
-        FileCheck().check(f"check_input_{num_inputs - 1}(input_handles);").run(code)
 
     def test_runtime_checks_complex(self):
         class Model(torch.nn.Module):

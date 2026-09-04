@@ -403,8 +403,8 @@ class CuptiMonitor:
         self._clock = _SynchronizedClock()
         self._timestamp_callback_active = False
 
-        # Snapshot of the native pool size taken at stop(), so stats() stays
-        # meaningful after the monitor has been stopped.
+        # Snapshot of the native pool size taken before stop() frees it, so
+        # stats() stays meaningful after the monitor has been stopped.
         self._final_allocated_buffers = 0
         self._outstanding_warned = False
         self._dropped_records = 0
@@ -608,6 +608,7 @@ class CuptiMonitor:
     def start(self) -> None:
         if self._started:
             raise RuntimeError("CUPTI monitor is already started")
+        _cupti_monitor_native.reset_buffers()
         _cupti_monitor_native.configure_buffers(self.buffer_size)
         self.register_callbacks()
         # Put activity records on kineto's unix timeline via the clock (see _SynchronizedClock):
@@ -722,6 +723,7 @@ class CuptiMonitor:
         # holds it either -- a handler must survive an activity session ending.
         self._release_subscriber_if_idle()
         self._final_allocated_buffers = _cupti_monitor_native.allocated_buffers()
+        _cupti_monitor_native.reset_buffers()
         self._clock.reset()
 
     def flush(self, *, sync: bool = False, timeout_s: float = 5.0) -> None:

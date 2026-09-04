@@ -597,14 +597,16 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         )
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
 
-        # node.meta is stripped by GraphModule.__reduce__, so preserve the
-        # location and value of every budget annotation in the cache key.
-        self.region_activation_memory_budget_annotations = tuple(
-            (module_name, node_index, budget)
-            for module_name, module in gm.named_modules()
-            if isinstance(module, torch.fx.GraphModule)
-            for node_index, node in enumerate(module.graph.nodes)
-            if (budget := _get_memory_budget_annotation(node)) is not None
+        # region_activation_memory_budget is graph-wide (the partitioner enforces
+        # a single value across the graph) and propagates to every node, so the
+        # cache key only needs the value off the first node. node.meta is stripped
+        # by GraphModule.__reduce__, so without recording it here a budget change
+        # would not invalidate the cache.
+        first_node = next(iter(gm.graph.nodes), None)
+        self.region_activation_memory_budget: float | None = (
+            _get_memory_budget_annotation(first_node)
+            if first_node is not None
+            else None
         )
 
         # Note: We use the live config module, not self.autograd_config (the

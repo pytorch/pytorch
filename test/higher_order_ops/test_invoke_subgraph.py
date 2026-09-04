@@ -3622,6 +3622,38 @@ class TestInvokeSubgraphReuse(TestCase):
         res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(res, fn(x))
 
+    def test_subgraph_reuse_nan_arg(self):
+        # Constants passed as arguments have sources, so reuse goes through
+        # the snapshotted EQUALS_MATCH/CONSTANT_MATCH eval_fn path.
+        @nested_compile_region
+        def gn(x, c: float):
+            return x * c
+
+        def fn(x, c1, c2):
+            return torch.stack([gn(x, c1), gn(x, c2)])
+
+        x = torch.randn(8)
+        n = float("nan")
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, n, n)
+
+        self.assertEqual(count(), 1)
+        self.assertTrue(torch.isnan(res).all())
+
+    def test_subgraph_no_reuse_neg_zero_arg(self):
+        @nested_compile_region
+        def gn(x, c: float):
+            return (x * c).reciprocal()
+
+        def fn(x, c1, c2):
+            return torch.stack([gn(x, c1), gn(x, c2)])
+
+        x = torch.ones(8)
+
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, 0.0, -0.0)
+        self.assertEqual(res, fn(x, 0.0, -0.0))
+
     def test_subgraph_reuse_different_shapes(self):
         @nested_compile_region
         def gn(x):
