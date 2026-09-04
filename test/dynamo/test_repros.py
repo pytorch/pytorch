@@ -2682,8 +2682,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(((3, 5), (3, 5)), res)
 
     @staticmethod
-    def _consume_prefix_state_dict(kind, t):
-        items = [("module.w", t), ("keep", t + 1), ("module.b", t + 2)]
+    def _consume_prefix_state_dict(kind, prefix_case, t):
+        if prefix_case == "empty":
+            items = []
+        elif prefix_case == "no_match":
+            items = [("w", t), ("keep", t + 1)]
+        else:
+            items = [("module.w", t), ("keep", t + 1), ("module.b", t + 2)]
         if kind == "dict":
             return dict(items)
         sd = collections.OrderedDict(items)
@@ -2700,34 +2705,70 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         meta = getattr(sd, "_metadata", None)
         return (
             list(sd.keys()),
-            sd["w"] + sd["b"] + sd["keep"],
+            dict(sd),
             None if meta is None else list(meta.items()),
         )
 
     @parametrize("kind", ["dict", "ordered_dict", "metadata"])
-    def test_consume_prefix_in_state_dict_caller_owned(self, kind):
+    @parametrize("owner", ["caller", "in_frame"])
+    def test_consume_prefix_in_state_dict(self, kind, owner):
         # The helper strips a prefix from its state_dict argument in place, so
         # it cannot be a graph node: FX hands the call an immutable_dict and
         # fake propagation raises, and when it does not the mutation is
         # silently dropped. It was bulk-added to the in-graph function list by
-        # #114196 rather than deliberately classified. The dict here is owned
-        # by the caller, so the mutation has to survive side-effect replay.
-        def fn(t, sd):
-            torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(
-                sd, "module."
-            )
+        # #114196 rather than deliberately classified. A caller-owned dict
+        # additionally needs the mutation to survive side-effect replay.
+        cp = torch.nn.modules.utils.consume_prefix_in_state_dict_if_present
+
+        def caller_fn(t, sd):
+            cp(sd, "module.")
             return t + 1
 
+        # Seeding _metadata on a dict built in the frame is a sourceless
+        # setattr on a dict subclass, which Dynamo declines; that decline is
+        # the seeding, not the helper.
+        declines = kind == "metadata" and owner == "in_frame"
         x = torch.zeros(2)
-        sd_eager = self._consume_prefix_state_dict(kind, x)
-        fn(x, sd_eager)
 
-        sd_compiled = self._consume_prefix_state_dict(kind, x)
-        torch.compile(fn, backend="eager", fullgraph=True)(x, sd_compiled)
-        self.assertEqual(
-            self._consume_prefix_snapshot(sd_compiled),
-            self._consume_prefix_snapshot(sd_eager),
-        )
+        for prefix_case in ("match", "no_match", "empty"):
+
+            def in_frame_fn(t, _case=prefix_case):
+                sd = self._consume_prefix_state_dict(kind, _case, t)
+                cp(sd, "module.")
+                return self._consume_prefix_snapshot(sd)
+
+            for fullgraph in (True, False):
+                with self.subTest(prefix_case=prefix_case, fullgraph=fullgraph):
+                    # Without a reset the fullgraph=True run below reuses the
+                    # cache entry from the fullgraph=False run and never
+                    # re-traces.
+                    torch._dynamo.reset()
+                    if owner == "caller":
+                        sd_eager = self._consume_prefix_state_dict(kind, prefix_case, x)
+                        caller_fn(x, sd_eager)
+                        sd = self._consume_prefix_state_dict(kind, prefix_case, x)
+                        torch.compile(caller_fn, backend="eager", fullgraph=fullgraph)(
+                            x, sd
+                        )
+                        self.assertEqual(
+                            self._consume_prefix_snapshot(sd),
+                            self._consume_prefix_snapshot(sd_eager),
+                        )
+                    elif declines and fullgraph:
+                        with self.assertRaisesRegex(
+                            torch._dynamo.exc.Unsupported,
+                            "setattr\\(\\) on unsupported",
+                        ):
+                            torch.compile(in_frame_fn, backend="eager", fullgraph=True)(
+                                x
+                            )
+                    else:
+                        self.assertEqual(
+                            torch.compile(
+                                in_frame_fn, backend="eager", fullgraph=fullgraph
+                            )(x),
+                            in_frame_fn(x),
+                        )
 
     @parametrize("fullgraph", [True, False])
     def test_consume_prefix_in_state_dict_metadata_only(self, fullgraph):
@@ -2757,18 +2798,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             list(sd_compiled._metadata.items()), list(sd_eager._metadata.items())
         )
         self.assertEqual(list(sd_compiled.keys()), list(sd_eager.keys()))
-
-    @parametrize("kind", ["dict", "ordered_dict"])
-    def test_consume_prefix_in_state_dict_built_in_frame(self, kind):
-        def fn(t):
-            sd = self._consume_prefix_state_dict(kind, t)
-            torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(
-                sd, "module."
-            )
-            return self._consume_prefix_snapshot(sd)
-
-        x = torch.zeros(2)
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_missing_attr_on_skipped_function_is_catchable(self):
         # A missing attribute on a skipped callable used to become a deferred
