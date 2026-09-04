@@ -16,11 +16,16 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import DistributedTestBase, TEST_SKIPS
-from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
+)
 
 
-device_type = get_devtype().type
+accelerator = torch.accelerator.current_accelerator()
+device_type = accelerator.type if accelerator is not None else "cpu"
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -29,7 +34,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-WORLD_SIZE = min(4, max(2, torch.get_device_module(device_type).device_count()))
+WORLD_SIZE = min(4, max(2, torch.accelerator.device_count()))
 
 
 def with_comms(func=None):
@@ -49,7 +54,18 @@ def with_comms(func=None):
     return wrapper
 
 
+class C10dLoggerGenericTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_get_or_create_logger(self):
+        self.assertIsNotNone(_c10d_logger)
+        self.assertEqual(1, len(_c10d_logger.handlers))
+        self.assertIsInstance(_c10d_logger.handlers[0], logging.NullHandler)
+
+
 class C10dErrorLoggerTest(DistributedTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return WORLD_SIZE
@@ -62,11 +78,6 @@ class C10dErrorLoggerTest(DistributedTestBase):
         # Wait for all ranks to reach here before starting shutdown.
         dist.barrier()
         dist.destroy_process_group()
-
-    def test_get_or_create_logger(self):
-        self.assertIsNotNone(_c10d_logger)
-        self.assertEqual(1, len(_c10d_logger.handlers))
-        self.assertIsInstance(_c10d_logger.handlers[0], logging.NullHandler)
 
     @_exception_logger
     def _failed_broadcast_raise_exception(self):
