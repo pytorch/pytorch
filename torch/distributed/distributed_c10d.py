@@ -996,7 +996,12 @@ class BackendConfig:
         elif normalized_backend in Backend.backend_list:
             # Cases for when backend is a single string (without device types)
             # e.g. "nccl", "gloo", "ucc", "mpi"
-            supported_devices = Backend.backend_capability[normalized_backend]
+            supported_devices = list(Backend.backend_capability[normalized_backend])
+            if normalized_backend == Backend.FAKE:
+                # FAKE backend should support all registered device types
+                for device in Backend.default_device_backend_map:
+                    if device not in supported_devices:
+                        supported_devices.append(device)
             backend_val = Backend(backend)
 
             self.device_backend_map = dict.fromkeys(supported_devices, backend_val)
