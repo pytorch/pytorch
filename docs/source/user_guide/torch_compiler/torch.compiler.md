@@ -34,14 +34,22 @@ In some cases, the terms `torch.compile`, TorchDynamo, `torch.compiler`
 might be used interchangeably in this documentation.
 :::
 
-`torch.compiler` also includes an ahead-of-time API, `torch.compiler.precompile`. It
-captures a whole computation -- with the model(s) passed among the arguments of the
-example call, e.g. `precompile(lambda model, x: model(x), example_inputs=[(model, x)])`
--- and lowers it to a self-contained, runnable Python source string plus an acceleration
-cache. Pass `tracer="dynamo"` to capture several calls, with the graph breaks and
-recompilations between them. Reload the
-artifact with `torch.compiler.precompile.load`; since no weights are baked in, you pass
-the model again at runtime. See the {ref}`API reference <torch.compiler_api>` for details.
+`torch.compiler` also includes an ahead-of-time API, `torch.compiler.precompile`. Capture
+is caller-driven: enter `precompile.artifact(fn)` as a context manager and call it exactly
+as you would `fn` -- with the model(s) passed among the arguments, e.g.
+
+```python
+with torch.compiler.precompile.artifact(lambda model, x: model(x)) as cap:
+    y = cap(model, x)
+python_code, cache = cap.result()
+```
+
+-- and it lowers the computation to a self-contained, runnable Python source string plus an
+acceleration cache. Pass `tracer="dynamo"` to capture several calls, with the graph breaks
+and recompilations between them; use `precompile.accumulate` to capture across a training
+loop and write the artifact to disk. Reload the artifact with
+`torch.compiler.precompile.load`; since no weights are baked in, you pass the model again at
+runtime. See the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}
 `torch.compile` may not support recently released major versions of Python.

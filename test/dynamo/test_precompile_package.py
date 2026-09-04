@@ -780,7 +780,7 @@ def _sum_if_tensor(x):
     return x.sum() if type(x) is torch.Tensor else x
 
 
-# Rows: builder, example_inputs, text the invariants file must contain, and a
+# Rows: builder, input calls, text the invariants file must contain, and a
 # pattern it must not -- object ids, the per-process counter in Dynamo's
 # builtins-dict name, and the address install_global_by_id bakes into an
 # identifier ("<prefix>_<id(value)>_c<n>": `type(x) is torch.Tensor` installs
@@ -803,25 +803,26 @@ def _mul_or_add(x, flag, k):
 # Shapes where the guard that SPLIT two compilations must show up as varying
 # and never as an invariant of both. Rows: builder, capture kwargs, calls,
 # substrings some varying fact must carry, substrings some invariant fact must
-# carry, substrings no invariant fact may carry.
+# carry, substrings no invariant fact may carry, and whether the single call
+# must be made once under no_grad and once under enable_grad to split it.
 _VARYING_CORPUS = {
     # _normalize strips object ids so the file diffs clean. It must not strip a
     # user constant with it: these two variants pin the dict to different keys.
-    "large_constant": (lambda: _scale_by_first_value, {"dynamic": False}, [(torch.ones(4), {1000000001: 2}), (torch.ones(4), {2000000002: 3})], ("[1000000001]", "[2000000002]"), (), ("dict.keys",)),
+    "large_constant": (lambda: _scale_by_first_value, {"dynamic": False}, [(torch.ones(4), {1000000001: 2}), (torch.ones(4), {2000000002: 3})], ("[1000000001]", "[2000000002]"), (), ("dict.keys",), False),
     # k is unspecialized, so its guard is "k is an int" in both variants and
     # is a real precondition. Fingerprinting the value it happened to hold
     # would split one shared guard into two indistinguishable varying facts.
-    "shared_int_guard": (lambda: _mul_or_add, {"dynamic": True}, [(torch.ones(4), True, 1), (torch.ones(4), False, 2)], (), ("___check_type_id(L['k']",), ()),
+    "shared_int_guard": (lambda: _mul_or_add, {"dynamic": True}, [(torch.ones(4), True, 1), (torch.ones(4), False, 2)], (), ("___check_type_id(L['k']",), (), False),
     # The id in an identity guard's code is normalized away, so the object has
     # to be named some other way, or self.act is reported invariant.
-    "identity_guard_named": (lambda: PrecompileSelfActPair(torch.relu, torch.sigmoid), {"dynamic": False}, [(torch.ones(4),)], ("relu on self.act", "sigmoid on self.act"), (), (".act",)),
+    "identity_guard_named": (lambda: PrecompileSelfActPair(torch.relu, torch.sigmoid), {"dynamic": False}, [(torch.ones(4),)], ("relu on self.act", "sigmoid on self.act"), (), (".act",), False),
     # Every entry of an ACT2FN-style table is "<lambda>" in one module on one
     # line; _object_identity must still tell them apart.
-    "lambda_table_pair": (lambda: PrecompileSelfActPair(*_LAMBDA_TABLE.values()), {"dynamic": False}, [(torch.randn(3, 4),)], ("self.act",), (), ("self.act",)),
-    # example_inputs run under no_grad and body calls do not, so the same call
-    # made both ways compiles twice; global-state guards carry no value of
-    # their own, so without a fingerprint nothing would be reported varying.
-    "grad_mode": (PrecompileInvariantModel, {"dynamic": False, "example_inputs": [(torch.ones(4, 8),)]}, [(torch.ones(4, 8),)], ("grad_enabled=True", "grad_enabled=False"), (), ()),
+    "lambda_table_pair": (lambda: PrecompileSelfActPair(*_LAMBDA_TABLE.values()), {"dynamic": False}, [(torch.randn(3, 4),)], ("self.act",), (), ("self.act",), False),
+    # The same call made once under no_grad and once under enable_grad compiles
+    # twice; global-state guards carry no value of their own, so without a
+    # fingerprint nothing would be reported varying.
+    "grad_mode": (PrecompileInvariantModel, {"dynamic": False}, [(torch.ones(4, 8),)], ("grad_enabled=True", "grad_enabled=False"), (), (), True),
 }  # fmt: skip
 
 
@@ -1834,36 +1835,36 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertIn("PRECOMPILE_ACTIVATION", reported[0])
         self.assertIn("require_no_risky_drops=False", logs.output[0])
 
-    def test_example_inputs_drive_the_capture(self):
-        # example_inputs is just "run these for me": capture is by execution, so
-        # the block body becomes optional.
+    def test_caller_driven_calls_drive_the_capture(self):
+        # Capture is by execution: the calls the caller makes inside the block
+        # are what fold into the artifact.
         session = precompile_capture(
             PrecompileInvariantModel(),
             backend="eager",
             dynamic=False,
-            example_inputs=_TWO_SHAPES,
         )
-        with session:
-            pass
+        with session as compiled:
+            for args in _TWO_SHAPES:
+                compiled(*args)
         summary = session.summary()
         self.assertEqual(summary.frames, 2)
         self.assertEqual(summary.guarded_codes, 4)
 
-    def test_a_failing_example_input_does_not_wedge_the_session(self):
-        # __enter__ runs example_inputs, and a __enter__ that raises never gets
-        # its __exit__, so the config patch the session holds would stay on for
-        # the life of the process and the session would refuse to save what it
-        # did capture. A bare tensor instead of a 1-tuple is the likely way in.
+    def test_a_failing_call_does_not_wedge_the_session(self):
+        # A call that raises inside the block still triggers __exit__ (normal
+        # context-manager semantics), so the config patch the session holds is
+        # restored rather than staying on for the life of the process, and the
+        # session refuses to save what it did not finish capturing.
         before = functorch_config.bundled_autograd_cache
         session = precompile_capture(
             PrecompileInvariantModel(),
             backend="eager",
             dynamic=False,
-            example_inputs=[torch.ones(4, 8)],
         )
-        with self.assertRaisesRegex(TypeError, "tuples of positional args"):
-            with session:
-                pass
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with session as compiled:
+                compiled(torch.ones(4, 8))
+                raise RuntimeError("boom")
         self.assertEqual(functorch_config.bundled_autograd_cache, before)
         with self.assertRaisesRegex(PackageError, "capture raised"):
             session.save(self.path())
@@ -2011,10 +2012,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 model,
                 backend="inductor",
                 dynamic=False,
-                example_inputs=[(x,)],
             )
-            with session:
-                pass
+            with session as compiled:
+                compiled(x)
             capture_target = session._package.cache_entry().system_info
         session.save(self.path())
         saved = _SingleFileStore().read(self.path()).dynamo.system_info
@@ -2107,10 +2107,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             PrecompileInvariantModel(),
             backend="eager",
             dynamic=False,
-            example_inputs=_TWO_SHAPES,
         )
-        with session:
-            pass
+        with session as compiled:
+            for args in _TWO_SHAPES:
+                compiled(*args)
 
         frames = {f.frame: f for f in session.invariants()}
         resume = next(k for k in frames if k.startswith("torch_dynamo_resume_in"))
@@ -2149,10 +2149,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             PrecompileInvariantModel(),
             backend="eager",
             dynamic=False,
-            example_inputs=_TWO_SHAPES,
         )
-        with session:
-            pass
+        with session as compiled:
+            for args in _TWO_SHAPES:
+                compiled(*args)
 
         frames = {f.frame: f for f in session.invariants()}
         undetermined_types = {f.guard_type for f in frames["forward"].undetermined}
@@ -2179,10 +2179,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 build(),
                 backend="eager",
                 dynamic=False,
-                example_inputs=inputs,
                 invariants=path,
-            ):
-                pass
+            ) as compiled:
+                for args in inputs:
+                    compiled(*args)
             self.assertTrue(os.path.isfile(path))
             with open(path, encoding="utf-8") as handle:
                 texts.append(handle.read())
@@ -2320,10 +2320,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             PrecompileInvariantModel(),
             backend="eager",
             dynamic=False,
-            example_inputs=_TWO_SHAPES,
         )
-        with session:
-            pass
+        with session as compiled:
+            for args in _TWO_SHAPES:
+                compiled(*args)
         rendered = [
             f.render() for frame in session.invariants() for f in frame.invariant
         ]
@@ -2332,13 +2332,19 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
     @parametrize("shape", sorted(_VARYING_CORPUS))
     def test_invariants_report_what_split_the_variants_as_varying(self, shape):
-        build, kwargs, calls, must_vary, must_hold, must_not_hold = _VARYING_CORPUS[
-            shape
-        ]
+        build, kwargs, calls, must_vary, must_hold, must_not_hold, grad_split = (
+            _VARYING_CORPUS[shape]
+        )
         session = precompile_capture(build(), backend="eager", **kwargs)
         with session as compiled:
-            for args in calls:
-                compiled(*args)
+            if grad_split:
+                with torch.no_grad():
+                    compiled(*calls[0])
+                with torch.enable_grad():
+                    compiled(*calls[0])
+            else:
+                for args in calls:
+                    compiled(*args)
         split = [f for f in session.invariants() if f.variants > 1]
         self.assertTrue(split, "expected a frame compiled more than once")
         for frame in split:
@@ -2371,11 +2377,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             f,
             backend="eager",
             dynamic=False,
-            example_inputs=[(torch.ones(4), 3)],
             prune_invariant_guards=True,
         )
-        with session:
-            pass
+        with session as compiled:
+            compiled(torch.ones(4), 3)
         kept = {(t, n) for t, n in session.summary().kept_guards}
         self.assertIn(("CONSTANT_MATCH", "k"), kept)
         self.assertNotIn(
@@ -2392,11 +2397,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             PrecompileStockSequential(),
             backend="eager",
             dynamic=False,
-            example_inputs=[(torch.randn(n, 8),) for n in (4, 5)],
             prune_invariant_guards=True,
         )
-        with session:
-            pass
+        with session as compiled:
+            for n in (4, 5):
+                compiled(torch.randn(n, 8))
         dropped = set(session.summary().policy_dropped_guards)
         self.assertTrue(dropped)
         for entry in session._package.code_entries():
@@ -2420,7 +2425,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             PrecompileStockSequential(),
             backend="eager",
             dynamic=False,
-            example_inputs=[(torch.randn(4, 8),)],
             prune_invariant_guards=True,
         )
         with (
@@ -2432,8 +2436,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 PackageError, "cannot be rebuilt from their serialized form"
             ),
         ):
-            with session:
-                pass
+            with session as compiled:
+                compiled(torch.randn(4, 8))
         # Nothing was pruned, and the accounting still says so.
         summary = session.summary()
         self.assertEqual(summary.policy_dropped_guards, ())
@@ -2453,10 +2457,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             _precompile_unreachable_entry,
             backend="eager",
             dynamic=False,
-            example_inputs=[(x,)],
         )
-        with session:
-            pass
+        with session as compiled, torch.no_grad():
+            compiled(x)
         code, cache = session.artifact()
         meta = _parse_artifact_metadata(code)
         self.assertEqual(meta["SERVING_MODE"], "installed")
@@ -2500,11 +2503,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 PrecompileStockSequential(),
                 backend="eager",
                 dynamic=False,
-                example_inputs=[(torch.randn(n, 8),) for n in (4, 5)],
                 prune_invariant_guards=True,
             )
-            with session:
-                pass
+            with session as compiled:
+                for n in (4, 5):
+                    compiled(torch.randn(n, 8))
             return session
 
         session = capture()
@@ -2706,11 +2709,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         model = PrecompileEmptyGraph()
         x = torch.randn(4)
         with _counting_cpu_probe(toolchain=False) as calls:
-            session = precompile_capture(
-                model, backend="eager", dynamic=False, example_inputs=[(x,)]
-            )
-            with session:
-                pass
+            session = precompile_capture(model, backend="eager", dynamic=False)
+            with session as compiled, torch.no_grad():
+                compiled(x)
             entry = session._package.cache_entry()
             self.assertFalse(entry.requires_native_backend_compatibility)
             self.assertIsNone(entry.system_info.cpu_codegen_target)
@@ -2818,10 +2819,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 cls(scale),
                 backend="eager",
                 dynamic=False,
-                example_inputs=[(x,)],
             )
-            with session:
-                pass
+            with session as compiled, torch.no_grad():
+                compiled(x)
             self.assertTrue(session.summary().complete)
             self.assertEqual(session.summary().risky_dropped_guards, ())
             path = self.path(f"shared_{cls.__name__}.pt")

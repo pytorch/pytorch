@@ -1,32 +1,37 @@
-"""Ahead-of-time precompilation: ``precompile(...)`` writes a dynamo-traced artifact to disk
-and returns the example calls' results; ``precompile.artifact(...)`` returns the
-``(python_code, cache)`` pair in memory (``make_fx`` tracer by default; ``dynamo`` also
-available).
+"""Ahead-of-time precompilation. Capture is caller-driven: the caller invokes a
+capture around their own execution rather than handing precompile example inputs to
+run. ``precompile.artifact(...)`` returns an in-memory capture whose ``result()`` is
+the ``(python_code, cache)`` pair (``make_fx`` tracer by default; ``dynamo`` also
+available); ``precompile.accumulate(...)`` returns a capture that rewrites an on-disk
+artifact across the caller's own loop.
 
-    python_code, cache = torch.compiler.precompile.artifact(fn, example_inputs=[(model, x)])
+    with torch.compiler.precompile.artifact(fn) as cap:
+        out = cap(model, x)             # runs fn(model, x), returns its result
+    python_code, cache = cap.result()
     f_c = torch.compiler.precompile.load(python_code, cache)
     out = f_c(model, x)                 # pass the model again at runtime
 
-    python_code, cache = torch.compiler.precompile.artifact(
-        fn, example_inputs=[(model, x1), (model, x2)], tracer="dynamo"
-    )
+    with torch.compiler.precompile.artifact(fn, tracer="dynamo") as cap:
+        cap(model, x1)
+        cap(model, x2)
+    python_code, cache = cap.result()
 
-    # Straight to disk, taking back what the example calls returned.
-    results = torch.compiler.precompile(
-        fn, example_inputs=[(model, x1), (model, x2)],
-        artifact_path="model.py", cache_path="model.cache",
-    )
+    # Straight to disk, across the caller's own loop.
+    with torch.compiler.precompile.accumulate(
+        fn, artifact_path="model.py", cache_path="model.cache"
+    ) as cap:
+        for x in loader:
+            out = cap(model, x)
 
-``example_inputs`` is the calling convention: a sequence of calls, each a tuple of
-positional arguments (or an ``ExampleInput`` when keywords are needed). The spelling 2.14
-shipped, ``precompile(fn, *example_inputs)`` returning the pair, still works for one
-release behind a FutureWarning. ``tracer`` picks ``artifact``'s capture front-end, and it
-is the ONLY thing that does -- ``make_fx`` takes exactly one call, ``dynamo`` takes as
-many as you want; ``precompile(...)`` itself is always ``dynamo``.
+The calls the caller makes ARE the capture: inputs flow through naturally and each
+call returns what ``fn`` returned, so the capture drops into an ordinary
+training/pipeline loop where intermediate values are needed. ``tracer`` picks
+``artifact``'s capture front-end -- ``make_fx`` takes exactly one call, ``dynamo``
+takes as many as you make; ``accumulate`` is always ``dynamo``.
 
 ``precompile.artifact`` captures your computation with ``make_fx`` (its default
-``tracer``) -- a NON-STRICT trace of the ATen ops that run when ``fn`` executes once on
-the example inputs. It does not analyze your Python, so it comes with an explicit
+``tracer``) -- a NON-STRICT trace of the ATen ops that run when ``fn`` executes once.
+It does not analyze your Python, so it comes with an explicit
 contract (the programming model): stay inside it and the artifact faithfully reproduces
 ``fn``; step outside it and you get an artifact that computes the wrong thing.
 
@@ -39,22 +44,22 @@ only to ``tracer="make_fx"``). See the ``tracer`` note at the bottom of
 Note [precompile programming model].
 
 For a computation with graph breaks, or to retain several guarded/recompiled variants,
-pass ``tracer="dynamo"`` with as many calls as you need. Either tracer yields the same
-``(python_code, cache)`` pair (returned by ``artifact``, written to disk by the call),
+pass ``tracer="dynamo"`` and make as many calls as you need. Either tracer yields the
+same ``(python_code, cache)`` pair (from ``result()``),
 reloaded with ``torch.compiler.precompile.load``; add
 ``training=True`` for an artifact that carries a backward. ``make_fx`` produces one trace,
-so it captures exactly one call and refuses a longer ``example_inputs``.
+so it captures exactly one call and refuses a second.
 
-Multi-graph capture keeps all live guards while running examples, then filters only the
-serialized copy. The ``require_*`` gates on the call refuse known coverage gaps, failed
+Multi-graph capture keeps all live guards while the calls run, then filters only the
+serialized copy. The ``require_*`` gates refuse known coverage gaps, failed
 captures, and RISKY dropped guards by default; the stricter ``require_no_dropped_guards``
 is off, since every model drops identity guards that cannot be serialized. Coverage remains
 execution-driven: a complete summary describes the calls
-that ran, not every possible input or unexecuted branch. precompile makes the calls, so
-precompile picks the grad mode: ordinary ``torch.no_grad()`` unless ``training=True``.
-Serve the resulting artifact under the mode it was captured in -- grad mode is a
-``GLOBAL_STATE`` guard, and it is checked. With ``tracer="dynamo"``, example inputs and
-module parameters/buffers created as inference tensors are rejected.
+that ran, not every possible input or unexecuted branch. The caller makes the calls, so
+gradients and return values keep their normal eager/``torch.compile`` semantics: the
+calls run in whatever grad mode the caller sets, and ``training=True`` lowers the
+backward eagerly. Serve the resulting artifact under the mode it was captured in -- grad
+mode is a ``GLOBAL_STATE`` guard, and it is checked.
 
 The artifact is a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
@@ -73,8 +78,8 @@ it.
 #
 # ``fn`` is the WHOLE computation, e.g. ``lambda model, x: model(x)`` for inference
 # or ``lambda model, x, t: loss_fn(model(x), t).backward()`` for a training step
-# (captured with ``training=True``, since precompile makes the example call under
-# no_grad otherwise). Among the positional args, the nn.Module arguments have their parameters and
+# (captured with ``training=True`` so the backward is lowered eagerly; the calls run
+# in whatever grad mode the caller sets). Among the positional args, the nn.Module arguments have their parameters and
 # buffers lifted to explicit graph inputs (via functional reparametrization), so
 # nothing live is baked in; the remaining args are the runtime inputs. The artifact
 # embeds NO weights -- you pass the model again at runtime.
@@ -214,7 +219,7 @@ it.
 #    binaries instead of JIT-compiling. Both the cache priming (it unpickles) and the exec run
 #    code you supplied; treat both python_code and the cache like code you are about to
 #    run. The code_hash binds the cache to its python_code:
-#    load() rejects a (code, cache) pair from different precompile() calls (same
+#    load() rejects a (code, cache) pair from different precompile captures (same
 #    backend) rather than silently running the cache's graph under foreign metadata.
 #
 # self-contained: ``python_code`` runs on its own -- it inlines the composed graph
@@ -232,7 +237,7 @@ it.
 # always runs the graph inlined in python_code. The metadata
 # lives in one place (python_code); the envelope carries a code_hash (sha256 of
 # python_code) alongside the format/version + backend tag, so load() rejects a
-# (python_code, cache) pair that did not come from the same precompile() call.
+# (python_code, cache) pair that did not come from the same precompile capture.
 #
 # backend: "inductor" (default) lowers the captured graph through
 # torch._functorch.aot_autograd.compile_to_python (AOTAutograd + Inductor, emitting a
@@ -338,8 +343,7 @@ import sys
 import threading
 import types
 import uuid
-import warnings
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence  # noqa: TC003
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 from typing_extensions import Self
@@ -348,7 +352,6 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch.compiler._precompile_types import (
-    ExampleInput,
     FrameInvariants,
     GuardFact,
     PrecompileSummary,
@@ -369,6 +372,7 @@ _RECORD_LOCK = threading.Lock()
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from torch._functorch._aot_autograd.codegen import PySourceBuilder
     from torch._subclasses.fake_tensor import FakeTensorMode
 
 
@@ -847,20 +851,139 @@ class AccumulatingCapture:
         self.close()
 
 
-class PrecompileSession:
-    r"""Execution-driven multi-graph capture session (internal).
+class _InMemoryCapture:
+    r"""The in-memory caller-driven capture :meth:`precompile.artifact` returns.
 
-    :func:`precompile` and :meth:`precompile.artifact` drive one of these
-    themselves for ``tracer="dynamo"`` -- entering it, running the example calls,
-    and rendering the artifact to disk or as the ``(python_code, cache)`` pair --
-    and :meth:`precompile.accumulate` wraps one in an ``AccumulatingCapture``, so
-    callers never receive one.
+    Part of the prototype ``torch.compiler.precompile`` API, so it may change
+    without a deprecation cycle. Enter it as a context manager to arm the
+    capture, call it exactly as you would ``fn`` inside the block -- each call
+    runs for real, folds what it exercised into the capture, and returns what
+    ``fn`` returned -- then, after the block exits, read the artifact with
+    :meth:`result`. It is the in-memory counterpart of
+    :class:`AccumulatingCapture`: same caller-driven model, with the
+    ``(python_code, cache)`` pair handed back rather than written to disk.
     """
 
-    def __init__(self, session: Any) -> None:
-        self._session = session
+    def __enter__(self) -> Self:
+        raise NotImplementedError
 
-    def _call(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
+    def __exit__(self, *exc: object) -> None:
+        raise NotImplementedError
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        raise NotImplementedError
+
+    def result(self) -> tuple[str, bytes]:
+        r"""result() -> tuple[str, bytes]
+
+        The captured artifact as ``(python_code, cache)``, ready for
+        :func:`torch.compiler.precompile.load`. Call it after the ``with`` block
+        has exited.
+        """
+        raise NotImplementedError
+
+
+class _MakeFxCapture(_InMemoryCapture):
+    r"""Single-shot in-memory capture: the ``make_fx`` tracer front-end.
+
+    A make_fx trace records the ATen ops of ONE execution of ``fn``, so this
+    captures exactly one call and refuses a second -- there is no notion of
+    guards or recompiled variants here, and thus nothing a further call could
+    add. Use :func:`precompile.artifact` with ``tracer="dynamo"`` to capture
+    several calls with the graph breaks and recompilations between them.
+    """
+
+    def __init__(
+        self,
+        fn: Callable[..., object],
+        *,
+        backend: str,
+        decompositions: dict | None,
+        training: bool,
+    ) -> None:
+        if isinstance(fn, functools.partial):
+            raise PrecompileError(
+                "precompile cannot capture a partial. Pass the underlying function "
+                "and give its bound arguments as call arguments."
+            )
+        self._module = PrecompiledModule(
+            fn, backend=backend, tracer="make_fx", decompositions=decompositions
+        )
+        self._training = training
+        self._traced = False
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        pass
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        if kwargs:
+            raise ValueError(
+                "tracer='make_fx' takes positional arguments only; pass "
+                "tracer='dynamo' to capture calls with keyword arguments."
+            )
+        if self._traced:
+            raise PrecompileError(
+                "tracer='make_fx' captures a single call and one has already been "
+                "traced. Use tracer='dynamo' to capture several calls, with the "
+                "graph breaks and recompilations between them."
+            )
+        self._traced = True
+        # A make_fx trace runs fn under proxy tensors, so it has no real result
+        # to hand back; it is single-shot precisely because there is no live
+        # execution to thread a value through. The caller drives the grad mode.
+        with torch.enable_grad() if self._training else torch.no_grad():
+            return self._module._compile(args)
+
+    def result(self) -> tuple[str, bytes]:
+        if not self._traced:
+            raise PrecompileError(
+                "nothing was captured: call the capture with your example "
+                "arguments inside a `with` block before result()."
+            )
+        # Build the (expensive) python_code ONCE and thread it into
+        # to_cache_bytes so the metadata + embedded kernel source is not rebuilt,
+        # and so code_hash is sha256 over exactly the bytes returned to the
+        # caller (a matched pair loads).
+        python_code = self._module.to_python_code()
+        return python_code, self._module.to_cache_bytes(python_code)
+
+
+class _DynamoCapture(_InMemoryCapture):
+    r"""Multi-call in-memory capture: the ``dynamo`` tracer front-end.
+
+    Enter the ``with`` block, call it as many times as you need to exercise the
+    graph breaks and recompiled variants you want captured, then read
+    :meth:`result` after the block. The same execution-driven model as
+    :class:`AccumulatingCapture`, without the per-call disk rewrite; the
+    artifact is rendered once, when the block exits.
+    """
+
+    def __init__(
+        self,
+        session: Any,
+        *,
+        backend: str,
+        require_complete: bool,
+        require_no_risky_drops: bool,
+        require_no_dropped_guards: bool,
+    ) -> None:
+        self._session = session
+        self._backend = backend
+        self._require_complete = require_complete
+        self._require_no_risky_drops = require_no_risky_drops
+        self._require_no_dropped_guards = require_no_dropped_guards
+        self._call: Callable[..., object] | None = None
+        self._fresh_cache: Any = None
+        self._exited = False
+        self._calls = 0
+        self._rendered: tuple[str, bytes] | None = None
+        self._render_error: BaseException | None = None
+        self._lock = threading.RLock()
+
+    def _map(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
         from torch._dynamo.exc import PackageError, RecompileError
 
         try:
@@ -868,70 +991,103 @@ class PrecompileSession:
         except (PackageError, RecompileError) as e:
             raise PrecompileError(str(e)) from e
 
-    def __enter__(self) -> Callable[..., object]:
-        compiled = self._call(self._session.__enter__)
+    def __enter__(self) -> Self:
+        from torch.compiler._cache import CacheArtifactManager
 
-        def call(*args: object, **kwargs: object) -> object:
-            return self._call(compiled, *args, **kwargs)
+        with self._lock:
+            if self._call is not None or self._exited:
+                raise PrecompileError(
+                    "this capture has already been entered; artifact() returns a "
+                    "fresh capture per call."
+                )
+            # The capture's compiles record into the process-global cache-artifact
+            # list, which result() serializes. A fresh one so the bundle holds
+            # only this capture rather than unrelated pending compiles; entered
+            # here and left in __exit__, spanning every captured call.
+            self._fresh_cache = CacheArtifactManager.with_fresh_cache()
+            self._fresh_cache.__enter__()
+            try:
+                self._call = self._map(self._session.__enter__)
+            except BaseException:
+                self._fresh_cache.__exit__(*sys.exc_info())
+                self._fresh_cache = None
+                raise
+        return self
 
-        return call
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        with self._lock:
+            if self._call is None or self._exited:
+                raise PrecompileError(
+                    "capture is not active: enter it with a `with` block before "
+                    "calling it."
+                )
+            call = self._call
+        result = self._map(call, *args, **kwargs)
+        with self._lock:
+            self._calls += 1
+        return result
 
     def __exit__(self, *exc: object) -> None:
-        self._call(self._session.__exit__, *exc)
+        with self._lock:
+            self._exited = True
+            try:
+                self._map(self._session.__exit__, *exc)
+                if exc[0] is None:
+                    # Render now, while the fresh cache still holds this capture's
+                    # compiles; result() hands back the stored pair. A gate refusal
+                    # is deferred to result() so summary()/invariants() stay
+                    # readable after the block.
+                    try:
+                        self._rendered = self._map(
+                            self._session.artifact,
+                            require_complete=self._require_complete,
+                            require_no_risky_drops=self._require_no_risky_drops,
+                            require_no_dropped_guards=self._require_no_dropped_guards,
+                        )
+                    except BaseException as e:
+                        self._render_error = e
+            finally:
+                if self._fresh_cache is not None:
+                    self._fresh_cache.__exit__(*sys.exc_info())
+                    self._fresh_cache = None
 
-    def example_results(self) -> list[object]:
-        r"""example_results() -> list
-
-        Return what each ``example_inputs`` call returned, in order.
-
-        Empty unless the session was configured to retain them, which
-        :func:`torch.compiler.precompile` does for its on-disk form; a session
-        the caller drives itself outlives its calls, so retaining every result
-        would pin the caller's output tensors for the life of the session.
-        """
-        return self._call(self._session.example_results)
+    def result(self) -> tuple[str, bytes]:
+        with self._lock:
+            if not self._exited:
+                raise PrecompileError(
+                    "call result() after the capture block has exited; the guard "
+                    "policy is applied and the artifact rendered on exit."
+                )
+            if self._render_error is not None:
+                raise self._render_error
+            if self._rendered is None:
+                raise PrecompileError(
+                    "no artifact was rendered: the capture block raised, so the "
+                    "capture is incomplete."
+                )
+            return self._rendered
 
     def summary(self) -> PrecompileSummary:
         r"""summary() -> PrecompileSummary
 
-        Return observed capture coverage, recompilation, failure, and guard information.
-
-        ``complete`` covers only calls that ran during capture; it cannot account for an
-        unexecuted path through the callable.
+        Coverage, recompilation, failure and guard information for everything
+        captured so far.
         """
-        return self._call(self._session.summary)
+        return self._map(self._session.summary)
 
-    def artifact(
-        self,
-        *,
-        require_complete: bool = True,
-        require_no_risky_drops: bool = True,
-        require_no_dropped_guards: bool = False,
-    ) -> tuple[str, bytes]:
-        r"""artifact(*, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False) -> tuple[str, bytes]
+    def invariants(self) -> tuple[FrameInvariants, ...]:
+        r"""invariants() -> tuple
 
-        Render the capture as ``(python_code, cache)``, the same pair
-        :meth:`torch.compiler.precompile.artifact` returns, and
-        reload it with :func:`torch.compiler.precompile.load`.
-
-        ``python_code`` is a self-contained module exposing ``forward``; it is
-        the single source of truth for the calling convention. A multi-graph
-        capture has no single readable graph, so the guard trees and the
-        transformed bytecode sit in clearly labelled OPAQUE sections, with the
-        frame names, per-frame variant counts, dropped guards and pinned values
-        emitted beside them as readable literals.
-
-        The gates are the ``require_*`` keywords of :func:`torch.compiler.precompile`:
-        ``require_complete`` refuses a capture whose summary is not complete,
-        ``require_no_risky_drops`` refuses one that dropped a guard whose loss could
-        change the answer, and ``require_no_dropped_guards`` refuses any dropped guard.
+        The guards that held across every captured variant of each frame.
         """
-        return self._call(
-            self._session.artifact,
-            require_complete=require_complete,
-            require_no_risky_drops=require_no_risky_drops,
-            require_no_dropped_guards=require_no_dropped_guards,
-        )
+        return self._map(self._session.invariants)
+
+    def calls(self) -> int:
+        r"""calls() -> int
+
+        How many calls have been folded into this capture.
+        """
+        return self._calls
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:
@@ -1658,7 +1814,7 @@ _GENERATED_HEADER = """\
 """
 
 
-def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
+def _build_metadata_section(buf: PySourceBuilder, compiled: PrecompiledModule) -> None:
     if compiled._out_spec is None or compiled._in_spec is None:
         raise PrecompileError("internal: cannot build metadata before _compile()")
     # OUT_SPEC is load-bearing: the driver rebuilds fn's output via tree_unflatten, so
@@ -1687,61 +1843,60 @@ def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
         in_spec_str: str | None = pytree.treespec_dumps(compiled._in_spec)
     except (NotImplementedError, TypeError):
         in_spec_str = None
-    parts = [
-        "# " + "=" * 70,
-        "# 2. Calling-convention metadata",
-        "# " + "=" * 70,
-        "import torch as _torch",
-        "import torch.utils._pytree as _pytree",
-        "",
-        # python_code is the single source of truth for the calling convention; the
-        # cache holds ONLY the compiled/captured artifact. load() reads these
-        # constants back out of python_code (see _parse_artifact_metadata).
-        f"BACKEND = {compiled._backend!r}",
-        f"MODULE_POSITIONS = {compiled._module_positions!r}",
-        # Number of positional args the traced fn took (modules + runtime inputs); the
-        # driver checks the runtime call passes the same count up front, so a wrong
-        # arity raises a clear PrecompileError instead of a raw IndexError.
-        f"NUM_POSITIONAL_ARGS = {compiled._num_positional_args}",
-        f"PARAM_NAMES = {compiled._param_names!r}",
-        f"BUFFER_NAMES = {compiled._buffer_names!r}",
-        # Per interned param / buffer example shape / dtype / device (aligned to
-        # PARAM_NAMES / BUFFER_NAMES); the driver checks each runtime param/buffer against
-        # these for the structural contract (invariant 2).
-        f"PARAM_SHAPES = {compiled._param_shapes!r}",
-        f"BUFFER_SHAPES = {compiled._buffer_shapes!r}",
-        f"PARAM_DTYPES = {compiled._param_dtypes!r}",
-        f"BUFFER_DTYPES = {compiled._buffer_dtypes!r}",
-        f"PARAM_DEVICES = {compiled._param_devices!r}",
-        f"BUFFER_DEVICES = {compiled._buffer_devices!r}",
-        # Which unique-param index each trailing grad output belongs to (see invariant 5);
-        # the driver scatters grad k onto params[GRAD_PARAM_INDICES[k]].
-        f"GRAD_PARAM_INDICES = {compiled._grad_param_indices!r}",
-        # The pytree structure of the runtime inputs, or None if not serializable (the
-        # driver validates against it when present, else skips the structure check).
-        f"IN_SPEC = {in_spec_str!r}",
-        f"OUT_SPEC = {out_spec_str!r}",
-        # Per user-input-leaf example shape / dtype / device (None for a non-tensor /
-        # subclass leaf); the drivers reject a runtime mismatch (invariants 3 and 6).
-        # Memory-format mismatches are caught by the inductor artifact's own
-        # assert_size_stride (pinned on at capture).
-        # Every device type the captured graph dispatches on, from the GRAPH
-        # rather than from the runtime tensors: the drivers neutralize ambient
-        # autocast on these, and a graph can reach a device none of its inputs
-        # live on (an explicit .to("cuda") inside fn) or have no tensor inputs
-        # at all. Artifacts written before this field carry their own, older
-        # driver, which never reads it.
-        f"GRAPH_DEVICES = {_graph_device_types(compiled._gm) if compiled._gm is not None else ()!r}",
-        f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}",
-        f"USER_INPUT_DTYPES = {compiled._user_input_dtypes!r}",
-        f"USER_INPUT_DEVICES = {compiled._user_input_devices!r}",
-        # Per user-input-leaf mark_unbacked min/max bounds: None for a leaf with no bounded
-        # marked dim, else {dim: (lo, hi)} (either may be None). The drivers reject a
-        # runtime size outside the declared range (invariant 3); see the inlined drivers.
-        f"USER_INPUT_BOUNDS = {compiled._user_input_bounds!r}",
-        "",
-    ]
-    return parts
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 2. Calling-convention metadata")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("import torch as _torch")
+    buf.writeline("import torch.utils._pytree as _pytree")
+    buf.writeline("")
+    # python_code is the single source of truth for the calling convention; the
+    # cache holds ONLY the compiled/captured artifact. load() reads these
+    # constants back out of python_code (see _parse_artifact_metadata).
+    buf.writeline(f"BACKEND = {compiled._backend!r}")
+    buf.writeline(f"MODULE_POSITIONS = {compiled._module_positions!r}")
+    # Number of positional args the traced fn took (modules + runtime inputs); the
+    # driver checks the runtime call passes the same count up front, so a wrong
+    # arity raises a clear PrecompileError instead of a raw IndexError.
+    buf.writeline(f"NUM_POSITIONAL_ARGS = {compiled._num_positional_args}")
+    buf.writeline(f"PARAM_NAMES = {compiled._param_names!r}")
+    buf.writeline(f"BUFFER_NAMES = {compiled._buffer_names!r}")
+    # Per interned param / buffer example shape / dtype / device (aligned to
+    # PARAM_NAMES / BUFFER_NAMES); the driver checks each runtime param/buffer against
+    # these for the structural contract (invariant 2).
+    buf.writeline(f"PARAM_SHAPES = {compiled._param_shapes!r}")
+    buf.writeline(f"BUFFER_SHAPES = {compiled._buffer_shapes!r}")
+    buf.writeline(f"PARAM_DTYPES = {compiled._param_dtypes!r}")
+    buf.writeline(f"BUFFER_DTYPES = {compiled._buffer_dtypes!r}")
+    buf.writeline(f"PARAM_DEVICES = {compiled._param_devices!r}")
+    buf.writeline(f"BUFFER_DEVICES = {compiled._buffer_devices!r}")
+    # Which unique-param index each trailing grad output belongs to (see invariant 5);
+    # the driver scatters grad k onto params[GRAD_PARAM_INDICES[k]].
+    buf.writeline(f"GRAD_PARAM_INDICES = {compiled._grad_param_indices!r}")
+    # The pytree structure of the runtime inputs, or None if not serializable (the
+    # driver validates against it when present, else skips the structure check).
+    buf.writeline(f"IN_SPEC = {in_spec_str!r}")
+    buf.writeline(f"OUT_SPEC = {out_spec_str!r}")
+    # Per user-input-leaf example shape / dtype / device (None for a non-tensor /
+    # subclass leaf); the drivers reject a runtime mismatch (invariants 3 and 6).
+    # Memory-format mismatches are caught by the inductor artifact's own
+    # assert_size_stride (pinned on at capture).
+    # Every device type the captured graph dispatches on, from the GRAPH
+    # rather than from the runtime tensors: the drivers neutralize ambient
+    # autocast on these, and a graph can reach a device none of its inputs
+    # live on (an explicit .to("cuda") inside fn) or have no tensor inputs
+    # at all. Artifacts written before this field carry their own, older
+    # driver, which never reads it.
+    buf.writeline(
+        f"GRAPH_DEVICES = {_graph_device_types(compiled._gm) if compiled._gm is not None else ()!r}"
+    )
+    buf.writeline(f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}")
+    buf.writeline(f"USER_INPUT_DTYPES = {compiled._user_input_dtypes!r}")
+    buf.writeline(f"USER_INPUT_DEVICES = {compiled._user_input_devices!r}")
+    # Per user-input-leaf mark_unbacked min/max bounds: None for a leaf with no bounded
+    # marked dim, else {dim: (lo, hi)} (either may be None). The drivers reject a
+    # runtime size outside the declared range (invariant 3); see the inlined drivers.
+    buf.writeline(f"USER_INPUT_BOUNDS = {compiled._user_input_bounds!r}")
+    buf.writeline("")
 
 
 def _read_literal(tree: object, name: str) -> object:
@@ -1883,23 +2038,27 @@ def _build_python_source(
     compiled: PrecompiledModule,
     graph_python: str,
 ) -> str:
-    parts = [_GENERATED_HEADER, ""]
-    parts.append("# " + "=" * 70)
-    parts.append("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
-    parts.append("# " + "=" * 70)
+    from torch._functorch._aot_autograd.codegen import PySourceBuilder
+
+    buf = PySourceBuilder()
+    buf.writeline(_GENERATED_HEADER)
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
+    buf.writeline("# " + "=" * 70)
     # The composed graph module from aot_autograd.compile_to_python: the inlined
     # Inductor kernels plus AOTAutograd's codegen'd prelude/epilogue, exposing
     # ``call(flat_inputs) -> outputs`` (subclass + mutation handled inside).
-    parts.append(graph_python)
-    parts.append("")
-    parts.extend(_build_metadata_section(compiled))
-    parts.append("# " + "=" * 70)
-    parts.append(
+    buf.writeline(graph_python)
+    buf.writeline("")
+    _build_metadata_section(buf, compiled)
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(
         "# 3. Driver: module params/buffers + grad scatter + calling convention"
     )
-    parts.append("# " + "=" * 70)
-    parts.append(_emit_driver_source("_inductor_forward"))
-    return "\n".join(parts)
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(_emit_driver_source("_inductor_forward"))
+    return buf.getvalue()
 
 
 _EAGER_GENERATED_HEADER = """\
@@ -1932,10 +2091,14 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     graph_src = gm.code.replace("def forward(", "def _graph_forward(", 1)
     in_spec_str = pytree.treespec_dumps(in_spec)
     out_spec_str = pytree.treespec_dumps(out_spec)
-    parts = [_EAGER_GENERATED_HEADER, ""]
-    parts.append("# " + "=" * 70)
-    parts.append("# 1. Captured ATen graph (eager backend) -- executable and readable")
-    parts.append("# " + "=" * 70)
+    from torch._functorch._aot_autograd.codegen import PySourceBuilder
+
+    buf = PySourceBuilder()
+    buf.writeline(_EAGER_GENERATED_HEADER)
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
+    buf.writeline("# " + "=" * 70)
     # gm.code relies on fx's custom builtins (torch, device, inf, nan, NoneType,
     # fx_pytree, pytree) being in scope -- fx injects them when a real GraphModule
     # runs. Reproduce the FULL set (not just torch/pytree) so a graph that bakes a
@@ -1944,24 +2107,24 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     from torch.fx.graph import _custom_builtins
 
     for _cb in _custom_builtins.values():
-        parts.append(_cb.import_str)
-    parts.append(graph_src)
-    parts.append("")
-    parts.append("class _GraphSelf:")
-    parts.append(f"    _in_spec = pytree.treespec_loads({in_spec_str!r})")
-    parts.append(f"    _out_spec = pytree.treespec_loads({out_spec_str!r})")
-    parts.append("")
-    parts.append("")
-    parts.append("def call(args):")
-    parts.append("    out = _graph_forward(_GraphSelf(), list(args))")
-    parts.append("    return list(out) if isinstance(out, (list, tuple)) else [out]")
-    parts.append("")
-    parts.extend(_build_metadata_section(compiled))
-    parts.append("# " + "=" * 70)
-    parts.append("# 3. Driver: run the inlined captured graph eagerly")
-    parts.append("# " + "=" * 70)
-    parts.append(_emit_driver_source("_eager_forward"))
-    return "\n".join(parts)
+        buf.writeline(_cb.import_str)
+    buf.writeline(graph_src)
+    buf.writeline("")
+    buf.writeline("class _GraphSelf:")
+    buf.writeline(f"    _in_spec = pytree.treespec_loads({in_spec_str!r})")
+    buf.writeline(f"    _out_spec = pytree.treespec_loads({out_spec_str!r})")
+    buf.writeline("")
+    buf.writeline("")
+    buf.writeline("def call(args):")
+    buf.writeline("    out = _graph_forward(_GraphSelf(), list(args))")
+    buf.writeline("    return list(out) if isinstance(out, (list, tuple)) else [out]")
+    buf.writeline("")
+    _build_metadata_section(buf, compiled)
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 3. Driver: run the inlined captured graph eagerly")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(_emit_driver_source("_eager_forward"))
+    return buf.getvalue()
 
 
 _DRIVER_MAIN = """\
@@ -2119,64 +2282,70 @@ def _build_multigraph_python_source(
     clearly banners' opaque blobs.
     """
     from torch._dynamo.package import SerializedCode
+    from torch._functorch._aot_autograd.codegen import PySourceBuilder
 
     frames = _multigraph_frames(entry)
-    parts = [_MULTIGRAPH_GENERATED_HEADER, _SERVING_NOTES[serving_mode], ""]
-    parts.append("# " + "=" * 70)
-    parts.append("# 1. What was captured (readable)")
-    parts.append("# " + "=" * 70)
-    parts.append(f"BACKEND = {backend!r}")
-    parts.append('TRACER = "dynamo"')
-    parts.append(f"FN_NAME = {entry.fn_name!r}")
-    parts.append(f"FN_FIRST_LINENO = {entry.fn_first_lineno!r}")
-    parts.append(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
-    parts.append(f"TORCH_VERSION = {torch.__version__!r}")
-    parts.append("")
-    parts.append(
+    buf = PySourceBuilder()
+    buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
+    buf.writeline(_SERVING_NOTES[serving_mode])
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 1. What was captured (readable)")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(f"BACKEND = {backend!r}")
+    buf.writeline('TRACER = "dynamo"')
+    buf.writeline(f"FN_NAME = {entry.fn_name!r}")
+    buf.writeline(f"FN_FIRST_LINENO = {entry.fn_first_lineno!r}")
+    buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
+    buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
+    buf.writeline("")
+    buf.writeline(
         "# frame name -> number of captured variants. A frame with one variant"
     )
-    parts.append("# serves one specialization; the artifact covers no other.")
-    parts.append("FRAMES = [")
+    buf.writeline("# serves one specialization; the artifact covers no other.")
+    buf.writeline("FRAMES = [")
     for frame, code in zip(frames, [c for c in entry.codes if not c.bypassed]):
         name = SerializedCode.to_code_object(code.python_code).co_name
-        parts.append(f"    ({name!r}, {len(frame['variants'])}),")
-    parts.append("]")
-    parts.append("")
-    parts.append(
+        buf.writeline(f"    ({name!r}, {len(frame['variants'])}),")
+    buf.writeline("]")
+    buf.writeline("")
+    buf.writeline(
         "# Guards that could NOT be serialized and are therefore not checked at"
     )
-    parts.append("# serve time. Rebinding any of these between capture and load can")
-    parts.append(
+    buf.writeline("# serve time. Rebinding any of these between capture and load can")
+    buf.writeline(
         "# silently select the wrong graph -- audit them against your deployment."
     )
-    parts.append(f"DROPPED_GUARDS = {[list(g) for g in summary.dropped_guards]!r}")
-    parts.append(
+    buf.writeline(f"DROPPED_GUARDS = {[list(g) for g in summary.dropped_guards]!r}")
+    buf.writeline(
         f"RISKY_DROPPED_GUARDS = {[list(g) for g in summary.risky_dropped_guards]!r}"
     )
-    parts.append("")
-    parts.append("# Guards that COULD be serialized and were not, because they held")
-    parts.append("# identically in every captured variant so they discriminated")
-    parts.append("# nothing. Not checked at serve time either: a call outside the")
-    parts.append("# captured domain along one of these is served, not refused.")
-    parts.append(
+    buf.writeline("")
+    buf.writeline("# Guards that COULD be serialized and were not, because they held")
+    buf.writeline("# identically in every captured variant so they discriminated")
+    buf.writeline("# nothing. Not checked at serve time either: a call outside the")
+    buf.writeline("# captured domain along one of these is served, not refused.")
+    buf.writeline(
         f"POLICY_DROPPED_GUARDS = {[list(g) for g in summary.policy_dropped_guards]!r}"
     )
-    parts.append("")
-    parts.append("# What a dropped slot above actually checked, where it renders one.")
-    parts.append("# A slot is named by")
-    parts.append("# its type and SOURCE, which for some types does not say enough to")
-    parts.append("# judge the drop: a dropped HASATTR on a source may be the benign")
-    parts.append("# companion of a kept TENSOR_MATCH on the same source, or the only")
-    parts.append("# thing pinning an optional attribute. The rendered check names the")
-    parts.append("# attribute and tells the two apart.")
-    parts.append(
+    buf.writeline("")
+    buf.writeline("# What a dropped slot above actually checked, where it renders one.")
+    buf.writeline("# A slot is named by")
+    buf.writeline("# its type and SOURCE, which for some types does not say enough to")
+    buf.writeline("# judge the drop: a dropped HASATTR on a source may be the benign")
+    buf.writeline("# companion of a kept TENSOR_MATCH on the same source, or the only")
+    buf.writeline("# thing pinning an optional attribute. The rendered check names the")
+    buf.writeline("# attribute and tells the two apart.")
+    buf.writeline(
         f"DROPPED_GUARD_CODE = "
         f"{[list(g) for g in getattr(summary, 'dropped_guard_code', ())]!r}"
     )
-    parts.append("")
-    parts.append("# Values pinned to exactly what capture saw; any other value misses.")
-    parts.append(f"WONT_GENERALIZE = {tuple(summary.wont_generalize)!r}")
-    parts.append("")
+    buf.writeline("")
+    buf.writeline(
+        "# Values pinned to exactly what capture saw; any other value misses."
+    )
+    buf.writeline(f"WONT_GENERALIZE = {tuple(summary.wont_generalize)!r}")
+    buf.writeline("")
     if serving_mode == "installed":
         reachable = _reachable_frames(frames)
         dead = sorted(
@@ -2184,66 +2353,74 @@ def _build_multigraph_python_source(
             for i, frame in enumerate(frames)
             if frame["variants"] and i not in reachable
         )
-        parts.append("# " + "=" * 70)
-        parts.append("# 2. How this artifact serves: INSTALLED (readable)")
-        parts.append("#")
-        parts.append("# A source artifact dispatches only the entry frame and the")
-        parts.append(
+        buf.writeline("# " + "=" * 70)
+        buf.writeline("# 2. How this artifact serves: INSTALLED (readable)")
+        buf.writeline("#")
+        buf.writeline("# A source artifact dispatches only the entry frame and the")
+        buf.writeline(
             "# continuations its bytecode names. These frames are entered by an"
         )
-        parts.append(
+        buf.writeline(
             "# ordinary call, so nothing in the entry reaches them and they would"
         )
-        parts.append("# run eager. This artifact therefore installs onto the live code")
-        parts.append("# objects instead, which reaches every frame.")
-        parts.append("#")
-        parts.append("# load() installs NOTHING; entering the result -- or calling")
-        parts.append("# it -- installs, and unload()/exit removes it again.")
-        parts.append("# " + "=" * 70)
-        parts.append('SERVING_MODE = "installed"')
-        parts.append(f"UNREACHABLE_WITHOUT_INSTALL = {tuple(dead)!r}")
-        parts.append("")
-        parts.append("# " + "=" * 70)
-        parts.append("# 3. The captured package -- OPAQUE")
-        parts.append("#")
-        parts.append("# base64(pickle) of the serialized Dynamo state (per-frame guard")
-        parts.append(
+        buf.writeline(
+            "# run eager. This artifact therefore installs onto the live code"
+        )
+        buf.writeline("# objects instead, which reaches every frame.")
+        buf.writeline("#")
+        buf.writeline("# load() installs NOTHING; entering the result -- or calling")
+        buf.writeline("# it -- installs, and unload()/exit removes it again.")
+        buf.writeline("# " + "=" * 70)
+        buf.writeline('SERVING_MODE = "installed"')
+        buf.writeline(f"UNREACHABLE_WITHOUT_INSTALL = {tuple(dead)!r}")
+        buf.writeline("")
+        buf.writeline("# " + "=" * 70)
+        buf.writeline("# 3. The captured package -- OPAQUE")
+        buf.writeline("#")
+        buf.writeline(
+            "# base64(pickle) of the serialized Dynamo state (per-frame guard"
+        )
+        buf.writeline(
             "# trees and transformed bytecode) plus the compiled subgraphs. Guard"
         )
-        parts.append(
+        buf.writeline(
             "# trees are a spec for a C++ GuardManager and have no readable form;"
         )
-        parts.append("# the counts and names above describe what is in here.")
-        parts.append("# " + "=" * 70)
-        parts.append(f"_PACKAGE = {_b64(package_entry)!r}")
-        parts.append("")
-        parts.append("# The entry's default arguments; see the standalone note")
-        parts.append("# above -- the installed driver rebuilds an entry too.")
-        parts.append(f"_ENTRY_BINDING = {_b64(entry_binding or {})!r}")
-        parts.append("")
-        parts.append("# " + "=" * 70)
-        parts.append("# 4. Driver: rebuild the package, install, dispatch (readable)")
-        parts.append("# " + "=" * 70)
-        parts.append(_emit_installed_driver_source())
-        return "\n".join(p for p in parts if p is not None)
+        buf.writeline("# the counts and names above describe what is in here.")
+        buf.writeline("# " + "=" * 70)
+        buf.writeline(f"_PACKAGE = {_b64(package_entry)!r}")
+        buf.writeline("")
+        buf.writeline("# The entry's default arguments; see the standalone note")
+        buf.writeline("# above -- the installed driver rebuilds an entry too.")
+        buf.writeline(f"_ENTRY_BINDING = {_b64(entry_binding or {})!r}")
+        buf.writeline("")
+        buf.writeline("# " + "=" * 70)
+        buf.writeline("# 4. Driver: rebuild the package, install, dispatch (readable)")
+        buf.writeline("# " + "=" * 70)
+        buf.writeline(_emit_installed_driver_source())
+        return buf.getvalue()
 
-    parts.append('SERVING_MODE = "standalone"')
-    parts.append("")
-    parts.append("# Every function Dynamo INLINED into a captured graph, so the driver")
-    parts.append("# can tell that the source it is about to trust still says what it")
-    parts.append("# said at capture. The installed mode gets this from CompilePackage;")
-    parts.append(
+    buf.writeline('SERVING_MODE = "standalone"')
+    buf.writeline("")
+    buf.writeline(
+        "# Every function Dynamo INLINED into a captured graph, so the driver"
+    )
+    buf.writeline("# can tell that the source it is about to trust still says what it")
+    buf.writeline(
+        "# said at capture. The installed mode gets this from CompilePackage;"
+    )
+    buf.writeline(
         "# a standalone artifact builds no package, so it carries the records."
     )
-    parts.append("# __main__ is skipped: it names the LOADER's script on another")
-    parts.append("# machine, which is exactly what a portable artifact is for.")
-    parts.append(
+    buf.writeline("# __main__ is skipped: it names the LOADER's script on another")
+    buf.writeline("# machine, which is exactly what a portable artifact is for.")
+    buf.writeline(
         f"INLINED_SOURCES = "
         f"{sorted((s.module, s.firstlineno, s.lastlineno, s.checksum) for s in entry.source_info.inlined_sources if s.module != '__main__')!r}"
     )
-    parts.append("")
-    parts.append("# The entry's defaults and closure values: a code object carries")
-    parts.append("# neither, and the driver rebuilds the entry from one.")
+    buf.writeline("")
+    buf.writeline("# The entry's defaults and closure values: a code object carries")
+    buf.writeline("# neither, and the driver rebuilds the entry from one.")
     try:
         binding_blob = _b64(entry_binding or {})
     except Exception as e:
@@ -2251,26 +2428,26 @@ def _build_multigraph_python_source(
             f"precompile cannot carry {entry.fn_name!r}'s default arguments in the "
             f"artifact; defaults must be picklable ({type(e).__name__}: {e})."
         ) from e
-    parts.append(f"_ENTRY_BINDING = {binding_blob!r}")
-    parts.append("")
-    parts.append("# " + "=" * 70)
-    parts.append("# 2. Guard trees and transformed bytecode -- OPAQUE")
-    parts.append("#")
-    parts.append(
+    buf.writeline(f"_ENTRY_BINDING = {binding_blob!r}")
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 2. Guard trees and transformed bytecode -- OPAQUE")
+    buf.writeline("#")
+    buf.writeline(
         "# base64(pickle) of one record per frame: the frame's code object, its"
     )
-    parts.append(
+    buf.writeline(
         "# variants' serialized guard state and Dynamo bytecode, and the globals"
     )
-    parts.append(
+    buf.writeline(
         "# it reads. Guard trees are a spec for a C++ GuardManager and have no"
     )
-    parts.append(
+    buf.writeline(
         "# readable form; the counts and names above describe what is in here."
     )
-    parts.append("# " + "=" * 70)
-    parts.append(f"_FRAMES = {_b64(frames)!r}")
-    parts.append("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(f"_FRAMES = {_b64(frames)!r}")
+    buf.writeline("")
     # A compiled subgraph is Inductor output, which HAS a source form -- unlike
     # the guard trees and bytecode above. Emit that source where the backend can
     # produce it, and fall back to the pickle only for the rest (eager graphs,
@@ -2279,46 +2456,48 @@ def _build_multigraph_python_source(
     # blocks splice sequentially into ONE namespace and resolve siblings late
     # without a variant silently running another variant's code.
     rendered = dict(rendered or {})
-    parts.append("# " + "=" * 70)
+    buf.writeline("# " + "=" * 70)
     if rendered:
-        parts.append(f"# 3. Compiled subgraphs -- {len(rendered)} READABLE below")
+        buf.writeline(f"# 3. Compiled subgraphs -- {len(rendered)} READABLE below")
         if len(rendered) < len(backends):
-            parts.append(
+            buf.writeline(
                 f"#    ({len(backends) - len(rendered)} could not be rendered and "
                 f"stay in _BACKENDS)"
             )
     else:
-        parts.append("# 3. Compiled subgraphs -- OPAQUE")
+        buf.writeline("# 3. Compiled subgraphs -- OPAQUE")
     # Why a subgraph stayed pickled, so the fallback is visible in the artifact
     # itself and not only in a warning at capture time.
     for backend_id, reason in (refused or {}).items():
-        parts.append(f"#    {backend_id} stays pickled: {reason}")
-    parts.append("#")
-    parts.append("# base64(pickle) of the backend artifacts the frames call by name.")
-    parts.append("# " + "=" * 70)
-    parts.append(
+        buf.writeline(f"#    {backend_id} stays pickled: {reason}")
+    buf.writeline("#")
+    buf.writeline("# base64(pickle) of the backend artifacts the frames call by name.")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(
         f"_BACKENDS = {_b64({k: v for k, v in backends.items() if k not in rendered})!r}"
     )
     if rendered:
-        parts.append("")
-        parts.append("_SUBGRAPHS = {}")
+        buf.writeline("")
+        buf.writeline("_SUBGRAPHS = {}")
         _seen_slots: list[str] = []
         for backend_id, source in rendered.items():
-            parts.append("")
-            parts.append("# " + "-" * 70)
-            parts.append(f"# subgraph {backend_id}")
-            parts.append("# " + "-" * 70)
-            parts.append(source)
+            buf.writeline("")
+            buf.writeline("# " + "-" * 70)
+            buf.writeline(f"# subgraph {backend_id}")
+            buf.writeline("# " + "-" * 70)
+            buf.writeline(source)
             # the block's entry was renamed along with everything else it defines
             entry_name = f"call_s{len(_seen_slots)}"
             _seen_slots.append(backend_id)
-            parts.append(f"_SUBGRAPHS[{backend_id!r}] = {entry_name}")
-    parts.append("")
-    parts.append("# " + "=" * 70)
-    parts.append("# 4. Driver: rebuild the guards, wire the names, dispatch (readable)")
-    parts.append("# " + "=" * 70)
-    parts.append(_emit_multigraph_driver_source())
-    return "\n".join(p for p in parts if p is not None)
+            buf.writeline(f"_SUBGRAPHS[{backend_id!r}] = {entry_name}")
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(
+        "# 4. Driver: rebuild the guards, wire the names, dispatch (readable)"
+    )
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(_emit_multigraph_driver_source())
+    return buf.getvalue()
 
 
 def _reachable_frames(frames: list[dict[str, Any]]) -> set[int]:
@@ -2433,7 +2612,7 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"an nn.Module, or a forward that immediately delegates -- where Dynamo "
             f"compiles the wrapper's inner frame instead. Capture the function that "
             f"CALLS the model, e.g. "
-            f"precompile(lambda m, x: m(x), example_inputs=[(model, x)])."
+            f"precompile.artifact(lambda m, x: m(x)) and calling cap(model, x)."
         )
     code = SerializedCode.to_code_object(entry_frames[0]["code"])
     if code.co_freevars:
@@ -2442,7 +2621,7 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"it closes over {list(code.co_freevars)!r}, and this capture has to rebuild "
             f"the entry from its code object, which cannot restore a closure. Capture a "
             f"module-level function that takes what it needs as arguments, e.g. "
-            f"precompile(step, example_inputs=[(model, x)]) with "
+            f"precompile.artifact(step), calling cap(model, x), with "
             f"'def step(model, x): return model(x)'."
         )
 
@@ -2586,7 +2765,7 @@ def _build_multigraph_artifact(
     )
     inductor_bundle = None
     if backend != "eager":
-        # precompile() runs the capture under with_fresh_cache(), so this is
+        # The dynamo capture runs under with_fresh_cache(), so this is
         # exactly what the capture's compiles recorded.
         from torch.compiler._cache import CacheArtifactManager
 
@@ -2838,8 +3017,8 @@ class PrecompiledModule(PrecompiledRunnable):
             raise
 
     def __call__(self, *args: object, **kwargs: object) -> object:
-        # A PrecompiledModule is runnable only after load(); precompile() itself
-        # returns (python_code, cache) rather than a runnable.
+        # A PrecompiledModule is runnable only after load(); a capture instead
+        # renders (python_code, cache) rather than a runnable.
         if self._loaded_forward is None:
             raise PrecompileError(
                 "this object is not runnable; build one with "
@@ -2916,8 +3095,9 @@ class PrecompiledModule(PrecompiledRunnable):
 def _capture_session(fn, **kwargs):
     """Start an internal multi-graph capture, mapping package errors to ours.
 
-    precompile() drives the capture itself -- there is no public session -- so
-    this exists to keep the error translation in one place.
+    precompile.artifact() and precompile.accumulate() drive the capture through
+    the caller-driven capture objects, so this exists to keep the error
+    translation of starting the underlying session in one place.
     """
     from torch._dynamo.exc import PackageError
     from torch._dynamo.precompile_package import precompile_capture
@@ -2925,7 +3105,7 @@ def _capture_session(fn, **kwargs):
     if isinstance(fn, functools.partial):
         raise PrecompileError(
             "precompile cannot capture a partial. Pass the underlying function "
-            "and give its bound arguments as example arguments."
+            "and give its bound arguments as call arguments."
         )
     try:
         return precompile_capture(fn, **kwargs)
@@ -3115,20 +3295,23 @@ def _make_inlined_forward(python_code: str) -> Callable[..., object]:
 
 
 class _PrecompileApi:
-    """Callable namespace implementing ``torch.compiler.precompile`` and its loaders.
+    """Namespace implementing ``torch.compiler.precompile`` and its loaders.
 
-    This whole surface -- the call, ``artifact``, ``accumulate``, ``load``, and
-    the objects they return -- is a prototype API: signatures, error types and
-    the artifact format may change between releases without a deprecation cycle.
+    This whole surface -- ``artifact``, ``accumulate``, ``load``, and the objects
+    they return -- is a prototype API: signatures, error types and the artifact
+    format may change between releases without a deprecation cycle.
 
-    A single instance is exposed as ``torch.compiler.precompile``; calling it
-    writes an artifact to disk, ``artifact`` returns the ``(python_code, cache)``
-    pair in memory, ``accumulate`` captures across the caller's own loop, and
-    ``load`` reloads a saved artifact. It is a class (rather than a function with
-    attached attributes) so these operations and the error type are explicit
+    A single instance is exposed as ``torch.compiler.precompile``. It is a
+    namespace, not itself callable: capture is caller-driven, so a caller
+    invokes the capture around their own execution rather than handing precompile
+    a list of example inputs to run. ``artifact`` returns an in-memory capture
+    whose :meth:`result` is the ``(python_code, cache)`` pair, ``accumulate``
+    returns a capture that rewrites an on-disk artifact across the caller's own
+    loop, and ``load`` reloads a saved artifact. It is a class (rather than a
+    module of functions) so these operations and the error type are explicit
     members.
 
-    The contract for the call, ``artifact``, ``accumulate`` and ``load`` is Note
+    The contract for ``artifact``, ``accumulate`` and ``load`` is Note
     [precompile programming model] in this module.
     """
 
@@ -3139,12 +3322,9 @@ class _PrecompileApi:
     # ``torch.compiler.precompile.PrecompileError``.
     PrecompileError = PrecompileError
 
-    # One capture call carrying keyword arguments, for ``example_inputs``;
-    # reachable without importing a private module.
-    ExampleInput = ExampleInput
-
-    # The handle accumulate() returns, so isinstance checks and annotations do
-    # not have to reach into a private module.
+    # The handles the capture APIs return, so isinstance checks and annotations
+    # do not have to reach into a private module.
+    Capture = _InMemoryCapture
     AccumulatingCapture = AccumulatingCapture
 
     # What summary() and invariants() return, documented under this path.
@@ -3162,164 +3342,14 @@ class _PrecompileApi:
     def __repr__(self) -> str:
         return "torch.compiler.precompile"
 
-    def __call__(
-        self,
-        fn: Callable[..., object],
-        /,
-        # The 2.14 spelling: the one example call passed positionally.
-        *example_args: object,
-        example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
-        artifact_path: str | os.PathLike[str] | None = None,
-        cache_path: str | os.PathLike[str] | None = None,
-        backend: str = "inductor",
-        tracer: str | None = None,
-        decompositions: dict | None = None,
-        guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None,
-        recompile_limit: int = 256,
-        dynamic: bool | None = None,
-        invariants: str | None = None,
-        require_complete: bool = True,
-        require_no_risky_drops: bool = True,
-        require_no_dropped_guards: bool = False,
-        training: bool = False,
-        keep_example_grads: bool = False,
-    ) -> list[object] | tuple[str, bytes]:
-        """Precompile ``fn`` to two files and return what the example calls returned.
-
-        ``example_inputs`` is the calling convention: a sequence of calls, each a
-        tuple of positional arguments (or an ``ExampleInput`` carrying keywords).
-        precompile makes those calls itself, for real, writes the artifact --
-        the matched ``(python_code, cache)`` pair -- to ``artifact_path`` and
-        ``cache_path``, and hands back the calls' results in order. Both paths
-        are required: a real capture's artifact runs to hundreds of megabytes of
-        source, so it is kept out of memory, and the results are how a training
-        capture over real batches hands its losses on without a second forward.
-        Reload with ``load(artifact_path=..., cache_path=...)``.
-
-        For the pair in memory use :meth:`artifact`, which takes the same
-        arguments (plus the ``make_fx`` tracer and ``decompositions``) and is
-        where the full contract -- backends, tracers, ``guard_filter_fn``, the
-        ``require_*`` gates, gradients, dynamic shapes -- is documented. Read
-        Note [precompile programming model] before relying on an artifact.
-
-        This form is ``tracer="dynamo"`` only. A make_fx trace runs ``fn`` under
-        proxy tensors and has no results to give, so it is refused BEFORE ``fn``
-        runs rather than handing back an empty list after it. Passing ``tracer``
-        or ``decompositions`` here raises ``TypeError`` naming :meth:`artifact`.
-
-        .. deprecated:: 2.15
-
-            ``precompile(fn, *example_inputs, backend="inductor", tracer="make_fx",
-            decompositions=None)`` -- the spelling 2.14 shipped, with the one
-            example call passed positionally -- still returns the
-            ``(python_code, cache)`` pair, with a ``FutureWarning``. It is
-            :meth:`artifact` called with ``example_inputs=[example_inputs]``; write
-            that instead. Combining it with ``example_inputs``, ``artifact_path`` or
-            ``cache_path`` raises ``TypeError``.
-
-        Example::
-
-            losses = torch.compiler.precompile(
-                train_step,
-                training=True,
-                example_inputs=[(model, batch) for batch in batches],
-                artifact_path="model.py",
-                cache_path="model.cache",
-            )
-            step = torch.compiler.precompile.load(
-                artifact_path="model.py", cache_path="model.cache"
-            )
-        """
-        torch._C._log_api_usage_once("torch.compiler.precompile")
-        if example_args:
-            if (example_inputs, artifact_path, cache_path) != (None, None, None):
-                raise TypeError(
-                    "precompile got positional example arguments together with "
-                    "example_inputs, artifact_path or cache_path. The example calls "
-                    "go in example_inputs: precompile(fn, example_inputs=[(arg0, "
-                    "arg1)], artifact_path=..., cache_path=...)."
-                )
-            warnings.warn(
-                "torch.compiler.precompile(fn, *example_inputs) is deprecated and "
-                "will stop returning the (python_code, cache) pair in a future "
-                "release; use torch.compiler.precompile.artifact(fn, "
-                "example_inputs=[(...)]) for the pair, or precompile(fn, "
-                "example_inputs=[...], artifact_path=..., cache_path=...) to write "
-                "it to disk.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            return self.artifact(
-                fn,
-                backend=backend,
-                tracer="make_fx" if tracer is None else tracer,
-                decompositions=decompositions,
-                example_inputs=[tuple(example_args)],
-                guard_filter_fn=guard_filter_fn,
-                recompile_limit=recompile_limit,
-                dynamic=dynamic,
-                invariants=invariants,
-                require_complete=require_complete,
-                require_no_risky_drops=require_no_risky_drops,
-                require_no_dropped_guards=require_no_dropped_guards,
-                training=training,
-                keep_example_grads=keep_example_grads,
-            )
-        if tracer is not None or decompositions is not None:
-            raise TypeError(
-                "precompile(...) takes neither tracer= nor decompositions=: it "
-                "always captures with the dynamo tracer and writes the artifact to "
-                "disk. Use precompile.artifact(fn, example_inputs=[...], tracer=..., "
-                "decompositions=...) for the (python_code, cache) pair in memory."
-            )
-        out_paths = _artifact_paths(
-            artifact_path,
-            cache_path,
-            who="precompile",
-            neither="Pass both, or use precompile.artifact() for the (python_code, cache) pair in memory.",
-        )
-        if out_paths is None:
-            raise ValueError(
-                "precompile writes the artifact to artifact_path and cache_path and "
-                "returns what the example calls returned; pass both paths, or use "
-                "precompile.artifact() for the (python_code, cache) pair in memory."
-            )
-        python_code, cache, results = self._capture(
-            fn,
-            backend=backend,
-            tracer="dynamo",
-            decompositions=None,
-            example_inputs=example_inputs,
-            guard_filter_fn=guard_filter_fn,
-            recompile_limit=recompile_limit,
-            dynamic=dynamic,
-            invariants=invariants,
-            require_complete=require_complete,
-            require_no_risky_drops=require_no_risky_drops,
-            require_no_dropped_guards=require_no_dropped_guards,
-            training=training,
-            keep_example_grads=keep_example_grads,
-            collect_results=True,
-        )
-        try:
-            _write_artifact(*out_paths, python_code, cache)
-        except OSError as e:
-            error = PrecompileError(
-                f"precompile ran the example calls but could not write the artifact: {e}"
-            )
-            error.result = results
-            raise error from e
-        return results
-
     def artifact(
         self,
         fn: Callable[..., object],
         /,
-        *example_args: object,
+        *,
         backend: str = "inductor",
         tracer: str = "make_fx",
         decompositions: dict | None = None,
-        example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None = None,
         guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None,
         recompile_limit: int = 256,
         dynamic: bool | None = None,
@@ -3328,45 +3358,48 @@ class _PrecompileApi:
         require_no_risky_drops: bool = True,
         require_no_dropped_guards: bool = False,
         training: bool = False,
-        keep_example_grads: bool = False,
-    ) -> tuple[str, bytes]:
-        """Ahead-of-time precompile ``fn`` against example inputs, in memory.
+    ) -> _InMemoryCapture:
+        """Return an in-memory caller-driven capture of ``fn``.
 
         .. warning::
 
             This is a prototype API. Its signature, error types and artifact
             format may change between releases without a deprecation cycle.
 
-        ``example_inputs`` is the calling convention: a sequence of calls, each a tuple of
-        positional arguments (or an ``ExampleInput`` carrying keywords). precompile makes
-        those calls itself and returns ``(python_code, cache)``.
+        Capture is caller-driven: this returns a capture object rather than
+        running anything. Enter it as a context manager, call it exactly as you
+        would ``fn`` inside the block -- each call runs for real, folds what it
+        exercised into the capture, and returns what ``fn`` returned -- then, once
+        the block exits, read the ``(python_code, cache)`` pair with
+        :meth:`~torch.compiler.precompile.Capture.result`::
 
-        This is the in-memory form. Calling ``torch.compiler.precompile`` itself
-        instead writes the same pair to ``artifact_path`` and ``cache_path`` and
-        returns what the example calls returned; see its docstring. Everything
-        below applies to both.
+            with torch.compiler.precompile.artifact(fn, tracer="dynamo") as cap:
+                y1 = cap(model, x1)
+                y2 = cap(model, x2)
+            python_code, cache = cap.result()
 
-        By default precompile snapshots and clears the example model's
-        gradients before the calls and restores them afterwards, so a capture
-        cannot double the gradients of the documented warmup-step-then-capture
-        flow. Pass ``keep_example_grads=True`` when the example call IS your
-        live training step and its gradients are what you are going to
-        optimize on; otherwise the backward is discarded and the artifact is
-        produced either way, so nothing tells you a batch went missing.
+        Because the caller makes the calls, inputs flow through naturally and
+        return values stay available, so the capture drops into an ordinary
+        training or pipeline loop where intermediate values are needed. To write
+        the artifact to disk across such a loop instead of holding it in memory,
+        use :meth:`accumulate`, the on-disk counterpart with the same model.
+
+        Gradients and return values keep their normal eager/``torch.compile``
+        semantics: the calls run in whatever grad mode the caller sets, and
+        precompile does not snapshot or clear the model's gradients -- there is
+        no example call of its own to compensate for. Pass ``training=True`` for
+        an artifact that carries a backward (it lowers the backward eagerly).
 
         ``tracer`` picks the capture front-end. ``"make_fx"`` (the default) is one
-        non-strict ATen trace, so it takes exactly one call and refuses a longer
-        ``example_inputs``. ``"dynamo"`` is an execution-driven multi-graph capture that
-        records graph-break continuations and every guarded recompilation the supplied
-        calls exercise, and it takes as many calls as you give it.
+        non-strict ATen trace, so the capture takes exactly ONE call and refuses a
+        second. ``"dynamo"`` is an execution-driven multi-graph capture that
+        records graph-break continuations and every guarded recompilation the
+        calls exercise, and takes as many calls as you make.
 
-        Live capture keeps all guards so one example cannot silently reuse another's graph;
-        ``guard_filter_fn`` applies only to the serialized artifact. Calls run under
-        ordinary ``torch.no_grad()`` unless ``training=True``; serve the resulting
-        artifact under that same grad mode. With ``tracer="dynamo"`` the calls also run
-        with inference mode disabled even when the caller is in it, and inputs or module
-        parameters/buffers created inside inference mode are rejected because they
-        remain inference tensors after the ambient mode is disabled.
+        Live capture keeps all guards so one call cannot silently reuse another's graph;
+        ``guard_filter_fn`` applies only to the serialized artifact. The calls run in
+        whatever mode the caller sets them in, so serve the resulting artifact under the
+        grad mode it was captured in.
 
         Capture is execution-driven, not an exhaustive analysis of ``fn``. A complete
         summary covers the calls that ran successfully; unexecuted paths and values are not
@@ -3414,8 +3447,8 @@ class _PrecompileApi:
         ``tracer`` selects the capture front-end (orthogonal to ``backend``):
 
         - ``"make_fx"`` (default): a NON-STRICT make_fx trace -- it records the ATen ops
-          that actually run when ``fn`` executes once on the example inputs and does not
-          analyze your Python, so control flow and shapes are specialized to the example
+          that actually run when ``fn`` executes once and does not
+          analyze your Python, so control flow and shapes are specialized to that call
           (the source of the programming-model contract).
         - ``"dynamo"``: a Dynamo-based front-end that analyzes the Python (bytecode)
           rather than tracing one path. The TRANSFORMED bytecode Dynamo produces (which
@@ -3441,7 +3474,7 @@ class _PrecompileApi:
           backend a drift the dropped guards would have caught -- broken weight tying, a
           retyped weight, a broadcast-compatible input-shape mismatch -- can SILENTLY
           miscompute where ``make_fx`` would raise. Pass a model and inputs matching the
-          example, as the contract requires. See the ``tracer`` note in
+          captured call, as the contract requires. See the ``tracer`` note in
           Note [precompile programming model].
           The dynamo artifact inlines marshalled bytecode plus a pickled state blob, so it
           is locked to the producing Python version (unlike the portable ``make_fx`` source)
@@ -3461,8 +3494,8 @@ class _PrecompileApi:
         ``ValueError`` rather than being silently ignored.
 
         Dynamic shapes are opt-in via ``torch._dynamo.decorators.mark_unbacked``, NOT a
-        precompile kwarg: mark dims on the inputs before calling, e.g.
-        ``mark_unbacked(x, 0); precompile(fn, example_inputs=[(model, x)])`` frees ``x``'s
+        precompile kwarg: mark dims on the inputs before the call, e.g.
+        ``mark_unbacked(x, 0)`` then a ``cap(model, x)`` frees ``x``'s
         batch dim. Marked
         dims are captured as UNBACKED symints, which cannot be guarded on, so one artifact
         serves any runtime size of them (invariant 3); a graph that needs to guard on /
@@ -3488,37 +3521,36 @@ class _PrecompileApi:
         bound checks. A shared ``shape_id`` is the way to get the check there;
         ``tracer="dynamo"`` enforces it either way, since the asserts ride in the graph.
 
-        The artifact is ``(python_code, cache)`` -- a self-contained, executable
-        Python source string (the single source of truth for the calling
-        convention) and a binary cache holding ONLY the backend artifact (NO
-        metadata, NO weights). Reload it with
-        ``torch.compiler.precompile.load(python_code, cache)``, or, for the
-        on-disk form, ``load(artifact_path=..., cache_path=...)``.
+        :meth:`~torch.compiler.precompile.Capture.result` is ``(python_code, cache)`` --
+        a self-contained, executable Python source string (the single source of truth
+        for the calling convention) and a binary cache holding ONLY the backend artifact
+        (NO metadata, NO weights). Reload it with
+        ``torch.compiler.precompile.load(python_code, cache)``.
 
         ``fn`` is the whole computation, e.g.::
 
-            python_code, cache = torch.compiler.precompile.artifact(
-                lambda model, x: model(x), example_inputs=[(model, x)]
-            )
+            with torch.compiler.precompile.artifact(lambda model, x: model(x)) as cap:
+                y = cap(model, x)
+            python_code, cache = cap.result()
 
 
             def train_step(model, x, t):
                 loss_fn(model(x), t).backward()  # or return autograd.grad(...)
 
 
-            python_code, cache = torch.compiler.precompile.artifact(
-                train_step, example_inputs=[(model, x, t)], training=True
-            )
+            with torch.compiler.precompile.artifact(train_step, training=True) as cap:
+                cap(model, x, t)
+            python_code, cache = cap.result()
 
-        Among the example call's arguments, the ``nn.Module`` arguments have their
+        Among a call's arguments, the ``nn.Module`` arguments have their
         params/buffers lifted to graph inputs (no weights are baked into the artifact --
         invariant 1); the rest are the runtime inputs. The reloaded callable is invoked
         with the SAME argument structure -- pass the model(s) again at runtime, e.g.
-        ``f_c(model, x)``, and that runtime model must match the example model's
+        ``f_c(model, x)``, and that runtime model must match the captured model's
         parameter/buffer structure (invariant 2). With ``tracer="make_fx"`` arguments
         are matched POSITIONALLY at capture and at load; ``tracer="dynamo"`` also takes
-        keyword arguments, captured through ``ExampleInput(kwargs=...)`` and passed as
-        keywords to the loaded callable. If ``fn`` ran a backward, the
+        keyword arguments -- pass them as keywords to ``cap(...)`` and to the loaded
+        callable. If ``fn`` ran a backward, the
         resulting parameter gradients are scattered (accumulated) onto that runtime
         model's ``parameters()`` ``.grad`` fields, exactly like eager ``.backward()``,
         so a ``zero_grad()`` / ``optimizer.step()`` loop works unchanged; the artifact
@@ -3533,61 +3565,14 @@ class _PrecompileApi:
         are supported -- AOTAutograd's prelude/epilogue is composed into the artifact
         (invariant 4), as is functionalized RNG. Caller responsibilities NOT checked
         here (see the Note): the runtime model must be structurally identical to the
-        example, and control flow / shapes are specialized to the example calls
+        captured one, and control flow / shapes are specialized to the captured calls
         (invariants 2 and 3). Violations that ARE checked raise ``PrecompileError``: a
         tensor baked
         as a constant (invariant 1), effectful ops (invariant 4), and -- for the
         inductor backend -- a runtime input whose stride / memory format differs from
-        the example's (invariant 6).
+        the captured call's (invariant 6).
         """
         torch._C._log_api_usage_once("torch.compiler.precompile.artifact")
-        if example_args:
-            raise TypeError(
-                f"precompile.artifact takes no positional example arguments (got "
-                f"{len(example_args)}). The example call goes in example_inputs: "
-                f"precompile.artifact(fn, example_inputs=[(arg0, arg1)]); pass "
-                f"tracer='dynamo' to capture several calls, with the graph breaks "
-                f"and recompilations between them."
-            )
-        python_code, cache, _ = self._capture(
-            fn,
-            backend=backend,
-            tracer=tracer,
-            decompositions=decompositions,
-            example_inputs=example_inputs,
-            guard_filter_fn=guard_filter_fn,
-            recompile_limit=recompile_limit,
-            dynamic=dynamic,
-            invariants=invariants,
-            require_complete=require_complete,
-            require_no_risky_drops=require_no_risky_drops,
-            require_no_dropped_guards=require_no_dropped_guards,
-            training=training,
-            keep_example_grads=keep_example_grads,
-            collect_results=False,
-        )
-        return python_code, cache
-
-    def _capture(
-        self,
-        fn: Callable[..., object],
-        *,
-        backend: str,
-        tracer: str,
-        decompositions: dict | None,
-        example_inputs: Sequence[ExampleInput | tuple[object, ...]] | None,
-        guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None,
-        recompile_limit: int,
-        dynamic: bool | None,
-        invariants: str | None,
-        require_complete: bool,
-        require_no_risky_drops: bool,
-        require_no_dropped_guards: bool,
-        training: bool,
-        keep_example_grads: bool,
-        collect_results: bool,
-    ) -> tuple[str, bytes, list[object]]:
-        """Capture and render; the results list is empty unless collected."""
         if backend not in ("inductor", "eager"):
             raise ValueError(
                 f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
@@ -3596,34 +3581,7 @@ class _PrecompileApi:
             raise ValueError(
                 f"precompile tracer must be 'make_fx' or 'dynamo', got {tracer!r}."
             )
-        # Deliberately not `not example_inputs`: a one-element tensor is falsy
-        # and a multi-element one is not even boolable, so the likeliest mistake
-        # -- passing the tensors instead of a sequence of calls -- has to reach
-        # PrecompileSession's container check rather than be read as "no calls".
-        if example_inputs is None or (
-            isinstance(example_inputs, Sequence) and len(example_inputs) == 0
-        ):
-            raise ValueError(
-                "precompile requires example_inputs=[(...), ...]: one tuple of "
-                "positional arguments per call to capture. Capture is by "
-                "execution, so there is nothing to trace without one."
-            )
         if tracer == "make_fx":
-            if isinstance(
-                example_inputs, (torch.Tensor, torch.nn.Module, str)
-            ) or not isinstance(example_inputs, Sequence):
-                raise TypeError(
-                    f"example_inputs takes a sequence of calls -- each a tuple of "
-                    f"positional arguments -- not {type(example_inputs).__name__}. "
-                    f"Wrap a single call as example_inputs=[(arg0, arg1)]."
-                )
-            if len(example_inputs) != 1:
-                raise ValueError(
-                    f"tracer='make_fx' captures a single call and got "
-                    f"{len(example_inputs)} example_inputs. Pass one tuple, or use "
-                    f"tracer='dynamo', which records a variant per call plus the "
-                    f"graph breaks between them."
-                )
             if (
                 guard_filter_fn is not None
                 or recompile_limit != 256
@@ -3632,35 +3590,18 @@ class _PrecompileApi:
                 or not require_complete
                 or not require_no_risky_drops
                 or require_no_dropped_guards
-                or keep_example_grads
             ):
                 raise ValueError(
-                    "guard_filter_fn, recompile_limit, dynamic, invariants, "
-                    "keep_example_grads and the require_* gates describe a "
-                    "multi-variant capture and apply only to tracer='dynamo'"
+                    "guard_filter_fn, recompile_limit, dynamic, invariants and the "
+                    "require_* gates describe a multi-variant capture and apply only "
+                    "to tracer='dynamo'"
                 )
-            from torch._dynamo.precompile_package import _example_call
-
-            args, kwargs = _example_call(example_inputs[0])
-            if kwargs:
-                raise ValueError(
-                    "tracer='make_fx' takes positional arguments only; "
-                    "ExampleInput(kwargs=...) applies only to tracer='dynamo'."
-                )
-            compiled = PrecompiledModule(
-                fn, backend=backend, tracer=tracer, decompositions=decompositions
+            return _MakeFxCapture(
+                fn,
+                backend=backend,
+                decompositions=decompositions,
+                training=bool(training),
             )
-            # precompile makes the call, so it picks the grad mode (same rule as
-            # the dynamo tracer).
-            with torch.enable_grad() if training else torch.no_grad():
-                compiled._compile(args)
-            # Build the (expensive) python_code ONCE and thread it into
-            # to_cache_bytes so the full metadata + embedded kernel source is not
-            # rebuilt, and so code_hash is sha256 over exactly the bytes returned
-            # to the caller (a matched pair loads).
-            python_code = compiled.to_python_code()
-            return python_code, compiled.to_cache_bytes(python_code), []
-
         if decompositions is not None:
             raise ValueError(
                 "decompositions apply only to tracer='make_fx'; the dynamo "
@@ -3671,56 +3612,32 @@ class _PrecompileApi:
         # invariant rest. This rests on precompile's contract (environment
         # identical at capture and runtime, all variation from inputs), so an
         # invariant guard is either pinned by that contract or an input
-        # dimension the examples did not vary; the cost is that an
-        # out-of-domain call is served rather than refused. Which guards
-        # discriminate is only knowable once every variant exists, but guards
-        # are serialized per compilation as produced, so capture once and apply
-        # the policy on the way out (PrecompileSession._apply_guard_policy)
-        # rather than re-running: a second capture pass has side effects --
-        # doubled gradients, state advanced past by mutations.
+        # dimension the calls did not vary; the cost is that an out-of-domain
+        # call is served rather than refused. Which guards discriminate is only
+        # knowable once every variant exists, but guards are serialized per
+        # compilation as produced, so capture and apply the policy on exit
+        # (PrecompileSession._apply_guard_policy).
         _reject_uninstallable_entry_defaults(fn)
-        from torch.compiler._cache import CacheArtifactManager
-
-        # The capture's compiles record into the process-global cache-artifact
-        # list, which the artifact then serializes (and clears). Give it a fresh
-        # one so the bundle holds only this capture and the caller's pending
-        # artifacts from unrelated compiles are neither bundled nor dropped.
-        with CacheArtifactManager.with_fresh_cache():
-            session = PrecompileSession(
-                _capture_session(
-                    fn,
-                    backend=backend,
-                    guard_filter_fn=guard_filter_fn,
-                    recompile_limit=recompile_limit,
-                    dynamic=dynamic,
-                    example_inputs=example_inputs,
-                    invariants=invariants,
-                    training=bool(training),
-                    keep_example_grads=bool(keep_example_grads),
-                    # Retain graphs only where they will actually be rendered: an
-                    # eager "backend" is an fx graph with no source to emit.
-                    keep_graphs=backend != "eager",
-                    prune_invariant_guards=True,
-                    collect_results=collect_results,
-                )
-            )
-            with session:
-                pass
-            # The capture is finished, so hand back the artifact rather than a
-            # session the caller has to know to save. The example calls have
-            # already run, so a gate refusal carries their results, as
-            # PrecompileError.result documents.
-            try:
-                python_code, cache = session.artifact(
-                    require_complete=require_complete,
-                    require_no_risky_drops=require_no_risky_drops,
-                    require_no_dropped_guards=require_no_dropped_guards,
-                )
-            except PrecompileError as e:
-                if collect_results:
-                    e.result = session.example_results()
-                raise
-        return python_code, cache, session.example_results()
+        session = _capture_session(
+            fn,
+            backend=backend,
+            guard_filter_fn=guard_filter_fn,
+            recompile_limit=recompile_limit,
+            dynamic=dynamic,
+            invariants=invariants,
+            training=bool(training),
+            # Retain graphs only where they will actually be rendered: an
+            # eager "backend" is an fx graph with no source to emit.
+            keep_graphs=backend != "eager",
+            prune_invariant_guards=True,
+        )
+        return _DynamoCapture(
+            session,
+            backend=backend,
+            require_complete=require_complete,
+            require_no_risky_drops=require_no_risky_drops,
+            require_no_dropped_guards=require_no_dropped_guards,
+        )
 
     def accumulate(
         self,
@@ -3746,12 +3663,12 @@ class _PrecompileApi:
             This is a prototype API. Its signature, error types and artifact
             format may change between releases without a deprecation cycle.
 
-        :func:`torch.compiler.precompile` makes the example calls itself, back to
-        back, which is wrong whenever the calls are not independent -- a training
-        step whose inputs come off a queue that the enclosing loop advances
-        cannot be called twice in a row, because the second call finds the state
-        the first one consumed. Here the caller keeps their loop and precompile
-        stops and resumes around each call::
+        This is the on-disk counterpart of :meth:`artifact`: same caller-driven
+        model, but each call rewrites an artifact on disk rather than holding it
+        in memory for :meth:`~torch.compiler.precompile.Capture.result`. Use it
+        when the capture spans a real training loop whose artifact is too large
+        to keep in memory, or that should survive a job dying partway. The caller
+        keeps their loop and precompile stops and resumes around each call::
 
             with torch.compiler.precompile.accumulate(
                 train_step,
@@ -3770,9 +3687,9 @@ class _PrecompileApi:
         step, and a job that dies partway leaves a working artifact. A call that
         exercises nothing new adds nothing.
 
-        Gradients pass straight through: precompile makes no call of its own
-        here, so there is nothing to snapshot and ``keep_example_grads`` does
-        not apply.
+        Gradients and return values keep their normal eager/``torch.compile``
+        semantics: the caller makes the calls, so they run in whatever grad mode
+        the caller sets and precompile snapshots nothing.
 
         The configuration lives on the capture rather than on each call, so a
         later call cannot disagree with the artifact it is accumulating into.
@@ -3881,7 +3798,7 @@ class _PrecompileApi:
         calling-convention metadata), if the cache's ``backend`` or ``tracer`` tag does
         not match ``python_code``, or if the cache's ``code_hash`` does not match
         ``sha256(python_code)`` -- i.e. the cache and python_code came from different
-        ``precompile()`` calls. A cache whose ``format``/``version`` does not match (a
+        precompile captures. A cache whose ``format``/``version`` does not match (a
         foreign or different-build envelope) is NOT fatal: the cache is acceleration
         only, so ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
         """
@@ -3902,8 +3819,8 @@ class _PrecompileApi:
         elif python_code is None or cache is None:
             raise ValueError(
                 "precompile.load needs the artifact: pass (python_code, cache) "
-                "as returned by precompile(), or artifact_path and cache_path "
-                "naming the two files precompile() wrote."
+                "as returned by a precompile capture's result(), or artifact_path and cache_path "
+                "naming the two files an accumulate() capture wrote."
             )
         # Unpickling the cache references classes in AOTAutograd's runtime; import
         # dynamo first so that import completes in a non-circular order (otherwise
@@ -3949,7 +3866,7 @@ class _PrecompileApi:
                     raise PrecompileError(
                         f"cache backend {blob.get('backend')!r} does not match the "
                         f"python_code backend {backend!r}; the cache and python_code "
-                        "came from different precompile() calls."
+                        "came from different precompile captures."
                     )
                 # A tracer tag was added alongside the dynamo tracer; treat its absence as
                 # make_fx so an older make_fx cache still pairs with its python_code. A
@@ -3958,7 +3875,7 @@ class _PrecompileApi:
                     raise PrecompileError(
                         f"cache tracer {blob.get('tracer', 'make_fx')!r} does not match "
                         f"the python_code tracer {tracer!r}; the cache and python_code "
-                        "came from different precompile() calls."
+                        "came from different precompile captures."
                     )
                 # Reject a cache whose code_hash does not match this python_code (a
                 # mismatched pairing); see Note [precompile programming model], invariant 7.
@@ -3968,8 +3885,8 @@ class _PrecompileApi:
                         "cache does not match python_code (its code_hash "
                         f"{blob.get('code_hash')!r} != sha256(python_code) "
                         f"{expected_code_hash!r}); the cache and python_code came from "
-                        "different precompile() calls. Pair each cache with the "
-                        "python_code from the same precompile() call."
+                        "different precompile captures. Pair each cache with the "
+                        "python_code from the same precompile capture."
                     )
                 artifact = blob.get("artifact")
         except PrecompileError:
@@ -4034,4 +3951,4 @@ precompile = _PrecompileApi()
 # public callable; the rich usage docs live on ``__call__``.
 precompile.__name__ = "precompile"  # type: ignore[attr-defined]
 precompile.__qualname__ = "precompile"  # type: ignore[attr-defined]
-precompile.__doc__ = _PrecompileApi.__call__.__doc__
+precompile.__doc__ = _PrecompileApi.__doc__
