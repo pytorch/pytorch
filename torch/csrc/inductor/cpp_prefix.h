@@ -832,11 +832,10 @@ Welford<scalar_t> welford_vec_reduce_all(
 }
 #endif
 
-inline std::atomic<int>* inductor_cpu_integer_div_error_flag = nullptr;
-
-inline void inductor_cpu_note_integer_div_by_zero() {
-  if (inductor_cpu_integer_div_error_flag != nullptr) {
-    inductor_cpu_integer_div_error_flag->store(1, std::memory_order_relaxed);
+inline void inductor_cpu_note_integer_div_by_zero(
+    std::atomic<int>* err = nullptr) {
+  if (err != nullptr) {
+    err->store(1, std::memory_order_relaxed);
   } else {
     TORCH_CHECK(false, "ZeroDivisionError");
   }
@@ -849,7 +848,10 @@ inline void inductor_cpu_throw_if_integer_div_error(std::atomic<int>& err) {
 }
 
 template <typename T, typename U>
-inline std::common_type_t<T, U> floor_divide_integral(T a, U b) {
+inline std::common_type_t<T, U> floor_divide_integral(
+    T a,
+    U b,
+    std::atomic<int>* err = nullptr) {
   using C = std::common_type_t<T, U>;
   static_assert(
       std::is_integral_v<C>,
@@ -857,17 +859,36 @@ inline std::common_type_t<T, U> floor_divide_integral(T a, U b) {
   const C a_c = static_cast<C>(a);
   const C b_c = static_cast<C>(b);
   if (C10_UNLIKELY_OR_CONST(b_c == 0)) {
-    inductor_cpu_note_integer_div_by_zero();
+    inductor_cpu_note_integer_div_by_zero(err);
     return C(0);
   }
   return c10::div_floor_integer(a_c, b_c);
+}
+
+template <typename T, typename U>
+inline std::common_type_t<T, U> trunc_divide_integral(
+    T a,
+    U b,
+    std::atomic<int>* err = nullptr) {
+  using C = std::common_type_t<T, U>;
+  static_assert(
+      std::is_integral_v<C>,
+      "trunc_divide_integral expects integral scalar operands");
+  const C a_c = static_cast<C>(a);
+  const C b_c = static_cast<C>(b);
+  if (C10_UNLIKELY_OR_CONST(b_c == 0)) {
+    inductor_cpu_note_integer_div_by_zero(err);
+    return C(0);
+  }
+  return c10::trunc_floor_integer(a_c, b_c);
 }
 
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T>
 inline at::vec::Vectorized<T> floor_divide_integral(
     const at::vec::Vectorized<T>& a,
-    const at::vec::Vectorized<T>& b) {
+    const at::vec::Vectorized<T>& b,
+    std::atomic<int>* err = nullptr) {
   static_assert(
       std::is_integral_v<T>,
       "floor_divide_integral expects integral underlying type");
@@ -878,7 +899,7 @@ inline at::vec::Vectorized<T> floor_divide_integral(
   a.store(out_buf);
   b.store(b_buf);
   for (int i = 0; i < kLen; ++i) {
-    out_buf[i] = floor_divide_integral(out_buf[i], b_buf[i]);
+    out_buf[i] = floor_divide_integral(out_buf[i], b_buf[i], err);
   }
   return Vec::loadu(out_buf);
 }
@@ -886,27 +907,63 @@ inline at::vec::Vectorized<T> floor_divide_integral(
 template <typename T, int N>
 inline at::vec::VectorizedN<T, N> floor_divide_integral(
     const at::vec::VectorizedN<T, N>& a,
-    const at::vec::VectorizedN<T, N>& b) {
+    const at::vec::VectorizedN<T, N>& b,
+    std::atomic<int>* err = nullptr) {
   static_assert(
       std::is_integral_v<T>,
       "floor_divide_integral expects integral underlying type");
   at::vec::VectorizedN<T, N> out;
   for (int i = 0; i < N; ++i) {
-    out[i] = floor_divide_integral(a[i], b[i]);
+    out[i] = floor_divide_integral(a[i], b[i], err);
+  }
+  return out;
+}
+
+template <typename T>
+inline at::vec::Vectorized<T> trunc_divide_integral(
+    const at::vec::Vectorized<T>& a,
+    const at::vec::Vectorized<T>& b,
+    std::atomic<int>* err = nullptr) {
+  static_assert(
+      std::is_integral_v<T>,
+      "trunc_divide_integral expects integral underlying type");
+  using Vec = at::vec::Vectorized<T>;
+  constexpr int kLen = Vec::size();
+  alignas(alignof(Vec)) T out_buf[kLen];
+  alignas(alignof(Vec)) T b_buf[kLen];
+  a.store(out_buf);
+  b.store(b_buf);
+  for (int i = 0; i < kLen; ++i) {
+    out_buf[i] = trunc_divide_integral(out_buf[i], b_buf[i], err);
+  }
+  return Vec::loadu(out_buf);
+}
+
+template <typename T, int N>
+inline at::vec::VectorizedN<T, N> trunc_divide_integral(
+    const at::vec::VectorizedN<T, N>& a,
+    const at::vec::VectorizedN<T, N>& b,
+    std::atomic<int>* err = nullptr) {
+  static_assert(
+      std::is_integral_v<T>,
+      "trunc_divide_integral expects integral underlying type");
+  at::vec::VectorizedN<T, N> out;
+  for (int i = 0; i < N; ++i) {
+    out[i] = trunc_divide_integral(a[i], b[i], err);
   }
   return out;
 }
 #endif
 
 template <typename T, typename U>
-inline std::common_type_t<T, U> mod(T a, U b) {
+inline std::common_type_t<T, U> mod(T a, U b, std::atomic<int>* err = nullptr) {
   using C = std::common_type_t<T, U>;
   static_assert(
       std::is_integral_v<C>,
       "inductor template mod(T a, U b) is only for integral types; use the float/double specializations "
       "for floating-point operands.");
   if (C10_UNLIKELY_OR_CONST(b == 0)) {
-    inductor_cpu_note_integer_div_by_zero();
+    inductor_cpu_note_integer_div_by_zero(err);
     return C(0);
   }
   const C a_c = static_cast<C>(a);
@@ -917,20 +974,20 @@ inline std::common_type_t<T, U> mod(T a, U b) {
   return a_c % b_c;
 }
 template <>
-inline float mod(float a, float b) {
+inline float mod(float a, float b, std::atomic<int>* err) {
   return std::fmod(a, b);
 }
 template <>
-inline double mod(double a, double b) {
+inline double mod(double a, double b, std::atomic<int>* err) {
   return std::fmod(a, b);
 }
 
 template <typename T>
-inline T remainder_integral(T a, T b) {
+inline T remainder_integral(T a, T b, std::atomic<int>* err = nullptr) {
   static_assert(
       std::is_integral_v<T>, "remainder_integral expects integral scalar T");
   if (C10_UNLIKELY_OR_CONST(b == 0)) {
-    inductor_cpu_note_integer_div_by_zero();
+    inductor_cpu_note_integer_div_by_zero(err);
     return T(0);
   }
   if (a == std::numeric_limits<T>::min() && b == T(-1)) {
@@ -947,7 +1004,8 @@ inline T remainder_integral(T a, T b) {
 template <typename T>
 inline at::vec::Vectorized<T> remainder_integral(
     const at::vec::Vectorized<T>& a,
-    const at::vec::Vectorized<T>& b) {
+    const at::vec::Vectorized<T>& b,
+    std::atomic<int>* err = nullptr) {
   static_assert(
       std::is_integral_v<T>,
       "remainder_integral expects integral underlying type");
@@ -960,7 +1018,7 @@ inline at::vec::Vectorized<T> remainder_integral(
   a.store(out_buf);
   b.store(b_buf);
   for (int i = 0; i < kLen; ++i) {
-    out_buf[i] = remainder_integral(out_buf[i], b_buf[i]);
+    out_buf[i] = remainder_integral(out_buf[i], b_buf[i], err);
   }
   return Vec::loadu(out_buf);
 }
@@ -968,13 +1026,14 @@ inline at::vec::Vectorized<T> remainder_integral(
 template <typename T, int N>
 inline at::vec::VectorizedN<T, N> remainder_integral(
     const at::vec::VectorizedN<T, N>& a,
-    const at::vec::VectorizedN<T, N>& b) {
+    const at::vec::VectorizedN<T, N>& b,
+    std::atomic<int>* err = nullptr) {
   static_assert(
       std::is_integral_v<T>,
       "remainder_integral expects integral underlying type");
   at::vec::VectorizedN<T, N> out;
   for (int i = 0; i < N; ++i) {
-    out[i] = remainder_integral(a[i], b[i]);
+    out[i] = remainder_integral(a[i], b[i], err);
   }
   return out;
 }
