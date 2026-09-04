@@ -33,6 +33,31 @@ inline bool is_outer_reduction(const int64_t* strides) {
          strides[3] == sizeof(typename traits::arg2_t);
 }
 
+// Only the reduce=true/false tail is templated and duplicated per
+// instantiation; the larger, identical-either-way accumulation loop in
+// vectorized_reduction stays shared (#138672 templated the whole function
+// and was reverted for the resulting binary size).
+template <typename Vec, typename func_t, typename vec_func_t, bool reduce>
+inline void vectorized_reduction_finish(Vec acc[4], char* out_ptr, func_t op, vec_func_t vop) {
+  using scalar_t = typename Vec::value_type;
+  if constexpr (reduce) {
+    scalar_t buffer[Vec::size()];
+    acc[0] = vop(vop(acc[0], acc[1]), vop(acc[2], acc[3]));
+    acc[0].store(buffer);
+    for (const auto j : c10::irange(1, Vec::size())) {
+      buffer[0] = op(buffer[0], buffer[j]);
+    }
+    auto dst = (scalar_t*)out_ptr;
+    *dst = op(*dst, buffer[0]);
+  } else {
+    for (const auto j : c10::irange(4)) {
+      auto dst = out_ptr + j * Vec::size() * sizeof(scalar_t);
+      acc[j] = vop(acc[j], Vec::loadu(dst));
+      acc[j].store(dst);
+    }
+  }
+}
+
 template <typename func_t, typename vec_func_t>
 inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
                                         func_t op, vec_func_t vop, bool reduce) {
@@ -50,20 +75,9 @@ inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
     acc[3] = vop(acc[3], Vec::loadu(ptr + (3 * Vec::size() * sizeof(scalar_t))));
   }
   if (reduce) {
-    scalar_t buffer[Vec::size()];
-    acc[0] = vop(vop(acc[0], acc[1]), vop(acc[2], acc[3]));
-    acc[0].store(buffer);
-    for (const auto j : c10::irange(1, Vec::size())) {
-      buffer[0] = op(buffer[0], buffer[j]);
-    }
-    auto dst = (scalar_t*)out_ptr;
-    *dst = op(*dst, buffer[0]);
+    vectorized_reduction_finish<Vec, func_t, vec_func_t, true>(acc, out_ptr, op, vop);
   } else {
-    for (const auto j : c10::irange(4)) {
-      auto dst = out_ptr + j * Vec::size() * sizeof(scalar_t);
-      acc[j] = vop(acc[j], Vec::loadu(dst));
-      acc[j].store(dst);
-    }
+    vectorized_reduction_finish<Vec, func_t, vec_func_t, false>(acc, out_ptr, op, vop);
   }
 }
 
