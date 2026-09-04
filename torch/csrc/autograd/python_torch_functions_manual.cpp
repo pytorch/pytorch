@@ -1,7 +1,5 @@
-#include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -14,8 +12,6 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/structseq.h>
-#include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 
@@ -24,8 +20,6 @@
 #include <ATen/native/Resize.h>
 #include <ATen/ops/from_blob.h>
 
-#include <Python.h>
-#include <fmt/format.h>
 #include <pybind11/pybind11.h>
 #include <utility>
 #include <vector>
