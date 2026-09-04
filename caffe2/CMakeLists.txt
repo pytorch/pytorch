@@ -1269,6 +1269,11 @@ if(USE_XPU)
   if(DEFINED Python3_INCLUDE_DIRS)
     list(REMOVE_ITEM TORCH_XPU_OPS_INCLUDE_DIRS ${Python3_INCLUDE_DIRS})
   endif()
+  # Some Python-derived include paths (for example NumPy/site-packages entries)
+  # can still arrive through transitive include sets and vary per CPython ABI.
+  # Strip them so FindSYCL custom-command scripts stay stable across iterations.
+  list(FILTER TORCH_XPU_OPS_INCLUDE_DIRS EXCLUDE REGEX "(^|/)site-packages(/|$)")
+  list(FILTER TORCH_XPU_OPS_INCLUDE_DIRS EXCLUDE REGEX "(^|/)python[0-9.]+(/|$)")
   # Pass the target as a dependency so that ATen headers generation
   # could be followed by torch-xpu-ops build.
   # 1. Sources in torch-xpu-ops depend on generated ATen headers.
