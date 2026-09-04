@@ -383,8 +383,9 @@ void CUDAGraph::reset() {
       capturing_to_pool_ = false;
     }
 
-    // Clean up cuBLAS workspaces allocated on the capture stream, otherwise live allocations prevent
-    // private pool cleanup
+    // Clean up cached cuBLAS workspaces allocated on the capture stream;
+    // otherwise live allocations prevent private pool cleanup. CUDA's default
+    // eager workspace mode does not populate this cache.
     clearCublasWorkspacesForStream(capture_stream_.stream());
 
     // notifyCaptureDestroy may throw. How should we handle this?

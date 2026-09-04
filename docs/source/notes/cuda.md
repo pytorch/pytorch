@@ -1131,14 +1131,18 @@ void customCudaFree(CustomAllocInfo* info) {
 
 ## cuBLAS workspaces
 
-For each combination of cuBLAS handle and CUDA stream, a cuBLAS workspace will be allocated
-if that handle and stream combination executes a cuBLAS kernel that requires a workspace.
-In order to avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
-`torch._C._cuda_clearCublasWorkspaces()` is called. The workspace size per allocation can be
-specified via the environment variable `CUBLAS_WORKSPACE_CONFIG` with the format `:[SIZE]:[COUNT]`.
-As an example, the default workspace size per allocation is `CUBLAS_WORKSPACE_CONFIG=:4096:2:16:8`
-which specifies a total size of `2 * 4096 + 8 * 16 KiB`. To force cuBLAS to avoid using workspaces,
-set `CUBLAS_WORKSPACE_CONFIG=:0:0`.
+By default, ATen allocates a cuBLAS workspace for each operation from the CUDA caching allocator
+and releases it when the operation returns. Set `TORCH_CUBLAS_WORKSPACE_CACHE=1` to instead retain
+one workspace for each cuBLAS handle and CUDA stream until
+`torch._C._cuda_clearCublasWorkspaces()` is called. Persistent workspaces must not be used when
+capturing multiple CUDA graphs on the same stream. Handles returned by
+`torch.cuda.current_blas_handle()` use cuBLAS's default workspace when ATen workspace caching is
+disabled.
+
+The workspace size per allocation can be specified via `CUBLAS_WORKSPACE_CONFIG` with the format
+`:[SIZE]:[COUNT]`. For example, `CUBLAS_WORKSPACE_CONFIG=:4096:2:16:8` specifies a total size of
+`2 * 4096 + 8 * 16 KiB`. To force cuBLAS to avoid using workspaces, set
+`CUBLAS_WORKSPACE_CONFIG=:0:0`.
 
 (cufft-plan-cache)=
 
