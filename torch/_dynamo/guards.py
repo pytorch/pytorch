@@ -4681,6 +4681,11 @@ def pickle_guards_state(
     except (torch._dynamo.exc.PackageError, RecursionError):
         raise
     except Exception as e:
+        # Deliberately broad, AssertionError included: GradScaler.__getstate__
+        # asserts mid-iteration, subclasses assert in __tensor_flatten__, users
+        # assert in __reduce__ and properties. Each is a legitimate limit of
+        # what a package can carry, reported as a bypass rather than failing
+        # the compile.
         raise torch._dynamo.exc.PackageError(str(e)) from e
     return buf.getvalue()
 
