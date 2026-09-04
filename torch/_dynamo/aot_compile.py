@@ -572,7 +572,7 @@ class AOTCompiledModel:
         try:
             traced_fn, _ = convert_frame.get_traced_fn(model.forward)
             guard_globals = traced_fn.__globals__
-        except RuntimeError:
+        except (RuntimeError, AttributeError):
             log.warning(
                 "%s.forward is %r, not a function or bound method, so no live "
                 "guard scope could be resolved; global guards on this artifact "
