@@ -398,9 +398,7 @@ class TestFSDPOptimState(FSDPTest):
         model = TransformerWithSharedParams.init(
             group,
             FSDPInitMode.RECURSIVE if wrap else FSDPInitMode.NO_FSDP,
-            # Initialize on CPU, then move using the current rank's bound
-            # accelerator.  DEVICE_BEFORE would read the framework's legacy
-            # module-global device selection and place every rank on that device.
+            # Initialize on CPU, then move to the current rank's accelerator.
             DEVICEInitMode.DEVICE_NEVER,
             deterministic=True,
         )
@@ -652,13 +650,12 @@ class TestFSDPOptimState(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_full_optim_state_dict_keys(self, device):
+    def test_full_optim_state_dict_keys(self):
         """Tests that the parameter keys returned by
         :meth:`full_optim_state_dict` match those of :meth:`state_dict` with
         full ``state_dict_type`` for a non-FSDP-root model with nested FSDP
         instances and ignored modules."""
-        device_type = torch.device(device).type
-        device = torch.device(device_type)
+        device = torch.device(self.device_type)
         model = NestedModel().to(device)
         wrapped_model = NestedModel.wrap(model, ignore_modules=True)
         # Add checkpointing to ensure optim_state_dict and state_dict strip out
@@ -679,19 +676,18 @@ class TestFSDPOptimState(FSDPTest):
             self.assertNotIn(_CHECKPOINT_WRAPPED_MODULE, key)
 
     @skip_if_lt_x_gpu(2)
-    def test_full_optim_state_dict_nested_invalid(self, device):
+    def test_full_optim_state_dict_nested_invalid(self):
         """Tests that :meth:`full_optim_state_dict` raises an error when
         nonzero ranks are missing the optimizer state for parameters on rank
         0."""
-        device_type = torch.device(device).type
-        device = torch.device(device_type)
+        device = torch.device(self.device_type)
         model = NestedModel.wrap(NestedModel().to(device), None)
         optim_input = list(model.parameters())
         if self.rank != 0:
             # Exclude a parameter so that nonzero ranks are missing state
             optim_input = optim_input[:-1]
         optim = torch.optim.Adam(optim_input, lr=1e-3)
-        self._step_model(model, optim, device_type, num_iters=3)
+        self._step_model(model, optim, num_iters=3)
         error_regex = (
             "FSDP currently requires each rank to have at least the "
             "optimizer states needed by rank 0's optimizer but some ranks "
@@ -1691,8 +1687,8 @@ class TestFSDPOptimState(FSDPTest):
         optim.step()
 
     @skip_if_lt_x_gpu(2)
-    def test_compatible_with_trec(self, device):
-        device_type = torch.device(device).type
+    def test_compatible_with_trec(self):
+        device_type = self.device_type
 
         class DenseModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -1779,8 +1775,8 @@ class TestFSDPOptimState(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_optim_state_without_param_groups(self, device):
-        device_type = torch.device(device).type
+    def test_optim_state_without_param_groups(self):
+        device_type = self.device_type
 
         class SimpleModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -1843,8 +1839,8 @@ class TestFSDPOptimState(FSDPTest):
         self.assertEqual(original_param_groups, optim.state_dict()["param_groups"])
 
     @skip_if_lt_x_gpu(2)
-    def test_with_empty_optimizer_state(self, device):
-        device_type = torch.device(device).type
+    def test_with_empty_optimizer_state(self):
+        device_type = self.device_type
         model = FSDP(TestDummyModel().to(device_type))
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         state_dict = optim.state_dict()
