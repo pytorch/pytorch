@@ -3,7 +3,6 @@ ciflow_tracking_issue: 64124
 ciflow_push_tags:
 - ciflow/b200
 - ciflow/b200-distributed
-- ciflow/b200-native-aot
 - ciflow/b200-symm-mem
 - ciflow/binaries
 - ciflow/binaries_libtorch
@@ -28,6 +27,7 @@ ciflow_push_tags:
 - ciflow/inductor-rocm-mi200
 - ciflow/inductor-rocm-mi300
 - ciflow/mps
+- ciflow/native-aot
 - ciflow/nightly
 - ciflow/op-benchmark
 - ciflow/periodic

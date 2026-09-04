@@ -161,8 +161,9 @@ exports `cpp_helpers`.
 
 A build compiles that grid once per eligible arch, so what ships depends on
 `TORCH_CUDA_ARCH_LIST`: a manywheel CUDA 13.x list (`7.5;8.0;8.6;9.0;10.0;12.0`)
-admits `sm_90` and `sm_100` and carries 96 kernels, `b200-native-aot.yml`
-(`10.0a`) carries 48, and CUDA 12.x builds skip stage 2 entirely.
+admits `sm_90` and `sm_100` and carries 96 kernels, `native-aot.yml` carries
+48 per arch it builds (`9.0a` and `10.0a`), and CUDA 12.x builds skip stage 2
+entirely.
 
 ---
 
@@ -1170,7 +1171,7 @@ EXPORTABLE_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a")
 Both spellings of the same compute capability are listed because they are
 distinct nvcc targets and different builds use different ones for the SAME
 hardware: `10.0a` (arch-conditional, what `tcgen05`/`wgmma` need) in
-`.github/workflows/b200-native-aot.yml`, plain `10.0` in every other Blackwell
+`.github/workflows/native-aot.yml`, plain `10.0` in every other Blackwell
 job and in the shipped manywheel lists. Omitting either would make those builds
 silently export nothing.
 
@@ -1335,12 +1336,12 @@ print('native-AOT: embedded kernels detected')
 "
 ```
 
-The dedicated workflow is `.github/workflows/b200-native-aot.yml`: builds with
-`cuda-arch-list: '10.0a'` and runs the `native_aot` test config on
-`linux.dgx.b200`, on PRs touching the native-AOT paths (`tools/native_aot/**`,
-`torch/_native/**`, `torchgen/native_aot*.py`, `test/python_native/**`, the
-stage-2 build shells and the workflow itself), nightly, and on
-`ciflow/b200-native-aot/*` tags.
+The dedicated workflow is `.github/workflows/native-aot.yml`: one build+test pair
+per capability the declarations claim, `cuda-arch-list: '10.0a'` on
+`linux.dgx.b200` and `'9.0a'` on `linux.aws.h100`, running on PRs touching the
+native-AOT paths (`tools/native_aot/**`, `torch/_native/**`,
+`torchgen/native_aot*.py`, `test/python_native/**`, the stage-2 build shells and
+the workflow itself), nightly, and on `ciflow/native-aot/*` tags.
 
 ---
 
@@ -1409,9 +1410,8 @@ plus the need for stock-aten references in tests.
   `("sm_90", "sm_90a", "sm_100", "sm_100a")`. Other arches in
   `TORCH_CUDA_ARCH_LIST` are skipped, not failed, so those builds ship without
   artifacts. Both admitted capabilities ship where a build's arch list names them:
-  a release CUDA 13.x wheel carries topk for `sm_90` and `sm_100` alike. No CI job
-  exercises AOT kernels on Hopper yet -- only `b200-native-aot.yml` runs them -- so
-  Hopper's coverage is the tools suite plus the Blackwell job.
+  a release CUDA 13.x wheel carries topk for `sm_90` and `sm_100` alike, and
+  `native-aot.yml` runs a build+test pair on each.
 * **A capability is admitted under one spelling.** `TORCH_CUDA_ARCH_LIST` naming
   both `10.0` and `10.0a` collapses to the arch-conditional one, so a declaration
   pinning only the plain spelling exports nothing for that build and says so.

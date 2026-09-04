@@ -85,7 +85,7 @@ KNOWN_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a", "sm_103", "sm_103a")
 # Which of them the STANDARD build ships: the TORCH_CUDA_ARCH_LIST entries eligible
 # on the automatic export path, which an explicit --arch bypasses. Both spellings of
 # a capability are listed because they are distinct nvcc targets for the same
-# hardware -- "10.0a" (needed by tcgen05/wgmma) in b200-native-aot.yml, plain "10.0"
+# hardware -- "10.0a" (needed by tcgen05/wgmma) in native-aot.yml, plain "10.0"
 # in the manywheel lists -- and omitting either silently exports nothing there. Each
 # entry also costs another full set of compiled kernels in every wheel naming it, and
 # makes the DSL runtimes mandatory on a builder with that GPU. sm_103 stays out: no
