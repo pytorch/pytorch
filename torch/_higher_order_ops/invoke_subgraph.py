@@ -46,6 +46,36 @@ from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispat
 invoke_subgraph_counter = 0
 
 
+# Keep this list limited to configs with established region-local semantics.
+_SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS = frozenset(
+    {
+        "fallback_by_default",
+    }
+)
+
+
+def _validate_nested_region_inductor_config_patches(
+    patches: dict[str, Any] | None, direction: str | None = None
+) -> None:
+    if patches is None:
+        return
+
+    from torch._inductor import config as inductor_config
+
+    for key in patches:
+        if not hasattr(inductor_config, key):
+            raise ValueError(
+                f"Invalid inductor config key '{key}'. "
+                "Available config keys can be found in torch._inductor.config"
+            )
+        if key not in _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS:
+            context = f"{direction} " if direction is not None else ""
+            raise ValueError(
+                f"Inductor config key '{key}' is not supported in {context}"
+                "nested compile-region options"
+            )
+
+
 # During the tracing of the joint graph, we construct this information. This is
 # used to filter out grad_outs/tangents in the `backward` method of
 # InvokeSubgraphAutogradOp.
@@ -87,6 +117,17 @@ class NestedCompileRegionOptions:
     # aot_autograd's separate fw_compiler/bw_compiler. If None, the backward
     # reuses the forward config.
     bw_inductor_config_patches: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        self.validate_inductor_config_patches()
+
+    def validate_inductor_config_patches(self) -> None:
+        _validate_nested_region_inductor_config_patches(
+            self.inductor_config_patches, "forward"
+        )
+        _validate_nested_region_inductor_config_patches(
+            self.bw_inductor_config_patches, "backward"
+        )
 
 
 def _extract_nested_region_config(fn):
@@ -1349,6 +1390,10 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
 def invoke_subgraph_inductor_compile(
     gm, example_inputs, inductor_config_patches=None, **kwargs
 ):
+    if inductor_config_patches is None:
+        inductor_config_patches = {}
+    _validate_nested_region_inductor_config_patches(inductor_config_patches)
+
     from torch._functorch._aot_autograd.runtime_wrappers import (
         SerializableCompiledFunction,
     )
@@ -1365,9 +1410,6 @@ def invoke_subgraph_inductor_compile(
         torch._dynamo.testing._testing_invoke_subgraph_inductor_compile_captured_gms.append(
             copy.deepcopy(gm)
         )
-
-    if inductor_config_patches is None:
-        inductor_config_patches = {}
 
     # Saved tensors flow across the HOP boundary into a separately-compiled bw
     # subgraph whose IR was traced with natural (unpadded) strides. Mark every
@@ -1417,7 +1459,7 @@ def get_invoke_subgraph_compile_options(
     bw_inductor_config_patches=None,
 ):
     if fw_inductor_config_patches is None:
-        fw_inductor_config_patches = {"triton.autotune_at_compile_time": True}
+        fw_inductor_config_patches = {}
 
     # The backward uses bw_inductor_config_patches when set (independently of the
     # forward), otherwise it reuses the forward config.
@@ -1426,17 +1468,6 @@ def get_invoke_subgraph_compile_options(
         if bw_inductor_config_patches is not None
         else fw_inductor_config_patches
     )
-
-    from torch._inductor import config as inductor_config
-
-    # Validate that all config keys exist
-    for patches in (fw_inductor_config_patches, bw_inductor_config_patches):
-        for key in patches or {}:
-            if not hasattr(inductor_config, key):
-                raise ValueError(
-                    f"Invalid inductor config key '{key}' in get_invoke_subgraph_compile_options. "
-                    f"Available config keys can be found in torch._inductor.config"
-                )
 
     fw_compiler = functools.partial(
         invoke_subgraph_inductor_compile,
