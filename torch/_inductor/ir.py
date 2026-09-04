@@ -520,9 +520,66 @@ def significant_strides_equal(
     return True
 
 
+def _get_runtime_bound_symbols() -> OrderedSet[Symbol]:
+    """Return a conservative set of symbols bound by wrapper codegen."""
+    result = OrderedSet(V.graph.bound_unbacked_symbols)
+    for value in V.graph.graph_inputs.values():
+        if isinstance(value, Symbol):
+            result.add(value)
+        if isinstance(value, Expr):
+            value = V.graph.sizevars.simplify(value)
+            if isinstance(value, Symbol):
+                result.add(value)
+
+    for symbol, (input_name, _kind, _dim) in V.graph.symbolic_input_sources.items():
+        if input_name not in V.graph.graph_inputs:
+            continue
+        simplified = V.graph.sizevars.simplify(symbol)
+        if isinstance(simplified, Symbol):
+            result.add(symbol)
+            result.add(simplified)
+    return result
+
+
+def _match_insignificant_strides(
+    layout: Layout,
+    strides: Sequence[_IntLike],
+    *,
+    significant_strides_match: bool,
+) -> list[Expr]:
+    """
+    Copy requested strides, preserving equivalent significant strides and any
+    insignificant stride whose symbols are unavailable to wrapper codegen.
+    """
+    available_symbols: OrderedSet[Symbol] | None = None
+    new_stride = []
+    is_empty = any(
+        V.graph.sizevars.statically_known_equals(dim, 0) for dim in layout.size
+    )
+    for i, size in enumerate(layout.size):
+        if is_empty or V.graph.sizevars.statically_known_leq(size, 1):
+            requested_stride = V.graph.sizevars.simplify(strides[i])
+            requested_symbols = free_symbols([requested_stride])
+            if not requested_symbols:
+                new_stride.append(requested_stride)
+            else:
+                if available_symbols is None:
+                    available_symbols = _get_runtime_bound_symbols()
+                new_stride.append(
+                    requested_stride
+                    if requested_symbols.issubset(available_symbols)
+                    else layout.stride[i]
+                )
+        elif significant_strides_match:
+            new_stride.append(layout.stride[i])
+        else:
+            new_stride.append(strides[i])
+    return new_stride
+
+
 def try_match_insignificant_strides(
     tensor: IRNode,
-    strides: Sequence[int | torch.SymInt],
+    strides: Sequence[_IntLike],
 ) -> IRNode:
     """
     Tries to match the strides of the tensor to those in the meta_strides. Strides of insignificant
@@ -543,11 +600,9 @@ def try_match_insignificant_strides(
         return tensor
 
     storage, old_layout = as_storage_and_layout(tensor)
-    new_stride = [*old_layout.stride]
-    is_empty = tensor.is_zero_elements()
-    for i, s in enumerate(tensor.get_size()):
-        if is_empty or V.graph.sizevars.statically_known_leq(s, 1):
-            new_stride[i] = strides[i]
+    new_stride = _match_insignificant_strides(
+        old_layout, strides, significant_strides_match=True
+    )
 
     new_layout = FixedLayout(
         old_layout.device,
@@ -5008,7 +5063,13 @@ class FlexibleLayout(Layout):
     def as_exact_strides(
         self, exact_strides: Sequence[_IntLike], allow_padding: bool = False
     ) -> FixedLayout:
-        new_stride = exact_strides
+        new_stride = _match_insignificant_strides(
+            self,
+            exact_strides,
+            significant_strides_match=significant_strides_equal(
+                exact_strides, self.stride, self.size
+            ),
+        )
         if self.should_pad_strides() and allow_padding:
             new_stride = self._pad_strides(new_stride, self.size, self.dtype)
 

@@ -3541,6 +3541,68 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         if not torch.version.hip:
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfNoONEDNN
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
+    @unittest.skipIf(IS_WINDOWS, "Not supported on Windows")
+    @inductor_config.patch({"freezing": True})
+    @torch.no_grad()
+    def test_qlinear_binary_sum_dynamic_m1_output_stride(self):
+        M, K, N = 1, 32, 64
+        q_min, q_max = -32, 31
+
+        class Mod(torch.nn.Module):
+            def __init__(self, qw, w_scales, w_zps, accum):
+                super().__init__()
+                self.packed_weight = torch.ops.onednn.qlinear_prepack(qw, None)
+                self.w_scales = w_scales
+                self.w_zps = w_zps
+                self.accum = accum
+
+            def forward(self, x):
+                return torch.ops.onednn.qlinear_pointwise.binary(
+                    x,
+                    0.1,
+                    0,
+                    self.packed_weight,
+                    self.w_scales,
+                    self.w_zps,
+                    self.accum,
+                    None,
+                    1.0,
+                    0,
+                    torch.float32,
+                    1.0,
+                    0,
+                    "sum",
+                    1.0,
+                    "none",
+                    [],
+                    "",
+                )
+
+        torch._dynamo.reset()
+        torch.manual_seed(0)
+        qw = torch.randint(q_min, q_max, (N, K), dtype=torch.int8)
+        w_scales = torch.rand(N) * 0.01 + 0.01
+        w_zps = torch.zeros(N, dtype=torch.int32)
+        accum = torch.rand(M, N)
+        x = torch.randint(q_min, q_max, (M, K), dtype=torch.int8)
+
+        reference_mod = Mod(
+            qw.clone(), w_scales.clone(), w_zps.clone(), accum.clone()
+        ).eval()
+        compiled_mod = Mod(
+            qw.clone(), w_scales.clone(), w_zps.clone(), accum.clone()
+        ).eval()
+
+        expected = reference_mod(x.clone())
+        actual = torch.compile(compiled_mod, dynamic=True, fullgraph=True)(x.clone())
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.shape, (M, N))
+        self.assertEqual(actual.stride(), (N, 1))
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
