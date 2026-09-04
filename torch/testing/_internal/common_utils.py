@@ -5968,6 +5968,9 @@ def find_library_location(lib_name: str) -> Path:
     if os.path.exists(path):
         return path
     torch_root = Path(__file__).resolve().parents[2]
+    path = torch_root.parent / 'build' / 'lib' / lib_name
+    if os.path.exists(path):
+        return path
     return torch_root / 'build' / 'lib' / lib_name
 
 def skip_but_pass_in_sandcastle(reason):
