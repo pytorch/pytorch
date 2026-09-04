@@ -8,6 +8,7 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SortingUtils.h>
+#include <ATen/native/TensorCompare.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -19,16 +20,23 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/arange.h>
 #include <ATen/ops/as_strided.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/cummax.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/full.h>
+#include <ATen/ops/full_like.h>
 #include <ATen/ops/kthvalue_native.h>
 #include <ATen/ops/median_native.h>
 #include <ATen/ops/nanmedian_native.h>
+#include <ATen/ops/ones.h>
 #include <ATen/ops/sort.h>
 #include <ATen/ops/sort_native.h>
 #include <ATen/ops/topk_native.h>
+#include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 namespace at::native {
 namespace {
@@ -797,4 +805,58 @@ std::tuple<Tensor&, Tensor&> nanmedian_out_mps(const Tensor& self,
                                                Tensor& indices) {
   return median_with_indices_impl_mps(values, indices, self, dim, keepdim, /*ignore_nan=*/self.is_floating_point());
 }
+
+// `mode` is implemented as a sort followed by a scan for the longest run of
+// equal values, which is the same shape as the CUDA fallback path. Doing it by
+// composition keeps it on the existing MPS sort rather than duplicating a
+// bitonic sort in Metal.
+static void mode_kernel_mps(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim, bool keepdim) {
+  auto out_sizes = self.sizes().vec();
+  if (keepdim) {
+    out_sizes[dim] = 1;
+  } else {
+    out_sizes.erase(out_sizes.begin() + dim);
+  }
+  at::native::resize_output(values, out_sizes);
+  at::native::resize_output(indices, out_sizes);
+
+  const auto n = self.size(dim);
+  if (n == 1) {
+    values.copy_(keepdim ? self : self.squeeze(dim));
+    indices.zero_();
+    return;
+  }
+
+  auto [sorted, sorted_indices] = at::sort(self, /*stable=*/true, dim, /*descending=*/false);
+
+  // Boundaries of the runs of equal values in the sorted slice.
+  const auto differs = sorted.slice(dim, 0, n - 1).ne(sorted.slice(dim, 1, n));
+  auto edge_sizes = sorted.sizes().vec();
+  edge_sizes[dim] = 1;
+  const auto edge = at::ones(edge_sizes, self.options().dtype(kBool));
+  const auto run_start = at::cat({edge, differs}, dim);
+  const auto run_end = at::cat({differs, edge}, dim);
+
+  // Length of the run each position belongs to, known once its end is reached.
+  std::vector<int64_t> pos_shape(self.dim(), 1);
+  pos_shape[dim] = n;
+  const auto pos = at::arange(n, self.options().dtype(kLong)).view(pos_shape).expand(sorted.sizes());
+  const auto run_first = std::get<0>(at::cummax(at::where(run_start, pos, at::zeros_like(pos)), dim));
+  const auto run_length = pos.sub(run_first).add(1);
+
+  // Rank run ends by length, breaking ties towards the earlier position, which
+  // is the smaller value since the slice is sorted ascending. That matches the
+  // CPU kernel, whose frequency comparison is strict.
+  const auto rank =
+      at::where(run_end, run_length.mul(n).sub(pos), at::full_like(pos, std::numeric_limits<int64_t>::lowest()));
+  const auto winner = rank.argmax(dim, /*keepdim=*/true);
+
+  const auto mode_values = sorted.gather(dim, winner);
+  const auto mode_indices = sorted_indices.gather(dim, winner);
+  values.copy_(keepdim ? mode_values : mode_values.squeeze(dim));
+  indices.copy_(keepdim ? mode_indices : mode_indices.squeeze(dim));
+}
+
+REGISTER_DISPATCH(mode_stub, &mode_kernel_mps)
+
 } // namespace at::native

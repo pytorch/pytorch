@@ -81,7 +81,6 @@ if torch.backends.mps.is_available():
                 torch.uint8,
             ],
             "median": [torch.bool],
-            "mode": None,
             "nanmedian": [torch.bool],
             "native_batch_norm": [
                 torch.uint8,
@@ -576,6 +575,10 @@ if torch.backends.mps.is_available():
         }
 
         SKIPLIST_GRAD = {
+            # mode's index is only defined up to the choice of duplicate, and
+            # the gradient is a scatter at that index, so MPS and CPU can seed
+            # different positions once fp16 rounding creates ties.
+            "mode": [torch.float16],
             # topk index gather is flaky on fp16 - whether duplicates appear
             # in the seeded sample input depends on prior test order's RNG
             # draws, so we skip rather than xfail.
