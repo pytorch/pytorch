@@ -25,16 +25,17 @@ R = TypeVar("R")
 _OpCondFn = Callable[P, bool]
 _OpImplFn = Callable[P, R]
 
-# Masks unconditional overrides, which the user-facing filters cannot reach. The
-# only supported flip is torch._native._unconditional_masked(), which lets a test
-# compute stock-aten reference values for an op whose override IS the implementation.
-_mask_unconditional = False
-
 
 def _unconditional_is_masked() -> bool:
-    """Current value of the private mask. A getter, so a caller can read it before
-    mutating anything and restore it even if a later step of its setup raises."""
-    return _mask_unconditional
+    """Whether unconditional overrides are currently masked.
+
+    The flag itself lives on the C++ Context, where the generated AOT gates read it,
+    so overrides and AOT kernels cannot disagree about whether the exemption is
+    lifted. A getter, so a caller can read it before mutating anything and restore it
+    even if a later step of its setup raises. Flipped only by
+    torch._native._unconditional_masked(), for reference computations.
+    """
+    return torch._C._get_native_aot_unconditional_masked()
 
 
 def _set_mask_unconditional(masked: bool) -> bool:
@@ -43,9 +44,8 @@ def _set_mask_unconditional(masked: bool) -> bool:
 
     The rebuild is required because check_enabled runs at graph registration, not per
     call: flipping the flag alone leaves the installed routers untouched."""
-    global _mask_unconditional
-    previous = _mask_unconditional
-    _mask_unconditional = masked
+    previous = _unconditional_is_masked()
+    torch._C._set_native_aot_unconditional_masked(masked)
     for (op_symbol, dispatch_key), graph in _graphs.items():
         _cleanup_and_reregister_graph(
             op_symbol, dispatch_key, graph, filter_state=_filter_state
@@ -95,11 +95,11 @@ class _FilterState:
         An unconditional override is exempt from every filter: its impl is
         the op's implementation, not an accelerated route to the same
         answer, so disabling by DSL name / op / dispatch key must not
-        silently change what the op computes. The private
-        `_mask_unconditional` escape hatch is the sole exception, and exists
-        only so tests can obtain stock aten reference values.
+        silently change what the op computes. The private mask read by
+        _unconditional_is_masked() is the sole exception, and exists only so
+        tests can obtain stock aten reference values.
         """
-        if node.unconditional_override and not _mask_unconditional:
+        if node.unconditional_override and not _unconditional_is_masked():
             return True
 
         if node.dsl_name in self._dsl_names:
