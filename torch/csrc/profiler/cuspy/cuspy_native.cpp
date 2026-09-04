@@ -1,4 +1,4 @@
-#include <torch/csrc/profiler/cupti/monitor_native.h>
+#include <torch/csrc/profiler/cuspy/cuspy_native.h>
 
 #include <algorithm>
 #include <chrono>
@@ -50,8 +50,7 @@ CuptiLayoutKey layoutKey(const CuptiRecordLayout& layout) {
 
 } // namespace
 
-std::vector<CuptiRecordLayout> cuptiMonitorParseRecordLayouts(
-    void* complete_info) {
+std::vector<CuptiRecordLayout> cuspyParseRecordLayouts(void* complete_info) {
   std::vector<CuptiRecordLayout> out;
   if (complete_info == nullptr) {
     return out;
@@ -80,18 +79,18 @@ std::vector<CuptiRecordLayout> cuptiMonitorParseRecordLayouts(
   return out;
 }
 
-CuptiMonitorBuffers& CuptiMonitorBuffers::get() {
-  static CuptiMonitorBuffers instance;
+CuspyBuffers& CuspyBuffers::get() {
+  static CuspyBuffers instance;
   return instance;
 }
 
-void CuptiMonitorBuffers::configure(size_t buffer_size) {
+void CuspyBuffers::configure(size_t buffer_size) {
   std::lock_guard<std::mutex> guard(mutex_);
   buffer_size_ = buffer_size;
   shutdown_ = false;
 }
 
-void CuptiMonitorBuffers::on_request(
+void CuspyBuffers::on_request(
     uint8_t** buffer,
     size_t* size,
     size_t* max_records) {
@@ -120,7 +119,7 @@ void CuptiMonitorBuffers::on_request(
   *max_records = 0;
 }
 
-void CuptiMonitorBuffers::on_complete(
+void CuspyBuffers::on_complete(
     void* complete_info,
     uint8_t* buffer,
     size_t /*size*/,
@@ -130,7 +129,7 @@ void CuptiMonitorBuffers::on_complete(
   // delivers neither CUcontext nor streamId (they are selectable record
   // fields), so ctx/stream are 0.
   std::vector<CuptiRecordLayout> layouts =
-      cuptiMonitorParseRecordLayouts(complete_info);
+      cuspyParseRecordLayouts(complete_info);
   {
     std::lock_guard<std::mutex> guard(mutex_);
     completed_.push_back({buffer, valid_size, 0, 0, std::move(layouts)});
@@ -138,8 +137,7 @@ void CuptiMonitorBuffers::on_complete(
   cv_.notify_one();
 }
 
-std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::
-    pop_completed_locked() {
+std::optional<CompletedCuptiBuffer> CuspyBuffers::pop_completed_locked() {
   if (completed_.empty()) {
     return std::nullopt; // timeout or shutdown
   }
@@ -148,13 +146,13 @@ std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::
   return buf;
 }
 
-std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed() {
+std::optional<CompletedCuptiBuffer> CuspyBuffers::get_completed() {
   std::unique_lock<std::mutex> lock(mutex_);
   cv_.wait(lock, [this] { return !completed_.empty() || shutdown_; });
   return pop_completed_locked();
 }
 
-std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed_for(
+std::optional<CompletedCuptiBuffer> CuspyBuffers::get_completed_for(
     std::chrono::nanoseconds timeout) {
   std::unique_lock<std::mutex> lock(mutex_);
   cv_.wait_for(
@@ -162,22 +160,22 @@ std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed_for(
   return pop_completed_locked();
 }
 
-void CuptiMonitorBuffers::return_buffer(uint8_t* ptr) {
+void CuspyBuffers::return_buffer(uint8_t* ptr) {
   std::lock_guard<std::mutex> guard(mutex_);
   free_.push_back(ptr);
 }
 
-size_t CuptiMonitorBuffers::pending_count() {
+size_t CuspyBuffers::pending_count() {
   std::lock_guard<std::mutex> guard(mutex_);
   return completed_.size();
 }
 
-size_t CuptiMonitorBuffers::allocated_count() {
+size_t CuspyBuffers::allocated_count() {
   std::lock_guard<std::mutex> guard(mutex_);
   return allocated_;
 }
 
-void CuptiMonitorBuffers::shutdown() {
+void CuspyBuffers::shutdown() {
   {
     std::lock_guard<std::mutex> guard(mutex_);
     shutdown_ = true;
@@ -185,7 +183,7 @@ void CuptiMonitorBuffers::shutdown() {
   cv_.notify_all();
 }
 
-void CuptiMonitorBuffers::reset() {
+void CuspyBuffers::reset() {
   std::lock_guard<std::mutex> guard(mutex_);
   completed_.clear();
   free_.clear();
@@ -201,12 +199,12 @@ void CuptiMonitorBuffers::reset() {
 // ---------------------------------------------------------------------------
 // Native decode worker.
 
-CuptiMonitorDecoder& CuptiMonitorDecoder::get() {
-  static CuptiMonitorDecoder instance;
+CuspyDecoder& CuspyDecoder::get() {
+  static CuspyDecoder instance;
   return instance;
 }
 
-CuptiMonitorDecoder::~CuptiMonitorDecoder() {
+CuspyDecoder::~CuspyDecoder() {
   // The clean path is stop(), which joins the worker. If we reach destruction
   // with it still running (process exiting without stop()), wake it out of
   // get_completed() and join: leaving it parked on the pool's condvar would
@@ -215,13 +213,13 @@ CuptiMonitorDecoder::~CuptiMonitorDecoder() {
   // (constructed first), so this is safe; the join is bounded -- the worker
   // drains and exits.
   running_.store(false);
-  CuptiMonitorBuffers::get().shutdown();
+  CuspyBuffers::get().shutdown();
   if (thread_.joinable()) {
     thread_.join();
   }
 }
 
-void CuptiMonitorDecoder::configure(
+void CuspyDecoder::configure(
     uintptr_t subscriber,
     uintptr_t get_next_record_fn,
     uint32_t fence_kind,
@@ -241,25 +239,25 @@ void CuptiMonitorDecoder::configure(
   valid_bytes_.store(0);
 }
 
-void CuptiMonitorDecoder::start() {
+void CuspyDecoder::start() {
   if (running_.exchange(true)) {
     return; // already running
   }
-  thread_ = std::thread(&CuptiMonitorDecoder::worker_loop, this);
+  thread_ = std::thread(&CuspyDecoder::worker_loop, this);
 }
 
-void CuptiMonitorDecoder::stop() {
+void CuspyDecoder::stop() {
   if (!running_.exchange(false)) {
     return; // not running
   }
   // Wake the worker if it is blocked in get_completed().
-  CuptiMonitorBuffers::get().shutdown();
+  CuspyBuffers::get().shutdown();
   if (thread_.joinable()) {
     thread_.join();
   }
 }
 
-void CuptiMonitorDecoder::worker_loop() {
+void CuspyDecoder::worker_loop() {
   // Single native thread: drives the periodic plain flush (when self_flush_ is
   // set) AND decodes. cuptiActivityFlushAll(0) is called through the address
   // Python passed (like the record iterator), so this file needs no libcupti
@@ -281,7 +279,7 @@ void CuptiMonitorDecoder::worker_loop() {
   // Backdate so the first iteration flushes immediately (matters for HES, whose
   // records only surface on a flush).
   auto last_flush = std::chrono::steady_clock::now() - period;
-  auto& buffers = CuptiMonitorBuffers::get();
+  auto& buffers = CuspyBuffers::get();
   while (true) {
     if (do_flush) {
       auto now = std::chrono::steady_clock::now();
@@ -309,7 +307,7 @@ void CuptiMonitorDecoder::worker_loop() {
   }
 }
 
-void CuptiMonitorDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
+void CuspyDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
   if (get_next_record_fn_ == 0 || buf.valid_size == 0) {
     return;
   }
@@ -397,8 +395,8 @@ void CuptiMonitorDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
   }
 }
 
-std::vector<std::pair<uint32_t, std::map<int, CuptiColumn>>>
-CuptiMonitorDecoder::drain() {
+std::vector<std::pair<uint32_t, std::map<int, CuptiColumn>>> CuspyDecoder::
+    drain() {
   std::lock_guard<std::mutex> guard(mutex_);
   std::vector<std::pair<uint32_t, std::map<int, CuptiColumn>>> out;
   for (auto& [kind, by_sig] : columns_) {
@@ -410,7 +408,7 @@ CuptiMonitorDecoder::drain() {
   return out;
 }
 
-double cuptiMonitorBenchDecode(
+double cuspyBenchDecode(
     uintptr_t buffer_addr,
     size_t valid_size,
     const std::vector<CuptiRecordLayout>& layouts,
@@ -456,11 +454,11 @@ namespace {
 thread_local std::vector<uint64_t> g_external_id_stack;
 } // namespace
 
-void cuptiMonitorNoteExternalPush(uint64_t external_id) {
+void cuspyNoteExternalPush(uint64_t external_id) {
   g_external_id_stack.push_back(external_id);
 }
 
-uint64_t cuptiMonitorNoteExternalPop() {
+uint64_t cuspyNoteExternalPop() {
   if (g_external_id_stack.empty()) {
     return 0;
   }
@@ -469,7 +467,7 @@ uint64_t cuptiMonitorNoteExternalPop() {
   return id;
 }
 
-uint64_t cuptiMonitorCurrentExternalId() {
+uint64_t cuspyCurrentExternalId() {
   return g_external_id_stack.empty() ? 0 : g_external_id_stack.back();
 }
 
@@ -500,23 +498,22 @@ std::map<uint64_t, nlohmann::json> CuptiMetadataStore::drain_external() {
   return out;
 }
 
-void cuptiMonitorBufferRequested(
+void cuspyBufferRequested(
     uint8_t** buffer,
     size_t* size,
     size_t* max_num_records,
     void* /*request_info*/) {
-  CuptiMonitorBuffers::get().on_request(buffer, size, max_num_records);
+  CuspyBuffers::get().on_request(buffer, size, max_num_records);
 }
 
-void cuptiMonitorBufferCompleted(
+void cuspyBufferCompleted(
     uint8_t* buffer,
     size_t size,
     size_t valid_size,
     void* complete_info) {
   // The record layout in complete_info is valid only for this call; on_complete
   // parses it and attaches it to the queued buffer.
-  CuptiMonitorBuffers::get().on_complete(
-      complete_info, buffer, size, valid_size);
+  CuspyBuffers::get().on_complete(complete_info, buffer, size, valid_size);
 }
 
 } // namespace torch::profiler::impl
