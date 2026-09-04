@@ -2724,6 +2724,13 @@ class DictTests(torch._dynamo.test_case.TestCase):
         "setdefault": lambda d: d.__dict__.setdefault("m", 1),
         "init": lambda d: d.__dict__.__init__({"m": 1}),
         "vars_setitem": lambda d: vars(d).__setitem__("m", 1),
+        "getattr_setitem": lambda d: getattr(d, "__dict__").__setitem__("m", 1),  # noqa: B009
+        # The instance attribute is read as an attribute FIRST, so the tracker
+        # already exists when the __dict__ spelling reaches it.
+        "read_then_store": lambda d: (
+            dict(d._metadata),
+            d.__dict__.__setitem__("m", 1),
+        ),
     }
 
     @staticmethod
@@ -2763,12 +2770,15 @@ class DictTests(torch._dynamo.test_case.TestCase):
     def test_dunder_dict_write_declines(self, spelling):
         self._check_dunder_dict_declines(self._DUNDER_DICT_WRITES[spelling])
 
-    def test_dunder_dict_sourceless_declines(self):
+    @parametrize("spelling", ["store", "read"])
+    def test_dunder_dict_sourceless_declines(self, spelling):
         # A dict built in-frame has no source, so a store through its __dict__
-        # would be dropped on the floor rather than replayed.
+        # would be dropped on the floor rather than replayed. The read is
+        # declined too: the answer would come from a rebuilt copy.
         def fn(t):
             d = OrderedDict(a=1)
-            d.__dict__["m"] = 1
+            if spelling == "store":
+                d.__dict__["m"] = 1
             return t + 1, hasattr(d, "m"), dict(d.__dict__)
 
         x = torch.zeros(2)
@@ -2776,6 +2786,61 @@ class DictTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         torch._dynamo.reset()
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_dict_instance_attr_sourceless_setattr_declines(self):
+        # Seeding an instance attribute on a dict built in-frame is a
+        # sourceless setattr on a dict subclass. There is nothing to replay it
+        # onto, so it graph-breaks rather than silently dropping the store --
+        # this is why an OrderedDict carrying _metadata cannot be BUILT inside
+        # a fullgraph region, only passed in.
+        def fn(t):
+            d = OrderedDict(a=1)
+            d._metadata = OrderedDict([("", {"version": 1})])
+            return t + 1, hasattr(d, "_metadata"), list(d._metadata.items())
+
+        x = torch.zeros(2)
+        with self.assertRaisesRegex(Unsupported, "setattr\\(\\) on unsupported"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    @parametrize("fullgraph", [True, False])
+    @unittest.expectedFailure
+    def test_dunder_dict_descriptor_get_declines(self, fullgraph):
+        # PRE-EXISTING WRONG ANSWER, byte-identical before this change: calling
+        # the __dict__ getset descriptor directly bypasses the decline above
+        # and constant-folds through a rebuilt container, so it answers {} for
+        # an object whose instance dict is not empty. Every other spelling
+        # graph-breaks. When this is fixed the xfail flips loudly.
+        desc = OrderedDict.__dict__["__dict__"]
+
+        def fn(d, t):
+            return t + 1, dict(desc.__get__(d))
+
+        x = torch.zeros(2)
+        d_eager, d = self._seeded_ordered_dict(), self._seeded_ordered_dict()
+        expected = fn(d_eager, x)
+        if fullgraph:
+            with self.assertRaisesRegex(Unsupported, self.DUNDER_DICT_GB):
+                torch.compile(fn, backend="eager", fullgraph=True)(d, x)
+        else:
+            self.assertEqual(torch.compile(fn, backend="eager")(d, x), expected)
+
+    def test_issubclass_on_dict_instance_matches_eager(self):
+        # A dict tracker models no Python class, but issubclass() still has to
+        # raise the same TypeError eager does rather than answer from the type.
+        def fn(d, t):
+            try:
+                issubclass(d, dict)
+                return t + 1, "no-raise"
+            except TypeError as e:
+                return t + 1, str(e)
+
+        x = torch.zeros(2)
+        d = self._seeded_ordered_dict()
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(d, x), fn(d, x)
+        )
 
     def test_dunder_dict_aliased_reverse_order_declines(self):
         # The same instance dict also reaches the frame as a GLOBAL, a locality
