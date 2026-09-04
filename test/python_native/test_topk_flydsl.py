@@ -269,7 +269,7 @@ class TestFlyDSLTopK(TestCase):
 
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
 
-        info = topk_cache_info()
+        info = topk_cache_info("register")
         self.assertEqual(info.misses, 1)
         self.assertGreaterEqual(info.hits, 1)
         self.assertEqual(info.currsize, 1)
@@ -315,6 +315,28 @@ class TestFlyDSLTopK(TestCase):
         torch.manual_seed(11)
         x = make_tensor((_test_m(), 32769), device="cuda", dtype=torch.float32)
         self._assert_topk_matches_aten(x, 512)
+
+    @parametrize(
+        "kernel,k,n",
+        (
+            ("register", 8, 1024),
+            ("radix", 512, 32768),
+        ),
+    )
+    def test_misaligned_base_matches_aten(self, kernel: str, k: int, n: int):
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
+        torch.manual_seed(12)
+        m = _test_m()
+        self.assertEqual(_expected_kernel(k, n), kernel)
+        buf = torch.randn(m * n + 1, device="cuda", dtype=torch.float32)
+        x = buf[1:].reshape(m, n)
+        if not x.is_contiguous():
+            raise AssertionError("expected contiguous misaligned-base view")
+        if x.data_ptr() % 16 == 0:
+            raise AssertionError("expected misaligned base pointer")
+        self._assert_topk_matches_aten(x, k)
+        self.assertEqual(topk_cache_info(kernel).misses, 1)
 
     def test_noncontiguous_out_dispatches_and_matches_aten(self):
         k = 8

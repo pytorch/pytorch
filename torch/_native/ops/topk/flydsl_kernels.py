@@ -28,8 +28,10 @@ not guaranteed. Phase 1's xor by ``_RADIX_SIGN_BIT`` is separate: it puts
 the top byte in unsigned bin order for the scan.
 
 ``_make_topk_storage`` unions ``s_hist``, the phase-2 counters, ``s_scan``
-and ``s_keys`` - they alias, each live only within its phase. Anything
-spanning phases needs a struct member, not a union member.
+and ``s_keys`` - they alias, each live only within its phase. The phase-2
+barrier before bitonic sort is the hand-off: after it ``s_scan`` is dead and
+``s_keys`` is live until phase 4. Anything spanning phases needs a struct
+member, not a union member.
 """
 
 import math
@@ -83,12 +85,6 @@ def _decode_key(key):
     val = val_bits.bitcast(Float32)
     idx = ~inv_idx
     return val, idx, ord32
-
-
-def _decode_topk_key(key, row):
-    val, idx, ord32 = _decode_key(key)
-    val = (ord32 == fx.Int32(_NAN_SENTINEL_ORD)).select(row[idx], val)
-    return val, idx
 
 
 def _load_vec_f32(copy_atom, input_div, idx):
@@ -168,6 +164,12 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
         s_vals = storage.s_vals.peek().view(fx.make_layout(sort_len, 1))
         s_keys = storage.s_phase.s_keys.peek().view(fx.make_layout(sort_len, 1))
         s_idxs = storage.s_idxs.peek().view(fx.make_layout(sort_len, 1))
+
+        def decode_topk_key(key):
+            val, idx, ord32 = _decode_key(key)
+            if ord32 == fx.Int32(_NAN_SENTINEL_ORD):
+                val = row_in[idx]
+            return val, idx
 
         def warp_inclusive_prefix_i32(val, lane):
             for i in range_constexpr(int(math.log2(warp_size))):
@@ -387,7 +389,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
                 if col < n:
                     gather_candidate(row_in[col], fx.Int32(col), s_vals, s_idxs)
 
-        gpu.barrier()
+        gpu.barrier()  # Phase 3 owns s_keys; s_scan is dead after phase 2.
 
         # Phase 3: cooperative bitonic sort.
         active = tid < fx.Int32(k)
@@ -395,9 +397,9 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
         sort_tid = sort_active.select(tid, 0)
         if sort_active:
             if active:
-                s_keys[tid] = _make_key(s_vals[sort_tid], s_idxs[sort_tid])
+                s_keys[sort_tid] = _make_key(s_vals[sort_tid], s_idxs[sort_tid])
             else:
-                s_keys[tid] = fx.Int64(-(1 << 63))
+                s_keys[sort_tid] = fx.Int64(-(1 << 63))
         gpu.barrier()
 
         # The padded bitonic network builds ascending blocks first, then the
@@ -422,22 +424,22 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
                     if tid < partner:
                         if block_dir == 0:
                             if self_gt_partner:
-                                s_keys[tid] = partner_key
+                                s_keys[sort_tid] = partner_key
                         else:
                             if self_lt_partner:
-                                s_keys[tid] = partner_key
+                                s_keys[sort_tid] = partner_key
                     else:
                         if block_dir == 0:
                             if self_lt_partner:
-                                s_keys[tid] = partner_key
+                                s_keys[sort_tid] = partner_key
                         else:
                             if self_gt_partner:
-                                s_keys[tid] = partner_key
+                                s_keys[sort_tid] = partner_key
                 gpu.barrier()
 
         # Phase 4: results to gmem.
         if tid < fx.Int32(k):
-            val, idx = _decode_topk_key(s_keys[tid], row_in)
+            val, idx = decode_topk_key(s_keys[tid])
             row_values[tid] = val
             row_indices[tid] = fx.Int64(idx)
 
@@ -467,11 +469,10 @@ def _build_register_topk_module(n: int, k: int, arch: str):
     # Groups are K elements, widened to _VEC for 128-bit loads. N >= 1024 is a
     # power of two, with threads_per_row = 32 or 64.
     group = max(k, _VEC)
-    if vec % group or group % _VEC:
-        raise AssertionError(
-            f"group={group} must divide vec={vec}, and "
-            f"_VEC={_VEC} must divide group={group}"
-        )
+    if vec % group:
+        raise AssertionError(f"vec={vec} must be divisible by group={group}")
+    if group % _VEC:
+        raise AssertionError(f"group={group} must be divisible by _VEC={_VEC}")
     group_loads = group // _VEC
     num_groups = vec // group
     num_stages_group = int(math.log2(group))
@@ -501,6 +502,12 @@ def _build_register_topk_module(n: int, k: int, arch: str):
         row_indices = fx.slice(indices_buf, (row_safe, None))
         input_div = fx.logical_divide(row_input, fx.make_layout(_VEC, 1))
         copy_atom_v = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), 32)
+
+        def decode_topk_key(key):
+            val, idx, ord32 = _decode_key(key)
+            if ord32 == fx.Int32(_NAN_SENTINEL_ORD):
+                val = row_input[idx]
+            return val, idx
 
         def compare_and_swap(arr, i: int, j: int, descending: bool):
             a = arr[i]
@@ -572,7 +579,7 @@ def _build_register_topk_module(n: int, k: int, arch: str):
 
         if lane == 0 and in_bounds:
             for i in range_constexpr(k):
-                val, idx = _decode_topk_key(topk[i], row_input)
+                val, idx = decode_topk_key(topk[i])
                 row_values[i] = val
                 row_indices[i] = fx.Int64(idx)
 

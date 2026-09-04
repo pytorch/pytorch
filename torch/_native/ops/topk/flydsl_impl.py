@@ -15,8 +15,9 @@ Two kernels, picked by (K, N) - see ``flydsl_kernels.py``:
 
 ``_cond`` also requires fp32 on ``_SUPPORTED_ARCHES``, largest+sorted, a
 contiguous last-axis reduction, one CU-wave of rows, and the input
-(``M * N * itemsize``) plus indices output (``M * K * 8``) buffers inside
-the 32-bit span an AMD buffer descriptor addresses. The N bounds are closed
+(``M * N * itemsize``), values (``M * K * 4``), and indices (``M * K * 8``)
+buffers inside the 32-bit span an AMD buffer descriptor addresses. Values are
+not checked separately because the indices bound is tighter. The N bounds are closed
 intervals - both kernels lose to aten again at large N; anything outside
 falls through.
 
@@ -41,9 +42,7 @@ _REGISTER_KS: frozenset[int] = frozenset({2, 4, 8, 16})
 # One (min, max) N range shared by every K in _REGISTER_KS, tuned on MI355.
 _REGISTER_N_BOUNDS: tuple[int, int] = (1024, 8192)
 
-# Per-K-range (min, max) N ranges tuned on MI355.  Each row keeps
-# ``2 * K <= N`` so ``M * K * 8 <= M * N * 4`` whenever the input fits the
-# 32-bit buffer span.
+# Per-K-range (min, max) N ranges tuned on MI355.
 _RADIX_GATE_RANGES = (
     ((64, 256), (8192, 32768)),
     ((257, 383), (16384, 32768)),
@@ -149,11 +148,21 @@ def _run(self: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
 
     self_2d = flatten_last_dim(self)
     kernel = _kernel_for(k, self_2d.shape[-1])
-    if kernel == "register":
-        values_2d, indices_2d = topk_register(self_2d, k)
-        return unflatten_last_dim(values_2d, indices_2d, self, k)
-    deterministic = torch.are_deterministic_algorithms_enabled()
-    values_2d, indices_2d = topk_radix(self_2d, k, deterministic=deterministic)
+
+    def _launch() -> tuple[torch.Tensor, torch.Tensor]:
+        if kernel == "register":
+            return topk_register(self_2d, k)
+        deterministic = torch.are_deterministic_algorithms_enabled()
+        return topk_radix(self_2d, k, deterministic=deterministic)
+
+    # Python-native dispatch does not install a CUDA device guard before
+    # launching (unlike generated ATen); see cutedsl_impl.py / #187983.
+    device = self.get_device()
+    if device == torch.cuda.current_device():
+        values_2d, indices_2d = _launch()
+    else:
+        with torch.cuda.device(device):
+            values_2d, indices_2d = _launch()
     return unflatten_last_dim(values_2d, indices_2d, self, k)
 
 
@@ -168,27 +177,36 @@ def _run_out(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     from .flydsl_kernels import topk_radix_out, topk_register_out
 
-    if (
-        not values.is_contiguous()
-        or not indices.is_contiguous()
-        or torch._C._overlaps(self, values)
-        or torch._C._overlaps(self, indices)
-    ):
-        v, i = _run(self, k)
-        values.copy_(v)
-        indices.copy_(i)
+    def _launch_out() -> tuple[torch.Tensor, torch.Tensor]:
+        if (
+            not values.is_contiguous()
+            or not indices.is_contiguous()
+            or torch._C._overlaps(self, values)
+            or torch._C._overlaps(self, indices)
+        ):
+            v, i = _run(self, k)
+            values.copy_(v)
+            indices.copy_(i)
+            return values, indices
+
+        self_2d = flatten_last_dim(self)
+        values_2d = _flatten_topk_out(values, k)
+        indices_2d = _flatten_topk_out(indices, k)
+        kernel = _kernel_for(k, self_2d.shape[-1])
+        if kernel == "register":
+            topk_register_out(self_2d, k, values_2d, indices_2d)
+        else:
+            deterministic = torch.are_deterministic_algorithms_enabled()
+            topk_radix_out(
+                self_2d, k, values_2d, indices_2d, deterministic=deterministic
+            )
         return values, indices
 
-    self_2d = flatten_last_dim(self)
-    values_2d = _flatten_topk_out(values, k)
-    indices_2d = _flatten_topk_out(indices, k)
-    kernel = _kernel_for(k, self_2d.shape[-1])
-    if kernel == "register":
-        topk_register_out(self_2d, k, values_2d, indices_2d)
-    else:
-        deterministic = torch.are_deterministic_algorithms_enabled()
-        topk_radix_out(self_2d, k, values_2d, indices_2d, deterministic=deterministic)
-    return values, indices
+    device = self.get_device()
+    if device == torch.cuda.current_device():
+        return _launch_out()
+    with torch.cuda.device(device):
+        return _launch_out()
 
 
 def _impl(
