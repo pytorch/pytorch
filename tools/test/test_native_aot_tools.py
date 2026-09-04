@@ -255,10 +255,9 @@ class TestExportJobs(unittest.TestCase):
             self.assertNotIn("--gpu-arch", seen["options"] or "")
 
     def test_cutedsl_export_pins_the_host_isa(self):
-        # Left to the DSL it targets the build machine's CPU, so an AVX512 builder emits
-        # module loaders that SIGILL elsewhere; a declaration's own choice still wins.
-        # Local import: a test below binds `platform` as a loop variable.
-        import platform
+        # Unpinned, the DSL follows the build machine's CPU, so an AVX512 builder's
+        # module loaders SIGILL elsewhere; a declaration's own choice still wins.
+        import platform  # local: a test below binds `platform` as a loop variable
 
         tc = toolchains.CuteDslToolchain()
         pin = tc._HOST_TARGETS[platform.machine()]
