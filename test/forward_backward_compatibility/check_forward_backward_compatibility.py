@@ -149,6 +149,10 @@ ALLOW_LIST = [
     ("c10d::.*", datetime.date(9999, 1, 1)),
     # Previously MPS_only did not support backward
     ("aten::_fused_rms_norm", datetime.date(2025, 12, 30)),
+    ("aten::_aminmax", datetime.date(2027, 12, 31)),
+    ("aten::_aminmax.dim", datetime.date(2027, 12, 31)),
+    ("aten::_aminmax.out", datetime.date(2027, 12, 31)),
+    ("aten::_aminmax.dim_out", datetime.date(2027, 12, 31)),
     # Named tensor removal: all dimname/named overloads and ops permanently removed
     ("aten::rename", datetime.date(9999, 1, 1), None, True),
     ("aten::refine_names", datetime.date(9999, 1, 1), None, True),
