@@ -10,6 +10,7 @@ from cutlass import Int32
 
 import torch
 
+from ...cutedsl.dtypes import cute2torch, torch2cute
 from .._cutedsl import launch as _L
 from .._cutedsl.plan_cache import cached_plan
 from .._cutedsl.traits import WARP
@@ -390,8 +391,13 @@ def single_row_config(N: int, dtype_width: int, nfields: int = 1, hw=None):
     return _RowConfig(tpr=rungs[-1], nt=rungs[-1])
 
 
-def _launch_itree(trait, trait_key, plan, dt, wrap, N, tag, nouts=1, dsts=()):
-    """Compile-or-fetch and launch one stage of the order. `wrap` rewraps per call."""
+def _launch_itree(
+    trait, trait_key, plan, dt, fakes, operands, N, tag, nouts=1, dsts=()
+):
+    """Compile-or-fetch and launch one stage of the order.
+
+    `fakes` describes the operands for the compile; `operands` are the real tensors for the launch.
+    """
     op = tile.TileReduce(
         trait,
         dt,
@@ -405,8 +411,8 @@ def _launch_itree(trait, trait_key, plan, dt, wrap, N, tag, nouts=1, dsts=()):
 
     # N is baked into the DAG, so only M rides in dynamically; the col axis's args and the
     # general axis's decode are None, not dummies (an unused Int32 param costs real time).
-    def _args():
-        mIns, mOuts = wrap()
+    def _args(pair):
+        mIns, mOuts = pair
         return (
             mIns,
             mOuts,
@@ -426,8 +432,8 @@ def _launch_itree(trait, trait_key, plan, dt, wrap, N, tag, nouts=1, dsts=()):
     # output dtype are different kernels. Every sibling driver keys on them; without it the second
     # call fetches the first's plan and the launch fails on a mismatched tensor.
     key = (tag, trait_key, dt, tuple(dsts)) + op.cache_sig
-    build = lambda: _compile(op, *_args())  # noqa: E731
-    cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_args())
+    build = lambda: _compile(op, *_args(fakes))  # noqa: E731
+    cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_args(operands))
 
 
 def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
@@ -437,25 +443,24 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
     partials get one buffer PER TRAIT FIELD (an index or Welford accumulator is not one number).
     """
     M, N = x.shape
-    dt = _L.torch2cute[x.dtype]
+    dt = torch2cute[x.dtype]
     # A ragged row's stride is not a vec multiple, so the wide load's alignment is only what the
     # gcd allows -- declaring 16 there would be a lie and the load faults.
     align = tile.align_bytes(N, x.element_size())
-    wrap_in = lambda: _L.cute_tensor_dynM(  # noqa: E731
-        x, align=align, ndim=2, read_only=True
+    # N is baked into the DAG, so the row extent is static and only M rides in dynamically.
+    fake_in = _L.fake_compact(dt, (_L.sym(), N), order=(1, 0), align=align)
+    fake_1d = lambda t: _L.fake_compact(  # noqa: E731
+        torch2cute[t.dtype], (_L.sym(),)
     )
     if itree.shape != "split":
         outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
-        wrap = lambda: (  # noqa: E731
-            [wrap_in()],
-            [_L.cute_tensor_dynM(o, ndim=1) for o in outs],
-        )
         _launch_itree(
             trait,
             trait_key,
             itree,
             dt,
-            wrap,
+            ([fake_in], [fake_1d(o) for o in outs]),
+            ([_L.read_only(x)], list(outs)),
             N,
             "rowitree",
             nouts,
@@ -467,35 +472,29 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
     # path. Partials stay in the FIELD dtypes so the cross-batch fold rounds once.
     nbatch = itree.split[0]
     parts = [
-        torch.empty(M * nbatch, device=x.device, dtype=_L.cute2torch[trait.fdtypes[f]])
+        torch.empty(M * nbatch, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
         for f in range(trait.nfields)
     ]
-    wrap1 = lambda: (  # noqa: E731
-        [wrap_in()],
-        [_L.cute_tensor_dynM(p, ndim=1) for p in parts],
-    )
     _launch_itree(
         trait,
         trait_key,
         itree,
         dt,
-        wrap1,
+        ([fake_in], [fake_1d(p) for p in parts]),
+        ([_L.read_only(x)], list(parts)),
         N,
         "rowitree1",
         nouts,
         tuple(p.dtype for p in parts),
     )
     outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
-    wrap2 = lambda: (  # noqa: E731
-        [_L.cute_tensor_dynM(p, ndim=1, read_only=True) for p in parts],
-        [_L.cute_tensor_dynM(o, ndim=1) for o in outs],
-    )
     _launch_itree(
         trait,
         trait_key,
         itree_combine_plan(itree),
         dt,
-        wrap2,
+        ([fake_1d(p) for p in parts], [fake_1d(o) for o in outs]),
+        ([_L.read_only(p) for p in parts], list(outs)),
         N,
         "rowitree2",
         nouts,
@@ -562,7 +561,7 @@ def reduce_row_tile(
     nt -= nt % tpr  # rows_per_block must be whole
     if use_tma is None:
         use_tma = tpr == 1 and tma_ok(N, x.element_size(), M, x.device)
-    dt = _L.torch2cute[x.dtype]
+    dt = torch2cute[x.dtype]
     op = tile.TileReduce(
         trait,
         dt,
@@ -589,17 +588,16 @@ def reduce_row_tile(
     isz = x.element_size()
     align = op.tilemap.align_bytes(isz) if use_tma else tile.align_bytes(N, isz)
 
-    def _wrap():
-        mX = (
-            _L.cute_tensor_dynM(x, align=align, ndim=2, read_only=True)
-            if use_tma
-            else _L.cute_tensor_dynMN(x, op.vec, align=align, read_only=True)
-        )
-        # q/npar belong to the COL axis: None, not a dummy value -- an unused Int32 param
-        # costs real time (see tile.TileReduce.kernel).
+    def _fake():
+        # Compile-time descriptors. The input is 2D row-major with the leading extent dynamic; the
+        # INNER extent is dynamic (divisible by vec, so one kernel serves the whole vec class)
+        # EXCEPT under TMA, where the descriptor is built from the tile's static extents. `align` is
+        # what lets the load stay wide. q/npar belong to the COL axis: None, not a dummy value -- an
+        # unused Int32 param costs real time (see tile.TileReduce.kernel).
+        inner = N if use_tma else _L.sym(op.vec)
         return (
-            [mX],
-            [_L.cute_tensor_dynM(o, ndim=1) for o in outs],
+            [_L.fake_compact(dt, (_L.sym(), inner), order=(1, 0), align=align)],
+            [_L.fake_compact(torch2cute[o.dtype], (_L.sym(),)) for o in outs],
             nchunks,
             nwaves,
             Int32(N),
@@ -613,7 +611,23 @@ def reduce_row_tile(
         )
 
     key = ("rowtile", trait_key, x.dtype, tuple(out_dtypes[:ndst])) + op.cache_sig
-    build = lambda: _compile(op, *_wrap())  # noqa: E731
+    build = lambda: _compile(op, *_fake())  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
-    fn(*_wrap())
+    # The real operands: read_only on the INPUT, or a COW input is materialized on export.
+    # q/npar (col split) and rvals/kvals/in_base/limit (general decode) are unused on this axis:
+    # None rather than a dummy value -- an unused Int32 param costs real time.
+    fn(
+        [_L.read_only(x)],
+        list(outs),
+        nchunks,
+        nwaves,
+        Int32(N),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        _stream(),
+    )
     return tuple(outs)

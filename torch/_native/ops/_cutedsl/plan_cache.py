@@ -33,7 +33,12 @@ def cached_plan(cache: dict, key, build: Callable, *, op: str | None = None):
         if op is not None:
             from torch._native.instrumentation import instrument_cutedsl_compile
 
-            plan = instrument_cutedsl_compile(op, key_fn=lambda: str(key))(build)()
+            # compiled=True, not inferred: `build` is a plain closure with no cache_info, and it
+            # runs only on this MISS arm, so the miss-delta inference would call every real
+            # compile a cache hit.
+            plan = instrument_cutedsl_compile(
+                op, key_fn=lambda: str(key), compiled=True
+            )(build)()
         else:
             plan = build()
         cache[key] = plan
