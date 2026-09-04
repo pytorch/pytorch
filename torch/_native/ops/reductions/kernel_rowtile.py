@@ -221,6 +221,10 @@ def reduce_row_tile(
             nchunks,
             nwaves,
             Int32(N),
+            None,  # q, npar: the col axis's split
+            None,
+            None,  # rvals, kvals, in_base, limit: the general axis's decode
+            None,
             None,
             None,
             _stream(),
@@ -230,5 +234,20 @@ def reduce_row_tile(
     build = lambda: _compile(op, *_fake())  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
     # The real operands: read_only on the INPUT, or a COW input is materialized on export.
-    fn([_L.read_only(x)], list(outs), nchunks, nwaves, Int32(N), None, None, _stream())
+    # q/npar (col split) and rvals/kvals/in_base/limit (general decode) are unused on this axis:
+    # None rather than a dummy value -- an unused Int32 param costs real time.
+    fn(
+        [_L.read_only(x)],
+        list(outs),
+        nchunks,
+        nwaves,
+        Int32(N),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        _stream(),
+    )
     return tuple(outs)
