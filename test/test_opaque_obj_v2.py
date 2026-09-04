@@ -1617,6 +1617,18 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 NestedCounters(Counter(1, 5)), torch.ones(2, 3)
             )
 
+    def test_compile_missing_attribute(self):
+        counter = Counter(0, 10)
+
+        def foo(counter, x):
+            if hasattr(counter, "missing"):
+                x = x + 1
+            return x, getattr(counter, "missing", None)
+
+        x = torch.ones(2, 3)
+        opt_foo = torch.compile(foo, backend="eager", fullgraph=True)
+        self.assertEqual(opt_foo(counter, x), foo(counter, x))
+
     def test_compile_fixed_stride_order(self):
         hs_name = get_opaque_type_name(HoistedString)
 
