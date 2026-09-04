@@ -90,6 +90,7 @@ from .static_triton_launcher import (
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
+    CompilationError,
     CompiledKernel,
     Config,
     GPUTarget,
@@ -827,12 +828,12 @@ class CachingAutotuner(KernelInterface):
         for c in self.configs:
             try:
                 compile_results.append(self._precompile_config(c))
-            except (OutOfResources, PTXASError, IntelGPUError) as e:
+            except (OutOfResources, PTXASError, IntelGPUError, CompilationError) as e:
                 exc = e
         if len(compile_results) == 0:
             raise NoTritonConfigsError(
                 f"No valid triton configs. {type(exc).__name__}: {exc}"
-            )
+            ) from exc
         self.compile_results = compile_results
         self.configs = None
 
