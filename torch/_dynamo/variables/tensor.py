@@ -2946,22 +2946,6 @@ class SymNodeVariable(VariableTracker):
         "__int__": Method(int_),
     }
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # Unlisted names keep the generic FX-proxy path so getattr still
-        # dispatches through call_method (_has_custom_call_method).
-        method = self.lookup_tp_method(name)
-        if method is not None:
-            result = method(self, tx, name, args, kwargs)
-            if result is not None:
-                return result
-        return self._proxy_method(tx, name, args, kwargs)
-
     def nb_index_impl(
         self,
         tx: "InstructionTranslatorBase",
