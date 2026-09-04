@@ -7171,6 +7171,7 @@
   dispatch:
     CompositeExplicitAutograd: _grouped_mm
     CUDA: _grouped_mm_cuda
+    MPS: _grouped_mm_mps
 
 # NOTE [ Sparse: autograd and API ]
 #
