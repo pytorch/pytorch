@@ -47,7 +47,7 @@ enum class WorkResult : std::uint8_t {
 // Converts OpType to human readable string.
 TORCH_API std::string opTypeToString(OpType opType);
 
-// Whether or not an OP is an p2p op (SEND, RECV, RECVANYSOURCE)
+// Whether or not an OP is a p2p op (SEND, RECV, RECVANYSOURCE)
 TORCH_API bool isP2POp(OpType opType, bool batchP2P = false);
 
 // Please do not use Work API, it is going away, to be
@@ -135,6 +135,11 @@ class TORCH_API Work : public torch::CustomClassHolder {
   virtual uint64_t getSequencenumber() const;
 
   virtual std::chrono::milliseconds getTimeout() const;
+
+  // Opaque identity used to correlate a Work with backend completion. A
+  // backend whose completion can outlive the Work must override this with a
+  // non-reused key.
+  virtual uint64_t getCompletionKey() const;
 
   OpType retrieveOpType() const;
 
