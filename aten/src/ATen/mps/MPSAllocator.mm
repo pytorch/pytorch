@@ -493,7 +493,8 @@ bool MPSHeapAllocatorImpl::insert_available_buffer(BufferPool& pool, BufferBlock
   bool inserted = pool.available_buffers.insert(buffer_block).second;
   auto it = pool.available_buffers_by_stream.find(buffer_block->stream);
   if (it == pool.available_buffers_by_stream.end()) {
-    it = pool.available_buffers_by_stream.emplace(buffer_block->stream, std::set<BufferBlock*, BufferComparison>())
+    it = pool.available_buffers_by_stream
+             .emplace(buffer_block->stream, std::set<BufferBlock*, BufferComparison>(BufferBlock::Comparator))
              .first;
   }
   it->second.insert(buffer_block);

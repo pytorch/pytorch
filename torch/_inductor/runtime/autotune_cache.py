@@ -67,8 +67,7 @@ def inductor_meta_from_config() -> _InductorMetaTy:
     from torch._inductor import config
 
     backend_hash = None
-    # CPU Triton artifacts also need a backend-specific cache key.
-    if has_triton(include_cpu=True):
+    if has_triton():
         try:
             backend_hash = torch.utils._triton.triton_hash_with_backend()
         except RuntimeError:

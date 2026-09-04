@@ -85,7 +85,6 @@ from .base import (
     AsPythonConstantNotImplementedError,
     GetSet,
     Member,
-    Method,
     ValueMutationNew,
     VariableTracker,
 )
@@ -2440,7 +2439,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             (
                 variables.SetVariable,
                 variables.FrozensetVariable,
-                variables.DictKeySetVariable,
                 variables.ConstDictVariable,
             ),
         ):
@@ -3206,14 +3204,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         if isinstance(a, DictViewVariable):
             a = a.dv_dict
         if isinstance(
-            a,
-            (
-                ListVariable,
-                ConstDictVariable,
-                SetVariable,
-                FrozensetVariable,
-                variables.DictKeySetVariable,
-            ),
+            a, (ListVariable, ConstDictVariable, SetVariable, FrozensetVariable)
         ):
             return VariableTracker.build(tx, len(a.items) == 0)
         if isinstance(a, UserDefinedObjectVariable):
@@ -3249,18 +3240,6 @@ class DictBuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         return DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
-    def fromkeys(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
-
-    tp_methods = {
-        "fromkeys": Method(fromkeys),
-    }
-
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -3283,6 +3262,11 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     [],
                     tx=tx,
                 )
+
+        if name == "fromkeys":
+            return DictBuiltinVariable.call_custom_dict_fromkeys(
+                tx, dict, *args, **kwargs
+            )
 
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
@@ -3395,13 +3379,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # CPython's do-not-rehash-dict-keys behavior when building a dict from
         # an existing set/frozenset/dict.
         if isinstance(
-            arg,
-            (
-                variables.SetVariable,
-                variables.FrozensetVariable,
-                variables.DictKeySetVariable,
-                ConstDictVariable,
-            ),
+            arg, (variables.SetVariable, variables.FrozensetVariable, ConstDictVariable)
         ):
             # HashableTracker keys are accepted by ConstDictVariable.__init__.
             return _make_result(dict.fromkeys(arg.items.keys(), value))  # type: ignore[arg-type]

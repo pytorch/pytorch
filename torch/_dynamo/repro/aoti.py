@@ -44,8 +44,6 @@ from torch._dynamo.debug_utils import (
 from torch.export import ExportedProgram
 from torch.hub import tqdm
 
-from . import _minifier_sanity_guard
-
 
 log = logging.getLogger(__name__)
 
@@ -461,25 +459,23 @@ def repro_minify(
                 return False
             return True
 
-    with _minifier_sanity_guard() as sanity:
-        minifier(
-            mod,
-            flat_example_inputs,
-            module_fails=functools.partial(module_fails, check_str=options.check_str),
-            dump_state=functools.partial(
-                dump_compiler_graph_state,
-                compiler_name=compiler_name,
-                config_patches=config_patches,
-                accuracy=options.accuracy,
-                strict=strict,
-            ),
-            save_dir=options.save_dir,
-            offload_to_disk=options.offload_to_disk,
-            skip_offload=options.skip_saving_eager_intermediates,
-            skip_sanity=options.skip_sanity,
-            max_granularity=options.max_granularity,
-        )
-    sanity.raise_if_failed()
+    minifier(
+        mod,
+        flat_example_inputs,
+        module_fails=functools.partial(module_fails, check_str=options.check_str),
+        dump_state=functools.partial(
+            dump_compiler_graph_state,
+            compiler_name=compiler_name,
+            config_patches=config_patches,
+            accuracy=options.accuracy,
+            strict=strict,
+        ),
+        save_dir=options.save_dir,
+        offload_to_disk=options.offload_to_disk,
+        skip_offload=options.skip_saving_eager_intermediates,
+        skip_sanity=options.skip_sanity,
+        max_granularity=options.max_granularity,
+    )
 
 
 def run_repro(

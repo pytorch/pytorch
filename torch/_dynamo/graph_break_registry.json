@@ -182,14 +182,6 @@
   "GB2019": [
     {
       "Gb_type": "Unsupported autograd.Function context `mark_dirty`",
-      "Context": "call_method {self} mark_dirty",
-      "Explanation": "Dynamo only supports tracing ctx.mark_dirty inside autograd.Function.apply.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    },
-    {
-      "Gb_type": "Unsupported autograd.Function context `mark_dirty`",
       "Context": "call_method {self} {name}",
       "Explanation": "Dynamo only supports tracing ctx.mark_dirty inside autograd.Function.apply.",
       "Hints": [
@@ -2112,16 +2104,6 @@
   "GB0138": [
     {
       "Gb_type": "Unsupported autograd.Function context `save_for_backward`",
-      "Context": "call_method {self} save_for_backward",
-      "Explanation": "Dynamo requires the `saved_tensors` attribute to be initialized on the `autograd.Function` context object.",
-      "Hints": [
-        "Ensure that the `saved_tensors` attribute is properly ",
-        "initialized before calling `save_for_backward`. ",
-        "`save_for_backward` only supported on a newly constructed `torch.autograd.function.FunctionCtx`."
-      ]
-    },
-    {
-      "Gb_type": "Unsupported autograd.Function context `save_for_backward`",
       "Context": "call_method {self} {name}",
       "Explanation": "Dynamo requires the `saved_tensors` attribute to be initialized on the `autograd.Function` context object.",
       "Hints": [
@@ -2683,12 +2665,6 @@
     }
   ],
   "GB0166": [
-    {
-      "Gb_type": "Unsupported torch._C._ImperativeEngine.queue_callback()",
-      "Context": "call_method {self} queue_callback",
-      "Explanation": "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True.",
-      "Hints": []
-    },
     {
       "Gb_type": "Unsupported torch._C._ImperativeEngine.queue_callback()",
       "Context": "call_method {self} {name}",
@@ -3255,26 +3231,6 @@
       "Gb_type": "Unresolved GetAttrVariable comparison",
       "Context": "richcompare_impl {self} {op}",
       "Explanation": "Cannot compare {self} because the attribute could not be resolved to a concrete value.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB9352": [
-    {
-      "Gb_type": "Data-dependent uint64 torch.Size element in torch._C._infer_size",
-      "Context": "torch.uint64 tensor-backed size",
-      "Explanation": "Dynamo cannot safely validate that a data-dependent torch.uint64 value fits in torch.Size's signed int64 range.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB9211": [
-    {
-      "Gb_type": "Unhinted data-dependent torch.Size element in torch._C._infer_size",
-      "Context": "symbolic size: {item.sym_num}",
-      "Explanation": "Dynamo cannot safely validate that a data-dependent torch.Size element fits in the signed int64 range.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

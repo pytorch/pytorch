@@ -1,9 +1,9 @@
+# mypy: ignore-errors
+
 """
 Utility function to facilitate testing.
 
 """
-
-from __future__ import annotations
 
 import contextlib
 import gc
@@ -18,48 +18,10 @@ import warnings
 from functools import wraps
 from io import StringIO
 from tempfile import mkdtemp, mkstemp
-from types import ModuleType
-from typing import cast, overload, ParamSpec, TYPE_CHECKING, TypeVar
 from warnings import WarningMessage
 
 import torch._numpy as np
-
-# torch._numpy builds its public __all__ dynamically, so pyrefly cannot see
-# these star-exported names statically.
-from torch._numpy import (
-    arange,  # pyrefly: ignore[missing-module-attribute]
-    asarray as asanyarray,
-    empty,  # pyrefly: ignore[missing-module-attribute]
-    float32,
-    intp,  # pyrefly: ignore[missing-module-attribute]
-    ndarray,
-)
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
-    from types import TracebackType
-    from typing import Literal, Never, Protocol, Self, TypeAlias
-
-    import numpy as _np
-    from numpy.typing import ArrayLike, DTypeLike
-
-    # Concrete numpy ndarray type (avoids the implicit-any of a bare `ndarray`).
-    _NDArray = _np.ndarray[tuple[int, ...], _np.dtype[_np.generic]]
-
-    # A message is either the text itself or a thunk producing it on failure.
-    _Message: TypeAlias = str | Callable[[], str]
-
-    _ForwardingRule: TypeAlias = Literal["always", "module", "once", "location"]
-
-    class _Decorator(Protocol):
-        """A decorator that preserves the signature of the function it wraps."""
-
-        def __call__(self, func: Callable[_P, _R]) -> Callable[_P, _R]: ...
-
-
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
+from torch._numpy import arange, asarray as asanyarray, empty, float32, intp, ndarray
 
 
 __all__ = [
@@ -105,11 +67,7 @@ IS_PYSTON = hasattr(sys, "pyston_version_info")
 HAS_REFCOUNT = getattr(sys, "getrefcount", None) is not None and not IS_PYSTON
 
 
-@overload
-def assert_(val: Literal[False], msg: _Message = "") -> Never: ...
-@overload
-def assert_(val: object, msg: _Message = "") -> None: ...
-def assert_(val: object, msg: _Message = "") -> None:
+def assert_(val, msg=""):
     """
     Assert that works in release mode.
     Accepts callable msg to allow deferring evaluation until failure.
@@ -123,38 +81,32 @@ def assert_(val: object, msg: _Message = "") -> None:
     __tracebackhide__ = True  # Hide traceback for py.test
     if not val:
         try:
-            smsg = msg() if callable(msg) else msg
+            smsg = msg()
         except TypeError:
             smsg = msg
         raise AssertionError(smsg)
 
 
-def _callable_name(func: Callable[..., object]) -> str:
-    # These helpers accept any callable; builtins and functools.partial objects
-    # do not necessarily have __name__.
-    return getattr(func, "__name__", repr(func))
+def gisnan(x):
+    return np.isnan(x)
 
 
-def gisnan(x: object) -> ndarray:
-    return np.isnan(x)  # pyrefly: ignore[missing-attribute]
+def gisfinite(x):
+    return np.isfinite(x)
 
 
-def gisfinite(x: object) -> ndarray:
-    return np.isfinite(x)  # pyrefly: ignore[missing-attribute]
-
-
-def gisinf(x: object) -> ndarray:
-    return np.isinf(x)  # pyrefly: ignore[missing-attribute]
+def gisinf(x):
+    return np.isinf(x)
 
 
 def build_err_msg(
-    arrays: Sequence[object],
-    err_msg: str,
-    header: str = "Items are not equal:",
-    verbose: bool = True,
-    names: Sequence[str] = ("ACTUAL", "DESIRED"),
-    precision: int = 8,
-) -> str:
+    arrays,
+    err_msg,
+    header="Items are not equal:",
+    verbose=True,
+    names=("ACTUAL", "DESIRED"),
+    precision=8,
+):
     msg = ["\n" + header]
     if err_msg:
         if err_msg.find("\n") == -1 and len(err_msg) < 79 - len(header):
@@ -163,15 +115,15 @@ def build_err_msg(
             msg.append(err_msg)
     if verbose:
         for i, a in enumerate(arrays):
+            if isinstance(a, ndarray):
+                # precision argument is only needed if the objects are ndarrays
+                # r_func = partial(array_repr, precision=precision)
+                r_func = ndarray.__repr__
+            else:
+                r_func = repr
+
             try:
-                if isinstance(a, ndarray):
-                    # precision argument is only needed if the objects are ndarrays
-                    # r_func = partial(array_repr, precision=precision)
-                    # NB: ndarray.__repr__ is created dynamically, so it is not
-                    # statically known to return str.
-                    r = str(ndarray.__repr__(a))
-                else:
-                    r = repr(a)
+                r = r_func(a)
             except Exception as exc:
                 r = f"[repr failed for <{type(a).__name__}>: {exc}]"
             if r.count("\n") > 3:
@@ -181,9 +133,7 @@ def build_err_msg(
     return "\n".join(msg)
 
 
-def assert_equal(
-    actual: object, desired: object, err_msg: str = "", verbose: bool = True
-) -> bool | None:
+def assert_equal(actual, desired, err_msg="", verbose=True):
     """
     Raises an AssertionError if two objects are not equal.
 
@@ -269,7 +219,6 @@ def assert_equal(
             assert_equal(actual[k], desired[k], f"item={k!r}\n{err_msg}", verbose)
         return
 
-    # pyrefly: ignore[missing-module-attribute]  # dynamic torch._numpy exports
     from torch._numpy import imag, iscomplexobj, isscalar, ndarray, real, signbit
 
     if isinstance(actual, ndarray) or isinstance(desired, ndarray):
@@ -334,7 +283,7 @@ def assert_equal(
             raise
 
 
-def print_assert_equal(test_string: str, actual: object, desired: object) -> None:
+def print_assert_equal(test_string, actual, desired):
     """
     Test if two objects are equal, and print an error message if test fails.
 
@@ -379,13 +328,7 @@ def print_assert_equal(test_string: str, actual: object, desired: object) -> Non
         raise AssertionError(msg.getvalue())
 
 
-def assert_almost_equal(
-    actual: object,
-    desired: object,
-    decimal: int = 7,
-    err_msg: str = "",
-    verbose: bool = True,
-) -> None:
+def assert_almost_equal(actual, desired, decimal=7, err_msg="", verbose=True):
     """
     Raises an AssertionError if two items are not equal up to desired
     precision.
@@ -456,7 +399,6 @@ def assert_almost_equal(
 
     """
     __tracebackhide__ = True  # Hide traceback for py.test
-    # pyrefly: ignore[missing-module-attribute]  # dynamic torch._numpy exports
     from torch._numpy import imag, iscomplexobj, ndarray, real
 
     # Handle complex numbers: separate into real/imag to handle
@@ -467,7 +409,7 @@ def assert_almost_equal(
     except ValueError:
         usecomplex = False
 
-    def _build_err_msg() -> str:
+    def _build_err_msg():
         header = f"Arrays are not almost equal to {decimal:d} decimals"
         return build_err_msg([actual, desired], err_msg, verbose=verbose, header=header)
 
@@ -508,19 +450,11 @@ def assert_almost_equal(
             return
     except (NotImplementedError, TypeError):
         pass
-    # actual/desired are numeric scalars on this path (arrays handled above).
-    # pyrefly: ignore[unsupported-operation]
     if abs(desired - actual) >= np.float64(1.5 * 10.0 ** (-decimal)):
         raise AssertionError(_build_err_msg())
 
 
-def assert_approx_equal(
-    actual: float,
-    desired: float,
-    significant: int = 7,
-    err_msg: str = "",
-    verbose: bool = True,
-) -> None:
+def assert_approx_equal(actual, desired, significant=7, err_msg="", verbose=True):
     """
     Raises an AssertionError if two items are not equal up to significant
     digits.
@@ -629,45 +563,37 @@ def assert_approx_equal(
 
 
 def assert_array_compare(
-    comparison: Callable[..., object],
-    x: object,
-    y: object,
-    err_msg: str = "",
-    verbose: bool = True,
-    header: str = "",
-    precision: int = 6,
-    equal_nan: bool = True,
-    equal_inf: bool = True,
+    comparison,
+    x,
+    y,
+    err_msg="",
+    verbose=True,
+    header="",
+    precision=6,
+    equal_nan=True,
+    equal_inf=True,
     *,
-    strict: bool = False,
-) -> None:
+    strict=False,
+):
     __tracebackhide__ = True  # Hide traceback for py.test
-    # pyrefly: ignore[missing-module-attribute]  # dynamic torch._numpy exports
     from torch._numpy import all, array, asarray, bool_, inf, isnan, max
 
     x = asarray(x)
     y = asarray(y)
 
-    def array2string(a: object) -> str:
+    def array2string(a):
         return str(a)
 
     # original array for output formatting
     ox, oy = x, y
 
-    def func_assert_same_pos(
-        x: ndarray,
-        y: ndarray,
-        func: Callable[[ndarray], object] = isnan,
-        hasval: str = "nan",
-    ) -> object:
+    def func_assert_same_pos(x, y, func=isnan, hasval="nan"):
         """Handling nan/inf.
 
         Combine results of running func on x and y, checking that they are True
         at the same locations.
 
         """
-        # torch._numpy.ndarray defines its methods/operators dynamically, so
-        # pyrefly cannot see them; the ignores below cover those gaps.
         __tracebackhide__ = True  # Hide traceback for py.test
         x_id = func(x)
         y_id = func(y)
@@ -682,7 +608,6 @@ def assert_array_compare(
         #     not implement np.all(), so favor using the .all() method
         # We are not committed to supporting such subclasses, but it's nice to
         # support them if possible.
-        # pyrefly: ignore[missing-attribute]
         if (x_id == y_id).all().item() is not True:
             msg = build_err_msg(
                 [x, y],
@@ -695,10 +620,8 @@ def assert_array_compare(
             raise AssertionError(msg)
         # If there is a scalar, then here we know the array has the same
         # flag as it everywhere, so we should return the scalar flag.
-        # pyrefly: ignore[missing-attribute]
         if isinstance(x_id, bool) or x_id.ndim == 0:
             return bool_(x_id)
-        # pyrefly: ignore[missing-attribute]
         elif isinstance(y_id, bool) or y_id.ndim == 0:
             return bool_(y_id)
         else:
@@ -730,15 +653,14 @@ def assert_array_compare(
             flagged = func_assert_same_pos(x, y, func=isnan, hasval="nan")
 
         if equal_inf:
-            flagged |= func_assert_same_pos(  # pyrefly: ignore[unsupported-operation]
+            flagged |= func_assert_same_pos(
                 x, y, func=lambda xy: xy == +inf, hasval="+inf"
             )
-            flagged |= func_assert_same_pos(  # pyrefly: ignore[unsupported-operation]
+            flagged |= func_assert_same_pos(
                 x, y, func=lambda xy: xy == -inf, hasval="-inf"
             )
 
-        if flagged.ndim > 0:  # pyrefly: ignore[missing-attribute]
-            # pyrefly: ignore[unsupported-operation]  # ~ on ndarray is dynamic
+        if flagged.ndim > 0:
             x, y = x[~flagged], y[~flagged]
             # Only do the comparison if actual values are left
             if x.size == 0:
@@ -753,7 +675,7 @@ def assert_array_compare(
             cond = val
             reduced = array([val])
         else:
-            reduced = val.ravel()  # pyrefly: ignore[missing-attribute]
+            reduced = val.ravel()
             cond = reduced.all()
 
         # The below comparison is a hack to ensure that fully masked
@@ -761,9 +683,7 @@ def assert_array_compare(
         # do not trigger a failure (np.ma.masked != True evaluates as
         # np.ma.masked, which is falsy).
         if not cond:
-            # pyrefly: ignore[missing-attribute]  # ndarray.sum is dynamic
             n_mismatch = reduced.size - int(reduced.sum(dtype=intp))
-            # pyrefly: ignore[missing-attribute]  # ndarray attrs are dynamic
             n_elements = flagged.size if flagged.ndim != 0 else reduced.size
             percent_mismatch = 100 * n_mismatch / n_elements
             remarks = [
@@ -773,10 +693,9 @@ def assert_array_compare(
             # with errstate(all='ignore'):
             # ignore errors for non-numeric types
             with contextlib.suppress(TypeError, RuntimeError):
-                error = abs(x - y)  # pyrefly: ignore[unsupported-operation]
+                error = abs(x - y)
                 if np.issubdtype(x.dtype, np.unsignedinteger):
-                    error2 = abs(y - x)  # pyrefly: ignore[unsupported-operation]
-                    # pyrefly: ignore[missing-attribute]  # dynamic torch._numpy export
+                    error2 = abs(y - x)
                     np.minimum(error, error2, out=error)
                 max_abs_error = max(error)
                 remarks.append(
@@ -790,7 +709,6 @@ def assert_array_compare(
                 if all(~nonzero):
                     max_rel_error = array(inf)
                 else:
-                    # pyrefly: ignore[bad-argument-type]  # abs on dynamic ndarray
                     max_rel_error = max(error[nonzero] / abs(y[nonzero]))
                 remarks.append(
                     "Max relative difference: " + array2string(max_rel_error.item())
@@ -823,14 +741,7 @@ def assert_array_compare(
         raise ValueError(msg)  # noqa: B904
 
 
-def assert_array_equal(
-    x: object,
-    y: object,
-    err_msg: str = "",
-    verbose: bool = True,
-    *,
-    strict: bool = False,
-) -> None:
+def assert_array_equal(x, y, err_msg="", verbose=True, *, strict=False):
     """
     Raises an AssertionError if two array_like objects are not equal.
 
@@ -937,9 +848,7 @@ def assert_array_equal(
     )
 
 
-def assert_array_almost_equal(
-    x: object, y: object, decimal: int = 6, err_msg: str = "", verbose: bool = True
-) -> None:
+def assert_array_almost_equal(x, y, decimal=6, err_msg="", verbose=True):
     """
     Raises an AssertionError if two objects are not equal up to desired
     precision.
@@ -1018,23 +927,20 @@ def assert_array_almost_equal(
 
     """
     __tracebackhide__ = True  # Hide traceback for py.test
-    # pyrefly: ignore[missing-module-attribute]  # dynamic torch._numpy exports
     from torch._numpy import any as npany, float_, issubdtype, number, result_type
 
-    def compare(x: ndarray, y: ndarray) -> object:
-        # torch._numpy.ndarray methods/operators are dynamic, so the ndarray
-        # operations below are invisible to pyrefly.
+    def compare(x, y):
         try:
             if npany(gisinf(x)) or npany(gisinf(y)):
                 xinfid = gisinf(x)
                 yinfid = gisinf(y)
-                if not (xinfid == yinfid).all():  # pyrefly: ignore[missing-attribute]
+                if not (xinfid == yinfid).all():
                     return False
                 # if one item, x and y is +- inf
                 if x.size == y.size == 1:
                     return x == y
-                x = x[~xinfid]  # pyrefly: ignore[unsupported-operation]
-                y = y[~yinfid]  # pyrefly: ignore[unsupported-operation]
+                x = x[~xinfid]
+                y = y[~yinfid]
         except (TypeError, NotImplementedError):
             pass
 
@@ -1042,7 +948,7 @@ def assert_array_almost_equal(
         # casting of x later.
         dtype = result_type(y, 1.0)
         y = asanyarray(y, dtype)
-        z = abs(x - y)  # pyrefly: ignore[unsupported-operation]
+        z = abs(x - y)
 
         if not issubdtype(z.dtype, number):
             z = z.astype(float_)  # handle object arrays
@@ -1060,9 +966,7 @@ def assert_array_almost_equal(
     )
 
 
-def assert_array_less(
-    x: object, y: object, err_msg: str = "", verbose: bool = True
-) -> None:
+def assert_array_less(x, y, err_msg="", verbose=True):
     """
     Raises an AssertionError if two array_like objects are not ordered by less
     than.
@@ -1150,7 +1054,7 @@ def assert_array_less(
     )
 
 
-def assert_string_equal(actual: str, desired: str) -> None:
+def assert_string_equal(actual, desired):
     """
     Test if two strings are equal.
 
@@ -1190,7 +1094,7 @@ def assert_string_equal(actual: str, desired: str) -> None:
     diff = list(
         difflib.Differ().compare(actual.splitlines(True), desired.splitlines(True))
     )
-    diff_list: list[str] = []
+    diff_list = []
     while diff:
         d1 = diff.pop(0)
         if d1.startswith("  "):
@@ -1226,19 +1130,14 @@ import unittest
 
 
 class _Dummy(unittest.TestCase):
-    def nop(self) -> None:
+    def nop(self):
         pass
 
 
 _d = _Dummy("nop")
 
 
-def assert_raises_regex(
-    exception_class: type[BaseException],
-    expected_regexp: str | re.Pattern[str],
-    *args: object,
-    **kwargs: object,
-) -> object:
+def assert_raises_regex(exception_class, expected_regexp, *args, **kwargs):
     """
     assert_raises_regex(exception_class, expected_regexp, callable, *args,
                         **kwargs)
@@ -1259,11 +1158,7 @@ def assert_raises_regex(
     return _d.assertRaisesRegex(exception_class, expected_regexp, *args, **kwargs)
 
 
-def decorate_methods(
-    cls: type,
-    decorator: _Decorator,
-    testmatch: str | re.Pattern[str] | None = None,
-) -> None:
+def decorate_methods(cls, decorator, testmatch=None):
     """
     Apply a decorator to all methods in a class matching a regular expression.
 
@@ -1310,7 +1205,7 @@ def decorate_methods(
     return
 
 
-def _assert_valid_refcount(op: Callable[..., object]) -> bool | None:
+def _assert_valid_refcount(op):
     """
     Check that ufuncs don't mishandle refcount of object `1`.
     Used in a few regression tests.
@@ -1338,15 +1233,15 @@ def _assert_valid_refcount(op: Callable[..., object]) -> bool | None:
 
 
 def assert_allclose(
-    actual: object,
-    desired: object,
-    rtol: float = 1e-7,
-    atol: float = 0,
-    equal_nan: bool = True,
-    err_msg: str = "",
-    verbose: bool = True,
-    check_dtype: bool = False,
-) -> None:
+    actual,
+    desired,
+    rtol=1e-7,
+    atol=0,
+    equal_nan=True,
+    err_msg="",
+    verbose=True,
+    check_dtype=False,
+):
     """
     Raises an AssertionError if two objects are not equal up to desired
     tolerance.
@@ -1404,8 +1299,7 @@ def assert_allclose(
     """
     __tracebackhide__ = True  # Hide traceback for py.test
 
-    def compare(x: ndarray, y: ndarray) -> object:
-        # pyrefly: ignore[missing-attribute]  # dynamic torch._numpy export
+    def compare(x, y):
         return np.isclose(x, y, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
     actual, desired = asanyarray(actual), asanyarray(desired)
@@ -1426,7 +1320,7 @@ def assert_allclose(
     )
 
 
-def assert_array_almost_equal_nulp(x: ArrayLike, y: ArrayLike, nulp: int = 1) -> None:
+def assert_array_almost_equal_nulp(x, y, nulp=1):
     """
     Compare two arrays relatively to their spacing.
 
@@ -1481,7 +1375,6 @@ def assert_array_almost_equal_nulp(x: ArrayLike, y: ArrayLike, nulp: int = 1) ->
     ax = np.abs(x)
     ay = np.abs(y)
     ref = nulp * np.spacing(np.where(ax > ay, ax, ay))
-    # pyrefly: ignore[unsupported-operation]  # x/y are array_like, subtracted via numpy
     if not np.all(np.abs(x - y) <= ref):
         if np.iscomplexobj(x) or np.iscomplexobj(y):
             msg = f"X and Y are not equal to {nulp:d} ULP"
@@ -1491,9 +1384,7 @@ def assert_array_almost_equal_nulp(x: ArrayLike, y: ArrayLike, nulp: int = 1) ->
         raise AssertionError(msg)
 
 
-def assert_array_max_ulp(
-    a: ArrayLike, b: ArrayLike, maxulp: int = 1, dtype: DTypeLike | None = None
-) -> _NDArray:
+def assert_array_max_ulp(a, b, maxulp=1, dtype=None):
     """
     Check that all items of arrays differ in at most N Units in the Last Place.
 
@@ -1539,7 +1430,6 @@ def assert_array_max_ulp(
     import numpy as np
 
     ret = nulp_diff(a, b, dtype)
-    # pyrefly: ignore[unsupported-operation]  # abstract dtype lacks elementwise <=
     if not np.all(ret <= maxulp):
         raise AssertionError(
             f"Arrays are not almost equal up to {maxulp:g} "
@@ -1548,7 +1438,7 @@ def assert_array_max_ulp(
     return ret
 
 
-def nulp_diff(x: ArrayLike, y: ArrayLike, dtype: DTypeLike | None = None) -> _NDArray:
+def nulp_diff(x, y, dtype=None):
     """For each item in x and y, return the number of representable floating
     points between them.
 
@@ -1602,8 +1492,7 @@ def nulp_diff(x: ArrayLike, y: ArrayLike, dtype: DTypeLike | None = None) -> _ND
     if not x.shape == y.shape:
         raise ValueError(f"x and y do not have the same shape: {x.shape} - {y.shape}")
 
-    def _diff(rx: _NDArray, ry: _NDArray, vdt: DTypeLike) -> _NDArray:
-        # pyrefly: ignore[unsupported-operation]  # abstract dtype lacks elementwise -
+    def _diff(rx, ry, vdt):
         diff = np.asarray(rx - ry, dtype=vdt)
         return np.abs(diff)
 
@@ -1612,7 +1501,7 @@ def nulp_diff(x: ArrayLike, y: ArrayLike, dtype: DTypeLike | None = None) -> _ND
     return _diff(rx, ry, t)
 
 
-def _integer_repr(x: _NDArray, vdt: DTypeLike, comp: _np.generic) -> _NDArray:
+def _integer_repr(x, vdt, comp):
     # Reinterpret binary representation of the float as sign-magnitude:
     # take into account two's-complement representation
     # See also
@@ -1627,7 +1516,7 @@ def _integer_repr(x: _NDArray, vdt: DTypeLike, comp: _np.generic) -> _NDArray:
     return rx
 
 
-def integer_repr(x: _NDArray) -> _NDArray:
+def integer_repr(x):
     """Return the signed-magnitude interpretation of the binary representation
     of x."""
     import numpy as np
@@ -1643,9 +1532,7 @@ def integer_repr(x: _NDArray) -> _NDArray:
 
 
 @contextlib.contextmanager
-def _assert_warns_context(
-    warning_class: type[Warning], name: str | None = None
-) -> Iterator[None]:
+def _assert_warns_context(warning_class, name=None):
     __tracebackhide__ = True  # Hide traceback for py.test
     with suppress_warnings() as sup:
         l = sup.record(warning_class)
@@ -1655,20 +1542,7 @@ def _assert_warns_context(
             raise AssertionError("No warning raised" + name_str)
 
 
-@overload
-def assert_warns(
-    warning_class: type[Warning],
-) -> contextlib.AbstractContextManager[None]: ...
-@overload
-def assert_warns(
-    warning_class: type[Warning],
-    func: Callable[_P, _R],
-    *args: _P.args,
-    **kwargs: _P.kwargs,
-) -> _R: ...
-def assert_warns(
-    warning_class: type[Warning], *args: object, **kwargs: object
-) -> object:
+def assert_warns(warning_class, *args, **kwargs):
     """
     Fail unless the given callable throws the specified warning.
 
@@ -1716,14 +1590,14 @@ def assert_warns(
     if not args:
         return _assert_warns_context(warning_class)
 
-    func = cast("Callable[..., object]", args[0])
+    func = args[0]
     args = args[1:]
-    with _assert_warns_context(warning_class, name=_callable_name(func)):
+    with _assert_warns_context(warning_class, name=func.__name__):
         return func(*args, **kwargs)
 
 
 @contextlib.contextmanager
-def _assert_no_warnings_context(name: str | None = None) -> Iterator[None]:
+def _assert_no_warnings_context(name=None):
     __tracebackhide__ = True  # Hide traceback for py.test
     with warnings.catch_warnings(record=True) as l:
         warnings.simplefilter("always")
@@ -1733,13 +1607,7 @@ def _assert_no_warnings_context(name: str | None = None) -> Iterator[None]:
             raise AssertionError(f"Got warnings{name_str}: {l}")
 
 
-@overload
-def assert_no_warnings() -> contextlib.AbstractContextManager[None]: ...
-@overload
-def assert_no_warnings(
-    func: Callable[_P, _R], *args: _P.args, **kwargs: _P.kwargs
-) -> _R: ...
-def assert_no_warnings(*args: object, **kwargs: object) -> object:
+def assert_no_warnings(*args, **kwargs):
     """
     Fail if the given callable produces any warnings.
 
@@ -1769,17 +1637,13 @@ def assert_no_warnings(*args: object, **kwargs: object) -> object:
     if not args:
         return _assert_no_warnings_context()
 
-    func = cast("Callable[..., object]", args[0])
+    func = args[0]
     args = args[1:]
-    with _assert_no_warnings_context(name=_callable_name(func)):
+    with _assert_no_warnings_context(name=func.__name__):
         return func(*args, **kwargs)
 
 
-def _gen_alignment_data(
-    dtype: object = float32,
-    type: Literal["unary", "binary"] = "binary",
-    max_size: int = 24,
-) -> Iterator[tuple[object, ...]]:
+def _gen_alignment_data(dtype=float32, type="binary", max_size=24):
     """
     generator producing data with different alignment and offsets
     to test simd vectorization
@@ -1810,7 +1674,7 @@ def _gen_alignment_data(
         for s in range(o + 2, max(o + 3, max_size)):
             if type == "unary":
 
-                def inp() -> ndarray:
+                def inp():
                     return arange(s, dtype=dtype)[o:]
 
                 out = empty((s,), dtype=dtype)[o:]
@@ -1845,7 +1709,7 @@ def _gen_alignment_data(
                 yield inp()[1:], inp()[:-1], ufmt % (o + 1, o, s - 1, dtype, "aliased")
             if type == "binary":
 
-                def inp1() -> ndarray:
+                def inp1():
                     return arange(s, dtype=dtype)[o:]
 
                 inp2 = inp1
@@ -1946,18 +1810,14 @@ class IgnoreException(Exception):
 
 
 @contextlib.contextmanager
-def tempdir(
-    suffix: str | None = None,
-    prefix: str | None = None,
-    dir: str | os.PathLike[str] | None = None,
-) -> Iterator[str]:
+def tempdir(*args, **kwargs):
     """Context manager to provide a temporary test folder.
 
     All arguments are passed as this to the underlying tempfile.mkdtemp
     function.
 
     """
-    tmpdir = mkdtemp(suffix, prefix, dir)
+    tmpdir = mkdtemp(*args, **kwargs)
     try:
         yield tmpdir
     finally:
@@ -1965,12 +1825,7 @@ def tempdir(
 
 
 @contextlib.contextmanager
-def temppath(
-    suffix: str | None = None,
-    prefix: str | None = None,
-    dir: str | os.PathLike[str] | None = None,
-    text: bool = False,
-) -> Iterator[str]:
+def temppath(*args, **kwargs):
     """Context manager for temporary files.
 
     Context manager that returns the path to a closed temporary file. Its
@@ -1983,7 +1838,7 @@ def temppath(
     can be opened again.
 
     """
-    fd, path = mkstemp(suffix, prefix, dir, text)
+    fd, path = mkstemp(*args, **kwargs)
     os.close(fd)
     try:
         yield path
@@ -2035,47 +1890,28 @@ class clear_and_catch_warnings(warnings.catch_warnings):
     ...     # np.core.fromnumeric
     """
 
-    class_modules: tuple[ModuleType, ...] = ()
+    class_modules = ()
 
-    def __init__(
-        self, record: bool = False, modules: Sequence[ModuleType] = ()
-    ) -> None:
+    def __init__(self, record=False, modules=()):
         self.modules = set(modules).union(self.class_modules)
-        self._warnreg_copies: dict[ModuleType, dict[object, object]] = {}
+        self._warnreg_copies = {}
         super().__init__(record=record)
 
-    def __enter__(self) -> list[WarningMessage] | None:
+    def __enter__(self):
         for mod in self.modules:
             if hasattr(mod, "__warningregistry__"):
-                # pyrefly: ignore[missing-attribute]  # set dynamically by warnings
                 mod_reg = mod.__warningregistry__
                 self._warnreg_copies[mod] = mod_reg.copy()
                 mod_reg.clear()
         return super().__enter__()
 
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        super().__exit__(exc_type, exc_val, exc_tb)
+    def __exit__(self, *exc_info):
+        super().__exit__(*exc_info)
         for mod in self.modules:
             if hasattr(mod, "__warningregistry__"):
-                # pyrefly: ignore[missing-attribute]  # set dynamically by warnings
                 mod.__warningregistry__.clear()
             if mod in self._warnreg_copies:
-                # pyrefly: ignore[missing-attribute]  # set dynamically by warnings
                 mod.__warningregistry__.update(self._warnreg_copies[mod])
-
-
-_Suppression: TypeAlias = tuple[
-    type[Warning],
-    str,
-    re.Pattern[str],
-    ModuleType | None,
-    list[WarningMessage] | None,
-]
 
 
 class suppress_warnings:
@@ -2155,23 +1991,17 @@ class suppress_warnings:
             pass
     """
 
-    # Established by __enter__ and read by __exit__ / _showwarning.
-    _tmp_suppressions: list[_Suppression]
-    _tmp_modules: set[ModuleType]
-    _forwarded: set[tuple[object, ...]]
-    log: list[WarningMessage]
-
-    def __init__(self, forwarding_rule: _ForwardingRule = "always") -> None:
+    def __init__(self, forwarding_rule="always"):
         self._entered = False
 
         # Suppressions are either instance or defined inside one with block:
-        self._suppressions: list[_Suppression] = []
+        self._suppressions = []
 
         if forwarding_rule not in {"always", "module", "once", "location"}:
             raise ValueError("unsupported forwarding rule.")
         self._forwarding_rule = forwarding_rule
 
-    def _clear_registries(self) -> None:
+    def _clear_registries(self):
         if hasattr(warnings, "_filters_mutated"):
             # clearing the registry should not be necessary on new pythons,
             # instead the filters should be mutated.
@@ -2181,18 +2011,13 @@ class suppress_warnings:
         # note that on new pythons it would be invalidated anyway.
         for module in self._tmp_modules:
             if hasattr(module, "__warningregistry__"):
-                # pyrefly: ignore[missing-attribute]  # set dynamically by warnings
                 module.__warningregistry__.clear()
 
-    def _filter(
-        self,
-        category: type[Warning] = Warning,
-        message: str = "",
-        module: ModuleType | None = None,
-        record: bool = False,
-    ) -> list[WarningMessage] | None:
-        # The log where to store warnings
-        record_log: list[WarningMessage] | None = [] if record else None
+    def _filter(self, category=Warning, message="", module=None, record=False):
+        if record:
+            record = []  # The log where to store warnings
+        else:
+            record = None
         if self._entered:
             if module is None:
                 warnings.filterwarnings("always", category=category, message=message)
@@ -2205,33 +2030,16 @@ class suppress_warnings:
                 self._clear_registries()
 
             self._tmp_suppressions.append(
-                (
-                    category,
-                    message,
-                    re.compile(message, re.IGNORECASE),
-                    module,
-                    record_log,
-                )
+                (category, message, re.compile(message, re.IGNORECASE), module, record)
             )
         else:
             self._suppressions.append(
-                (
-                    category,
-                    message,
-                    re.compile(message, re.IGNORECASE),
-                    module,
-                    record_log,
-                )
+                (category, message, re.compile(message, re.IGNORECASE), module, record)
             )
 
-        return record_log
+        return record
 
-    def filter(
-        self,
-        category: type[Warning] = Warning,
-        message: str = "",
-        module: ModuleType | None = None,
-    ) -> None:
+    def filter(self, category=Warning, message="", module=None):
         """
         Add a new suppressing filter or apply it if the state is entered.
 
@@ -2253,12 +2061,7 @@ class suppress_warnings:
         """
         self._filter(category=category, message=message, module=module, record=False)
 
-    def record(
-        self,
-        category: type[Warning] = Warning,
-        message: str = "",
-        module: ModuleType | None = None,
-    ) -> list[WarningMessage]:
+    def record(self, category=Warning, message="", module=None):
         """
         Append a new recording filter or apply it if the state is entered.
 
@@ -2285,13 +2088,11 @@ class suppress_warnings:
         When added within a context, filters are only added inside
         the context and will be forgotten when the context is exited.
         """
-        log = self._filter(
+        return self._filter(
             category=category, message=message, module=module, record=True
         )
-        # record=True always produces a list; narrow for the type checker.
-        return log if log is not None else []
 
-    def __enter__(self) -> Self:
+    def __enter__(self):
         if self._entered:
             raise RuntimeError("cannot enter suppress_warnings twice.")
 
@@ -2304,7 +2105,7 @@ class suppress_warnings:
         self._tmp_modules = set()
         self._forwarded = set()
 
-        self.log = []  # reset global log
+        self.log = []  # reset global log (no need to keep same list)
 
         for cat, mess, _, mod, log in self._suppressions:
             if log is not None:
@@ -2317,15 +2118,12 @@ class suppress_warnings:
                     "always", category=cat, message=mess, module=module_regex
                 )
                 self._tmp_modules.add(mod)
-        # _showwarning intentionally uses a broader signature than the stdlib
-        # warnings.showwarning it replaces (numpy's suppress_warnings pattern).
-        # pyrefly: ignore[bad-assignment]
         warnings.showwarning = self._showwarning
         self._clear_registries()
 
         return self
 
-    def __exit__(self, *exc_info: object) -> None:
+    def __exit__(self, *exc_info):
         warnings.showwarning = self._orig_show
         warnings.filters = self._filters
         self._clear_registries()
@@ -2333,19 +2131,9 @@ class suppress_warnings:
         del self._orig_show
         del self._filters
 
-    # Set only via warnings machinery on some code paths; declared for typing.
-    _orig_showmsg: Callable[[object], object]
-
     def _showwarning(
-        self,
-        message: Warning,
-        category: type[Warning],
-        filename: str,
-        lineno: int,
-        *args: object,
-        use_warnmsg: object = None,
-        **kwargs: object,
-    ) -> None:
+        self, message, category, filename, lineno, *args, use_warnmsg=None, **kwargs
+    ):
         for cat, _, pattern, mod, rec in (self._suppressions + self._tmp_suppressions)[
             ::-1
         ]:
@@ -2354,29 +2142,18 @@ class suppress_warnings:
                     # Message and category match, either recorded or ignored
                     if rec is not None:
                         msg = WarningMessage(
-                            message,
-                            category,
-                            filename,
-                            lineno,
-                            # pyrefly: ignore[bad-argument-type]  # object **kwargs
-                            **kwargs,
+                            message, category, filename, lineno, **kwargs
                         )
                         self.log.append(msg)
                         rec.append(msg)
                     return
                 # Use startswith, because warnings strips the c or o from
                 # .pyc/.pyo files.
-                # pyrefly: ignore[missing-attribute]  # __file__ is set for real modules
                 elif mod.__file__.startswith(filename):
                     # The message and module (filename) match
                     if rec is not None:
                         msg = WarningMessage(
-                            message,
-                            category,
-                            filename,
-                            lineno,
-                            # pyrefly: ignore[bad-argument-type]  # object **kwargs
-                            **kwargs,
+                            message, category, filename, lineno, **kwargs
                         )
                         self.log.append(msg)
                         rec.append(msg)
@@ -2386,37 +2163,34 @@ class suppress_warnings:
         # unless we should only pass it once
         if self._forwarding_rule == "always":
             if use_warnmsg is None:
-                # pyrefly: ignore[bad-argument-type]  # object *args/**kwargs forwarded
                 self._orig_show(message, category, filename, lineno, *args, **kwargs)
             else:
                 self._orig_showmsg(use_warnmsg)
             return
 
-        signature: tuple[object, ...]
         if self._forwarding_rule == "once":
             signature = (message.args, category)
         elif self._forwarding_rule == "module":
             signature = (message.args, category, filename)
-        else:  # "location"; forwarding_rule is validated in __init__
+        elif self._forwarding_rule == "location":
             signature = (message.args, category, filename, lineno)
 
         if signature in self._forwarded:
             return
         self._forwarded.add(signature)
         if use_warnmsg is None:
-            # pyrefly: ignore[bad-argument-type]  # object *args/**kwargs forwarded
             self._orig_show(message, category, filename, lineno, *args, **kwargs)
         else:
             self._orig_showmsg(use_warnmsg)
 
-    def __call__(self, func: Callable[_P, _R]) -> Callable[_P, _R]:
+    def __call__(self, func):
         """
         Function decorator to apply certain suppressions to a whole
         function.
         """
 
         @wraps(func)
-        def new_func(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        def new_func(*args, **kwargs):
             with self:
                 return func(*args, **kwargs)
 
@@ -2424,7 +2198,7 @@ class suppress_warnings:
 
 
 @contextlib.contextmanager
-def _assert_no_gc_cycles_context(name: str | None = None) -> Iterator[None]:
+def _assert_no_gc_cycles_context(name=None):
     __tracebackhide__ = True  # Hide traceback for py.test
 
     # not meaningful to test if there is no refcounting
@@ -2476,13 +2250,7 @@ def _assert_no_gc_cycles_context(name: str | None = None) -> Iterator[None]:
         )
 
 
-@overload
-def assert_no_gc_cycles() -> contextlib.AbstractContextManager[None]: ...
-@overload
-def assert_no_gc_cycles(
-    func: Callable[_P, _R], *args: _P.args, **kwargs: _P.kwargs
-) -> None: ...
-def assert_no_gc_cycles(*args: object, **kwargs: object) -> object:
+def assert_no_gc_cycles(*args, **kwargs):
     """
     Fail if the given callable produces any reference cycles.
 
@@ -2511,13 +2279,13 @@ def assert_no_gc_cycles(*args: object, **kwargs: object) -> object:
     if not args:
         return _assert_no_gc_cycles_context()
 
-    func = cast("Callable[..., object]", args[0])
+    func = args[0]
     args = args[1:]
-    with _assert_no_gc_cycles_context(name=_callable_name(func)):
+    with _assert_no_gc_cycles_context(name=func.__name__):
         func(*args, **kwargs)
 
 
-def break_cycles() -> None:
+def break_cycles():
     """
     Break reference cycles by calling gc.collect
     Objects can call other objects' methods (for instance, another object's
@@ -2535,13 +2303,13 @@ def break_cycles() -> None:
         gc.collect()
 
 
-def requires_memory(free_bytes: int) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+def requires_memory(free_bytes):
     """Decorator to skip a test if not enough memory is available"""
-    import pytest  # pyrefly: ignore[missing-import]
+    import pytest
 
-    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
+    def decorator(func):
         @wraps(func)
-        def wrapper(*a: _P.args, **kw: _P.kwargs) -> _R:
+        def wrapper(*a, **kw):
             msg = check_free_memory(free_bytes)
             if msg is not None:
                 pytest.skip(msg)
@@ -2551,14 +2319,13 @@ def requires_memory(free_bytes: int) -> Callable[[Callable[_P, _R]], Callable[_P
             except MemoryError:
                 # Probably ran out of memory regardless: don't regard as failure
                 pytest.xfail("MemoryError raised")
-                raise
 
         return wrapper
 
     return decorator
 
 
-def check_free_memory(free_bytes: int) -> str | None:
+def check_free_memory(free_bytes):
     """
     Check whether `free_bytes` amount of memory is currently free.
     Returns: None if enough memory available, otherwise error message
@@ -2593,7 +2360,7 @@ def check_free_memory(free_bytes: int) -> str | None:
     return msg if mem_free < free_bytes else None
 
 
-def _parse_size(size_str: str) -> int:
+def _parse_size(size_str):
     """Convert memory size strings ('12 GB' etc.) to float"""
     suffixes = {
         "": 1,
@@ -2623,17 +2390,17 @@ def _parse_size(size_str: str) -> int:
     return int(float(m.group(1)) * suffixes[m.group(2)])
 
 
-def _get_mem_available() -> int | None:
+def _get_mem_available():
     """Return available memory in bytes, or None if unknown."""
     try:
-        import psutil  # pyrefly: ignore[missing-import]
+        import psutil
 
         return psutil.virtual_memory().available
     except (ImportError, AttributeError):
         pass
 
     if sys.platform.startswith("linux"):
-        info: dict[str, int] = {}
+        info = {}
         with open("/proc/meminfo") as f:
             for line in f:
                 p = line.split()
@@ -2648,7 +2415,7 @@ def _get_mem_available() -> int | None:
     return None
 
 
-def _no_tracing(func: Callable[_P, _R]) -> Callable[_P, _R]:
+def _no_tracing(func):
     """
     Decorator to temporarily turn off tracing for the duration of a test.
     Needed in tests that check refcounting, otherwise the tracing itself
@@ -2659,7 +2426,7 @@ def _no_tracing(func: Callable[_P, _R]) -> Callable[_P, _R]:
     else:
 
         @wraps(func)
-        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        def wrapper(*args, **kwargs):
             original_trace = sys.gettrace()
             try:
                 sys.settrace(None)
@@ -2670,10 +2437,9 @@ def _no_tracing(func: Callable[_P, _R]) -> Callable[_P, _R]:
         return wrapper
 
 
-def _get_glibc_version() -> str:
+def _get_glibc_version():
     try:
-        confstr = os.confstr("CS_GNU_LIBC_VERSION")
-        ver = confstr.rsplit(" ")[1] if confstr else "0.0"
+        ver = os.confstr("CS_GNU_LIBC_VERSION").rsplit(" ")[1]
     except Exception:
         ver = "0.0"
 
@@ -2683,5 +2449,5 @@ def _get_glibc_version() -> str:
 _glibcver = _get_glibc_version()
 
 
-def _glibc_older_than(x: str) -> bool:
+def _glibc_older_than(x):
     return _glibcver != "0.0" and _glibcver < x

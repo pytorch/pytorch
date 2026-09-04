@@ -41,8 +41,7 @@ DebugLevel loadDebugLevelFromEnvironment() {
   } else if (level_str == "DETAIL") {
     level = DebugLevel::Detail;
   } else {
-    TORCH_CHECK_VALUE(
-        false,
+    throw std::invalid_argument(
         "The value of TORCH_DISTRIBUTED_DEBUG must be OFF, INFO, or DETAIL.");
   }
 

@@ -102,9 +102,8 @@ bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
 c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     c10::DeviceType deviceType) {
   // If there is a backend associated with this device type then return it
-  if (auto it = deviceTypeToBackend_.find(deviceType);
-      it != deviceTypeToBackend_.end()) {
-    return it->second;
+  if (deviceTypeToBackend_.contains(deviceType)) {
+    return deviceTypeToBackend_.at(deviceType);
   }
 
   // Get the backend type associated with the device
@@ -117,9 +116,8 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
   }
 
   // Check if the backend has already been initialized
-  if (auto it = backendTypeToBackend_.find(backendType);
-      it != backendTypeToBackend_.end()) {
-    auto backend = it->second;
+  if (backendTypeToBackend_.contains(backendType)) {
+    auto backend = backendTypeToBackend_.at(backendType);
     deviceTypeToBackend_[deviceType] = backend;
     return backend;
   }

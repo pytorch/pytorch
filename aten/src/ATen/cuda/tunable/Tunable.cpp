@@ -174,9 +174,8 @@ void TuningResultsManager::AddImpl(const std::string& op_signature,
     const std::string& params_signature,
     ResultEntry best,
     KernelMap& kernel_map) {
-  auto [it, inserted] =
-      kernel_map.try_emplace(params_signature, std::move(best));
-  if (!inserted) {
+  auto it = kernel_map.find(params_signature);
+  if (it != kernel_map.end()) {
     if (it->second != best) {
       TUNABLE_LOG1(op_signature, "(", params_signature, ") already has a best kernel ",
           "id=", it->second, " selected, want to add a different best kernel ", best,
@@ -185,7 +184,8 @@ void TuningResultsManager::AddImpl(const std::string& op_signature,
     return;
   }
 
-  TUNABLE_LOG2(op_signature, "(", params_signature, ") -> ", it->second);
+  TUNABLE_LOG2(op_signature, "(", params_signature, ") -> ", best);
+  kernel_map.emplace(params_signature, std::move(best));
 }
 
 void TuningResultsManager::Add(const std::string& op_signature, const std::string& params_signature, ResultEntry best) {

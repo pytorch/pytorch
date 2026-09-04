@@ -16,6 +16,7 @@
 #include <c10/util/error.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
+#include <c10/util/llvmMathExtras.h>
 #include <c10/util/static_tracepoint.h>
 
 #if defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
@@ -36,7 +37,6 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -45,7 +45,6 @@
 #include <mutex>
 #include <new>
 #include <ranges>
-#include <regex>
 #include <set>
 #include <stack>
 #include <thread>
@@ -190,31 +189,31 @@ void decrease_stat_array(
 
 struct Block;
 struct PrivatePool;
-
-struct BlockComparatorSizeCounterAddress {
-  bool operator()(const Block* a, const Block* b) const;
-};
-
-struct BlockComparatorAddress {
-  bool operator()(const Block* a, const Block* b) const;
-};
+typedef bool (*Comparison)(const Block*, const Block*);
+static bool BlockComparatorSizeCounterAddress(const Block* a, const Block* b);
+static bool BlockComparatorAddress(const Block* a, const Block* b);
 
 struct BlockPool {
   BlockPool(bool small, PrivatePool* private_pool = nullptr)
-      : is_small(small), owner_PrivatePool(private_pool) {}
+      : blocks(BlockComparatorSizeCounterAddress),
+        blocks_by_addr(BlockComparatorAddress),
+        unmapped(BlockComparatorAddress),
+        is_small(small),
+        owner_PrivatePool(private_pool) {}
 
   // Do not insert or erase a Block from blocks/blocks_by_addr directly; use
   // insert_into_blocks()/erase_from_blocks() instead.
-  std::set<Block*, BlockComparatorSizeCounterAddress> blocks;
-  std::set<Block*, BlockComparatorAddress> blocks_by_addr;
-  std::set<Block*, BlockComparatorAddress> unmapped;
+  std::set<Block*, Comparison> blocks;
+  std::set<Block*, Comparison> blocks_by_addr;
+  std::set<Block*, Comparison> unmapped;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool is_small;
   PrivatePool* owner_PrivatePool;
   int64_t get_free_blocks_call_count{0};
 
   // Add a Block into blocks set with updating gc counter.
-  std::pair<decltype(blocks)::iterator, bool> insert_into_blocks(Block* block);
+  std::pair<std::set<Block*, Comparison>::iterator, bool> insert_into_blocks(
+      Block* block);
   size_t erase_from_blocks(Block* block);
 
   MempoolId_t owner_MempoolId() const;
@@ -292,7 +291,7 @@ struct Block {
   }
 };
 
-std::pair<decltype(BlockPool::blocks)::iterator, bool> BlockPool::
+std::pair<std::set<Block*, Comparison>::iterator, bool> BlockPool::
     insert_into_blocks(Block* block) {
   block->gc_count_base = get_free_blocks_call_count;
   auto inserted = blocks.insert(block);
@@ -1201,9 +1200,7 @@ struct RestoreResult {
   std::vector<Block*> allocations_created;
 };
 
-bool BlockComparatorSizeCounterAddress::operator()(
-    const Block* a,
-    const Block* b) const {
+bool BlockComparatorSizeCounterAddress(const Block* a, const Block* b) {
   if (a->stream != b->stream) {
     return (uintptr_t)a->stream < (uintptr_t)b->stream;
   }
@@ -1216,7 +1213,7 @@ bool BlockComparatorSizeCounterAddress::operator()(
   return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
 }
 
-bool BlockComparatorAddress::operator()(const Block* a, const Block* b) const {
+bool BlockComparatorAddress(const Block* a, const Block* b) {
   if (a->stream != b->stream) {
     return (uintptr_t)a->stream < (uintptr_t)b->stream;
   }
@@ -1618,11 +1615,6 @@ class DeviceCachingAllocator {
   // affects trace entries for all devices used by the calling thread. This is
   // intentional: metadata labels a region of source code, not a device.
   static thread_local std::string user_metadata;
-
-  // Tag recorded as internal_metadata_ on trace entries emitted while it is
-  // set (see malloc_with_address). Guarded by mutex, which the setter holds
-  // across the tagged region.
-  std::string internal_metadata_tag;
 
  public:
   explicit DeviceCachingAllocator(c10::DeviceIndex id)
@@ -2130,12 +2122,17 @@ class DeviceCachingAllocator {
     const size_t prefix_size = requested_addr - block_begin;
 
     // mallocWithAddress may allocate both prefix block and requested block,
-    // and free prefix block later. This adds a fake malloc/free pair for
-    // prefix block. Tag the resulting trace entries for better memory
-    // visualization, without touching the user-set metadata.
-    internal_metadata_tag = "mallocWithAddress";
-    auto clear_internal_metadata =
-        c10::make_scope_exit([this]() { internal_metadata_tag.clear(); });
+    // and free prefix block later. This adds a fake malloc/free pair for prefix
+    // block. A metadata is added for better memory visualization.
+    const auto original_user_metadata = getUserMetadata();
+    const auto malloc_with_address_metadata = original_user_metadata.empty()
+        ? std::string("mallocWithAddress")
+        : original_user_metadata + "\nmallocWithAddress";
+    setUserMetadata(malloc_with_address_metadata);
+    auto restore_user_metadata =
+        c10::make_scope_exit([this, original_user_metadata]() {
+          setUserMetadata(original_user_metadata);
+        });
 
     Block* prefix_block = nullptr;
     Block* requested_source = containing_block;
@@ -3167,7 +3164,7 @@ class DeviceCachingAllocator {
   // them, the values are 1024, 1280, 1536, and 1792. So the function will
   // return 1280 as the nearest ceiling of power-2 division.
   static size_t roundup_power2_next_division(size_t size, size_t divisions) {
-    if (std::has_single_bit(size)) {
+    if (llvm::isPowerOf2_64(size)) {
       return size;
     }
 
@@ -3175,8 +3172,9 @@ class DeviceCachingAllocator {
 
     // divide the space between these 2's power into equal divisions
     // If division is zero, return the power-of-2 ceiling.
-    size_t power2_floor = std::bit_floor(size);
-    size_t power2_division = power2_floor >> (std::bit_width(divisions) - 1);
+    size_t power2_floor = llvm::PowerOf2Floor(size);
+    size_t power2_division =
+        power2_floor >> (63 - llvm::countLeadingZeros(divisions));
     if (C10_UNLIKELY(power2_division == 0)) {
       return (power2_floor << 1);
     }
@@ -4594,7 +4592,6 @@ class DeviceCachingAllocator {
         record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
         compile_string,
         metadata_override ? std::move(*metadata_override) : user_metadata);
-    te.internal_metadata_ = internal_metadata_tag;
 
     // Callbacks should not include any Pytorch call
     for (const auto& cb : trace_trackers_) {

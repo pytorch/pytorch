@@ -1009,19 +1009,7 @@ This class does not support ``__members__`` property.)");
             }
             return py::cast(preMulSupplement->tensor_factor);
           },
-          R"(The factor of the PREMUL_SUM ReduceOp.)")
-      .def(
-          "boxed",
-          [](const ::c10d::ReduceOp& self) {
-            return torch::jit::toPyObject(
-                c10::IValue(c10::make_intrusive<::c10d::ReduceOp>(self)));
-          })
-      .def_static("unbox", [](py::object obj) {
-        auto typePtr =
-            torch::getCustomClass("__torch__.torch.classes.c10d.ReduceOp");
-        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
-        return *ivalue.toCustomClass<::c10d::ReduceOp>();
-      });
+          R"(The factor of the PREMUL_SUM ReduceOp.)");
 
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
@@ -2169,8 +2157,9 @@ Example::
 
             std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
-              TORCH_CHECK_VALUE(
-                  worldSize.value() != 0, "TCPStore world size cannot be 0");
+              if (worldSize.value() == 0) {
+                throw py::value_error("TCPStore world size cannot be 0");
+              }
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
@@ -2233,7 +2222,9 @@ Arguments:
       .def(
           py::init([](const std::string& prefix,
                       c10::intrusive_ptr<::c10d::Store> store) {
-            TORCH_CHECK_VALUE(store, "store argument cannot be None");
+            if (!store) {
+              throw py::value_error("store argument cannot be None");
+            }
             return new ::c10d::PrefixStore(prefix, std::move(store));
           }),
           py::arg("prefix"),
@@ -3775,8 +3766,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               return ::c10d::ProcessGroupGloo::createDeviceForInterface(
                   interface, lazyInit);
             }
-            TORCH_CHECK_VALUE(
-                false, "Specify either `hostname` or `interface` argument.");
+            throw std::invalid_argument(
+                "Specify either `hostname` or `interface` argument.");
           },
           py::arg("hostname") = "",
           py::arg("interface") = "",

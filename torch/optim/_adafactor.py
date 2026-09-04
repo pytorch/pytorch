@@ -7,7 +7,6 @@ from torch import Tensor
 
 from .optimizer import (
     _disable_dynamo_if_unsupported,
-    _functional_api_doc,
     _get_scalar_dtype,
     _maximize_doc,
     _params_doc,
@@ -626,6 +625,10 @@ def adafactor(
     eps2: float,
     maximize: bool,
 ) -> None:
+    r"""Functional API that performs Adafactor algorithm computation.
+
+    See :class:`~torch.optim.Adafactor` for details.
+    """
     if not torch.compiler.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
@@ -656,6 +659,3 @@ def adafactor(
         found_inf=found_inf,
         has_complex=has_complex,
     )
-
-
-adafactor.__doc__ = _functional_api_doc.format(optimizer="Adafactor")
