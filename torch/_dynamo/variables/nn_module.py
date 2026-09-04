@@ -1522,8 +1522,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self, tx: "InstructionTranslatorBase", field: str, name_vt: VariableTracker
     ) -> VariableTracker | None:
         dict_vt = self.tp_getattro_impl(tx, field)
-        if isinstance(dict_vt, variables.UserDefinedDictVariable):
-            dict_vt = dict_vt._base_vt
         if isinstance(dict_vt, variables.ConstDictVariable):
             return dict_vt.maybe_getitem_const(name_vt)
         return None

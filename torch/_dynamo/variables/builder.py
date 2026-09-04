@@ -208,7 +208,6 @@ from .base import (
     AttributeMutationExisting,
     AttributeMutationNew,
     typestr,
-    ValueMutationExisting,
     ValueMutationNew,
     VariableTracker,
     VariableTrackerMeta,
@@ -341,6 +340,7 @@ from .user_defined import (
     UserDefinedFrozensetVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedOrderedDictVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
@@ -1254,17 +1254,12 @@ class VariableBuilder:
 
             if istype(value, collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
-                dict_vt = ConstDictVariable(
-                    result,  # type: ignore[arg-type]
-                    mutation_type=ValueMutationExisting(),
-                    source=self.source,
-                )
                 result = DefaultDictVariable(
                     value,
                     default_factory=VariableBuilder(self.tx, factory_source)(
                         value.default_factory
                     ),
-                    dict_vt=dict_vt,
+                    items=result,  # type: ignore[arg-type]
                     source=self.source,
                 )
                 return self.tx.output.side_effects.track_object_existing(value, result)
@@ -2201,26 +2196,20 @@ class VariableBuilder:
 
                 return key, res_value
 
-            result = dict(
+            kv_items = dict(
                 build_key_value(i, k, v)
                 for i, k, v in enumerate_items_with_dict_position(value)
             )
 
-            dict_vt_cls = (
-                OrderedDictVariable
+            udf_cls = (
+                UserDefinedOrderedDictVariable
                 if isinstance(value, collections.OrderedDict)
-                else ConstDictVariable
+                else UserDefinedDictVariable
             )
-            dict_vt = dict_vt_cls(
-                result,
-                mutation_type=ValueMutationExisting(),
-                source=self.source,
-            )
+            result = udf_cls(value, items=kv_items, source=self.source)
             # Force this to reconstruct on mutation to keep the reconstruction
             # bytecode simple
-            dict_vt.should_reconstruct_all = True
-
-            result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
+            result.should_reconstruct_all = True
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
