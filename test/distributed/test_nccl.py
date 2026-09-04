@@ -434,7 +434,14 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             with self.assertRaisesRegex(RuntimeError, r"must be in \[0"):
                 handle.wait_signal(src_rank=bad_rank)
 
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    # Registering a window on a second communicator makes only a subset of
+    # ranks enter the bootstrap barrier inside RCCL's ncclRmaCeInit, so the
+    # barrier never completes. Needs a prior rendezvous on the WORLD group in
+    # the same process to trigger.
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_ROCM,
+        "RCCL hangs in ncclRmaCeInit's bootstrap barrier on subgroup rendezvous",
+    )
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_rendezvous_subgroup(self):

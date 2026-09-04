@@ -281,20 +281,35 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   // Avoid the legacy/default-stream dependency of synchronous H2D copies
   // during HIP capture. Async copies are recorded on the current stream;
   // buffers_ / signal_pads_ live on this object so their sources remain valid
-  // through graph replay. CUDA keeps its existing synchronous path.
+  // through graph replay. Outside capture the stream is drained here, so a
+  // published handle carries the same cross-stream ordering that the
+  // synchronous path below provides; a consumer that reads the handle during
+  // capture must be part of the same captured graph. The drain also retires an
+  // enqueued copy before a failed copy unwinds this object, whose members are
+  // the copy sources. CUDA keeps its existing synchronous path.
   auto stream = at::cuda::getCurrentCUDAStream();
-  C10_CUDA_CHECK(cudaMemcpyAsync(
+  const bool is_capturing = c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
+      c10::cuda::CaptureStatus::None;
+  const cudaError_t buffers_copy_status = cudaMemcpyAsync(
       buffers_dev_,
       buffers_.data(),
       arr_size,
       cudaMemcpyHostToDevice,
-      stream));
-  C10_CUDA_CHECK(cudaMemcpyAsync(
-      signal_pads_dev_,
-      signal_pads_.data(),
-      arr_size,
-      cudaMemcpyHostToDevice,
-      stream));
+      stream);
+  cudaError_t signal_pads_copy_status = cudaSuccess;
+  if (buffers_copy_status == cudaSuccess) {
+    signal_pads_copy_status = cudaMemcpyAsync(
+        signal_pads_dev_,
+        signal_pads_.data(),
+        arr_size,
+        cudaMemcpyHostToDevice,
+        stream);
+  }
+  const cudaError_t copy_drain_status =
+      is_capturing ? cudaSuccess : cudaStreamSynchronize(stream);
+  C10_CUDA_CHECK(buffers_copy_status);
+  C10_CUDA_CHECK(signal_pads_copy_status);
+  C10_CUDA_CHECK(copy_drain_status);
 #else
   C10_CUDA_CHECK(cudaMemcpy(
     buffers_dev_,  // dst (device)
@@ -712,6 +727,11 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // async zero on a non-captured setup stream, synced before the window is
     // published. Gated by RCCL 2.30.7 / device API / CUMEM+WIN at comm init
     // (see NCCLDevCommManager).
+    //
+    // Only the current stream's capture state is observable. A process-wide
+    // cudaStreamCaptureModeGlobal capture begun on another thread is not
+    // queryable, and would make the non-capturing branch's hipMalloc/hipMemset
+    // illegal here just as it does on the synchronous CUDA path below.
     const bool is_capturing =
         c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
         c10::cuda::CaptureStatus::None;
