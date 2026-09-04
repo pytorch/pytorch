@@ -16246,6 +16246,40 @@ if __name__ == '__main__':
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
+    @skipMeta
+    def test_parameters_to_vector_roundtrip(self, device):
+        model = nn.Sequential(nn.Conv2d(3, 10, 5), nn.Linear(10, 20)).to(device)
+
+        vec = parameters_to_vector(model.parameters())
+        self.assertEqual(vec.size(0), 980)
+        self.assertEqual(vec.device, torch.device(device))
+
+        vector_to_parameters(vec * 2, model.parameters())
+        self.assertEqual(parameters_to_vector(model.parameters()), vec * 2)
+        for param in model.parameters():
+            self.assertEqual(param.device, torch.device(device))
+
+    @skipMeta
+    def test_parameters_to_vector_mixed_device_types(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("needs a device type other than cpu")
+        params = [nn.Parameter(torch.zeros(4, device=device)), nn.Parameter(torch.zeros(6))]
+
+        with self.assertRaisesRegex(TypeError, "different devices"):
+            parameters_to_vector(params)
+        with self.assertRaisesRegex(TypeError, "different devices"):
+            vector_to_parameters(torch.zeros(10, device=device), params)
+
+    @deviceCountAtLeast(2)
+    @skipMeta
+    def test_parameters_to_vector_multiple_device_indices(self, devices):
+        params = [nn.Parameter(torch.zeros(4, device=devices[0])), nn.Parameter(torch.zeros(6, device=devices[1]))]
+
+        with self.assertRaisesRegex(TypeError, "different devices"):
+            parameters_to_vector(params)
+        with self.assertRaisesRegex(TypeError, "different devices"):
+            vector_to_parameters(torch.zeros(10, device=devices[0]), params)
+
 
 class TestNNCUDA(NNTestCase):
     @skipCUDAIfNoCudnn
