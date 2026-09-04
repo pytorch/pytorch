@@ -145,34 +145,13 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
       int64_t alloc_size,
       size_t total_allocated,
       size_t total_reserved,
-      c10::Device device) override {
-    if (config_.profile_memory && !config_.disabled()) {
-      recordQueue.getSubqueue()->emplace_allocation_event(
-          c10::getApproximateTime(),
-          ptr,
-          alloc_size,
-          total_allocated,
-          total_reserved,
-          device.type(),
-          device.index());
-    }
-  }
+      c10::Device device) override;
 
   void reportOutOfMemory(
       int64_t alloc_size,
       size_t total_allocated,
       size_t total_reserved,
-      c10::Device device) override {
-    if (config_.profile_memory && !config_.disabled()) {
-      recordQueue.getSubqueue()->emplace_ooms_event(
-          c10::getApproximateTime(),
-          alloc_size,
-          total_allocated,
-          total_reserved,
-          device.type(),
-          device.index());
-    }
-  }
+      c10::Device device) override;
 
   void setEventPostProcessingCallback(post_process_t&& cb) {
     eventPostProcessCb = std::move(cb);
@@ -184,6 +163,10 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
   void resumePython() {
     recordQueue.restart();
+  }
+
+  void setGlobalSessionGeneration(uint64_t generation) {
+    global_session_generation_.store(generation, std::memory_order_release);
   }
 
   std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>
@@ -255,6 +238,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
   std::vector<experimental_event_t> eventTree;
   // Optional, if event post-processing is enabled.
   post_process_t eventPostProcessCb;
+  std::atomic<uint64_t> global_session_generation_{0};
 };
 
 // Coordinates one global RecordFunction callback session (KINETO_ONDEMAND, or
@@ -376,6 +360,96 @@ class GlobalCallbackSession {
 };
 
 GlobalCallbackSession global_callback_session;
+
+void KinetoThreadLocalState::reportMemoryUsage(
+    void* ptr,
+    int64_t alloc_size,
+    size_t total_allocated,
+    size_t total_reserved,
+    c10::Device device) {
+  if (!config_.profile_memory || config_.disabled()) {
+    return;
+  }
+
+  if (!config_.pushGlobalCallbacks()) {
+    recordQueue.getSubqueue()->emplace_allocation_event(
+        c10::getApproximateTime(),
+        ptr,
+        alloc_size,
+        total_allocated,
+        total_reserved,
+        device.type(),
+        device.index());
+    return;
+  }
+
+  // Global memory reports can arrive from threads without profiler TLS. Share
+  // the callback session's drain with RecordFunction callbacks so teardown
+  // cannot finalize RecordQueue while this write is in progress.
+  if (!global_callback_session.isActive()) {
+    return;
+  }
+  const auto session_generation =
+      global_session_generation_.load(std::memory_order_acquire);
+  global_callback_session.enter();
+  auto in_flight_guard =
+      c10::make_scope_exit([] { global_callback_session.exit(); });
+  if (!global_callback_session.isActive() ||
+      session_generation != global_callback_session.generation()) {
+    return;
+  }
+
+  recordQueue.getSubqueue()->emplace_allocation_event(
+      c10::getApproximateTime(),
+      ptr,
+      alloc_size,
+      total_allocated,
+      total_reserved,
+      device.type(),
+      device.index());
+}
+
+void KinetoThreadLocalState::reportOutOfMemory(
+    int64_t alloc_size,
+    size_t total_allocated,
+    size_t total_reserved,
+    c10::Device device) {
+  if (!config_.profile_memory || config_.disabled()) {
+    return;
+  }
+
+  if (!config_.pushGlobalCallbacks()) {
+    recordQueue.getSubqueue()->emplace_ooms_event(
+        c10::getApproximateTime(),
+        alloc_size,
+        total_allocated,
+        total_reserved,
+        device.type(),
+        device.index());
+    return;
+  }
+
+  if (!global_callback_session.isActive()) {
+    return;
+  }
+  const auto session_generation =
+      global_session_generation_.load(std::memory_order_acquire);
+  global_callback_session.enter();
+  auto in_flight_guard =
+      c10::make_scope_exit([] { global_callback_session.exit(); });
+  if (!global_callback_session.isActive() ||
+      session_generation != global_callback_session.generation()) {
+    return;
+  }
+
+  recordQueue.getSubqueue()->emplace_ooms_event(
+      c10::getApproximateTime(),
+      alloc_size,
+      total_allocated,
+      total_reserved,
+      device.type(),
+      device.index());
+}
 
 std::unique_ptr<at::ObserverContext> onFunctionEnterGlobal(
     const at::RecordFunction& fn) {
@@ -564,6 +638,7 @@ void pushGlobalProfilingCallbacks(
   // this is a new profiling session, also bump the session generation.
   // disableProfiler() relies on this to know it must drain in-flight callbacks.
   global_callback_session.activate(new_session);
+  state_ptr->setGlobalSessionGeneration(global_callback_session.generation());
 
   state_ptr->setCallbackHandle(at::addGlobalCallback(recordFunctionCallback));
 }
