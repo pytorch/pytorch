@@ -4,6 +4,7 @@ import ast
 import itertools
 import math
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
@@ -19,6 +20,7 @@ from torch._dynamo.debug_utils import (
 from torch._dynamo.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
@@ -280,6 +282,183 @@ def forward(self, x_1):
 
                 self.assertIn("# nvcc not found\n", result)
                 self.assertIn("# GPU Hardware Info: \n", result)
+
+
+class TestDeviceSystemInfoComment(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_cuda_delegates_to_legacy_comment(self):
+        sentinel = "# CUDA SENTINEL\n"
+        with patch.object(
+            debug_utils, "_cuda_system_info_comment", return_value=sentinel
+        ):
+            # Explicit device_type (normalized through torch.device)...
+            self.assertEqual(
+                debug_utils.device_system_info_comment(device_type="cuda:0"),
+                sentinel,
+            )
+            # ...and inference from inputs both dispatch to the CUDA path.
+            objs = [SimpleNamespace(device=torch.device("cuda:0"))]
+            self.assertEqual(debug_utils.device_system_info_comment(objs), sentinel)
+
+    def test_generic_backend_collects_hardware_info(self):
+        fake_npu = SimpleNamespace(
+            is_available=lambda: True,
+            device_count=lambda: 4,
+            get_device_name=lambda i: "Ascend910B" if i < 2 else "Atlas 300I Duo",
+        )
+        with patch.object(torch, "npu", fake_npu, create=True):
+            out = debug_utils.device_system_info_comment(device_type="npu")
+        self.assertIn("# NPU Info: \n", out)
+        self.assertIn("# NPU Hardware Info: \n", out)
+        self.assertIn("# Ascend910B : 2 \n", out)
+        self.assertIn("# Atlas 300I Duo : 2 \n", out)
+
+    def test_generic_backend_includes_version_line(self):
+        # torch.version.<dt> (e.g. torch.version.npu when torch_npu exposes it)
+        # must surface as a "# <dt> version:" line; absent -> line omitted.
+        fake_npu = SimpleNamespace(
+            is_available=lambda: True,
+            device_count=lambda: 1,
+            get_device_name=lambda i: "Ascend910B2",
+        )
+        with (
+            patch.object(torch, "npu", fake_npu, create=True),
+            patch.object(torch.version, "npu", "9.1.0", create=True),
+        ):
+            out = debug_utils.device_system_info_comment(device_type="npu")
+        self.assertIn("# npu version: 9.1.0 \n", out)
+        with patch.object(
+            torch,
+            "npu",
+            SimpleNamespace(
+                is_available=lambda: True,
+                device_count=lambda: 1,
+                get_device_name=lambda i: "Ascend910B2",
+            ),
+            create=True,
+        ):
+            out = debug_utils.device_system_info_comment(device_type="npu")
+        self.assertNotIn("version:", out)
+
+    def test_generic_backend_unavailable_or_partial_api(self):
+        with patch.object(
+            torch, "npu", SimpleNamespace(is_available=lambda: False), create=True
+        ):
+            out = debug_utils.device_system_info_comment(device_type="npu")
+        self.assertIn("torch.npu.is_available()==False", out)
+
+        # Unknown backends without a torch module degrade the same way.
+        out = debug_utils.device_system_info_comment(device_type="nosuchbackend")
+        self.assertIn("torch.nosuchbackend.is_available()==False", out)
+
+        # A module that claims availability but lacks the query API must not
+        # break repro generation.
+        broken = SimpleNamespace(is_available=lambda: True, device_count=lambda: 1)
+        with patch.object(torch, "npu", broken, create=True):
+            out = debug_utils.device_system_info_comment(device_type="npu")
+        self.assertIn("Failed to collect npu hardware info", out)
+
+    def test_device_type_inference_from_objs(self):
+        # NB: torch.device("npu:...") is not constructible on vanilla torch
+        # (backend name unregistered), so use xpu — valid on every build.
+        objs = [
+            SimpleNamespace(device=torch.device("xpu:1")),
+            SimpleNamespace(device=torch.device("xpu:0")),
+            SimpleNamespace(device=torch.device("cpu")),
+            SimpleNamespace(device=torch.device("meta")),
+            torch.randn(2),
+            "not a tensor",
+            None,
+        ]
+        self.assertEqual(debug_utils._infer_device_type_from_objs(objs), "xpu")
+        self.assertIsNone(debug_utils._infer_device_type_from_objs([torch.randn(2)]))
+        self.assertIsNone(debug_utils._infer_device_type_from_objs(None))
+
+    def test_interface_hook_overrides_generic(self):
+        from torch._dynamo.device_interface import (
+            device_interfaces,
+            DeviceInterface,
+            register_interface_for_device,
+        )
+
+        class HookedInterface(DeviceInterface):
+            @staticmethod
+            def get_repro_system_info():
+                return "# HOOKED SYSTEM INFO\n"
+
+        class EmptyHookInterface(DeviceInterface):
+            @staticmethod
+            def get_repro_system_info():
+                return None
+
+        register_interface_for_device("hookeddev", HookedInterface)
+        register_interface_for_device("emptyhookdev", EmptyHookInterface)
+        self.addCleanup(device_interfaces.pop, "hookeddev", None)
+        self.addCleanup(device_interfaces.pop, "emptyhookdev", None)
+
+        self.assertEqual(
+            debug_utils.device_system_info_comment(device_type="hookeddev"),
+            "# HOOKED SYSTEM INFO\n",
+        )
+        # A falsy hook result falls through to the generic collector.
+        out = debug_utils.device_system_info_comment(device_type="emptyhookdev")
+        self.assertIn("torch.emptyhookdev.is_available()==False", out)
+
+    def test_probe_default_device_order(self):
+        unavailable = SimpleNamespace(is_available=lambda: False)
+        available = SimpleNamespace(is_available=lambda: True)
+        no_accelerator = SimpleNamespace(
+            current_accelerator=lambda check_available=False: None
+        )
+        with (
+            patch.object(torch, "accelerator", no_accelerator, create=True),
+            patch.object(torch, "cuda", unavailable, create=True),
+            patch.object(torch, "xpu", unavailable, create=True),
+            patch.object(torch, "mps", unavailable, create=True),
+            patch.object(torch, "npu", available, create=True),
+        ):
+            self.assertEqual(debug_utils._probe_default_device(), "npu")
+        with (
+            patch.object(torch, "accelerator", no_accelerator, create=True),
+            patch.object(torch, "cuda", unavailable, create=True),
+            patch.object(torch, "xpu", unavailable, create=True),
+            patch.object(torch, "npu", unavailable, create=True),
+            patch.object(torch, "mps", unavailable, create=True),
+        ):
+            self.assertEqual(debug_utils._probe_default_device(), "cpu")
+
+    def test_probe_prefers_accelerator_channel(self):
+        # The accelerator channel wins even though the legacy probe order
+        # is cuda-first (backends like npu register via _register_accelerator_module).
+        fake_accelerator = SimpleNamespace(
+            current_accelerator=lambda check_available=False: torch.device("xpu")
+        )
+        with (
+            patch.object(torch, "accelerator", fake_accelerator, create=True),
+            patch.object(
+                torch, "cuda", SimpleNamespace(is_available=lambda: True), create=True
+            ),
+        ):
+            self.assertEqual(debug_utils._probe_default_device(), "xpu")
+
+    def test_cpu_only_inputs_report_no_accelerator(self):
+        with patch.object(debug_utils, "_probe_default_device", return_value="cpu"):
+            out = debug_utils.device_system_info_comment([torch.randn(2)])
+        self.assertIn("No accelerator device detected", out)
+
+    def test_aot_graph_input_parser_default_device(self):
+        def forward(x: "f32[2, 3]"):
+            return x
+
+        with patch.object(debug_utils, "_probe_default_device", return_value="cpu"):
+            kwargs = aot_graph_input_parser(forward)
+        self.assertEqual(kwargs["x"].device.type, "cpu")
+        self.assertEqual(tuple(kwargs["x"].shape), (2, 3))
+
+        # Explicit device still wins over probing.
+        kwargs = aot_graph_input_parser(forward, device="cpu")
+        self.assertEqual(kwargs["x"].device.type, "cpu")
 
 
 class TestDebugUtilsDevice(TestCase):

@@ -494,6 +494,166 @@ def _cuda_system_info_comment() -> str:
     return model_str
 
 
+# Accelerator backends queried by _probe_default_device(), in priority order.
+# Out-of-tree backends (e.g. npu from torch_npu) are looked up dynamically via
+# getattr(torch, name), so they participate once their package is imported.
+_REPRO_DEVICE_PROBE_ORDER: tuple[str, ...] = ("cuda", "xpu", "npu", "mps")
+
+# Device types that never carry accelerator system info.
+_NON_ACCELERATOR_DEVICE_TYPES = ("cpu", "meta")
+
+
+def _infer_device_type_from_objs(objs: Sequence[Any] | None) -> str | None:
+    """Return the most common non-cpu device type found among ``objs``.
+
+    Duck-types on a ``device`` attribute holding a ``torch.device`` so plain
+    tensors, modules' parameters and lightweight stand-ins all work.
+    """
+    device_types: Counter[str] = Counter()
+    for obj in objs or ():
+        device = getattr(obj, "device", None)
+        if (
+            isinstance(device, torch.device)
+            and device.type not in _NON_ACCELERATOR_DEVICE_TYPES
+        ):
+            device_types[device.type] += 1
+    return device_types.most_common(1)[0][0] if device_types else None
+
+
+def _probe_default_device() -> str:
+    """Best default device when a repro has no explicit device hint.
+
+    Prefers the unified ``torch.accelerator`` channel (covers backends that
+    register themselves there, e.g. npu via torch_npu), then falls back to
+    probing known backend modules in _REPRO_DEVICE_PROBE_ORDER.
+    """
+    accelerator_module = getattr(torch, "accelerator", None)
+    current_accelerator = getattr(accelerator_module, "current_accelerator", None)
+    if current_accelerator is not None:
+        try:
+            acc = current_accelerator(check_available=True)
+        except Exception:
+            acc = None
+        if acc is not None:
+            return acc.type
+    for device_type in _REPRO_DEVICE_PROBE_ORDER:
+        module = getattr(torch, device_type, None)
+        is_available = getattr(module, "is_available", None)
+        if is_available is None:
+            continue
+        try:
+            if is_available():
+                return device_type
+        except Exception:
+            continue
+    return "cpu"
+
+
+def _normalize_device_type(device_type: str) -> str:
+    """Reduce any device-like string (``"npu:0"``) to a bare type (``"npu"``).
+
+    ``torch.device`` rejects type names that no compiled/registered backend
+    owns (e.g. "npu" before torch_npu is imported), so fall back to the
+    prefix to keep dispatch graceful for unknown or out-of-tree backends.
+    """
+    try:
+        return torch.device(device_type).type
+    except (TypeError, RuntimeError, ValueError):
+        return str(device_type).split(":", 1)[0].lower()
+
+
+def _generic_device_system_info_comment(device_type: str) -> str:
+    """Best-effort ``# <DEVICE> Info`` comment block for any backend module.
+
+    Only relies on the de-facto standard backend-module API
+    (``is_available``/``device_count``/``get_device_name``) so it works for
+    built-in and out-of-tree device modules (e.g. torch.npu from torch_npu)
+    alike.
+    """
+    module = getattr(torch, device_type, None)
+    is_available = getattr(module, "is_available", None)
+    if is_available is None or not is_available():
+        return (
+            f"# torch.{device_type}.is_available()==False, no device info collected\n"
+        )
+
+    model_str = f"# {device_type.upper()} Info: \n"
+    version = getattr(torch.version, device_type, None)
+    if version is not None:
+        model_str += f"# {device_type} version: {version} \n"
+    model_str += "\n"
+
+    try:
+        device_names = Counter(
+            module.get_device_name(i) for i in range(module.device_count())
+        )
+    except Exception:
+        # The module claims availability but lacks the standard query API;
+        # degrade to a comment instead of breaking repro generation.
+        return model_str + f"# Failed to collect {device_type} hardware info\n"
+
+    model_str += f"# {device_type.upper()} Hardware Info: \n"
+    for name, count in device_names.items():
+        model_str += f"# {name} : {count} \n"
+    model_str += "\n"
+    return model_str
+
+
+def device_system_info_comment(
+    objs: Sequence[Any] | None = None,
+    *,
+    device_type: str | None = None,
+) -> str:
+    """Device-agnostic counterpart of _cuda_system_info_comment().
+
+    Target device resolution order:
+      1. an explicit ``device_type``,
+      2. the most common non-cpu tensor device among ``objs``,
+      3. the first available accelerator from _probe_default_device().
+
+    Comment collection dispatch order:
+      1. ``cuda`` keeps using the cached _cuda_system_info_comment() (nvcc /
+         ROCm specifics; byte-identical behavior for CUDA repros),
+      2. a registered torch._dynamo.device_interface DeviceInterface may take
+         over by implementing the optional hook ``get_repro_system_info() ->
+         str | None`` (returning a falsy value falls back to the next step),
+      3. _generic_device_system_info_comment() for every other backend.
+    """
+    if device_type is None:
+        device_type = _infer_device_type_from_objs(objs)
+    if device_type is None:
+        device_type = _probe_default_device()
+    else:
+        device_type = _normalize_device_type(device_type)
+
+    if device_type == "cuda":
+        return _cuda_system_info_comment()
+    if device_type in _NON_ACCELERATOR_DEVICE_TYPES:
+        return "# No accelerator device detected, no device info collected\n"
+
+    interface: type | None = None
+    try:
+        from .device_interface import get_interface_for_device
+
+        interface = get_interface_for_device(device_type)
+    except Exception:
+        # Device registry is best-effort here: unknown or uninitialized
+        # backends simply fall through to the generic collector.
+        interface = None
+
+    if interface is not None:
+        get_repro_system_info = getattr(interface, "get_repro_system_info", None)
+        if get_repro_system_info is not None:
+            try:
+                info = get_repro_system_info()
+            except Exception:
+                info = None
+            if info:
+                return str(info)
+
+    return _generic_device_system_info_comment(device_type)
+
+
 def generate_env_vars_string(*, stable_output: bool = False) -> str:
     """
     Generate a string configuration for environment variables related to Dynamo, Inductor, and Triton.
@@ -1023,7 +1183,7 @@ class InputWriter:
         if _dtype_or_default(None) != _dtype_or_default(dtype_hint):
             maybe_dtype_hint = f", dtype_hint={dtype_hint!r}"
         # TODO: being optional on device is kind of pointless as the default
-        # is CPU but most repros we care about are CUDA
+        # is CPU but most repros we care about run on an accelerator
         maybe_device = ""
         device = untyped_storage.device
         if device.type == "meta":
@@ -1123,7 +1283,7 @@ class InputWriter:
 
 def aot_graph_input_parser(
     func: Callable[[list[Tensor]], list[Tensor]],
-    device: str = "cuda",
+    device: str | None = None,
     sym_shapes: dict[str, int] | None = None,
     default_sym_shape: int | None = None,
 ) -> dict[str, Any]:
@@ -1140,7 +1300,13 @@ def aot_graph_input_parser(
 
     kwargs = aot_graph_input_parser(forward)
     forward(**kwargs)
+
+    ``device`` defaults to the first available accelerator (see
+    _probe_default_device()), so passing it explicitly is only needed to
+    force a particular backend.
     """
+    if device is None:
+        device = _probe_default_device()
 
     from torch.utils._dtype_abbrs import dtype_abbrs
 
