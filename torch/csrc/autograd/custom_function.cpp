@@ -275,18 +275,17 @@ static at::Tensor _view_as_self_with_no_grad(
   //
   // (2) Though it is not necessary for the purposes of attaching grad_fn, we
   // also call this function when an output is non-differentiable (and does not
-  // require grad). to help custom forward AD UX more consistent. We'd like to
-  // uniformly say that returning an input as-is is treated as if
-  // `self.view_as(self)` were returned for that output.
+  // require grad), to make custom forward AD UX more consistent. Returning an
+  // input as-is is treated as an alias so it can receive distinct autograd
+  // metadata without changing the input's tensor metadata.
   //
   // Alternatively, we could have not disabled forward grad while performing
   // this view, but it would mean that the user defined jvp may be silently
   // ignored.
   at::AutoFwGradMode fw_grad_mode(false);
   AutoGradMode grad_mode(false);
-  // We thread through this view_as_self_fn lambda so that in the case we are a
-  // Python custom function (rather than a cpp one), we can properly call the
-  // view_as from python so that torch function logic can still trigger.
+  // We thread through this view_as_self_fn lambda so Python custom functions
+  // can retain the Python view_as path when torch function logic must trigger.
   return view_as_self_fn(self);
 }
 
