@@ -5244,6 +5244,32 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 if x.is_tensor() and x.as_proxy() in non_differentiable_set:
                     non_differentiable_idx.append(i)
 
+        # Only tensor/symint/custom-class outputs flow through the fwd graph;
+        # any remaining (non-tensor) outputs are dropped from it. To keep the
+        # reconstructed autograd node's output arity matching eager (so hooks
+        # registered on grad_fn see the right number of grad_outputs), we thread
+        # these non-tensor outputs, which are compile-time constants, and their
+        # original positions to ApplyTemplate so they are re-inserted there.
+        non_tensor_output_indices: list[int] = []
+        non_tensor_output_values: list[Any] = []
+        if isinstance(fwd_out, variables.BaseListVariable):
+            try:
+                for i, x in enumerate(fwd_out.items):
+                    if not (
+                        x.is_tensor()
+                        or isinstance(x, (SymNodeVariable, CustomClassObjectVariable))
+                    ):
+                        non_tensor_output_indices.append(i)
+                        non_tensor_output_values.append(x.as_python_constant())
+            except NotImplementedError:
+                # A non-tensor output is not a compile-time constant; fall back
+                # to the historical behavior of dropping non-tensor outputs. In
+                # this path the reconstructed node keeps the shorter tensor-only
+                # arity, so a mark_non_differentiable/mark_dirty on a tensor
+                # after a dropped output stays misindexed (pre-existing).
+                non_tensor_output_indices = []
+                non_tensor_output_values = []
+
         dirty_idx: list[int] = []
         if ctx.dirty_tensors is not None:
             dirty_tensor_set: set[Proxy] = {
@@ -5322,6 +5348,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # Preserve the existing HOP call shape for the common no-mark_dirty case.
         if dirty_idx:
             kwargs_for_fn["dirty_idx"] = dirty_idx
+        # Preserve the existing HOP call shape when there are no non-tensor outputs.
+        if non_tensor_output_indices:
+            kwargs_for_fn["non_tensor_output_indices"] = non_tensor_output_indices
+            kwargs_for_fn["non_tensor_output_values"] = non_tensor_output_values
 
         # Store the invocation as a call
         from torch._functorch.autograd_function import autograd_function_apply

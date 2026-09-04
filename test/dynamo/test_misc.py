@@ -7590,6 +7590,74 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(foo_v2_compile.bar.const, 4)
             same(res, foo_v2_eager(inp))
 
+    def test_construct_object_with_del_graph_breaks(self):
+        # A class with a custom __del__ cannot be traced: Dynamo would
+        # materialize example instances during tracing and reconstruct the
+        # object across graph breaks, each firing __del__. Dynamo graph-breaks
+        # on construction so the object is created and destroyed once, in eager.
+        counter = [0]
+
+        class Tracked:
+            def __del__(self):
+                counter[0] += 1
+
+        class InheritsDel(Tracked):
+            pass
+
+        # Cover: discarded result, escaping (returned/consumed) result, and a
+        # subclass that inherits __del__ from a base.
+        def fn_discard(x):
+            Tracked()
+            return x + 1
+
+        def fn_escape(x):
+            t = Tracked()
+            return x + 1, t
+
+        def fn_inherited(x):
+            InheritsDel()
+            return x + 1
+
+        for fn in (fn_discard, fn_escape, fn_inherited):
+            for compiled in (False, True):
+                torch._dynamo.reset()
+                counter[0] = 0
+                f = torch.compile(fn, backend="eager") if compiled else fn
+                out = f(torch.randn(3))
+                del out
+                gc.collect()
+                self.assertEqual(counter[0], 1)
+
+    def test_construct_object_with_del_fullgraph_errors(self):
+        # Under fullgraph, the construction graph break must surface as an error.
+        class Tracked:
+            def __del__(self):
+                pass
+
+        def fn(x):
+            Tracked()
+            return x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
+
+    def test_construct_object_with_metaclass_del_no_break(self):
+        # __del__ defined on the metaclass is never received by instances, so
+        # construction must not graph-break.
+        class Meta(type):
+            def __del__(cls):
+                pass
+
+        class C(metaclass=Meta):
+            pass
+
+        def fn(x):
+            C()
+            return x + 1
+
+        # Must trace cleanly under fullgraph (no construction graph break).
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
+
     def test_replay_side_effects_input_mut(self):
         class Foo(torch.nn.Module):
             def __init__(self):
