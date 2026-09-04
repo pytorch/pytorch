@@ -57,9 +57,9 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     GetSet,
-    getset_read,
     Member,
     Method,
+    readonly_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -530,7 +530,7 @@ class BaseListVariable(VariableTracker):
         # CPython has a series of checks to optimize list.extend for different data types
         # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
         from .dicts import ConstDictVariable
-        from .sets import FrozensetVariable, SetVariable
+        from .sets import DictKeySetVariable, FrozensetVariable, SetVariable
         from .user_defined import UserDefinedObjectVariable
 
         sz = len(self.items)
@@ -538,7 +538,10 @@ class BaseListVariable(VariableTracker):
             self.items.extend(args[0].items)
         elif isinstance(args[0], UserDefinedObjectVariable):
             self.items.extend(unpack_iterable(tx, args[0]))
-        elif isinstance(args[0], (ConstDictVariable, SetVariable, FrozensetVariable)):
+        elif isinstance(
+            args[0],
+            (ConstDictVariable, SetVariable, FrozensetVariable, DictKeySetVariable),
+        ):
             items = [item.vt for item in args[0].items]
             self.items.extend(items)
         elif isinstance(args[0], ConstantVariable):
@@ -1121,9 +1124,9 @@ class RangeVariable(BaseListVariable):
     # range_members: start/stop/step are Py_READONLY _Py_T_OBJECT members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c (range_members)
     tp_members = {
-        "start": Member(getset_read(lambda s: s.items[0])),
-        "stop": Member(getset_read(lambda s: s.items[1])),
-        "step": Member(getset_read(lambda s: s.items[2])),
+        "start": Member(lambda s, _: s.items[0], readonly_setter),
+        "stop": Member(lambda s, _: s.items[1], readonly_setter),
+        "step": Member(lambda s, _: s.items[2], readonly_setter),
     }
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
@@ -1652,7 +1655,7 @@ class DequeVariable(BaseListVariable):
     # deque_getset: maxlen is a read-only getset (deque_get_maxlen, no setter).
     # https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c (deque_getset)
     tp_getset = {
-        "maxlen": GetSet(getset_read(lambda s: s.maxlen)),
+        "maxlen": GetSet(lambda s, _: s.maxlen, readonly_setter),
     }
 
     def _clamp_maxlen(self, side: str) -> None:
@@ -2366,9 +2369,9 @@ class SliceVariable(VariableTracker):
     # slice_members: start/stop/step are Py_READONLY _Py_T_OBJECT members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/sliceobject.c (slice_members)
     tp_members = {
-        "start": Member(getset_read(lambda s: s.items[0])),
-        "stop": Member(getset_read(lambda s: s.items[1])),
-        "step": Member(getset_read(lambda s: s.items[2])),
+        "start": Member(lambda s, _: s.items[0], readonly_setter),
+        "stop": Member(lambda s, _: s.items[1], readonly_setter),
+        "step": Member(lambda s, _: s.items[2], readonly_setter),
     }
 
     def indices(
