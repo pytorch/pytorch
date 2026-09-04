@@ -440,7 +440,7 @@ def _shard_tensors(
 ) -> list[LocalTensor | torch.Tensor]:
     """Create sharded LocalTensors from tensors according to placements."""
     local_tensors: list[LocalTensor | torch.Tensor] = []
-    for tensor_idx, ((name, tensor), placement) in enumerate(
+    for tensor_idx, ((_name, tensor), placement) in enumerate(
         zip(tensors, input_placements)
     ):
         if isinstance(placement, Partial):
@@ -590,7 +590,7 @@ def validate_combination(
         # Uneven shards produce SymInt in LocalTensor's wrapper shape,
         # which breaks C++ overload resolution before __torch_dispatch__
         # can intercept. Return None to signal "untestable".
-        for (name, tensor), placement in zip(tensors, combination[0]):
+        for (_name, tensor), placement in zip(tensors, combination[0]):
             if isinstance(placement, Shard):
                 if tensor.size(placement.dim) % world_size != 0:
                     return None, "uneven shard"
@@ -679,7 +679,7 @@ def validate_aten_combination(
         if not tensors:
             return False, "No tensor args in captured aten call"
 
-        for (name, tensor), placement in zip(tensors, combination[0]):
+        for (_name, tensor), placement in zip(tensors, combination[0]):
             if isinstance(placement, Shard):
                 if tensor.size(placement.dim) % world_size != 0:
                     return None, "uneven shard"
