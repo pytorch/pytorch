@@ -1,7 +1,7 @@
-#include <torch/csrc/profiler/cupti/monitor_python.h>
+#include <torch/csrc/profiler/cuspy/cuspy_python.h>
 
-#include <torch/csrc/profiler/cupti/monitor_native.h>
-#include <torch/csrc/profiler/cupti/monitor_pftrace.h>
+#include <torch/csrc/profiler/cuspy/cuspy_native.h>
+#include <torch/csrc/profiler/cuspy/cuspy_pftrace.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <pybind11/numpy.h>
@@ -24,41 +24,40 @@ uint64_t cuptiApproximateTimeCallback() {
 }
 } // namespace
 
-void initCuptiMonitorBindings(py::module& m) {
-  // GIL-free CUPTI monitor bindings, grouped under the
-  // torch._C._profiler._cupti_monitor submodule. The two callback addresses are
+void initCuspyBindings(py::module& m) {
+  // GIL-free Cuspy bindings, grouped under the
+  // torch._C._profiler._cuspy submodule. The two callback addresses are
   // registered with CUPTI on the Python side via ctypes; everything else is
   // driven from the decode thread.
-  auto cupti_monitor = m.def_submodule(
-      "_cupti_monitor",
-      "GIL-free CUPTI monitor buffer pool + v2 record-layout capture.");
-  using torch::profiler::impl::CuptiMonitorBuffers;
-  cupti_monitor.def("approximate_time_callback_address", []() {
+  auto cuspy = m.def_submodule(
+      "_cuspy", "GIL-free Cuspy buffer pool + v2 record-layout capture.");
+  using torch::profiler::impl::CuspyBuffers;
+  cuspy.def("approximate_time_callback_address", []() {
     return reinterpret_cast<uintptr_t>(&cuptiApproximateTimeCallback);
   });
-  cupti_monitor.def("configure_buffers", [](size_t buffer_size) {
-    CuptiMonitorBuffers::get().configure(buffer_size);
+  cuspy.def("configure_buffers", [](size_t buffer_size) {
+    CuspyBuffers::get().configure(buffer_size);
   });
   // The subscriber-scoped (cuptiActivityRegisterCallbacks_v2) buffer callbacks;
   // registered with CUPTI on the Python side via ctypes.
-  cupti_monitor.def("buffer_request_callback_address", []() -> uintptr_t {
+  cuspy.def("buffer_request_callback_address", []() -> uintptr_t {
     return reinterpret_cast<uintptr_t>(
-        &torch::profiler::impl::cuptiMonitorBufferRequested);
+        &torch::profiler::impl::cuspyBufferRequested);
   });
-  cupti_monitor.def("buffer_complete_callback_address", []() -> uintptr_t {
+  cuspy.def("buffer_complete_callback_address", []() -> uintptr_t {
     return reinterpret_cast<uintptr_t>(
-        &torch::profiler::impl::cuptiMonitorBufferCompleted);
+        &torch::profiler::impl::cuspyBufferCompleted);
   });
   // Pop a completed buffer, returning (ptr, valid_size, ctx, stream, layouts)
   // where layouts is the v2 user-defined record layout CUPTI reported for THIS
   // buffer (pBufferCompleteInfo->ppRecordLayouts), as a list of
   // (kind, record_size, [(field_id, offset, size)]). Empty for v1 buffers (and
   // when libcupti did not populate ppRecordLayouts). Returns None on shutdown.
-  cupti_monitor.def("get_completed", []() -> py::object {
+  cuspy.def("get_completed", []() -> py::object {
     std::optional<torch::profiler::impl::CompletedCuptiBuffer> buf;
     {
       py::gil_scoped_release release;
-      buf = CuptiMonitorBuffers::get().get_completed();
+      buf = CuspyBuffers::get().get_completed();
     }
     if (!buf.has_value()) {
       return py::none();
@@ -79,28 +78,25 @@ void initCuptiMonitorBindings(py::module& m) {
         buf->stream,
         std::move(layouts));
   });
-  cupti_monitor.def("return_buffer", [](uintptr_t ptr) {
+  cuspy.def("return_buffer", [](uintptr_t ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    CuptiMonitorBuffers::get().return_buffer(reinterpret_cast<uint8_t*>(ptr));
+    CuspyBuffers::get().return_buffer(reinterpret_cast<uint8_t*>(ptr));
   });
-  cupti_monitor.def("pending_buffers", []() {
-    return CuptiMonitorBuffers::get().pending_count();
+  cuspy.def(
+      "pending_buffers", []() { return CuspyBuffers::get().pending_count(); });
+  cuspy.def("allocated_buffers", []() {
+    return CuspyBuffers::get().allocated_count();
   });
-  cupti_monitor.def("allocated_buffers", []() {
-    return CuptiMonitorBuffers::get().allocated_count();
-  });
-  cupti_monitor.def(
-      "shutdown_buffers", []() { CuptiMonitorBuffers::get().shutdown(); });
-  cupti_monitor.def(
-      "reset_buffers", []() { CuptiMonitorBuffers::get().reset(); });
+  cuspy.def("shutdown_buffers", []() { CuspyBuffers::get().shutdown(); });
+  cuspy.def("reset_buffers", []() { CuspyBuffers::get().reset(); });
 
   // Native decode worker (GIL-free): pulls completed buffers, iterates records
   // with cuptiActivityGetNextRecord_v2 and (for self-flush) drives
   // cuptiActivityFlushAll -- both as addresses passed from Python, which owns
   // the libcupti handle + subscriber -- and accumulates per-(kind, field)
   // columns.
-  using torch::profiler::impl::CuptiMonitorDecoder;
-  cupti_monitor.def(
+  using torch::profiler::impl::CuspyDecoder;
+  cuspy.def(
       "configure_decoder",
       [](uintptr_t subscriber,
          uintptr_t get_next_record_fn,
@@ -109,7 +105,7 @@ void initCuptiMonitorBindings(py::module& m) {
          bool self_flush,
          uint64_t flush_period_ns,
          uintptr_t flush_fn) {
-        CuptiMonitorDecoder::get().configure(
+        CuspyDecoder::get().configure(
             subscriber,
             get_next_record_fn,
             fence_kind,
@@ -125,19 +121,17 @@ void initCuptiMonitorBindings(py::module& m) {
       py::arg("self_flush") = false,
       py::arg("flush_period_ns") = 0,
       py::arg("flush_fn") = 0);
-  cupti_monitor.def(
-      "start_decoder", []() { CuptiMonitorDecoder::get().start(); });
-  cupti_monitor.def(
-      "stop_decoder", []() { CuptiMonitorDecoder::get().stop(); });
-  cupti_monitor.def("decoder_max_sync_ns", []() {
-    return CuptiMonitorDecoder::get().max_sync_ns();
+  cuspy.def("start_decoder", []() { CuspyDecoder::get().start(); });
+  cuspy.def("stop_decoder", []() { CuspyDecoder::get().stop(); });
+  cuspy.def("decoder_max_sync_ns", []() {
+    return CuspyDecoder::get().max_sync_ns();
   });
   // Benchmark entry point: time the native per-buffer decode over a synthetic
   // buffer. record_layouts is [(kind, record_size, [(field_id, offset, size),
   // ...])]
   // -- the same shape as the captured layouts. Returns total seconds for
   // `iters` decodes, run with the GIL released (as the decode worker does).
-  cupti_monitor.def(
+  cuspy.def(
       "bench_decode",
       [](uintptr_t buffer_addr,
          size_t valid_size,
@@ -162,29 +156,29 @@ void initCuptiMonitorBindings(py::module& m) {
           layouts.push_back(std::move(layout));
         }
         py::gil_scoped_release release;
-        return torch::profiler::impl::cuptiMonitorBenchDecode(
+        return torch::profiler::impl::cuspyBenchDecode(
             buffer_addr, valid_size, layouts, iters);
       });
-  cupti_monitor.def("decoder_buffers_decoded", []() {
-    return CuptiMonitorDecoder::get().buffers_decoded();
+  cuspy.def("decoder_buffers_decoded", []() {
+    return CuspyDecoder::get().buffers_decoded();
   });
-  cupti_monitor.def("decoder_valid_bytes", []() {
-    return CuptiMonitorDecoder::get().valid_bytes();
+  cuspy.def("decoder_valid_bytes", []() {
+    return CuspyDecoder::get().valid_bytes();
   });
   // Host-side mirror of CUPTI's per-thread external-correlation stack so the
   // current id (what Python pushed) can be read -- CUPTI has push/pop but no
-  // peek. The monitor calls note_external_push/pop alongside the CUPTI
+  // peek. Cuspy calls note_external_push/pop alongside the CUPTI
   // push/pop; current_external_id() returns the top (0 if none) for consumers
   // on the same thread (e.g. an NCCL profiler plugin keying collective metadata
   // to the id).
-  cupti_monitor.def("note_external_push", [](uint64_t external_id) {
-    torch::profiler::impl::cuptiMonitorNoteExternalPush(external_id);
+  cuspy.def("note_external_push", [](uint64_t external_id) {
+    torch::profiler::impl::cuspyNoteExternalPush(external_id);
   });
-  cupti_monitor.def("note_external_pop", []() {
-    return torch::profiler::impl::cuptiMonitorNoteExternalPop();
+  cuspy.def("note_external_pop", []() {
+    return torch::profiler::impl::cuspyNoteExternalPop();
   });
-  cupti_monitor.def("current_external_id", []() {
-    return torch::profiler::impl::cuptiMonitorCurrentExternalId();
+  cuspy.def("current_external_id", []() {
+    return torch::profiler::impl::cuspyCurrentExternalId();
   });
   // Opaque per-annotation metadata store: an in-process NCCL profiler plugin
   // puts a blob (JSON via nlohmann, or any encoding) keyed by the external-
@@ -203,14 +197,14 @@ void initCuptiMonitorBindings(py::module& m) {
   // (process_group, sizes,
   // ...), either inside the collective's push window or by passing its id.
   using torch::profiler::impl::CuptiMetadataStore;
-  cupti_monitor.def(
+  cuspy.def(
       "metadata_put_external",
       [](const std::string& blob, uint64_t external_id) {
         // The id default lives here: 0 -> the most-recently-pushed id on this
         // thread (the collective being issued now). Pass an explicit id to
         // target a specific collective from outside its push window.
         if (external_id == 0) {
-          external_id = torch::profiler::impl::cuptiMonitorCurrentExternalId();
+          external_id = torch::profiler::impl::cuspyCurrentExternalId();
         }
         CuptiMetadataStore::get().put_external(
             nlohmann::json::parse(blob), external_id);
@@ -232,8 +226,8 @@ void initCuptiMonitorBindings(py::module& m) {
   //    happens Python-side, where all of the window's records are present at
   //    once.
   // Resets both accumulators.
-  cupti_monitor.def("drain_decoded", []() -> py::tuple {
-    auto groups = CuptiMonitorDecoder::get().drain();
+  cuspy.def("drain_decoded", []() -> py::tuple {
+    auto groups = CuspyDecoder::get().drain();
     py::list out;
     for (auto& [kind, kind_cols] : groups) {
       py::dict fields;
@@ -255,8 +249,8 @@ void initCuptiMonitorBindings(py::module& m) {
   });
 
   // Encode the prepared columnar window into a Perfetto-native trace (raw
-  // TracePacket stream, uncompressed) via protozero. See monitor_pftrace.h. The
-  // Python side (monitor_trace.py) shapes the window and gzips the result.
+  // TracePacket stream, uncompressed) via protozero. See cuspy_pftrace.h. The
+  // Python side (trace.py) shapes the window and gzips the result.
   //  - base_ns: absolute time base (baseTimeNanoseconds) -> ClockSnapshot
   //  - tracks: list of (uuid, parent, is_process, pid, tid, name)
   //  - name_table: list of distinct slice names (iid == index + 1)
@@ -271,7 +265,7 @@ void initCuptiMonitorBindings(py::module& m) {
   //       gpu_corr: (int32_offsets_col, int64_ids_col) CSR | None,
   //       cat_iid: uint64_col | None)
   // All columns are numpy arrays; they are kept alive for the encode.
-  cupti_monitor.def(
+  cuspy.def(
       "encode_pftrace",
       [](int64_t base_ns,
          const py::list& tracks,
@@ -545,7 +539,7 @@ void initCuptiMonitorBindings(py::module& m) {
         std::string out{};
         {
           py::gil_scoped_release release;
-          out = torch::profiler::impl::cuptiMonitorEncodePftrace(
+          out = torch::profiler::impl::cuspyEncodePftrace(
               base_ns,
               track_vec,
               name_vec,
