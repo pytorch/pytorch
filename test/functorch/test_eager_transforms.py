@@ -5071,6 +5071,53 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
         self.assertEqual(out1, out2)
         self.assertEqual(inpt1, inpt2)
 
+    def test_functionalize_unpack_dual(self, device):
+        x = torch.tensor([1.0, 2.0], device=device)
+        tangent = torch.tensor([3.0, 4.0], device=device)
+
+        def f(dual):
+            output = dual + dual
+            inspected_tangent = fwAD.unpack_dual(dual).tangent
+            return output, inspected_tangent + 1
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, tangent)
+            expected_output, expected_tangent = f(dual)
+            actual_output, actual_tangent = torch.func.functionalize(f)(dual)
+            expected_primal, expected_propagated_tangent = fwAD.unpack_dual(
+                expected_output
+            )
+            actual_primal, actual_propagated_tangent = fwAD.unpack_dual(actual_output)
+
+        self.assertEqual(actual_primal, expected_primal)
+        self.assertEqual(actual_propagated_tangent, expected_propagated_tangent)
+        self.assertEqual(actual_tangent, expected_tangent)
+
+    def test_functionalize_unpack_dual_without_tangent(self, device):
+        x = torch.tensor([1.0, 2.0], device=device)
+
+        with fwAD.dual_level():
+            tangent = torch.func.functionalize(
+                lambda tensor: fwAD.unpack_dual(tensor).tangent
+            )(x)
+
+        self.assertIsNone(tangent)
+
+    def test_functionalize_unpack_dual_without_views(self, device):
+        x = torch.tensor([1.0, 2.0], device=device)
+        tangent = torch.tensor([3.0, 4.0], device=device)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(x, tangent)
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "Trying to use forward AD with aten::_fw_primal_copy that does not support it",
+            ):
+                torch.func.functionalize(
+                    lambda tensor: fwAD.unpack_dual(tensor).tangent,
+                    remove="mutations_and_views",
+                )(dual)
+
     @unittest.skipIf(IS_FBCODE, "fails in fbcode")
     def test_vmap_functionalize_jvp(self, device):
         def f(x: torch.Tensor) -> torch.Tensor:
