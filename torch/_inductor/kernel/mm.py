@@ -64,7 +64,7 @@ from ..utils import (
     use_triton_template,
     use_triton_tma_template,
 )
-from .decompose_k import blackwell_decompose_k_partial
+from .decompose_k import decompose_k_subgraph_template
 from .mm_common import (
     _is_static_problem,
     _use_small_mm_pointwise,
@@ -351,77 +351,6 @@ def _check_addmm_input_metadata(inp, mat1, mat2) -> None:
         inp.get_device() == mat1.get_device() and inp.get_device() == mat2.get_device(),
         lambda: "all inputs must be on the same device",
     )
-
-
-def decomposeK(a, b, k_splits, bmm_backend="aten", bmm_config_index=-1):
-    m = a.shape[0]
-    k = a.shape[1]
-
-    if bmm_backend == "aten":
-        n = b.shape[1]
-        k_parts = k // k_splits
-        a_reshaped = torch.permute(a.reshape(m, k_splits, k_parts), (1, 0, 2))
-        b_reshaped = b.reshape(k_splits, k_parts, n)
-        result = torch.bmm(a_reshaped, b_reshaped, out_dtype=torch.float32)
-    elif bmm_backend == "triton":
-        result = blackwell_decompose_k_partial(
-            a,
-            b,
-            k_splits,
-            bmm_config_index,
-        )
-    else:
-        raise AssertionError(f"unsupported decompose-K BMM backend: {bmm_backend}")
-
-    reduced_buf = torch.sum(result, 0)
-    return reduced_buf.to(a.dtype)
-
-
-class DecomposeKSugraphTemplate(SubgraphTemplate):
-    def __init__(self):
-        super().__init__(
-            name="decompose_k",
-        )
-
-    def generate(  # type: ignore[override]
-        self,
-        input_nodes: list[Buffer],
-        layout: Layout,
-        k_split: int,
-        bmm_backend: str = "aten",
-        bmm_config_index: int = -1,
-    ) -> SubgraphChoiceCaller:
-        from torch._dispatch.python import enable_python_dispatcher
-
-        from ..decomposition import select_decomp_table
-
-        name = f"decompose_k_mm_{k_split}_split_{bmm_backend}"
-        if bmm_backend == "triton":
-            name = f"{name}_config_{bmm_config_index}"
-        description = f"{k_split=}, {bmm_backend=}, {bmm_config_index=}"
-
-        with enable_python_dispatcher():
-            decompositions = select_decomp_table()
-            fn = make_fx(
-                functools.partial(
-                    decomposeK,
-                    k_splits=k_split,
-                    bmm_backend=bmm_backend,
-                    bmm_config_index=bmm_config_index,
-                ),
-                decompositions,
-            )
-
-            return super().generate(
-                name=name,
-                input_nodes=input_nodes,
-                layout=layout,
-                make_fx_graph=fn,
-                description=description,
-            )
-
-
-decompose_k_subgraph_template = DecomposeKSugraphTemplate()
 
 
 class ContiguousTemplate(SubgraphTemplate):

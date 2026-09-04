@@ -7,9 +7,9 @@ import torch
 from torch._inductor import config
 from torch._inductor.kernel.decompose_k import (
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
+    decomposeK,
     lower_blackwell_decompose_k_partial,
 )
-from torch._inductor.kernel.mm import decomposeK
 from torch._inductor.lowering import lowerings
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
