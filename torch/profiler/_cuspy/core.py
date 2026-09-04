@@ -938,13 +938,18 @@ class Cuspy:
     # --- PM sampling (opt-in GPU utilization counters) -----------------------
 
     def request_pm_sampling(
-        self, sink: Callable[[dict[str, Any]], None], metrics: Iterable[str]
+        self,
+        sink: Callable[[dict[str, Any]], None],
+        metrics: Iterable[str],
+        *,
+        sampling_interval_ms: float | None = None,
+        lookback_window_ms: float | None = None,
     ) -> None:
         """Register ``sink`` as a PM-sampling consumer wanting ``metrics`` on the current device.
         The shared per-device session samples the union of all consumers' metrics; the first
-        consumer starts it (see PmSampler.configure() for interval/look-back). Frames arrive on the
-        flush thread with ``start_ns`` already converted into the trace clock. No-op if CUDA is
-        unavailable, no metrics are given, or ``sink`` is already registered."""
+        consumer starts it. Frames arrive on the flush thread with ``start_ns`` already converted
+        into the trace clock. No-op if CUDA is unavailable, no metrics are given, or ``sink`` is
+        already registered."""
         from torch.profiler._cuspy.pm_sampling import PmSampler
 
         metrics = list(metrics)
@@ -955,7 +960,11 @@ class Cuspy:
                 return
             sampler = PmSampler()  # per-device singleton for the current device
             try:
-                handle = sampler.add_consumer(metrics)
+                handle = sampler.add_consumer(
+                    metrics,
+                    sampling_interval_ms=sampling_interval_ms,
+                    lookback_window_ms=lookback_window_ms,
+                )
             except Exception as e:
                 logger.warning("PM sampling could not register consumer: %s", e)
                 return

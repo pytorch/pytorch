@@ -20,7 +20,7 @@ import types
 import unittest
 import warnings
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 # Suppress libkineto USDT profiler_start/profiler_stop logs in this verbose
@@ -38,6 +38,7 @@ from torch.autograd.profiler import KinetoStepTracker, profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
     _utils,
+    CuspyConfig,
     DeviceType,
     kineto_available,
     PerformanceMetricsConfig,
@@ -2155,7 +2156,7 @@ class TestProfiler(TestCase):
         self.assertEqual(p.activity_configs, {ProfilerActivity.CUDA: config})
 
         self.assertEqual(
-            _get_profiler_extensions(config),
+            _get_profiler_extensions(config.profiler_configs),
             {
                 "PERFORMANCE_METRICS": "metric_a,metric_b",
                 "PERFORMANCE_METRICS_SAMPLING_INTERVAL_MS": "0.5",
@@ -2164,12 +2165,67 @@ class TestProfiler(TestCase):
         )
         self.assertEqual(
             _get_profiler_extensions(
-                ProfilerActivityConfig(
-                    profiler_configs=[PerformanceMetricsConfig(metric_names=[])]
-                )
+                [PerformanceMetricsConfig(metric_names=[]), CuspyConfig()]
             ),
             {"PERFORMANCE_METRICS": ""},
         )
+
+    def test_cuspy_config_routes_performance_metrics(self):
+        performance_metrics = PerformanceMetricsConfig(
+            metric_names=["metric_a", "metric_b"],
+            sampling_interval_ms=0.5,
+            lookback_window_ms=2000,
+        )
+        cuspy_config = CuspyConfig(
+            enable_cuda_sync_events=True,
+            enable_environment_counters=True,
+            enable_graph_dependencies=False,
+            enable_event_node_ids=False,
+        )
+        p = profile(
+            activities=[
+                ProfilerActivity.CPU,
+                {
+                    ProfilerActivity.CUDA: ProfilerActivityConfig(
+                        profiler_configs=[performance_metrics, cuspy_config]
+                    )
+                },
+            ],
+            experimental_config=_ExperimentalConfig(
+                custom_profiler_config=json.dumps(
+                    {
+                        "enable_cuda_sync_events": False,
+                        "enable_environment_counters": True,
+                        "enable_graph_dependencies": True,
+                        "enable_event_node_ids": True,
+                    }
+                )
+            ),
+        )
+        observer = MagicMock(return_value=object())
+        observer_module = types.ModuleType("torch.profiler._cuspy.observers.profiler")
+        observer_module.ProfilerObserver = observer
+
+        with (
+            patch("torch.profiler.profiler.prof.profile") as kineto_profile,
+            patch.dict(
+                sys.modules,
+                {"torch.profiler._cuspy.observers.profiler": observer_module},
+            ),
+            patch("torch.profiler.profiler.prof._set_active_cuspy_profiler_observer"),
+        ):
+            p.prepare_trace()
+
+        self.assertEqual(kineto_profile.call_args.kwargs["_profiler_extensions"], {})
+        self.assertEqual(
+            observer.call_args.kwargs["pm_metrics"], ["metric_a", "metric_b"]
+        )
+        self.assertTrue(observer.call_args.kwargs["enable_cuda_sync"])
+        self.assertTrue(observer.call_args.kwargs["enable_environment_counters"])
+        self.assertFalse(observer.call_args.kwargs["enable_graph_dependencies"])
+        self.assertFalse(observer.call_args.kwargs["enable_event_node_ids"])
+        self.assertEqual(observer.call_args.kwargs["pm_sampling_interval_ms"], 0.5)
+        self.assertEqual(observer.call_args.kwargs["pm_lookback_window_ms"], 2000)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_invalid_type_name(self):
