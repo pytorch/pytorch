@@ -158,7 +158,10 @@ class RuntimeEstimator(TorchDispatchMode):
                 func(*args, **kwargs)
             end_event.record(torch.accelerator.current_stream())
             torch.accelerator.synchronize()
-            cuda_time = start_event.elapsed_time(end_event)
+            try:
+                cuda_time = start_event.elapsed_time(end_event)
+            except RuntimeError:
+                cuda_time = 0.0
             mean_op_time = cuda_time / actual_iters
 
         storages = set()
