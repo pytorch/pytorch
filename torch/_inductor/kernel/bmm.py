@@ -162,6 +162,8 @@ class BlackwellBMMConfig:
     num_stages: int
     num_warps: int
     epilogue_subtile: int = 1
+    data_partition_factor: int = 1
+    separate_epilogue_store: bool = True
 
 
 BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
