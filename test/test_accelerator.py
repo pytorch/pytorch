@@ -2,9 +2,12 @@
 
 import gc
 import operator
+import os
 import sys
+import tempfile
 import unittest
 from contextlib import nullcontext
+from unittest.mock import patch
 
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -326,6 +329,42 @@ class TestAccelerator(TestCase):
                     t = torch.empty(16, dtype=dtype, device=acc)
                     t = t.to(reference_dtype)
                     t = t.to(dtype)
+
+    def test_save_memory_usage(self):
+        acc = torch.accelerator.current_accelerator()
+        mem_mod = getattr(torch.get_device_module(acc), "memory", None)
+        if mem_mod is None or not all(
+            hasattr(mem_mod, attr) for attr in ("_memory", "_segments")
+        ):
+            self.skipTest("Backend does not implement flamegraph formatting")
+
+        # The formatter is stubbed: it downloads flamegraph.pl and shells out to
+        # perl, and is already covered by test_cuda.py. What is under test here is
+        # that the accelerator wrapper reaches the backend formatter and writes its
+        # output, on both the supplied-snapshot and default-snapshot paths.
+        for attr, save in (
+            ("_segments", torch.accelerator.memory._save_segment_usage),
+            ("_memory", torch.accelerator.memory._save_memory_usage),
+        ):
+            for explicit in (False, True):
+                with self.subTest(formatter=attr, explicit_snapshot=explicit):
+                    snapshot = (
+                        torch.accelerator.memory._snapshot() if explicit else None
+                    )
+                    with (
+                        tempfile.TemporaryDirectory() as tmpdir,
+                        patch.object(mem_mod, attr, return_value="<svg/>") as fmt,
+                    ):
+                        path = os.path.join(tmpdir, "usage.svg")
+                        save(path, snapshot)
+                        fmt.assert_called_once()
+                        formatted = fmt.call_args.args[0]
+                        if explicit:
+                            self.assertIs(formatted, snapshot)
+                        else:
+                            self.assertIn("segments", formatted)
+                        with open(path, encoding="utf-8") as f:
+                            self.assertEqual(f.read(), "<svg/>")
 
 
 instantiate_device_type_tests(
