@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 """Always-on per-graph-node activity-duration observer.
 
-The smallest real consumer of the monitor: registers for one or more activity
+The smallest real consumer of Cuspy: registers for one or more activity
 kinds with just the compact fields needed for timing (START, END,
-GRAPH_NODE_ID, STREAM_ID) and buffers the raw per-kernel spans the monitor's
+GRAPH_NODE_ID, STREAM_ID) and buffers the raw per-kernel spans Cuspy's
 worker thread delivers. :meth:`NodeTimerObserver.drain` returns them as flat numpy
 columns ``(graph_node_id, start_ns, end_ns, stream_id)`` -- consumers aggregate or
 bucket as they need (e.g. total duration per node, or kernels bucketed into training
@@ -13,9 +13,9 @@ By default only CONCURRENT_KERNEL is timed -- the common case. Opt into MEMCPY /
 MEMCPY2 (peer-to-peer) / MEMSET via ``kinds`` to time those nodes too. Requesting
 MEMCPY2 also enables MEMCPY implicitly (CUPTI emits no MEMCPY2 records unless
 MEMCPY is on too). Every kind here times the same 4
-fields (START, END, GRAPH_NODE_ID, STREAM_ID), so all records are one size and the
-monitor decodes them via its vectorized stride + kind-dispatch path; this observer
-just buffers the raw columns (the cost is in the monitor's decode, not here).
+fields (START, END, GRAPH_NODE_ID, STREAM_ID), so all records are one size and
+Cuspy decodes them via its vectorized stride + kind-dispatch path; this observer
+just buffers the raw columns (the cost is in Cuspy's decode, not here).
 
 Durations are keyed by graph_node_id alone, kind-agnostic: each CUDA-graph node
 is a single op, so its kind is unambiguous. Eager (non-graph) activities report
@@ -26,8 +26,8 @@ base); :meth:`drain_annotated` then returns ``{name: [(start_ns, end_ns), ...]}`
 resolving each span graph-first then eager-fallback:
 
   * **Graph** (``graph_annotation_resolver``) -- ``graph_node_id -> name`` via the resolver
-    (a custom one or the default registry). Needs no extra record kinds, so it stays on the
-    monitor's **vectorized** decode path. On by default; ``None`` disables it.
+    (a custom one or the default registry). Needs no extra record kinds, so it stays on
+    Cuspy's **vectorized** decode path. On by default; ``None`` disables it.
   * **Eager** (``support_eager_annotations``) -- ``record_function``-style regions bracketed
     with :meth:`push_annotation`/:meth:`annotate` (inherited from the base) become
     external-correlation ids, joined ``correlation_id -> external_id -> name``. This
@@ -46,11 +46,11 @@ from typing import Any, TYPE_CHECKING
 
 from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-from torch.profiler._cupti.observers.base import (
-    CuptiMonitorObserver,
+from torch.profiler._cuspy.observers.base import (
+    CuspyObserver,
     ObserverAnnotationSettings,
 )
-from torch.profiler._cupti.records import (
+from torch.profiler._cuspy.records import (
     CORRELATION_FIELD,
     ExternalCorrelation,
     Kernel,
@@ -113,9 +113,9 @@ def _bucket_name(annotation: Any) -> str:
     return str(annotation) if annotation else ""
 
 
-class NodeTimerObserver(CuptiMonitorObserver):
-    """Buffers raw per-activity ``(graph_node_id, start_ns, end_ns, stream_id)`` spans the
-    monitor delivers; :meth:`drain` returns them as flat numpy columns. Construct with
+class NodeTimerObserver(CuspyObserver):
+    """Buffers raw per-activity ``(graph_node_id, start_ns, end_ns, stream_id)`` spans
+    Cuspy delivers; :meth:`drain` returns them as flat numpy columns. Construct with
     ``annotations=ObserverAnnotationSettings(...)`` and :meth:`drain_annotated` returns
     ``{name: [(start_ns, end_ns), ...]}``. See the module docstring."""
 
@@ -190,17 +190,17 @@ class NodeTimerObserver(CuptiMonitorObserver):
 
     def _resolve_named_ancestor(self, eid_col):
         """Map each (innermost) external id to the innermost ENCLOSING id that names a
-        region, via the monitor's active-id chain -- so a kernel nested below a named
+        region, via Cuspy's active-id chain -- so a kernel nested below a named
         region (e.g. a collective inside it) still resolves to that region. Resolved
         at dispatch, while the chain is live (it is dropped shortly after the pop). The
         innermost id is returned as-is when no named region encloses it (incl. the
-        common non-nested case) or no monitor is available."""
+        common non-nested case) or Cuspy is unavailable."""
         names = set(self.annotation_names())
-        if not names or self._monitor is None:
+        if not names or self._cuspy is None:
             return eid_col
         import numpy as np
 
-        chain = self._monitor.external_id_chain
+        chain = self._cuspy.external_id_chain
         return np.asarray(
             [
                 next((c for c in reversed(chain(int(e))) if c in names), int(e))
@@ -233,8 +233,8 @@ class NodeTimerObserver(CuptiMonitorObserver):
         picked up on the next drain)."""
         import numpy as np
 
-        if flush and self._monitor is not None:
-            self._monitor.flush()
+        if flush and self._cuspy is not None:
+            self._cuspy.flush()
         chunks, _ = self._take()
         if not chunks:
             return (
@@ -256,8 +256,8 @@ class NodeTimerObserver(CuptiMonitorObserver):
         captured nodes, else the ``correlation_id -> external_id -> name`` join for
         eager regions. Spans that resolve to no name (incl. when no naming is enabled)
         go into the ``""`` bucket. ``flush`` behaves as in :meth:`drain`."""
-        if flush and self._monitor is not None:
-            self._monitor.flush()
+        if flush and self._cuspy is not None:
+            self._cuspy.flush()
         chunks, ext_chunks = self._take()
         names = self.annotation_names(reset=True)  # external_id -> name (this window)
         if not chunks:
@@ -283,8 +283,8 @@ class NodeTimerObserver(CuptiMonitorObserver):
             span_names = g_names[inv_g]
 
         # Eager fallback for spans the graph resolver didn't name: correlation_id ->
-        # external_id -> name. The external ids were resolved at dispatch through the
-        # monitor's active-id chain to the innermost ENCLOSING named region (so a
+        # external_id -> name. The external ids were resolved at dispatch through
+        # Cuspy's active-id chain to the innermost ENCLOSING named region (so a
         # collective nested in a region maps to the region, not its own untracked id);
         # here we just keep those that name a region (in `names`) and map their
         # correlation ids.
