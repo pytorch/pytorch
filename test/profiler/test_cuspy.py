@@ -1,9 +1,9 @@
 # Owner(s): ["oncall: profiler"]
-"""Tests for the CUPTI activity monitor and its v2/user-defined-record codec.
+"""Tests for Cuspy and its v2/user-defined-record codec.
 
-Covers the monitor at every layer: the ``records`` field schema + ``decode`` codec
-(pure, no CUDA), collection through ``CuptiMonitor`` directly (CUDA), the native
-buffer-pool / v2-record-layout callbacks driven via ctypes, and the monitor *through*
+Covers Cuspy at every layer: the ``records`` field schema + ``decode`` codec
+(pure, no CUDA), collection through ``Cuspy`` directly (CUDA), the native
+buffer-pool / v2-record-layout callbacks driven via ctypes, and Cuspy *through*
 ``torch.profiler.profile`` (trace shape, op/kernel-name parity, record_shapes,
 multithread, sync/async export, ...).
 """
@@ -29,7 +29,7 @@ from torch.profiler import (
     record_function,
     supported_activities,
 )
-from torch.profiler._cupti.observers.observation_window import WindowFinalizerMixin
+from torch.profiler._cuspy.observers.observation_window import WindowFinalizerMixin
 from torch.testing._internal.common_cuda import (
     SM100OrLater,
     TEST_CUDA,
@@ -60,12 +60,12 @@ def setUpModule():
             x + x
             torch.cuda.synchronize()
         # Priming leaves libkineto holding the single process-wide CUPTI subscriber, so a
-        # later cupti_monitor session can't subscribe (MULTIPLE_SUBSCRIBERS). Release it
-        # via the documented cuptiFinalize hand-off -- no monitor exists yet, so this is
+        # later cuspy session can't subscribe (MULTIPLE_SUBSCRIBERS). Release it
+        # via the documented cuptiFinalize hand-off -- Cuspy does not exist yet, so this is
         # safe; libkineto re-subscribes on its next profile, so kineto tests are
         # unaffected. See pylibcupti().finalize.
         if TEST_CUPTI_V13_3:
-            from torch.profiler._cupti.cupti_python import pylibcupti
+            from torch.profiler._cuspy.cupti_python import pylibcupti
 
             try:
                 pylibcupti().finalize()
@@ -74,12 +74,12 @@ def setUpModule():
 
 
 def _isolated(test_fn):
-    """Run a cupti_monitor test in a fresh subprocess. The monitor needs the single
+    """Run a cuspy test in a fresh subprocess. Cuspy needs the single
     process-wide CUPTI subscriber, but libkineto grabs it for the process lifetime once
     any kineto-CUDA profile runs (setUpModule's prime, or another test in a full run),
     and decoded-record native state can leak between tests. Re-running the test alone in
     a child gives it a clean process: setUpModule's finalize releases the child's own
-    prime, so the monitor subscribes, with no cross-test interference."""
+    prime, so Cuspy subscribes, with no cross-test interference."""
 
     @functools.wraps(test_fn)
     def wrapper(self):
@@ -106,7 +106,7 @@ def _isolated(test_fn):
 def _fresh_event_node_recorder(test):
     """The ``_EventNodeRecorder`` singleton, reset first (and again at teardown) so the test
     starts from an unarmed recorder with an empty map and leaves none behind."""
-    from torch.profiler._cupti._event_nodes import _EventNodeRecorder, _reset_for_test
+    from torch.profiler._cuspy._event_nodes import _EventNodeRecorder, _reset_for_test
 
     _reset_for_test()
     test.addCleanup(_reset_for_test)
@@ -114,27 +114,27 @@ def _fresh_event_node_recorder(test):
 
 
 @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-class TestCuptiRecords(TestCase):
-    """Pure monitor + metadata unit tests (no CUDA)."""
+class TestCuspyRecords(TestCase):
+    """Pure Cuspy + metadata unit tests (no CUDA)."""
 
     def setUp(self):
-        # CuptiMonitor is a process-wide singleton; drop it so each test builds a fresh one.
-        from torch.profiler._cupti import monitor as _cupti_monitor
+        # Cuspy is a process-wide singleton; drop it so each test builds a fresh one.
+        from torch.profiler._cuspy import core as cuspy_core
 
-        _cupti_monitor._reset_for_test()
-        self.addCleanup(_cupti_monitor._reset_for_test)
+        cuspy_core._reset_for_test()
+        self.addCleanup(cuspy_core._reset_for_test)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_monitor_normalize_activities(self):
+    def test_cuspy_normalize_activities(self):
         # A registration request resolves to (kinds, per-kind field selection): a
         # bare kind iterable means "all fields"; a field map selects fields, with
         # "all"/None expanding; *_FIELD_KIND (0) is always included.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti.monitor import CuptiMonitor
-        from torch.profiler._cupti.records import FIELD_REGISTRY, Kernel
+        from torch.profiler._cuspy.core import Cuspy
+        from torch.profiler._cuspy.records import FIELD_REGISTRY, Kernel
 
-        m = CuptiMonitor()
+        m = Cuspy()
         kernel = ActivityKind.CONCURRENT_KERNEL
         memcpy = ActivityKind.MEMCPY
         all_kernel = frozenset(FIELD_REGISTRY[kernel]) | {0}
@@ -155,19 +155,19 @@ class TestCuptiRecords(TestCase):
         # first-serve. Pure config -- no session, only the cupti python bindings (not
         # libcupti). setUp reset the singleton, so this starts from the defaults: both
         # cadences off (-1, caller-driven) and the approx clock off.
-        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cuspy import core as cuspy_core
 
-        cfg = cupti_monitor.get_config()
+        cfg = cuspy_core.get_config()
         self.assertEqual(cfg["buffer_size"], 4 * 1024 * 1024)
         self.assertEqual(cfg["background_flush_period_s"], -1.0)
         self.assertEqual(cfg["background_drain_period_s"], -1.0)
         self.assertFalse(cfg["use_approx_timestamps"])
         self.assertFalse(cfg["configured"])
 
-        cupti_monitor.configure(
+        cuspy_core.configure(
             buffer_size=2048, background_flush_period_s=0.5, use_approx_timestamps=True
         )
-        cfg = cupti_monitor.get_config()
+        cfg = cuspy_core.get_config()
         self.assertEqual(cfg["buffer_size"], 2048)
         self.assertEqual(cfg["background_flush_period_s"], 0.5)
         self.assertEqual(
@@ -177,53 +177,53 @@ class TestCuptiRecords(TestCase):
         self.assertTrue(cfg["configured"])
 
         # First-come-first-serve: a second configure() is ignored.
-        cupti_monitor.configure(buffer_size=4096)
-        self.assertEqual(cupti_monitor.get_config()["buffer_size"], 2048)
+        cuspy_core.configure(buffer_size=4096)
+        self.assertEqual(cuspy_core.get_config()["buffer_size"], 2048)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_singleton_snapshots_config(self):
-        # CuptiMonitor() is the process-wide singleton: it returns the one instance,
+        # Cuspy() is the process-wide singleton: it returns the one instance,
         # built once from the configure() settings.
-        from torch.profiler._cupti import monitor as cupti_monitor
-        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cuspy import core as cuspy_core
+        from torch.profiler._cuspy.core import Cuspy
 
-        cupti_monitor.configure(
+        cuspy_core.configure(
             buffer_size=2048,
             background_flush_period_s=0.5,
             background_drain_period_s=2.0,
         )
-        m = CuptiMonitor()
+        m = Cuspy()
         self.assertEqual(m.buffer_size, 2048)
         self.assertEqual(m.background_flush_period_s, 0.5)
         self.assertEqual(m.background_drain_period_s, 2.0)
-        self.assertIs(CuptiMonitor(), m)
+        self.assertIs(Cuspy(), m)
 
         # Unconfigured, both cadences default off (caller-driven).
-        cupti_monitor._reset_for_test()
-        m = CuptiMonitor()
+        cuspy_core._reset_for_test()
+        m = Cuspy()
         self.assertEqual(m.background_flush_period_s, -1.0)
         self.assertEqual(m.background_drain_period_s, -1.0)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_monitor_use_approx_timestamps_config(self):
+    def test_cuspy_use_approx_timestamps_config(self):
         # use_approx_timestamps is a configure() setting the singleton snapshots: OFF by
-        # default (the per-subscriber callback only times device records correctly when the
-        # monitor is the first CUPTI consumer), opt-in on. Constructing loads libcupti (>= 13.3).
-        from torch.profiler._cupti import monitor as cupti_monitor
-        from torch.profiler._cupti.monitor import CuptiMonitor
+        # default (the per-subscriber callback only times device records correctly when
+        # Cuspy is the first CUPTI consumer), opt-in on. Constructing loads libcupti (>= 13.3).
+        from torch.profiler._cuspy import core as cuspy_core
+        from torch.profiler._cuspy.core import Cuspy
 
-        self.assertFalse(CuptiMonitor()._timestamp_callback_enabled)
-        cupti_monitor._reset_for_test()
-        cupti_monitor.configure(use_approx_timestamps=True)
-        self.assertTrue(CuptiMonitor()._timestamp_callback_enabled)
+        self.assertFalse(Cuspy()._timestamp_callback_enabled)
+        cuspy_core._reset_for_test()
+        cuspy_core.configure(use_approx_timestamps=True)
+        self.assertTrue(Cuspy()._timestamp_callback_enabled)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_monitor_external_correlation_not_started(self):
-        # External-correlation push/pop are no-ops until the monitor is started (no
+    def test_cuspy_external_correlation_not_started(self):
+        # External-correlation push/pop are no-ops until Cuspy is started (no
         # subscriber yet), returning None rather than touching CUPTI's global stack.
-        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cuspy.core import Cuspy
 
-        m = CuptiMonitor()
+        m = Cuspy()
         self.assertFalse(m._started)
         self.assertIsNone(m.push_external_correlation_id())
         self.assertIsNone(m.pop_external_correlation_id())
@@ -236,10 +236,10 @@ class TestCuptiRecords(TestCase):
         # for the rest of the process -- including after that observer unregistered.
         from cupti.cupti import ActivityKind
 
-        from torch.profiler._cupti.monitor import CuptiMonitor
-        from torch.profiler._cupti.records import Kernel
+        from torch.profiler._cuspy.core import Cuspy
+        from torch.profiler._cuspy.records import Kernel
 
-        m = CuptiMonitor()
+        m = Cuspy()
         calls = []
 
         with patch.object(
@@ -272,7 +272,7 @@ class TestCuptiRecords(TestCase):
         # The native per-thread mirror of CUPTI's external-correlation stack lets
         # the current id be read (CUPTI has push/pop but no peek). Pure: the mirror
         # is host-side, no CUDA/CUPTI.
-        m = torch._C._profiler._cupti_monitor
+        m = torch._C._profiler._cuspy
         while m.current_external_id():  # drain residue from a prior test (same thread)
             m.note_external_pop()
         self.assertEqual(m.current_external_id(), 0)
@@ -289,14 +289,14 @@ class TestCuptiRecords(TestCase):
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_external_id_chain_and_gc(self):
         # The push-time active-id chain: with one kind CUPTI tags a kernel with only
-        # the innermost id, so the monitor snapshots the full active stack per id and
+        # the innermost id, so Cuspy snapshots the full active stack per id and
         # exposes external_id_chain(innermost) -> (outermost..innermost) for consumers
         # to recover enclosing contexts. Popped ids' chains are GC'd one generation
         # late (their records arrive after the pop). Drive the state directly -- no
         # CUDA/CUPTI.
-        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cuspy.core import Cuspy
 
-        m = CuptiMonitor()
+        m = Cuspy()
         # region id 1 encloses collective id 2 (as push_external_correlation_id would
         # record snapshotting this thread's live stack).
         m._id_chains[1] = (1,)
@@ -323,7 +323,7 @@ class TestCuptiRecords(TestCase):
         # (poll()/deliver are GIL work). Pure: a fake consumer, no CUDA/session.
         import numpy as np
 
-        from torch.profiler._cupti.monitor import CuptiMonitor
+        from torch.profiler._cuspy.core import Cuspy
 
         class _FakeHandle:
             def __init__(self):
@@ -333,7 +333,7 @@ class TestCuptiRecords(TestCase):
                 self.polls += 1
                 return {"start_ns": np.array([100, 200], dtype=np.int64)}
 
-        m = CuptiMonitor()
+        m = Cuspy()
         delivered: list = []
         handle = _FakeHandle()
         m._pm_consumers[lambda frame: delivered.append(frame)] = handle
@@ -351,7 +351,7 @@ class TestCuptiRecords(TestCase):
         # drains alongside the decoded records (folded into drain_decoded's return) so
         # the metadata and the records it annotates come from one snapshot. Pure
         # host-side, no CUDA/CUPTI.
-        m = torch._C._profiler._cupti_monitor
+        m = torch._C._profiler._cuspy
         m.drain_decoded()  # clear any residue
         # No id on the stack -> put is a no-op.
         m.metadata_put_external(json.dumps({"func": "AllReduce"}))
@@ -376,11 +376,11 @@ class TestCuptiRecords(TestCase):
     def test_attach_metadata_join(self):
         # The CollTrace-replacement join: a blob keyed by external_id is attached as a
         # "metadata" column onto the GPU-op kinds whose correlation_id maps (via the
-        # window's EXTERNAL_CORRELATION columns -- all ours, the monitor is the sole
+        # window's EXTERNAL_CORRELATION columns -- all ours, Cuspy is the sole
         # pusher) to that external_id. Pure host-side, columnar.
         import numpy as np
 
-        from torch.profiler._cupti.observers.profiler import _attach_metadata
+        from torch.profiler._cuspy.observers.profiler import _attach_metadata
 
         columns = {
             "kernel": {
@@ -418,7 +418,7 @@ class TestCuptiRecords(TestCase):
         # mechanism as graph annotation names). Pure host-side, columnar.
         import numpy as np
 
-        from torch.profiler._cupti.observers.profiler import _attach_metadata
+        from torch.profiler._cuspy.observers.profiler import _attach_metadata
 
         blob = json.dumps({"func": "AllReduce"})
         registry = {7: blob}  # stack-managed graph_node_id -> blob
@@ -523,12 +523,12 @@ class TestCuptiRecords(TestCase):
         self.assertIn(8, r.graph_event_nodes)
 
     def test_graph_recorders_are_singletons(self):
-        # Both instantiate-hook recorders are process-wide singletons (like CuptiMonitor): a
+        # Both instantiate-hook recorders are process-wide singletons (like Cuspy): a
         # later construction hands back the one instance WITHOUT re-initializing it, which is
         # what lets an observer created mid-run (at prepare_trace) share the map a recorder
         # armed before warm-up capture has been filling.
-        from torch.profiler._cupti._event_nodes import _EventNodeRecorder
-        from torch.profiler._cupti._graph_deps import (
+        from torch.profiler._cuspy._event_nodes import _EventNodeRecorder
+        from torch.profiler._cuspy._graph_deps import (
             _GraphDependencyRecorder,
             _reset_for_test,
         )
@@ -549,7 +549,7 @@ class TestCuptiRecords(TestCase):
         # The window orchestration: keys each launch by correlation id -> exec graph id (from a
         # graphed work record's graph_node_id), orders that launch's event records by sync id,
         # and resolves each record to its node POSITIONALLY. Pure (no numpy/CUDA).
-        from torch.profiler._cupti._event_nodes import resolve_window
+        from torch.profiler._cuspy._event_nodes import resolve_window
 
         exec_id = 7
         n0, n1 = (exec_id << 32) | 11, (exec_id << 32) | 13
@@ -582,7 +582,7 @@ class TestCuptiRecords(TestCase):
         # spans with graph_id = node_id >> 32. Pure host-side.
         import numpy as np
 
-        from torch.profiler._cupti.observers.profiler import _add_graph_event_node_spans
+        from torch.profiler._cuspy.observers.profiler import _add_graph_event_node_spans
 
         node = (7 << 32) | 11
         cols = {
@@ -631,7 +631,7 @@ class TestCuptiRecords(TestCase):
         # kernel moves to the process-group lane.
         import numpy as np
 
-        from torch.profiler._cupti.observers.profiler import (
+        from torch.profiler._cuspy.observers.profiler import (
             _add_graph_event_node_spans,
             LOGICAL_LANE_BASE,
         )
@@ -676,7 +676,7 @@ class TestCuptiRecords(TestCase):
         # gets spread into the exported event's args.
         import numpy as np
 
-        from torch.profiler._cupti.observers.profiler import _attach_event_node_ids
+        from torch.profiler._cuspy.observers.profiler import _attach_event_node_ids
 
         exec_id = 7
         n0 = (exec_id << 32) | 11
@@ -715,10 +715,7 @@ class TestCuptiRecords(TestCase):
         # endpoint: an arrow flows from the producing kernel to the event node. No CUDA.
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import (
-            _FLOW_CATEGORY,
-            _trace_window_entries,
-        )
+        from torch.profiler._cuspy.trace import _FLOW_CATEGORY, _trace_window_entries
 
         def i64(*v):
             return np.array(v, dtype=np.int64)
@@ -795,7 +792,7 @@ class TestCuptiRecords(TestCase):
         # cuda_event frame.
         import numpy as np
 
-        from torch.profiler._cupti.observers.profiler import _attach_event_node_ids
+        from torch.profiler._cuspy.observers.profiler import _attach_event_node_ids
 
         exec_id = 7
         n0, n1 = (exec_id << 32) | 11, (exec_id << 32) | 13
@@ -836,7 +833,7 @@ class TestCuptiRecords(TestCase):
         # dep resolver collapses those non-present nodes to the nearest rendered ancestor.
         import numpy as np
 
-        from torch.profiler._cupti.observers.profiler import (
+        from torch.profiler._cuspy.observers.profiler import (
             _nearest_present_preds,
             _window_graph_deps,
         )
@@ -878,7 +875,7 @@ class TestCuptiRecords(TestCase):
         # annotation is. Drives the columnar merge directly (no CUDA).
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import _trace_window_entries
+        from torch.profiler._cuspy.trace import _trace_window_entries
 
         def col(v):
             return np.array([v], dtype=np.int64)
@@ -927,7 +924,7 @@ class TestCuptiRecords(TestCase):
         # "HostNode: <fn>" and both surface in args. Drives the columnar merge directly (no CUDA).
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import _trace_window_entries
+        from torch.profiler._cuspy.trace import _trace_window_entries
 
         def col(v):
             return np.array([v], dtype=np.int64)
@@ -977,7 +974,7 @@ class TestCuptiRecords(TestCase):
         # directly). No CUDA.
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import _trace_window_entries
+        from torch.profiler._cuspy.trace import _trace_window_entries
 
         def i64(*vals):
             return np.array(vals, dtype=np.int64)
@@ -1056,7 +1053,7 @@ class TestCuptiRecords(TestCase):
         # (which the chrome path would otherwise abs()-fold and pftrace would not).
         import numpy as np
 
-        from torch.profiler._cupti.observers.profiler import (
+        from torch.profiler._cuspy.observers.profiler import (
             _resolve_lane_columns,
             LOGICAL_LANE_BASE,
         )
@@ -1097,12 +1094,12 @@ class TestCuptiRecords(TestCase):
         # in the reserved range, as _resolve_lane_columns assigns them. No CUDA.
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import (
+        from torch.profiler._cuspy.observers.profiler import LOGICAL_LANE_BASE
+        from torch.profiler._cuspy.trace import (
             _assign_render_event_ids,
             _build_render_stages,
             _STREAM_IID_BASE,
         )
-        from torch.profiler._cupti.observers.profiler import LOGICAL_LANE_BASE
 
         def i64(*vals):
             return np.array(vals, dtype=np.int64)
@@ -1148,10 +1145,8 @@ class TestCuptiRecords(TestCase):
 
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import (
-            merge_trace_window_into_chrome_trace,
-        )
-        from torch.profiler._cupti.observers.profiler import LOGICAL_LANE_BASE
+        from torch.profiler._cuspy.observers.profiler import LOGICAL_LANE_BASE
+        from torch.profiler._cuspy.trace import merge_trace_window_into_chrome_trace
 
         def i64(*vals):
             return np.array(vals, dtype=np.int64)
@@ -1227,7 +1222,7 @@ class TestCuptiRecords(TestCase):
         # its annotation. No CUDA.
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import _gpu_user_annotation_events
+        from torch.profiler._cuspy.trace import _gpu_user_annotation_events
 
         def i64(*vals):
             return np.array(vals, dtype=np.int64)
@@ -1272,7 +1267,7 @@ class TestCuptiRecords(TestCase):
         # CUDA-graph node->node dependency arrows in the JSON export: one flow per edge from the
         # predecessor's end to the successor's start, resolved within the same replay
         # (correlation_id) so arrows never cross replays, on the ops' display lanes. No CUDA.
-        from torch.profiler._cupti.monitor_trace import _graph_dependency_flow_events
+        from torch.profiler._cuspy.trace import _graph_dependency_flow_events
 
         # replay 100: node 11 on lane 7 [1000,2000]; node 12 on lane 8 [3000,4000], 12 -> 11.
         # replay 200 repeats the same nodes and stays self-contained.
@@ -1319,7 +1314,7 @@ class TestCuptiRecords(TestCase):
         # replay (shared correlation): A (root) -> B, A -> C, {B, C} -> D. No CUDA.
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import _trace_window_entries
+        from torch.profiler._cuspy.trace import _trace_window_entries
 
         def i64(*v):
             return np.array(v, dtype=np.int64)
@@ -1379,7 +1374,7 @@ class TestCuptiRecords(TestCase):
         # keeps its "stream N" lane. No CUDA.
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import (
+        from torch.profiler._cuspy.trace import (
             _assign_render_event_ids,
             _build_render_stages,
         )
@@ -1438,7 +1433,7 @@ class TestCuptiRecords(TestCase):
 
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import (
+        from torch.profiler._cuspy.trace import (
             _assign_render_event_ids,
             _build_render_stages,
         )
@@ -1520,7 +1515,7 @@ class TestCuptiRecords(TestCase):
         # lane (regression: "aaa_comm" (lane 50) sorted before "stream 7"). No CUDA.
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import (
+        from torch.profiler._cuspy.trace import (
             _assign_render_event_ids,
             _build_render_stages,
             _STREAM_IID_BASE,
@@ -1558,12 +1553,12 @@ class TestCuptiRecords(TestCase):
 
     def test_pftrace_annotation_column_from_window(self):
         # pftrace builds its GPU annotation render column from the columnar window (kineto emits
-        # no gpu_user_annotation in monitor mode), on the kernels' capture stream not the
+        # no gpu_user_annotation in Cuspy mode), on the kernels' capture stream not the
         # reassigned lane. Stream 7 keeps eager work, so the span stays there; one whose stream
         # was fully reassigned is dropped (covered by the annotation commit's test). No CUDA.
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import _gpu_annotation_render_column
+        from torch.profiler._cuspy.trace import _gpu_annotation_render_column
 
         def i64(*vals):
             return np.array(vals, dtype=np.int64)
@@ -1607,7 +1602,7 @@ class TestCuptiRecords(TestCase):
         # "GPU N Counters" process row, separate from the GPU kernel work. No CUDA.
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import (
+        from torch.profiler._cuspy.trace import (
             _build_chrome_counters,
             _build_pm_counters,
             _gpu_counter_process,
@@ -1659,7 +1654,7 @@ class TestCuptiRecords(TestCase):
         # "GPU N Counters" process row, separate from the GPU kernel work. No CUDA.
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import (
+        from torch.profiler._cuspy.trace import (
             _build_chrome_counters,
             _gpu_counter_process,
             _merge_counters,
@@ -1688,7 +1683,7 @@ class TestCuptiRecords(TestCase):
         # collective rather than the current pushed one -- the seam for a backend to
         # attach metadata outside the push window. external_id 0 (default) still keys
         # by the current id, and the two paths merge. Pure host-side.
-        m = torch._C._profiler._cupti_monitor
+        m = torch._C._profiler._cuspy
         m.drain_decoded()  # clear any residue
         try:
             m.metadata_put_external(json.dumps({"backend": "x"}), 77)  # explicit id
@@ -1721,7 +1716,7 @@ class TestCuptiRecords(TestCase):
             Runtime_api_trace_cbid,
         )
 
-        from torch.profiler._cupti.monitor_trace import (
+        from torch.profiler._cuspy.trace import (
             _runtime_cbid_name,
             merge_trace_window_into_chrome_trace,
         )
@@ -1870,7 +1865,7 @@ class TestCuptiRecords(TestCase):
                 captured["render"] = render
                 return b""
 
-            m = torch._C._profiler._cupti_monitor
+            m = torch._C._profiler._cuspy
             with patch.object(m, "encode_pftrace", _capture, create=True):
                 merge_trace_window_into_chrome_trace(
                     cpu_path, os.path.join(d, "out.pftrace"), window
@@ -1982,11 +1977,11 @@ class TestCuptiRecords(TestCase):
 
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import (
+        from torch.profiler._cuspy.observers.profiler import LOGICAL_LANE_BASE
+        from torch.profiler._cuspy.trace import (
             _STREAM_IID_BASE,
             merge_trace_window_into_chrome_trace,
         )
-        from torch.profiler._cupti.observers.profiler import LOGICAL_LANE_BASE
 
         def i64(*vals):
             return np.array(vals, dtype=np.int64)
@@ -2061,7 +2056,7 @@ class TestCuptiRecords(TestCase):
                 captured["render"] = render
                 return b""
 
-            m = torch._C._profiler._cupti_monitor
+            m = torch._C._profiler._cuspy
             with patch.object(m, "encode_pftrace", _capture, create=True):
                 merge_trace_window_into_chrome_trace(
                     cpu_path, os.path.join(d, "out.pftrace"), window
@@ -2096,7 +2091,7 @@ class TestCuptiRecords(TestCase):
             Runtime_api_trace_cbid,
         )
 
-        from torch.profiler._cupti.monitor_trace import (
+        from torch.profiler._cuspy.trace import (
             _runtime_cbid_name,
             merge_trace_window_into_chrome_trace,
         )
@@ -2164,7 +2159,7 @@ class TestCuptiRecords(TestCase):
             cpu_path = os.path.join(d, "cpu.json")
             with open(cpu_path, "wb") as f:
                 f.write(json.dumps(cpu).encode())
-            m = torch._C._profiler._cupti_monitor
+            m = torch._C._profiler._cuspy
             with patch.object(m, "encode_pftrace", _capture, create=True):
                 merge_trace_window_into_chrome_trace(
                     cpu_path, os.path.join(d, "out.pftrace"), window
@@ -2207,9 +2202,7 @@ class TestCuptiRecords(TestCase):
 
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import (
-            merge_trace_window_into_chrome_trace,
-        )
+        from torch.profiler._cuspy.trace import merge_trace_window_into_chrome_trace
 
         def i64(*vals):
             return np.array(vals, dtype=np.int64)
@@ -2323,9 +2316,7 @@ class TestCuptiRecords(TestCase):
 
         import numpy as np
 
-        from torch.profiler._cupti.monitor_trace import (
-            merge_trace_window_into_chrome_trace,
-        )
+        from torch.profiler._cuspy.trace import merge_trace_window_into_chrome_trace
 
         def i64(*vals):
             return np.array(vals, dtype=np.int64)
@@ -2462,7 +2453,7 @@ class TestCuptiRecords(TestCase):
             Runtime_api_trace_cbid,
         )
 
-        from torch.profiler._cupti.monitor_trace import (
+        from torch.profiler._cuspy.trace import (
             _runtime_cbid_name,
             merge_trace_window_into_chrome_trace,
         )
@@ -2608,15 +2599,15 @@ class TestCuptiRecords(TestCase):
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
-class TestCuptiMonitorCUDA(TestCase):
-    """Collection through CuptiMonitor directly (not via torch.profiler.profile)."""
+class TestCuspyCUDA(TestCase):
+    """Collection through Cuspy directly (not via torch.profiler.profile)."""
 
     def setUp(self):
-        # CuptiMonitor is a process-wide singleton; drop it so each test builds a fresh one.
-        from torch.profiler._cupti import monitor as _cupti_monitor
+        # Cuspy is a process-wide singleton; drop it so each test builds a fresh one.
+        from torch.profiler._cuspy import core as cuspy_core
 
-        _cupti_monitor._reset_for_test()
-        self.addCleanup(_cupti_monitor._reset_for_test)
+        cuspy_core._reset_for_test()
+        self.addCleanup(cuspy_core._reset_for_test)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_fence_enables_sync_transiently(self):
@@ -2624,23 +2615,23 @@ class TestCuptiMonitorCUDA(TestCase):
         # the fence (even when no observer requested it) and disabled again after.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti.monitor import CuptiMonitor
-        from torch.profiler._cupti.records import Kernel
+        from torch.profiler._cuspy.core import Cuspy
+        from torch.profiler._cuspy.records import Kernel
 
         sync = int(ActivityKind.SYNCHRONIZATION)
-        monitor = CuptiMonitor()
-        obs = monitor.register(
+        cuspy = Cuspy()
+        obs = cuspy.register(
             {ActivityKind.CONCURRENT_KERNEL: {Kernel.END}}, lambda c: None
         )
-        self.addCleanup(monitor.unregister, obs)
-        self.assertNotIn(sync, monitor._enabled)
+        self.addCleanup(cuspy.unregister, obs)
+        self.assertNotIn(sync, cuspy._enabled)
 
         x = torch.randn(64, 64, device="cuda")
         (x @ x).relu().sum().item()
         start = time.time()
-        monitor.flush(sync=True)
+        cuspy.flush(sync=True)
         self.assertLess(time.time() - start, 2.0)
-        self.assertNotIn(sync, monitor._enabled)
+        self.assertNotIn(sync, cuspy._enabled)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @unittest.skipIf(
@@ -2787,14 +2778,14 @@ class TestCuptiMonitorCUDA(TestCase):
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_v2_columnar_collection(self):
-        # End-to-end columnar collection: the monitor turns on a per-activity field
+        # End-to-end columnar collection: Cuspy turns on a per-activity field
         # selection, decodes each buffer against CUPTI's captured layout, and hands
         # the observer the columns for its selection.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti.cupti_python import CuptiError
-        from torch.profiler._cupti.monitor import CuptiMonitor
-        from torch.profiler._cupti.records import Kernel
+        from torch.profiler._cuspy.core import Cuspy
+        from torch.profiler._cuspy.cupti_python import CuptiError
+        from torch.profiler._cuspy.records import Kernel
 
         kind = ActivityKind.CONCURRENT_KERNEL
         want = {kind: {Kernel.START, Kernel.END, Kernel.CORRELATION_ID, Kernel.NAME}}
@@ -2804,12 +2795,10 @@ class TestCuptiMonitorCUDA(TestCase):
         # Fully caller-driven (both periods < 0): no background self-flush and no
         # background drain, so the explicit flush(sync=True) below is the sole,
         # deterministic flush + drain -- nothing races it to consume the decoded columns.
-        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cuspy import core as cuspy_core
 
-        cupti_monitor.configure(
-            background_flush_period_s=-1, background_drain_period_s=-1
-        )
-        monitor = CuptiMonitor()
+        cuspy_core.configure(background_flush_period_s=-1, background_drain_period_s=-1)
+        cuspy = Cuspy()
 
         def on_columns(cols):
             if kind in cols:
@@ -2817,11 +2806,11 @@ class TestCuptiMonitorCUDA(TestCase):
                     columns.append(cols[kind])
 
         try:
-            obs = monitor.register(want, on_columns)
+            obs = cuspy.register(want, on_columns)
         except CuptiError as e:
             self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
-        self.addCleanup(monitor.unregister, obs)
-        self.assertIsNotNone(monitor._subscriber)
+        self.addCleanup(cuspy.unregister, obs)
+        self.assertIsNotNone(cuspy._subscriber)
 
         x = torch.randn(256, 256, device="cuda")
         for _ in range(4):
@@ -2829,8 +2818,8 @@ class TestCuptiMonitorCUDA(TestCase):
         x.sum().item()
         torch.cuda.synchronize()
 
-        monitor.flush(sync=True)
-        monitor.unregister(obs)
+        cuspy.flush(sync=True)
+        cuspy.unregister(obs)
 
         total = sum(len(c[int(Kernel.START)]) for c in columns)
         self.assertGreater(total, 0)
@@ -2853,10 +2842,10 @@ class TestCuptiMonitorCUDA(TestCase):
         # the only Python work is an explicit drain -- flush() is never called.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti import monitor as cupti_monitor
-        from torch.profiler._cupti.cupti_python import CuptiError
-        from torch.profiler._cupti.monitor import CuptiMonitor
-        from torch.profiler._cupti.records import Kernel
+        from torch.profiler._cuspy import core as cuspy_core
+        from torch.profiler._cuspy.core import Cuspy
+        from torch.profiler._cuspy.cupti_python import CuptiError
+        from torch.profiler._cuspy.records import Kernel
 
         kind = ActivityKind.CONCURRENT_KERNEL
         lock = threading.Lock()
@@ -2866,10 +2855,10 @@ class TestCuptiMonitorCUDA(TestCase):
         # buffers are only delivered by the NEXT cadence flush ~period later. Records showing
         # up therefore proves the periodic self-flush actually fires on schedule.
         flush_period_s = 5.0
-        cupti_monitor.configure(
+        cuspy_core.configure(
             background_flush_period_s=flush_period_s, background_drain_period_s=-1
         )
-        monitor = CuptiMonitor()
+        cuspy = Cuspy()
 
         def on_columns(cols):
             if kind in cols:
@@ -2877,10 +2866,10 @@ class TestCuptiMonitorCUDA(TestCase):
                     columns.append(cols[kind])
 
         try:
-            obs = monitor.register({kind: {Kernel.START, Kernel.END}}, on_columns)
+            obs = cuspy.register({kind: {Kernel.START, Kernel.END}}, on_columns)
         except CuptiError as e:
             self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
-        self.addCleanup(monitor.unregister, obs)
+        self.addCleanup(cuspy.unregister, obs)
 
         x = torch.randn(128, 128, device="cuda")
         for _ in range(4):
@@ -2894,13 +2883,13 @@ class TestCuptiMonitorCUDA(TestCase):
         deadline = time.time() + flush_period_s * 3 + 5.0
         total = 0
         while time.time() < deadline:
-            monitor._drain_and_dispatch()
+            cuspy._drain_and_dispatch()
             with lock:
                 total = sum(len(c[int(Kernel.START)]) for c in columns)
             if total > 0:
                 break
             time.sleep(0.1)
-        self.assertGreater(monitor.stats()["buffers_completed"], 0)
+        self.assertGreater(cuspy.stats()["buffers_completed"], 0)
         self.assertGreater(total, 0)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
@@ -2910,18 +2899,16 @@ class TestCuptiMonitorCUDA(TestCase):
         # delivered until the caller drives flush(). Both cadences off (caller-driven).
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti import monitor as cupti_monitor
-        from torch.profiler._cupti.cupti_python import CuptiError
-        from torch.profiler._cupti.monitor import CuptiMonitor
-        from torch.profiler._cupti.records import Kernel
+        from torch.profiler._cuspy import core as cuspy_core
+        from torch.profiler._cuspy.core import Cuspy
+        from torch.profiler._cuspy.cupti_python import CuptiError
+        from torch.profiler._cuspy.records import Kernel
 
         kind = ActivityKind.CONCURRENT_KERNEL
         lock = threading.Lock()
         columns: list = []
-        cupti_monitor.configure(
-            background_flush_period_s=-1, background_drain_period_s=-1
-        )
-        monitor = CuptiMonitor()
+        cuspy_core.configure(background_flush_period_s=-1, background_drain_period_s=-1)
+        cuspy = Cuspy()
 
         def on_columns(cols):
             if kind in cols:
@@ -2929,10 +2916,10 @@ class TestCuptiMonitorCUDA(TestCase):
                     columns.append(cols[kind])
 
         try:
-            obs = monitor.register({kind: {Kernel.START, Kernel.END}}, on_columns)
+            obs = cuspy.register({kind: {Kernel.START, Kernel.END}}, on_columns)
         except CuptiError as e:
             self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
-        self.addCleanup(monitor.unregister, obs)
+        self.addCleanup(cuspy.unregister, obs)
 
         x = torch.randn(128, 128, device="cuda")
         for _ in range(4):
@@ -2942,17 +2929,17 @@ class TestCuptiMonitorCUDA(TestCase):
 
         # No self-flush and no caller flush: the idle decode thread decodes nothing.
         time.sleep(0.2)
-        monitor._drain_and_dispatch()
+        cuspy._drain_and_dispatch()
         with lock:
             before = sum(len(c[int(Kernel.START)]) for c in columns)
-        self.assertEqual(monitor.stats()["buffers_completed"], 0)
+        self.assertEqual(cuspy.stats()["buffers_completed"], 0)
         self.assertEqual(before, 0)
 
         # The caller-driven flush is what delivers the records.
-        monitor.flush(sync=True)
+        cuspy.flush(sync=True)
         with lock:
             after = sum(len(c[int(Kernel.START)]) for c in columns)
-        self.assertGreater(monitor.stats()["buffers_completed"], 0)
+        self.assertGreater(cuspy.stats()["buffers_completed"], 0)
         self.assertGreater(after, 0)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
@@ -2965,14 +2952,14 @@ class TestCuptiMonitorCUDA(TestCase):
             """
             import torch
             from cupti.cupti import ActivityKind
-            from torch.profiler._cupti import monitor as mon
-            from torch.profiler._cupti.records import Kernel
+            from torch.profiler._cuspy import core as cuspy_core
+            from torch.profiler._cuspy.records import Kernel
 
             assert not torch.cuda.is_initialized()
             kind = ActivityKind.CONCURRENT_KERNEL
             seen = []
-            mon.configure(use_approx_timestamps=True)
-            m = mon.CuptiMonitor()
+            cuspy_core.configure(use_approx_timestamps=True)
+            m = cuspy_core.Cuspy()
             obs = m.register({kind: {Kernel.START, Kernel.END}},
                              lambda cols: seen.append(cols[kind]) if kind in cols else None)
             assert m._timestamp_callback_active, "callback did not engage"
@@ -3005,18 +2992,18 @@ class TestCuptiMonitorCUDA(TestCase):
         # records land on the approx clock (< 1e17), not CLOCK_REALTIME (~1e18).
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti import monitor as cupti_monitor
-        from torch.profiler._cupti.cupti_python import CuptiError, pylibcupti
-        from torch.profiler._cupti.monitor import CuptiMonitor
-        from torch.profiler._cupti.records import Kernel
+        from torch.profiler._cuspy import core as cuspy_core
+        from torch.profiler._cuspy.core import Cuspy
+        from torch.profiler._cuspy.cupti_python import CuptiError, pylibcupti
+        from torch.profiler._cuspy.records import Kernel
 
         if pylibcupti().get_version() < 130303:
             self.skipTest(
                 "libcupti cannot re-time device records with an existing context"
             )
 
-        cupti_monitor._reset_for_test()
-        self.addCleanup(cupti_monitor._reset_for_test)
+        cuspy_core._reset_for_test()
+        self.addCleanup(cuspy_core._reset_for_test)
 
         # Establish a CUDA context first: this is the pre-existing-context case.
         torch.randn(8, device="cuda").sum().item()
@@ -3025,8 +3012,8 @@ class TestCuptiMonitorCUDA(TestCase):
 
         kind = ActivityKind.CONCURRENT_KERNEL
         seen: list = []
-        cupti_monitor.configure(use_approx_timestamps=True)
-        m = CuptiMonitor()
+        cuspy_core.configure(use_approx_timestamps=True)
+        m = Cuspy()
 
         def on_columns(cols):
             if kind in cols:
@@ -3060,15 +3047,15 @@ class TestCuptiMonitorCUDA(TestCase):
         # kernels + other records still flow (so the check is not vacuous).
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti import monitor as cupti_monitor
-        from torch.profiler._cupti.cupti_python import (
+        from torch.profiler._cuspy import core as cuspy_core
+        from torch.profiler._cuspy.core import Cuspy
+        from torch.profiler._cuspy.cupti_python import (
             _noisy_driver_cbids,
             _noisy_runtime_cbids,
             CuptiError,
             pylibcupti,
         )
-        from torch.profiler._cupti.monitor import CuptiMonitor
-        from torch.profiler._cupti.records import Api, Kernel
+        from torch.profiler._cuspy.records import Api, Kernel
 
         if pylibcupti().get_version() < 130303:
             self.skipTest("libcupti predates the UDR per-cbid disable fix")
@@ -3097,8 +3084,8 @@ class TestCuptiMonitorCUDA(TestCase):
             if kk:
                 kernels += len(next(iter(kk.values())))
 
-        cupti_monitor.configure(buffer_size=1 << 20)
-        m = CuptiMonitor()
+        cuspy_core.configure(buffer_size=1 << 20)
+        m = Cuspy()
         want = {
             ActivityKind.CONCURRENT_KERNEL: {Kernel.START, Kernel.END},
             ActivityKind.RUNTIME: {Api.CBID},
@@ -3121,7 +3108,7 @@ class TestCuptiMonitorCUDA(TestCase):
             m.unregister(obs)
 
         # Records must actually be flowing, else the assertions below are vacuous.
-        self.assertGreater(kernels, 0, "no kernel records -- monitor not collecting")
+        self.assertGreater(kernels, 0, "no kernel records -- Cuspy not collecting")
         self.assertGreater(
             sum(runtime_seen.values()), 0, "no RUNTIME records collected"
         )
@@ -3140,14 +3127,14 @@ class TestCuptiMonitorCUDA(TestCase):
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_singleton_flush_accessible(self):
-        # A user can reach the process-wide monitor singleton through CuptiMonitor()
-        # and flush it: CuptiMonitor() constructs/returns the one instance, and
+        # A user can reach the process-wide Cuspy singleton through Cuspy()
+        # and flush it: Cuspy() constructs/returns the one instance, and
         # flush(sync=True) on it delivers everything collected up to the call.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti import monitor as cupti_monitor
-        from torch.profiler._cupti.cupti_python import CuptiError
-        from torch.profiler._cupti.records import Kernel
+        from torch.profiler._cuspy import core as cuspy_core
+        from torch.profiler._cuspy.cupti_python import CuptiError
+        from torch.profiler._cuspy.records import Kernel
 
         kernel = ActivityKind.CONCURRENT_KERNEL
         lock = threading.Lock()
@@ -3158,11 +3145,11 @@ class TestCuptiMonitorCUDA(TestCase):
                 with lock:
                     columns.append(cols[kernel])
 
-        mon = cupti_monitor.CuptiMonitor()
-        self.assertIs(cupti_monitor.CuptiMonitor(), mon)
-        # Drop the singleton after the observer is torn down so the next CuptiMonitor()
-        # caller gets a fresh monitor (cleanups run LIFO: unregister first).
-        self.addCleanup(setattr, cupti_monitor, "_instance", None)
+        mon = cuspy_core.Cuspy()
+        self.assertIs(cuspy_core.Cuspy(), mon)
+        # Drop the singleton after the observer is torn down so the next Cuspy()
+        # caller gets a fresh Cuspy (cleanups run LIFO: unregister first).
+        self.addCleanup(setattr, cuspy_core, "_instance", None)
         try:
             obs = mon.register({kernel: {Kernel.START, Kernel.END}}, on_columns)
         except CuptiError as e:
@@ -3177,22 +3164,22 @@ class TestCuptiMonitorCUDA(TestCase):
 
         # Flush via the singleton fetched from the public accessor, not the local
         # handle, to exercise the user-visible path.
-        cupti_monitor.CuptiMonitor().flush(sync=True)
+        cuspy_core.Cuspy().flush(sync=True)
 
         total = sum(len(c[int(Kernel.START)]) for c in columns)
         self.assertGreater(total, 0)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     def test_multiple_observers(self):
-        # The monitor is the multiplexer: it enables the union of fields on its one
+        # Cuspy is the multiplexer: it enables the union of fields on its one
         # subscriber, then hands each observer only the columns it selected. Two
         # observers on the same kind with disjoint selections each see only their own
         # slice (plus KIND id 0) and the same set of records.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti.cupti_python import CuptiError
-        from torch.profiler._cupti.monitor import CuptiMonitor
-        from torch.profiler._cupti.records import Kernel
+        from torch.profiler._cuspy.core import Cuspy
+        from torch.profiler._cuspy.cupti_python import CuptiError
+        from torch.profiler._cuspy.records import Kernel
 
         kernel = ActivityKind.CONCURRENT_KERNEL
         lock = threading.Lock()
@@ -3208,20 +3195,20 @@ class TestCuptiMonitorCUDA(TestCase):
 
             return cb
 
-        monitor = CuptiMonitor()
+        cuspy = Cuspy()
         try:
-            obs_a = monitor.register(
+            obs_a = cuspy.register(
                 {kernel: {Kernel.START, Kernel.END}}, collect(a_slices)
             )
         except CuptiError as e:
             self.skipTest(f"v2 subscribe unavailable on this driver/cupti: {e}")
-        obs_b = monitor.register(
+        obs_b = cuspy.register(
             {kernel: {Kernel.CORRELATION_ID, Kernel.NAME}}, collect(b_slices)
         )
-        self.addCleanup(monitor.unregister, obs_b)
-        self.addCleanup(monitor.unregister, obs_a)
+        self.addCleanup(cuspy.unregister, obs_b)
+        self.addCleanup(cuspy.unregister, obs_a)
         self.assertGreaterEqual(
-            set(monitor._enabled.get(int(kernel), frozenset())),
+            set(cuspy._enabled.get(int(kernel), frozenset())),
             {0, int(Kernel.START), int(Kernel.CORRELATION_ID)},
         )
 
@@ -3230,7 +3217,7 @@ class TestCuptiMonitorCUDA(TestCase):
             x = torch.relu(x @ x)
         x.sum().item()
         torch.cuda.synchronize()
-        monitor.flush(sync=True)
+        cuspy.flush(sync=True)
 
         self.assertTrue(a_slices)
         self.assertTrue(b_slices)
@@ -3256,9 +3243,9 @@ class TestCuptiMonitorCUDA(TestCase):
         # teardown) on unregister must not hang either.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti.cupti_python import CuptiError
-        from torch.profiler._cupti.monitor import CuptiMonitor
-        from torch.profiler._cupti.records import Api, ExternalCorrelation, Kernel
+        from torch.profiler._cuspy.core import Cuspy
+        from torch.profiler._cuspy.cupti_python import CuptiError
+        from torch.profiler._cuspy.records import Api, ExternalCorrelation, Kernel
 
         counts: dict[int, int] = {}
 
@@ -3268,10 +3255,10 @@ class TestCuptiMonitorCUDA(TestCase):
                     len(next(iter(c.values()))) if c else 0
                 )
 
-        from torch.profiler._cupti import monitor as cupti_monitor
+        from torch.profiler._cuspy import core as cuspy_core
 
-        cupti_monitor.configure(buffer_size=1024, background_flush_period_s=0.02)
-        m = CuptiMonitor()
+        cuspy_core.configure(buffer_size=1024, background_flush_period_s=0.02)
+        m = Cuspy()
         want = {
             ActivityKind.CONCURRENT_KERNEL: {
                 Kernel.START,
@@ -3331,162 +3318,162 @@ def _graph_node_created_key():
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
-# setUp imports the monitor, which hard-imports the build-generated _cupti_stubs, so the
+# setUp imports Cuspy, which hard-imports the build-generated _cupti_stubs, so the
 # whole class has to be gated -- a method-level gate would still let setUp error out where
 # the stubs were not generated (see TEST_CUPTI in common_cuda).
 @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-class TestCuptiCallbackRegistry(TestCase):
-    """The monitor's shared *subscriber-callback* registry -- a separate axis from activity
+class TestCuspyCallbackRegistry(TestCase):
+    """Cuspy's shared *subscriber-callback* registry -- a separate axis from activity
     records: handlers fire synchronously on the application thread inside the CUDA call."""
 
     def setUp(self):
-        from torch.profiler._cupti import monitor as _cupti_monitor
+        from torch.profiler._cuspy import core as cuspy_core
 
-        _cupti_monitor._reset_for_test()
-        self.addCleanup(_cupti_monitor._reset_for_test)
+        cuspy_core._reset_for_test()
+        self.addCleanup(cuspy_core._reset_for_test)
 
-    def _monitor(self):
-        from torch.profiler._cupti.monitor import CuptiMonitor
+    def _cuspy(self):
+        from torch.profiler._cuspy.core import Cuspy
 
-        return CuptiMonitor()
+        return Cuspy()
 
     def test_capability_flag_advertised(self):
         # Consumers (e.g. an out-of-tree CUPTI subscriber) branch on this to stop taking a
         # subscription of their own. Needs no CUDA/CUPTI.
-        from torch.profiler._cupti import monitor as _cupti_monitor
+        from torch.profiler._cuspy import core as cuspy_core
 
-        self.assertTrue(_cupti_monitor.get_config()["supports_callback_handlers"])
+        self.assertTrue(cuspy_core.get_config()["supports_callback_handlers"])
 
     def test_register_unregister_handler(self):
-        monitor = self._monitor()
+        cuspy = self._cuspy()
         key = _graph_node_created_key()
-        first = monitor.register_callback_handler(*key, lambda *a: None)
-        second = monitor.register_callback_handler(*key, lambda *a: None)
-        self.addCleanup(monitor.unregister_callback_handler, second)
-        self.assertEqual(len(monitor._callback_handlers[key]), 2)
+        first = cuspy.register_callback_handler(*key, lambda *a: None)
+        second = cuspy.register_callback_handler(*key, lambda *a: None)
+        self.addCleanup(cuspy.unregister_callback_handler, second)
+        self.assertEqual(len(cuspy._callback_handlers[key]), 2)
 
-        monitor.unregister_callback_handler(first)
-        self.assertEqual(monitor._callback_handlers[key], (second.fn,))
+        cuspy.unregister_callback_handler(first)
+        self.assertEqual(cuspy._callback_handlers[key], (second.fn,))
         # Idempotent: removing an already-removed handler leaves the survivor alone.
-        monitor.unregister_callback_handler(first)
-        self.assertEqual(monitor._callback_handlers[key], (second.fn,))
+        cuspy.unregister_callback_handler(first)
+        self.assertEqual(cuspy._callback_handlers[key], (second.fn,))
 
     def test_arm_refcount_disables_only_at_zero(self):
         # Two consumers scoping the same callback to different windows must not disable
         # each other, so cuptiEnableCallback is driven only on the 0->1 and 1->0 edges.
-        monitor = self._monitor()
+        cuspy = self._cuspy()
         key = _graph_node_created_key()
-        handler = monitor.register_callback_handler(*key, lambda *a: None)
-        self.addCleanup(monitor.unregister_callback_handler, handler)
+        handler = cuspy.register_callback_handler(*key, lambda *a: None)
+        self.addCleanup(cuspy.unregister_callback_handler, handler)
 
         calls = []
-        real = monitor._cupti.enable_callback
+        real = cuspy._cupti.enable_callback
 
         def recording(sub, domain, cbid, enable):
             calls.append(enable)
             return real(sub, domain, cbid, enable)
 
-        with patch.object(monitor._cupti, "enable_callback", recording):
-            monitor.arm_callback(*key)
-            monitor.arm_callback(*key)
+        with patch.object(cuspy._cupti, "enable_callback", recording):
+            cuspy.arm_callback(*key)
+            cuspy.arm_callback(*key)
             self.assertEqual(calls, [True])
-            self.assertEqual(monitor._callback_armed[key], 2)
+            self.assertEqual(cuspy._callback_armed[key], 2)
 
-            monitor.disarm_callback(*key)
+            cuspy.disarm_callback(*key)
             self.assertEqual(calls, [True])
-            monitor.disarm_callback(*key)
+            cuspy.disarm_callback(*key)
             self.assertEqual(calls, [True, False])
-            self.assertNotIn(key, monitor._callback_armed)
+            self.assertNotIn(key, cuspy._callback_armed)
             # Disarming when not armed is a no-op, not an error.
-            monitor.disarm_callback(*key)
+            cuspy.disarm_callback(*key)
             self.assertEqual(calls, [True, False])
 
     def test_handler_exception_is_isolated(self):
         # A raise must not reach CUPTI's C dispatch, and one bad handler must not silence
         # the others (order-independent, so check both orderings).
-        monitor = self._monitor()
+        cuspy = self._cuspy()
         key = _graph_node_created_key()
         seen = []
 
         def boom(*_args):
             raise RuntimeError("handler blew up")
 
-        bad = monitor.register_callback_handler(*key, boom)
-        good = monitor.register_callback_handler(*key, lambda *a: seen.append("good"))
-        self.addCleanup(monitor.unregister_callback_handler, good)
-        self.addCleanup(monitor.unregister_callback_handler, bad)
+        bad = cuspy.register_callback_handler(*key, boom)
+        good = cuspy.register_callback_handler(*key, lambda *a: seen.append("good"))
+        self.addCleanup(cuspy.unregister_callback_handler, good)
+        self.addCleanup(cuspy.unregister_callback_handler, bad)
 
-        monitor._dispatch_callback(0, *key, 0)
+        cuspy._dispatch_callback(0, *key, 0)
         self.assertEqual(seen, ["good"])
 
     def test_handler_alone_holds_subscription(self):
         # A callback-only consumer must be able to bring CUPTI up and hold it with no
         # activity observers -- the motivating case captures graphs before any profiling.
-        monitor = self._monitor()
-        self.assertIsNone(monitor._subscriber)
+        cuspy = self._cuspy()
+        self.assertIsNone(cuspy._subscriber)
 
-        handler = monitor.register_callback_handler(
+        handler = cuspy.register_callback_handler(
             *_graph_node_created_key(), lambda *a: None
         )
-        self.assertIsNotNone(monitor._subscriber)
+        self.assertIsNotNone(cuspy._subscriber)
         # No user-defined records and no decode worker: the activity path stayed off.
-        self.assertFalse(monitor._started)
-        self.assertFalse(monitor._callbacks_registered)
+        self.assertFalse(cuspy._started)
+        self.assertFalse(cuspy._callbacks_registered)
 
-        monitor.unregister_callback_handler(handler)
-        self.assertIsNone(monitor._subscriber)
+        cuspy.unregister_callback_handler(handler)
+        self.assertIsNone(cuspy._subscriber)
 
     def test_subscription_survives_activity_session_either_way(self):
         # The subscription is shared, so it must outlive whichever consumer leaves first.
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti.records import Kernel
+        from torch.profiler._cuspy.records import Kernel
 
-        monitor = self._monitor()
-        handler = monitor.register_callback_handler(
+        cuspy = self._cuspy()
+        handler = cuspy.register_callback_handler(
             *_graph_node_created_key(), lambda *a: None
         )
-        obs = monitor.register(
+        obs = cuspy.register(
             {ActivityKind.CONCURRENT_KERNEL: {Kernel.END}}, lambda c: None
         )
-        self.assertTrue(monitor._started)
-        subscriber = monitor._subscriber
+        self.assertTrue(cuspy._started)
+        subscriber = cuspy._subscriber
 
         # Observer leaves first: stop() disarms user-defined records but must not
         # unsubscribe from under the live handler.
-        monitor.unregister(obs)
-        self.assertFalse(monitor._started)
-        self.assertEqual(monitor._subscriber, subscriber)
+        cuspy.unregister(obs)
+        self.assertFalse(cuspy._started)
+        self.assertEqual(cuspy._subscriber, subscriber)
 
         # Handler leaves last -> released.
-        monitor.unregister_callback_handler(handler)
-        self.assertIsNone(monitor._subscriber)
+        cuspy.unregister_callback_handler(handler)
+        self.assertIsNone(cuspy._subscriber)
 
     def test_noop_cb_swap_does_not_clobber_dispatch(self):
         # An out-of-tree consumer that swaps cupti_python._NOOP_CB (to route its own
-        # subscription to its own callback) must not steal the monitor's dispatch, so the
-        # monitor passes its switchboard to subscribe() explicitly.
-        from torch.profiler._cupti import cupti_python
+        # subscription to its own callback) must not steal Cuspy's dispatch, so
+        # Cuspy passes its switchboard to subscribe() explicitly.
+        from torch.profiler._cuspy import cupti_python
 
         other = cupti_python._CB_FUNC(lambda *a: None)
         with patch.object(cupti_python, "_NOOP_CB", other):
-            monitor = self._monitor()
-            handler = monitor.register_callback_handler(
+            cuspy = self._cuspy()
+            handler = cuspy.register_callback_handler(
                 *_graph_node_created_key(), lambda *a: None
             )
-            self.addCleanup(monitor.unregister_callback_handler, handler)
-            self.assertIsNotNone(monitor._callback_trampoline)
-            self.assertIsNot(monitor._callback_trampoline, other)
+            self.addCleanup(cuspy.unregister_callback_handler, handler)
+            self.assertIsNotNone(cuspy._callback_trampoline)
+            self.assertIsNot(cuspy._callback_trampoline, other)
 
     def test_graph_node_callback_fires_during_capture_only(self):
         # End-to-end proof of the mechanism: GRAPHNODE_CREATED fires once per node while
         # armed during a capture, and not at all once disarmed (so replay pays nothing).
         key = _graph_node_created_key()
         n_kernels = 4
-        monitor = self._monitor()
+        cuspy = self._cuspy()
         fired = []
-        handler = monitor.register_callback_handler(*key, lambda *a: fired.append(a))
-        self.addCleanup(monitor.unregister_callback_handler, handler)
+        handler = cuspy.register_callback_handler(*key, lambda *a: fired.append(a))
+        self.addCleanup(cuspy.unregister_callback_handler, handler)
 
         x = torch.randn(64, 64, device="cuda")
         s = torch.cuda.Stream()
@@ -3497,13 +3484,13 @@ class TestCuptiCallbackRegistry(TestCase):
         torch.cuda.current_stream().wait_stream(s)
 
         g = torch.cuda.CUDAGraph()
-        monitor.arm_callback(*key)
+        cuspy.arm_callback(*key)
         try:
             with torch.cuda.graph(g):
                 for _ in range(n_kernels):
                     x = x + 1
         finally:
-            monitor.disarm_callback(*key)
+            cuspy.disarm_callback(*key)
         self.assertGreaterEqual(len(fired), n_kernels)
 
         # Disarmed: replay must not enter the dispatcher at all.
@@ -3521,7 +3508,7 @@ class TestWindowFinalizer(TestCase):
     class _Fake(WindowFinalizerMixin):
         def __init__(self) -> None:
             self._clock = 0
-            self._delivered: list[int] = []  # starts the "monitor" has handed over
+            self._delivered: list[int] = []  # starts Cuspy has handed over
             self._buf: list[int] = []  # collected, not-yet-finalized record starts
             # (window_id, boundary, [selected starts]) in finalize order
             self.finalized: list[tuple[int, int, list[int]]] = []
@@ -3602,26 +3589,26 @@ class TestWindowFinalizer(TestCase):
 
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not TEST_CUDA, "CUDA is required")
-class TestCuptiMonitorProfiler(TestCase):
-    """The monitor driven through ``torch.profiler.profile`` (trace shape, op/kernel
+class TestCuspyProfiler(TestCase):
+    """Cuspy driven through ``torch.profiler.profile`` (trace shape, op/kernel
     parity, record_shapes, sync/async export, multithread thread-assignment, ...)."""
 
     def setUp(self):
-        # CuptiMonitor is a process-wide singleton; drop it so each test builds a fresh one.
-        # The class also hosts CUPTI-free config-validation tests, so the monitor module
+        # Cuspy is a process-wide singleton; drop it so each test builds a fresh one.
+        # The class also hosts CUPTI-free config-validation tests, so Cuspy module
         # (which needs cupti-python) may be unimportable; there is nothing to reset then.
         if not TEST_CUPTI_PYTHON:
             return
-        from torch.profiler._cupti import monitor as _cupti_monitor
+        from torch.profiler._cuspy import core as cuspy_core
 
-        _cupti_monitor._reset_for_test()
-        self.addCleanup(_cupti_monitor._reset_for_test)
+        cuspy_core._reset_for_test()
+        self.addCleanup(cuspy_core._reset_for_test)
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     @unittest.skipUnless(
         SM100OrLater, "hardware event sampling requires GB200+ (sm_100)"
     )
-    def test_cupti_monitor_enable_hes_early_guard(self):
+    def test_cuspy_enable_hes_early_guard(self):
         import subprocess
 
         subprocess.check_call(
@@ -3630,10 +3617,10 @@ class TestCuptiMonitorProfiler(TestCase):
                 "-c",
                 """
 import torch
-from torch.profiler._cupti import monitor as _cupti_monitor
+from torch.profiler._cuspy import core as cuspy_core
 
-_cupti_monitor.enable_hes_early()
-assert _cupti_monitor.is_hes_enabled()
+cuspy_core.enable_hes_early()
+assert cuspy_core.is_hes_enabled()
 """,
             ],
             text=True,
@@ -3646,10 +3633,10 @@ assert _cupti_monitor.is_hes_enabled()
                 "-c",
                 """
 import torch
-from torch.profiler._cupti import monitor as _cupti_monitor
+from torch.profiler._cuspy import core as cuspy_core
 
 torch.randn(1, device="cuda")
-_cupti_monitor.enable_hes_early()
+cuspy_core.enable_hes_early()
 """,
             ],
             text=True,
@@ -3664,9 +3651,9 @@ _cupti_monitor.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @_isolated
-    def test_cupti_monitor_collection_smoke(self):
-        from torch.profiler._cupti import monitor as _cupti_monitor
-        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+    def test_cuspy_collection_smoke(self):
+        from torch.profiler._cuspy import core as cuspy_core
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
 
         obs = NodeTimerObserver()
         self.assertTrue(obs.available)
@@ -3676,25 +3663,25 @@ _cupti_monitor.enable_hes_early()
         y.sum().item()
         torch.cuda.synchronize()
 
-        monitor = _cupti_monitor.CuptiMonitor()
-        monitor.flush(sync=True)
-        stats = monitor.stats()
+        cuspy = cuspy_core.Cuspy()
+        cuspy.flush(sync=True)
+        stats = cuspy.stats()
         _gnode, start, _end, _stream = obs.drain()
         obs.close()
 
         # The native C++ pool must actually have been exercised: catches a silent
         # regression to a no-op (e.g. broken callback registration or symbol
-        # export) that would still pass if the worker never saw a buffer. The
-        # monitor demuxes to columns and the observer drains spans, so real kernel
+        # export) that would still pass if the worker never saw a buffer.
+        # Cuspy demuxes to columns and the observer drains spans, so real kernel
         # spans (NodeTimerObserver collects CONCURRENT_KERNEL) must come out.
         self.assertGreater(stats["buffers_allocated"], 0)
         self.assertGreater(stats["buffers_completed"], 0)
         self.assertEqual(stats["buffers_pending"], 0)
         self.assertGreater(len(start), 0)
 
-        # obs.close() unregistered the last observer, stopping the monitor. The pool
+        # obs.close() unregistered the last observer, stopping Cuspy. The pool
         # must survive that: CUPTI can still own buffers it never returned.
-        self.assertGreater(torch._C._profiler._cupti_monitor.allocated_buffers(), 0)
+        self.assertGreater(torch._C._profiler._cuspy.allocated_buffers(), 0)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @_isolated
@@ -3712,7 +3699,7 @@ _cupti_monitor.enable_hes_early()
         # nothing, so skip rather than falsely fail.
         import ctypes
 
-        from torch.profiler._cupti._graph_deps import _GraphDependencyRecorder
+        from torch.profiler._cuspy._graph_deps import _GraphDependencyRecorder
 
         try:
             from cuda.bindings import runtime as cudart
@@ -3746,7 +3733,7 @@ _cupti_monitor.enable_hes_early()
         graph.instantiate()
 
         cfg = _ExperimentalConfig(
-            custom_profiler_config='{"backend":"cupti_monitor","enable_graph_dependencies":true}'
+            custom_profiler_config='{"backend":"cuspy","enable_graph_dependencies":true}'
         )
         with TemporaryFileName(mode="w+") as trace_path:
             with profile(
@@ -3774,12 +3761,12 @@ _cupti_monitor.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @_isolated
-    def test_cupti_monitor_collection_repeated_lifecycle(self):
-        from torch.profiler._cupti import monitor as _cupti_monitor
-        from torch.profiler._cupti.observers.node_timer import NodeTimerObserver
+    def test_cuspy_collection_repeated_lifecycle(self):
+        from torch.profiler._cuspy import core as cuspy_core
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
 
-        # Register/collect/unregister twice: the last observer leaving stops the
-        # monitor, so the second pass exercises the start-after-stop restart path.
+        # Register/collect/unregister twice: the last observer leaving stops
+        # Cuspy, so the second pass exercises the start-after-stop restart path.
         for _ in range(2):
             obs = NodeTimerObserver()
             self.assertTrue(obs.available)
@@ -3789,8 +3776,8 @@ _cupti_monitor.enable_hes_early()
             y.sum().item()
             torch.cuda.synchronize()
 
-            monitor = _cupti_monitor.CuptiMonitor()
-            monitor.flush(sync=True)
+            cuspy = cuspy_core.Cuspy()
+            cuspy.flush(sync=True)
             _gnode, start, _end, _stream = obs.drain()
             obs.close()
 
@@ -3798,7 +3785,7 @@ _cupti_monitor.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @_isolated
-    def test_cupti_monitor_multithread_runtime_thread_assignment(self):
+    def test_cuspy_multithread_runtime_thread_assignment(self):
         x1 = torch.randn(256, 256, device="cuda")
         x2 = torch.randn(256, 256, device="cuda")
         y1 = torch.randn(256, 256, device="cuda")
@@ -3821,7 +3808,7 @@ _cupti_monitor.enable_hes_early()
 
         cfg = _ExperimentalConfig(
             profile_all_threads=True,
-            custom_profiler_config='{"backend":"cupti_monitor"}',
+            custom_profiler_config='{"backend":"cuspy"}',
         )
 
         with TemporaryFileName(mode="w+") as trace_path:
@@ -3840,7 +3827,7 @@ _cupti_monitor.enable_hes_early()
                     thread.join()
 
             prof.export_chrome_trace(trace_path)
-            # cupti_monitor writes the trace gzipped at <path>.gz (synchronously by default).
+            # cuspy writes the trace gzipped at <path>.gz (synchronously by default).
             gz = trace_path + ".gz"
             if os.path.exists(gz):
                 with gzip.open(gz, "rt") as f:
@@ -3877,7 +3864,7 @@ _cupti_monitor.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @_isolated
-    def test_cupti_monitor_runtime_thread_without_record_function(self):
+    def test_cuspy_runtime_thread_without_record_function(self):
         # Regression: CPU-side CUPTI records (cuda_runtime/cuda_driver) must land on the
         # issuing OS thread -- the same lane as their cpu_ops, matching kineto -- even
         # with NO record_function region. The thread map is otherwise only populated by
@@ -3893,7 +3880,7 @@ _cupti_monitor.enable_hes_early()
         )
         x = torch.randn(32, 512, device="cuda")
         cfg = _ExperimentalConfig(
-            custom_profiler_config='{"backend":"cupti_monitor"}',
+            custom_profiler_config='{"backend":"cuspy"}',
         )
         with TemporaryFileName(mode="w+") as trace_path:
             with (
@@ -3934,23 +3921,23 @@ _cupti_monitor.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @_isolated
-    def test_cupti_monitor_trace_has_expected_events(self):
+    def test_cuspy_trace_has_expected_events(self):
         cfg = _ExperimentalConfig(
-            custom_profiler_config='{"backend":"cupti_monitor"}',
+            custom_profiler_config='{"backend":"cuspy"}',
         )
         with TemporaryFileName(mode="w+") as trace_path:
             with profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 experimental_config=cfg,
             ) as prof:
-                with record_function("monitor_region"):
+                with record_function("cuspy_region"):
                     a = torch.randn(128, 128, device="cuda")
                     b = torch.randn(128, 128, device="cuda")
                     c = (a @ b).relu()
                     _ = c.cpu()
                     torch.cuda.synchronize()
             prof.export_chrome_trace(trace_path)
-            # cupti_monitor writes the trace gzipped at <path>.gz (synchronously by default).
+            # cuspy writes the trace gzipped at <path>.gz (synchronously by default).
             gz = trace_path + ".gz"
             if os.path.exists(gz):
                 with gzip.open(gz, "rt") as f:
@@ -3987,19 +3974,19 @@ _cupti_monitor.enable_hes_early()
             for e in events
             if e.get("cat") == "user_annotation" and e.get("ph") == "X"
         }
-        self.assertIn("monitor_region", user_names)
+        self.assertIn("cuspy_region", user_names)
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-    def test_cupti_monitor_observer_registration_failure_is_graceful(self):
-        # If the per-cycle ProfilerObserver fails to register with the CUPTI monitor (an
+    def test_cuspy_observer_registration_failure_is_graceful(self):
+        # If the per-cycle ProfilerObserver fails to register with Cuspy (an
         # intermittent CUPTI condition), the profiler must degrade gracefully: with no
         # observer / trace window, stop_trace and export_chrome_trace skip the trace instead
         # of asserting and taking down the run.
-        from torch.profiler._cupti import monitor as _cupti_monitor
+        from torch.profiler._cuspy import core as cuspy_core
 
-        cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cupti_monitor"}')
+        cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cuspy"}')
         with patch.object(
-            _cupti_monitor.CuptiMonitor,
+            cuspy_core.Cuspy,
             "register",
             side_effect=RuntimeError("simulated observer registration failure"),
         ):
@@ -4014,7 +4001,7 @@ _cupti_monitor.enable_hes_early()
                     _ = (a @ a).cpu()
                     torch.cuda.synchronize()
                 # Registration failed -> observer unavailable, no trace window.
-                obs = prof._cupti_profiler_observer
+                obs = prof._cuspy_profiler_observer
                 self.assertTrue(obs is None or not obs.available)
                 # Must skip the export rather than assert/crash.
                 prof.export_chrome_trace(trace_path)
@@ -4023,11 +4010,11 @@ _cupti_monitor.enable_hes_early()
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @_isolated
-    def test_cupti_monitor_sync_export_default(self):
-        # Default: the cupti_monitor backend exports synchronously -- the merged file is
+    def test_cuspy_sync_export_default(self):
+        # Default: the cuspy backend exports synchronously -- the merged file is
         # on disk when export_chrome_trace returns, wait_for_exports is a no-op, and no
         # background poll thread is spawned (the finalize runs on the calling thread).
-        cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cupti_monitor"}')
+        cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cuspy"}')
         with TemporaryFileName(mode="w+") as trace_path:
             with profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -4036,11 +4023,11 @@ _cupti_monitor.enable_hes_early()
                 a = torch.randn(128, 128, device="cuda")
                 (a @ a).relu().sum().item()
                 torch.cuda.synchronize()
-            obs = prof._cupti_profiler_observer
+            obs = prof._cuspy_profiler_observer
             self.assertIsNotNone(obs)
             self.assertIsNone(obs._poll_thread)  # sync -> no background poller spawned
             prof.export_chrome_trace(trace_path)
-            # Written before return (cupti_monitor writes gzipped at <path>.gz).
+            # Written before return (cuspy writes gzipped at <path>.gz).
             self.assertTrue(
                 os.path.exists(trace_path + ".gz") or os.path.exists(trace_path)
             )
@@ -4048,13 +4035,11 @@ _cupti_monitor.enable_hes_early()
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @_isolated
-    def test_cupti_monitor_async_export_defers(self):
-        # cupti_monitor_async_export=true hands the export off: a background poll thread
+    def test_cuspy_async_export_defers(self):
+        # cuspy_async_export=true hands the export off: a background poll thread
         # is spawned and the file is written off-thread, joined by wait_for_exports.
         cfg = _ExperimentalConfig(
-            custom_profiler_config=(
-                '{"backend":"cupti_monitor","cupti_monitor_async_export":true}'
-            ),
+            custom_profiler_config=('{"backend":"cuspy","cuspy_async_export":true}'),
         )
         with TemporaryFileName(mode="w+") as trace_path:
             with profile(
@@ -4064,7 +4049,7 @@ _cupti_monitor.enable_hes_early()
                 a = torch.randn(128, 128, device="cuda")
                 (a @ a).relu().sum().item()
                 torch.cuda.synchronize()
-            obs = prof._cupti_profiler_observer
+            obs = prof._cuspy_profiler_observer
             self.assertIsNotNone(obs._poll_thread)  # async -> background poller running
             prof.export_chrome_trace(trace_path)
             prof.wait_for_exports()
@@ -4072,23 +4057,23 @@ _cupti_monitor.enable_hes_early()
                 os.path.exists(trace_path + ".gz") or os.path.exists(trace_path)
             )
 
-    def test_cupti_monitor_async_export_requires_backend(self):
-        # cupti_monitor_async_export is a cupti_monitor-only option: setting it without
+    def test_cuspy_async_export_requires_backend(self):
+        # cuspy_async_export is a cuspy-only option: setting it without
         # the backend is a misconfiguration, not a silent no-op. (Pure config
         # validation -- raises at construction, no CUDA/cupti needed.)
-        with self.assertRaisesRegex(ValueError, "cupti_monitor_async_export"):
+        with self.assertRaisesRegex(ValueError, "cuspy_async_export"):
             profile(
                 activities=[ProfilerActivity.CPU],
                 experimental_config=_ExperimentalConfig(
-                    custom_profiler_config='{"cupti_monitor_async_export":false}'
+                    custom_profiler_config='{"cuspy_async_export":false}'
                 ),
             )
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @_isolated
-    def test_cupti_monitor_record_shapes(self):
+    def test_cuspy_record_shapes(self):
         cfg = _ExperimentalConfig(
-            custom_profiler_config='{"backend":"cupti_monitor"}',
+            custom_profiler_config='{"backend":"cuspy"}',
         )
 
         def shaped_cpu_ops(record_shapes):
@@ -4102,7 +4087,7 @@ _cupti_monitor.enable_hes_early()
                     (a @ a).relu()
                     torch.cuda.synchronize()
                 prof.export_chrome_trace(trace_path)
-                # cupti_monitor writes the trace gzipped at <path>.gz (synchronously by default).
+                # cuspy writes the trace gzipped at <path>.gz (synchronously by default).
                 gz = trace_path + ".gz"
                 if os.path.exists(gz):
                     with gzip.open(gz, "rt") as f:
@@ -4116,20 +4101,20 @@ _cupti_monitor.enable_hes_early()
                 if e.get("cat") == "cpu_op" and "Input Dims" in e.get("args", {})
             ]
 
-        # record_shapes is a CPU-side setting, so it must flow through the monitor
+        # record_shapes is a CPU-side setting, so it must flow through Cuspy
         # backend just like the stock profiler.
         self.assertEqual(shaped_cpu_ops(record_shapes=False), [])
         self.assertGreater(len(shaped_cpu_ops(record_shapes=True)), 0)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_cupti_monitor_matches_stock_op_and_kernel_names(self):
+    def test_cuspy_matches_stock_op_and_kernel_names(self):
         # Run in a FRESH process. This test needs a stock (Kineto) CUDA baseline and
-        # then a cupti_monitor session, so it must start from a process that hasn't
+        # then a cuspy session, so it must start from a process that hasn't
         # touched CUPTI -- immune to whatever earlier tests did to this process's
         # CUPTI. Inside it, stock (Kineto) runs first, then cuptiFinalize() releases
         # CUPTI synchronously (rather than Kineto's async TEARDOWN_CUPTI, whose
-        # deferred global finalize races and can deadlock the monitor's teardown) so
-        # the following monitor session can subscribe.
+        # deferred global finalize races and can deadlock Cuspy's teardown) so
+        # the following Cuspy session can subscribe.
         import subprocess
 
         script = textwrap.dedent(
@@ -4139,10 +4124,10 @@ _cupti_monitor.enable_hes_early()
             from torch.profiler import profile, ProfilerActivity
             from torch._C._profiler import _ExperimentalConfig
 
-            def trace_summary(use_monitor):
+            def trace_summary(use_cuspy):
                 cfg = _ExperimentalConfig(
-                    custom_profiler_config='{"backend":"cupti_monitor"}'
-                    if use_monitor else "")
+                    custom_profiler_config='{"backend":"cuspy"}'
+                    if use_cuspy else "")
                 with tempfile.NamedTemporaryFile("w+", suffix=".json") as f:
                     with profile(
                         activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -4153,7 +4138,7 @@ _cupti_monitor.enable_hes_early()
                         (a @ b).relu().sum()
                         torch.cuda.synchronize()
                     prof.export_chrome_trace(f.name)
-                    # cupti_monitor writes the trace gzipped at <name>.gz (sync by default);
+                    # cuspy writes the trace gzipped at <name>.gz (sync by default);
                     # stock writes <name> directly.
                     gz = f.name + ".gz"
                     if os.path.exists(gz):
@@ -4168,19 +4153,19 @@ _cupti_monitor.enable_hes_early()
                 return aten, nker
 
             stock_ops, stock_kernels = trace_summary(False)
-            # Synchronously release CUPTI from the stock (Kineto) session so the
-            # monitor can subscribe -- cuptiFinalize() now, with nothing else using
+            # Synchronously release CUPTI from the stock (Kineto) session so
+            # Cuspy can subscribe -- cuptiFinalize() now, with nothing else using
             # CUPTI, instead of Kineto's async TEARDOWN_CUPTI finalize (which races
-            # and can deadlock the monitor's teardown).
-            from torch.profiler._cupti.cupti_python import pylibcupti
+            # and can deadlock Cuspy's teardown).
+            from torch.profiler._cuspy.cupti_python import pylibcupti
             pylibcupti().finalize()
-            monitor_ops, monitor_kernels = trace_summary(True)
+            cuspy_ops, cuspy_kernels = trace_summary(True)
             assert stock_kernels > 0, f"stock kernels={stock_kernels}"
-            assert monitor_kernels > 0, f"monitor kernels={monitor_kernels}"
-            assert monitor_ops == stock_ops, (
-                f"ops differ: only_stock={sorted(stock_ops - monitor_ops)} "
-                f"only_monitor={sorted(monitor_ops - stock_ops)}")
-            print("OK", stock_kernels, monitor_kernels)
+            assert cuspy_kernels > 0, f"Cuspy kernels={cuspy_kernels}"
+            assert cuspy_ops == stock_ops, (
+                f"ops differ: only_stock={sorted(stock_ops - cuspy_ops)} "
+                f"only_cuspy={sorted(cuspy_ops - stock_ops)}")
+            print("OK", stock_kernels, cuspy_kernels)
             """
         )
         # The child inherits this process's libcupti (LD_PRELOAD/LD_LIBRARY_PATH) via
@@ -4199,12 +4184,12 @@ _cupti_monitor.enable_hes_early()
         self.assertIn("OK", p.stdout)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    def test_cupti_monitor_kineto_parity(self):
+    def test_cuspy_kineto_parity(self):
         # In a FRESH process (clean CUPTI), profile a couple of representative models
-        # under stock (Kineto) and then the cupti_monitor backend, eager AND graphed,
+        # under stock (Kineto) and then the cuspy backend, eager AND graphed,
         # and assert the aten-op set + kernel-name multiset are identical between the
-        # two backends -- the monitor must observe the same ops/kernels Kineto does.
-        # Stock runs first; cuptiFinalize() then releases CUPTI so the monitor can
+        # two backends -- Cuspy must observe the same ops/kernels Kineto does.
+        # Stock runs first; cuptiFinalize() then releases CUPTI so Cuspy can
         # subscribe. The child inherits this process's libcupti via the environment.
         import subprocess
 
@@ -4215,25 +4200,25 @@ _cupti_monitor.enable_hes_early()
             from torch.profiler import profile, ProfilerActivity
             from torch._C._profiler import _ExperimentalConfig
 
-            # HES (hardware events) must be armed before any CUDA context exists; the
-            # monitor must still produce kernel metadata identical to Kineto with it on.
+            # HES (hardware events) must be armed before any CUDA context exists;
+            # Cuspy must still produce kernel metadata identical to Kineto with it on.
             # Arm it first thing and assert no context exists yet -- a failure here means
             # the harness created a context too early (a test bug), distinct from HES
             # being unsupported on the platform (is_hes_enabled stays False -> SKIP_HES).
             HES = os.environ.get("PARITY_HES") == "1"
             if HES:
                 assert not torch.cuda.is_initialized(), "CUDA context exists before HES arm"
-                from torch.profiler._cupti import monitor as _cupti_monitor
-                from torch.profiler._cupti.cupti_python import CuptiError
+                from torch.profiler._cuspy import core as cuspy_core
+                from torch.profiler._cuspy.cupti_python import CuptiError
                 try:
-                    _cupti_monitor.enable_hes_early()
+                    cuspy_core.enable_hes_early()
                 except CuptiError as e:
                     # HES is unsupported on this platform (cuptiActivityEnableHWTrace
                     # -> CUPTI_ERROR_NOT_SUPPORTED): skip the HES leg of the parity check.
                     if "CUPTI_ERROR_NOT_SUPPORTED" not in str(e):
                         raise
                     print("SKIP_HES"); raise SystemExit(0)
-                if not _cupti_monitor.is_hes_enabled():
+                if not cuspy_core.is_hes_enabled():
                     print("SKIP_HES"); raise SystemExit(0)
 
             def make_models():
@@ -4255,12 +4240,12 @@ _cupti_monitor.enable_hes_early()
                 with torch.cuda.graph(g): model(inp)
                 return g
 
-            def summary(model, inp, mode, use_monitor):
-                # The cupti_monitor backend writes the trace gzipped at <path>.gz
+            def summary(model, inp, mode, use_cuspy):
+                # The cuspy backend writes the trace gzipped at <path>.gz
                 # (synchronously by default), so export then read the .gz.
                 g = capture(model, inp) if mode == "graphed" else None
                 cfg = _ExperimentalConfig(
-                    custom_profiler_config='{"backend":"cupti_monitor"}' if use_monitor else "")
+                    custom_profiler_config='{"backend":"cuspy"}' if use_cuspy else "")
                 with tempfile.NamedTemporaryFile("w+", suffix=".json") as f:
                     with torch.no_grad(), profile(
                         activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
@@ -4324,13 +4309,13 @@ _cupti_monitor.enable_hes_early()
                 return sum(sum(c.values()) for c in meta.values())
 
             # HES is process-global and armed before CUDA init, which perturbs a stock
-            # Kineto session (it drops activity records). So compare the monitor against
-            # stock only with HES off; the HES run instead emits its monitor metadata for
-            # the parent to compare against the HES-off monitor (transitively == stock).
+            # Kineto session (it drops activity records). So compare Cuspy against
+            # stock only with HES off; the HES run instead emits its Cuspy metadata for
+            # the parent to compare against the HES-off Cuspy (transitively == stock).
             if not HES:
                 stock = {(n, mode): summary(m, i, mode, False)
                          for n, (m, i) in models.items() for mode in MODES}
-                from torch.profiler._cupti.cupti_python import pylibcupti
+                from torch.profiler._cuspy.cupti_python import pylibcupti
                 pylibcupti().finalize()
             mon = {(n, mode): summary(m, i, mode, True)
                    for n, (m, i) in models.items() for mode in MODES}
@@ -4340,7 +4325,7 @@ _cupti_monitor.enable_hes_early()
                     for mode in MODES:
                         sa, sm, sx = stock[(n, mode)]; ma, mm, mx = mon[(n, mode)]
                         assert nkernels(sm) > 0, f"{n}/{mode}: no stock kernels"
-                        assert nkernels(mm) > 0, f"{n}/{mode}: no monitor kernels"
+                        assert nkernels(mm) > 0, f"{n}/{mode}: no Cuspy kernels"
                         assert sa == ma, (f"{n}/{mode} aten differ: "
                             f"only_stock={sorted(sa - ma)} only_mon={sorted(ma - sa)}")
                         # Parity on kernel names, per-kernel launch counts, AND launch
@@ -4354,13 +4339,13 @@ _cupti_monitor.enable_hes_early()
                             # cudaLaunchKernel counts match (graphed replays launch via a
                             # single cudaGraphLaunch, so this only holds eager).
                             assert sx["arrows"] == sx["gpu_ops"] == mx["arrows"] == mx["gpu_ops"], (
-                                f"{n} launch-arrow parity: stock={sx} monitor={mx}")
+                                f"{n} launch-arrow parity: stock={sx} Cuspy={mx}")
                             assert sx["launches"] == mx["launches"], (
-                                f"{n} cudaLaunchKernel parity: stock={sx} monitor={mx}")
+                                f"{n} cudaLaunchKernel parity: stock={sx} Cuspy={mx}")
             else:
                 for n in models:
                     for mode in MODES:
-                        assert nkernels(mon[(n, mode)][1]) > 0, f"{n}/{mode}: no monitor kernels"
+                        assert nkernels(mon[(n, mode)][1]) > 0, f"{n}/{mode}: no Cuspy kernels"
 
             serial = {f"{n}|{mode}": {name: {repr(ck): cnt for ck, cnt in cfgs.items()}
                                       for name, cfgs in mon[(n, mode)][1].items()}
@@ -4371,8 +4356,8 @@ _cupti_monitor.enable_hes_early()
         )
         # Run parity once with HES off and once with it on (the HES child self-skips
         # via SKIP_HES when the platform doesn't support hardware events). Each child
-        # prints its monitor metadata after RESULT; the HES-on monitor must match the
-        # HES-off monitor (which already matched stock above).
+        # prints its Cuspy metadata after RESULT; the HES-on Cuspy must match the
+        # HES-off Cuspy (which already matched stock above).
         import json
 
         captured = {}
@@ -4404,7 +4389,7 @@ _cupti_monitor.enable_hes_early()
             self.assertEqual(
                 captured[False],
                 captured[True],
-                "monitor kernel metadata differs with HES enabled vs disabled",
+                "Cuspy kernel metadata differs with HES enabled vs disabled",
             )
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
@@ -4414,7 +4399,7 @@ _cupti_monitor.enable_hes_early()
         "kernel-launch path on sm_100+; pre-sm_100 archs route launches through "
         "the runtime API and never surface a DRIVER record",
     )
-    def test_cupti_monitor_observed_kinds_present(self):
+    def test_cuspy_observed_kinds_present(self):
         # Every activity kind the ProfilerObserver subscribes to must surface in the
         # exported chrome trace. One workload exercises kernels, H2D/D2H memcpy, memset,
         # runtime + driver API, CUPTI overhead, record_function annotations (external
@@ -4444,8 +4429,8 @@ _cupti_monitor.enable_hes_early()
                 torch.cuda.synchronize()
 
             def categories(sync_on):
-                cb = ('{"backend":"cupti_monitor","enable_cuda_sync_events":true}'
-                      if sync_on else '{"backend":"cupti_monitor"}')
+                cb = ('{"backend":"cuspy","enable_cuda_sync_events":true}'
+                      if sync_on else '{"backend":"cuspy"}')
                 cfg = _ExperimentalConfig(custom_profiler_config=cb)
                 f = tempfile.NamedTemporaryFile("w+", suffix=".json", delete=False)
                 with torch.no_grad(), profile(
@@ -4475,7 +4460,7 @@ _cupti_monitor.enable_hes_early()
             assert not missing, f"missing categories {missing}; got {dict(cats)}"
             assert ok, f"trace validator failed: {viol}"
 
-            from torch.profiler._cupti.cupti_python import pylibcupti
+            from torch.profiler._cuspy.cupti_python import pylibcupti
             pylibcupti().finalize()
             off, _, _ = categories(False)
             assert not off.get("cuda_sync"), f"cuda_sync without opt-in: {dict(off)}"
@@ -4491,13 +4476,13 @@ _cupti_monitor.enable_hes_early()
         self.assertIn("OK", p.stdout)
 
 
-class TestCuptiMonitorNative(TestCase):
-    """The monitor's native buffer-pool / v2-record-layout callbacks driven directly
+class TestCuspyNative(TestCase):
+    """Cuspy's native buffer-pool / v2-record-layout callbacks driven directly
     via ctypes -- pure C++, no CUDA/cupti-python."""
 
     @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
-    def test_cupti_monitor_buffer_pool_reuse(self):
-        # The CUPTI monitor's buffer pool is pure C++ (no CUDA/cupti-python), so
+    def test_cuspy_buffer_pool_reuse(self):
+        # Cuspy's buffer pool is pure C++ (no CUDA/cupti-python), so
         # drive its native buffer-requested / buffer-completed callbacks directly
         # via ctypes to verify returned buffers are recycled rather than
         # reallocated. The callbacks match cuptiActivityRegisterCallbacks_v2: the
@@ -4507,10 +4492,10 @@ class TestCuptiMonitorNative(TestCase):
         import ctypes
 
         pyprof = torch._C._profiler
-        pyprof._cupti_monitor.reset_buffers()
-        self.addCleanup(pyprof._cupti_monitor.reset_buffers)
+        pyprof._cuspy.reset_buffers()
+        self.addCleanup(pyprof._cuspy.reset_buffers)
         buffer_size = 64 * 1024
-        pyprof._cupti_monitor.configure_buffers(buffer_size)
+        pyprof._cuspy.configure_buffers(buffer_size)
 
         request_t = ctypes.CFUNCTYPE(
             None,
@@ -4526,8 +4511,8 @@ class TestCuptiMonitorNative(TestCase):
             ctypes.c_size_t,
             ctypes.c_void_p,
         )
-        request = request_t(pyprof._cupti_monitor.buffer_request_callback_address())
-        complete = complete_t(pyprof._cupti_monitor.buffer_complete_callback_address())
+        request = request_t(pyprof._cuspy.buffer_request_callback_address())
+        complete = complete_t(pyprof._cuspy.buffer_complete_callback_address())
 
         def do_request():
             buf = ctypes.c_void_p()
@@ -4547,33 +4532,33 @@ class TestCuptiMonitorNative(TestCase):
         # First request has an empty free list, so it allocates.
         ptr_a, size_a = do_request()
         self.assertEqual(size_a, buffer_size)
-        self.assertEqual(pyprof._cupti_monitor.allocated_buffers(), 1)
+        self.assertEqual(pyprof._cuspy.allocated_buffers(), 1)
 
         # Complete it, drain it, and return it to the pool.
         do_complete(ptr_a)
-        self.assertEqual(pyprof._cupti_monitor.pending_buffers(), 1)
-        item = pyprof._cupti_monitor.get_completed()
+        self.assertEqual(pyprof._cuspy.pending_buffers(), 1)
+        item = pyprof._cuspy.get_completed()
         # (ptr, valid_size, ctx, stream, layouts): ctx/stream 0 (not delivered to the
         # completion callback) and layouts empty (driven with a null complete_info).
         self.assertEqual(item, (ptr_a, 4096, 0, 0, []))
-        self.assertEqual(pyprof._cupti_monitor.pending_buffers(), 0)
-        pyprof._cupti_monitor.return_buffer(ptr_a)
+        self.assertEqual(pyprof._cuspy.pending_buffers(), 0)
+        pyprof._cuspy.return_buffer(ptr_a)
 
         # The next request reuses the freed buffer: same pointer, no new alloc.
         ptr_b, _ = do_request()
         self.assertEqual(ptr_b, ptr_a)
-        self.assertEqual(pyprof._cupti_monitor.allocated_buffers(), 1)
+        self.assertEqual(pyprof._cuspy.allocated_buffers(), 1)
 
         # A second concurrently-outstanding buffer forces a fresh allocation.
         ptr_c, _ = do_request()
         self.assertNotEqual(ptr_c, ptr_b)
-        self.assertEqual(pyprof._cupti_monitor.allocated_buffers(), 2)
+        self.assertEqual(pyprof._cuspy.allocated_buffers(), 2)
 
-    def test_cupti_monitor_not_imported_without_active_session(self):
-        # The optional CUPTI monitor import chain (observers.profiler -> monitor ->
+    def test_cuspy_not_imported_without_active_session(self):
+        # The optional Cuspy import chain (observers.profiler -> Cuspy ->
         # cupti.cupti) must NOT be pulled in just by using record_function -- only an
-        # active cupti_monitor profile imports it. Otherwise a process whose cupti-python
-        # is too old for the monitor's symbols logs an import warning on every record
+        # active cuspy profile imports it. Otherwise a process whose cupti-python
+        # is too old for Cuspy's symbols logs an import warning on every record
         # region. Checked in a fresh subprocess so other tests' imports don't pollute
         # sys.modules; needs no cupti-python.
         script = textwrap.dedent(
@@ -4583,9 +4568,9 @@ class TestCuptiMonitorNative(TestCase):
 
             with torch.autograd.profiler.record_function("r"):
                 pass
-            leaked = sorted(m for m in sys.modules if m.startswith("torch.profiler._cupti"))
-            assert not leaked, f"cupti chain imported without an active session: {leaked}"
-            assert torch.autograd.profiler._active_cupti_profiler_observer is None
+            leaked = sorted(m for m in sys.modules if m.startswith("torch.profiler._cuspy"))
+            assert not leaked, f"cuspy chain imported without an active session: {leaked}"
+            assert torch.autograd.profiler._active_cuspy_profiler_observer is None
             print("OK")
             """
         )
@@ -4595,7 +4580,7 @@ class TestCuptiMonitorNative(TestCase):
         self.assertIn(b"OK", out)
 
     @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
-    def test_cupti_monitor_v2_record_layout_capture(self):
+    def test_cuspy_v2_record_layout_capture(self):
         # The v2 complete callback parses the CUPTI user-defined record layout
         # (pBufferCompleteInfo->ppRecordLayouts, valid only during the callback) and
         # attaches it to the completed buffer, so the decode thread parses records
@@ -4605,9 +4590,9 @@ class TestCuptiMonitorNative(TestCase):
         import ctypes
 
         pyprof = torch._C._profiler
-        pyprof._cupti_monitor.reset_buffers()
-        self.addCleanup(pyprof._cupti_monitor.reset_buffers)
-        pyprof._cupti_monitor.configure_buffers(64 * 1024)
+        pyprof._cuspy.reset_buffers()
+        self.addCleanup(pyprof._cuspy.reset_buffers)
+        pyprof._cuspy.configure_buffers(64 * 1024)
 
         class FieldEntry(ctypes.Structure):
             _fields_ = [
@@ -4670,8 +4655,8 @@ class TestCuptiMonitorNative(TestCase):
             ctypes.c_size_t,
             ctypes.c_void_p,
         )
-        request = request_t(pyprof._cupti_monitor.buffer_request_callback_address())
-        complete = complete_t(pyprof._cupti_monitor.buffer_complete_callback_address())
+        request = request_t(pyprof._cuspy.buffer_request_callback_address())
+        complete = complete_t(pyprof._cuspy.buffer_complete_callback_address())
 
         buf = ctypes.c_void_p()
         size = ctypes.c_size_t()
@@ -4686,9 +4671,9 @@ class TestCuptiMonitorNative(TestCase):
         # The completed buffer carries CUPTI's parsed layout as its 5th field: the
         # per-kind (kind, record_size, [(field_id, offset, size), ...]) list (here
         # kind 9). No epoch / shared state -- the layout travels with the buffer.
-        item = pyprof._cupti_monitor.get_completed()
+        item = pyprof._cuspy.get_completed()
         self.assertEqual(item[4], [(9, 16, [(0, 0, 4), (5, 8, 8)])])
-        pyprof._cupti_monitor.return_buffer(item[0])
+        pyprof._cuspy.return_buffer(item[0])
 
         # A second buffer with a different selection carries its own layout -- each
         # buffer decodes against the layout it was completed with.
@@ -4714,14 +4699,14 @@ class TestCuptiMonitorNative(TestCase):
             8,
             ctypes.cast(ctypes.pointer(info_b), ctypes.c_void_p),
         )
-        item_b = pyprof._cupti_monitor.get_completed()
+        item_b = pyprof._cuspy.get_completed()
         self.assertEqual(item_b[4], [(3, 8, [(0, 0, 4)])])
-        pyprof._cupti_monitor.return_buffer(item_b[0])
+        pyprof._cuspy.return_buffer(item_b[0])
 
 
 @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-class TestCuptiClock(TestCase):
-    """Clock-alignment math for the cupti_monitor -- record timestamps -> unix-epoch ns on
+class TestCuspyClock(TestCase):
+    """Clock-alignment math for the cuspy -- record timestamps -> unix-epoch ns on
     kineto's axis. Drives the production _SynchronizedClock directly (its calibrate() reads
     the native clock through an injected callable), so no CUDA / live CUPTI session is needed;
     a lambda returning CLOCK_REALTIME stands in for cuptiGetTimestamp."""
@@ -4735,7 +4720,7 @@ class TestCuptiClock(TestCase):
         # ns, so conversion is identity (offset 0) and 0 stays 0.
         import numpy as np
 
-        from torch.profiler._cupti.monitor import _SynchronizedClock
+        from torch.profiler._cuspy.core import _SynchronizedClock
 
         clock = _SynchronizedClock()
         clock.calibrate(callback_active=False, native_now=self._realtime)
@@ -4751,7 +4736,7 @@ class TestCuptiClock(TestCase):
         # verify convert reproduces it -- to integer-rounding noise -- across a range of ticks.
         import numpy as np
 
-        from torch.profiler._cupti.monitor import _SynchronizedClock
+        from torch.profiler._cuspy.core import _SynchronizedClock
 
         conv = torch._C._profiler._ApproximateClockToUnixTimeConverter()
         clock = _SynchronizedClock()
@@ -4774,7 +4759,7 @@ class TestCuptiClock(TestCase):
         # under the callback) would misread the same column as approx ticks and diverge wildly.
         import numpy as np
 
-        from torch.profiler._cupti.monitor import _SynchronizedClock
+        from torch.profiler._cuspy.core import _SynchronizedClock
 
         conv = torch._C._profiler._ApproximateClockToUnixTimeConverter()
         clock = _SynchronizedClock()

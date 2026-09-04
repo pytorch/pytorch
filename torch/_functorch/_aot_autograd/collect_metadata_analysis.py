@@ -385,6 +385,9 @@ def run_functionalized_fw_and_collect_metadata(
                 #     "RuntimeError: Output 0 of UnbindBackward0 is a view and is being modified inplace. This view is
                 #      the output of a function that returns multiple views. Such functions do not allow the output
                 #      views to be modified inplace. You should replace the inplace operation by an out-of-place one."
+                #     A regenerated alias says SelectBackward0 instead: functionalization rebuilds one output of a
+                #     multi-output view directly rather than replaying the op. The error is the same, because it is
+                #     keyed off CreationMeta rather than off the grad_fn. See [Note: multi-output view replay].
                 # (b) What if we take a view of o_k and mutate it, o_k.view(o_k.shape).mul_(2)?
                 #     Autograd raises the same error- the "multi-output-view"ness of an alias propagates to future views.
                 # (c) What if we mutate o_k under no_grad?
