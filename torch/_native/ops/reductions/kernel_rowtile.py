@@ -445,11 +445,13 @@ def single_row_config(N: int, dtype_width: int, nfields: int = 1, hw=None):
 
 
 def _launch_itree(
-    trait, trait_key, plan, dt, fakes, operands, N, tag, nouts=1, dsts=()
+    trait, trait_key, plan, dt, fakes, operands, N, tag, nouts=1, dsts=(), align=0
 ):
     """Compile-or-fetch and launch one stage of the order.
 
     `fakes` describes the operands for the compile; `operands` are the real tensors for the launch.
+    `align` is part of the key: the declared alignment is baked into the compiled kernel, so a call
+    whose base pointer meets less must not inherit a wider claim (cache_sig has no alignment field).
     """
     op = tile.TileReduce(
         trait,
@@ -484,29 +486,63 @@ def _launch_itree(
     # dsts: the kernel bakes each destination's element type, so two calls differing only in an
     # output dtype are different kernels. Every sibling driver keys on them; without it the second
     # call fetches the first's plan and the launch fails on a mismatched tensor.
-    key = (tag, trait_key, dt, tuple(dsts)) + op.cache_sig
+    key = (tag, trait_key, dt, tuple(dsts), align) + op.cache_sig
     build = lambda: _compile(op, *_args(fakes))  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_args(operands))
 
 
-def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
+def _declared_align(x, natural: int) -> int:
+    """The alignment the wrap may DECLARE for `x`: what N allows, narrowed to what its base pointer
+    actually meets. Both are powers of two (`natural` is gcd(N, 16 // itemsize) * itemsize and
+    itemsize is a power of two), so halving terminates at the element width, which every tensor
+    meets by construction."""
+    # const_data_ptr, so reading the address does not materialize a COW tensor.
+    with torch._C.DisableTorchFunctionSubclass():
+        ptr = x.const_data_ptr()
+    align = natural
+    while align > x.element_size() and ptr % align:
+        align //= 2
+    return align
+
+
+def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1, out=None):
     """Run the inner-tree order for `x`, one launch per stage of its shape.
 
     Serves any trait: `nouts` projected outputs at the end, and the split shape's intermediate
     partials get one buffer PER TRAIT FIELD (an index or Welford accumulator is not one number).
+    `out` names the result tensors to write into (an aten override already owns its output);
+    they must be 1-D unit-stride, which is what the store's wrap declares.
     """
     M, N = x.shape
+
+    def results():
+        if out is not None:
+            return list(out)
+        return [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
+
     dt = torch2cute[x.dtype]
     # A ragged row's stride is not a vec multiple, so the wide load's alignment is only what the
-    # gcd allows -- declaring 16 there would be a lie and the load faults.
-    align = tile.align_bytes(N, x.element_size())
+    # gcd allows -- declaring 16 there would be a lie and the load faults. So is a compact input at
+    # a non-zero STORAGE OFFSET (`buf[1:].view(M, N)`), whose strides are fine but whose base
+    # pointer is not: declare what the pointer actually meets, and key on it below so a later
+    # better-aligned call does not inherit this narrower declaration (cache_sig has no alignment
+    # field of its own).
+    natural = tile.align_bytes(N, x.element_size())
+    align = _declared_align(x, natural)
+    if align < natural and itree.stage_e:
+        # cp.async's 128-bit atom needs a statically `natural`-aligned source, so a misaligned base
+        # cannot use the staged form at all -- it fails IR verification rather than the load. Serve
+        # this call with the UNSTAGED form of the same plan: staging is bit-neutral, so the DAG and
+        # therefore the result do not move (verified bitwise against the reference at align 8 and 4
+        # for every staged shape).
+        itree = itree_plan(N, M, x.element_size(), stage=False)
     # N is baked into the DAG, so the row extent is static and only M rides in dynamically.
     fake_in = _L.fake_compact(dt, (_L.sym(), N), order=(1, 0), align=align)
     fake_1d = lambda t: _L.fake_compact(  # noqa: E731
         torch2cute[t.dtype], (_L.sym(),)
     )
     if itree.shape != "split":
-        outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
+        outs = results()
         _launch_itree(
             trait,
             trait_key,
@@ -518,6 +554,7 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
             "rowitree",
             nouts,
             tuple(o.dtype for o in outs),
+            align,
         )
         return tuple(outs)
     # The split shape cannot bake its batch count, so it writes one partial per (row, batch) and
@@ -539,8 +576,9 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
         "rowitree1",
         nouts,
         tuple(p.dtype for p in parts),
+        align,
     )
-    outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
+    outs = results()
     _launch_itree(
         trait,
         trait_key,
@@ -552,8 +590,25 @@ def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
         "rowitree2",
         nouts,
         tuple(o.dtype for o in outs),
+        align,
     )
     return tuple(outs)
+
+
+def reduce_row_itree(trait, trait_key, x, out):
+    """The inner-tree order alone, writing rows of 2D `x` into the 1-D `out`.
+
+    The entry point for an override that has already committed to this order (see
+    ops/reductions/ordered.py) rather than picking a fold per launch shape. False means the
+    order has no plan for this shape and the caller must serve it another way -- it never means
+    the result is wrong or partial.
+    """
+    M, N = x.shape
+    itree = itree_plan(N, M, x.element_size())
+    if itree is None:
+        return False
+    _run_itree(trait, trait_key, x, [out.dtype], itree, out=[out])
+    return True
 
 
 def reduce_row_tile(

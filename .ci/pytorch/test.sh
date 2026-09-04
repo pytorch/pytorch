@@ -458,9 +458,35 @@ test_cpuset_num_threads() {
   assert_git_not_dirty
 }
 
+# The CuteDSL native-op suites, named ONCE and shared by the H100 and B200 smoke configs so the
+# two cannot drift. They are @skipIfNoCuteDSL and install_flash_attn_cute is the only thing in CI
+# that installs that runtime, so they run in NO job unless a job installs it AND lists them. Several
+# are host-only (no GPU work) but still need the runtime to import.
+#
+# Both architectures on purpose: the kernels are gated at sm_90+ and the fold's bit pattern is fixed
+# by N rather than by the hardware, so Blackwell coverage alone would not show a Hopper regression.
+# Verified by hand on an H100 (sm_90) -- 163 tests, and all 112 pinned hashes reproduce values
+# generated on a B200 -- which is exactly the property that wants a job rather than a one-off.
+PYTHON_NATIVE_CUTEDSL_SUITES=(
+  python_native/test_cutedsl_smoketest
+  python_native/test_sum_cutedsl
+  python_native/test_sum_inner_tree_plan
+  python_native/test_inner_tree_order
+  python_native/test_kernel_coltile
+  python_native/test_kernel_xcta
+  python_native/test_kernel_rowtile
+  python_native/test_kernel_general
+  python_native/test_hw_caps
+  python_native/test_traits
+  python_native/test_instrumentation
+  python_native/test_tile_datapath
+)
+
 test_python_smoke() {
   # Smoke tests for H100/B200
   install_nvmath
+  install_flash_attn_cute
+  time python test/run_test.py --include "${PYTHON_NATIVE_CUTEDSL_SUITES[@]}" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_foreach -k TestForeachMM $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -477,9 +503,6 @@ test_python_smoke_b200() {
   # cutlass.operators. The preview package pins apache-tvm-ffi==0.1.7, which
   # is incompatible with CuTeDSL 4.6.2 used by the rest of this job.
   #
-  # The host-only python_native suites below do no GPU work, but they are @skipIfNoCuteDSL and
-  # install_flash_attn_cute above is the only thing in CI that installs that runtime -- so they
-  # run in NO job if they are dropped from this list.
   time python test/run_test.py \
     --include \
       test_matmul_cuda \
@@ -487,16 +510,7 @@ test_python_smoke_b200() {
       inductor/test_fp8 \
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
-      python_native/test_cutedsl_smoketest \
-      python_native/test_inner_tree_order \
-      python_native/test_kernel_coltile \
-      python_native/test_kernel_xcta \
-      python_native/test_kernel_rowtile \
-      python_native/test_kernel_general \
-      python_native/test_hw_caps \
-      python_native/test_traits \
-      python_native/test_instrumentation \
-      python_native/test_tile_datapath \
+      "${PYTHON_NATIVE_CUTEDSL_SUITES[@]}" \
       inductor/test_torchinductor \
       inductor/test_async_compile \
       inductor/test_nv_universal_gemm \

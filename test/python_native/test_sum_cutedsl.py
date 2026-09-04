@@ -304,6 +304,112 @@ class TestSumCuteDSLOverride(TestCase):
         self.assertEqual(self._sha(result), "75d8b1a702344e90")
 
     @skipIfRocm
+    def test_entry_point_bits_at_every_plan_shape(self):
+        # The kernel picks a different shape per N (rows inside one thread, warps over baked
+        # batches, a partials pass plus a combine), and the entry point must carry the same bits
+        # for ALL of them. Asserted through ``x.sum`` rather than by calling the kernel, because
+        # what this catches is a launch-shape preference quietly serving some N another way --
+        # which a tolerance compare cannot see, and which happened at the two largest N here.
+        #
+        # The BITS ALONE cannot carry this claim, because the reference kernel they are compared
+        # against is also what the override falls back to: with the new kernel declining every
+        # call, this whole file still passed, in 0.5s instead of 84s. So assert the ROUTE too --
+        # that the ordered kernel was asked and accepted -- which is the part this commit adds.
+        from torch._native.ops.reductions import (
+            inner_tree_kernel as ref,
+            kernel_rowtile as rt,
+        )
+
+        for m, n in [(64, 32), (8, 4096), (8192, 1024), (671, 100000), (256, 262144)]:
+            for dtype, as_int in (
+                (torch.float32, torch.int32),
+                (torch.float64, torch.int64),
+            ):
+                with self.subTest(m=m, n=n, dtype=dtype):
+                    x = torch.randn(m, n, device="cuda", dtype=dtype)
+                    want = torch.empty(m, device="cuda", dtype=dtype)
+                    ref.inner_tree_sum_into(want, x)
+                    torch.cuda.synchronize()
+                    real, served = rt.reduce_row_itree, []
+
+                    def spy(*a, _real=real, _served=served, **k):
+                        _served.append(_real(*a, **k))
+                        return _served[-1]
+
+                    with mock.patch.object(rt, "reduce_row_itree", spy):
+                        got = x.sum(dim=1)
+                    torch.cuda.synchronize()
+                    self.assertEqual(
+                        served,
+                        [True],
+                        f"({m}, {n}) {dtype}: the ordered kernel did not serve this call",
+                    )
+                    self.assertTrue(
+                        torch.equal(got.view(as_int), want.view(as_int)),
+                        f"({m}, {n}) {dtype}: entry point lost the inner-tree bit pattern",
+                    )
+
+    @skipIfRocm
+    def test_misaligned_input_is_served_by_the_order(self):
+        # A compact input at a non-zero storage offset (`buf[1:].view(M, N)`) has fine strides and a
+        # base pointer four bytes off, which is less than the wrap would otherwise declare from N.
+        # MEASURED before this was handled: `RuntimeError: Tensor data pointer is not aligned to 16
+        # bytes` through `torch.sum`, at every shape and both offsets.
+        #
+        # It must be SERVED, not declined: the reference kernel this order replaces is going away,
+        # so a fallback would eventually mean these calls change order or stop working. So assert
+        # both halves -- the order took the call, and the bits are the reference kernel's. A
+        # tolerance compare would pass either way, and so would a bitwise compare on its own if the
+        # call had quietly fallen back to the very kernel it is compared against.
+        from torch._native.ops.reductions import (
+            inner_tree_kernel as ref,
+            kernel_rowtile as rt,
+        )
+
+        for m, n in [
+            (64, 128),
+            (128, 1024),
+            (8, 40000),
+        ]:  # (128, 1024) is a STAGED shape
+            for op in ("sum", "prod"):
+                raw = torch.randn(m * n + 1, device="cuda")
+                if op == "prod":
+                    raw = raw * 0.01 + 1.0  # keep a length-n product bounded
+                x = raw[1:].view(m, n)
+                with self.subTest(shape=(m, n), op=op):
+                    self.assertTrue(x.is_contiguous())
+                    self.assertNotEqual(
+                        x.data_ptr() % 16, 0, "the view came out aligned"
+                    )
+                    real, served = rt.reduce_row_itree, []
+
+                    def spy(*a, _real=real, _served=served, **k):
+                        _served.append(_real(*a, **k))
+                        return _served[-1]
+
+                    with mock.patch.object(rt, "reduce_row_itree", spy):
+                        got = getattr(x, op)(dim=1)
+                    torch.cuda.synchronize()
+                    # [True] == called once AND accepted; [] is a decline by _layout_ok and
+                    # [False] a decline by the kernel, both of which would fall back.
+                    self.assertEqual(
+                        served, [True], "the order did not serve this call"
+                    )
+                    want = torch.empty(m, device="cuda")
+                    into = (
+                        ref.inner_tree_prod_into
+                        if op == "prod"
+                        else ref.inner_tree_sum_into
+                    )
+                    into(want, x)
+                    torch.cuda.synchronize()
+                    self.assertEqual(
+                        got.view(torch.int32),
+                        want.view(torch.int32),
+                        msg=f"{op} ({m}, {n}) misaligned: bits differ from the reference",
+                    )
+
+    @skipIfRocm
     def test_bitwise(self):
         for dtype_name, dtype in self._DTYPE_MAP.items():
             if dtype == torch.float8_e4m3fn and not PLATFORM_SUPPORTS_FP8:
@@ -369,7 +475,7 @@ class TestSumCuteDSLOverride(TestCase):
         # are functionally supported but not part of the bitwise contract, so
         # compare to ATen with a low-precision tolerance. Covers the multirow,
         # looped, and two-kernel paths.
-        from torch._native.ops.reductions import inner_tree_kernel
+        from torch._native.ops.reductions import ordered
 
         for m, n in [(64, 32), (8, 4096), (8, 65536)]:
             with self.subTest(m=m, n=n):
@@ -381,9 +487,9 @@ class TestSumCuteDSLOverride(TestCase):
                     ref = x.prod(dim=1)
                 with (
                     mock.patch.object(
-                        inner_tree_kernel,
-                        "inner_tree_prod_into",
-                        wraps=inner_tree_kernel.inner_tree_prod_into,
+                        ordered,
+                        "prod_into",
+                        wraps=ordered.prod_into,
                     ) as prod_into,
                 ):
                     got = x.prod(dim=1)
