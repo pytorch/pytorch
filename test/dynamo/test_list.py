@@ -535,6 +535,28 @@ class ListTests(TupleTests):
         p[1:3] = ["x", "y"]
         self.assertEqual(p, ["a", "x", "y", "d", "e", "f"])
 
+    @make_dynamo_test
+    def test_unbound_len(self):
+        a = [1, 2, 3]
+        self.assertEqual(list.__len__(a), 3)
+
+    @make_dynamo_test
+    def test_unbound_append(self):
+        a = [1, 2, 3]
+        list.append(a, 9)
+        self.assertEqual(a, [1, 2, 3, 9])
+
+    @make_dynamo_test
+    def test_unbound_add(self):
+        a = [1, 2]
+        b = [3, 4]
+        self.assertEqual(list.__add__(a, b), [1, 2, 3, 4])
+
+    @make_dynamo_test
+    def test_unbound_getitem(self):
+        a = [1, 2, 3]
+        self.assertEqual(list.__getitem__(a, 1), 2)
+
 
 class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
     # list/tuple/deque share BaseListVariable.list_index, but CPython's
