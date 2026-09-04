@@ -429,6 +429,7 @@ class TestPublicBindings(TestCase):
                 "torch._native.ops.reductions.tile",
                 "torch._native.ops.reductions.kernel_xcta",
                 "torch._native.ops.reductions.kernel_coltile",
+                "torch._native.ops.reductions.ordered",
                 "torch._native.ops.scatter_add.",
                 "torch._native.ops.topk.",
                 "torch._vendor.quack",
