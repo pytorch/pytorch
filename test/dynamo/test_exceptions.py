@@ -1821,12 +1821,9 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(comparable(opt_fn(x)[0]), comparable(fn(x)[0]))
 
-    # A write is routed to the wrapped ExceptionVariable, but side_effects sends
-    # only a bare ExceptionVariable through reconstruct(), so a
-    # UserDefinedExceptionObjectVariable is rebuilt via __new__ and the write is
-    # dropped at the boundary.
-    @unittest.expectedFailure
-    @parametrize("attr", WRITABLE_BASE_EXCEPTION_ATTRS)
+    @parametrize(
+        "attr", [a for a in WRITABLE_BASE_EXCEPTION_ATTRS if a != "__suppress_context__"]
+    )
     def test_exception_attr_write_survives_escape(self, attr):
         def fn(x):
             e = CustomException("x")
@@ -1836,6 +1833,23 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         got, expected = getattr(opt_fn(x), attr), getattr(fn(x), attr)
+        self.assertEqual(comparable(got), comparable(expected))
+
+    # ExceptionVariable.reconstruct skips any ConstantVariable-valued attribute
+    # (see test_builtin_exception_constant_attr_survives_escape), so a
+    # deliberate bool write to __suppress_context__ is indistinguishable from
+    # the untouched default across the compile boundary.
+    @unittest.expectedFailure
+    def test_exception_attr_write_survives_escape_suppress_context(self):
+        def fn(x):
+            e = CustomException("x")
+            setattr(e, "__suppress_context__", exception_attr_value("__suppress_context__"))
+            return e
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        got = getattr(opt_fn(x), "__suppress_context__")
+        expected = getattr(fn(x), "__suppress_context__")
         self.assertEqual(comparable(got), comparable(expected))
 
     @unittest.expectedFailure
