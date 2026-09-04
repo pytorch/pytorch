@@ -192,6 +192,45 @@ class TestKernelRowTile(TestCase):
                 self.assertEqual(got, x.var(dim=1, correction=correction))
                 self.assertTrue(torch.isinf(got).all())
 
+    def test_welford_agrees_with_aten_on_infinities(self):
+        # WelfordOps.combine has no zero-count guard, unlike ATen's
+        # (aten/src/ATen/native/SharedReduceOps.h: `if (a.nf == 0) return b`), so merging a PADDED
+        # identity lane with an accumulator whose mean is +-inf computes `delta * 0` = NaN. That is
+        # real in the intermediate and it does not surface: a Welford mean is a bounded weighted
+        # average, so it is infinite only when an element is, and ATen's variance is then non-finite
+        # too. Adding the guard would cost two selects per field on the innermost chain and change
+        # nothing for finite inputs (with na == 0 the unguarded formula already reproduces b), so
+        # what is pinned here is the AGREEMENT rather than the guard -- a future fold that combines
+        # identities differently would otherwise break it silently.
+        import math
+
+        import cutlass
+
+        from torch._native.ops._cutedsl import traits as T
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        # Both N leave padded lanes: at N=3 only 3 of 32 lanes hold an element.
+        for n in (3, 127):
+            for where in ("first", "last", "both"):
+                with self.subTest(n=n, inf_at=where):
+                    x = torch.randn(8, n, device="cuda")
+                    if where in ("first", "both"):
+                        x[:, 0] = math.inf
+                    if where in ("last", "both"):
+                        x[:, -1] = -math.inf
+                    (got,) = rt.reduce_row_tile(
+                        T.WelfordOps(acc=cutlass.Float32),
+                        f"welford_inf{n}",
+                        x,
+                        [torch.float32],
+                    )
+                    want = x.var(dim=1)
+                    # nan == nan here, but nan must not stand in for inf: equal_nan alone would
+                    # accept exactly the corruption this guards against.
+                    self.assertEqual(got.isnan(), want.isnan())
+                    finite = ~got.isnan()
+                    self.assertEqual(got[finite], want[finite])
+
     def test_integer_accumulator_identities(self):
         # _pos_id / _neg_id have integer arms because Int32/Int64 have no .inf. A wrong sentinel
         # loses to (or beats) every real element, so the result is off by one identity -- visible
