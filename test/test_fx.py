@@ -2293,6 +2293,154 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         stack_list = list(mod_stack.items())
         self.assertEqual(stack_list, expected_stack)
 
+    def test_nn_module_stack_deep_nesting(self):
+        """nn_module_stack records every level for >=3 nesting depths.
+
+        Many downstream passes (e.g. ONNX exporter, quantisation, custom
+        backends) reconstruct a module tree from nn_module_stack.  They
+        rely on every intermediate level being present and ordered from
+        outermost to innermost.  The test_nn_module_stack only
+        covers 2 levels; this test ensures 3+ levels work correctly.
+        """
+        def model_creator(depth: int) -> torch.nn.Module:
+            class Chain(torch.nn.Module):
+                def __init__(self, level: int):
+                    super().__init__()
+                    # For depth N, chain of modules is Root.level_0..level_{N-2}; final leaf is .linear
+                    if level == depth - 2:
+                        self.linear = torch.nn.Linear(4, 4)
+                    else:
+                        self._next_name = f"level_{level + 1}"
+                        setattr(self, self._next_name, Chain(level + 1))
+
+                def forward(self, x):
+                    if hasattr(self, "linear"):
+                        return self.linear(x)
+                    return getattr(self, self._next_name)(x)
+
+            class Root(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.level_0 = Chain(level=0)
+
+                def forward(self, x):
+                    return self.level_0(x)
+
+            return Root()
+
+        def expected_paths(depth: int) -> list[str]:
+            module_paths = [
+                ".".join(f"level_{i}" for i in range(level + 1))
+                for level in range(depth - 1)
+            ]
+            return [*module_paths, f"{module_paths[-1]}.linear"]
+
+        for depth in (3, 6, 9):
+            with self.subTest(depth=depth):
+                m = model_creator(depth)
+                gm = torch.fx.symbolic_trace(m)
+
+                deepest_stack = {}
+                for node in gm.graph.nodes:
+                    s = node.meta.get("nn_module_stack") or {}
+                    if len(s) > len(deepest_stack):
+                        deepest_stack = s
+
+                paths = [path for _key, (path, _cls) in deepest_stack.items()]
+                # Outermost-to-innermost ordering: paths should be monotonically
+                # increasing in depth (number of dot-separated components)
+                path_depths = [p.count(".") for p in paths]
+                self.assertEqual(path_depths, sorted(path_depths))
+                # Exact expected paths (also verifies completeness).
+                self.assertEqual(paths, expected_paths(depth))
+
+    def test_nn_module_stack_module_list(self):
+        """nn_module_stack produces numeric path components for ModuleList children.
+
+        nn.ModuleList is widely used for repeated identical blocks (e.g.
+        transformer layers).  Downstream consumers that collapse repeated
+        sub-trees rely on each child appearing with a numeric path suffix
+        (e.g. "layers.0", "layers.1") and having structurally identical
+        nn_module_stack entries.  This test ensures ModuleList children
+        are correctly reflected in the metadata.
+        """
+        class Block(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4, bias=False)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Model(torch.nn.Module):
+            def __init__(self, n_blocks):
+                super().__init__()
+                self.blocks = torch.nn.ModuleList(
+                    [Block() for _ in range(n_blocks)]
+                )
+
+            def forward(self, x):
+                for blk in self.blocks:
+                    x = blk(x)
+                return x
+
+        n_blocks = 3
+        m = Model(n_blocks)
+        gm = torch.fx.symbolic_trace(m)
+
+        # Collect nn_module_stack for every node that has one
+        stacks_by_node = {}
+        for node in gm.graph.nodes:
+            s = node.meta.get("nn_module_stack") or {}
+            if s and node.op not in ("placeholder", "output"):
+                stacks_by_node[node.name] = s
+
+        # There should be at least n_blocks nodes with stacks (one per block)
+        self.assertGreaterEqual(len(stacks_by_node), n_blocks)
+
+        # Verify numeric indices appear in the paths
+        numeric_paths_seen = set()
+        for stack in stacks_by_node.values():
+            for path, _cls in stack.values():
+                # Look for "blocks.0", "blocks.1", "blocks.2" style paths
+                if "blocks." in path:
+                    parts = path.split(".")
+                    idx = parts.index("blocks")
+                    if idx + 1 < len(parts) and parts[idx + 1].isdigit():
+                        numeric_paths_seen.add(int(parts[idx + 1]))
+
+        self.assertEqual(numeric_paths_seen, set(range(n_blocks)))
+
+    def test_nn_module_stack_class_entries_are_types(self):
+        """nn_module_stack class entries are real types (not strings).
+
+        Several consumers (ONNX export, quantisation utilities, custom
+        compiler backends) access ``cls.__name__`` on nn_module_stack
+        entries.  This requires that the class value is an actual type
+        object, not a serialised string or other placeholder.
+        """
+        class UserModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = UserModule()
+        gm = torch.fx.symbolic_trace(m)
+
+        found_any_stack = False
+        for node in gm.graph.nodes:
+            stack = node.meta.get("nn_module_stack") or {}
+            for _path, cls in stack.values():
+                found_any_stack = True
+                self.assertTrue(
+                    isinstance(cls, type),
+                    f"nn_module_stack class entry should be a type, got {type(cls)}: {cls}",
+                )
+        self.assertTrue(found_any_stack, "Expected at least one nn_module_stack entry")
+
     def test_transformer_preserves_nn_module_stack_for_get_attr(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
