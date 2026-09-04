@@ -2147,10 +2147,99 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.erfinv({x})"
 
     @staticmethod
-    @maybe_upcast_float32()
+    def _cuda_hypotf(x: CSEVariable, y: CSEVariable) -> CSEVariable:
+        # Match CUDA's device hypotf implementation. Triton's libdevice uses an
+        # approximate square root that can differ from eager by one ULP.
+        shape = get_broadcasted_shape(x.shape, y.shape)
+
+        def gen(expr: str, dtype: torch.dtype = torch.float32) -> TritonCSEVariable:
+            return V.kernel.cse.generate(
+                V.kernel.compute, expr, dtype=dtype, shape=shape
+            )
+
+        def uint32_const(bits: int) -> str:
+            return f"tl.full([], 0x{bits:08X}, tl.uint32)"
+
+        abs_mask = uint32_const(0x7FFFFFFF)
+        x_bits = gen(f"{x}.to(tl.uint32, bitcast=True) & {abs_mask}", torch.uint32)
+        y_bits = gen(f"{y}.to(tl.uint32, bitcast=True) & {abs_mask}", torch.uint32)
+        lo_bits = gen(f"tl.minimum({x_bits}, {y_bits})", torch.uint32)
+        hi_bits = gen(f"tl.maximum({x_bits}, {y_bits})", torch.uint32)
+        lo = gen(f"{lo_bits}.to(tl.float32, bitcast=True)")
+        hi = gen(f"{hi_bits}.to(tl.float32, bitcast=True)")
+
+        exponent = gen(f"{hi_bits} & {uint32_const(0xFE000000)}", torch.uint32)
+        scale_down_bits = gen(f"{uint32_const(0x7E800000)} - {exponent}", torch.uint32)
+        scale_down = gen(f"{scale_down_bits}.to(tl.float32, bitcast=True)")
+        scaled_lo = gen(f"{lo} * {scale_down}")
+        scaled_hi = gen(f"{hi} * {scale_down}")
+        lo_square = gen(f"{scaled_lo} * {scaled_lo}")
+        square_sum = TritonOverrides._inline_asm_f32(
+            "fma.rn.f32 $0, $1, $2, $3;", [scaled_hi, scaled_hi, lo_square], shape
+        )
+        magnitude = gen(f"tl.sqrt_rn({square_sum})")
+        scale_up_bits = gen(f"{exponent} | {uint32_const(0x00800000)}", torch.uint32)
+        scale_up = gen(f"{scale_up_bits}.to(tl.float32, bitcast=True)")
+        result = gen(f"{magnitude} * {scale_up}")
+
+        result = gen(f"tl.where({lo_bits} == 0, {hi}, {result})")
+        inf_bits = uint32_const(0x7F800000)
+        nan = TritonOverrides._f32_const_from_bits(0x7FFFFFFF)
+        result = gen(f"tl.where({hi_bits} > {inf_bits}, {nan}, {result})")
+        is_inf = gen(
+            f"({x_bits} == {inf_bits}) | ({y_bits} == {inf_bits})", torch.bool
+        )
+        inf = TritonOverrides._f32_const_from_bits(0x7F800000)
+        return gen(f"tl.where({is_inf}, {inf}, {result})")
+
+    @staticmethod
     # pyrefly: ignore [bad-override]
     def hypot(x, y):
-        return f"libdevice.hypot({x}, {y})"
+        # Under strict numerics, match ATen CUDA's scaled float32 hypot (explicit
+        # fma.rn + sqrt_rn) instead of libdevice.hypot, whose approximate sqrt differs
+        # from eager by ~1 ULP. The default path keeps libdevice.hypot (the manual
+        # upcast below reproduces the previous @maybe_upcast_float32 behavior).
+        x_needs_upcast = needs_upcast_to_float32(x)
+        y_needs_upcast = needs_upcast_to_float32(y)
+        if (
+            config.numerics == "strict"
+            and not torch.version.hip
+            and V.graph.get_current_device_or_throw().type == "cuda"
+            and isinstance(x, CSEVariable)
+            and isinstance(y, CSEVariable)
+            and (triton_arg_dtype(x) == torch.float32 or x_needs_upcast)
+            and (triton_arg_dtype(y) == torch.float32 or y_needs_upcast)
+        ):
+            result_dtype = None
+            if x_needs_upcast or y_needs_upcast:
+                result_dtype = get_dtype_handler().hypot(x, y)
+            if x_needs_upcast:
+                x = V.kernel.cse.generate(
+                    V.kernel.compute,
+                    f"{x}.to(tl.float32)",
+                    dtype=torch.float32,
+                    shape=x.shape,
+                )
+            if y_needs_upcast:
+                y = V.kernel.cse.generate(
+                    V.kernel.compute,
+                    f"{y}.to(tl.float32)",
+                    dtype=torch.float32,
+                    shape=y.shape,
+                )
+            result = TritonOverrides._cuda_hypotf(x, y)
+            if result_dtype is not None and result_dtype != torch.float32:
+                return f"{result}.to({triton_type(result_dtype)})"
+            return result
+
+        x_upcast = ".to(tl.float32)" if x_needs_upcast else ""
+        y_upcast = ".to(tl.float32)" if y_needs_upcast else ""
+        result = f"libdevice.hypot({x}{x_upcast}, {y}{y_upcast})"
+        if x_needs_upcast or y_needs_upcast:
+            result_dtype = get_dtype_handler().hypot(x, y)
+            if result_dtype is not None and result_dtype != torch.float32:
+                return f"{result}.to({triton_type(result_dtype)})"
+        return result
 
     @staticmethod
     @maybe_upcast_float32()
@@ -2484,6 +2573,7 @@ class TritonOverrides(OpOverrides):
 # Register the custom pow override after class creation so type checkers see
 # a plain callable instead of the class-body staticmethod descriptor.
 OpDtypeSupport.register_upcast(TritonOverrides.atan, True)
+OpDtypeSupport.register_upcast(TritonOverrides.hypot, True)
 OpDtypeSupport.register_upcast(TritonOverrides.pow, True)
 TritonOverrides._initialize_pointwise_overrides("triton")
 
