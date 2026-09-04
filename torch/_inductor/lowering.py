@@ -3901,7 +3901,7 @@ make_fallback(aten.masked_scatter)
 make_fallback(aten.masked_scatter_backward)
 
 # Complex number support
-make_fallback(aten.view_as_complex, require_contiguous)
+make_fallback(aten.view_as_complex, constrain_to_fx_strides)
 make_fallback(aten.angle)  # needs complex
 
 # Needs Sparse
