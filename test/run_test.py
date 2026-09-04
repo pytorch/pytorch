@@ -118,7 +118,11 @@ NUM_PYTEST_RERUNS = int(os.getenv("PYTORCH_NUM_PYTEST_RERUNS", "2"))
 NUM_PROCESS_RETRIES = int(os.getenv("PYTORCH_NUM_PROCESS_RETRIES", "2"))
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
-IS_SLOW = "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT
+# The periodic config hosts slow-gated tests (test.sh sets
+# PYTORCH_TEST_WITH_SLOW for it), so it gets slow's per-file timeout budget.
+IS_SLOW = (
+    "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT or TEST_CONFIG == "periodic"
+)
 IS_S390X = platform.machine() == "s390x"
 
 
@@ -1836,6 +1840,7 @@ def get_selected_tests(options) -> list[str]:
             "test_mps",
             "test_metal",
             "test_modules",
+            "test_linalg",
             "nn/test_convolution",
             "nn/test_dropout",
             "nn/test_pooling",
@@ -2157,18 +2162,17 @@ def run_tests(
         x for x in selected_tests if x not in selected_tests_parallel
     ]
 
-    # The multigpu marker (see test/conftest.py) is orthogonal to serial: it
-    # partitions distributed tests by whether they spawn multiple processes /
-    # need multiple GPUs. AND it into whatever serial expression a pass uses so
-    # a single-GPU config can select `not multigpu` without dropping the
-    # serial/not-serial split (a bare second `-m` would clobber the first).
+    # Additional markers are orthogonal to serial. AND them into whatever
+    # serial expression a pass uses because a second `-m` would clobber the
+    # first.
     multigpu_marker = {
         "multigpu": "multigpu",
         "not-multigpu": "not multigpu",
     }.get(getattr(options, "multigpu_filter", None))
+    periodic_marker = "periodic" if TEST_CONFIG == "periodic" else None
 
     def marker_args(serial_expr: str | None) -> list[str]:
-        exprs = [e for e in (serial_expr, multigpu_marker) if e]
+        exprs = [e for e in (serial_expr, multigpu_marker, periodic_marker) if e]
         if not exprs:
             return []
         return ["-m", " and ".join(f"({e})" for e in exprs)]
