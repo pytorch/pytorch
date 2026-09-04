@@ -332,6 +332,8 @@ def _patch_alias_metadata(
     target_requires_grad: bool,
     target_is_conj: bool,
     target_is_neg: bool,
+    target_is_multi_output_view: bool = False,
+    target_multi_output_view_was_invalidated: bool = False,
 ) -> Tensor:
     out = _patch_requires_grad(aliased_base_tensor, out, target_requires_grad)
     if out.dtype != target_meta_tensor.dtype:
@@ -340,6 +342,19 @@ def _patch_alias_metadata(
         out = out.conj()
     if out.is_neg() != target_is_neg:
         out = torch._neg_view(out)
+    if out._is_view():
+        creation_meta = torch._C._autograd._get_creation_meta(out)
+        if (
+            target_is_multi_output_view
+            and creation_meta == torch._C._autograd.CreationMeta.DEFAULT
+        ):
+            torch._C._autograd._set_creation_meta(
+                out, torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE
+            )
+    if target_multi_output_view_was_invalidated:
+        if not out._is_view() or out.is_inference():
+            raise AssertionError("expected a differentiable multi-output view")
+        torch._C._autograd._unsafe_mark_view_attr_version_stale(out)
     return out
 
 
@@ -360,6 +375,47 @@ def _reshape_base_for_view_replay(
     return aliased_base_tensor
 
 
+def _apply_view_meta_sequence_with_grad_modes(
+    base: Tensor,
+    sequence: list[_functionalization.ViewMeta],
+    grad_enabled: Sequence[bool | None],
+) -> Tensor:
+    if grad_enabled and len(grad_enabled) != len(sequence):
+        raise AssertionError("ViewMeta and grad-mode sequence lengths must match")
+    if not grad_enabled:
+        return _functionalization.apply_view_meta_sequence(base, sequence)
+
+    out = base
+    for view_meta, mode in zip(sequence, grad_enabled, strict=True):
+        if (
+            mode is None
+            or mode == torch.is_grad_enabled()
+            or torch.is_inference_mode_enabled()
+        ):
+            out = _functionalization.apply_view_meta_sequence(out, [view_meta])
+        else:
+            with torch.set_grad_enabled(mode):
+                out = _functionalization.apply_view_meta_sequence(out, [view_meta])
+    return out
+
+
+def _apply_multi_output_view_meta_with_grad_mode(
+    base: Tensor, view_meta: Any, grad_enabled: bool | None
+) -> list[Tensor]:
+    if (
+        grad_enabled is None
+        or grad_enabled == torch.is_grad_enabled()
+        or torch.is_inference_mode_enabled()
+    ):
+        return _functionalization.apply_multi_output_view_meta_sequence(
+            base, [view_meta]
+        )
+    with torch.set_grad_enabled(grad_enabled):
+        return _functionalization.apply_multi_output_view_meta_sequence(
+            base, [view_meta]
+        )
+
+
 def gen_alias_from_base(
     aliased_base_tensor: Tensor,
     target_meta_tensor: Tensor,
@@ -369,23 +425,119 @@ def gen_alias_from_base(
     replay_views: bool,
     target_is_conj: bool | None = None,
     target_is_neg: bool | None = None,
+    target_is_multi_output_view: bool = False,
+    target_multi_output_view_was_invalidated: bool = False,
+    target_view_meta_grad_enabled: Sequence[bool | None] = (),
+    replay_from_detached_base: bool = False,
+    replay_detached_view_meta_sequence: bool = False,
+    target_is_view: bool = True,
 ) -> Tensor:
     if target_is_conj is None:
         target_is_conj = target_meta_tensor.is_conj()
     if target_is_neg is None:
         target_is_neg = target_meta_tensor.is_neg()
+    if replay_from_detached_base:
+        if target_view_meta_sequence is not None:
+            detach_indices = [
+                i
+                for i, view_meta in enumerate(target_view_meta_sequence.sequence)
+                if type(view_meta).__name__ in ("detach_ViewMeta", "detach__ViewMeta")
+            ]
+            if detach_indices and not any(
+                view_meta.has_symbolic_inputs
+                for view_meta in target_view_meta_sequence.sequence
+            ):
+                # Preserve the detach boundary itself, not just the final
+                # tensor's geometry. A later view exposes this detached tensor
+                # through ._base, so detaching the original input directly can
+                # make mutations affect a larger region than eager execution.
+                detach_index = detach_indices[-1]
+                prefix = target_view_meta_sequence.sequence[:detach_index]
+                prefix_grad_enabled = target_view_meta_grad_enabled[:detach_index]
+                detached_base = (
+                    _apply_view_meta_sequence_with_grad_modes(
+                        aliased_base_tensor, prefix, prefix_grad_enabled
+                    )
+                    if prefix
+                    else aliased_base_tensor
+                ).detach()
+                detached_base.requires_grad_(target_requires_grad)
+                suffix = target_view_meta_sequence.sequence[detach_index + 1 :]
+                suffix_grad_enabled = target_view_meta_grad_enabled[detach_index + 1 :]
+                out = (
+                    _apply_view_meta_sequence_with_grad_modes(
+                        detached_base, suffix, suffix_grad_enabled
+                    )
+                    if suffix
+                    else detached_base
+                )
+                if not target_is_view and out._is_view():
+                    out = out.detach()
+                    out.requires_grad_(target_requires_grad)
+                if out.shape != target_meta_tensor.shape:
+                    raise AssertionError(
+                        "incorrect out shape after detached ViewMeta replay: "
+                        f"{tuple(out.shape)} (actual) vs "
+                        f"{tuple(target_meta_tensor.shape)} (expected)"
+                    )
+                return _patch_alias_metadata(
+                    detached_base,
+                    out,
+                    target_meta_tensor,
+                    target_requires_grad,
+                    target_is_conj,
+                    target_is_neg,
+                    target_is_multi_output_view,
+                    target_multi_output_view_was_invalidated,
+                )
+        detached_base = aliased_base_tensor.detach()
+        if target_is_view:
+            detached_base.requires_grad_(target_requires_grad)
+            return gen_alias_from_base(
+                detached_base,
+                target_meta_tensor,
+                target_requires_grad,
+                (
+                    target_view_meta_sequence
+                    if replay_detached_view_meta_sequence
+                    else None
+                ),
+                replay_views=(
+                    replay_views if replay_detached_view_meta_sequence else False
+                ),
+                target_is_conj=target_is_conj,
+                target_is_neg=target_is_neg,
+                target_is_multi_output_view=replay_detached_view_meta_sequence,
+                target_view_meta_grad_enabled=(target_view_meta_grad_enabled),
+            )
+        out = gen_alias_from_base(
+            detached_base,
+            target_meta_tensor,
+            False,
+            None,
+            replay_views=False,
+            target_is_conj=target_is_conj,
+            target_is_neg=target_is_neg,
+            target_view_meta_grad_enabled=(),
+        ).detach()
+        out.requires_grad_(target_requires_grad)
+        return out
     # If provided, use the target functional tensor for replaying the views.
     #
     # In summary, we use the fact that FunctionalTensorWrapper saves the view
     # functions applied to itself (collected during functionalization) so as
     # to replay them (view functions) on the aliased_base_tensor.
-    if (
-        replay_views
-        and target_view_meta_sequence is not None
-        and not any(vm.has_symbolic_inputs for vm in target_view_meta_sequence.sequence)
+    replayable_view_meta_sequence = target_view_meta_sequence is not None and not any(
+        vm.has_symbolic_inputs for vm in target_view_meta_sequence.sequence
+    )
+    requires_segmented_grad_replay = len(set(target_view_meta_grad_enabled)) > 1
+    if replayable_view_meta_sequence and (
+        replay_views or requires_segmented_grad_replay
     ):
-        out = _functionalization.apply_view_meta_sequence(
-            aliased_base_tensor, target_view_meta_sequence.sequence
+        out = _apply_view_meta_sequence_with_grad_modes(
+            aliased_base_tensor,
+            target_view_meta_sequence.sequence,
+            target_view_meta_grad_enabled,
         )
         # If re-applying the ViewMeta sequence succeeded, there should be no more
         # problems going forward. We just check we got to the target shape and
@@ -402,7 +554,38 @@ def gen_alias_from_base(
             target_requires_grad,
             target_is_conj,
             target_is_neg,
+            target_is_multi_output_view,
+            target_multi_output_view_was_invalidated,
         )
+
+    # If ViewMeta replay is unavailable, run the fused ViewFunc/as_strided
+    # fallback under the final view operation's captured grad mode.
+    target_grad_enabled = (
+        target_view_meta_grad_enabled[-1] if target_view_meta_grad_enabled else None
+    )
+    if (
+        target_grad_enabled is not None
+        and torch.is_grad_enabled() != target_grad_enabled
+        and not torch.is_inference_mode_enabled()
+    ):
+        with torch.set_grad_enabled(target_grad_enabled):
+            return gen_alias_from_base(
+                aliased_base_tensor,
+                target_meta_tensor,
+                target_requires_grad,
+                target_view_meta_sequence,
+                replay_views=replay_views,
+                target_is_conj=target_is_conj,
+                target_is_neg=target_is_neg,
+                target_is_multi_output_view=target_is_multi_output_view,
+                target_multi_output_view_was_invalidated=(
+                    target_multi_output_view_was_invalidated
+                ),
+                target_view_meta_grad_enabled=(),
+                replay_from_detached_base=replay_from_detached_base,
+                replay_detached_view_meta_sequence=(replay_detached_view_meta_sequence),
+                target_is_view=target_is_view,
+            )
 
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.
@@ -425,6 +608,8 @@ def gen_alias_from_base(
                 target_requires_grad,
                 target_is_conj,
                 target_is_neg,
+                target_is_multi_output_view,
+                target_multi_output_view_was_invalidated,
             )
 
     size = target_meta_tensor.size()
@@ -464,6 +649,8 @@ def gen_alias_from_base(
         target_requires_grad,
         target_is_conj,
         target_is_neg,
+        target_is_multi_output_view,
+        target_multi_output_view_was_invalidated,
     )
 
 
@@ -473,6 +660,8 @@ def gen_aliases_from_multi_output_view(
     target_requires_grads: Sequence[bool],
     target_is_conjs: Sequence[bool],
     target_is_negs: Sequence[bool],
+    target_view_meta_grad_enabled: Sequence[Sequence[bool | None]],
+    target_views_were_invalidated: Sequence[bool],
     target_view_meta_sequences: Sequence[ViewMetaSequence | None],
     target_output_indices: Sequence[int],
     target_view_meta_indices: Sequence[int],
@@ -492,6 +681,8 @@ def gen_aliases_from_multi_output_view(
         len(target_requires_grads)
         == len(target_is_conjs)
         == len(target_is_negs)
+        == len(target_view_meta_grad_enabled)
+        == len(target_views_were_invalidated)
         == len(target_view_meta_sequences)
         == len(target_output_indices)
         == len(target_view_meta_indices)
@@ -500,6 +691,32 @@ def gen_aliases_from_multi_output_view(
         raise AssertionError("multi-output view metadata lengths must match")
     if expected_len == 0:
         return []
+
+    distinct_grad_modes = {
+        mode for modes in target_view_meta_grad_enabled for mode in modes
+    }
+    grad_modes_match = len(distinct_grad_modes) <= 1
+    shared_grad_enabled = next(iter(distinct_grad_modes), None)
+    if (
+        grad_modes_match
+        and shared_grad_enabled is not None
+        and torch.is_grad_enabled() != shared_grad_enabled
+        and not torch.is_inference_mode_enabled()
+    ):
+        with torch.set_grad_enabled(shared_grad_enabled):
+            return gen_aliases_from_multi_output_view(
+                aliased_base_tensor,
+                target_meta_tensors,
+                target_requires_grads,
+                target_is_conjs,
+                target_is_negs,
+                target_view_meta_grad_enabled,
+                target_views_were_invalidated,
+                target_view_meta_sequences,
+                target_output_indices,
+                target_view_meta_indices,
+                replay_views=replay_views,
+            )
 
     def select_replayed_outputs(
         replayed_outs: Sequence[Tensor], replay_source: str
@@ -540,13 +757,22 @@ def gen_aliases_from_multi_output_view(
                 requires_grad,
                 is_conj,
                 is_neg,
+                target_multi_output_view_was_invalidated=was_invalidated,
             )
-            for out, target, requires_grad, is_conj, is_neg in zip(
+            for (
+                out,
+                target,
+                requires_grad,
+                is_conj,
+                is_neg,
+                was_invalidated,
+            ) in zip(
                 replayed_outs,
                 target_meta_tensors,
                 target_requires_grads,
                 target_is_conjs,
                 target_is_negs,
+                target_views_were_invalidated,
                 strict=True,
             )
         ]
@@ -628,16 +854,50 @@ def gen_aliases_from_multi_output_view(
             )
             return None
 
+        if any(
+            modes and len(modes) != len(sequence.sequence)
+            for sequence, modes in zip(
+                view_meta_sequences, target_view_meta_grad_enabled, strict=True
+            )
+        ):
+            raise AssertionError("ViewMeta and grad-mode sequence lengths must match")
+
         first_view_meta_sequence = view_meta_sequences[0]
         first_view_meta_index = target_view_meta_indices[0]
-        replayed_outs = _functionalization.apply_multi_output_view_meta_sequence(
-            aliased_base_tensor,
-            first_view_meta_sequence.sequence[: first_view_meta_index + 1],
+        first_grad_enabled = target_view_meta_grad_enabled[0]
+        shared_grad_enabled = first_grad_enabled[: first_view_meta_index + 1]
+        if any(
+            modes[: index + 1] != shared_grad_enabled
+            for modes, index in zip(
+                target_view_meta_grad_enabled,
+                target_view_meta_indices,
+                strict=True,
+            )
+        ):
+            log.debug("Batched multi-output views have different prefix grad modes")
+            return None
+        prefix = first_view_meta_sequence.sequence[:first_view_meta_index]
+        prefix_out = (
+            _apply_view_meta_sequence_with_grad_modes(
+                aliased_base_tensor,
+                prefix,
+                first_grad_enabled[:first_view_meta_index],
+            )
+            if prefix
+            else aliased_base_tensor
+        )
+        multi_output_grad_enabled = (
+            first_grad_enabled[first_view_meta_index] if first_grad_enabled else None
+        )
+        replayed_outs = _apply_multi_output_view_meta_with_grad_mode(
+            prefix_out,
+            first_view_meta_sequence.sequence[first_view_meta_index],
+            multi_output_grad_enabled,
         )
         selected_outs = select_replayed_outputs(replayed_outs, "ViewMeta")
         if selected_outs is None:
             return None
-        suffix_replayed_outs = []
+        suffix_replayed_outs: list[Tensor] = []
         for out, sequence, index in zip(
             selected_outs,
             view_meta_sequences,
@@ -645,8 +905,13 @@ def gen_aliases_from_multi_output_view(
             strict=True,
         ):
             suffix = sequence.sequence[index + 1 :]
+            suffix_grad_enabled = target_view_meta_grad_enabled[
+                len(suffix_replayed_outs)
+            ][index + 1 :]
             suffix_replayed_outs.append(
-                _functionalization.apply_view_meta_sequence(out, suffix)
+                _apply_view_meta_sequence_with_grad_modes(
+                    out, suffix, suffix_grad_enabled
+                )
                 if suffix
                 else out
             )
@@ -654,11 +919,16 @@ def gen_aliases_from_multi_output_view(
 
     # Match gen_alias_from_base's preference and preserve the hard
     # replay_views gate used by backends that cannot execute ViewMeta recipes.
-    replay_attempts = (
-        (replay_with_view_metas, replay_with_view_funcs)
-        if replay_views
-        else (replay_with_view_funcs,)
-    )
+    if replay_views:
+        replay_attempts = (
+            (replay_with_view_metas, replay_with_view_funcs)
+            if grad_modes_match
+            else (replay_with_view_metas,)
+        )
+    else:
+        replay_attempts = (
+            (replay_with_view_funcs,) if grad_modes_match else (replay_with_view_metas,)
+        )
     for replay in replay_attempts:
         replayed = replay()
         if replayed is not None:
@@ -677,18 +947,25 @@ def gen_aliases_from_multi_output_view(
             replay_views=replay_views,
             target_is_conj=target_is_conj,
             target_is_neg=target_is_neg,
+            target_is_multi_output_view=True,
+            target_multi_output_view_was_invalidated=was_invalidated,
+            target_view_meta_grad_enabled=grad_enabled,
         )
         for (
             target_meta_tensor,
             target_requires_grad,
             target_is_conj,
             target_is_neg,
+            grad_enabled,
+            was_invalidated,
             target_view_meta_sequence,
         ) in zip(
             target_meta_tensors,
             target_requires_grads,
             target_is_conjs,
             target_is_negs,
+            target_view_meta_grad_enabled,
+            target_views_were_invalidated,
             target_view_meta_sequences,
             strict=True,
         )

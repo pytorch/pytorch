@@ -387,6 +387,7 @@ def get_ignored_functions() -> set[Callable]:
         Tensor.to_padded_tensor,
         Tensor._use_count,
         Tensor._philox_normal_,
+        Tensor._philox_randint_,
         Tensor._philox_uniform_,
     }
 

@@ -8,7 +8,9 @@
 
 import copy
 import gc
+import io
 import itertools
+import math
 import operator
 import unittest
 import warnings
@@ -55,6 +57,7 @@ from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
+from torch._functorch._aot_autograd import runtime_wrappers
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
     _aot_export_function,
@@ -72,7 +75,11 @@ from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.output_code import MockFXGraphCacheOutput
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
-from torch.fx.experimental.proxy_tensor import is_sym_node
+from torch.fx.experimental.proxy_tensor import (
+    _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
+    _ModuleStackTracer,
+    is_sym_node,
+)
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.utils.rnn import PackedSequence
@@ -2074,6 +2081,77 @@ def forward(self, primals_1):
             # alias's grad_fns into error nodes)
             out_test2[0].grad_fn
 
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("op_name", ["unbind", "split"])
+    def test_output_aliases_input_multi_output_view_direct_mutation(
+        self, view_replay_for_aliased_outputs, op_name
+    ):
+        def f(a):
+            if op_name == "unbind":
+                return list(a.unbind(0))
+            return list(a.split(1, 0))
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+
+            inp = torch.ones(3, 3, requires_grad=True).clone()
+            outs = compiled_f(inp)
+            self.assertEqual(
+                torch._C._autograd._get_creation_meta(outs[0]),
+                torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE,
+            )
+            if not view_replay_for_aliased_outputs:
+                self.assertIn("AsStridedBackward", str(outs[0].grad_fn))
+            with self.assertRaisesRegex(
+                RuntimeError, "functions do not allow the output views"
+            ):
+                outs[0].mul_(2)
+
+            inp = torch.ones(3, 3, requires_grad=True).clone()
+            outs = compiled_f(inp)
+            inp.mul_(2)
+            with self.assertRaisesRegex(
+                RuntimeError, "functions do not allow the output views"
+            ):
+                outs[0].grad_fn
+
+            inp = torch.ones(3, 3, requires_grad=True).clone()
+            outs = compiled_f(inp)
+            outs[0].detach().mul_(2)
+            with self.assertRaisesRegex(
+                RuntimeError, "functions do not allow the output views"
+            ):
+                outs[1].grad_fn
+
+            inp = torch.ones(3, 3, requires_grad=True).clone()
+            outs = compiled_f(inp)
+            with torch.no_grad():
+                outs[0].mul_(2)
+            with self.assertRaisesRegex(
+                RuntimeError, "functions do not allow the output views"
+            ):
+                outs[1].grad_fn
+
+            # CreationMeta matters even when this call's input does not require
+            # grad: a returned view can become a grad leaf later, and a suffix
+            # created from it must retain eager's stale multi-output-view check.
+            inp = torch.ones(3, 3)
+            outs = compiled_f(inp)
+            self.assertEqual(
+                torch._C._autograd._get_creation_meta(outs[0]),
+                torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE,
+            )
+            outs[0].requires_grad_()
+            suffix = outs[0].unsqueeze(0)
+            with torch.no_grad():
+                inp.add_(1)
+            with self.assertRaisesRegex(
+                RuntimeError, "functions do not allow the output views"
+            ):
+                suffix.grad_fn
+
     def test_output_aliases_input_multi_output_view(self):
         # When multi-output views alias inputs, AOTAutograd regenerates the views
         # instead of sending them through a compiled autograd.Function.
@@ -2406,9 +2484,40 @@ def forward(self, primals_1):
         versions = (error_a._version, error_b._version)
         with self.assertRaisesRegex(IndexError, "out of range"):
             failing_compiled_f(error_a, error_b, torch.tensor([99]))
-        self.assertEqual((error_a._version, error_b._version), versions)
-        saved_loss.backward()
-        self.assertIsNotNone(error_leaf.grad)
+        self.assertGreater(error_a._version, versions[0])
+        self.assertGreater(error_b._version, versions[1])
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+            saved_loss.backward()
+
+        original_replay = runtime_wrappers.gen_aliases_from_multi_output_view
+        fail_replay = False
+
+        def replay_or_raise(*args, **kwargs):
+            if fail_replay:
+                raise RuntimeError("injected alias replay failure")
+            return original_replay(*args, **kwargs)
+
+        with patch.object(
+            runtime_wrappers,
+            "gen_aliases_from_multi_output_view",
+            replay_or_raise,
+        ):
+            failing_after_mutation = aot_function(f, nop)
+            _, warm_a, warm_b = make_inputs()
+            failing_after_mutation(warm_a, warm_b)
+
+        error_leaf, error_a, error_b = make_inputs()
+        saved_loss = error_a.square().sum()
+        original_data = error_a.detach().clone()
+        versions = (error_a._version, error_b._version)
+        fail_replay = True
+        with self.assertRaisesRegex(RuntimeError, "injected alias replay failure"):
+            failing_after_mutation(error_a, error_b)
+        self.assertNotEqual(error_a, original_data)
+        self.assertGreater(error_a._version, versions[0])
+        self.assertGreater(error_b._version, versions[1])
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+            saved_loss.backward()
 
         with (
             torch.inference_mode(),
@@ -2428,6 +2537,1537 @@ def forward(self, primals_1):
             outs = inference_compiled_f(base[1:], base[:4])
 
         self.assertEqual(outs, ref_outs)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @patch("torch._functorch.config.debug_assert", True)
+    def test_synthetic_base_multi_output_view_lazy_conj(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, b):
+            b.add_(1)
+            return a.unbind(0)
+
+        def make_inputs():
+            leaf = torch.arange(18.0).reshape(6, 3).to(torch.cfloat).requires_grad_()
+            base = leaf + 1
+            return leaf, base[:3].conj(), base[2:5]
+
+        ref_leaf, ref_a, ref_b = make_inputs()
+        ref_outs = f(ref_a, ref_b)
+        leaf, a, b = make_inputs()
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            outs = aot_function(f, nop)(a, b)
+
+        self.assertEqual(outs, ref_outs)
+        self.assertEqual(a, ref_a)
+        self.assertEqual(b, ref_b)
+        sum(out.real.sum() for out in ref_outs).backward()
+        sum(out.real.sum() for out in outs).backward()
+        self.assertEqual(leaf.grad, ref_leaf.grad)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("mutation", ["data", "metadata", "metadata_canceled"])
+    @parametrize("overlap", [False, True])
+    def test_input_alias_multi_output_view_mutation_order(
+        self, view_replay_for_aliased_outputs, mutation, overlap
+    ):
+        def f(a, b):
+            before = a.unbind(0)
+            if mutation == "data":
+                b.add_(2)
+            else:
+                b.transpose_(0, 1)
+                if mutation == "metadata_canceled":
+                    b.transpose_(0, 1)
+            after = a.unbind(0)
+            return before[0], after[0]
+
+        def make_inputs():
+            leaf = torch.arange(18.0, requires_grad=True)
+            base = leaf.reshape(6, 3) + 1
+            return (base[1:5], base[:4]) if overlap else (base[:2], base[2:])
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            warm_a, warm_b = make_inputs()
+            compiled_f(warm_a, warm_b)
+
+            a, b = make_inputs()
+            before, after = compiled_f(a, b)
+
+        self.assertEqual(
+            torch._C._autograd._get_creation_meta(before),
+            torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE,
+        )
+        self.assertEqual(
+            torch._C._autograd._get_creation_meta(after),
+            torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE,
+        )
+        self.assertIsNotNone(after.grad_fn)
+        with self.assertRaisesRegex(
+            RuntimeError, "base or another view of its base has been modified inplace"
+        ):
+            before.grad_fn
+        # Keep the stale marker stable across later mutations. Marking it as
+        # current_version + 1 would incorrectly make it valid after this bump.
+        with torch.no_grad():
+            a.add_(1)
+        with self.assertRaisesRegex(
+            RuntimeError, "base or another view of its base has been modified inplace"
+        ):
+            before.grad_fn
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_distinct_version_counters(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, b):
+            before = a.unbind(0)
+            with torch.no_grad():
+                b.add_(2)
+            after = a.unbind(0)
+            return before[0], after[0]
+
+        def make_inputs():
+            storage = torch.arange(18.0).untyped_storage()
+            a = torch.empty(2, 3, requires_grad=True) + 0
+            b = torch.empty(4, 3, requires_grad=True) + 0
+            with torch.no_grad():
+                a.set_(storage, 0, (2, 3), (3, 1))
+                b.set_(storage, 6, (4, 3), (3, 1))
+            return a, b
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            warm_a, warm_b = make_inputs()
+            compiled_f(warm_a, warm_b)
+
+            a, b = make_inputs()
+            before, after = compiled_f(a, b)
+
+        # Sharing storage alone is insufficient: these independently-created
+        # tensors have distinct version counters, so mutating b must not stale
+        # the multi-output views of a.
+        self.assertEqual(before, a[0])
+        self.assertEqual(after, a[0])
+        self.assertIsNotNone(before.grad_fn)
+        self.assertIsNotNone(after.grad_fn)
+        grad_a, grad_b = torch.autograd.grad(
+            before.sum(), (a, b), allow_unused=True, retain_graph=True
+        )
+        self.assertEqual(grad_a, torch.tensor([[1.0, 1.0, 1.0], [0.0, 0.0, 0.0]]))
+        self.assertIsNone(grad_b)
+        with torch.no_grad():
+            b.add_(1)
+        self.assertIsNotNone(before.grad_fn)
+        self.assertIsNotNone(after.grad_fn)
+        with torch.no_grad():
+            a.add_(1)
+        for out in (before, after):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "base or another view of its base has been modified inplace",
+            ):
+                out.grad_fn
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize(
+        "history_boundary", ["none", "detach_before", "no_grad_before", "detach_after"]
+    )
+    @parametrize("input_requires_grad", [False, True])
+    def test_multi_output_view_rejects_overlapping_unrelated_autograd_inputs(
+        self, view_replay_for_aliased_outputs, history_boundary, input_requires_grad
+    ):
+        def f(a, b):
+            if history_boundary == "detach_before":
+                base = a.detach().requires_grad_()
+            elif history_boundary == "no_grad_before":
+                with torch.no_grad():
+                    base = a.view_as(a)
+            else:
+                base = a
+            out = base.unbind(0)[0]
+            if history_boundary == "detach_after":
+                out = out.detach().requires_grad_()
+            with torch.no_grad():
+                b.add_(2)
+            return out
+
+        storage = torch.arange(18.0).untyped_storage()
+        a = torch.empty(3, 3, requires_grad=input_requires_grad) + 0
+        b = torch.empty(3, 3, requires_grad=input_requires_grad) + 0
+        with torch.no_grad():
+            a.set_(storage, 0, (3, 3), (3, 1))
+            b.set_(storage, 3, (3, 3), (3, 1))
+
+        self.assertIsNone(a._base)
+        self.assertIsNone(b._base)
+        self.assertFalse(torch._C._autograd._is_same_version_counter(a, b))
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            with self.assertRaisesRegex(
+                AssertionError,
+                "does not yet handle non-differentiable view input mutations",
+            ):
+                aot_function(f, nop)(a, b)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_rejects_synthetic_detached_mixed_modes(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, b):
+            with torch.no_grad():
+                b.add_(1)
+            base = a.unbind(0)[0].detach().requires_grad_()
+            with torch.no_grad():
+                no_grad_view = base.unsqueeze(0)
+            with torch.enable_grad():
+                return no_grad_view.transpose(0, 1)
+
+        leaf = torch.arange(18.0, requires_grad=True)
+        base = leaf.reshape(6, 3) + 1
+        a, b = base[:3], base[2:5]
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            with self.assertRaisesRegex(
+                AssertionError,
+                "synthetic-base replay of detached or mixed-grad-mode",
+            ):
+                aot_function(f, nop)(a, b)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_rejects_symbolic_detached_mixed_modes(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a):
+            prefix = a.narrow(1, 0, a.shape[1] - 1)
+            base = prefix.unbind(0)[0].detach().requires_grad_()
+            with torch.no_grad():
+                no_grad_view = base.unsqueeze(0)
+            with torch.enable_grad():
+                return no_grad_view.transpose(0, 1)
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            with self.assertRaisesRegex(
+                AssertionError,
+                "symbolic or unavailable ViewMeta replay",
+            ):
+                aot_function(f, nop, dynamic=True)(
+                    torch.randn(2, 5, requires_grad=True)
+                )
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("compile_with_shared_version_counter", [False, True])
+    def test_multi_output_view_version_counter_relationship_is_runtime_dynamic(
+        self,
+        view_replay_for_aliased_outputs,
+        compile_with_shared_version_counter,
+    ):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        def f(a, b):
+            before = a.unbind(0)
+            with torch.no_grad():
+                b.add_(2)
+            after = a.unbind(0)
+            return before[0], after[0]
+
+        def make_inputs(shared_version_counter):
+            if shared_version_counter:
+                leaf = torch.arange(18.0, requires_grad=True)
+                base = leaf.reshape(6, 3) + 1
+                return base[:2], base[2:]
+            storage = torch.arange(18.0).untyped_storage()
+            a = torch.empty(2, 3, requires_grad=True) + 0
+            b = torch.empty(4, 3, requires_grad=True) + 0
+            with torch.no_grad():
+                a.set_(storage, 0, (2, 3), (3, 1))
+                b.set_(storage, 6, (4, 3), (3, 1))
+            return a, b
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            counter = CompileCounterWithBackend("aot_eager")
+            compiled_f = torch.compile(f, backend=counter, fullgraph=True)
+            compiled_f(*make_inputs(compile_with_shared_version_counter))
+
+            runtime_shares_counter = not compile_with_shared_version_counter
+            a, b = make_inputs(runtime_shares_counter)
+            before, after = compiled_f(a, b)
+
+        self.assertEqual(counter.frame_count, 1)
+        self.assertIsNotNone(after.grad_fn)
+        if runtime_shares_counter:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "base or another view of its base has been modified inplace",
+            ):
+                before.grad_fn
+        else:
+            self.assertIsNotNone(before.grad_fn)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_mutation_order_probe_preserves_semantics(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, b):
+            before = b.unbind(0)[0]
+            with torch.no_grad():
+                a.add_(1)
+            # A counterfactual probe that made a and b share a version counter
+            # would make this otherwise-valid operation raise.
+            return b.unbind(0)[0], before.sin()
+
+        def make_inputs():
+            return (
+                torch.arange(6.0, requires_grad=True).reshape(2, 3) + 1,
+                torch.arange(6.0, requires_grad=True).reshape(2, 3) + 10,
+            )
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            actual = compiled_f(*make_inputs())
+            expected = f(*make_inputs())
+
+        self.assertEqual(actual, expected)
+        self.assertIsNotNone(actual[0].grad_fn)
+        self.assertIsNotNone(actual[1].grad_fn)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_mutation_order_ignores_recycled_temporaries(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, b):
+            for i in range(50):
+                tmp = b + 1
+                del tmp
+                if i == 25:
+                    with torch.no_grad():
+                        a.add_(1)
+            return b.unbind(0)[0]
+
+        def make_inputs():
+            leaf = torch.arange(12.0, requires_grad=True)
+            base = leaf.reshape(4, 3) + 1
+            return base[:2], base[2:]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            out = aot_function(f, nop)(*make_inputs())
+
+        self.assertIsNotNone(out.grad_fn)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_respects_preserved_version_counter(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, b):
+            out = a.unbind(0)[0]
+            with torch.autograd._unsafe_preserve_version_counter(b):
+                with torch.no_grad():
+                    b.add_(1)
+            return out
+
+        def make_inputs():
+            leaf = torch.arange(12.0, requires_grad=True)
+            base = leaf.reshape(4, 3) + 1
+            return base[:2], base[2:]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            out = aot_function(f, nop)(*make_inputs())
+
+        self.assertIsNotNone(out.grad_fn)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("detached_view", [False, True])
+    @parametrize("create_under_no_grad", [False, True])
+    @parametrize("input_requires_grad", [False, True])
+    def test_multi_output_view_detached_output_ignores_later_mutation(
+        self,
+        view_replay_for_aliased_outputs,
+        detached_view,
+        create_under_no_grad,
+        input_requires_grad,
+    ):
+        def f(a, b):
+            if create_under_no_grad:
+                with torch.no_grad():
+                    out = a.unbind(0)[0].detach()
+                    if detached_view:
+                        out = out.view(-1)
+                    b.add_(2)
+            else:
+                out = a.unbind(0)[0].detach()
+                if detached_view:
+                    out = out.view(-1)
+                with torch.no_grad():
+                    b.add_(2)
+            return out
+
+        def make_inputs():
+            leaf = torch.arange(12.0, requires_grad=input_requires_grad)
+            base = leaf.reshape(4, 3) + 1
+            return base[:2], base[2:]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            compiled_f(*make_inputs())
+            a, b = make_inputs()
+            out = compiled_f(a, b)
+
+        self.assertFalse(out.requires_grad)
+        self.assertIsNone(out.grad_fn)
+        self.assertEqual(out, a[0])
+        self.assertEqual(
+            out.untyped_storage().data_ptr(), a.untyped_storage().data_ptr()
+        )
+        self.assertEqual(out._is_view(), detached_view)
+        with torch.no_grad():
+            a.add_(3)
+        self.assertEqual(out, a[0])
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("suffix", [False, True])
+    def test_multi_output_view_detach_requires_grad_boundary(
+        self, view_replay_for_aliased_outputs, suffix
+    ):
+        def f(a):
+            out = a.unbind(0)[0].detach().requires_grad_()
+            return out.unsqueeze(0) if suffix else out
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            a = torch.randn(2, 3, requires_grad=True)
+            out = compiled_f(a)
+
+        self.assertTrue(out.requires_grad)
+        self.assertEqual(out.is_leaf, not suffix)
+        if suffix:
+            self.assertEqual(out._base.shape, a[0].shape)
+            a_before = a.detach().clone()
+            with torch.no_grad():
+                out._base.add_(10)
+            self.assertEqual(a[0], a_before[0] + 10)
+            self.assertEqual(a[1], a_before[1])
+        out.sum().backward()
+        self.assertIsNone(a.grad)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("suffix", [False, True])
+    def test_multi_output_view_requires_grad_from_nondifferentiable_input(
+        self, view_replay_for_aliased_outputs, suffix
+    ):
+        def f(a):
+            out = a.unbind(0)[0]
+            out.requires_grad_()
+            return out.unsqueeze(0) if suffix else out
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            a = torch.randn(2, 3)
+            if suffix:
+                with self.assertRaisesRegex(
+                    AssertionError,
+                    r"view operations after requires_grad_\(\) in a non-grad-input",
+                ):
+                    compiled_f(a)
+                return
+            out = compiled_f(a)
+
+        self.assertTrue(out.requires_grad)
+        self.assertEqual(out.is_leaf, not suffix)
+        self.assertEqual(
+            out.untyped_storage().data_ptr(), a.untyped_storage().data_ptr()
+        )
+        self.assertEqual(
+            torch._C._autograd._get_creation_meta(out),
+            torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE,
+        )
+        out.sum().backward()
+        self.assertIsNone(a.grad)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_rejects_regrad_before_multi_output_view(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a):
+            base = a.transpose(0, 1)
+            base.requires_grad_()
+            return base.unbind(0)[0]
+
+        eager_a = torch.randn(3, 4)
+        eager_out = f(eager_a)
+        self.assertIs(eager_out._base, eager_a)
+        eager_out.sum().backward()
+        self.assertIsNone(eager_a.grad)
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            with self.assertRaisesRegex(
+                AssertionError,
+                r"view operations after requires_grad_\(\) in a non-grad-input",
+            ):
+                aot_function(f, nop)(torch.randn(3, 4))
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("restart_grad", [False, True])
+    def test_multi_output_view_detach_before_no_grad_suffix(
+        self, view_replay_for_aliased_outputs, restart_grad
+    ):
+        def f(a):
+            out = a.unbind(0)[0].detach()
+            if restart_grad:
+                out.requires_grad_()
+            with torch.no_grad():
+                return out.unsqueeze(0)
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            a = torch.randn(2, 3, requires_grad=True)
+            out = aot_function(f, nop)(a)
+
+        self.assertEqual(out.requires_grad, restart_grad)
+        self.assertTrue(out.is_leaf)
+        self.assertTrue(out._is_view())
+        self.assertEqual(
+            out.untyped_storage().data_ptr(), a.untyped_storage().data_ptr()
+        )
+        self.assertEqual(
+            torch._C._autograd._get_creation_meta(out),
+            torch._C._autograd.CreationMeta.NO_GRAD_MODE,
+        )
+        if restart_grad:
+            (grad_a,) = torch.autograd.grad(out.sum(), a, allow_unused=True)
+            self.assertIsNone(grad_a)
+        self.assertEqual(out._base.shape, a[0].shape)
+        a_before = a.detach().clone()
+        with torch.no_grad():
+            out._base.add_(10)
+        self.assertEqual(a[0], a_before[0] + 10)
+        self.assertEqual(a[1], a_before[1])
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("metadata_op", ["transpose", "unsqueeze"])
+    def test_multi_output_view_detach_inplace_metadata_stays_non_view(
+        self, view_replay_for_aliased_outputs, metadata_op
+    ):
+        def f(a):
+            out = a.unbind(0)[0].detach()
+            if metadata_op == "transpose":
+                out.transpose_(0, 1)
+            else:
+                out.unsqueeze_(0)
+            return out
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            eager_a = torch.randn(4, 2, 3, requires_grad=True)
+            a = eager_a.detach().clone().requires_grad_()
+            eager_out = f(eager_a)
+            out = aot_function(f, nop)(a)
+
+        self.assertEqual(out, eager_out)
+        self.assertEqual(out.stride(), eager_out.stride())
+        self.assertEqual(
+            out.untyped_storage().data_ptr(), a.untyped_storage().data_ptr()
+        )
+        self.assertFalse(out._is_view())
+        self.assertIsNone(out._base)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_tag_cleared_by_set(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, replacement):
+            out = a.unbind(0)[0].detach()
+            out.set_(replacement)
+            return out.unsqueeze(0)
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            a = torch.arange(6.0).reshape(2, 3)
+            replacement = torch.arange(10.0, 16.0).reshape(2, 3)
+            out = aot_function(f, nop)(a, replacement)
+
+        self.assertEqual(out, replacement.unsqueeze(0))
+        self.assertEqual(
+            out.untyped_storage().data_ptr(), replacement.untyped_storage().data_ptr()
+        )
+        self.assertTrue(out._is_view())
+        self.assertIsNotNone(out._base)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("restart_grad", [False, True])
+    def test_multi_output_view_detach_resets_mutation_restriction(
+        self, view_replay_for_aliased_outputs, restart_grad
+    ):
+        def f(a, b):
+            out = a.unbind(0)[0].detach()
+            if restart_grad:
+                out.requires_grad_()
+            with torch.no_grad():
+                b.add_(1)
+            return out.unsqueeze(0)
+
+        def make_inputs():
+            leaf = torch.arange(12.0, requires_grad=True)
+            base = leaf.reshape(4, 3) + 1
+            return base[:2], base[2:]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            a, b = make_inputs()
+            out = aot_function(f, nop)(a, b)
+
+        self.assertEqual(out, a[0].unsqueeze(0))
+        self.assertEqual(out.requires_grad, restart_grad)
+        self.assertEqual(
+            out.untyped_storage().data_ptr(), a.untyped_storage().data_ptr()
+        )
+        self.assertTrue(out._is_view())
+        self.assertEqual(
+            torch._C._autograd._get_creation_meta(out),
+            torch._C._autograd.CreationMeta.DEFAULT,
+        )
+        if restart_grad:
+            self.assertFalse(out.is_leaf)
+            (grad_a,) = torch.autograd.grad(out.sum(), a, allow_unused=True)
+            self.assertIsNone(grad_a)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("sever_history", ["detach", "transpose_detach", "no_grad_view"])
+    def test_multi_output_view_after_severed_input_history(
+        self, view_replay_for_aliased_outputs, sever_history
+    ):
+        def f(a):
+            if sever_history == "detach":
+                base = a.detach().requires_grad_()
+            elif sever_history == "transpose_detach":
+                base = a.transpose(0, 1).detach().requires_grad_()
+            else:
+                with torch.no_grad():
+                    base = a.view_as(a)
+            with torch.enable_grad():
+                return base.unbind(0)
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            a = torch.randn(3, 4, requires_grad=True)
+            if sever_history != "no_grad_view":
+                with self.assertRaisesRegex(
+                    AssertionError,
+                    "multiple returned aliases sharing a detached "
+                    "multi-output-view lineage",
+                ):
+                    aot_function(f, nop)(a)
+                return
+            outs = aot_function(f, nop)(a)
+
+        for out in outs:
+            self.assertEqual(
+                out.untyped_storage().data_ptr(), a.untyped_storage().data_ptr()
+            )
+            self.assertEqual(
+                torch._C._autograd._get_creation_meta(out),
+                torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE,
+            )
+            (grad_a,) = torch.autograd.grad(out.sum(), a, allow_unused=True)
+            self.assertIsNone(grad_a)
+            self.assertIs(out._base, a)
+            self.assertIsNone(out._base.grad)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_mutation_after_detach_starts_new_interval(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a):
+            base = a.unbind(0)[0].detach().requires_grad_()
+            with torch.no_grad():
+                base.add_(1)
+            return base.unbind(0)[0]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            a = torch.randn(4, 2, 3, requires_grad=True)
+            a_before = a.detach().clone()
+            out = aot_function(f, nop)(a)
+
+        self.assertEqual(out, a[0, 0])
+        self.assertEqual(a[0], a_before[0] + 1)
+        self.assertEqual(a[1:], a_before[1:])
+        self.assertEqual(
+            torch._C._autograd._get_creation_meta(out),
+            torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE,
+        )
+        out.sum().backward()
+        self.assertIsNone(a.grad)
+        expected_base_grad = torch.zeros_like(out._base)
+        expected_base_grad[0].fill_(1)
+        self.assertEqual(out._base.grad, expected_base_grad)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_same_object_noop_retains_pending_mutation(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, c):
+            out = a.unbind(0)[0]
+            with torch.no_grad():
+                c.add_(1)
+            out.requires_grad_(True)
+            return out
+
+        def make_distinct_inputs():
+            return (
+                torch.randn(2, 3, requires_grad=True) + 0,
+                torch.randn(2, 3, requires_grad=True) + 0,
+            )
+
+        def make_shared_inputs():
+            leaf = torch.arange(12.0, requires_grad=True)
+            base = leaf.reshape(4, 3) + 1
+            return base[:2], base[2:]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            compiled_f(*make_distinct_inputs())
+            out = compiled_f(*make_shared_inputs())
+
+        with self.assertRaisesRegex(
+            RuntimeError, "base or another view of its base has been modified inplace"
+        ):
+            out.grad_fn
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_same_object_mutation_stays_stale(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a):
+            out = a.unbind(0)[0]
+            with torch.no_grad():
+                out.add_(1)
+            return out
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            a = torch.randn(2, 3, requires_grad=True) + 0
+            out = aot_function(f, nop)(a)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "base or another view of its base has been modified inplace"
+        ):
+            out.grad_fn
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("consume", ["clone", "detach"])
+    def test_stale_multi_output_view_clone_vs_detach(
+        self, view_replay_for_aliased_outputs, consume
+    ):
+        def f(a, c):
+            out = a.unbind(0)[0]
+            with torch.no_grad():
+                c.add_(1)
+            return out.clone() if consume == "clone" else out.detach()
+
+        def make_inputs(shared):
+            if not shared:
+                return (
+                    torch.randn(2, 3, requires_grad=True) + 0,
+                    torch.randn(2, 3, requires_grad=True) + 0,
+                )
+            leaf = torch.arange(12.0, requires_grad=True)
+            base = leaf.reshape(4, 3) + 1
+            return base[:2], base[2:]
+
+        eager_a, eager_c = make_inputs(True)
+        if consume == "clone":
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "base or another view of its base.*modified inplace",
+            ):
+                f(eager_a, eager_c)
+        else:
+            eager_out = f(eager_a, eager_c)
+            self.assertFalse(eager_out._is_view())
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            compiled_f(*make_inputs(False))
+            a, c = make_inputs(True)
+            if consume == "clone":
+                c_before = c.detach().clone()
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "base or another view of its base.*modified inplace",
+                ):
+                    compiled_f(a, c)
+                self.assertEqual(c, c_before)
+            else:
+                out = compiled_f(a, c)
+                self.assertFalse(out.requires_grad)
+                self.assertFalse(out._is_view())
+                self.assertEqual(
+                    out.untyped_storage().data_ptr(), a.untyped_storage().data_ptr()
+                )
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_stale_multi_output_view_unrelated_grad_output(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, c):
+            out = a.unbind(0)[0]
+            with torch.no_grad():
+                c.add_(1)
+            return torch.zeros_like(out, requires_grad=True)
+
+        def make_inputs(shared):
+            if not shared:
+                return (
+                    torch.randn(2, 3, requires_grad=True) + 0,
+                    torch.randn(2, 3, requires_grad=True) + 0,
+                )
+            leaf = torch.arange(12.0, requires_grad=True)
+            base = leaf.reshape(4, 3) + 1
+            return base[:2], base[2:]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            compiled_f(*make_inputs(False))
+            a, c = make_inputs(True)
+            c_before = c.detach().clone()
+            out = compiled_f(a, c)
+
+        self.assertTrue(out.requires_grad)
+        self.assertFalse(out._is_view())
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(c, c_before + 1)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("suffix", [False, True])
+    def test_multi_output_view_preserves_internal_creation_context(
+        self, view_replay_for_aliased_outputs, suffix
+    ):
+        def f(a):
+            with torch.no_grad():
+                out = a.unbind(0)[0]
+            return out.unsqueeze(0) if suffix else out
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            a = torch.randn(2, 3, requires_grad=True)
+            out = compiled_f(a)
+
+        self.assertTrue(out.requires_grad)
+        if not suffix:
+            self.assertEqual(
+                torch._C._autograd._get_creation_meta(out),
+                torch._C._autograd.CreationMeta.NO_GRAD_MODE,
+            )
+        out.sum().backward()
+        self.assertIsNone(a.grad)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("suffix_is_multi_output", [False, True])
+    def test_multi_output_view_mutation_before_suffix_raises(
+        self, view_replay_for_aliased_outputs, suffix_is_multi_output
+    ):
+        def f(a, b):
+            out = a.unbind(0)[0]
+            with torch.no_grad():
+                b.add_(1)
+            return out.split(1, 0)[0] if suffix_is_multi_output else out.unsqueeze(0)
+
+        def make_inputs():
+            leaf = torch.arange(12.0, requires_grad=True)
+            base = leaf.reshape(4, 3) + 1
+            return base[:2], base[2:]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            a, b = make_inputs()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "base or another view of its base.*modified inplace",
+            ):
+                aot_function(f, nop)(a, b)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_mutation_before_suffix_without_synthetic_base(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a):
+            out = a.unbind(0)[0]
+            with torch.no_grad():
+                a.add_(1)
+            return out.unsqueeze(0)
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            a = torch.randn(2, 3, requires_grad=True) + 1
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "base or another view of its base.*modified inplace",
+            ):
+                aot_function(f, nop)(a)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("suffix_is_multi_output", [False, True])
+    def test_multi_output_view_no_grad_suffix_resets_restriction(
+        self, view_replay_for_aliased_outputs, suffix_is_multi_output
+    ):
+        def f(a, b):
+            out = a.unbind(0)[0]
+            with torch.no_grad():
+                b.add_(1)
+                return (
+                    out.split(1, 0)[0] if suffix_is_multi_output else out.unsqueeze(0)
+                )
+
+        def make_inputs():
+            leaf = torch.arange(12.0, requires_grad=True)
+            base = leaf.reshape(4, 3) + 1
+            return base[:2], base[2:]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            out = aot_function(f, nop)(*make_inputs())
+
+        self.assertTrue(out.requires_grad)
+        self.assertIsNone(out.grad_fn)
+        self.assertEqual(
+            torch._C._autograd._get_creation_meta(out),
+            torch._C._autograd.CreationMeta.NO_GRAD_MODE,
+        )
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("restart_grad", [False, True])
+    def test_multi_output_view_creation_error_survives_detach(
+        self, view_replay_for_aliased_outputs, restart_grad
+    ):
+        def f(a, b):
+            out = a.unbind(0)[0]
+            with torch.no_grad():
+                b.add_(1)
+            out = out.unsqueeze(0).detach()
+            return out.requires_grad_() if restart_grad else out
+
+        def make_inputs():
+            leaf = torch.arange(12.0, requires_grad=True)
+            base = leaf.reshape(4, 3) + 1
+            return base[:2], base[2:]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            a, b = make_inputs()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "base or another view of its base.*modified inplace",
+            ):
+                aot_function(f, nop)(a, b)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("return_tagged_output", [False, True])
+    @parametrize("sever_before_multi_output", [False, True])
+    def test_discarded_multi_output_view_creation_error_stops_execution(
+        self,
+        view_replay_for_aliased_outputs,
+        return_tagged_output,
+        sever_before_multi_output,
+    ):
+        def f(a, b, c):
+            base = a.detach().requires_grad_() if sever_before_multi_output else a
+            out = base.unbind(0)[0]
+            with torch.no_grad():
+                b.add_(1)
+            out.unsqueeze(0)
+            with torch.no_grad():
+                c.add_(5)
+            return out if return_tagged_output else c
+
+        def make_inputs():
+            leaf = torch.arange(12.0, requires_grad=True)
+            base = leaf.reshape(4, 3) + 1
+            return base[:2], base[2:], torch.zeros(1)
+
+        eager_a, eager_b, eager_c = make_inputs()
+        eager_b_before = eager_b.clone()
+        with self.assertRaisesRegex(
+            RuntimeError, "base or another view of its base.*modified inplace"
+        ):
+            f(eager_a, eager_b, eager_c)
+        self.assertEqual(eager_b, eager_b_before + 1)
+        self.assertEqual(eager_c, torch.zeros(1))
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            a, b, c = make_inputs()
+            b_before = b.clone()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "base or another view of its base.*modified inplace",
+            ):
+                aot_function(f, nop)(a, b, c)
+
+        # The runtime condition is checked before compiled execution. This is
+        # conservatively all-or-nothing: neither the mutation before the eager
+        # failure nor code after it runs in the compiled call.
+        self.assertEqual(b, b_before)
+        self.assertEqual(c, torch.zeros(1))
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_no_grad_suffix_dynamo(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a):
+            out = a.unbind(0)[0]
+            with torch.no_grad():
+                return out.unsqueeze(0)
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True)
+            a = torch.randn(2, 3, requires_grad=True)
+            out = compiled_f(a)
+
+        self.assertTrue(out.requires_grad)
+        self.assertIsNone(out.grad_fn)
+        self.assertEqual(
+            torch._C._autograd._get_creation_meta(out),
+            torch._C._autograd.CreationMeta.NO_GRAD_MODE,
+        )
+        out.sum().backward()
+        self.assertIsNone(a.grad)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_separate_multi_output_view_snapshots_with_suffix(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, b):
+            before = a.unbind(0)[0]
+            with torch.no_grad():
+                b.add_(1)
+            after = a.unbind(0)[0]
+            return before, after.unsqueeze(0)
+
+        def make_inputs():
+            leaf = torch.arange(12.0, requires_grad=True)
+            base = leaf.reshape(4, 3) + 1
+            return base[:2], base[2:]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            before, after = aot_function(f, nop)(*make_inputs())
+
+        with self.assertRaisesRegex(
+            RuntimeError, "base or another view of its base has been modified inplace"
+        ):
+            before.grad_fn
+        self.assertIsNotNone(after.grad_fn)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_independent_multi_output_view_lineages_track_mutations(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, b, c):
+            out_a = a.transpose(0, 1).unbind(0)[0].unsqueeze(0)
+            out_b = b.transpose(0, 1).unbind(0)[0].unsqueeze(0)
+            with torch.no_grad():
+                c.add_(1)
+            return out_a, out_b
+
+        leaf = torch.arange(12.0, requires_grad=True)
+        base = leaf.reshape(4, 3) + 1
+        a, c = base[:2], base[2:]
+        b = torch.arange(6.0, requires_grad=True).reshape(2, 3) + 10
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            out_a, out_b = aot_function(f, nop)(a, b, c)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "base or another view of its base has been modified inplace"
+        ):
+            out_a.grad_fn
+        self.assertIsNotNone(out_b.grad_fn)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_preserves_internal_enable_grad(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a):
+            with torch.enable_grad():
+                return a.unbind(0)[0]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            a = torch.randn(2, 3, requires_grad=True)
+            with torch.no_grad():
+                out = compiled_f(a)
+
+        self.assertIsNotNone(out.grad_fn)
+        self.assertEqual(
+            torch._C._autograd._get_creation_meta(out),
+            torch._C._autograd.CreationMeta.MULTI_OUTPUT_NODE,
+        )
+        out.sum().backward()
+        self.assertEqual(a.grad, torch.tensor([[1.0, 1.0, 1.0], [0.0, 0.0, 0.0]]))
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("first_grad_enabled", [False, True])
+    def test_nested_multi_output_view_preserves_grad_mode_boundaries(
+        self, view_replay_for_aliased_outputs, first_grad_enabled
+    ):
+        def f(a):
+            with torch.set_grad_enabled(first_grad_enabled):
+                out = a.unbind(0)[0]
+            with torch.set_grad_enabled(not first_grad_enabled):
+                return out.split(2, 0)[0]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            eager_inp = torch.randn(2, 3, requires_grad=True)
+            compiled_inp = eager_inp.detach().clone().requires_grad_()
+            expected = f(eager_inp)
+            actual = compiled_f(compiled_inp)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.requires_grad, expected.requires_grad)
+        actual.sum().backward()
+        expected.sum().backward()
+        self.assertEqual(compiled_inp.grad, eager_inp.grad)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_detached_multi_output_view_preserves_nested_grad_modes(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a):
+            base = a.unbind(0)[0].detach().requires_grad_()
+            with torch.no_grad():
+                no_grad_view = base.unsqueeze(0)
+            with torch.enable_grad():
+                return no_grad_view.transpose(0, 1)
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            a = torch.randn(2, 3, requires_grad=True)
+            out = aot_function(f, nop)(a)
+
+        self.assertTrue(out.requires_grad)
+        self.assertFalse(out.is_leaf)
+        self.assertEqual(out._base.shape, a[0].shape)
+        self.assertEqual(
+            torch._C._autograd._get_creation_meta(out),
+            torch._C._autograd.CreationMeta.NO_GRAD_MODE,
+        )
+        out.sum().backward()
+        self.assertIsNone(a.grad)
+        self.assertIsNone(out._base.grad)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("input_requires_grad", [False, True])
+    @parametrize("use_dynamo", [False, True])
+    def test_non_grad_detached_multi_output_view_returns_siblings(
+        self, view_replay_for_aliased_outputs, input_requires_grad, use_dynamo
+    ):
+        def f(a):
+            return a.detach().unbind(0)
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = (
+                torch.compile(f, backend="aot_eager", fullgraph=True)
+                if use_dynamo
+                else aot_function(f, nop)
+            )
+            eager_inp = torch.randn(2, 3, requires_grad=input_requires_grad)
+            compiled_inp = (
+                eager_inp.detach().clone().requires_grad_(input_requires_grad)
+            )
+            expected = f(eager_inp)
+            actual = compiled_f(compiled_inp)
+
+        self.assertEqual(actual, expected)
+        self.assertFalse(any(out.requires_grad for out in actual))
+        actual[0].add_(1)
+        self.assertEqual(actual[0], expected[0] + 1)
+        self.assertEqual(actual[1], expected[1])
+        self.assertEqual(compiled_inp[0], eager_inp[0] + 1)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("return_base", [False, True])
+    def test_multi_output_view_rejects_shared_detached_lineage(
+        self, view_replay_for_aliased_outputs, return_base
+    ):
+        def f(a):
+            if return_base:
+                base = a.unbind(0)[0].detach().requires_grad_()
+                return base, base.unsqueeze(0)
+            base = a.detach().requires_grad_()
+            return base.unbind(0)
+
+        eager_outs = f(torch.randn(2, 3, requires_grad=True))
+        detached_base = eager_outs[0] if return_base else eager_outs[0]._base
+        self.assertIsNotNone(detached_base)
+        self.assertIs(eager_outs[1]._base, detached_base)
+        if not return_base:
+            eager_outs[0].sum().backward()
+        eager_outs[1].sum().backward()
+        self.assertEqual(detached_base.grad, torch.ones_like(detached_base))
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            with self.assertRaisesRegex(
+                AssertionError,
+                "multiple returned aliases sharing a detached multi-output-view lineage",
+            ):
+                aot_function(f, nop)(torch.randn(2, 3, requires_grad=True))
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("history_boundary", ["detach", "non_grad_input"])
+    @parametrize("return_view", [False, True])
+    @parametrize("op", ["clone", "sin"])
+    def test_multi_output_view_rejects_detached_lineage_graph_output(
+        self, view_replay_for_aliased_outputs, history_boundary, return_view, op
+    ):
+        def f(a):
+            base = a.unbind(0)[0]
+            if history_boundary == "detach":
+                base = base.detach()
+            base.requires_grad_()
+            escaped = base.unsqueeze(0) if return_view else base
+            derived = escaped.clone() if op == "clone" else escaped.sin()
+            return escaped, derived
+
+        input_requires_grad = history_boundary == "detach"
+        eager_alias, eager_derived = f(
+            torch.randn(2, 3, requires_grad=input_requires_grad)
+        )
+        eager_alias.retain_grad()
+        eager_derived.sum().backward()
+        self.assertIsNotNone(eager_alias.grad)
+        if history_boundary == "detach":
+            detached_base = eager_alias._base if return_view else eager_alias
+            self.assertIsNotNone(detached_base)
+            self.assertIsNotNone(detached_base.grad)
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            expected_error = (
+                r"view operations after requires_grad_\(\) in a non-grad-input"
+                if history_boundary == "non_grad_input" and return_view
+                else "differentiable outputs that share a detached "
+                "multi-output-view lineage"
+            )
+            with self.assertRaisesRegex(
+                AssertionError,
+                expected_error,
+            ):
+                aot_function(f, nop)(
+                    torch.randn(2, 3, requires_grad=input_requires_grad)
+                )
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_detached_multi_output_view_with_unrelated_grad_output(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, other):
+            return a.unbind(0)[0].detach(), other.sin()
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            a = torch.randn(2, 3, requires_grad=True)
+            other = torch.randn(3, requires_grad=True)
+            actual = aot_function(f, nop)(a, other)
+            expected = f(a, other)
+
+        self.assertEqual(actual, expected)
+        actual[1].sum().backward()
+        self.assertEqual(other.grad, other.cos())
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_stale_detached_multi_output_view_with_unrelated_grad_output(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, other):
+            base = a.detach().requires_grad_()
+            out = base.unbind(0)[0]
+            with torch.no_grad():
+                a.add_(1)
+            return out, other.sin()
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            a = torch.randn(2, 3, requires_grad=True)
+            other = torch.randn(3, requires_grad=True)
+            out, unrelated = aot_function(f, nop)(a, other)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "base or another view of its base has been modified inplace"
+        ):
+            out.grad_fn
+        unrelated.sum().backward()
+        self.assertEqual(other.grad, other.cos())
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("add_suffix_after_regrad", [False, True])
+    def test_multi_output_view_rejects_delayed_regrad_after_detach(
+        self, view_replay_for_aliased_outputs, add_suffix_after_regrad
+    ):
+        def f(a):
+            base = a.unbind(0)[0].detach()
+            out = base.unsqueeze(0)
+            out.requires_grad_()
+            return out.transpose(0, 1) if add_suffix_after_regrad else out
+
+        eager_out = f(torch.randn(2, 3, requires_grad=True))
+        self.assertFalse(eager_out._base.requires_grad)
+        eager_out.sum().backward()
+        self.assertIsNone(eager_out._base.grad)
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            with self.assertRaisesRegex(
+                AssertionError,
+                r"delayed requires_grad_\(\) transitions in detached",
+            ):
+                aot_function(f, nop)(torch.randn(2, 3, requires_grad=True))
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_no_grad_multi_output_view_tracks_later_mutation(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, b):
+            out = a.unbind(0)[0]
+            b.add_(1)
+            return out
+
+        def make_inputs():
+            leaf = torch.arange(12.0, requires_grad=True)
+            base = leaf.reshape(4, 3) + 1
+            return base[:2], base[2:]
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            warm_a, warm_b = make_inputs()
+            a, b = make_inputs()
+            with torch.no_grad():
+                compiled_f(warm_a, warm_b)
+                out = compiled_f(a, b)
+
+        self.assertEqual(
+            torch._C._autograd._get_creation_meta(out),
+            torch._C._autograd.CreationMeta.NO_GRAD_MODE,
+        )
+        with self.assertRaisesRegex(RuntimeError, "view was created in no_grad mode"):
+            out.grad_fn
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_no_grad_multi_output_view_preserves_internal_invalidation(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a):
+            with torch.no_grad():
+                out = a.unbind(0)[0]
+                a.add_(1)
+            return out
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            a = torch.randn(2, 3, requires_grad=True) + 0
+            a_before = a.detach().clone()
+            out = aot_function(f, nop)(a)
+
+        self.assertEqual(a, a_before + 1)
+        self.assertEqual(
+            torch._C._autograd._get_creation_meta(out),
+            torch._C._autograd.CreationMeta.NO_GRAD_MODE,
+        )
+        with self.assertRaisesRegex(RuntimeError, "view was created in no_grad mode"):
+            out.grad_fn
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("compile_shared_with", ["before", "after"])
+    def test_multi_output_view_runtime_counter_relationship_preserves_order(
+        self, view_replay_for_aliased_outputs, compile_shared_with
+    ):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        def f(a, b, c):
+            with torch.no_grad():
+                b.add_(1)
+            out = a.unbind(0)[0]
+            with torch.no_grad():
+                c.add_(1)
+            return out
+
+        def make_inputs(shared_with):
+            leaf = torch.arange(12.0, requires_grad=True)
+            base = leaf.reshape(4, 3) + 1
+            a, shared = base[:2], base[2:]
+            shared.data = torch.full_like(shared, 2)
+            independent = torch.full((2, 3), 3.0, requires_grad=True) + 0
+            if shared_with == "before":
+                return a, shared, independent
+            return a, independent, shared
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            counter = CompileCounterWithBackend("aot_eager")
+            compiled_f = torch.compile(f, backend=counter, fullgraph=True)
+            compiled_f(*make_inputs(compile_shared_with))
+
+            runtime_shared_with = (
+                "after" if compile_shared_with == "before" else "before"
+            )
+            out = compiled_f(*make_inputs(runtime_shared_with))
+
+        self.assertEqual(counter.frame_count, 1)
+        if runtime_shared_with == "after":
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "base or another view of its base has been modified inplace",
+            ):
+                out.grad_fn
+        else:
+            self.assertIsNotNone(out.grad_fn)
+
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    def test_multi_output_view_shared_version_counter_after_storage_change(
+        self, view_replay_for_aliased_outputs
+    ):
+        def f(a, b):
+            before = a.unbind(0)
+            with torch.no_grad():
+                b.add_(2)
+            after = a.unbind(0)
+            return before[0], after[0]
+
+        def make_inputs():
+            leaf = torch.arange(18.0, requires_grad=True)
+            base = leaf.reshape(6, 3) + 1
+            a, b = base[:2], base[2:]
+            b.data = torch.ones_like(b)
+            self.assertNotEqual(
+                a.untyped_storage().data_ptr(), b.untyped_storage().data_ptr()
+            )
+            self.assertTrue(torch._C._autograd._is_same_version_counter(a, b))
+            return a, b
+
+        with torch._functorch.config.patch(
+            view_replay_for_aliased_outputs=view_replay_for_aliased_outputs
+        ):
+            compiled_f = aot_function(f, nop)
+            warm_a, warm_b = make_inputs()
+            compiled_f(warm_a, warm_b)
+
+            a, b = make_inputs()
+            before, after = compiled_f(a, b)
+
+        self.assertIsNotNone(after.grad_fn)
+        with self.assertRaisesRegex(
+            RuntimeError, "base or another view of its base has been modified inplace"
+        ):
+            before.grad_fn
+
+    def test_synthetic_base_failed_replay_preserves_version(self):
+        def f(a, b):
+            a.add_(2)
+            b.transpose_(0, 1)
+            return a[:2]
+
+        def make_inputs():
+            leaf = torch.arange(15.0, requires_grad=True)
+            base = leaf.reshape(5, 3)
+            return leaf, base[1:].detach(), base[:4].detach()
+
+        original_replay = runtime_wrappers.gen_alias_from_base
+        fail_replay = False
+
+        def replay_or_raise(*args, **kwargs):
+            if fail_replay:
+                raise RuntimeError("injected alias replay failure")
+            return original_replay(*args, **kwargs)
+
+        with patch.object(runtime_wrappers, "gen_alias_from_base", replay_or_raise):
+            compiled_f = aot_function(f, nop)
+            _, warm_a, warm_b = make_inputs()
+            compiled_f(warm_a, warm_b)
+
+        leaf, a, b = make_inputs()
+        self.assertIsNone(a._base)
+        self.assertIsNone(b._base)
+        saved_loss = leaf.square().sum()
+        original_data = a.clone()
+        versions = (leaf._version, a._version, b._version)
+        fail_replay = True
+        with self.assertRaisesRegex(RuntimeError, "injected alias replay failure"):
+            compiled_f(a, b)
+        self.assertNotEqual(a, original_data)
+        self.assertGreater(leaf._version, versions[0])
+        self.assertGreater(a._version, versions[1])
+        self.assertGreater(b._version, versions[2])
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+            saved_loss.backward()
 
     def test_output_aliases_intermediate_multi_output_view(self):
         # All aliased outs are from multi-output views, so AOTAutograd will hide the aliasing from autograd.
@@ -4404,6 +6044,57 @@ def forward(self, tangents_1):
         self.assertEqual(out_ref, out_test)
         self.assertEqual(a, a2)
 
+    # See https://github.com/pytorch/pytorch/issues/191449
+    def test_dupe_arg_with_no_grad_alias_of_output(self):
+        # Duplicating and mutating an input routes metadata through
+        # AOTDedupeWrapper, which remaps base_idx through add_dupe_map. Only
+        # alias_of_input / is_input hold an input index there; a no-grad alias
+        # of a user output holds a user-output index and must be left alone.
+        # The leading outputs push that index past the input count, so remapping
+        # it used to raise IndexError.
+        def f(x, y):
+            y.mul_(2)
+            a, b, c = x + 1, x + 2, x + 3
+            d = x + 4 + y
+            return a, b, c, d, d.view(-1)
+
+        f_compiled = aot_function(f, nop)
+        x = torch.ones(4)
+        out_ref = f(x, x)
+
+        x2 = torch.ones(4)
+        out_test = f_compiled(x2, x2)
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(x, x2)
+        # Eager returns two distinct objects sharing storage, so the compiled
+        # function must too, or an eager resize_() on the alias corrupts d.
+        self.assertIsNot(out_test[3], out_test[4])
+        self.assertEqual(out_test[3].data_ptr(), out_test[4].data_ptr())
+
+    # See https://github.com/pytorch/pytorch/issues/191449
+    def test_synthetic_base_with_no_grad_alias_of_output(self):
+        # Overlapping aliased inputs plus a mutation build synthetic bases,
+        # which remap base_idx through synthetic_base_info. As with dedup, only
+        # alias_of_input / is_input hold an input index there.
+        def f(x, y):
+            y.mul_(2)
+            a, b, c = x + 1, x + 2, x + 3
+            d = x + 4 + y
+            return a, b, c, d, d.view(-1)
+
+        f_compiled = aot_function(f, nop)
+        base = torch.ones(8)
+        out_ref = f(base[0:6], base[2:8])
+
+        base2 = torch.ones(8)
+        out_test = f_compiled(base2[0:6], base2[2:8])
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(base, base2)
+        self.assertIsNot(out_test[3], out_test[4])
+        self.assertEqual(out_test[3].data_ptr(), out_test[4].data_ptr())
+
     @patch("torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count)
     @patch("torch._functorch.config.debug_assert", True)
     def test_invalid_dupe_left_bias(self, counter):
@@ -5613,6 +7304,133 @@ class TestAOTExport(AOTTestCase):
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
+
+    def test_aot_export_module_graph_module_serialization(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return (self.relu(self.linear(x)),)
+
+        mod = M().eval()
+        inp = torch.randn(2, 4)
+        gm, sig = aot_export_module(
+            mod,
+            (inp,),
+            trace_joint=False,
+            decompositions=torch._decomp.core_aten_decompositions(),
+        )
+
+        buffer = io.BytesIO()
+        torch.save(gm, buffer)
+        buffer.seek(0)
+        loaded = torch.load(buffer, weights_only=False)
+
+        graph_inputs = tuple(mod.get_parameter(name) for name in sig.parameters)
+        graph_inputs += tuple(mod.get_buffer(name) for name in sig.buffers)
+        graph_inputs += (inp,)
+        self.assertEqual(gm(*graph_inputs), loaded(*graph_inputs))
+        self.assertEqual(
+            [(node.op, node.target) for node in gm.graph.nodes],
+            [(node.op, node.target) for node in loaded.graph.nodes],
+        )
+
+    def test_module_stack_tracer_deserialization_preserves_graph_and_state(self):
+        class Shared(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                shared = Shared()
+                self.left = shared
+                self.right = shared
+
+            def forward(self, x):
+                return self.left(x) + self.right(x)
+
+        def roundtrip(gm):
+            buffer = io.BytesIO()
+            torch.save(gm, buffer)
+            buffer.seek(0)
+            return torch.load(buffer, weights_only=False)
+
+        inp = torch.randn(3)
+        export_gm = torch.export.export(M(), (inp,), strict=False).graph_module
+        self.assertIs(export_gm.graph._tracer_cls, _ModuleStackTracer)
+
+        loaded_export_gm = roundtrip(export_gm)
+        self.assertIs(loaded_export_gm.graph._tracer_cls, _ModuleStackTracer)
+        self.assertEqual(export_gm(inp), loaded_export_gm(inp))
+        self.assertEqual(
+            [(node.op, node.target) for node in export_gm.graph.nodes],
+            [(node.op, node.target) for node in loaded_export_gm.graph.nodes],
+        )
+
+        root = torch.nn.Module()
+        root.left = export_gm
+        root.right = export_gm
+        graph = torch.fx.Graph(tracer_cls=export_gm.graph._tracer_cls)
+        x = graph.placeholder("x")
+        left = graph.call_module("left", (x,))
+        right = graph.call_module("right", (x,))
+        graph.output((left, right))
+        nested_gm = torch.fx.GraphModule(root, graph)
+
+        sentinel_key = id(inp)
+        sentinel_node = next(iter(export_gm.graph.nodes))
+        with patch.dict(
+            _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
+            {sentinel_key: sentinel_node},
+            clear=True,
+        ):
+            loaded_nested_gm = roundtrip(nested_gm)
+            self.assertIs(
+                _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[sentinel_key], sentinel_node
+            )
+
+        self.assertEqual(nested_gm(inp), loaded_nested_gm(inp))
+        self.assertIs(loaded_nested_gm.graph._tracer_cls, _ModuleStackTracer)
+        self.assertIs(loaded_nested_gm.left, loaded_nested_gm.right)
+        self.assertEqual(
+            [(node.op, node.target) for node in nested_gm.graph.nodes],
+            [(node.op, node.target) for node in loaded_nested_gm.graph.nodes],
+        )
+
+    def test_module_stack_tracer_deserialization_autowraps_math(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                size = (
+                    math.trunc(x.shape[-2] + 0.5),
+                    math.trunc(x.shape[-1] + 0.5),
+                )
+                return F.interpolate(x, size=size, mode="bilinear")
+
+        inp = torch.rand(1, 3, 28, 28)
+        gm = torch.export.export(
+            M(),
+            (inp,),
+            dynamic_shapes={
+                "x": {2: torch.export.Dim.DYNAMIC, 3: torch.export.Dim.DYNAMIC}
+            },
+            strict=False,
+        ).graph_module
+        self.assertTrue(any(node.target is math.trunc for node in gm.graph.nodes))
+
+        buffer = io.BytesIO()
+        torch.save(gm, buffer)
+        buffer.seek(0)
+        loaded = torch.load(buffer, weights_only=False)
+
+        self.assertEqual(gm(inp), loaded(inp))
+        self.assertEqual(
+            [(node.op, node.target) for node in gm.graph.nodes],
+            [(node.op, node.target) for node in loaded.graph.nodes],
+        )
 
     def test_aot_export_ban_dropout_mut_pre_dispatch(self):
         def fn(p, x):
@@ -9732,6 +11550,8 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertIn("as_strided_", source)
         self.assertIn("_meta_mut", source)
+        self.assertIn("increment_version(_meta_mut)", source)
+        self.assertNotIn("_unsafe_set_version_counter", source)
 
     @xfailIfTorchDynamo
     def test_synthetic_base_codegen_multiple_base_groups(self):
@@ -10181,6 +12001,40 @@ def forward(self, primals_1, tangents_1):
             ],
             [0, 1, 2],
         )
+
+    def test_collect_metadata_no_grad_no_op_view_of_user_output(self):
+        # https://github.com/pytorch/pytorch/issues/191449
+        # Without gradients, a no-op view of another user output must still be
+        # classified as an alias so the runtime wrapper regenerates a distinct
+        # tensor object; otherwise the backend may return one object for both
+        # outputs, while eager returns distinct objects.
+        from torch._functorch._aot_autograd.collect_metadata_analysis import (
+            run_functionalized_fw_and_collect_metadata,
+        )
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.schemas import OutputType
+
+        def f(x):
+            base = x + 1
+            return [base.view(-1), base]
+
+        fake_mode = FakeTensorMode()
+        arg = fake_mode.from_tensor(torch.ones(1))
+
+        metadata = run_functionalized_fw_and_collect_metadata(
+            f,
+            flat_args_descs=[PlainAOTInput(0)],
+            keep_input_mutations=True,
+            static_input_indices=[],
+        )(arg)
+
+        self.assertEqual(
+            metadata.output_info[0].output_type,
+            OutputType.alias_of_intermediate_base_is_user_output,
+        )
+        self.assertEqual(metadata.output_info[0].base_idx, 1)
+        self.assertEqual(metadata.output_info[1].output_type, OutputType.non_alias)
+        self.assertEqual(metadata.num_intermediate_bases, 0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")

@@ -40,6 +40,12 @@ from .utils import strict_zip
 zip = strict_zip
 
 
+# The only output types whose base_idx is an index into the graph inputs. The
+# alias_of_intermediate* types index into graph intermediates or user outputs
+# instead, so input renumbering must skip them. See OutputAliasInfo.base_idx.
+INPUT_ALIAS_TYPES = (OutputType.alias_of_input, OutputType.is_input)
+
+
 def remove_dupe_metadata(
     m: ViewAndMutationMeta,
     keep_arg_mask: list[bool],
@@ -89,16 +95,42 @@ def remove_dupe_metadata(
         input_info=[x for i, x in enumerate(m.input_info) if keep_arg_mask[i]],
         # For outputs that are views of inputs, we store the index of the input that the output
         # was generated from. Need to update that index to account for removed dupes.
+        # Dedup renumbers inputs only, so this skips the non-input index spaces.
         output_info=[
             OutputAliasInfo(
                 output_type=o.output_type,
                 raw_type=o.raw_type,
                 dynamic_dims=o.dynamic_dims,
-                base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx],
+                base_idx=(
+                    add_dupe_map[o.base_idx]
+                    if o.base_idx is not None and o.output_type in INPUT_ALIAS_TYPES
+                    else o.base_idx
+                ),
                 requires_grad=o.requires_grad,
                 requires_grad_for_backward=o.requires_grad_for_backward,
                 is_conj=o.is_conj,
                 is_neg=o.is_neg,
+                is_view=o.is_view,
+                is_multi_output_view=o.is_multi_output_view,
+                view_replay_grad_enabled=o.view_replay_grad_enabled,
+                multi_output_view_base_idx=(
+                    add_dupe_map[o.multi_output_view_base_idx]
+                    if o.multi_output_view_base_idx is not None
+                    else None
+                ),
+                replay_from_detached_base=o.replay_from_detached_base,
+                replay_detached_view_meta_sequence=(
+                    o.replay_detached_view_meta_sequence
+                ),
+                multi_output_view_was_invalidated=o.multi_output_view_was_invalidated,
+                multi_output_view_invalidating_input_indices=(
+                    tuple(
+                        dict.fromkeys(
+                            add_dupe_map[i]
+                            for i in o.multi_output_view_invalidating_input_indices
+                        )
+                    )
+                ),
                 view_meta_sequence=o.view_meta_sequence,
                 multi_output_view_group=o.multi_output_view_group,
                 multi_output_view_index=o.multi_output_view_index,
@@ -113,6 +145,15 @@ def remove_dupe_metadata(
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
         subclass_tangent_meta=subclass_tangent_meta,
+        multi_output_view_creation_error_conditions=tuple(
+            (
+                add_dupe_map[base_idx],
+                tuple(dict.fromkeys(add_dupe_map[i] for i in invalidating_indices)),
+            )
+            for base_idx, invalidating_indices in (
+                m.multi_output_view_creation_error_conditions
+            )
+        ),
     )
 
 
@@ -135,6 +176,10 @@ def create_synthetic_base_metadata(
     inner_args: list[Any],
     inner_args_desc: list[AOTInput],
 ) -> tuple[ViewAndMutationMeta, list[int]]:
+    def synthetic_base_inner_idx(outer_idx: int) -> int:
+        entry = synthetic_base_info[outer_idx]
+        return entry[0] if isinstance(entry, tuple) else entry
+
     # maps inner arg indices to outer arg indices
     synthetic_base_to_indices: dict[int, list[int]] = {}
     for inner_idx in range(len(inner_args)):
@@ -241,28 +286,40 @@ def create_synthetic_base_metadata(
             requires_grad_for_backward=requires_grad,
             is_conj=outer_args[outer_idx].is_conj(),
             is_neg=outer_args[outer_idx].is_neg(),
+            is_view=outer_args[outer_idx]._is_view(),
+            is_multi_output_view=False,
+            view_replay_grad_enabled=(),
+            multi_output_view_base_idx=None,
+            replay_from_detached_base=False,
+            replay_detached_view_meta_sequence=False,
+            multi_output_view_was_invalidated=False,
+            multi_output_view_invalidating_input_indices=(),
         )
         for outer_idx in outer_aliased_arg_idx_with_metadata_mutations
     ]
     existing_output_infos = []
     for o in m.output_info:
-        synthetic_base_info_for_output = (
-            None if o.base_idx is None else synthetic_base_info[o.base_idx]
-        )
-        new_base_idx = (
-            None
-            if o.base_idx is None
-            else (
-                synthetic_base_info_for_output
-                if isinstance(synthetic_base_info_for_output, int)
-                else synthetic_base_info_for_output[0]  # type: ignore[index]
+        if o.base_idx is None or o.output_type not in INPUT_ALIAS_TYPES:
+            # base_idx is not an input index for these, so synthetic bases
+            # leave it alone. See OutputAliasInfo.base_idx.
+            new_base_idx = o.base_idx
+            new_output_type = o.output_type
+            input_merged = False
+        else:
+            synthetic_base_info_for_output = synthetic_base_info[o.base_idx]
+            # If the original input was merged into a synthetic base, then an
+            # output that was literally that input is now a view of the base.
+            input_merged = isinstance(synthetic_base_info_for_output, tuple)
+            new_base_idx = (
+                synthetic_base_info_for_output[0]  # type: ignore[index]
+                if input_merged
+                else synthetic_base_info_for_output  # type: ignore[assignment]
             )
-        )
-        # If the original input was merged into a synthetic base, then an
-        # output that was literally that input is now a view of the base.
-        input_merged = o.base_idx is not None and isinstance(
-            synthetic_base_info[o.base_idx], tuple
-        )
+            new_output_type = (
+                OutputType.alias_of_input
+                if o.output_type == OutputType.is_input and input_merged
+                else o.output_type
+            )
         # A ViewMeta sequence for an input alias is relative to that original
         # input. After replacing the input with its synthetic root, replaying
         # the old sequence on the root would omit the input's own offset/stride
@@ -270,11 +327,17 @@ def create_synthetic_base_metadata(
         # from the wrapped synthetic-base graph and include that prefix; if they
         # are unavailable, gen_alias_from_base safely falls back to as_strided.
         view_meta_sequence = None if input_merged else o.view_meta_sequence
-        new_output_type = (
-            OutputType.alias_of_input
-            if o.output_type == OutputType.is_input and input_merged
-            else o.output_type
-        )
+        if (
+            input_merged
+            and o.is_multi_output_view
+            and (
+                o.replay_from_detached_base or len(set(o.view_replay_grad_enabled)) > 1
+            )
+        ):
+            raise AssertionError(
+                "aot_autograd() does not yet handle synthetic-base replay of "
+                "detached or mixed-grad-mode multi-output views"
+            )
         existing_output_infos.append(
             OutputAliasInfo(
                 output_type=new_output_type,
@@ -286,6 +349,26 @@ def create_synthetic_base_metadata(
                 requires_grad_for_backward=o.requires_grad_for_backward,
                 is_conj=o.is_conj,
                 is_neg=o.is_neg,
+                is_view=o.is_view,
+                is_multi_output_view=o.is_multi_output_view,
+                view_replay_grad_enabled=(
+                    o.view_replay_grad_enabled[-1:]
+                    if input_merged and o.is_multi_output_view
+                    else o.view_replay_grad_enabled
+                ),
+                multi_output_view_base_idx=(
+                    synthetic_base_inner_idx(o.multi_output_view_base_idx)
+                    if o.multi_output_view_base_idx is not None
+                    else None
+                ),
+                replay_from_detached_base=o.replay_from_detached_base,
+                replay_detached_view_meta_sequence=(
+                    o.replay_detached_view_meta_sequence
+                ),
+                multi_output_view_was_invalidated=o.multi_output_view_was_invalidated,
+                multi_output_view_invalidating_input_indices=(
+                    o.multi_output_view_invalidating_input_indices
+                ),
                 view_meta_sequence=view_meta_sequence,
                 multi_output_view_group=o.multi_output_view_group,
                 multi_output_view_index=o.multi_output_view_index,
@@ -340,6 +423,19 @@ def create_synthetic_base_metadata(
             subclass_inp_meta=[],
             subclass_fw_graph_out_meta=[],
             subclass_tangent_meta=subclass_tangent_meta,
+            multi_output_view_creation_error_conditions=tuple(
+                (
+                    synthetic_base_inner_idx(base_idx),
+                    tuple(
+                        dict.fromkeys(
+                            synthetic_base_inner_idx(i) for i in invalidating_indices
+                        )
+                    ),
+                )
+                for base_idx, invalidating_indices in (
+                    m.multi_output_view_creation_error_conditions
+                )
+            ),
         ),
         outer_aliased_arg_idx_with_metadata_mutations,
     )

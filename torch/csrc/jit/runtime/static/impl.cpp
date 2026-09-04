@@ -7,6 +7,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/irange.h>
+#include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/add_if_then_else.h>
@@ -22,7 +23,6 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <initializer_list>
 #include <iostream>
@@ -1660,7 +1660,7 @@ float BlockRunner::benchmark_model(
       }
     }
   }
-  const auto start = std::chrono::high_resolution_clock::now();
+  caffe2::Timer timer;
   for ([[maybe_unused]] const auto _n_run : c10::irange(main_runs)) {
     const auto num_args = static_cast<uint32_t>(args_list.size());
     for (const auto j : c10::irange(num_args)) {
@@ -1670,9 +1670,7 @@ float BlockRunner::benchmark_model(
       }
     }
   }
-  const float millis = std::chrono::duration<float, std::milli>(
-                           std::chrono::high_resolution_clock::now() - start)
-                           .count();
+  float millis = timer.MilliSeconds();
   return millis /
       (static_cast<float>(main_runs) * static_cast<float>(args_list.size()));
 }
@@ -1798,23 +1796,21 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   c10::InferenceMode mode;
 
   // setup time
-  using hr_clock = std::chrono::high_resolution_clock;
-  using float_millis = std::chrono::duration<float, std::milli>;
-  auto start = hr_clock::now();
+  caffe2::Timer timer;
 
   set_inputs(args_list[0], is_kwargs_empty ? empty_kwargs : kwargs_list[0]);
 
-  results.setup_time = float_millis(hr_clock::now() - start).count();
+  results.setup_time = timer.MilliSeconds();
 
   // The first iteration profiles each node's output Tensors' sizes and
   // initializes the memory planner with the profile information. Following
   // iterations just use the already established memory planning.
-  start = hr_clock::now();
+  timer.Start();
   operator()(args_list[0], is_kwargs_empty ? empty_kwargs : kwargs_list[0]);
   if (manage_output_tensors) {
     deallocateOutputTensors();
   }
-  results.first_iter_time = float_millis(hr_clock::now() - start).count();
+  results.first_iter_time = timer.MilliSeconds();
 
   // warmup runs
   for ([[maybe_unused]] const auto _n_run : c10::irange(warmup_runs)) {
@@ -1833,21 +1829,21 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
     for (const auto j : c10::irange(num_args)) {
       set_inputs(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
 
-      start = hr_clock::now();
+      timer.Start();
       if (planner_) {
         planner_->allocate();
       }
-      float millis = float_millis(hr_clock::now() - start).count();
+      float millis = timer.MilliSeconds();
       results.memory_alloc_time += millis;
       const auto num_nodes = static_cast<uint32_t>(nodes_.size());
       for (const auto k : c10::irange<uint32_t>(num_nodes)) {
-        start = hr_clock::now();
+        timer.Start();
         nodes_[k].run();
-        millis = float_millis(hr_clock::now() - start).count();
+        millis = timer.MilliSeconds();
         results.time_per_node[k] += millis;
         verify_and_correct_memory_overlap(nodes_[k]);
       }
-      start = hr_clock::now();
+      timer.Start();
       create_memory_planner();
       planner_->deallocate();
       // clean up owning refs of input tensors
@@ -1855,10 +1851,10 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
       if (manage_output_tensors) {
         deallocateOutputTensors();
       }
-      millis = float_millis(hr_clock::now() - start).count();
+      millis = timer.MilliSeconds();
       results.memory_dealloc_time += millis;
 
-      start = hr_clock::now();
+      timer.Start();
       // no need to keep references of outputs in static runtime anymore
       c10::IValue output;
       if (static_module_.num_outputs() > 1) {
@@ -1871,7 +1867,7 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
       output = std::move(*outputs_[0]);
       // release outputs explicitly to measure the time it takes
       output = IValue();
-      millis = float_millis(hr_clock::now() - start).count();
+      millis = timer.MilliSeconds();
       results.output_dealloc_time += millis;
     }
   }
