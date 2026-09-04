@@ -114,6 +114,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     skipMPS,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
@@ -2238,6 +2239,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         )
 
     @expectedFailureMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4022")
     @set_default_dtype_if_supported(torch.double)
     def test_relaxed_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
@@ -2319,6 +2321,7 @@ class TestDistributionsDevice(DistributionsTestCase):
             self.assertTrue((values < high).all().item())
 
     @expectedFailureMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4020")
     @set_default_dtype_if_supported(torch.double)
     def test_uniform(self):
         low = torch.zeros(5, 5, requires_grad=True)
@@ -2360,6 +2363,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_forward_ad(lambda x: x.uniform_())
 
     @expectedFailureMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3977")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_vonmises_sample(self):
         for loc in [0.0, math.pi / 2.0]:
@@ -2381,6 +2385,7 @@ class TestDistributionsDevice(DistributionsTestCase):
             self.assertLess(abs(norm - 1), 1e-3)
 
     @expectedFailureMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4020")
     @set_default_dtype_if_supported(torch.double)
     def test_cauchy(self):
         loc = torch.zeros(5, 5, requires_grad=True)
@@ -2413,6 +2418,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_forward_ad(lambda x: x.cauchy_())
 
     @expectedFailureMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4020")
     @set_default_dtype_if_supported(torch.double)
     def test_halfcauchy(self):
         scale = torch.ones(5, 5, requires_grad=True)
@@ -2649,6 +2655,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         return _sampler
 
     @expectedFailureMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4020")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_logisticnormal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -2787,6 +2794,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         )
 
     @expectedFailureMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4020")
     @set_default_dtype_if_supported(torch.double)
     def test_normal(self):
         loc = torch.randn(5, 5, requires_grad=True)
@@ -3260,6 +3268,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         )
         self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4020")
     @set_default_dtype_if_supported(torch.double)
     def test_multivariate_normal_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -3374,6 +3383,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         wishart_log_prob_gradcheck(df_no_batch, None, None, scale_tril_batched)
 
     @skipMPS  # flaky failure
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4021")
     def test_wishart_stable_with_precision_matrix(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 10
@@ -3446,6 +3456,7 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @skipMPS  # flaky failure
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4020")
     @set_default_dtype_if_supported(torch.double)
     def test_wishart_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -3492,6 +3503,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         )
         self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4020")
     def test_wishart_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
@@ -3505,6 +3517,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(d.variance, empirical_var, atol=0.5, rtol=0)
 
     @expectedFailureMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4020")
     @set_default_dtype_if_supported(torch.double)
     def test_exponential(self):
         rate = torch.randn(5, 5).abs().requires_grad_()
@@ -3557,6 +3570,7 @@ class TestDistributionsDevice(DistributionsTestCase):
             )
 
     @expectedFailureMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4021")
     @set_default_dtype_if_supported(torch.double)
     def test_laplace(self):
         loc = torch.randn(5, 5, requires_grad=True)
@@ -3753,6 +3767,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_log_prob(GeneralizedPareto(loc, scale, concentration), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4020")
     def test_generalized_pareto_sample(self):
         set_rng_seed(1)  # see note [Randomized statistical tests]
         for loc, scale, concentration in product(
@@ -3944,6 +3959,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_log_prob(Chi2(df), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4020")
     def test_chi2_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for df in [0.1, 1.0, 5.0]:
@@ -3977,6 +3993,7 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @expectedFailureMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4020")
     @set_default_dtype_if_supported(torch.double)
     def test_studentT_sample(self):
         set_rng_seed(11)  # see Note [Randomized statistical tests]
@@ -4810,6 +4827,7 @@ class TestRsampleDevice(DistributionsTestCase):
             )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5212")
     def test_dirichlet_on_diagonal(self):
         num_samples = 20
         grid = [1e-1, 1e0, 1e1]
@@ -4851,6 +4869,7 @@ class TestRsampleDevice(DistributionsTestCase):
             )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5213")
     def test_beta_wrt_alpha(self):
         num_samples = 20
         grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
@@ -4928,6 +4947,7 @@ class TestRsampleDevice(DistributionsTestCase):
                 ),
             )
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5214")
     def test_dirichlet_multivariate(self):
         alpha_crit = 0.25 * (5.0**0.5 - 1.0)
         num_samples = 100000
@@ -4959,6 +4979,7 @@ class TestRsampleDevice(DistributionsTestCase):
                 ),
             )
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5215")
     @set_default_dtype(torch.double)
     def test_dirichlet_tangent_field(self):
         num_samples = 20
@@ -5961,6 +5982,7 @@ class TestKLDevice(DistributionsTestCase):
         self.assertEqual(expected_kl, actual_kl)
 
     @skipIfTorchDynamo("This test explicitly invokes torch.compile")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5216")
     def test_compile_kl_multivariate_normal(self):
         def fn(p_mu, p_log_var, q_mu, q_log_var):
             q_var = torch.diag_embed(torch.exp(q_log_var))
