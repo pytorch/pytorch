@@ -2,7 +2,6 @@
 
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/Context.h>
-#include <ATen/DeviceGuard.h>
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
@@ -13,13 +12,10 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
-#include <c10/util/env.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
-#include <c10/util/irange.h>
 
 #if AT_CUDNN_ENABLED()
-#include <ATen/cudnn/cudnn-wrapper.h>
 #include <cudnn_frontend.h>
 #endif
 
