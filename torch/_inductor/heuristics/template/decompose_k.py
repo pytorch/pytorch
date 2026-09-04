@@ -14,6 +14,7 @@ from ...kernel.decompose_k import (
     decompose_k_subgraph_template,
 )
 from ...kernel_inputs import KernelInputs, MMKernelInputs
+from ...runtime.hints import DeviceProperties
 from ...utils import (
     get_k_splits,
     use_aten_gemm_kernels,
@@ -73,18 +74,25 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             return
 
         m, n, k = kernel_inputs.mnk_symbolic()
-        k_splits = get_k_splits(m, n, k)
-        exact_k_splits = [
-            k_split
-            for k_split in k_splits
-            if V.graph.sizevars.statically_known_true(
-                sympy.Eq(sympy.Mod(k, k_split), 0)
-            )
-        ]
-
         if use_aten_gemm_kernels():
-            for k_split in exact_k_splits:
-                yield {"k_split": k_split, "bmm_backend": "aten"}
+            device_properties = DeviceProperties.create(kernel_inputs.device())
+            if device_properties.type == "cuda" and device_properties.major == 10:
+                aten_k_splits = get_k_splits(
+                    m,
+                    n,
+                    k,
+                    num_sms=device_properties.multi_processor_count,
+                    ctas_per_tile=2,
+                    max_workspace_bytes=128 * 1024 * 1024,
+                )
+            else:
+                aten_k_splits = get_k_splits(m, n, k)
+
+            for k_split in aten_k_splits:
+                if V.graph.sizevars.statically_known_true(
+                    sympy.Eq(sympy.Mod(k, k_split), 0)
+                ):
+                    yield {"k_split": k_split, "bmm_backend": "aten"}
 
         mat1, mat2 = kernel_inputs.mat1mat2()
         layout = kernel_inputs.output_layout()
@@ -100,12 +108,23 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         ):
             return
 
+        # Keep Triton's split policy separate from the ATen-oriented occupancy
+        # ranking above. A follow-up can use Triton's known tile geometry and
+        # support uneven aligned partitions.
+        triton_k_splits = [
+            k_split
+            for k_split in get_k_splits(m, n, k)
+            if V.graph.sizevars.statically_known_true(
+                sympy.Eq(sympy.Mod(k, k_split), 0)
+            )
+        ]
+
         m_hint, n_hint, k_hint = map(int, (m, n, k))
         config_indices = [0, 3]
         if m_hint > 128:
             config_indices.extend((1, 4) if n_hint <= 128 else (2, 5))
 
-        for k_split in exact_k_splits:
+        for k_split in triton_k_splits:
             for config_index in config_indices:
                 partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
                 m_tiles = math.ceil(m_hint / partial_config.block_m)
