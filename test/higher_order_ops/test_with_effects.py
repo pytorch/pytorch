@@ -1322,7 +1322,9 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             self.assertEqual(out.shape, (batch_size, num_heads, seq_len, head_dim))
 
 
-instantiate_device_type_tests(TestWithEffectsDevice, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestWithEffectsDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
