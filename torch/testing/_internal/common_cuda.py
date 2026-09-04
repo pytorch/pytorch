@@ -6,7 +6,7 @@ import functools
 import threading
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU, TEST_MTIA
 from torch.utils._import_utils import _check_module_exists
 import inspect
 import contextlib
@@ -92,6 +92,15 @@ SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 SM100OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0))
 SM120OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (12, 0))
+BF16X9_API_SUPPORTED = LazyVal(
+    lambda: TEST_CUDA
+    and not TEST_WITH_ROCM
+    and _get_torch_cuda_version() >= (12, 9)
+)
+BF16X9_SUPPORTED = LazyVal(
+    lambda: BF16X9_API_SUPPORTED
+    and torch.cuda.get_device_capability() in ((10, 0), (10, 3))
+)
 
 IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is not None and
                   ((torch.cuda.get_device_capability() == (11, 0) and int(torch.version.cuda[:2]) >= 13) or
@@ -187,6 +196,8 @@ def evaluate_platform_supports_flash_attention():
         return not IS_WINDOWS and SM80OrLater
     if TEST_XPU:
         return True
+    if TEST_MTIA:
+        return True
     return False
 
 def evaluate_platform_supports_ck_sdpa():
@@ -209,6 +220,8 @@ def evaluate_platform_supports_efficient_attention():
     if TEST_CUDA:
         return True
     if TEST_XPU:
+        return True
+    if TEST_MTIA:
         return True
     return False
 
