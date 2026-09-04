@@ -3585,6 +3585,75 @@ class TestInvokeSubgraphReuse(TestCase):
 
         self.assertEqual(count(), 1)
 
+    def test_subgraph_reuse_nan_constant(self):
+        # nan != nan under IEEE eq; the reuse check must compare constants
+        # bitwise so a nan constant input still allows subgraph reuse.
+        @nested_compile_region
+        def gn(x, c: float):
+            return x * c
+
+        def fn(x):
+            a = gn(x, float("nan"))
+            b = gn(x, float("nan"))
+            return torch.stack([a, b])
+
+        x = torch.randn(8)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(count(), 1)
+        self.assertTrue(torch.isnan(res).all())
+
+    def test_subgraph_no_reuse_neg_zero_constant(self):
+        # -0.0 == 0.0 under IEEE eq, but a subgraph traced with 0.0 baked in
+        # must not be reused for -0.0 (reciprocal flips sign of inf).
+        @nested_compile_region
+        def gn(x, c: float):
+            return (x * c).reciprocal()
+
+        def fn(x):
+            a = gn(x, 0.0)
+            b = gn(x, -0.0)
+            return torch.stack([a, b])
+
+        x = torch.ones(8)
+
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+
+    def test_subgraph_reuse_nan_arg(self):
+        # Constants passed as arguments have sources, so reuse goes through
+        # the snapshotted EQUALS_MATCH/CONSTANT_MATCH eval_fn path.
+        @nested_compile_region
+        def gn(x, c: float):
+            return x * c
+
+        def fn(x, c1, c2):
+            return torch.stack([gn(x, c1), gn(x, c2)])
+
+        x = torch.randn(8)
+        n = float("nan")
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, n, n)
+
+        self.assertEqual(count(), 1)
+        self.assertTrue(torch.isnan(res).all())
+
+    def test_subgraph_no_reuse_neg_zero_arg(self):
+        @nested_compile_region
+        def gn(x, c: float):
+            return (x * c).reciprocal()
+
+        def fn(x, c1, c2):
+            return torch.stack([gn(x, c1), gn(x, c2)])
+
+        x = torch.ones(8)
+
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, 0.0, -0.0)
+        self.assertEqual(res, fn(x, 0.0, -0.0))
+
     def test_subgraph_reuse_different_shapes(self):
         @nested_compile_region
         def gn(x):
