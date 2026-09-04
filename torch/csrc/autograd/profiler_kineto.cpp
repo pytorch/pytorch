@@ -584,7 +584,14 @@ struct ProfilerStateInfo {
   std::shared_ptr<KinetoThreadLocalState> state_ptr;
   std::unordered_set<at::RecordScope> scopes;
 };
-std::shared_ptr<ProfilerStateInfo> profiler_state_info_ptr{nullptr};
+// Owns the main thread's profiler state. Intentionally leaked: if a profiler
+// is still running at exit, static destruction would run ~ProfilerStateBase
+// after the thread_local callback manager it registered with has already been
+// destroyed (TLS destructors run before static ones).
+std::shared_ptr<ProfilerStateInfo>& profilerStateInfo() {
+  static auto& ptr = *new std::shared_ptr<ProfilerStateInfo>();
+  return ptr;
+}
 
 } // namespace
 
@@ -682,7 +689,7 @@ static void toggleTorchOpCollectionDynamic(bool enable) {
       ProfilerStateBase::getGlobal();
   if (global_state) {
     if (enable) {
-      auto scopes = profiler_state_info_ptr->scopes;
+      auto scopes = profilerStateInfo()->scopes;
       // Mid-session re-arm on the same RecordQueue: do not bump the generation.
       pushGlobalProfilingCallbacks(scopes, /*new_session=*/false);
     } else {
@@ -692,7 +699,7 @@ static void toggleTorchOpCollectionDynamic(bool enable) {
     ProfilerStateBase* tls_state = ProfilerStateBase::getTLS();
     TORCH_CHECK(tls_state);
     if (enable) {
-      auto scopes = profiler_state_info_ptr->scopes;
+      auto scopes = profilerStateInfo()->scopes;
       pushTLSProfilingCallbacks(scopes);
     } else {
       tls_state->removeCallback();
@@ -846,16 +853,16 @@ void enableProfiler(
     auto state_info_ptr = std::make_shared<ProfilerStateInfo>();
     state_info_ptr->state_ptr = std::move(state_ptr);
     state_info_ptr->scopes = scopes;
-    profiler_state_info_ptr = std::move(state_info_ptr);
+    profilerStateInfo() = std::move(state_info_ptr);
   }
 }
 
 bool isProfilerEnabledInMainThread() {
-  return profiler_state_info_ptr != nullptr;
+  return profilerStateInfo() != nullptr;
 }
 
 void enableProfilerInChildThread() {
-  auto state_info_ptr = profiler_state_info_ptr;
+  auto state_info_ptr = profilerStateInfo();
   TORCH_CHECK(state_info_ptr, "Profiler is not enabled in main thread.");
   TORCH_CHECK(
       KinetoThreadLocalState::getTLS() == nullptr,
@@ -875,7 +882,7 @@ void disableProfilerInChildThread() {
 
 std::unique_ptr<ProfilerResult> disableProfiler() {
   // releasing to inform child threads to stop profiling
-  profiler_state_info_ptr = nullptr;
+  profilerStateInfo() = nullptr;
 
   // If global callbacks were installed (KINETO_ONDEMAND, or KINETO with
   // profile_all_threads), they may be running on other threads right now. Wait
