@@ -187,6 +187,42 @@ def fp8e4m3fn_to_float32(x):
 
 
 @triton.jit
+def fp8e4m3fnuz_to_float32(x):
+    x_u32 = x.to(tl.uint32)
+    sign = (x_u32 & 0x80) << 24
+    exp = (x_u32 >> 3) & 0xF
+    mant = x_u32 & 0x7
+
+    normal_bits = sign | ((exp + 119) << 23) | (mant << 20)
+    normal = normal_bits.to(tl.float32, bitcast=True)
+
+    subnormal_abs = mant.to(tl.float32) * 0.0009765625
+    subnormal_bits = subnormal_abs.to(tl.uint32, bitcast=True) | sign
+    subnormal = subnormal_bits.to(tl.float32, bitcast=True)
+
+    result = tl.where(exp == 0, subnormal, normal)
+    return tl.where(x_u32 == 0x80, float("nan"), result)
+
+
+@triton.jit
+def fp8e5m2fnuz_to_float32(x):
+    x_u32 = x.to(tl.uint32)
+    sign = (x_u32 & 0x80) << 24
+    exp = (x_u32 >> 2) & 0x1F
+    mant = x_u32 & 0x3
+
+    normal_bits = sign | ((exp + 111) << 23) | (mant << 21)
+    normal = normal_bits.to(tl.float32, bitcast=True)
+
+    subnormal_abs = mant.to(tl.float32) * 0.00000762939453125
+    subnormal_bits = subnormal_abs.to(tl.uint32, bitcast=True) | sign
+    subnormal = subnormal_bits.to(tl.float32, bitcast=True)
+
+    result = tl.where(exp == 0, subnormal, normal)
+    return tl.where(x_u32 == 0x80, float("nan"), result)
+
+
+@triton.jit
 def div_floor_integer(a, b):
     # NOTE: a // b is C division, but we want floor division
     # Based on c10::div_floor_integer
