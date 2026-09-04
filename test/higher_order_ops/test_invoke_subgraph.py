@@ -1484,11 +1484,9 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(8, requires_grad=False)
         y = torch.randn(8, requires_grad=False)
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Inplace update to inference tensor outside InferenceMode is not allowed",
-        ):
-            opt_fn(x, y)
+        expected = fn(x.clone(), y)
+        result = opt_fn(x.clone(), y)
+        self.assertEqual(expected, result)
 
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_input_mutation_alias_annotated_custom_op(self):
