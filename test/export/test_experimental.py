@@ -706,6 +706,120 @@ def forward(self, args_0):
             OutputKind.LOSS_OUTPUT,
         )
 
+    def test_joint_parameter_mutation_error(self):
+        class MutatesParamInBackward(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, p):
+                ctx.save_for_backward(p)
+                return x * p
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (p,) = ctx.saved_tensors
+                p.add_(1)
+                return grad_output * p, None
+
+        class MutatesParam(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.ones(4), requires_grad=False)
+
+            def forward(self, x):
+                self.p.add_(1)
+                return ((x * self.p).sum(),)
+
+        class MutatesParamDuringBackward(MutatesParam):
+            def forward(self, x):
+                return (MutatesParamInBackward.apply(x, self.p).sum(),)
+
+        @torch.library.custom_op(
+            "test_experimental::mutates_param_in_backward", mutates_args=()
+        )
+        def mutates_param_in_backward(x: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
+            return x * p
+
+        @mutates_param_in_backward.register_fake
+        def _(x, p):
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            ctx.save_for_backward(inputs[1])
+
+        def backward(ctx, grad_output):
+            (p,) = ctx.saved_tensors
+            with torch.no_grad():
+                p.add_(1)
+            return grad_output * p, None
+
+        mutates_param_in_backward.register_autograd(
+            backward, setup_context=setup_context
+        )
+
+        class MutatesParamDuringExportedBackward(MutatesParam):
+            def forward(self, x):
+                return (mutates_param_in_backward(x, self.p).sum(),)
+
+        error_msg = (
+            "Mutating module parameters while exporting a joint "
+            "forward/backward graph is not supported.*Only buffers can be "
+            "mutated.*'p'"
+        )
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            aot_export_module(
+                MutatesParam(),
+                (torch.randn(4, requires_grad=True),),
+                trace_joint=True,
+                output_loss_index=0,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            aot_export_module(
+                MutatesParamDuringBackward(),
+                (torch.randn(4, requires_grad=True),),
+                trace_joint=True,
+                output_loss_index=0,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            ep = export(MutatesParam(), (torch.randn(4, requires_grad=True),))
+            _export_forward_backward(ep)
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            ep = export(
+                MutatesParam(), (torch.randn(4, requires_grad=True),)
+            ).run_decompositions()
+            _export_forward_backward(ep)
+
+        for decompose in (False, True):
+            with self.subTest(decompose=decompose):
+                ep = export(
+                    MutatesParamDuringExportedBackward(),
+                    (torch.randn(4, requires_grad=True),),
+                )
+                if decompose:
+                    ep = ep.run_decompositions()
+                with self.assertRaisesRegex(RuntimeError, error_msg):
+                    _export_forward_backward(ep)
+
+    def test_joint_aot_buffer_mutation_still_allowed(self):
+        class MutatesBuffer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(4))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return ((x * self.buf).sum(),)
+
+        _, signature = aot_export_module(
+            MutatesBuffer(),
+            (torch.randn(4, requires_grad=True),),
+            trace_joint=True,
+            output_loss_index=0,
+        )
+        self.assertEqual(list(signature.buffers_to_mutate.values()), ["buf"])
+
     def test_sticky_export(self):
         class Model(torch.nn.Module):
             def __init__(self):
