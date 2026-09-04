@@ -6,6 +6,7 @@
 #include <c10/util/ThreadLocalDebugInfo.h>
 
 #include <ATen/FuncTorchTLS.h>
+#include <ATen/NodeCreationHooks.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
 #include <ATen/ThreadLocalPythonObjects.h>
@@ -72,6 +73,9 @@ class TORCH_API ThreadLocalState {
 
   // TLS for saved tensors default hooks
   at::impl::SavedTensorDefaultHooksTLS saved_tensors_default_hooks_state_;
+
+  // TLS for node creation hooks
+  at::impl::NodeCreationHooksTLS node_creation_hooks_state_;
 
   bool functionalization_reapply_views_state_;
 

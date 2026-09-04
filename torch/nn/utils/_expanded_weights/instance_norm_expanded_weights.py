@@ -62,9 +62,9 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
                 correction=0,
                 keepdim=False,
             )
-            rstd = 1 / torch.sqrt(var + eps)
+            rstd = torch.rsqrt(var + eps)
 
-            # must use native batch norm since it supports all inputs. This may have used cuda or openmi during the forward but
+            # must use native batch norm since it supports all inputs. This may have used cuda or openmp during the forward but
             # it didn't save the metadata, so we don't know during the backward
             res = torch.ops.aten.native_batch_norm_backward(
                 grad_output_reshaped,

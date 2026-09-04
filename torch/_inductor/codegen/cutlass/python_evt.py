@@ -11,6 +11,10 @@ import sympy
 import torch
 import torch._inductor.virtualized as virtualized
 from torch._inductor.ir import ComputedBuffer, Pointwise
+from torch._inductor.kernel.gemm_epilogue import (
+    GEMM_ACCUMULATOR_ARG_NAME,
+    GemmEpiloguePlan,
+)
 from torch._inductor.ops_handler import DefaultHandler, WrapperHandler
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import DelayReplaceLine, IndentedBuffer, OrderedSet
@@ -18,8 +22,6 @@ from torch._inductor.virtualized import OpsValue
 
 from ...virtualized import V
 
-
-_ACCUMULATOR_ARG_NAME = "accum"
 
 # 1/sqrt(2) (M_SQRT1_2), the constant Inductor's gelu decomposition multiplies
 # the input by before applying erf.
@@ -100,6 +102,53 @@ def _match_gelu_erf(node: ast.expr) -> "ast.expr | None":
     return None
 
 
+def _match_silu(node: ast.expr) -> "ast.expr | None":
+    """Match SiLU decomposition ``x / (1 + exp(0.0 - x))`` and return ``x``.
+
+    Inductor decomposes silu(x) as x / (1 + exp(-x)). With our neg() op
+    emitting (0.0 - x), the generated code is: x / (1.0 + exp((0.0 - x))).
+    """
+    # Must be a division: x / denom
+    if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
+        return None
+    x = node.left
+    denom = node.right
+
+    # denom must be: 1.0 + exp(neg_x) or exp(neg_x) + 1.0
+    if not (isinstance(denom, ast.BinOp) and isinstance(denom.op, ast.Add)):
+        return None
+
+    operands = [denom.left, denom.right]
+    one = next((o for o in operands if _is_close_constant(o, 1.0)), None)
+    if one is None:
+        return None
+    exp_part = next((o for o in operands if o is not one), None)
+    if exp_part is None:
+        return None
+
+    # exp_part must be exp(neg_x)
+    exp_call = _match_call(exp_part, "exp")
+    if exp_call is None:
+        return None
+    neg_x = exp_call.args[0]
+
+    # neg_x must be (0.0 - x) where x matches the numerator
+    if (
+        isinstance(neg_x, ast.BinOp)
+        and isinstance(neg_x.op, ast.Sub)
+        and _is_close_constant(neg_x.left, 0.0)
+        and _same(neg_x.right, x)
+    ):
+        return x
+
+    # Also handle unary minus: -x
+    if isinstance(neg_x, ast.UnaryOp) and isinstance(neg_x.op, ast.USub):
+        if _same(neg_x.operand, x):
+            return x
+
+    return None
+
+
 @dataclass(frozen=True)
 class _ActivationPattern:
     # ``name`` must be a functor the CUTLASS EVT frontend binds natively (see
@@ -115,6 +164,7 @@ class _ActivationPattern:
 # Add new entries here to re-fuse additional decomposed activations.
 _ACTIVATION_PATTERNS: tuple[_ActivationPattern, ...] = (
     _ActivationPattern("gelu", "erf", _match_gelu_erf),
+    _ActivationPattern("silu", "0.0 -", _match_silu),
 )
 
 
@@ -242,7 +292,7 @@ def scaled_mm_evt(
     evt_read_names = [scale_A_name, scale_B_name]
     var_name_to_buffer_name = {n: n for n in [scale_A_name, scale_B_name]}
     var_name_to_buffer_name["D"] = output_name
-    var_name_to_buffer_name[_ACCUMULATOR_ARG_NAME] = output_name
+    var_name_to_buffer_name[GEMM_ACCUMULATOR_ARG_NAME] = output_name
     expr = f"accum * {scale_A_name} * {scale_B_name}{linesep}"
     if bias_name:
         expr = f"({expr}) + {bias_name}"
@@ -333,6 +383,10 @@ class CutlassEVTOpsMixIn:
     def erf(x0: str) -> str:
         return CutlassEVTOpsMixIn._prefix_un_op("erf", x0)
 
+    @staticmethod
+    def silu(x0: str) -> str:
+        return CutlassEVTOpsMixIn._prefix_un_op("silu", x0)
+
 
 class MockCutlassHandler(CutlassEVTOpsMixIn, WrapperHandler):
     """Passthrough handler for cutlass ops, used for running epilogue nodes for memory planning"""
@@ -394,7 +448,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         self.reads: OrderedSet[str] = OrderedSet([])
         # Used for creating example tensors
         self.var_name_to_buffer_name: dict[str, str] = {
-            _ACCUMULATOR_ARG_NAME: accumulator_node_name
+            GEMM_ACCUMULATOR_ARG_NAME: accumulator_node_name
         }
         self.removed_buffers: OrderedSet[str] = removed_buffers
         self.cur_node: ComputedBuffer | None = None
@@ -410,7 +464,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         if accumulator_node_name not in removed_buffers:
             # cannot return accumulator directly, so alias it
             var = self._tmp_var()
-            self.body.writeline(f"{var} = {_ACCUMULATOR_ARG_NAME}")
+            self.body.writeline(f"{var} = {GEMM_ACCUMULATOR_ARG_NAME}")
             self.store(accumulator_node_name, value=OpsValue(var))
 
     @staticmethod
@@ -420,7 +474,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         removed_buffers: OrderedSet[str],
         fn_name: str = "fn",
         as_standalone_function: bool = False,
-    ) -> tuple[list[str], list[str], dict[str, Any], str]:
+    ) -> GemmEpiloguePlan:
         codegen = CutlassEVTCodegen(cutlass_template_node_name, removed_buffers)
         handler = _AssignmentFormatter(codegen)
 
@@ -428,7 +482,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             for s_node in epilogue_nodes:
                 node = s_node.node
                 if not isinstance(node, ComputedBuffer):
-                    raise AssertionError(
+                    raise NotImplementedError(
                         f"expected node to be a ComputedBuffer, got {type(node)}"
                     )
                 with codegen.set_cur_node(node):
@@ -437,11 +491,12 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
 
         codegen.finalize()
 
-        return (
-            codegen.get_reads(),
-            codegen.get_writes(),
-            codegen.get_renames(),
-            codegen.get_value(
+        return GemmEpiloguePlan(
+            is_evt_fallback=True,
+            reads=tuple(codegen.get_reads()),
+            writes=tuple(codegen.get_writes()),
+            renames=codegen.get_renames(),
+            source=codegen.get_value(
                 fn_name=fn_name,
                 as_standalone_function=as_standalone_function,
             ),
@@ -499,7 +554,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         if name in self.store_name_to_value:
             return self.store_name_to_value[name].value
         elif name == self.accumulator_node_name:
-            return _ACCUMULATOR_ARG_NAME
+            return GEMM_ACCUMULATOR_ARG_NAME
         else:
             self.reads.add(name)
             self.var_name_to_buffer_name[name] = name
@@ -511,8 +566,8 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         if name not in self.removed_buffers:
             if index:
                 self._check_indexing(name, index)
-            if value.value == _ACCUMULATOR_ARG_NAME:
-                raise AssertionError("Cannot store accumulator arg name")
+            if value.value == GEMM_ACCUMULATOR_ARG_NAME:
+                raise NotImplementedError("Cannot store accumulator arg name")
             self.var_name_to_buffer_name[value.value] = name
             self.store_name_to_value[name] = value
             self.last_stored_var_name = value.value
@@ -528,7 +583,9 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         data = node.data
         # TODO mlazos: relax this, cutlass supports reductions and other ops
         if not isinstance(data, Pointwise):
-            raise AssertionError(f"expected data to be Pointwise, got {type(data)}")
+            raise NotImplementedError(
+                f"expected data to be Pointwise, got {type(data)}"
+            )
         return data._index(data.ranges)
 
     def _get_current_index_vars(self) -> Sequence[sympy.Expr]:
@@ -538,7 +595,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         # We only support indexing that matches the layout today because
         # CUTLASS doesn't support arbitrary indexing
         buffer_name = (
-            self.accumulator_node_name if name == _ACCUMULATOR_ARG_NAME else name
+            self.accumulator_node_name if name == GEMM_ACCUMULATOR_ARG_NAME else name
         )
         buffer = self.name_to_buffer[buffer_name]
         index_strides = V.graph.sizevars.stride_vars(
@@ -594,7 +651,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
 
     def _render_input_signature(self, fn_name: str = "fn") -> str:
         arguments = ", ".join(
-            [_ACCUMULATOR_ARG_NAME]
+            [GEMM_ACCUMULATOR_ARG_NAME]
             + [name for name in self.reads if name != self.accumulator_node_name]
         )
         return f"def {fn_name}({arguments}):"
@@ -604,7 +661,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             op_v.value for op_v in self.store_name_to_value.values()
         )
         if "D" not in return_vars:
-            raise AssertionError(f"expected 'D' in return_vars, got {return_vars}")
+            raise NotImplementedError(f"expected 'D' in return_vars, got {return_vars}")
         return f"return {', '.join(return_vars)}"
 
     def _tmp_var(self) -> str:
