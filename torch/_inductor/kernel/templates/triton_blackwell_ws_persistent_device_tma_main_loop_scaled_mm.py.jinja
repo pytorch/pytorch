@@ -1,10 +1,19 @@
-{{def_kernel("A", "B")}}
+{{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
     K = {{size("A", 1)}}
     if M * N == 0:
         # early exit due to zero-size input(s)
         return
+    tl.static_assert(BLOCK_K == 128, "Blockwise scaling requires BLOCK_K == 128")
+    tl.static_assert(BLOCK_M >= 64, "FP8 MMAv5 requires BLOCK_M >= 64")
+    tl.static_assert(BLOCK_N % 128 == 0, "BLOCK_N must be divisible by 128")
+    {%- if SCALE_RECIPE_A == 5 %}  # ScalingType.BlockWise128x128
+    tl.static_assert(
+        BLOCK_M <= 128 or BLOCK_M % 128 == 0,
+        "BLOCK_M above 128 must be divisible by 128",
+    )
+    {%- endif %}
     start_pid = tl.program_id(0)
     grid_m = tl.cdiv(M, BLOCK_M)
     grid_n = tl.cdiv(N, BLOCK_N)
@@ -17,6 +26,10 @@
     stride_ak = {{stride("A", 1)}}
     stride_bk = {{stride("B", 0)}}
     stride_bn = {{stride("B", 1)}}
+    stride_scale_am = {{stride("A_inverse_scale", SCALE_A_OUTER_DIM)}}
+    stride_scale_ak = {{stride("A_inverse_scale", 1 - SCALE_A_OUTER_DIM)}}
+    stride_scale_bn = {{stride("B_inverse_scale", SCALE_B_OUTER_DIM)}}
+    stride_scale_bk = {{stride("B_inverse_scale", 1 - SCALE_B_OUTER_DIM)}}
     a_desc = triton.language.make_tensor_descriptor(
         base=A,
         shape=[M, K] if A_ROW_MAJOR else [K, M],
@@ -56,6 +69,16 @@
         offs_bn = pid_n * BLOCK_N
         offs_am_desc = offs_am.to(tl.int32)
         offs_bn_desc = offs_bn.to(tl.int32)
+        {%- if SCALE_RECIPE_A == 5 %}  # ScalingType.BlockWise128x128
+        scale_am = offs_am // 128 + tl.arange(0, tl.cdiv(BLOCK_M, 128))
+        {%- else %}  # ScalingType.BlockWise1x128
+        scale_am = offs_am + tl.arange(0, BLOCK_M)
+        {%- endif %}
+        {%- if SCALE_RECIPE_B == 5 %}  # ScalingType.BlockWise128x128
+        scale_bn = offs_bn // 128 + tl.arange(0, BLOCK_N // 128)
+        {%- else %}  # ScalingType.BlockWise1x128
+        scale_bn = offs_bn + tl.arange(0, BLOCK_N)
+        {%- endif %}
 
         accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
         for ki in range(k_tiles):
@@ -73,11 +96,53 @@
                 if B_ROW_MAJOR
                 else [offs_bn_desc, offs_k_desc],
             )
-            accumulator += tl.dot(
+            # Scales are constant across this 128-wide K tile, so keep the dot in FP8.
+            partial = tl.dot(
                 a if A_ROW_MAJOR else a.T,
                 b if B_ROW_MAJOR else b.T,
-                allow_tf32=ALLOW_TF32,
             )
+            {%- if SCALE_RECIPE_A == 5 %}  # ScalingType.BlockWise128x128
+            scale_a_blocks = tl.load(
+                A_inverse_scale
+                + scale_am * stride_scale_am
+                + ki * stride_scale_ak,
+                mask=scale_am < tl.cdiv(M, 128),
+                other=1.0,
+            )
+            scale_a = tl.broadcast_to(
+                scale_a_blocks[:, None],
+                (tl.cdiv(BLOCK_M, 128), MIN_BLOCK_TILE_AM),
+            ).reshape(BLOCK_M)
+            {%- else %}  # ScalingType.BlockWise1x128
+            scale_a = tl.load(
+                A_inverse_scale
+                + scale_am * stride_scale_am
+                + ki * stride_scale_ak,
+                mask=scale_am < M,
+                other=1.0,
+            )
+            {%- endif %}
+            {%- if SCALE_RECIPE_B == 5 %}  # ScalingType.BlockWise128x128
+            scale_b_blocks = tl.load(
+                B_inverse_scale
+                + scale_bn * stride_scale_bn
+                + ki * stride_scale_bk,
+                mask=scale_bn < tl.cdiv(N, 128),
+                other=1.0,
+            )
+            scale_b = tl.broadcast_to(
+                scale_b_blocks[:, None], (BLOCK_N // 128, 128)
+            ).reshape(BLOCK_N)
+            {%- else %}  # ScalingType.BlockWise1x128
+            scale_b = tl.load(
+                B_inverse_scale
+                + scale_bn * stride_scale_bn
+                + ki * stride_scale_bk,
+                mask=scale_bn < N,
+                other=1.0,
+            )
+            {%- endif %}
+            accumulator += partial * scale_a[:, None] * scale_b[None, :]
 
         tile_id_c += NUM_SMS
         pid_m, pid_n = _compute_pid(

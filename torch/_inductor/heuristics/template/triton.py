@@ -3114,7 +3114,6 @@ class ScaledBlackwellTMAMainLoopScalingConfigMixin(
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, op_name, **kwargs
         ):
-            template_kwargs["BLOCKWISE_MAIN_LOOP_SCALING"] = True
             template_kwargs["MIN_BLOCK_TILE_AM"] = min(template_kwargs["BLOCK_M"], 128)
             yield template_kwargs
 
