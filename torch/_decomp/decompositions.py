@@ -431,6 +431,8 @@ def smooth_l1_loss(
     reduction: int = Reduction.MEAN.value,
     beta: float = 1.0,
 ):
+    if beta < 0:
+        raise RuntimeError("smooth_l1_loss does not support negative values for beta.")
     loss = (self - target).abs()
 
     loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
@@ -442,6 +444,8 @@ def smooth_l1_loss(
 def smooth_l1_loss_backward(
     grad_output: Tensor, self: Tensor, target: Tensor, reduction: int, beta: float
 ):
+    if beta < 0:
+        raise RuntimeError("smooth_l1_loss does not support negative values for beta.")
     norm = 1.0 / self.numel() if reduction == Reduction.MEAN.value else 1.0
     x = self - target
     abs_x = torch.abs(x)
