@@ -6,6 +6,7 @@ import pickle
 import re
 import sys
 import tempfile
+import traceback
 import unittest
 from typing import cast
 
@@ -16,6 +17,7 @@ import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import (
     BackendCompilerFailed,
+    format_user_stack,
     InvalidBackend,
     ResetRequired,
     ShortenTraceback,
@@ -594,6 +596,153 @@ Failed Source Expressions:
     ~
 """,
             )
+
+    def test_user_stack_repeated_frames_are_compacted(self):
+        frame = traceback.FrameSummary("recursive.py", 1, "fn", line="return fn()")
+
+        result = format_user_stack([frame] * 10)
+
+        self.assertEqual(result.count('File "recursive.py", line 1, in fn'), 3)
+        self.assertIn("[Previous line repeated 7 more times]", result)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_tabbed_source_caret_alignment(self):
+        filename = f"{__file__}.tabbed"
+        source = "return\tgn()\n"
+        linecache.cache[filename] = (
+            len(source),
+            None,
+            source.splitlines(True),
+            filename,
+        )
+        self.addCleanup(linecache.cache.pop, filename, None)
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=1,
+            colno=7,
+            end_colno=11,
+        )
+
+        result = format_user_stack([frame])
+        source_line, marker_line = result.splitlines()[1:]
+
+        self.assertNotIn("\t", result)
+        self.assertEqual(
+            len(marker_line) - len(marker_line.lstrip()), source_line.index("gn()")
+        )
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_wide_unicode_source_caret_alignment(self):
+        filename = f"{__file__}.wide"
+        source = '    return "\U0001f600" + gn()\n'
+        linecache.cache[filename] = (
+            len(source),
+            None,
+            source.splitlines(True),
+            filename,
+        )
+        self.addCleanup(linecache.cache.pop, filename, None)
+        start = len(source[: source.index("gn()")].encode())
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=1,
+            colno=start,
+            end_colno=start + len("gn()"),
+        )
+
+        result = format_user_stack([frame])
+        source_line, marker_line = result.splitlines()[1:]
+
+        self.assertEqual(
+            len(marker_line) - len(marker_line.lstrip()),
+            source_line.index("gn()") + 1,
+        )
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_multiline_variable_width_source(self):
+        filename = f"{__file__}.multiline"
+        source_lines = [
+            "    value = (\n",
+            '        "\U0001f600"\n',
+            "        +\tgn()\n",
+            "    )\n",
+        ]
+        source = "".join(source_lines)
+        linecache.cache[filename] = (len(source), None, source_lines, filename)
+        self.addCleanup(linecache.cache.pop, filename, None)
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=len(source_lines),
+            colno=len("    value = "),
+            end_colno=len("    )"),
+        )
+
+        result = format_user_stack([frame])
+
+        self.assertIn('"\U0001f600"', result)
+        self.assertIn("gn()", result)
+        self.assertNotIn("\t", result)
+        self.assertGreater(result.count("^"), 0)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_long_multiline_range_is_bounded(self):
+        filename = f"{__file__}.long"
+        source_lines = ["class Foo:\n"] + [
+            f"    sentinel_{index} = {index}\n" for index in range(30)
+        ]
+        source = "".join(source_lines)
+        linecache.cache[filename] = (
+            len(source),
+            None,
+            source_lines,
+            filename,
+        )
+        self.addCleanup(linecache.cache.pop, filename, None)
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=len(source_lines),
+            colno=0,
+            end_colno=len(source_lines[-1].rstrip()),
+        )
+
+        result = format_user_stack([frame])
+
+        self.assertNotIn("sentinel_15", result)
+        self.assertLessEqual(len(result.splitlines()), 10)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_long_tabbed_range_omits_misaligned_marker(self):
+        filename = f"{__file__}.long_tabbed"
+        source_lines = ["value\t= (\n"] + ["    0,\n"] * 5 + [")\n"]
+        source = "".join(source_lines)
+        linecache.cache[filename] = (len(source), None, source_lines, filename)
+        self.addCleanup(linecache.cache.pop, filename, None)
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=len(source_lines),
+            colno=len("value\t"),
+            end_colno=1,
+        )
+
+        result = format_user_stack([frame])
+
+        self.assertNotIn("^", result)
+        self.assertNotIn("~", result)
 
     def test_vt_source_location_set_during_tracing(self):
         _source_location_capture.clear()
