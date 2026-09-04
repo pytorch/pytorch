@@ -15,6 +15,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
+import torch._functorch.config as functorch_config
 from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import CompileCounterWithBackend, rand_strided
@@ -154,6 +155,131 @@ class LstmModule(torch.nn.Module):
 @instantiate_parametrized_tests
 class CPUReproTests(TestCase):
     common = check_model
+
+    def _check_interpolate_mutated_input_backward(
+        self, fn, activation_memory_budget=1.0
+    ):
+        torch.manual_seed(0)
+        base = torch.randn(1, 3, 16, 16)
+        mean = torch.randn(3, 1, 1)
+        std = torch.randn(3, 1, 1).abs().add(0.5)
+
+        def make_args():
+            base_arg = base.detach().clone().requires_grad_(True)
+            x_arg = (base_arg * 1.0).squeeze(0)
+            mean_arg = mean.detach().clone().requires_grad_(True)
+            std_arg = std.detach().clone().requires_grad_(True)
+            return base_arg, x_arg, mean_arg, std_arg
+
+        def run(fn_to_run):
+            base_arg, x_arg, mean_arg, std_arg = make_args()
+            y, z = fn_to_run(x_arg, mean_arg, std_arg)
+            (y.sum() + z.sum()).backward()
+            return y.detach(), z.detach(), base_arg.grad, mean_arg.grad, std_arg.grad
+
+        expected = run(fn)
+        with functorch_config.patch(activation_memory_budget=activation_memory_budget):
+            actual = run(torch.compile(fn, backend="inductor", fullgraph=True))
+        self.assertEqual(actual, expected)
+
+    @parametrize("activation_memory_budget", (0, 1))
+    def test_interpolate_mutated_input_backward(self, activation_memory_budget):
+        def fn(x, mean, std):
+            y = F.interpolate(
+                x[:, :8, :8].unsqueeze(0),
+                size=(4, 4),
+                mode="bilinear",
+                align_corners=False,
+            )
+            x.sub_(mean).div_(std)
+            return y, x
+
+        self._check_interpolate_mutated_input_backward(fn, activation_memory_budget)
+
+    def test_interpolate_mutated_input_backward_with_effect_token(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::_issue185497_effect", mutates_args=())
+        def effect(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @effect.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        handle = _register_effectful_op(effect, EffectType.ORDERED)
+
+        try:
+
+            def fn(x, mean, std):
+                torch.ops.test._issue185497_effect(x)
+                y = F.interpolate(
+                    x[:, :8, :8].unsqueeze(0),
+                    size=(4, 4),
+                    mode="bilinear",
+                    align_corners=False,
+                )
+                x.sub_(mean).div_(std)
+                return y, x
+
+            self._check_interpolate_mutated_input_backward(fn)
+        finally:
+            handle.destroy()
+
+    def test_in_graph_mutated_grad_input_zero_memory_budget(self):
+        def fn(w, x):
+            result = w.sin()
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(w):
+                w.copy_(x)
+            return result
+
+        w = torch.randn(4, requires_grad=True)
+        x = torch.randn(4)
+        expected = w.detach().sin()
+        # The preserved version counter makes backward read the updated data.
+        expected_grad = x.cos()
+
+        with (
+            functorch_config.patch(
+                activation_memory_budget=0, enable_autograd_cache=False
+            ),
+            patch(
+                "torch._functorch.partitioners.solve_min_cut",
+                side_effect=AssertionError(
+                    "in-graph mutations should keep the zero-budget fast path"
+                ),
+            ),
+        ):
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(w, x)
+            actual.sum().backward()
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(w, x)
+        self.assertEqual(w.grad, expected_grad)
+
+    @parametrize("activation_memory_budget", (0, 1))
+    def test_mutated_input_clone_saved_for_backward(self, activation_memory_budget):
+        def fn(x, y):
+            result = x.T.clone() * y
+            x.add_(1)
+            return result, x
+
+        def run(fn_to_run):
+            base = torch.randn(2, 4, requires_grad=True)
+            x = base * 1.0
+            y = torch.randn(4, 2, requires_grad=True)
+            result, mutated_x = fn_to_run(x, y)
+            result.sum().backward()
+            return result.detach(), mutated_x.detach(), base.grad, y.grad
+
+        torch.manual_seed(0)
+        expected = run(fn)
+        torch.manual_seed(0)
+        with functorch_config.patch(activation_memory_budget=activation_memory_budget):
+            actual = run(torch.compile(fn, backend="inductor", fullgraph=True))
+
+        self.assertEqual(actual, expected)
 
     @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
