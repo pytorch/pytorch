@@ -447,10 +447,17 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       py::call_guard<py::gil_scoped_release>());
   m.def(
       "_prepare_profiler",
-      prepareProfiler,
+      [](const ProfilerConfig& config,
+         const std::set<ActivityType>& activities,
+         const ActivityFilter& activity_filter,
+         const ProfilerExtensionMap& profiler_extensions) {
+        prepareProfiler(
+            config, activities, activity_filter, profiler_extensions);
+      },
       py::arg("config"),
       py::arg("activities"),
-      py::arg("activity_filter") = torch::autograd::profiler::ActivityFilter{},
+      py::arg("activity_filter") = ActivityFilter{},
+      py::arg("profiler_extensions") = ProfilerExtensionMap{},
       py::call_guard<py::gil_scoped_release>());
   m.def(
       "_toggle_collection_dynamic",
