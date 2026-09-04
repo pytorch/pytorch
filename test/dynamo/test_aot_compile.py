@@ -38,7 +38,12 @@ from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallab
 from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.graph_utils import _graph_device_types
 from torch._dynamo.guards import CheckFunctionManager
-from torch._dynamo.package import _current_cpu_codegen_target, DynamoCache
+from torch._dynamo.output_graph import get_builtins_dict
+from torch._dynamo.package import (
+    _current_cpu_codegen_target,
+    DynamoCache,
+    load_guards_state,
+)
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
@@ -437,6 +442,10 @@ class ParentWithChildModule(torch.nn.Module):
         self.lin = torch.nn.Linear(4, 4)
 
     def forward(self, x):
+        # isinstance is a builtin: its BUILTIN_MATCH guard is rooted at
+        # G['__builtins_dict___N'], the other name only the tracing process has.
+        if not isinstance(x, torch.Tensor):
+            raise TypeError(type(x))
         return self.lin(x)
 
 
@@ -1569,6 +1578,10 @@ from user code:
         self.assertIn("__import_torch_dot_nn_dot_modules_dot_module", import_sources)
         for alias, module_name in import_sources.items():
             self.assertIs(globals()[alias], importlib.import_module(module_name))
+        guards_state = load_guards_state(result._artifacts.guards_state)
+        builtins_key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        self.assertTrue(builtins_key)
+        self.assertIs(globals()[builtins_key], get_builtins_dict(globals()))
         x = torch.randn(4, 4)
         self.assertEqual(model(x), mod(x))
 
@@ -1588,16 +1601,26 @@ from user code:
         (result,) = model.forward.compiled_results
         import_sources = result._artifacts.runtime_env.import_sources
         self.assertTrue(import_sources)
+        serialized_guards = result._artifacts.guards_state
         torch._dynamo.reset()
 
-        scope = {k: v for k, v in globals().items() if not k.startswith("__import_")}
+        scope = {
+            k: v
+            for k, v in globals().items()
+            if not k.startswith(("__import_", "__builtins_dict__"))
+        }
         kept_alias = next(iter(import_sources))
         sentinel = object()
         scope[kept_alias] = sentinel
         before = set(scope)
         (serialized,) = pickle.loads(data)
         AOTCompiledFunction.deserialize(serialized, guard_globals=scope)
-        self.assertEqual(set(scope) - before, set(import_sources) - {kept_alias})
+        builtins_key = load_guards_state(
+            serialized_guards
+        ).output_graph.name_of_builtins_dict_key_in_fglobals
+        self.assertEqual(
+            set(scope) - before, (set(import_sources) - {kept_alias}) | {builtins_key}
+        )
         self.assertIs(scope[kept_alias], sentinel)
         for alias, module_name in import_sources.items():
             if alias != kept_alias:
