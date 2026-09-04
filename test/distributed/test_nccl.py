@@ -1651,6 +1651,144 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             if c10d.is_initialized():
                 c10d.destroy_process_group()
 
+    @skip_if_lt_x_gpu(2)
+    def test_retained_handle_rejected_after_abort(self) -> None:
+        # Aborting reaches teardown through abortComms rather than shutdown,
+        # which is a separate call site for retiring the registration.
+        previous = os.environ.get("TORCH_NCCL_ASYNC_ERROR_HANDLING")
+        if previous is None:
+            self.addCleanup(os.environ.pop, "TORCH_NCCL_ASYNC_ERROR_HANDLING", None)
+        else:
+            self.addCleanup(
+                os.environ.__setitem__, "TORCH_NCCL_ASYNC_ERROR_HANDLING", previous
+            )
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+
+        symm_mem.set_backend("NCCL")
+        self._init_process_group("nccl", "_abort")
+        group_name = c10d.distributed_c10d._get_default_group().group_name
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        tensor = symm_mem.empty(4096, dtype=torch.float32, device=self.device).fill_(
+            self.rank
+        )
+        handle = symm_mem.rendezvous(tensor, group=group_name)
+        handle.barrier()
+        torch.cuda.synchronize(self.device)
+
+        c10d.distributed_c10d._abort_process_group()
+        with self.assertRaisesRegex(
+            RuntimeError, "stale because its RCCL communicator was destroyed"
+        ):
+            handle.barrier()
+        with self.assertRaisesRegex(
+            RuntimeError, "stale because its RCCL communicator was destroyed"
+        ):
+            symm_mem.rendezvous(tensor, group=group_name)
+
+
+@requires_cuda_p2p_access()
+@skipIfRocmVersionLessThan((10, 1))
+@skip_but_pass_in_sandcastle_if(
+    not TEST_WITH_ROCM, "ROCm-specific symmetric-memory capability gating test"
+)
+@skip_but_pass_in_sandcastle_if(
+    TEST_WITH_ROCM and nccl.version() < (2, 30, 7),
+    "Capture-time symmetric allocation requires RCCL 2.30.7 or newer",
+)
+@skip_but_pass_in_sandcastle_if(
+    TEST_WITH_ROCM and not NCCL_SYMMEM_COMPILED,
+    "RCCL symmetric memory was disabled at build time; nccl_device.h did not "
+    "pass the host-translation-unit compatibility probe",
+)
+class NCCLSymmetricMemoryCapabilityGateTest(MultiProcessTestCase):
+    """Capture-time allocation is gated on CUMEM+WIN as sampled at comm init.
+
+    The other symmetric-memory tests export NCCL_CUMEM_ENABLE and
+    NCCL_WIN_ENABLE before a process group exists, so the rejection path is
+    never taken. These spawn workers without them.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        for name, value in {
+            "TORCH_SYMMEM": "NCCL",
+            "TORCH_DIST_USE_NCCL2": "1",
+        }.items():
+            self._restore_env_after_test(name)
+            os.environ[name] = value
+        # The capability snapshot has to be taken with these absent.
+        for name in ("NCCL_CUMEM_ENABLE", "NCCL_WIN_ENABLE"):
+            self._restore_env_after_test(name)
+            os.environ.pop(name, None)
+        self._spawn_processes()
+
+    def _restore_env_after_test(self, name: str) -> None:
+        previous = os.environ.get(name)
+        if previous is None:
+            self.addCleanup(os.environ.pop, name, None)
+        else:
+            self.addCleanup(os.environ.__setitem__, name, previous)
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    def _init_process_group(self) -> None:
+        if not PLATFORM_SUPPORTS_SYMM_MEM:
+            raise SkipTest("Test requires SymmMem support")
+        for peer in range(self.world_size):
+            if peer != self.rank and not torch._C._cuda_canDeviceAccessPeer(
+                self.rank, peer
+            ):
+                raise SkipTest("Test requires p2p access")
+
+        torch.cuda.set_device(self.device)
+        symm_mem.set_backend("NCCL")
+        c10d.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=c10d.FileStore(self.file_name, self.world_size),
+            device_id=self.device,
+        )
+        # Publish the communicator, which is what samples the capability.
+        c10d.all_reduce(torch.ones(1, device=self.device))
+
+    def _assert_capture_allocation_rejected(self) -> None:
+        graph = torch.cuda.CUDAGraph()
+        capture_stream = torch.cuda.Stream(device=self.device)
+        with self.assertRaisesRegex(
+            RuntimeError, "NCCL_CUMEM_ENABLE=1 plus NCCL_WIN_ENABLE=1"
+        ):
+            with torch.cuda.graph(graph, stream=capture_stream):
+                symm_mem.empty(1_000_003, device=self.device)
+
+    @skip_if_lt_x_gpu(2)
+    def test_capture_allocation_rejected_when_disabled(self) -> None:
+        self._init_process_group()
+        try:
+            self._assert_capture_allocation_rejected()
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
+
+    @skip_if_lt_x_gpu(2)
+    def test_capture_allocation_rejected_when_enabled_after_init(self) -> None:
+        self._init_process_group()
+        try:
+            # register_comm already sampled the capability, so enabling the
+            # variables now must not retroactively widen it.
+            os.environ["NCCL_CUMEM_ENABLE"] = "1"
+            os.environ["NCCL_WIN_ENABLE"] = "1"
+            self._assert_capture_allocation_rejected()
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
+
 
 @requires_cuda_p2p_access()
 @skipIfRocmVersionLessThan((10, 1))
