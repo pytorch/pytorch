@@ -792,7 +792,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str time_us_s = "time_us";
   py::str compile_context_s = "compile_context";
   py::str user_metadata_s = "user_metadata";
-  py::str internal_metadata_s = "internal_metadata";
   py::str pool_id_s = "pool_id";
 
   py::list empty_frames;
@@ -913,9 +912,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
     trace_entry[time_us_s] = te.time_.t_;
     trace_entry[compile_context_s] = te.compile_context_;
     trace_entry[user_metadata_s] = te.user_metadata_;
-    if (!te.internal_metadata_.empty()) {
-      trace_entry[internal_metadata_s] = te.internal_metadata_;
-    }
     trace_entry[pool_id_s] = te.mempool_;
     return trace_entry;
   };

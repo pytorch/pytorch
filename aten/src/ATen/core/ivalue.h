@@ -513,11 +513,11 @@ struct TORCH_API IValue final {
 
   template <
       typename... Args,
-      typename = typename enable_if_ivalue_compatible<Args...>::type>
+      typename = enable_if_ivalue_compatible<Args...>::type>
   IValue(const std::tuple<Args...>& t);
   template <
       typename... Args,
-      typename = typename enable_if_ivalue_compatible<Args...>::type>
+      typename = enable_if_ivalue_compatible<Args...>::type>
   IValue(std::tuple<Args...>&& t);
   bool isTuple() const {
     return Tag::Tuple == tag;

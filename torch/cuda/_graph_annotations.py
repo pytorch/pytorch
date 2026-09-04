@@ -12,8 +12,8 @@ current on scope entry, so that stream must already be participating in
 the capture. ``mark_stream`` handles this by starting ``mark_kernels``
 before switching to the target stream.
 
-The annotations are baked into a Chrome profiler trace by
-``prof.export_chrome_trace(path, cuda_graph_annotations=get_kernel_annotations())``.
+The annotations can be pickled and later merged into a Chrome profiler
+trace using ``torch.cuda._annotate_cuda_graph_trace``.
 
 Requires ``cuda.bindings`` package and a CUDA driver that supports
 ``cudaGraphNodeGetToolsId`` (CUDA >= 13.1 or appropriate cuda-compat).
@@ -50,7 +50,6 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from logging import getLogger
 from typing import Any, NamedTuple, TYPE_CHECKING, TypeAlias
-from typing_extensions import deprecated
 
 
 if TYPE_CHECKING:
@@ -70,12 +69,6 @@ try:
         runtime as _cuda_runtime,
     )
 except ImportError:
-    _cuda_driver = None  # type: ignore[assignment]
-    _cuda_runtime = None  # type: ignore[assignment]
-
-if not _HAS_CUDA_BINDINGS:
-    # This module imports the bindings itself, so keep it in step with the shared gate,
-    # which also reports them absent on ROCm -- where they import but cannot work.
     _cuda_driver = None  # type: ignore[assignment]
     _cuda_runtime = None  # type: ignore[assignment]
 
@@ -227,13 +220,9 @@ def maybe_stamp_capture_root(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
 def _probe_tools_id() -> bool:
     """Probe whether cudaGraphNodeGetToolsId is supported by the driver.
 
-    Calls with a null node and accepts only the errors that prove the API is
-    really there: cudaErrorInvalidValue, i.e. the driver got as far as rejecting
-    the argument. Every other status means we cannot use it -- an old NVIDIA
-    driver answers cudaErrorCallRequiresNewerDriver, while an environment with no
-    CUDA driver behind the bindings at all (ROCm, where cuda-bindings can still
-    import) answers cudaErrorInsufficientDriver. Allowlisting rather than
-    denylisting keeps a new failure mode from reading as "supported".
+    Calls with a null node: cudaErrorInvalidValue means the API exists
+    in the driver (good), cudaErrorCallRequiresNewerDriver means it
+    does not (bad).
     """
     if not hasattr(_cuda_runtime, "cudaGraphNodeGetToolsId"):
         # API is missing from cuda-bindings - likely version too old
@@ -253,16 +242,12 @@ def _probe_tools_id() -> bool:
     )  # pyrefly: ignore[missing-attribute]
     if (
         err
-        not in (
-            _cuda_runtime.cudaError_t.cudaSuccess,  # pyrefly: ignore[missing-attribute]
-            _cuda_runtime.cudaError_t.cudaErrorInvalidValue,  # pyrefly: ignore[missing-attribute]
-        )
+        == _cuda_runtime.cudaError_t.cudaErrorCallRequiresNewerDriver  # pyrefly: ignore[missing-attribute]
     ):
         logger.info(
-            "cudaGraphNodeGetToolsId is unusable (%s); it needs a CUDA driver >= 13.1 "
-            "or an equivalent cuda-compat. CUDA graph kernel annotations will be "
-            "disabled",
-            err,
+            "cudaGraphNodeGetToolsId requires a newer driver "
+            "(missing cuda-compat?); "
+            "CUDA graph kernel annotations will be disabled"
         )
         return False
     return True
@@ -547,6 +532,12 @@ def _exit_region(prev: dict[str, Any] | None) -> None:
 # other metadata user can collide with it.
 _HOOKED_KEY: Any = object()
 
+# Bumped by clear_kernel_annotations. Node hooks record only while the
+# generation they were created under is current, so clearing revokes
+# recording from every scope opened before the clear (the hooks stay on
+# the graph but become inert) without mutating live autograd graphs.
+_annotation_generation: int = 0
+
 
 class _KernelScope(NamedTuple):
     """Capture-frontier snapshot taken at scope entry, consumed at scope exit."""
@@ -656,7 +647,7 @@ class _BracketState(threading.local):
 _SKIPPED: Any = object()
 
 
-def _freeze_region_hook(node: Any) -> None:
+def _freeze_region_hook(node: Any, generation: int) -> None:
     """Node creation hook: freeze the current region into ``node``'s bracket.
 
     Reads the region TLS slot and, if a region is open, installs the node's
@@ -681,10 +672,10 @@ def _freeze_region_hook(node: Any) -> None:
     if frozen is None:
         return
     node.metadata[_HOOKED_KEY] = True
-    _attach_backward_hooks(node, frozen)
+    _attach_backward_hooks(node, frozen, generation)
 
 
-def _attach_backward_hooks(node: Any, frozen: dict[str, Any]) -> None:
+def _attach_backward_hooks(node: Any, frozen: dict[str, Any], generation: int) -> None:
     """Register one pre/post hook pair bracketing ``node``'s backward execution.
 
     ``frozen`` is the region that was current when the node was created:
@@ -716,14 +707,19 @@ def _attach_backward_hooks(node: Any, frozen: dict[str, Any]) -> None:
     ambient-annotation entry the CUPTI path publishes is module-global and so
     is not restored that way; it is dropped on next read instead (see
     :data:`_active_scopes`).
+
+    ``generation`` is the annotation generation the owning scope was opened
+    under; the bracket only records (and only propagates to created nodes)
+    while it is current, so ``clear_kernel_annotations`` makes stale hooks
+    inert.
     """
     state = _BracketState()
 
     def creation_hook(child: Any) -> None:
-        _freeze_region_hook(child)
+        _freeze_region_hook(child, generation)
 
     def prehook(_grad_outputs: Any) -> None:
-        if _is_tools_id_unavailable():
+        if generation != _annotation_generation or _is_tools_id_unavailable():
             state.stack.append(_SKIPPED)
             return
         # Re-establish ownership even when this backward is not itself
@@ -780,9 +776,10 @@ def _annotation_region(annotation: dict[str, Any], backward: bool):
     for nodes hooked by a nested ``backward=True`` scope (or by an executing hooked node)
     to freeze this annotation too.
     """
+    generation = _annotation_generation
 
     def creation_hook(node: Any) -> None:
-        _freeze_region_hook(node)
+        _freeze_region_hook(node, generation)
 
     prev = _enter_region({**(_current_region() or {}), **annotation})
     try:
@@ -946,25 +943,6 @@ def resolve_pending_annotations() -> None:
         _pending_scopes.clear()
 
 
-def discard_capture_annotations(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
-    """Drop what this capture recorded, for a capture that never reached an exec graph.
-
-    ``resolve_pending_annotations`` runs before ``capture_end`` because the rekey in
-    ``instantiate()`` consumes what it writes, so entries land keyed by the capture
-    graph's id. If ``capture_end`` then raises, that rekey never happens and the entries
-    keep an id no exec graph will ever hold: ``remove_kernel_annotations`` matches exec
-    ids, so the graph-destroy path cannot reach them and they last for the life of the
-    process. Only called on that error path. Not a public API."""
-    _pending_scopes.clear()
-    capture_graph_id = torch_cuda_graph._capture_graph_id
-    # A remap already happened (keep_graph=False instantiates inside capture_end), so the
-    # entries are on a real exec id and are the graph's to purge on destroy, not ours.
-    if capture_graph_id is None or torch_cuda_graph._remapped_exec_id is not None:
-        return
-    for key in [k for k in _kernel_annotations if k >> 32 == capture_graph_id]:
-        del _kernel_annotations[key]
-
-
 def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     """Remap annotation keys from capture graph ID to exec graph ID.
 
@@ -1052,9 +1030,9 @@ class _AnnotationsView(Mapping[int, "list[Any]"]):
     one-element list.
 
     The store holds exactly one merged dict per node, but the public mapping has always
-    had list values and pickles of it are read back by out-of-tree consumers, so the
-    shape is kept. Wrapping on read rather than storing lists is what makes "at most one
-    annotation per node" explicit.
+    had list values -- and pickles of it are read back by
+    ``torch.cuda._annotate_cuda_graph_trace`` -- so the shape is kept. Wrapping on read
+    rather than storing lists is what makes "at most one annotation per node" explicit.
     """
 
     def __getitem__(self, tools_id: int) -> list[Any]:
@@ -1104,48 +1082,28 @@ def get_kernel_annotations() -> Mapping[int, list[Any]]:
     return _annotations_view
 
 
-def _reset_kernel_annotations() -> None:
-    """Empty the annotation registry.
-
-    Backward brackets already attached to live autograd nodes are NOT revoked -- they
-    cannot be detached, and they go on recording into the emptied registry. The
-    implementation behind the deprecated :func:`clear_kernel_annotations`, and what tests
-    use to isolate themselves without tripping its deprecation warning. Not a public
-    API."""
-    _kernel_annotations.clear()
-    _pending_scopes.clear()
-
-
-@deprecated(
-    "`torch.cuda.graph_annotations.clear_kernel_annotations` is deprecated. The registry "
-    "bounds itself: annotations are rekeyed to the exec graph on instantiate and dropped "
-    "when that graph is destroyed, so a global wipe is not needed and discards annotations "
-    "for graphs that are still live.",
-    category=FutureWarning,
-)
 def clear_kernel_annotations() -> None:
     r"""clear_kernel_annotations() -> None
 
     Clear all recorded kernel annotations.
 
-    .. deprecated:: 2.15
-        The registry is self-bounding, so nothing needs to call this. Annotations are
-        rekeyed to the exec graph id on instantiation and dropped when that graph is
-        destroyed; in a long-running workload -- where graphs are captured once and
-        replayed for the whole run -- a global wipe instead discards annotations for
-        graphs that are still live and still being joined against.
+    The annotation registry is process-global and accumulates across
+    captures; long-running workloads that capture many graphs should clear
+    it once recorded annotations have been consumed (e.g. after saving
+    them alongside a profiler trace).
 
-    Forgets everything recorded so far. It does not stop anything from recording:
-    the backward hooks :func:`mark_kernels` attached to live autograd nodes cannot be
-    detached and go on writing into the emptied registry, and a forward scope open
-    across the clear registers on exit as usual. In particular this breaks backward
-    projection across a forward/backward capture pair -- the forward graph's entries
-    are gone and its scope no longer names the backward graph's kernels.
+    Clearing forgets everything recorded so far and revokes recording from
+    every scope opened before the clear: backward hooks that
+    :func:`mark_kernels` attached to existing autograd nodes stay on the
+    graph but become inert. Scopes opened after the clear record normally.
 
     .. warning::
         This API is in prototype and may change in future releases.
     """
-    _reset_kernel_annotations()
+    global _annotation_generation
+    _kernel_annotations.clear()
+    _pending_scopes.clear()
+    _annotation_generation += 1
 
 
 def remove_kernel_annotations(exec_graph_ids: Iterable[int]) -> None:
