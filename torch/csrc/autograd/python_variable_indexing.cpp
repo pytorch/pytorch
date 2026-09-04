@@ -1,8 +1,6 @@
 #include <torch/csrc/autograd/python_variable_indexing.h>
 
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/variable.h>
@@ -11,7 +9,6 @@
 #include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/tensor_new.h>
@@ -28,7 +25,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
-#include <c10/core/Layout.h>
 #include <fmt/format.h>
 
 using namespace at;
@@ -599,6 +595,12 @@ static int THPVariable_setitem_impl(
 
   {
     pybind11::gil_scoped_release no_gil;
+    if constexpr (std::is_same_v<T, Scalar>) {
+      if (at::indexing::try_dispatch_masked_fill_(
+              sliced, variableIndices, value)) {
+        return 0;
+      }
+    }
     Tensor valueTensor = asTensor(value, self_);
     SymIntArrayRef valueSizes = valueTensor.sym_sizes();
     SymIntArrayRef slicedValueSizes =
