@@ -1128,6 +1128,27 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             for x in inputs
         ]
 
+    @staticmethod
+    def _get_extern_kernel_profiling_args(node_schedule) -> list[str | None] | None:
+        # write_record_function_handle below records no argument metadata on
+        # this path, and deriving it is not free: a reinterpret view mints a
+        # tensor handle whose owning expression would then go unused, leaking
+        # it. Skip the derivation entirely.
+        return None
+
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        profiling_args: Sequence[str | None] | None = None,
+    ):
+        # ArrayRef tensors are not AtenTensorHandle, so we cannot call
+        # aoti_torch_tensor_to_ivalue on them.  Emit RAIIAtenRecordFunctionHandle
+        # without input metadata instead.
+        sanitized = kernel_name.replace("::", "_").replace(".", "_")
+        self.writeline(
+            f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr);'
+        )
+
     def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False

@@ -2304,17 +2304,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"int64_t {sym} = {cexpr(expr)};")
 
     def _generate_symbolic_call_arg_helper(
-        self, arg: SymbolicCallArg, graph: GraphLowering
+        self, arg: SymbolicCallArg, graph: GraphLowering, in_profile_scope: bool = False
     ) -> None:
-        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
-            "linux",
-            "win32",
-        ]
-        if enable_kernel_profile or (arg.inner, graph) not in self.kernel_numel_expr:
-            # When enable_kernel_profile is on, each kernel call is wrapped in
-            # its own {} scope block, so we must redeclare the variable each
-            # time since prior declarations are no longer visible.
-            self.kernel_numel_expr.add((arg.inner, graph))
+        if in_profile_scope or (arg.inner, graph) not in self.kernel_numel_expr:
+            # When inside a kernel profile {} scope block, we must always
+            # redeclare since prior declarations from other scope blocks are
+            # not visible. We intentionally skip adding to kernel_numel_expr
+            # in that case because the block-scoped declaration won't be
+            # visible at function scope either. At function scope, we declare
+            # on first use and assign thereafter.
+            if not in_profile_scope:
+                self.kernel_numel_expr.add((arg.inner, graph))
             self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
         else:
             self.writeline(f"{arg.inner} = {cexpr(arg.inner_expr)};")
@@ -4513,12 +4513,14 @@ if (!custom_op_wrapper) {
         # KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});
         # ... operations...
         # }
+        self.kernel_profile_scope_depth += 1
         self.writeline("{")
 
     def write_kernel_context_guard_end(
         self,
     ):
         # End of a kernel context guarded block.
+        self.kernel_profile_scope_depth -= 1
         self.writeline("}")
 
     def write_kernel_context_guard(
@@ -4554,3 +4556,42 @@ if (!custom_op_wrapper) {
             stack_trace_str += "\n"
         stack_trace_str += ')"'
         self.writeline(f'KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});')
+
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        profiling_args: Sequence[str | None] | None = None,
+    ):
+        sanitized = kernel_name.replace("::", "_").replace(".", "_")
+        if profiling_args:
+            # Tensors and placeholders are numbered independently so a name
+            # identifies which kind of argument it holds.
+            ivalue_names = []
+            num_inputs = 0
+            num_scalars = 0
+            for profiling_arg in profiling_args:
+                if profiling_arg is None:
+                    # A non-tensor argument only has to hold its schema
+                    # position, so record a dummy int64.
+                    ivalue_var = f"tmp_{sanitized}_scalar_{num_scalars}"
+                    num_scalars += 1
+                    to_ivalue = f"aoti_torch_int64_to_ivalue(0, &{ivalue_var})"
+                else:
+                    ivalue_var = f"tmp_{sanitized}_input_{num_inputs}"
+                    num_inputs += 1
+                    to_ivalue = (
+                        f"aoti_torch_tensor_to_ivalue({profiling_arg}, &{ivalue_var})"
+                    )
+                self.writelines(_ivalue_conversion(ivalue_var, to_ivalue))
+                ivalue_names.append(ivalue_var)
+            inputs_vec = f"{sanitized}_inputs_"
+            self.writeline(
+                f"std::vector<C10IValueHandle> {inputs_vec}({{{', '.join(ivalue_names)}}});"
+            )
+            self.writeline(
+                f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr, {inputs_vec});'
+            )
+        else:
+            self.writeline(
+                f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr);'
+            )
