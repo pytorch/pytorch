@@ -236,6 +236,14 @@ runtime_triton_nan_asserts = (
 )
 scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
 
+# Skips codegen for range bounds, a subset of scalar_asserts. These are
+# inequalities between a symbol and a constant (e.g. u0 >= 4). This is unsafe
+# because the skipped assertions check expected shape invariants, including
+# hand-written torch._check().
+unsafe_skip_scalar_range_asserts = (
+    os.environ.get("TORCHINDUCTOR_UNSAFE_SKIP_SCALAR_RANGE_ASSERTS") == "1"
+)
+
 # Disable by default in fbcode
 alignment_asserts = (
     os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS", "0" if is_fbcode() else "1")
@@ -393,7 +401,7 @@ force_fuse_int_mm_with_mul = False
 # (may improve perf at the cost of accuracy for some models).
 keep_addmm_fused_for_half_dtypes = True
 
-use_mixed_mm = Config(
+use_mixed_mm: bool = Config(
     default=True, deprecated=True, deprecation_message="does not do anything"
 )
 
@@ -2313,9 +2321,13 @@ class triton:
         == "1"
     )
 
-    # Fuse staged reduction pipelines, including dependent cross-axis reductions
-    # and lane-resolution pointwise epilogues.
-    nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
+    # Fuse staged reduction pipelines, including block reductions and
+    # lane-resolution pointwise epilogues.
+    nested_reduction: bool = Config(
+        justknob="pytorch/inductor:nested_reduction",
+        env_name_force="TORCHINDUCTOR_NESTED_REDUCTION",
+        default=True,
+    )
 
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
