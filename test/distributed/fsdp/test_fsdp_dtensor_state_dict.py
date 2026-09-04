@@ -3,7 +3,9 @@ import io
 from copy import deepcopy
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
+from torch._utils import _get_device_module
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -13,17 +15,22 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.tensor import DTensor, Shard
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import parametrize, run_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_distributed import requires_world_size
+from torch.testing._internal.common_fsdp import DISTRIBUTED_BACKEND
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
-    skip_if_lt_x_gpu,
     with_comms,
 )
-
-
-device_type = torch.device(get_devtype())
 
 
 # Simple and boring model to test interface and some corner cases that do not
@@ -40,8 +47,8 @@ class TestDummyModel(torch.nn.Module):
     def forward(self, x):
         return self.net4(self.net3(self.net2(self.net1(x))))
 
-    def get_input(self):
-        return torch.rand(8, 8, device=device_type.type)
+    def get_input(self, device):
+        return torch.rand(8, 8, device=device)
 
 
 class TestDummyModelUneven(torch.nn.Module):
@@ -56,26 +63,58 @@ class TestDummyModelUneven(torch.nn.Module):
     def forward(self, x):
         return self.net4(self.net3(self.net2(self.net1(x))))
 
-    def get_input(self):
-        return torch.rand(5, 5, device=device_type.type)
+    def get_input(self, device):
+        return torch.rand(5, 5, device=device)
 
 
-class TestFSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
+class FSDPDTensorStateDictTestBase(DTensorContinuousTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def _resolved_device_type(cls) -> str:
+        dt = cls.device_type
+        if dt == "privateuse1":
+            dt = torch._C._get_privateuse1_backend_name()
+        return dt
+
+    @classmethod
+    def backend_str(cls) -> str:
+        try:
+            return dist.get_default_backend_for_device(cls._resolved_device_type())
+        except ValueError:
+            # Devices without a registered default backend (e.g. ``hpu`` unless
+            # the vendor extension registers ``hccl`` via ``register_backend``):
+            # fall back to the historical ``common_fsdp`` ``DISTRIBUTED_BACKEND``
+            # ("hccl" on HPU), preserving the pre-refactor behavior.
+            return DISTRIBUTED_BACKEND
+
+    @property
+    def world_size(self) -> int:
+        return _get_device_module(self.device_type).device_count()
+
+
+class TestFSDPWithDeviceMeshAndDTensor(FSDPDTensorStateDictTestBase):
     def _create_model(self, is_even_sharded_model, device_mesh=None):
+        device_type = self._resolved_device_type()
         dummy_model = (
             TestDummyModel() if is_even_sharded_model else TestDummyModelUneven()
         )
         model = FSDP(dummy_model.to(device_type), device_mesh=device_mesh)
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
-        model(model.get_input()).sum().backward()
+        model(model.get_input(device_type)).sum().backward()
         optim.step()
         return model, optim
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @requires_world_size(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.dtensor,
+        Capability.distributed.fsdp,
+    )
     @parametrize("is_even_sharded_model", [True, False])
-    def test_fsdp_init_with_device_mesh(self, is_even_sharded_model):
-        device_mesh = init_device_mesh(device_type.type, (self.world_size,))
+    def test_fsdp_init_with_device_mesh(self, device, is_even_sharded_model):
+        device_mesh = init_device_mesh(self._resolved_device_type(), (self.world_size,))
         model, optim = self._create_model(is_even_sharded_model, device_mesh)
         FSDP.set_state_dict_type(
             model,
@@ -102,13 +141,18 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
         self.assertEqual(state_dict_type.optim_state_dict_config._use_dtensor, True)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @requires_world_size(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.dtensor,
+        Capability.distributed.fsdp,
+    )
     @parametrize("offload_to_cpu", [True, False])
     @parametrize("is_even_sharded_model", [True, False])
     def test_dtensor_sharded_tensor_state_dict_identical(
-        self, offload_to_cpu, is_even_sharded_model
+        self, device, offload_to_cpu, is_even_sharded_model
     ):
-        device_mesh = init_device_mesh(device_type.type, (self.world_size,))
+        device_mesh = init_device_mesh(self._resolved_device_type(), (self.world_size,))
         model, optim = self._create_model(is_even_sharded_model, device_mesh)
         FSDP.set_state_dict_type(
             model,
@@ -178,13 +222,18 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
                     self.assertEqual(v1, v2)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @requires_world_size(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.dtensor,
+        Capability.distributed.fsdp,
+    )
     @parametrize("offload_to_cpu", [True, False])
     @parametrize("is_even_sharded_model", [True, False])
     def test_dtensor_sharded_optim_load_state_dict(
-        self, offload_to_cpu, is_even_sharded_model
+        self, device, offload_to_cpu, is_even_sharded_model
     ):
-        device_mesh = init_device_mesh(device_type.type, (self.world_size,))
+        device_mesh = init_device_mesh(self._resolved_device_type(), (self.world_size,))
         model, optim = self._create_model(is_even_sharded_model, device_mesh)
         FSDP.set_state_dict_type(
             model,
@@ -198,7 +247,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
         # Deepcopy to save current optim_state_dict to compare with the optim_state_dict loaded back below.
         ref_optim_state_dict = deepcopy(FSDP.optim_state_dict(model, optim))
         # Update the parameters so FSDP.optim_state_dict() will be different from ref_optim_state_dict.
-        model(model.get_input()).sum().backward()
+        model(model.get_input(self._resolved_device_type())).sum().backward()
         optim.step()
         # Load ref_optim_state_dict back.
         checkpoint.seek(0)
@@ -229,13 +278,18 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
                     self.assertEqual(type(v2), DTensor)
 
     @with_comms()
-    @skip_if_lt_x_gpu(2)
+    @requires_world_size(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.dtensor,
+        Capability.distributed.fsdp,
+    )
     @parametrize("offload_to_cpu", [True, False])
     @parametrize("is_even_sharded_model", [True, False])
     def test_dtensor_sharded_model_load_state_dict(
-        self, offload_to_cpu, is_even_sharded_model
+        self, device, offload_to_cpu, is_even_sharded_model
     ):
-        device_mesh = init_device_mesh(device_type.type, (self.world_size,))
+        device_mesh = init_device_mesh(self._resolved_device_type(), (self.world_size,))
         model, optim = self._create_model(is_even_sharded_model, device_mesh)
         FSDP.set_state_dict_type(
             model,
@@ -247,7 +301,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
         # Deepcopy to save current state_dict to compare with the state_dict loaded back below.
         ref_state_dict = deepcopy(model.state_dict())
         # Update the parameters so model.state_dict() will be different from ref_dtensor_sd.
-        model(model.get_input()).sum().backward()
+        model(model.get_input(self._resolved_device_type())).sum().backward()
         optim.step()
         # Load ref_state_dict back.
         checkpoint.seek(0)
@@ -264,14 +318,19 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
             self.assertEqual(v1, v2)
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_raises_warning_or_errors(self):
-        device_mesh = init_device_mesh(device_type.type, (self.world_size,))
+    @requires_world_size(4)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.dtensor,
+        Capability.distributed.fsdp,
+    )
+    def test_raises_warning_or_errors(self, device):
+        device_mesh = init_device_mesh(self._resolved_device_type(), (self.world_size,))
         model, optim = self._create_model(
             is_even_sharded_model=True, device_mesh=device_mesh
         )
         # initialize optim
-        model(model.get_input()).sum().backward()
+        model(model.get_input(self._resolved_device_type())).sum().backward()
         optim.step()
         with self.assertRaisesRegex(
             RuntimeError, "DeviceMesh is not compatible with LOCAL_STATE_DICT."
@@ -285,9 +344,8 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
                 FSDP.optim_state_dict(model, optim)
 
 
-devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
-    TestFSDPWithDeviceMeshAndDTensor, globals(), only_for=devices, allow_xpu=True
+    TestFSDPWithDeviceMeshAndDTensor, globals(), except_for="cpu", allow_xpu=True
 )
 if __name__ == "__main__":
     run_tests()
