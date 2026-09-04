@@ -801,8 +801,6 @@ POINTWISE_XFAIL = frozenset(
         ("short", "bfloat16"),
         ("short", "float16"),
         ("short", "float32"),
-        ("sigmoid", "float16"),
-        ("sigmoid", "float32"),
         ("special_bessel_j0", "float32"),
         ("special_bessel_j1", "float32"),
         ("special_bessel_y0", "float32"),
