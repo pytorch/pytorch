@@ -17415,7 +17415,10 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo(
         'nn.functional.silu',
         aten_backward_name='silu_backward',
-        ref=lambda x, inplace=False: x / (1 + np.exp(-x)),
+        # silu(x) -> 0 as x -> -inf; the bare x/(1+exp(-x)) form yields
+        # -inf/inf = NaN there, so match the op's limit (pytorch/pytorch#160876).
+        ref=lambda x, inplace=False: np.where(
+            x == -np.inf, 0.0, x / (1 + np.exp(-x))),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         dtypesIfMPS=floating_types_and(
             torch.bfloat16, torch.float16, torch.int16, torch.int32, torch.uint8, torch.bool, torch.int8
