@@ -5717,6 +5717,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 3, 5, requires_grad=True)
         self.run_test(model, x)
 
+        # 1-D weight reduces over no axes, so the norm is an elementwise abs
+        class WeightNorm1d(torch.nn.Module):
+            def forward(self, v, g):
+                return torch._weight_norm(v, g, 0)
+
+        self.run_test(WeightNorm1d(), (torch.randn(5), torch.randn(5)))
+
     @skipScriptTest()
     def test_weight_norm_nodim(self):
         # addmm for 3-d inputs converts to onnx::MatMul
