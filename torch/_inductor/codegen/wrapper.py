@@ -1501,9 +1501,12 @@ class SymbolicCallArgLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     arg: SymbolicCallArg
     graph: GraphLowering
+    in_profile_scope: bool = False
 
     def codegen(self, code: IndentedBuffer) -> None:
-        self.wrapper._generate_symbolic_call_arg_helper(self.arg, self.graph)
+        self.wrapper._generate_symbolic_call_arg_helper(
+            self.arg, self.graph, self.in_profile_scope
+        )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_symbolic_call_arg
@@ -1686,6 +1689,10 @@ class PythonWrapperCodegen(CodeGen):
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
         self.kernel_numel_expr: OrderedSet[tuple[str, GraphLowering]] = OrderedSet()
+        # Nesting depth of the kernel-profiling {} scope blocks currently open.
+        # A symbolic numel emitted inside one is block-scoped, so it has to be
+        # redeclared rather than assigned.
+        self.kernel_profile_scope_depth: int = 0
         self.lines: list[Line] = []
         self.declare = ""
         self.declare_maybe_reference = ""
@@ -4057,12 +4064,19 @@ class PythonWrapperCodegen(CodeGen):
 
         is_benchmark_kernel = kernel_name == ""
         if not is_benchmark_kernel:
-            self.writeline(SymbolicCallArgLine(self, arg, V.graph))
+            self.writeline(
+                SymbolicCallArgLine(
+                    self,
+                    arg,
+                    V.graph,
+                    in_profile_scope=self.kernel_profile_scope_depth > 0,
+                )
+            )
 
         return arg
 
     def _generate_symbolic_call_arg_helper(
-        self, arg: SymbolicCallArg, graph: GraphLowering
+        self, arg: SymbolicCallArg, graph: GraphLowering, in_profile_scope: bool = False
     ) -> None:
         self.writeline(f"{arg.inner} = {pexpr(arg.inner_expr)}")
 
@@ -5322,6 +5336,41 @@ class PythonWrapperCodegen(CodeGen):
         Mark the end of kernel context guard
         """
         return
+
+    @contextlib.contextmanager
+    def kernel_profile_scope(
+        self,
+        kernel_name: str,
+        node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
+        enabled: bool | None = None,
+    ):
+        """Emit a kernel call inside a profiling {} scope block.
+
+        Pairing the block here rather than at each call site is what keeps
+        kernel_profile_scope_depth balanced: the depth decides whether a
+        symbolic numel is redeclared, so leaking it past a kernel that failed
+        to emit would mis-scope every numel after it.
+
+        enabled defaults to config.cpp.enable_kernel_profile and is read once,
+        so the block cannot open and fail to close. Callers that also record a
+        RecordFunction pass kernel_profile_enabled() instead, which additionally
+        requires a platform where the handle exists.
+
+        The write_* methods are no-ops on PythonWrapperCodegen, so this is
+        effectively a no-op there; CppWrapperCpu overrides them to emit the
+        real block.
+        """
+        if enabled is None:
+            enabled = config.cpp.enable_kernel_profile
+        try:
+            if enabled:
+                self.write_kernel_context_guard_begin()
+                if config.cpp.enable_kernel_context_guard:
+                    self.write_kernel_context_guard(kernel_name, node_schedule)
+            yield
+        finally:
+            if enabled:
+                self.write_kernel_context_guard_end()
 
 
 class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
