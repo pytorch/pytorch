@@ -49,7 +49,7 @@ from ..utils import (
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, TritonScratchWorkspace
-from .cpp_utils import cexpr
+from .cpp_utils import cexpr, DEVICE_TO_ATEN
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .multi_kernel import MultiKernelCall
 from .triton_utils import should_unwrap_unspec_arg
@@ -1310,6 +1310,11 @@ class CppWrapperGpu(CppWrapperCpu):
             f"triton debug sync is not supported with {self.device} cpp_wrapper"
         )
 
+    def _codegen_cached_device_type(self) -> str:
+        device_str = DEVICE_TO_ATEN[self.device][5:].lower()
+        self.used_cached_devices.add(device_str)
+        return f"cached_torch_device_type_{device_str}"
+
     @staticmethod
     def create(
         is_subgraph: bool,
@@ -1863,6 +1868,9 @@ static inline void ensure_triton_kernel_compiles_started() {{
                             size=workspace_size,
                             generate_dtype_str=(
                                 lambda: self.codegen_dtype(torch.uint8)
+                            ),
+                            generate_device_type_str=(
+                                lambda: self._codegen_cached_device_type()
                             ),
                         ),
                         prefix=scratch_name,
