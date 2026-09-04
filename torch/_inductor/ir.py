@@ -111,6 +111,7 @@ from .loop_body import LoopBody
 from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties, ReductionHint
+from .sizevars import is_range_bound
 from .utils import (
     argsort,
     argsort_sym,
@@ -147,7 +148,7 @@ if TYPE_CHECKING:
     from .codegen.cutlass.template import CUTLASSTemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
-    from .kernel.gemm_epilogue import GemmReductionPlan
+    from .kernel.gemm_epilogue import GemmEpiloguePlan, GemmReductionPlan
     from .utils import IndentedBuffer
 
 else:
@@ -6737,10 +6738,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self,
         out_node: Any,
         hint_override: int | None = None,
-        epilogue_fn_code: str | None = None,
-        epilogue_reads: list[str] | None = None,
-        epilogue_writes: list[str] | None = None,
-        epilogue_var_renames: dict[str, Any] | None = None,
+        epilogue: GemmEpiloguePlan | None = None,
         local_reduce: GemmReductionPlan | None = None,
     ) -> tuple[Any, Any]:
         """
@@ -6750,10 +6748,6 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         - kernel: NVUniversalGemmKernel object with call_kernel() method
         - render: function that returns source code string
         """
-        if epilogue_fn_code is not None:
-            if epilogue_var_renames is None:
-                raise AssertionError("epilogue_fn_code requires epilogue_var_renames")
-
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernel,
         )
@@ -6788,10 +6782,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             scale_type_b=self.scale_type_b,
             swizzle_type_a=self.swizzle_type_a,
             swizzle_type_b=self.swizzle_type_b,
-            epilogue_fn_code=epilogue_fn_code,
-            epilogue_reads=epilogue_reads,
-            epilogue_writes=epilogue_writes,
-            epilogue_var_renames=epilogue_var_renames,
+            epilogue=epilogue,
             local_reduce=local_reduce,
             swap_ab=self.swap_ab,
             bias_node=bias_node,
@@ -7024,13 +7015,15 @@ class ConcatKernel(NopKernel):
                 input_unwrapped = inp.data.unwrap_view()
             else:
                 input_unwrapped = inp.data
-
             if (
                 isinstance(input_unwrapped, StorageBox)
                 and input_unwrapped.is_input_buffer()
                 and (dev := inp.get_device()) is not None
                 and is_gpu(dev.type)
-                and not is_dynamic(input_buffer)
+                and (
+                    not is_dynamic(input_buffer)
+                    or config.combo_kernel_foreach_dynamic_shapes
+                )
             ):
                 op_names.append(input_buffer.get_operation_name())
 
@@ -8148,37 +8141,46 @@ class ExternKernel(InputsKernel):
             )
         )
 
+    def get_assert_name(self) -> str:
+        name = self.get_name()
+        if V.graph.cpp_wrapper and self.is_inplace_view():
+            # inplace_view ops (e.g. set_.source_Tensor) don't declare an
+            # output variable; assert on the mutated input instead.
+            if not isinstance(self.inputs[0], IRNode):
+                raise AssertionError("Expected isinstance(self.inputs[0], IRNode)")
+            name = self.inputs[0].get_name()
+        return name
+
     def codegen_size_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         if not config.size_asserts:
             return
         if self.is_inplace_view() and not V.graph.cpp_wrapper:
             return
         op_name = self.get_op_name()
-        name = self.get_name()
-        if V.graph.cpp_wrapper:
-            # inplace_view ops (e.g. set_.source_Tensor) don't declare an
-            # output variable; assert on the mutated input instead.
-            if self.is_inplace_view():
-                if not isinstance(self.inputs[0], IRNode):
-                    raise AssertionError("Expected isinstance(self.inputs[0], IRNode)")
-                name = self.inputs[0].get_name()
+        name = self.get_assert_name()
         size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
         stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
         dtype = self.get_dtype() if self.should_assert_dtype(op_name) else None
         wrapper.write_assert_size_stride(name, size, stride, op_name, dtype)
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
-        if config.alignment_asserts and not V.graph.cpp_wrapper:
-            name = self.get_name()
-            aligned = name not in V.graph.unaligned_buffers
+        # Preserve the existing Python-wrapper behavior for inplace-view
+        # results. Only cpp_wrapper needs get_assert_name() to spell the check
+        # with the mutated input handle because its shim declares no output.
+        if config.alignment_asserts:
+            name = self.get_assert_name()
+            # For cpp_wrapper inplace-view ops, `name` is the mutated input
+            # variable used to spell the runtime check, while self.get_name()
+            # describes the post-mutation result whose layout was classified.
+            # Keep the alignment decision tied to that result layout.
+            aligned = self.get_name() not in V.graph.unaligned_buffers
             op_name = self.get_op_name()
             if aligned:
-                wrapper.writeline(
-                    f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
-                )
+                wrapper.write_assert_alignment(name, GPU_ALIGN_BYTES, op_name)
             else:
-                wrapper.writeline(
-                    f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
+                wrapper.make_comment(
+                    f"{wrapper.comment} buffer {name} (op: {op_name}) "
+                    "is assumed to be not aligned"
                 )
 
     def codegen_memory_tracking(self, wrapper: PythonWrapperCodegen) -> None:
@@ -9483,6 +9485,8 @@ class AssertScalar(ExternKernel):
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         if not config.scalar_asserts:
             return
+        if config.unsafe_skip_scalar_range_asserts and is_range_bound(self.scalar):
+            return
         # NB: It is EXTREMELY important not to simplify the scalar under assertion here,
         # because simplify is done with respect to runtime asserts.  So if you have
         # "u0 == 0" in the runtime asserts, if you subsequently try to
@@ -9894,7 +9898,13 @@ class FallbackKernel(ExternKernelAlloc):
             elif isinstance(return_type, torch.IntType):
                 return export_schema.Argument.create(as_int=output)
             else:
-                raise RuntimeError(f"Unsupported return type {type(return_type)}")
+                # Name the op: the bare message gives no way to tell which
+                # extern kernel has the unsupported return. `target` is the op
+                # whose schema produced `return_type`.
+                raise RuntimeError(
+                    f"Unsupported return type {type(return_type)} for "
+                    f"target={target} schema={getattr(target, '_schema', None)}"
+                )
 
         if isinstance(target, torch._higher_order_ops.torchbind.CallTorchBind):
             returns = target.schema(args[0], args[1]).returns
@@ -9973,36 +9983,19 @@ class FallbackKernel(ExternKernelAlloc):
                 kernel not in config.aot_inductor.custom_ops_to_c_shims
             )
 
-        # Handle the special case where a complex number is input to a C-shim kernel for
-        # a scalar input.  The torchgen'ed shim API will use type "double", which is
-        # incompatible with complex numbers, forcing a fallback to runtime dispatch.
+        # Scalars the C-shim's double ABI cannot represent must use the proxy executor
+        # instead; see _cshim_scalar_abi_forces_proxy.
         if (
             V.graph.cpp_wrapper
             and isinstance(kernel, torch._ops.OpOverload)
             and not self.use_runtime_dispatch
         ):
-
-            def is_number(t: torch.JitType) -> bool:
-                if isinstance(t, torch.OptionalType):
-                    return is_number(t.getElementType())
-                return isinstance(t, torch.NumberType)
-
-            # Using unflatten_args is a bit of a hack, but all the complex arguments we
+            # Using unflatten_args is a bit of a hack, but all the scalar arguments we
             # care about are in self.constant_args, and calling unflatten_args puts them
             # in the correct order without triggering codegen.
             args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
-            # Append kwarg values to args.  ordered_kwargs_for_cpp_kernel is guaranteed
-            # to be set, since this is an OpOverload kernel.
-            args_iter = itertools.chain(
-                args,
-                (
-                    self.get_kwargs_value(k, **kwargs)
-                    for k in self.ordered_kwargs_for_cpp_kernel
-                ),
-            )
-            self.use_runtime_dispatch = any(
-                isinstance(v, complex) and is_number(a.real_type)
-                for v, a in zip(args_iter, kernel._schema.arguments)
+            self.use_runtime_dispatch = self._cshim_scalar_abi_forces_proxy(
+                kernel, args, kwargs
             )
 
         self.codegen_comment(wrapper)
@@ -10116,6 +10109,62 @@ class FallbackKernel(ExternKernelAlloc):
             return False
         return kernel not in config.aot_inductor.custom_ops_to_c_shims
 
+    @staticmethod
+    def _cshim_scalar_abi_forces_proxy(
+        kernel: _OpOverloads, args: Any, kwargs: Any
+    ) -> bool:
+        # Whether a Scalar arg cannot survive the C-shim's `double` Scalar ABI. Complex
+        # does not fit a double at all; bool and int lose their type, which ATen rejects
+        # (`alpha=1` -> `1.0`) or silently mis-promotes. Such ops go to the proxy executor,
+        # which serializes each scalar with its real type. Used by both codegen() and
+        # _materialize_scalar_tensor_args.
+        if not V.graph.cpp_wrapper or not isinstance(kernel, torch._ops.OpOverload):
+            return False
+
+        def is_number(t: torch.JitType) -> bool:
+            if isinstance(t, torch.OptionalType):
+                return is_number(t.getElementType())
+            return isinstance(t, torch.NumberType)
+
+        def is_integral_tensor(v: Any) -> bool:
+            if not isinstance(v, IRNode):
+                return False
+            try:
+                dtype = v.get_dtype()
+            except (AttributeError, NotImplementedError):
+                return False
+            return (
+                dtype is not None
+                and not dtype.is_floating_point
+                and not dtype.is_complex
+            )
+
+        has_integral_tensor = any(
+            is_integral_tensor(v) for v in itertools.chain(args, kwargs.values())
+        )
+
+        for i, arg_info in enumerate(kernel._schema.arguments):
+            if arg_info.name in kwargs:
+                value = kwargs[arg_info.name]
+            elif not arg_info.kwarg_only and i < len(args):
+                value = args[i]
+            else:
+                value = arg_info.default_value
+            if not is_number(arg_info.real_type):
+                continue
+            if isinstance(value, complex):
+                return True
+            # A bool Scalar is its own c10::Scalar kind; the double ABI turns True into
+            # 1.0, which is neither boolean nor integral. Ungated by has_integral_tensor
+            # because it also changes dtype inference on ops with no tensor arg at all
+            # (full(size, True) is bool, full(size, 1.0) is float).
+            if type(value) is bool:
+                return True
+            # `type(...) is int`, not isinstance: bool subclasses int, handled above.
+            if type(value) is int and has_integral_tensor:
+                return True
+        return False
+
     @classmethod
     def _materialize_scalar_tensor_args(
         cls, kernel: _OpOverloads, args: Any, kwargs: Any
@@ -10133,7 +10182,12 @@ class FallbackKernel(ExternKernelAlloc):
         # as *real* tensors (see the V.graph.constants branch there).
         if not isinstance(kernel, torch._ops.OpOverload):
             return args, kwargs, False
-        if not cls._uses_aot_proxy_executor(kernel):
+        # Materialize for anything codegen() will send to the proxy executor: no C-shim,
+        # or a scalar the C-shim's double ABI cannot represent.
+        if not (
+            cls._uses_aot_proxy_executor(kernel)
+            or cls._cshim_scalar_abi_forces_proxy(kernel, args, kwargs)
+        ):
             return args, kwargs, False
 
         tensor_dtypes: list[torch.dtype] = []
@@ -11745,23 +11799,25 @@ class WhileLoop(ExternKernel):
             stack_output=stack_output,
         )
 
-        if not (
-            body_fn.graph is not None
-            and isinstance(body_fn.graph.module, torch.fx.GraphModule)
-        ):  # to make linter happy
-            raise AssertionError(
-                "Expected body_fn.graph is not None and isinstance( body_fn.graph.module, torch.fx.GraphModule )"
-            )
-
-        # Handling input mutations
-        mutated_idxs = check_input_alias_and_mutation(
-            body_fn.graph.module, fake_all_inputs
-        )[3]
-        mutated_idx_set = OrderedSet(mutated_idxs)
-        mutated_inputs = [all_inputs[idx] for idx in mutated_idx_set]
+        # Handling input mutations. Inputs can be mutated by cond_fn,
+        # body_fn or both (e.g. a captured tensor mutated only in cond_fn).
+        subgraph_mutated_idxs: list[OrderedSet[int]] = []
+        for subgraph in (cond_fn, body_fn):
+            if subgraph.graph is None or not isinstance(
+                subgraph.graph.module, torch.fx.GraphModule
+            ):
+                raise AssertionError(
+                    "Expected lowered subgraph with a GraphModule, got "
+                    f"{subgraph.graph and subgraph.graph.module}"
+                )
+            mutated_idxs = check_input_alias_and_mutation(
+                subgraph.graph.module, fake_all_inputs
+            )[3]
+            subgraph_mutated_idxs.append(OrderedSet(mutated_idxs))
+        cond_mutated_idxs, body_mutated_idxs = subgraph_mutated_idxs
+        mutated_idx_set = cond_mutated_idxs | body_mutated_idxs
 
         # Create all outputs first
-        mutated_inputs_iter = iter(mutated_inputs)
         all_outputs: list[IRNode] = []
         while_loop.outputs = []
         while_loop.mutation_outputs = []
@@ -11784,15 +11840,13 @@ class WhileLoop(ExternKernel):
                 all_outputs.append(multi_out)
         else:
             for idx, output in enumerate(body_outputs):
-                if idx in mutated_idx_set:
-                    if idx >= len(carried_inputs):
-                        raise AssertionError("only carries can be mutated.")
-                    # Create MutationOutput for mutated inputs
-                    mutated_input = next(mutated_inputs_iter)
-                    while_loop.mutation_outputs.append(
-                        MutationOutput(mutated_input.layout, mutated_input, while_loop)  # type: ignore[attr-defined, union-attr]
-                    )
-                    all_outputs.append(mutated_input)
+                if idx in body_mutated_idxs:
+                    # Carries mutated in place by body_fn: the input buffer
+                    # itself is the output. cond_fn mutations must not take
+                    # this branch: the loop state is rebound to body_fn's
+                    # outputs each iteration, so the carry's final value
+                    # still lives in body_outputs[idx].
+                    all_outputs.append(all_inputs[idx])
                 else:
                     multi_out = MultiOutput(
                         FixedLayout(
@@ -11807,6 +11861,16 @@ class WhileLoop(ExternKernel):
                     )
                     while_loop.outputs.append(multi_out)
                     all_outputs.append(multi_out)
+
+            # Register a MutationOutput for every input mutated by either
+            # subgraph (carried or additional, e.g. captured tensors) so
+            # reads of these buffers in the outer graph are ordered after
+            # the loop.
+            for idx in sorted(mutated_idx_set):
+                mutated_input = all_inputs[idx]
+                while_loop.mutation_outputs.append(
+                    MutationOutput(mutated_input.layout, mutated_input, while_loop)  # type: ignore[attr-defined, union-attr]
+                )
 
         for inp, out in zip(carried_inputs, all_outputs):
             if inp.get_name() in V.graph.graph_inputs:

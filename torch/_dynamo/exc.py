@@ -569,6 +569,11 @@ def raise_observed_exception(
     tx.do_raise(exception_vt, None)
 
 
+def raise_attribute_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
+    """Raise an AttributeError as an observed exception during tracing."""
+    raise_observed_exception(AttributeError, tx, args=[msg])
+
+
 def raise_type_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
     """Raise a TypeError as an observed exception during tracing."""
     raise_observed_exception(TypeError, tx, args=[msg])
@@ -818,9 +823,15 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
  torch._dynamo.replay('{exc.record_filename}').\n"
         )
 
-    if not config.verbose and hasattr(exc, "real_stack"):
+    show_verbose_hint = real_stack is not None or isinstance(exc, ShortenTraceback)
+    if not config.verbose and show_verbose_hint:
+        stack_trace = (
+            "the full Dynamo stack trace"
+            if isinstance(exc, ShortenTraceback)
+            else "the internal stack trace"
+        )
         msg += (
-            "\nSet TORCHDYNAMO_VERBOSE=1 for the internal stack trace "
+            f"\nSet TORCHDYNAMO_VERBOSE=1 for {stack_trace} "
             "(please do this especially if you're reporting a bug to PyTorch). "
             'For even more developer context, set TORCH_LOGS="+dynamo"\n'
         )

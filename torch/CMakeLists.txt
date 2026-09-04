@@ -438,7 +438,7 @@ if(BUILD_ONEDNN_GRAPH)
 endif()
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "RelWithAssert")
-   # Workaround numerous decret-without-a-gil warnings from JIT
+   # Workaround numerous decref-without-a-gil warnings from JIT
    # see https://github.com/pytorch/pytorch/issues/130073
    target_compile_definitions(torch_python PRIVATE "-DPYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF")
 endif()
@@ -467,15 +467,13 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
       C_VISIBILITY_PRESET "default"
     )
   endif()
-  # Install at the install prefix root, which maps to torch/ in the wheel
-  # via wheel.install-dir = "torch". The import library (Windows _C.lib) goes
-  # alongside the other import libs in torch/lib/, matching the layout that
-  # setup.py used before _C moved to CMake.
-  install(TARGETS _C
-    RUNTIME DESTINATION "."
-    LIBRARY DESTINATION "."
-    ARCHIVE DESTINATION "lib"
-  )
+  # The extension module belongs to the Python package.
+  if(SKBUILD)
+    install(TARGETS _C
+      RUNTIME DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
+      LIBRARY DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
+    )
+  endif()
 
   # ---[ NCCL EP extension (torch._nccl_ep)
   # Optional standalone extension holding the NCCL EP bindings, imported lazily
@@ -515,7 +513,11 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     if(NOT WIN32)
       set_target_properties(_nccl_ep PROPERTIES C_VISIBILITY_PRESET "default")
     endif()
-    install(TARGETS _nccl_ep RUNTIME DESTINATION "." LIBRARY DESTINATION ".")
+    if(SKBUILD)
+      install(TARGETS _nccl_ep
+        RUNTIME DESTINATION "${SKBUILD_PLATLIB_DIR}/torch"
+        LIBRARY DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
+    endif()
   endif()
 endif()
 
@@ -546,14 +548,18 @@ add_custom_target(
 add_dependencies(torch_python gen_torch_version)
 # version.py is gitignored (generated), so scikit-build-core won't include it
 # via Python package collection. Install it explicitly via cmake instead.
-install(FILES "${TORCH_SRC_DIR}/version.py" DESTINATION ".")
+if(SKBUILD)
+  install(FILES "${TORCH_SRC_DIR}/version.py"
+          DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
+endif()
 
 # _rocm_init.py is gitignored (injected by ROCm build scripts to bootstrap
 # torch/__init__.py). See https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md
 # scikit-build-core won't include it via Python package collection. Install it
 # explicitly via cmake instead.
-if(USE_ROCM AND EXISTS "${TORCH_SRC_DIR}/_rocm_init.py")
-  install(FILES "${TORCH_SRC_DIR}/_rocm_init.py" DESTINATION ".")
+if(SKBUILD AND USE_ROCM AND EXISTS "${TORCH_SRC_DIR}/_rocm_init.py")
+  install(FILES "${TORCH_SRC_DIR}/_rocm_init.py"
+          DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
 endif()
 
 # Skip building this library under MacOS, since it is currently failing to build on Mac

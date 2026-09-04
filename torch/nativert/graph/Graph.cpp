@@ -53,10 +53,11 @@ size_t expectImpl(std::string_view source, char expected, size_t curPos) {
   }
   TORCH_CHECK(
       expected == source[curPos],
-      "Parser error: expected '{}' at position {}, but found '{}'.",
-      expected,
-      curPos,
-      source[curPos]);
+      fmt::format(
+          "Parser error: expected '{}' at position {}, but found '{}'.",
+          expected,
+          curPos,
+          source[curPos]));
   curPos++;
   return curPos;
 }
@@ -466,17 +467,14 @@ Value* Graph::createConstantSymIntValue(int value) {
 }
 
 Value* Graph::getValue(std::string_view name) const {
-  // TODO: can eliminate this string copy by enabling heterogeneous lookup for
-  // the container
-  return values_.at(std::string(name)).get();
+  auto it = values_.find(name);
+  TORCH_CHECK_INDEX(it != values_.end(), "Unknown value: ", name);
+  return it->second.get();
 }
 
 Value* Graph::tryGetValue(std::string_view name) const {
-  // TODO: can eliminate this string copy by enabling heterogeneous lookup for
-  // the container
-  const auto key = std::string(name);
-  if (values_.contains(key)) {
-    return values_.at(key).get();
+  if (auto it = values_.find(name); it != values_.end()) {
+    return it->second.get();
   }
   return nullptr;
 }
@@ -820,7 +818,7 @@ void Graph::removeNode(Node* n) {
 void Graph::removeValue(Value* value) {
   // TODO: assuming not removing from constantSymIntValues_
   TORCH_CHECK(value->users().empty(), "Cannot erase a value with users.");
-  auto it = values_.find(std::string(value->name()));
+  auto it = values_.find(value->name());
   TORCH_CHECK(
       it != values_.end(),
       "Attempted to erase a value not in graph ",
