@@ -28,14 +28,11 @@ use_torchcomms: bool = Config(
     env_name_default="TORCH_DISTRIBUTED_USE_TORCHCOMMS",
 )
 
-# When enabled, pipeline stages carry downstream (r -> r+1, forward activations)
-# and upstream (r -> r-1, backward gradients) P2P on two separate communicators
-# instead of sharing one. A single PP communicator serializes all send/recv in one
-# FIFO: coalescing makes a single mixed batch deadlock-free, but across batches
-# (pipeline skew, looped / V schedules, skip connections) the shared FIFO can
-# still form a dependency cycle and deadlock. Splitting by direction removes that
-# hazard and restores full-duplex bandwidth. Requires a device-bound default
-# process group.
+# When enabled, pipeline stages carry each adjacent directed physical rank edge
+# on a separate communicator instead of sharing one FIFO. This preserves P2P
+# ordering across looped schedules where distinct virtual-stage edges can reach
+# the same ranks in different orders. The schedule initializes the actual PP
+# parent before deriving child communicators.
 #
 # This flag force-enables the behavior; it is auto-enabled when TorchComms is in
 # use regardless of this flag (see PipelineStage), so it mainly matters for the
