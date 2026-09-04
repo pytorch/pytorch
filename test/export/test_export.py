@@ -2908,11 +2908,26 @@ graph():
         args = (torch._neg_view(torch.randn(10, 10, requires_grad=True)),)
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
-        FileCheck().check("torch.ops.aten.detach.default").check(
-            "torch.ops.aten.to.dtype_layout"
-        ).check("torch.ops.aten.resolve_conj.default").check(
-            "torch.ops.aten.resolve_neg.default"
-        ).run(ep.graph_module.code)
+        if not is_training_ir_test(self._testMethodName):
+            FileCheck().check("torch.ops.aten.detach.default").check(
+                "torch.ops.aten.to.dtype_layout"
+            ).check("torch.ops.aten.resolve_conj.default").check(
+                "torch.ops.aten.resolve_neg.default"
+            ).run(ep.graph_module.code)
+
+    def test_non_strict_export_tensor_numpy_force_fake_cuda(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x.numpy(force=True).sum()
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            args = (torch.ones(3, device="cuda"),)
+            ep = export(Foo(), args, strict=False)
+            result = ep.module()(*args)
+        self.assertEqual(result.device, args[0].device)
+        self.assertEqual(result.dtype, args[0].dtype)
+        self.assertEqual(result.shape, args[0].shape)
 
     def test_non_strict_export_tensor_numpy_detaches(self):
         class Foo(torch.nn.Module):

@@ -197,20 +197,12 @@ class _NonStrictNumpyScalar(_NonStrictNumpyProxy):
         }[self._tensor.dtype]
 
     def __add__(self, other: object) -> object:
-        if (
-            is_fake_tensor(other)
-            and other.dtype == self._tensor.dtype
-            and other.device == self._tensor.device
-        ):
+        if is_fake_tensor(other) and other.dtype == self._tensor.dtype:
             return self._tensor + other
         self._unsupported("addition")
 
     def __radd__(self, other: object) -> object:
-        if (
-            is_fake_tensor(other)
-            and other.dtype == self._tensor.dtype
-            and other.device == self._tensor.device
-        ):
+        if is_fake_tensor(other) and other.dtype == self._tensor.dtype:
             return other + self._tensor
         self._unsupported("addition")
 

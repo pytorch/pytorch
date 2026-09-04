@@ -1795,10 +1795,15 @@ class TritonOverrides(OpOverrides):
             shape=(RBLOCK, XBLOCK),
         )
 
-        if torch.backends.cuda.matmul.fp32_precision == "tf32":
-            input_precision = "tf32"
-        else:
-            input_precision = "ieee"
+        precision = torch.backends.cuda.matmul.fp32_precision
+        if precision == "bfx9" and orig_a.dtype == torch.float32:
+            # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+            torch._logging.warning_once(
+                log,
+                "Triton does not support bfx9 precision; using IEEE precision instead.",
+            )
+            precision = "ieee"
+        input_precision = "tf32" if precision == "tf32" else "ieee"
 
         return f'tl.dot({a}, {b}, input_precision="{input_precision}")'
 
@@ -3348,7 +3353,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             collections.defaultdict(dict)
         )
         self.tma_min_block_sizes = dict[str, int]()
-        self.host_tma_descriptor_args: dict[str, TensorDescriptorOptions] = {}
+        # TensorDescriptorOptions for pointwise/reduction kernels; template
+        # kernels set a resolved {block_shape, shape, strides} dict directly
+        # (see TritonTemplateKernel.tma_descriptor).
+        self.host_tma_descriptor_args: dict[
+            str, TensorDescriptorOptions | dict[str, Any]
+        ] = {}
         self._host_tma_non_materializable: OrderedSet[str] = OrderedSet()
         self._host_tma_non_materializable_buffers: OrderedSet[str] | None = None
         self._emitted_device_tma = False
@@ -3573,6 +3583,28 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return False
 
         return any(stride == 1 for stride in stride_vars)
+
+    def _reject_if_template_host_tma(self, var: str) -> None:
+        """Bail out if `var` can no longer be host-side TMA but the template
+        already committed to a host descriptor for it.
+
+        A buffer used as both a template operand and an epilogue operand is one
+        kernel arg, and the two uses need different descriptors. The template has
+        already emitted its descriptor access, so the kernel cannot compile; raise
+        so this choice is dropped and a non-host-side one is used instead.
+        """
+        # Template registrations are plain dicts; epilogue ones are
+        # TensorDescriptorOptions and are free to fall back.
+        if isinstance(self.host_tma_descriptor_args.get(var), dict):
+            log.warning(
+                "host-side TMA disabled for this kernel: %s is both a template "
+                "operand and an epilogue operand, which need different descriptors",
+                var,
+            )
+            raise NotImplementedError(
+                f"host-side TMA cannot share arg {var} between a template operand "
+                "and an epilogue operand"
+            )
 
     @staticmethod
     def _is_host_tma_materializable(
@@ -4397,6 +4429,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             # Device-side TMA: reached for every case except the host-TMA branch
             # above (which returned) -- emit an in-kernel tl.make_tensor_descriptor.
+            self._reject_if_template_host_tma(var)
             self._emitted_device_tma = True
 
         else:
@@ -5052,12 +5085,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     for_store=False,
                 )
             elif is_sympy_integer_like(original_index):
+                self._reject_if_template_host_tma(var)
                 self._host_tma_non_materializable.add(var)
                 self.host_tma_descriptor_args.pop(var, None)
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
                 shape = ()
             else:
+                self._reject_if_template_host_tma(var)
                 self._host_tma_non_materializable.add(var)
                 self.host_tma_descriptor_args.pop(var, None)
                 line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
@@ -5212,6 +5247,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 ):
                     value_shape = ", ".join(map(str, value.shape))
                     indexing_str += f".broadcast_to({value_shape})"
+            self._reject_if_template_host_tma(var)
             self._host_tma_non_materializable.add(var)
             self.host_tma_descriptor_args.pop(var, None)
             line = f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})"
@@ -5580,7 +5616,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return "value"
             return "index"
 
-        cache_key = (src_dtype, reduction_type, value)
+        cache_key = (
+            src_dtype,
+            reduction_type,
+            value if logical_index is None else (value, logical_index),
+        )
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
 
@@ -6385,38 +6425,58 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
         return self._reshape_expr(value, shape, value_expr=value_expr)
 
+    def _emit_recursive_split(
+        self,
+        expr: str,
+        names: Sequence[str],
+        shape: Sequence[sympy.Expr | int | str],
+        dtype: torch.dtype,
+    ) -> None:
+        """Split a trailing axis into a power-of-two number of lanes."""
+        factor = len(names)
+        if factor <= 1 or factor & (factor - 1) != 0:
+            raise AssertionError(f"split factor must be a power of two: {factor}")
+        is_float8 = dtype in TRITON_FLOAT8_DTYPES
+        if factor == 2:
+            if not is_float8:
+                self.compute.writeline(f"{', '.join(names)} = tl.split({expr})")
+                return
+            raw_parts = tuple(
+                self.cse.newvar(dtype=torch.uint8, shape=shape[:-1]) for _ in names
+            )
+            self.compute.writeline(
+                f"{', '.join(map(str, raw_parts))} = tl.split({expr})"
+            )
+            for raw_part, name in zip(raw_parts, names):
+                self.compute.writeline(
+                    f"{name} = {raw_part}.to({triton_type(dtype)}, bitcast=True)"
+                )
+            return
+        half = factor // 2
+        split_shape = (*shape[:-1], half, 2)
+        part_shape = (*shape[:-1], half)
+        split_dtype = torch.uint8 if is_float8 else dtype
+        even = self.cse.newvar(dtype=split_dtype, shape=part_shape)
+        odd = self.cse.newvar(dtype=split_dtype, shape=part_shape)
+        self.compute.writeline(
+            f"{even}, {odd} = tl.split("
+            f"tl.reshape({expr}, {triton_shape_str(split_shape)}))"
+        )
+        self._emit_recursive_split(str(even), names[0::2], part_shape, dtype)
+        self._emit_recursive_split(str(odd), names[1::2], part_shape, dtype)
+
     def emit_split_via_reshape(
         self,
         value: CSEVariable,
         reshape_shape: Sequence[sympy.Expr | int | str],
         part_names: Sequence[str],
     ) -> None:
-        """Reshape ``value`` to expose the lane axis, then split it.
-
-        ``tl.split`` can only divide the trailing axis in two, so the caller
-        reshapes ``[..., n]`` to ``[..., n // factor, factor]`` first; the lane
-        axis has to be trailing before the split can see it.
-
-        float8 goes through uint8 because Triton's ``tl.split`` does not accept
-        fp8 operands.
-        """
+        """Reshape ``value`` to expose the trailing lane axis, then split it."""
         dtype = value.dtype
         if dtype is None:
             raise AssertionError("split value must have a known dtype")
-        is_float8 = dtype in TRITON_FLOAT8_DTYPES
-        value_expr = str(value)
-        if is_float8:
-            value_expr = f"{value_expr}.to(tl.uint8, bitcast=True)"
-        reshaped = self._reshape_expr(value, reshape_shape, value_expr=value_expr)
-        if not is_float8:
-            self.compute.writeline(f"{', '.join(part_names)} = tl.split({reshaped})")
-            return
-        raw_part_names = [f"{name}_uint8" for name in part_names]
-        self.compute.writeline(f"{', '.join(raw_part_names)} = tl.split({reshaped})")
-        for raw_name, part_name in zip(raw_part_names, part_names):
-            self.compute.writeline(
-                f"{part_name} = {raw_name}.to({triton_type(dtype)}, bitcast=True)"
-            )
+        expr = self._bitcast_reshape_expr(value, reshape_shape, dtype)
+        self._emit_recursive_split(expr, part_names, reshape_shape, dtype)
 
     def emit_broadcast_via_reshape(
         self,
@@ -7307,6 +7367,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             resolved = {}
             for inner, opts in self.host_tma_descriptor_args.items():
+                if isinstance(opts, dict):
+                    resolved[inner] = opts
+                    continue
                 dims = [_resolve_block_dim(s) for s in opts.block_shape]
                 resolved[inner] = {
                     "block_shape": dims,
