@@ -16,13 +16,11 @@
 
 #include <algorithm>
 #include <limits>
-#include <string_view>
 
 namespace at::native {
 namespace {
 
 using namespace mps;
-using namespace std::string_view_literals;
 
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
@@ -44,6 +42,7 @@ uint32_t grouped_mm_tile_rows(int64_t rows) {
 
 template <typename idx_t>
 GroupedMMParams<idx_t> grouped_mm_params(const Tensor& mat_a, const Tensor& mat_b, const Tensor& out, uint32_t groups) {
+  const auto& batched = mat_a.dim() == 3 ? mat_a : mat_b.dim() == 3 ? mat_b : out;
   return {
       .m = c10::checked_convert<uint32_t>(mat_a.size(-2), "mat_a.size(-2)"),
       .n = c10::checked_convert<uint32_t>(mat_b.size(-1), "mat_b.size(-1)"),
@@ -51,13 +50,11 @@ GroupedMMParams<idx_t> grouped_mm_params(const Tensor& mat_a, const Tensor& mat_
       .groups = groups,
       .a_stride_m = static_cast<idx_t>(mat_a.stride(-2)),
       .a_stride_k = static_cast<idx_t>(mat_a.stride(-1)),
-      .a_batch_stride = mat_a.dim() == 3 ? static_cast<idx_t>(mat_a.stride(0)) : idx_t(0),
       .b_stride_k = static_cast<idx_t>(mat_b.stride(-2)),
       .b_stride_n = static_cast<idx_t>(mat_b.stride(-1)),
-      .b_batch_stride = mat_b.dim() == 3 ? static_cast<idx_t>(mat_b.stride(0)) : idx_t(0),
       .out_stride_m = static_cast<idx_t>(out.stride(-2)),
       .out_stride_n = static_cast<idx_t>(out.stride(-1)),
-      .out_batch_stride = out.dim() == 3 ? static_cast<idx_t>(out.stride(0)) : idx_t(0),
+      .batch_stride = static_cast<idx_t>(batched.stride(0)),
   };
 }
 
@@ -77,13 +74,8 @@ bool grouped_mm_mpp_tensor_offsets_fit(uint64_t rows, uint64_t row_stride, uint6
     return true;
   }
 
-  const auto row_extent = rows - 1;
-  if (row_extent != 0 && row_stride > int_max / row_extent) {
-    return false;
-  }
-  const auto row_offset = row_extent * row_stride;
-  const auto col_extent = cols - 1;
-  return col_extent == 0 || col_stride <= (int_max - row_offset) / col_extent;
+  // The caller bounds dimensions and strides to int32, so the sum fits in uint64.
+  return (rows - 1) * row_stride + (cols - 1) * col_stride <= int_max;
 }
 
 // matmul2d takes int32 extents and strides and computes offsets relative to
@@ -103,44 +95,49 @@ bool grouped_mm_mpp_indices_fit(const GroupedMMParams<uint64_t>& params, uint32_
       grouped_mm_mpp_tensor_offsets_fit(tile_rows, params.out_stride_m, tile_cols, params.out_stride_n);
 }
 
-// Runs one of the jagged modes; jagged_rows selects whether the offsets split
-// the rows of mat_a (2d x 3d) or the shared contraction dim (2d x 2d).
-void grouped_mm_out_mps(const Tensor& mat_a,
-                        const Tensor& mat_b,
-                        const Tensor& offsets,
-                        const Tensor& out,
-                        bool jagged_rows) {
+// The operand ranks pick the jagged mode: 2d x 3d splits the rows of mat_a,
+// 3d x 2d the columns of mat_b, 2d x 2d the shared contraction dim.
+void grouped_mm_out_mps(const Tensor& mat_a, const Tensor& mat_b, const Tensor& offsets, const Tensor& out) {
   const auto groups = c10::checked_convert<uint32_t>(offsets.numel(), "number of groups");
   if (groups == 0 || out.numel() == 0) {
     return;
   }
 
-  const auto mode = jagged_rows ? "rows"sv : "k"sv;
-  const auto bm = grouped_mm_tile_rows(jagged_rows ? mat_a.size(0) / groups : mat_a.size(0));
+  const bool jagged_rows = mat_a.dim() == 2 && mat_b.dim() == 3;
+  const bool jagged_cols = mat_a.dim() == 3 && mat_b.dim() == 2;
+  const auto mode = jagged_rows ? "rows" : jagged_cols ? "cols" : "k";
   const auto params = grouped_mm_params<uint64_t>(mat_a, mat_b, out, groups);
+  const auto bm = grouped_mm_tile_rows(jagged_rows ? mat_a.size(0) / groups : mat_a.size(-2));
+  const auto mpp_bn = grouped_mm_mpp_tile_cols(params.n, mat_b.nbytes(), bm);
   // Every operand is either row or col major, because mpp matmul2d wants
   // to know the orientation in advance per operand (`n` row-major, `t` column major)
   // and output is always row-major, so the transposed-output 3d x 2d fallback call lands on the simdgroup kernels.
   const char a_layout = params.a_stride_k == 1 ? 'n' : 't';
   const char b_layout = params.b_stride_k == 1 ? 't' : 'n';
   const auto dtype = scalarToMetalTypeString(out);
-  const auto mpp_bn = grouped_mm_mpp_tile_cols(params.n, mat_b.nbytes(), bm);
   const auto mpp_kernel_name =
       fmt::format("grouped_mm_{}_mpp_{}{}_{}_bm{}_bn{}", mode, a_layout, b_layout, dtype, bm, mpp_bn);
   const bool use_mpp = has_mpp() && grouped_mm_mpp_indices_fit(params, bm, mpp_bn) && params.out_stride_n == 1 &&
       lib.hasFunction(mpp_kernel_name);
+  if (jagged_cols && !use_mpp) {
+    // Without matmul2d the jagged columns are cheaper to reach through the
+    // transpose identity, which the simdgroup rows kernels can store.
+    grouped_mm_out_mps(mat_b.transpose(0, 1), mat_a.transpose(-2, -1), offsets, out.transpose(0, 1));
+    return;
+  }
+
   const bool use_u32 = !use_mpp && offsetsFitIn<int32_t>(mat_a, mat_b, out);
   const auto kernel_name =
       use_mpp ? mpp_kernel_name : fmt::format("grouped_mm_{}_{}_bm{}{}", mode, dtype, bm, mtlIdxSuffix(use_u32));
   const auto pipeline = lib.getPipelineStateForFunc(kernel_name);
   const auto bn = use_mpp ? mpp_bn : kGroupedMMTileN;
-  // The rows grid covers the worst case of one extra partial tile per group;
-  // the kernel discards the excess tiles.
-  const auto threadgroups = MTLSizeMake(at::ceil_div<NSUInteger>(params.n, bn),
+  // The jagged grid axis covers the worst case of one extra partial tile per
+  // group; the kernel discards the excess tiles.
+  const auto threadgroups = MTLSizeMake(at::ceil_div<NSUInteger>(params.n, bn) + (jagged_cols ? groups : 0),
                                         at::ceil_div<NSUInteger>(params.m, bm) + (jagged_rows ? groups : 0),
-                                        jagged_rows ? 1 : groups);
-  const auto threads = MTLSizeMake(grouped_mm_mpp_simdgroups(bm, bn) * c10::metal::simdgroup_size, 1, 1);
-  const auto profile_name = fmt::format("grouped_mm_{}{}", mode, use_mpp ? "_mpp"sv : ""sv);
+                                        jagged_rows || jagged_cols ? 1 : groups);
+  const auto threads = MTLSizeMake(grouped_mm_simdgroups(bm, bn) * c10::metal::simdgroup_size, 1, 1);
+  const auto profile_name = fmt::format("grouped_mm_{}{}", mode, use_mpp ? "_mpp" : "");
   auto stream = getCurrentMPSStream();
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -148,58 +145,11 @@ void grouped_mm_out_mps(const Tensor& mat_a,
       auto encoder = stream->commandEncoder();
       getMPSProfiler().beginProfileKernel(pipeline, profile_name, {mat_a, mat_b, offsets}, stream);
       [encoder setComputePipelineState:pipeline];
-      mtlDispatchByIndexWidth<uint32_t, uint64_t>(use_u32, [&](auto idx_tag) {
-        using idx_t = typename decltype(idx_tag)::type;
-        mtl_setArgs(encoder, mat_a, mat_b, offsets, out, grouped_mm_params<idx_t>(mat_a, mat_b, out, groups));
-      });
-      [encoder dispatchThreadgroups:threadgroups threadsPerThreadgroup:threads];
-      getMPSProfiler().endProfileKernel(pipeline, stream);
-    }
-  });
-}
-
-std::string grouped_mm_cols_mpp_kernel_name(const Tensor& mat_a, const Tensor& mat_b, const Tensor& out) {
-  const auto bm = grouped_mm_tile_rows(mat_a.size(-2));
-  const auto bn = grouped_mm_mpp_tile_cols(mat_b.size(-1), mat_b.nbytes(), bm);
-  const char a_layout = mat_a.stride(-1) == 1 ? 'n' : 't';
-  const char b_layout = mat_b.stride(-2) == 1 ? 't' : 'n';
-  const auto dtype = scalarToMetalTypeString(out);
-  return fmt::format("grouped_mm_cols_mpp_{}{}_{}_bm{}_bn{}", a_layout, b_layout, dtype, bm, bn);
-}
-
-bool grouped_mm_cols_mpp_available(const Tensor& mat_a, const Tensor& mat_b, const Tensor& offsets, const Tensor& out) {
-  const auto groups = c10::checked_convert<uint32_t>(offsets.numel(), "number of groups");
-  const auto bm = grouped_mm_tile_rows(mat_a.size(-2));
-  const auto bn = grouped_mm_mpp_tile_cols(mat_b.size(-1), mat_b.nbytes(), bm);
-  const auto params = grouped_mm_params<uint64_t>(mat_a, mat_b, out, groups);
-  return has_mpp() && grouped_mm_mpp_indices_fit(params, bm, bn) && params.out_stride_n == 1 &&
-      lib.hasFunction(grouped_mm_cols_mpp_kernel_name(mat_a, mat_b, out));
-}
-
-// 3d x 2d: the offsets split the columns of mat_b and out, so the row-major
-// out is written directly instead of routing through the transpose identity
-// (which would need a transposed store that matmul2d does not have).
-void grouped_mm_cols_mpp_out_mps(const Tensor& mat_a, const Tensor& mat_b, const Tensor& offsets, const Tensor& out) {
-  const auto groups = c10::checked_convert<uint32_t>(offsets.numel(), "number of groups");
-  if (groups == 0 || out.numel() == 0) {
-    return;
-  }
-
-  const auto bm = grouped_mm_tile_rows(mat_a.size(-2));
-  const auto bn = grouped_mm_mpp_tile_cols(mat_b.size(-1), mat_b.nbytes(), bm);
-  const auto params = grouped_mm_params<uint64_t>(mat_a, mat_b, out, groups);
-  const auto pipeline = lib.getPipelineStateForFunc(grouped_mm_cols_mpp_kernel_name(mat_a, mat_b, out));
-  const auto threadgroups =
-      MTLSizeMake(at::ceil_div<NSUInteger>(params.n, bn) + groups, at::ceil_div<NSUInteger>(params.m, bm), 1);
-  const auto threads = MTLSizeMake(grouped_mm_mpp_simdgroups(bm, bn) * c10::metal::simdgroup_size, 1, 1);
-  auto stream = getCurrentMPSStream();
-
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      auto encoder = stream->commandEncoder();
-      getMPSProfiler().beginProfileKernel(pipeline, "grouped_mm_cols_mpp", {mat_a, mat_b, offsets}, stream);
-      [encoder setComputePipelineState:pipeline];
-      mtl_setArgs(encoder, mat_a, mat_b, offsets, out, params);
+      if (use_u32) {
+        mtl_setArgs(encoder, mat_a, mat_b, offsets, out, grouped_mm_params<uint32_t>(mat_a, mat_b, out, groups));
+      } else {
+        mtl_setArgs(encoder, mat_a, mat_b, offsets, out, params);
+      }
       [encoder dispatchThreadgroups:threadgroups threadsPerThreadgroup:threads];
       getMPSProfiler().endProfileKernel(pipeline, stream);
     }
@@ -223,24 +173,7 @@ Tensor _grouped_mm_mps(const Tensor& mat_a,
   }
 
   TORCH_INTERNAL_ASSERT(offs.has_value());
-  const auto& offsets = *offs;
-  if (mat_a.dim() == 2 && mat_b.dim() == 3) {
-    grouped_mm_out_mps(mat_a, mat_b, offsets, out, /*jagged_rows=*/true);
-  } else if (mat_a.dim() == 3 && mat_b.dim() == 2) {
-    if (grouped_mm_cols_mpp_available(mat_a, mat_b, offsets, out)) {
-      grouped_mm_cols_mpp_out_mps(mat_a, mat_b, offsets, out);
-    } else {
-      // Without matmul2d the jagged columns are cheaper to reach through the
-      // transpose identity, which the simdgroup rows kernels can store.
-      grouped_mm_out_mps(mat_b.transpose(0, 1),
-                         mat_a.transpose(-2, -1),
-                         offsets,
-                         out.transpose(0, 1),
-                         /*jagged_rows=*/true);
-    }
-  } else {
-    grouped_mm_out_mps(mat_a, mat_b, offsets, out, /*jagged_rows=*/false);
-  }
+  grouped_mm_out_mps(mat_a, mat_b, *offs, out);
   return out;
 }
 

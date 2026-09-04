@@ -11651,7 +11651,9 @@ class TestGroupedMM(TestCase):
 
         self.assertEqual(eager.shape, fake.shape)
         self.assertEqual(eager.stride(), fake.stride())
-        self.assertEqual(eager.stride(), (40, 8, 1))
+        # CUDA and MPS pad the last dim to 16 bytes; ROCm allocates contiguous.
+        expected_stride = (35, 7, 1) if TEST_WITH_ROCM else (40, 8, 1)
+        self.assertEqual(eager.stride(), expected_stride)
 
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
