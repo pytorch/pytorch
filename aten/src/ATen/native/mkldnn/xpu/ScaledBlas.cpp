@@ -265,6 +265,7 @@ Tensor& _scaled_gemm(
     const std::optional<Tensor>& bias,
     const bool use_fast_accum,
     Tensor& out,
+    const std::optional<Tensor>& scale_result = std::nullopt,
     const std::optional<Tensor>& alpha = std::nullopt) {
   // Note: XPU does not support fast_accum for now, we will warn and always pass
   // false to the call.
@@ -272,8 +273,6 @@ Tensor& _scaled_gemm(
     TORCH_WARN(
         "scaled_mm: fast_accum is not supported in XPU for now. It would silently set use_fast_accum to false.");
   }
-  // TODO: scale_result is not defined or used!
-  std::optional<Tensor> scale_result = std::nullopt;
   at::native::onednn::scaled_matmul(
       mat1,
       mat2,
@@ -320,8 +319,8 @@ Tensor& _scaled_gemm(
 //        BlockWise1x32: [K//32, N] (MXFP8/MXFP4, Float8_e8m0fnu);
 //        BlockWise1x16: [K//16, N] (NVFP4, Float8_e4m3fn);
 //        BlockWise128x128: [K//128, N//128]
-//    - `scale_result`: a scalar tensor with the scale of the output (not
-//    currently supported on XPU)
+//    - `scale_result`: a scalar tensor with the scale of the output, only
+//    applied when the output is a Float8 type (ignored for 16/32-bit outputs)
 //    - `use_fast_accum`: not supported on XPU, silently ignored
 //    - `out`: a reference to the output tensor
 
@@ -453,7 +452,6 @@ Tensor& _scaled_mm_out_xpu(
     return out;
   }
 
-  // TODO: Scale_result is not supported by now!!
   // API shapes match CUDA v1. oneDNN needs row-major contiguous.
   // scale_a: [M, K//128] or [M//128, K//128] or [M, K//32] or [M, K//16]
   // scale_b: [K//128, N] or [K//128, N//128] or [K//32, N] or [K//16, N]
@@ -476,6 +474,11 @@ Tensor& _scaled_mm_out_xpu(
     // already match oneDNN's expected row-major layout. Just ensure contiguous.
     scale_b_internal = scale_b.is_contiguous() ? scale_b : scale_b.contiguous();
   }
+  // FP8-out only (CUDA semantics); reciprocal since oneDNN DST scale divides.
+  std::optional<Tensor> dst_scale = std::nullopt;
+  if (scale_result && isFloat8Type(out.scalar_type())) {
+    dst_scale = scale_result->reciprocal();
+  }
   return _scaled_gemm(
       mat1,
       mat2,
@@ -485,7 +488,8 @@ Tensor& _scaled_mm_out_xpu(
       scaling_choice_b,
       bias,
       false /* use_fast_accum */,
-      out);
+      out,
+      dst_scale);
 }
 
 Tensor _scaled_mm_xpu(
@@ -1097,6 +1101,7 @@ Tensor& _scaled_nvfp4_nvfp4(
       bias,
       use_fast_accum,
       out,
+      /*scale_result=*/std::nullopt,
       alpha);
 
   return out;
