@@ -430,11 +430,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     @staticmethod
     def _is_privateuse1_tensor_class(value: type[object]) -> bool:
-        # PrivateUse1 tensor classes can be registered after the static class cache
-        # is populated, so resolve them at the constructor routing point.
-        if value not in torch._tensor_classes:
-            return False
-
         privateuse1_module = getattr(
             torch, torch._C._get_privateuse1_backend_name(), None
         )
