@@ -26,7 +26,7 @@ from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, raise_type_error
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, is_constant_source, is_from_local_source
+from ..source import is_constant_source, is_from_local_source
 from ..utils import (
     _item_debug_repr,
     cmp_name_to_op_mapping,
@@ -184,6 +184,11 @@ class BaseSetVariable(VariableTracker):
         ):
             kwargs["source"] = None
         return super().clone(**kwargs)
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        return VariableTracker.build(tx, hasattr(self.python_type(), name))
 
     def install_set_contains_guard(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
@@ -789,28 +794,6 @@ class OrderedSetClassVariable(VariableTracker):
 
     def as_python_constant(self) -> type[OrderedSet[Any]]:
         return OrderedSet
-
-    def tp_getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        # Mirror the names call_method below can dispatch (__new__ plus the set
-        # methods invoked unbound, e.g. OrderedSet.add(s, x)).  Without this the
-        # generic MRO walk finds nothing on the class and raises AttributeError.
-        if name == "__new__" or getattr(set, name, None) in set_methods:
-            from .misc import CallMethodVariable
-
-            if self.source:
-                attr_source = AttrSource(self.source, name)
-            else:
-                attr_source = None
-            return CallMethodVariable(
-                self,
-                name,
-                py_type=type(getattr(OrderedSet, name)),
-                source=attr_source,
-            )
-        else:
-            return super().tp_getattro_impl(tx, name)
 
     def call_method(
         self,

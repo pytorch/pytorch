@@ -624,19 +624,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         # Step 6: Metaclass non-data descriptor or plain attr.
         # For C-level descriptors with proper VTs, invoke tp_descr_get to
-        # produce a bound method. Callable fallbacks get MTV (routes
-        # call_function through call_method); non-callable get VT.build.
+        # produce a bound method. For everything else, defer to GetAttrVariable
+        # which routes call_function through call_method at runtime.
         if meta_attr is not NO_SUCH_SUBOBJ:
             metacls_source = TypeSource(self.source) if self.source else None
             metacls_vt = VariableTracker.build(tx, type(self.value), metacls_source)
             result = _resolve_descriptor_get(tx, meta_attr, self, metacls_vt, source)
             if result is not None:
                 return result
-            if callable(meta_attr):
-                return variables.CallMethodVariable(
-                    self, name, py_type=type(meta_attr), source=source
-                )
-            return VariableTracker.build(tx, meta_attr, source)
+            return variables.GetAttrVariable(self, name, type(meta_attr), source=source)
 
         # __getattr__ on metaclass (not part of type_getattro proper —
         # CPython handles this via slot_tp_getattr_hook).
@@ -691,7 +687,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         resolved = type.__getattribute__(self.value, name)
         if source:
             return VariableTracker.build(tx, resolved, source)
-        return VariableTracker.build(tx, resolved)
+        from . import ConstantVariable
+
+        if ConstantVariable.is_literal(resolved):
+            return VariableTracker.build(tx, resolved)
+        return variables.GetAttrVariable(self, name, type(resolved), source=source)
 
     def _descriptor_defining_class_vt(
         self,
@@ -803,7 +803,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name in cmp_name_to_op_mapping and not isinstance(
             cls_attr, types.FunctionType
         ):
-            return variables.CallMethodVariable(
+            return variables.GetAttrVariable(
                 self, name, py_type=type(cls_attr), source=source
             )
 
@@ -863,9 +863,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
             ):
                 return VariableTracker.build(tx, cls_attr, source)
-            return variables.CallMethodVariable(
-                self, name, py_type=type(cls_attr), source=source
-            )
+            return variables.GetAttrVariable(self, name, type(cls_attr), source=source)
 
         # Everything else: FunctionType, etc.
         return VariableTracker.build(tx, cls_attr, source)
@@ -881,9 +879,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             cls_attr
         ):
-            return variables.CallMethodVariable(self, name, source=source)
+            return variables.GetAttrVariable(self, name, source=source)
         if self.value is collections.OrderedDict:
-            return variables.CallMethodVariable(self, name, py_type=type(cls_attr))
+            return variables.GetAttrVariable(self, name, py_type=type(cls_attr))
         return VariableTracker.build(tx, cls_attr, source)
 
     def invoke_cls_descriptor_get(
@@ -3369,18 +3367,93 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ],
         )
 
-    def lookup_type_attr(self, tx: "InstructionTranslatorBase", name: str) -> object:
+    def generic_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        """Dynamo implementation of CPython's PyObject_GenericGetAttr.
+
+        This mirrors object.__getattribute__ and is called from:
+        - tp_getattribute_impl (for objects without a custom __getattribute__)
+        - SuperVariable.call_method (when super().__getattribute__() resolves
+          to object.__getattribute__)
+
+        The algorithm: MRO walk -> data descriptor -> instance __dict__ ->
+        non-data descriptor / plain class attr -> dynamic fallback ->
+        AttributeError.
+
+        There is deliberately no __getattr__ step: CPython chains to
+        __getattr__ in _Py_slot_tp_getattr_hook, one level above
+        GenericGetAttr, which is tp_getattro_impl here.
+        """
+        source: Source | None = AttrSource(self.source, name) if self.source else None
+
+        if name == "__dict__":
+            if not hasattr(self.value, "__dict__"):
+                raise_observed_exception(AttributeError, tx)
+            return self.get_dict_vt(tx)
+
+        # TODO(anijain2305) - Investigate if we need specialization for more
+        # dunder attrs. inspect.getattr_static does not return correct value for
+        # them.
+        if name == "__class__":
+            cls_source: Source | None = source
+            if source is None:
+                cls_source = self.cls_source
+            else:
+                cls_source = source
+            return VariableTracker.build(tx, type(self.value), cls_source)
+
         from ..mutation_guard import unpatched_nn_module_init
 
+        # ---- CPython attribute lookup algorithm ----
+        # Mirror object.__getattribute__ (PyObject_GenericGetAttr):
+        #   1. type_attr = lookup name in type(obj).__mro__
+        #   2. if type_attr is a DATA descriptor → invoke it
+        #   3. if name in obj.__dict__ → return as-is (no descriptor invocation)
+        #   4. if type_attr is a non-data descriptor → invoke it
+        #   5. if type_attr is a plain class variable → return it
+        #   6. __getattr__ fallback
+        #   7. raise AttributeError
+        #
+        # Between steps 5 and 6, we also handle objects with custom storage
+        # that aren't visible via the MRO walk or instance __dict__ (step 5b).
+        #
+        # Step 1: Single MRO walk on the type (cached).
         type_attr = self.lookup_class_mro_attr(name)
+
+        # Dynamo patches nn.Module.__init__ at import time to inject tracing
+        # hooks.  Undo that here so the unpatched original is traced instead.
         if type_attr is torch.nn.Module.__init__:
             type_attr = unpatched_nn_module_init
-        return type_attr
 
-    def dynamic_getattr_fallback(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker | None:
-        source: Source | None = AttrSource(self.source, name) if self.source else None
+        # Step 2: Data descriptors on the type take priority over instance dict.
+        if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
+            return self.resolve_data_descriptor(tx, name, type_attr, source)
+
+        # Step 3: Instance __dict__ — return as-is, no descriptor invocation.
+        result = self.lookup_instance_dict(tx, name)
+        if result is not None:
+            return result
+
+        # Step 4-5: Non-data descriptor or plain class attribute.
+        if type_attr is not NO_SUCH_SUBOBJ:
+            return self.resolve_type_attr(tx, name, type_attr, source)
+
+        # Step 5b: Dynamic fallback for attributes that exist on the live
+        # object but aren't visible to the static MRO walk or instance
+        # __dict__ check above.  This covers objects with custom storage
+        # backends (e.g. threading.local uses a per-thread dict not
+        # accessible via obj.__dict__) and C extensions that store data
+        # outside the normal Python object layout.
+        #
+        # This is NOT the same as the C-level data descriptor fallback in
+        # resolve_data_descriptor (step 2): that handles descriptors found
+        # on the type MRO (like member_descriptor for __slots__), while this
+        # handles attributes that aren't on the type MRO at all.
+        #
+        # Only safe when the class doesn't override __getattribute__,
+        # otherwise we'd run arbitrary user code.
+        # Skip if side effects have mutations that supersede the live object.
         has_instance_mutations = tx.output.side_effects.has_pending_mutation_of_attr(
             self,
             name,
@@ -3395,48 +3468,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return VariableTracker.build(tx, resolved, source)
             except AttributeError:
                 pass
-        return None
 
-    def lookup_dunder_shortcut(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker | None:
-        """__dict__/__class__ must resolve to the mutation-tracked dict and the
-        real type rather than through the generic getset-descriptor path.
-
-        Called from every entry point into the lookup -- tp_getattro_impl (before
-        the user __getattribute__ dispatch, to avoid re-entering it) and
-        object_generic_getattr (which explicit __getattribute__ and
-        super().__getattribute__ reach directly).  Returns None to decline.
-        """
-        if name == "__dict__":
-            if not hasattr(self.value, "__dict__"):
-                raise_observed_exception(AttributeError, tx)
-            return self.get_dict_vt(tx)
-
-        if name == "__class__":
-            cls_source = (
-                AttrSource(self.source, name) if self.source else self.cls_source
-            )
-            return VariableTracker.build(tx, type(self.value), cls_source)
-
-        return None
+        # Step 7: AttributeError.
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
+            kwargs={"name": variables.ConstantVariable.create(name), "obj": self},
+        )
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        # TODO(anijain2305) - Investigate if we need specialization for more
-        # dunder attrs. inspect.getattr_static does not return correct value
-        # for them.
-        #
-        # These must come before the __getattribute__ dispatch because
-        # descriptor resolution (resolve_type_attr, resolve_data_descriptor)
-        # calls self.tp_getattro_impl(tx, "__class__") internally.  If
-        # __getattribute__ is overridden, that dispatch would re-enter the
-        # attribute lookup and recurse infinitely.
-        shortcut = self.lookup_dunder_shortcut(tx, name)
-        if shortcut is not None:
-            return shortcut
-
         # Literal translation of CPython's _Py_slot_tp_getattr_hook: run
         # __getattribute__ (custom or generic), and ONLY on AttributeError chain
         # to __getattr__ -- never re-walk GenericGetAttr.  When the type defines
@@ -3469,8 +3512,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # if present, else GenericGetAttr with NO __getattr__ fallback. Mirrors
         # CPython's _Py_slot_tp_getattro (the no-__getattr__ dispatcher):
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9603-L9608
-        from .object_protocol import object_generic_getattr
-
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
@@ -3484,7 +3525,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source=new_source,
             ).call_function(tx, [VariableTracker.build(tx, name)], {})
 
-        return object_generic_getattr(tx, self, name)
+        return self.generic_getattr(tx, name)
 
     def resolve_data_descriptor(
         self,
@@ -3652,14 +3693,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
             or is_cython_function(type_attr)
         ):
-            return variables.CallMethodVariable(
-                self, name, py_type=type(type_attr), source=source
-            )
+            return variables.GetAttrVariable(self, name, type(type_attr), source=source)
 
         if inspect.ismethoddescriptor(type_attr):
-            # Deliberately no py_type: the class descriptor's type is not the
-            # type instance access returns.
-            return variables.CallMethodVariable(self, name, source=source)
+            return variables.GetAttrVariable(self, name, source=source)
 
         # Plain class variable (or MethodType, C-level non-data descriptor
         # without __get__, etc.).
