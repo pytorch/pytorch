@@ -13,25 +13,28 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_distributed import requires_world_size
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
+    DISTRIBUTED_BACKEND,
     FSDPInitMode,
     FSDPTestContinuous,
-    get_devtype,
     MLP,
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
-
-device_type = torch.device(get_devtype())
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -50,18 +53,52 @@ class PassType(Enum):
     BWD = auto()
 
 
-class TestCommunication(FSDPTestContinuous):
+class FSDPCommTestBase(FSDPTestContinuous):
+    """Device-agnostic base for FSDP communication tests.
+
+    Mirrors the ``ExecOrderTestBase`` / ``FineTuneTestBase`` pattern: the
+    intermediate base holds ``backend_str`` so the device-specific generated
+    class inherits it rather than ports it (a ported classmethod cannot see
+    the variant's device_type). Shared by both ``TestCommunication`` and
+    ``TestExplicitUnshard``.
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def _resolved_device_type(cls) -> str:
+        dt = cls.device_type
+        if dt == "privateuse1":
+            dt = torch._C._get_privateuse1_backend_name()
+        return dt
+
+    @classmethod
+    def backend_str(cls) -> str:
+        try:
+            return dist.get_default_backend_for_device(cls._resolved_device_type())
+        except ValueError:
+            # Devices without a registered default backend (e.g. ``hpu`` unless
+            # the vendor extension registers ``hccl`` via ``register_backend``):
+            # fall back to the historical ``common_fsdp`` ``DISTRIBUTED_BACKEND``
+            # ("hccl" on HPU), preserving the pre-refactor behavior.
+            return DISTRIBUTED_BACKEND
+
+    @property
+    def world_size(self) -> int:
+        return _get_device_module(self.device_type).device_count()
+
+
+class TestCommunication(FSDPCommTestBase):
     """Tests ``FullyShardedDataParallel``'s collective communication usage."""
 
     def _init_model(
         self,
-        device,
         nested_model: bool,
         sharding_strategy: ShardingStrategy,
     ):
         fsdp_kwargs = {
             "sharding_strategy": sharding_strategy,
-            "device_id": device_type.type,
+            "device_id": self._resolved_device_type(),
         }
         if nested_model:
             model = NestedWrappedModule.init(
@@ -201,7 +238,11 @@ class TestCommunication(FSDPTestContinuous):
             f"Number of all-gathers: {num_all_gathers}"
         )
 
-    @skip_if_lt_x_gpu(2)
+    @requires_world_size(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize("nested_model", [False, True])
     @parametrize("use_no_sync", [False, True])
     @parametrize("sharding_strategy", [ShardingStrategy.SHARD_GRAD_OP, None])
@@ -226,10 +267,11 @@ class TestCommunication(FSDPTestContinuous):
             sharding_strategy (Optional[ShardingStrategy]): Configures the
                 FSDP algorithm.
         """
+        device_type = torch.device(self._resolved_device_type())
         # Enable execution order checking
         dist.set_debug_level(dist.DebugLevel.DETAIL)
         # Initialize the model and inputs
-        fsdp_model = self._init_model(device_type, nested_model, sharding_strategy)
+        fsdp_model = self._init_model(nested_model, sharding_strategy)
         batch = fsdp_model.module.get_input(device_type)
         # Count the number of FSDP instances that manage parameters since the
         # number of collectives are a function of this number
@@ -289,14 +331,20 @@ class TestCommunication(FSDPTestContinuous):
                 self.assertEqual(num_reduce_scatters, ref_num_reduce_scatters)
 
 
-class TestExplicitUnshard(FSDPTestContinuous):
+class TestExplicitUnshard(FSDPCommTestBase):
     @property
     def world_size(self) -> int:
         return min(_get_device_module(self.device_type).device_count(), 2)
 
-    @skip_if_lt_x_gpu(2)
+    @requires_world_size(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize("use_orig_params", [False, True])
     def test_unshard_async(self, device, use_orig_params: bool):
+        device_type = torch.device(self._resolved_device_type())
+
         class ReduceModule(nn.Module):
             def __init__(self, dim: int, group: dist.ProcessGroup):
                 super().__init__()
@@ -379,7 +427,11 @@ class TestExplicitUnshard(FSDPTestContinuous):
             self.assertEqual(losses[0], losses[1])
             model.module.mlps._wait_unshard_streams_on_current_stream()
 
-    @skip_if_lt_x_gpu(2)
+    @requires_world_size(2)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.fsdp,
+    )
     @parametrize("use_orig_params", [False, True])
     @parametrize("async_op", [False, True])
     def test_unshard_after_backward(
@@ -390,6 +442,7 @@ class TestExplicitUnshard(FSDPTestContinuous):
         This is a regression test for issue #168947 where a Stream was
         incorrectly passed instead of an Event to UnshardHandle.
         """
+        device_type = torch.device(self._resolved_device_type())
         model = nn.Sequential(
             MLP(dim=8),
             nn.Linear(8, 4, device=device_type.type),
@@ -419,12 +472,11 @@ class TestExplicitUnshard(FSDPTestContinuous):
             self.assertTrue(param.numel() > 0)
 
 
-devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
-    TestCommunication, globals(), only_for=devices, allow_xpu=True
+    TestCommunication, globals(), except_for="cpu", allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestExplicitUnshard, globals(), only_for=devices, allow_xpu=True
+    TestExplicitUnshard, globals(), except_for="cpu", allow_xpu=True
 )
 if __name__ == "__main__":
     run_tests()
