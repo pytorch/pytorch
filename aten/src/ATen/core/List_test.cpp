@@ -1135,6 +1135,20 @@ TEST(ListTestNonIValueBasedList, useCountCountsSharedStorage) {
   EXPECT_EQ(1, list.use_count());
 }
 
+TEST(ListTestNonIValueBasedList, emplaceConvertsToTheElementType) {
+  // The argument names an IValue overload of its own; emplace has to build the
+  // element type first, or the list holds a value elementType() disagrees with
+  // and reading it back fails.
+  List<double> list({1.5});
+  list.emplace(list.begin(), 1);
+  list.emplace_back(2);
+
+  EXPECT_EQ(3, list.size());
+  EXPECT_DOUBLE_EQ(1.0, list.get(0));
+  EXPECT_DOUBLE_EQ(1.5, list.get(1));
+  EXPECT_DOUBLE_EQ(2.0, list.get(2));
+}
+
 TEST(ListTestNonIValueBasedList, copyHasSeparateStorage) {
   List<int64_t> list1;
   List<int64_t> list2(list1.copy());

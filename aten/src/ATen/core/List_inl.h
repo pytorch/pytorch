@@ -266,8 +266,10 @@ typename List<T>::iterator List<T>::insert(iterator pos, T&& value) const {
 template<class T>
 template<class... Args>
 typename List<T>::iterator List<T>::emplace(iterator pos, Args&&... value) const {
-  // TODO Use ListElementFrom?
-  return iterator { impl_->list.emplace(pos.iterator_, std::forward<Args>(value)...) };
+  // Build T first, or the IValue picks the args' own overload, not T's.
+  return iterator{impl_->list.emplace(
+      pos.iterator_,
+      c10::detail::ListElementFrom<T>::from(T(std::forward<Args>(value)...)))};
 }
 
 template<class T>
@@ -292,8 +294,8 @@ void List<T>::append(List<T> b) const {
 template<class T>
 template<class... Args>
 void List<T>::emplace_back(Args&&... args) const {
-  // TODO Use ListElementFrom?
-  impl_->list.push_back(T(std::forward<Args>(args)...));
+  impl_->list.push_back(
+      c10::detail::ListElementFrom<T>::from(T(std::forward<Args>(args)...)));
 }
 
 template<class T>
@@ -362,4 +364,3 @@ void List<T>::unsafeSetElementType(TypePtr t) {
 }
 
 }
-
