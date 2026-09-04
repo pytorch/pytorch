@@ -92,8 +92,11 @@ class MPSEventPtrTarget : public c10::intrusive_ptr_target {
     return m_event;
   }
 
-  void record(bool needsLock, bool syncEvent = false) {
-    m_event->record(needsLock, syncEvent);
+  void record(
+      bool needsLock,
+      bool syncEvent = false,
+      MPSStream* stream = nullptr) {
+    m_event->record(needsLock, syncEvent, stream);
   }
   bool synchronize() {
     return m_event->synchronize();
