@@ -36,7 +36,10 @@ except ImportError:
     raise unittest.SkipTest("requires triton")  # noqa: B904
 
 from torch._inductor import config
-from torch._inductor.heuristics.triton_codegen.reduction import ROCmReductionHeuristic
+from torch._inductor.heuristics.triton_codegen.reduction import (
+    ROCmReductionHeuristic,
+    XPUReductionHeuristic,
+)
 from torch._inductor.runtime.hints import (
     AttrsDescriptorWrapper,
     AutotuneHint,
@@ -212,27 +215,55 @@ class TestTritonHeuristics(TestCase):
         with self.assertRaisesRegex(AssertionError, "exceeds Triton maximum"):
             make_matmul_triton_config({"x": 256, "y": 128, "r": 64}, 8, 1)
 
-    @parametrize("rnumel", [256, 1024])
     @parametrize(
-        "reduction_hint,rsplit_size",
+        "xnumel,rnumel,reduction_hint,rsplit_size,expected_max_configs",
         [
-            (ReductionHint.INNER, None),
-            (ReductionHint.INNER, 128),
-            (ReductionHint.OUTER, None),
-            (ReductionHint.OUTER_TINY, None),
+            (2048, 128, ReductionHint.INNER, None, [(1, 2), (8, 2), (32, 2)]),
+            (2048, 128, ReductionHint.OUTER, None, [(32, 8), (1, 2), (8, 8)]),
+            (
+                2048,
+                128,
+                ReductionHint.OUTER_TINY,
+                None,
+                [(4, 4), (1, 2), (8, 8), (32, 8)],
+            ),
+            (512, 256, ReductionHint.INNER, None, [(1, 2), (8, 2)]),
+            (1024, 256, ReductionHint.INNER, None, [(4, 1), (1, 2), (8, 2)]),
+            (2048, 256, ReductionHint.DEFAULT, None, [(1, 2), (8, 8)]),
+            (2048, 256, ReductionHint.INNER, None, [(4, 1), (1, 2), (8, 2)]),
+            (2048, 256, ReductionHint.INNER, 128, [(1, 2), (8, 2)]),
+            (2048, 256, ReductionHint.OUTER, None, [(8, 8), (1, 2)]),
+            (
+                2048,
+                256,
+                ReductionHint.OUTER_TINY,
+                None,
+                [(2, 4), (1, 2), (8, 8)],
+            ),
+            (2048, 512, ReductionHint.INNER, None, [(2, 1), (1, 4), (8, 4)]),
+            (2048, 512, ReductionHint.INNER, 128, [(1, 4), (8, 4)]),
+            (2048, 512, ReductionHint.OUTER, None, [(8, 8), (1, 4)]),
+            (2048, 512, ReductionHint.OUTER_TINY, None, [(1, 4), (8, 8)]),
+            (2048, 1024, ReductionHint.INNER, None, [(1, 1), (1, 8)]),
+            (2048, 1024, ReductionHint.INNER, 128, [(1, 8)]),
+            (2048, 1024, ReductionHint.OUTER, None, [(1, 8)]),
+            (2048, 1024, ReductionHint.OUTER_TINY, None, [(1, 8)]),
+            (2048, 2048, ReductionHint.INNER, None, [(1, 8)]),
         ],
     )
     @parametrize("max_autotune_flag", ["max_autotune", "max_autotune_pointwise"])
     def test_persistent_max_autotune_includes_default_config(
-        self, rnumel, reduction_hint, rsplit_size, max_autotune_flag
+        self,
+        xnumel,
+        rnumel,
+        reduction_hint,
+        rsplit_size,
+        expected_max_configs,
+        max_autotune_flag,
     ):
-        size_hints = {"x": 2048, "r0_": rnumel}
+        size_hints = {"x": xnumel, "r0_": rnumel}
         inductor_meta = {} if rsplit_size is None else {"RSPLIT_SIZE": rsplit_size}
         triton_meta = {"device": self._fake_cuda_device_properties()}
-        expected_inner_configs = {
-            256: [(4, 1), (1, 2), (8, 2)],
-            1024: [(1, 1), (1, 8)],
-        }
 
         default_configs = _persistent_reduction_configs(
             size_hints=size_hints,
@@ -247,20 +278,68 @@ class TestTritonHeuristics(TestCase):
             triton_meta=triton_meta,
         )
 
-        self.assertEqual(len(default_configs), 1)
-        if reduction_hint == ReductionHint.INNER and rsplit_size is None:
-            self.assertEqual(
-                [
-                    (config.kwargs["XBLOCK"], config.num_warps)
-                    for config in max_autotune_configs
-                ],
-                expected_inner_configs[rnumel],
+        default_keys = [triton_config_to_hashable(c) for c in default_configs]
+        max_autotune_keys = [triton_config_to_hashable(c) for c in max_autotune_configs]
+        self.assertEqual(max_autotune_keys[: len(default_keys)], default_keys)
+        self.assertEqual(len(max_autotune_keys), len(set(max_autotune_keys)))
+        self.assertEqual(
+            [(c.kwargs["XBLOCK"], c.num_warps) for c in max_autotune_configs],
+            expected_max_configs,
+        )
+
+    @parametrize(
+        "heuristic_cls,device_type,warp_size,expected_max_configs",
+        [
+            (
+                ROCmReductionHeuristic,
+                "hip",
+                64,
+                [(4, 1), (1, 2), (4, 2), (8, 2), (16, 2), (2, 4)],
+            ),
+            (XPUReductionHeuristic, "xpu", 32, [(8, 8), (1, 2), (8, 2)]),
+        ],
+    )
+    @parametrize("max_autotune_flag", ["max_autotune", "max_autotune_pointwise"])
+    def test_backend_persistent_max_autotune_retains_candidates(
+        self,
+        heuristic_cls,
+        device_type,
+        warp_size,
+        expected_max_configs,
+        max_autotune_flag,
+    ):
+        triton_meta = {
+            "device": DeviceProperties(
+                type=device_type,
+                index=0,
+                multi_processor_count=1,
+                cc=80,
+                major=8,
+                regs_per_multiprocessor=65536,
+                max_threads_per_multi_processor=2048,
+                max_threads_per_block=1024,
+                warp_size=warp_size,
             )
+        }
+        heuristic = heuristic_cls()
+        kwargs = {
+            "size_hints": {"x": 2048, "r0_": 256},
+            "reduction_hint": ReductionHint.INNER,
+            "triton_meta": triton_meta,
+        }
+        default_configs = heuristic.get_persistent_configs(**kwargs, inductor_meta={})
+        max_autotune_configs = heuristic.get_persistent_configs(
+            **kwargs, inductor_meta={max_autotune_flag: True}
+        )
 
         default_keys = [triton_config_to_hashable(c) for c in default_configs]
         max_autotune_keys = [triton_config_to_hashable(c) for c in max_autotune_configs]
         self.assertEqual(max_autotune_keys[: len(default_keys)], default_keys)
         self.assertEqual(len(max_autotune_keys), len(set(max_autotune_keys)))
+        self.assertEqual(
+            [(c.kwargs["XBLOCK"], c.num_warps) for c in max_autotune_configs],
+            expected_max_configs,
+        )
 
     def test_rocm_persistent_tiled_max_autotune_configs_remain_tiled(self):
         size_hints = {"x": 2048, "y": 16, "r0_": 512}
