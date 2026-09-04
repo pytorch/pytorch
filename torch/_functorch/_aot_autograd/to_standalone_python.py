@@ -230,6 +230,11 @@ def _known_helper_table() -> dict[int, tuple[str, str]]:
             f"{_RT} CUDARngStateHelper",
             "CUDARngStateHelper.set_new_offset",
         ),
+        id(rt.AOTDispatchAutograd.process_runtime_tangent): (
+            f"{_RT} AOTDispatchAutograd",
+            "AOTDispatchAutograd.process_runtime_tangent",
+        ),
+        id(rt.TensorAlias): (f"{_RT} TensorAlias", "TensorAlias"),
     }
     return table
 
@@ -1207,6 +1212,11 @@ def _compose_training_module(
     orchestration = splice(orch)
 
     fw_metadata_src = emit_value(spec.fw_metadata, imports)
+    # dynamic_saved_tensors_idxs is set in __post_init__, so emit_value's
+    # constructor-field reduction drops it (and ViewAndMutationMeta.__eq__ is
+    # blind to it); reassign it after construction so the symbolic backward
+    # keeps the strides it needs to restride saved tensors.
+    dsi_src = emit_value(spec.fw_metadata.dynamic_saved_tensors_idxs, imports)
     # Emitted as a CONSTRUCTOR CALL, never by value-reduction: the tracker's
     # default runtime-state fields include an itertools.count, whose pickle
     # support was removed in Python 3.12+ (gone in 3.14), so reducing a live
@@ -1231,6 +1241,7 @@ def _compose_training_module(
 
     glue = f"""
 _fw_metadata = {fw_metadata_src}
+_fw_metadata.dynamic_saved_tensors_idxs = {dsi_src}
 _saved_state = _AutogradSavedState(metadata=_fw_metadata)
 _rng_state = {rng_src}
 _NUM_FORWARD_RETURNS = {spec.fw_metadata.num_forward_returns}
@@ -1386,8 +1397,9 @@ def call(flat_inputs):  # noqa: F811
 
 def _graph_differentiates(gm: GraphModule) -> bool:
     """Whether a dense graph carries an INLINED backward (a make_fx trace through
-    ``.backward()`` has no joint). Only inductor's ``decide_layout_opt`` depends on
-    this, and it acts only on convolutions, whose backward is a named
+    ``.backward()`` has no joint). Inductor branches on is_inference in
+    ``decide_layout_opt`` and in the post-grad passes (reorder_for_locality); the
+    layout branch acts only on convolutions, whose backward is a named
     ``convolution_backward`` call, so matching the op name of call nodes suffices."""
     return any(
         node.op == "call_function" and "convolution_backward" in str(node.target)

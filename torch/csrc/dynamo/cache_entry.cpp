@@ -92,17 +92,11 @@ void enable_precompile_cache_keys() {
 // plus the no-raise lookup keep the walk off the exception path entirely.
 PyObject* lookup_optional(py::handle handle, PyObject* name) {
   PyObject* value = nullptr;
-#if IS_PYTHON_3_13_PLUS
+  // pythoncapi_compat provides PyObject_GetOptionalAttr before 3.13.
   if (PyObject_GetOptionalAttr(handle.ptr(), name, &value) < 0) {
     PyErr_Clear();
     return nullptr;
   }
-#else
-  if (_PyObject_LookupAttr(handle.ptr(), name, &value) < 0) {
-    PyErr_Clear();
-    return nullptr;
-  }
-#endif
   // A borrowed reference is what the caller wants and what the chain keeps
   // alive; drop the one the lookup handed us rather than leak it.
   Py_XDECREF(value);
