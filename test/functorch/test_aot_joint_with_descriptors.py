@@ -362,9 +362,9 @@ class inner_f(torch.nn.Module):
         transpose: "f32[3, 2]" = torch.ops.prims.transpose.default(primals_1, [1, 0]);  primals_1 = None
         mm: "f32[4, 2]" = torch.ops.aten.mm.default(primals_3, transpose);  transpose = None
         mul: "f32[4, 2]" = torch.ops.prims.mul.default(mm, 1.0);  mm = None
-        mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
-        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
-        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
+        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(primals_2, [4, 2], [1]);  primals_2 = None
+        mul_1: "f32[4, 2]" = torch.ops.prims.mul.default(broadcast_in_dim, 1.0);  broadcast_in_dim = None
+        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, mul_1);  mul = mul_1 = None
         mul_2: "f32[4, 2]" = torch.ops.prims.mul.default(add, primals_4);  add = None
         mul_3: "f32[4, 2]" = torch.ops.prims.mul.default(tangents_1, primals_4);  tangents_1 = primals_4 = None
         transpose_1: "f32[2, 4]" = torch.ops.prims.transpose.default(mul_3, [1, 0])
