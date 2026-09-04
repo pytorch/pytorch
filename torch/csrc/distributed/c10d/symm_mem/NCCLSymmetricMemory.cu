@@ -241,8 +241,8 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     signal_pads_.resize(world_size_);
 
 #if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
-    // No host-side peer-pointer API is available, so a kernel resolves both
-    // peer arrays at once via ncclGetLsaPointer and copies them to host.
+    // Lack of host-side API to get peer pointers, so a kernel writes both
+    // peer arrays at once and copies the results to host.
     int threads = std::min(128, world_size_);
     auto stream = at::cuda::getCurrentCUDAStream();
     build_ptr_dev<<<1, threads, 0, stream>>>(
@@ -278,38 +278,51 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         : static_cast<char*>(signal_pads_[i]) + buffer_offset_;
   }
 #ifdef USE_ROCM
-  // Avoid the legacy/default-stream dependency of synchronous H2D copies
-  // during HIP capture. Async copies are recorded on the current stream;
-  // buffers_ / signal_pads_ live on this object so their sources remain valid
-  // through graph replay. Outside capture the stream is drained here, so a
-  // published handle carries the same cross-stream ordering that the
-  // synchronous path below provides; a consumer that reads the handle during
-  // capture must be part of the same captured graph. The drain also retires an
-  // enqueued copy before a failed copy unwinds this object, whose members are
-  // the copy sources. CUDA keeps its existing synchronous path.
-  auto stream = at::cuda::getCurrentCUDAStream();
-  const bool is_capturing = c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
-      c10::cuda::CaptureStatus::None;
-  const cudaError_t buffers_copy_status = cudaMemcpyAsync(
-      buffers_dev_,
-      buffers_.data(),
-      arr_size,
-      cudaMemcpyHostToDevice,
-      stream);
-  cudaError_t signal_pads_copy_status = cudaSuccess;
-  if (buffers_copy_status == cudaSuccess) {
-    signal_pads_copy_status = cudaMemcpyAsync(
+  // A synchronous H2D copy returns HIP 906 and invalidates an active capture,
+  // so ROCm uploads the peer tables asynchronously. The copies go on the
+  // non-captured setup stream rather than the current stream: these tables are
+  // immutable for the lifetime of this object, so they only ever need to be
+  // written once, and writing them off the capturing stream means the handle
+  // is fully initialized when rendezvous returns instead of depending on a
+  // later graph replay. Synchronizing the setup stream is legal during capture
+  // because that stream is not itself capturing. The synchronize also retires
+  // the enqueued copies before a failure can unwind this object, whose members
+  // are the copy sources. CUDA keeps its existing synchronous path.
+  if (mgr.capture_allocation_supported()) {
+    std::lock_guard<std::mutex> setup_lock(mgr.capture_setup_mutex());
+    const cudaStream_t setup_stream = mgr.capture_setup_stream();
+    const cudaError_t buffers_copy_status = cudaMemcpyAsync(
+        buffers_dev_,
+        buffers_.data(),
+        arr_size,
+        cudaMemcpyHostToDevice,
+        setup_stream);
+    cudaError_t signal_pads_copy_status = cudaSuccess;
+    if (buffers_copy_status == cudaSuccess) {
+      signal_pads_copy_status = cudaMemcpyAsync(
+          signal_pads_dev_,
+          signal_pads_.data(),
+          arr_size,
+          cudaMemcpyHostToDevice,
+          setup_stream);
+    }
+    const cudaError_t sync_status = cudaStreamSynchronize(setup_stream);
+    C10_CUDA_CHECK(buffers_copy_status);
+    C10_CUDA_CHECK(signal_pads_copy_status);
+    C10_CUDA_CHECK(sync_status);
+  } else {
+    // No setup stream exists, which also means this configuration cannot
+    // rendezvous under capture at all: window registration above already
+    // fails during capture on the tested older RCCL. The synchronous copies
+    // are therefore safe here and match CUDA.
+    C10_CUDA_CHECK(cudaMemcpy(
+        buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice));
+    C10_CUDA_CHECK(cudaMemcpy(
         signal_pads_dev_,
         signal_pads_.data(),
         arr_size,
-        cudaMemcpyHostToDevice,
-        stream);
+        cudaMemcpyHostToDevice));
   }
-  const cudaError_t copy_drain_status =
-      is_capturing ? cudaSuccess : cudaStreamSynchronize(stream);
-  C10_CUDA_CHECK(buffers_copy_status);
-  C10_CUDA_CHECK(signal_pads_copy_status);
-  C10_CUDA_CHECK(copy_drain_status);
 #else
   C10_CUDA_CHECK(cudaMemcpy(
     buffers_dev_,  // dst (device)
@@ -355,8 +368,10 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       // Skip if this group no longer owns `comm_`. Stock ProcessGroupNCCL now
       // removes this identity before destroying or aborting RCCL, so a retained
       // handle cannot attempt late window deregistration through that comm.
-      // Include the registration generation: RCCL may recycle a destroyed
-      // communicator's raw pointer for a same-name successor.
+      // Matching on the registration generation as well as the pointer means
+      // the comparison stays correct even if a same-name successor is handed a
+      // recycled `ncclComm_t` address; that is defensive rather than an
+      // observed RCCL allocation behavior.
       // Relaxed: destructor may run during HIP capture, and RCCL deregistration
       // has been observed to leave the thread in Relaxed mode; the guard
       // restores the caller's mode on exit.
@@ -438,6 +453,14 @@ NCCLSymmetricMemory::NCCLSymmetricMemory(
 }
 
 #ifdef USE_ROCM
+// Liveness gating is ROCm-only because the mechanism it relies on is ROCm-only:
+// stock ProcessGroupNCCL retires this group's registry identity before RCCL
+// destroy or abort, which is what makes a stale handle detectable here. The
+// use-after-destroy hazard itself is not ROCm-specific; it is fixed here first
+// because on the tested gfx950 stack it surfaced as a hard
+// HSA_STATUS_ERROR_MEMORY_FAULT from a barrier kernel launched through a
+// destroyed communicator. Extending the same gating to CUDA is left as a
+// follow-up so this change cannot alter CUDA behavior.
 bool NCCLSymmetricMemory::is_live() const {
   return pai_->is_live();
 }
@@ -613,9 +636,10 @@ size_t NCCLSymmetricMemory::get_offset() {
 }
 
 size_t NCCLSymmetricMemory::get_window_offset() {
-#ifdef USE_ROCM
-  check_liveness();
-#endif
+  // No liveness check: this is arithmetic over two immutable members and
+  // cannot touch a destroyed communicator. Every caller that goes on to use
+  // the offset against device state checks liveness through get_window() or
+  // the CFT handle accessors.
   // The NCCL window starts at the signal pad; this handle's data lives
   // buffer_offset_ bytes further in, plus its own offset within the buffer.
   return pai_->buffer_offset_ + offset_;
@@ -717,36 +741,24 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 #else
     const size_t total_size = buffer_offset + aligned_buffer_size;
 #endif
-
     void* alloc_base;
 #ifdef USE_ROCM
-    // Keep CUDA's existing allocation path unchanged. On tested HIP, default
-    // ncclMemAlloc falls back to hipMalloc (illegal during capture); sync
-    // hipMemset returns 906; async memset on the captured stream records a
-    // replayable node that can wipe a peer's signal. Use CUMEM + Relaxed +
-    // async zero on a non-captured setup stream, synced before the window is
-    // published. Gated by RCCL 2.30.7 / device API / CUMEM+WIN at comm init
-    // (see NCCLDevCommManager).
+    // Keep CUDA's existing allocation path unchanged. On the tested HIP stack
+    // the default allocation and zeroing sequence has three separate problems
+    // under graph capture: ncclMemAlloc falls back to hipMalloc, which capture
+    // rejects; a synchronous hipMemset returns HIP 906 and invalidates the
+    // capture; and an async memset recorded on the capturing stream becomes a
+    // replayable node that can wipe a peer's signal pad on every replay.
     //
-    // Only the current stream's capture state is observable. A process-wide
-    // cudaStreamCaptureModeGlobal capture begun on another thread is not
-    // queryable, and would make the non-capturing branch's hipMalloc/hipMemset
-    // illegal here just as it does on the synchronous CUDA path below.
-    const bool is_capturing =
-        c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
-        c10::cuda::CaptureStatus::None;
-    if (is_capturing) {
-      auto& mgr = NCCLDevCommManager::get(
-          c10::Device(c10::DeviceType::CUDA, device_idx));
-      TORCH_CHECK(
-          mgr.capture_allocation_supported(),
-          "Fresh ROCm NCCL symmetric-memory allocation during HIP graph "
-          "capture requires RCCL 2.30.7 or newer, device API support, and "
-          "NCCL_CUMEM_ENABLE=1 plus NCCL_WIN_ENABLE=1 set before process-group "
-          "initialization. Preallocate, rendezvous, and retain the symmetric "
-          "tensor before capture on older RCCL, or when "
-          "TORCH_NCCL_SYMM_MEM_DISABLE_CAPTURE_ALLOC=1.");
-
+    // CUMEM allocation plus an async zero on a non-captured setup stream
+    // avoids all three, so it is used wherever RCCL supports it rather than
+    // only while capturing. Keying on capability instead of capture state
+    // gives the supported configuration a single code path and removes any
+    // dependence on detecting capture. Support is snapshotted at comm init
+    // from RCCL 2.30.7 / device API / CUMEM+WIN (see NCCLDevCommManager).
+    auto& mgr = NCCLDevCommManager::get(
+        c10::Device(c10::DeviceType::CUDA, device_idx));
+    if (mgr.capture_allocation_supported()) {
       std::lock_guard<std::mutex> setup_lock(mgr.capture_setup_mutex());
       const cudaStream_t setup_stream = mgr.capture_setup_stream();
       c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
@@ -765,6 +777,22 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         C10_CUDA_CHECK(sync_status);
       }
     } else {
+      // Without RCCL capture-allocation support there is no capture-safe way
+      // to obtain and zero a fresh window, so report that directly instead of
+      // letting HIP fail inside ncclMemAlloc or hipMemset. This check is a
+      // diagnostic, not the safety mechanism: only the current stream's
+      // capture state is observable, and under a process-wide capture started
+      // on another thread the calls below fail exactly the way an ordinary
+      // torch.empty does in that situation.
+      TORCH_CHECK(
+          c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
+              c10::cuda::CaptureStatus::None,
+          "Fresh ROCm NCCL symmetric-memory allocation during HIP graph "
+          "capture requires RCCL 2.30.7 or newer, device API support, and "
+          "NCCL_CUMEM_ENABLE=1 plus NCCL_WIN_ENABLE=1 set before process-group "
+          "initialization. Preallocate, rendezvous, and retain the symmetric "
+          "tensor before capture on older RCCL, or when "
+          "TORCH_NCCL_SYMM_MEM_DISABLE_CAPTURE_ALLOC=1.");
       C10D_NCCL_CHECK(ncclMemAlloc(&alloc_base, total_size), "ncclMemAlloc");
       C10_CUDA_CHECK(cudaMemset(alloc_base, 0, buffer_offset));
     }
