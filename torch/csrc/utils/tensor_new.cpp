@@ -424,22 +424,19 @@ Tensor internal_new_from_data(
 
         // If the device is Meta, take the shortcut. We don't want to allocate
         // an empty CPU tensor which would break our contract for meta tensors.
-        // Indexed Meta devices take the same path and, like plain Meta, skip
-        // recursive_store validation.
-        if (device.type() == DeviceType::Meta) {
-          tensor = at::empty(sizes, opts.device(device));
-        } else {
-          tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
-          if (c10::multiply_integers(tensor.sizes()) != 0) {
-            recursive_store(
-                (char*)tensor.data_ptr(),
-                tensor.sizes(),
-                tensor.strides(),
-                0,
-                inferred_scalar_type,
-                tensor.dtype().itemsize(),
-                data);
-          }
+        if (device == at::kMeta) {
+          return at::empty(sizes, opts.device(device));
+        }
+        tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
+        if (c10::multiply_integers(tensor.sizes()) != 0) {
+          recursive_store(
+              (char*)tensor.data_ptr(),
+              tensor.sizes(),
+              tensor.strides(),
+              0,
+              inferred_scalar_type,
+              tensor.dtype().itemsize(),
+              data);
         }
       }
     }
@@ -473,28 +470,13 @@ Tensor internal_new_from_data(
     at::AutoDispatchBelowADInplaceOrView guard;
     tensor = at::lift_fresh(tensor);
   }
-  // CPU and Meta tensors are already on their canonical devices, but tensors
-  // constructed from storage can still need a post-lift device move.
-  if (only_lift_cpu_tensors()) {
-    const auto tensor_device_type = tensor.device().type();
-    const bool already_on_canonical_device =
-        (device.type() == DeviceType::CPU &&
-         tensor_device_type == DeviceType::CPU) ||
-        (device.type() == DeviceType::Meta &&
-         tensor_device_type == DeviceType::Meta);
-    if (!already_on_canonical_device) {
-      if (device.type() == DeviceType::Meta) {
-        device = at::kMeta;
-      } else if (device.type() == DeviceType::CPU) {
-        device = at::kCPU;
-      } else if (
-          !device.has_index() &&
-          !torch::utils::is_device_initialized(device.type())) {
-        // Infer device 0 to avoid device init
-        device = c10::Device(device.type(), 0);
-      }
-      tensor = tensor.to(device, /*non_blocking=*/false, /*copy=*/false);
+  if (only_lift_cpu_tensors() && device.type() != DeviceType::CPU) {
+    if (!device.has_index() &&
+        !torch::utils::is_device_initialized(device.type())) {
+      // Infer device 0 to avoid device init
+      device = c10::Device(device.type(), 0);
     }
+    tensor = tensor.to(device, /*non_blocking=*/false, /*copy=*/false);
   }
   return tensor;
 }

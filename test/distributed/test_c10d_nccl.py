@@ -1098,7 +1098,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(w.timeout, timedelta(seconds=123))
         w.wait()
         dist.set_timeout(timedelta(seconds=3), pg)
-        dist.barrier()
         if self.rank == 0:
             # Ideally we want to sleep for a very long time, but this is not
             # feasible in unit test. So this is only a very tiny case.

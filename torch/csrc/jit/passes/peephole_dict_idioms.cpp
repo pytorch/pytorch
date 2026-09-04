@@ -173,7 +173,13 @@ class PeepholeOptimizeDictIdiomsImpl {
   }
 
   const DictNode& getDictNode(Node* creation_node) {
-    return dict_cache_.try_emplace(creation_node, creation_node).first->second;
+    auto cached = dict_cache_.find(creation_node);
+    if (cached == dict_cache_.end()) {
+      cached =
+          dict_cache_.emplace(creation_node, DictNode(creation_node)).first;
+    }
+
+    return cached->second;
   }
 
   std::optional<Value*> getValueFromDict(Node* dict_creation_node, Value* key) {

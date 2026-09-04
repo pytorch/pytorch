@@ -422,14 +422,11 @@ static void autogradNotImplementedFallbackImpl(
         // TensorList, see https://github.com/pytorch/pytorch/issues/93940
         // Skip native_channel_shuffle as well as transformer_encoder
         // For details see https://github.com/pytorch/pytorch/issues/130073
-        // `_efficient_attention_backward` may return dq/dk/dv chunked from a
-        // single shared storage (shared_storage_dqdkdv=True).
         if (!is_aliased_output[idx_ret] && t.has_storage() &&
             op_name != "aten::_foreach_norm" &&
             op_name != "aten::_transformer_encoder_layer_fwd" &&
             op_name != "aten::native_channel_shuffle" &&
-            op_name != "aten::_sparse_semi_structured_tile" &&
-            op_name != "aten::_efficient_attention_backward")
+            op_name != "aten::_sparse_semi_structured_tile")
           TORCH_INTERNAL_ASSERT(t.storage().use_count() == 1);
       },
       stack,

@@ -12,12 +12,8 @@ import torch._numpy as w
 import torch._numpy._ufuncs as _ufuncs
 import torch._numpy._util as _util
 from torch._numpy.testing import assert_allclose, assert_equal
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-)
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -74,8 +70,6 @@ class TestOneArr(TestCase):
     Accepts array_likes, torch.Tensors, w.ndarays; returns an ndarray
     """
 
-    hw_classification = HardwareClassification.GENERIC
-
     @parametrize("func", one_arg_funcs)
     def test_asarray_tensor(self, func):
         t = torch.Tensor([[1.0, 2, 3], [4, 5, 6]])
@@ -118,8 +112,6 @@ one_arg_axis_funcs = [
 
 @instantiate_parametrized_tests
 class TestOneArrAndAxis(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     @parametrize("func", one_arg_axis_funcs)
     @parametrize("axis", [0, 1, -1, None])
     def test_andaxis_tensor(self, func, axis):
@@ -147,8 +139,6 @@ class TestOneArrAndAxis(TestCase):
 
 @instantiate_parametrized_tests
 class TestOneArrAndAxesTuple(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     @parametrize("func", [w.transpose])
     @parametrize("axes", [(0, 2, 1), (1, 2, 0), None])
     def test_andtuple_tensor(self, func, axes):
@@ -202,8 +192,6 @@ arr_shape_funcs = [
 class TestOneArrAndShape(TestCase):
     """Smoke test of functions (array_like, shape_like) -> array_like"""
 
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         super().setUp()
         self.shape = (2, 3)
@@ -252,8 +240,6 @@ one_arg_scalar_funcs = [(w.size, _np.size), (w.shape, _np.shape), (w.ndim, _np.n
 class TestOneArrToScalar(TestCase):
     """Smoke test of functions (array_like) -> scalar or python object."""
 
-    hw_classification = HardwareClassification.GENERIC
-
     @parametrize("func, np_func", one_arg_scalar_funcs)
     def test_toscalar_tensor(self, func, np_func):
         t = torch.Tensor([[1, 2, 3], [4, 5, 6]])
@@ -295,8 +281,6 @@ shape_funcs = [w.zeros, w.empty, w.ones, functools.partial(w.full, fill_value=42
 class TestShapeLikeToArray(TestCase):
     """Smoke test (shape_like) -> array."""
 
-    hw_classification = HardwareClassification.GENERIC
-
     shape = (3, 4)
 
     @parametrize("func", shape_funcs)
@@ -315,8 +299,6 @@ seq_funcs = [w.atleast_1d, w.atleast_2d, w.atleast_3d, w.broadcast_arrays]
 @instantiate_parametrized_tests
 class TestSequenceOfArrays(TestCase):
     """Smoke test (sequence of arrays) -> (sequence of arrays)."""
-
-    hw_classification = HardwareClassification.GENERIC
 
     @parametrize("func", seq_funcs)
     def test_single_tensor(self, func):
@@ -387,8 +369,6 @@ seq_to_single_funcs = [
 class TestSequenceOfArraysToSingle(TestCase):
     """Smoke test (sequence of arrays) -> (array)."""
 
-    hw_classification = HardwareClassification.GENERIC
-
     @parametrize("func", seq_to_single_funcs)
     def test_several(self, func):
         arys = (
@@ -414,8 +394,6 @@ single_to_seq_funcs = (
 @instantiate_parametrized_tests
 class TestArrayToSequence(TestCase):
     """Smoke test array -> (tuple of arrays)."""
-
-    hw_classification = HardwareClassification.GENERIC
 
     @parametrize("func", single_to_seq_funcs)
     def test_asarray_tensor(self, func):
@@ -472,8 +450,6 @@ funcs_and_args = [
 class TestPythonArgsToArray(TestCase):
     """Smoke_test (sequence of scalars) -> (array)"""
 
-    hw_classification = HardwareClassification.GENERIC
-
     @parametrize("func, args", funcs_and_args)
     def test_argstoarray_simple(self, func, args):
         a = func(*args)
@@ -483,8 +459,6 @@ class TestPythonArgsToArray(TestCase):
 
 class TestNormalizations(TestCase):
     """Smoke test generic problems with normalizations."""
-
-    hw_classification = HardwareClassification.GENERIC
 
     def test_unknown_args(self):
         # Check that unknown args to decorated functions fail
@@ -512,8 +486,6 @@ class TestNormalizations(TestCase):
 
 
 class TestCopyTo(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_copyto_basic(self):
         dst = w.empty(4)
         src = w.arange(4)
@@ -549,8 +521,6 @@ class TestCopyTo(TestCase):
 
 
 class TestDivmod(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_divmod_out(self):
         x1 = w.arange(8, 15)
         x2 = w.arange(4, 11)
@@ -611,8 +581,6 @@ class TestDivmod(TestCase):
 
 
 class TestSmokeNotImpl(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_nimpl_basic(self):
         # smoke test that the "NotImplemented" annotation is picked up
         with assert_raises(NotImplementedError):
@@ -621,8 +589,6 @@ class TestSmokeNotImpl(TestCase):
 
 @instantiate_parametrized_tests
 class TestDefaultDtype(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_defaultdtype_defaults(self):
         # by default, both floats and ints 64 bit
         x = w.empty(3)
@@ -664,8 +630,6 @@ class TestDefaultDtype(TestCase):
 
 @skip(_np.__version__ <= "1.23", reason="from_dlpack is new in NumPy 1.23")
 class TestExport(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_exported_objects(self):
         exported_fns = {
             x
@@ -685,16 +649,12 @@ class TestExport(TestCase):
 
 
 class TestCtorNested(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_arrays_in_lists(self):
         lst = [[1, 2], [3, w.array(4)]]
         assert_equal(w.asarray(lst), [[1, 2], [3, 4]])
 
 
 class TestMisc(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_ndarrays_to_tensors(self):
         out = _util.ndarrays_to_tensors(((w.asarray(42), 7), 3))
         if len(out) != 2:
@@ -708,32 +668,19 @@ class TestMisc(TestCase):
                 f"Expected out[0][0] to be torch.Tensor, got {type(out[0][0])}"
             )
 
-
-class TestMiscDevice(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @onlyAccelerator
-    def test_f16_on_gpu(self, device):
-        # make sure operations with float16 tensors give same results on gpu and on CPU
+    @skip(not TEST_CUDA, reason="requires cuda")
+    def test_f16_on_cuda(self):
+        # make sure operations with float16 tensors give same results on CUDA and on CPU
         t = torch.arange(5, dtype=torch.float16)
-        assert_allclose(w.vdot(t.to(device), t.to(device)), w.vdot(t, t))
-        assert_allclose(w.inner(t.to(device), t.to(device)), w.inner(t, t))
-        assert_allclose(w.matmul(t.to(device), t.to(device)), w.matmul(t, t))
-        assert_allclose(
-            w.einsum("i,i", t.to(device), t.to(device)), w.einsum("i,i", t, t)
-        )
+        assert_allclose(w.vdot(t.cuda(), t.cuda()), w.vdot(t, t))
+        assert_allclose(w.inner(t.cuda(), t.cuda()), w.inner(t, t))
+        assert_allclose(w.matmul(t.cuda(), t.cuda()), w.matmul(t, t))
+        assert_allclose(w.einsum("i,i", t.cuda(), t.cuda()), w.einsum("i,i", t, t))
 
-        assert_allclose(w.mean(t.to(device)), w.mean(t))
+        assert_allclose(w.mean(t.cuda()), w.mean(t))
 
-        assert_allclose(
-            w.cov(t.to(device), t.to(device)), w.cov(t, t).tensor.to(device)
-        )
-        assert_allclose(w.corrcoef(t.to(device)), w.corrcoef(t).tensor.to(device))
-
-
-instantiate_device_type_tests(
-    TestMiscDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
-)
+        assert_allclose(w.cov(t.cuda(), t.cuda()), w.cov(t, t).tensor.cuda())
+        assert_allclose(w.corrcoef(t.cuda()), w.corrcoef(t).tensor.cuda())
 
 
 if __name__ == "__main__":

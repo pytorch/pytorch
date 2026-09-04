@@ -1,26 +1,11 @@
 #pragma once
 
-#include <algorithm>
-#include <array>
-#include <atomic>
 #include <condition_variable>
-#include <cstddef>
-#include <exception>
-#include <functional>
-#include <initializer_list>
-#include <iterator>
 #include <memory>
-#include <mutex>
 #include <optional>
-#include <ostream>
-#include <sstream>
-#include <string>
-#include <string_view>
 #include <tuple>
 #include <type_traits>
-#include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
@@ -349,62 +334,73 @@ struct TORCH_API TupleElements {
   // c10::SmallVector<IValue> because c10::SmallVector<IValue> always
   // stores the begin/end/capacity pointers, which would be a waste of
   // space in our use case.
-  //
-  // The implementation of TupleElements can be simplified if we can
-  // use variant<vector<IValue>, inplace_vector<IValue, 3>> (C++26).
-  // The default ctor, dtor, and assignment operators should suffice.
-  static constexpr size_t kInlineCapacity = 3;
   union {
     std::vector<IValue> elementsVector_;
     // Don't want to declare a std::array because the convenient
     // iteration and size members are a footgun in this case -- the
     // actual size of the array may be smaller than 3!
     // NOLINTNEXTLINE(*c-arrays*)
-    IValue elementsInline_[kInlineCapacity];
+    IValue elementsInline_[3];
   };
 
+  void destroyInline() {
+   for (const auto ii : c10::irange(inlineSize_)) {
+     elementsInline_[ii].~IValue();
+   }
+  }
  public:
 
   using iterator = IValue*;
   using const_iterator = const IValue*;
 
-  TupleElements() : inlineSize_(0), elementsVector_() {}
+  TupleElements() : inlineSize_(0) {
+    new (&elementsVector_) std::vector<IValue>();
+  }
 
   explicit TupleElements(std::vector<IValue> elements)
-    : inlineSize_(0), elementsVector_(std::move(elements)) {}
+  : inlineSize_(0), elementsVector_(std::move(elements)) {}
 
   explicit TupleElements(c10::ArrayRef<IValue> elements)
-    : inlineSize_(elements.size() <= kInlineCapacity ? elements.size() : 0) {
-    if (inlineSize_) {
-      std::uninitialized_copy_n(elements.begin(), inlineSize_, elementsInline_);
-    } else {
-      std::construct_at(&elementsVector_, elements.begin(), elements.end());
+  : inlineSize_(elements.size() <= 3 ? elements.size() : 0) {
+    switch (inlineSize_) {
+      case 3:
+        new (&elementsInline_[2]) IValue(elements[2]);
+        [[fallthrough]];
+      case 2:
+        new (&elementsInline_[1]) IValue(elements[1]);
+        [[fallthrough]];
+      case 1:
+        new (&elementsInline_[0]) IValue(elements[0]);
+        break;
+      case 0:
+        new (&elementsVector_) std::vector<IValue>(elements.begin(), elements.end());
+        break;
     }
   }
 
   explicit TupleElements(IValue&& e1)
-    : inlineSize_(1) {
-    std::construct_at(elementsInline_ + 0, std::move(e1));
+  : inlineSize_(1) {
+    new (&elementsInline_[0]) IValue(std::move(e1));
   }
 
   explicit TupleElements(IValue&& e1, IValue&& e2)
-    : inlineSize_(2) {
-    std::construct_at(elementsInline_ + 0, std::move(e1));
-    std::construct_at(elementsInline_ + 1, std::move(e2));
+  : inlineSize_(2) {
+    new (&elementsInline_[0]) IValue(std::move(e1));
+    new (&elementsInline_[1]) IValue(std::move(e2));
   }
 
   explicit TupleElements(IValue&& e1, IValue&& e2, IValue&& e3)
-    : inlineSize_(3) {
-    std::construct_at(elementsInline_ + 0, std::move(e1));
-    std::construct_at(elementsInline_ + 1, std::move(e2));
-    std::construct_at(elementsInline_ + 2, std::move(e3));
+  : inlineSize_(3) {
+    new (&elementsInline_[0]) IValue(std::move(e1));
+    new (&elementsInline_[1]) IValue(std::move(e2));
+    new (&elementsInline_[2]) IValue(std::move(e3));
   }
 
   ~TupleElements() {
     if (inlineSize_) {
-      std::destroy_n(elementsInline_, inlineSize_);
+      destroyInline();
     } else {
-      std::destroy_at(&elementsVector_);
+      elementsVector_.~vector();
     }
   }
 
@@ -420,39 +416,43 @@ struct TORCH_API TupleElements {
   // it the inefficient way.
   // See also operator std::vector below.
   TupleElements(const TupleElements& rhs)
-    : inlineSize_(rhs.inlineSize_) {
+  : inlineSize_(rhs.inlineSize_) {
     if (rhs.inlineSize_) {
-      std::uninitialized_copy_n(rhs.elementsInline_, rhs.inlineSize_, elementsInline_);
+      for (const auto  ii : c10::irange(inlineSize_)) {
+        new (&elementsInline_[ii]) IValue(rhs.elementsInline_[ii]);
+      }
     } else {
-      std::construct_at(&elementsVector_, rhs.elementsVector_);
+      new (&elementsVector_) std::vector<IValue>(rhs.elementsVector_);
     }
   }
 
-  // This implementation only provides basic exception safety
   TupleElements& operator=(const TupleElements& rhs) {
-    if (this == &rhs) { return *this; }
-    if (inlineSize_ == 0 && rhs.inlineSize_ == 0) {
-      elementsVector_ = rhs.elementsVector_;
-    } else if (inlineSize_ == 0 && rhs.inlineSize_ > 0) {
-      // NOLINTNEXTLINE(*c-arrays*)
-      IValue tmp[kInlineCapacity];
-      std::copy_n(rhs.elementsInline_, rhs.inlineSize_, tmp);
-      std::destroy_at(&elementsVector_);
-      std::uninitialized_move_n(tmp, rhs.inlineSize_, elementsInline_);
-    } else if (inlineSize_ > 0 && rhs.inlineSize_ == 0) {
-      std::vector<IValue> tmp(rhs.elementsVector_);
-      std::destroy_n(elementsInline_, inlineSize_);
-      std::construct_at(&elementsVector_, std::move(tmp));
+    if (inlineSize_) {
+      if (rhs.inlineSize_) {
+        for (const auto ii : c10::irange(std::min(inlineSize_, rhs.inlineSize_))) {
+          elementsInline_[ii] = rhs.elementsInline_[ii];
+        }
+        if (rhs.inlineSize_ > inlineSize_) {
+          for (const auto ii : c10::irange(inlineSize_, rhs.inlineSize_)) {
+            new (&elementsInline_[ii]) IValue(rhs.elementsInline_[ii]);
+          }
+        } else {
+          for (const auto ii : c10::irange(rhs.inlineSize_, inlineSize_)) {
+            elementsInline_[ii].~IValue();
+          }
+        }
+      } else {
+        destroyInline();
+        new (&elementsVector_) std::vector<IValue>(rhs.elementsVector_);
+      }
     } else {
-      auto copySize = std::min(inlineSize_, rhs.inlineSize_);
-      auto it = std::copy(
-        rhs.elementsInline_, rhs.elementsInline_ + copySize, elementsInline_);
-      if (inlineSize_ > rhs.inlineSize_) {
-        std::destroy(it, elementsInline_ + inlineSize_);
-      } else if (inlineSize_ < rhs.inlineSize_) {
-        auto remainingBegin = rhs.elementsInline_ + copySize;
-        auto remainingEnd = rhs.elementsInline_ + rhs.inlineSize_;
-        std::uninitialized_copy(remainingBegin, remainingEnd, it);
+      if (rhs.inlineSize_) {
+        elementsVector_.~vector();
+        for (const auto ii : c10::irange(rhs.inlineSize_)) {
+          new (&elementsInline_[ii]) IValue(rhs.elementsInline_[ii]);
+        }
+      } else {
+        elementsVector_ = rhs.elementsVector_;
       }
     }
     inlineSize_ = rhs.inlineSize_;
@@ -460,34 +460,43 @@ struct TORCH_API TupleElements {
   }
 
   TupleElements(TupleElements&& rhs) noexcept
-    : inlineSize_(rhs.inlineSize_) {
-    if (rhs.inlineSize_) {
-      std::uninitialized_move_n(rhs.elementsInline_, rhs.inlineSize_, elementsInline_);
+  : inlineSize_(rhs.inlineSize_) {
+    if (inlineSize_) {
+      for (const auto ii : c10::irange(inlineSize_)) {
+        new (&elementsInline_[ii]) IValue(std::move(rhs.elementsInline_[ii]));
+      }
     } else {
-      std::construct_at(&elementsVector_, std::move(rhs.elementsVector_));
+      new (&elementsVector_) std::vector<IValue>(std::move(rhs.elementsVector_));
     }
   }
 
   TupleElements& operator=(TupleElements&& rhs) noexcept {
-    if (this == &rhs) { return *this; }
-    if (inlineSize_ == 0 && rhs.inlineSize_ == 0) {
-      elementsVector_ = std::move(rhs.elementsVector_);
-    } else if (inlineSize_ == 0 && rhs.inlineSize_ > 0) {
-      std::destroy_at(&elementsVector_);
-      std::uninitialized_move_n(rhs.elementsInline_, rhs.inlineSize_, elementsInline_);
-    } else if (inlineSize_ > 0 && rhs.inlineSize_ == 0) {
-      std::destroy_n(elementsInline_, inlineSize_);
-      std::construct_at(&elementsVector_, std::move(rhs.elementsVector_));
+    if (inlineSize_) {
+      if (rhs.inlineSize_) {
+        for (const auto ii : c10::irange(std::min(inlineSize_, rhs.inlineSize_))) {
+          elementsInline_[ii] = std::move(rhs.elementsInline_[ii]);
+        }
+        if (rhs.inlineSize_ > inlineSize_) {
+          for (const auto ii : c10::irange(inlineSize_, rhs.inlineSize_)) {
+            new (&elementsInline_[ii]) IValue(std::move(rhs.elementsInline_[ii]));
+          }
+        } else {
+          for (const auto ii : c10::irange(rhs.inlineSize_, inlineSize_)) {
+            elementsInline_[ii].~IValue();
+          }
+        }
+      } else {
+        destroyInline();
+        new (&elementsVector_) std::vector<IValue>(std::move(rhs.elementsVector_));
+      }
     } else {
-      auto moveSize = std::min(inlineSize_, rhs.inlineSize_);
-      auto it = std::move(
-        rhs.elementsInline_, rhs.elementsInline_ + moveSize, elementsInline_);
-      if (inlineSize_ > rhs.inlineSize_) {
-        std::destroy(it, elementsInline_ + inlineSize_);
-      } else if (inlineSize_ < rhs.inlineSize_) {
-        auto remainingBegin = rhs.elementsInline_ + moveSize;
-        auto remainingEnd = rhs.elementsInline_ + rhs.inlineSize_;
-        std::uninitialized_move(remainingBegin, remainingEnd, it);
+      if (rhs.inlineSize_) {
+        elementsVector_.~vector();
+        for (const auto ii : c10::irange(rhs.inlineSize_)) {
+          new (&elementsInline_[ii]) IValue(std::move(rhs.elementsInline_[ii]));
+        }
+      } else {
+        elementsVector_ = std::move(rhs.elementsVector_);
       }
     }
     inlineSize_ = rhs.inlineSize_;
@@ -513,8 +522,9 @@ struct TORCH_API TupleElements {
 
   void setContents(std::vector<IValue>&& contents) {
     if (inlineSize_) {
-      std::destroy_n(elementsInline_, std::exchange(inlineSize_, 0));
-      std::construct_at(&elementsVector_, std::move(contents));
+      destroyInline();
+      new (&elementsVector_) std::vector<IValue>(std::move(contents));
+      inlineSize_ = 0;
     } else {
       elementsVector_ = std::move(contents);
     }
@@ -546,7 +556,7 @@ struct TORCH_API TupleElements {
 
   [[nodiscard]] IValue& at(size_t idx) {
     if (inlineSize_) {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= kInlineCapacity);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
       return elementsInline_[idx];
     } else {
@@ -556,7 +566,7 @@ struct TORCH_API TupleElements {
 
   [[nodiscard]] const IValue& at(size_t idx) const {
     if (inlineSize_) {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= kInlineCapacity);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
       return elementsInline_[idx];
     } else {
@@ -606,11 +616,7 @@ struct TORCH_API TupleElements {
   }
 
   [[nodiscard]] std::vector<IValue> vec() const& {
-    if (inlineSize_) {
-      return std::vector<IValue>(elementsInline_, elementsInline_ + inlineSize_);
-    } else {
-      return elementsVector_;
-    }
+    return asArrayRef().vec();
   }
 
   [[nodiscard]] IValue& back() {
@@ -623,12 +629,9 @@ struct TORCH_API TupleElements {
 
   [[nodiscard]] std::vector<IValue> vec() && {
     std::vector<IValue> result;
-    if (inlineSize_) {
-      result.assign(
-        std::make_move_iterator(elementsInline_),
-        std::make_move_iterator(elementsInline_ + inlineSize_));
-    } else {
-      result.swap(elementsVector_);
+    result.reserve(size());
+    for (auto&& iv : *this) {
+      result.push_back(std::move(iv));
     }
     return result;
   }
@@ -641,7 +644,7 @@ struct TORCH_API TupleElements {
   }
 
   operator std::vector<IValue>() && {
-    return std::move(*this).vec();
+    return vec();
   }
 };
 
@@ -716,6 +719,13 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
 
   static c10::intrusive_ptr<Tuple> create(IValue e1, IValue e2, IValue e3) {
     return c10::make_intrusive<Tuple>(std::move(e1), std::move(e2), std::move(e3));
+  }
+
+ private:
+  // Workaround inability to use `>` operator in template argument list.
+  template <typename... Args>
+  static constexpr bool hasMoreThanThreeArgs() {
+    return sizeof...(Args) > 3;
   }
 
  public:
@@ -1002,7 +1012,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // Get the result of the current future.
   IValue value() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     if (eptr_) {
       std::rethrow_exception(eptr_);
@@ -1013,7 +1023,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // This accessor should only be used if we know that the future is
   // completed() with no error.
   const IValue& constValue() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     TORCH_INTERNAL_ASSERT(
       !eptr_,
@@ -1027,7 +1037,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // This accessor should only be used if we know that the future is
   // completed() with no error.
   const std::vector<WeakStorage>& storages() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     AT_ASSERT(!eptr_);
     return storages_;
@@ -1118,7 +1128,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // Tries to retrieve the error message from std::exception_ptr.
   std::string tryRetrieveErrorMessage() const {
     TORCH_CHECK(hasError(), "No error present on the future.");
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     return tryRetrieveErrorMessageInternal(eptr_);
   }
 
@@ -1128,17 +1138,17 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   bool hasValue() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     return completed_ && !eptr_;
   }
 
   bool hasError() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     return eptr_ ? true : false;
   }
 
   std::exception_ptr exception_ptr() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     return eptr_;
   }
 
@@ -1864,7 +1874,11 @@ Tuple generic_to_tuple_impl(
 template <
     typename... Args,
     typename Indices = std::make_index_sequence<sizeof...(Args)>,
-    typename = typename IValue::enable_if_ivalue_compatible<Args...>::type>
+    std::enable_if_t<
+        !std::disjunction_v<
+            std::is_lvalue_reference<Args>...,
+            std::negation<std::is_constructible<IValue, Args>>...>,
+        std::nullptr_t> = nullptr>
 std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args...>> /*unused*/) {
   const auto& vals = ivalue.toTupleRef().elements();
   TORCH_CHECK(vals.size() == sizeof...(Args));
@@ -1947,8 +1961,7 @@ inline T IValue::to() && {
 
 template <typename T>
 inline typename c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to() const& {
-  using return_type =
-      typename c10::detail::ivalue_to_const_ref_overload_return<T>::type;
+  using return_type = c10::detail::ivalue_to_const_ref_overload_return<T>::type;
 #define DEFINE_BRANCH(type, converter)                                         \
   if constexpr (std::is_same_v<T, type>) {                                     \
     return static_cast<return_type>(this->converter());                        \
@@ -2125,12 +2138,24 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
     : tag(Tag::Tuple) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
-template <typename... Args, typename /* Enable */>
+template <
+    typename... Args,
+    std::enable_if_t<
+        !std::disjunction_v<
+            std::is_lvalue_reference<Args>...,
+            std::negation<std::is_constructible<IValue, Args>>...>,
+        std::nullptr_t>>
 inline IValue::IValue(const std::tuple<Args...>& t)
     : IValue(std::apply(c10::ivalue::Tuple::create<const Args&...>, t)) {
 }
 
-template <typename... Args, typename /* Enable */>
+template <
+    typename... Args,
+    std::enable_if_t<
+        !std::disjunction_v<
+            std::is_lvalue_reference<Args>...,
+            std::negation<std::is_constructible<IValue, Args>>...>,
+        std::nullptr_t>>
 inline IValue::IValue(std::tuple<Args...>&& t)
     : IValue(std::apply(c10::ivalue::Tuple::create<Args&&...>, std::move(t))) {
 }
@@ -2319,10 +2344,9 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) : tag(Tag::Object) {
     try {
       return c10::getCustomClassType<c10::intrusive_ptr<T>>();
     } catch (const c10::Error&) {
-      TORCH_CHECK(
-          false,
-          "Trying to instantiate a class that isn't a registered custom class: ",
-          c10::util::get_fully_qualified_type_name<T>());
+      throw c10::Error(
+          "Trying to instantiate a class that isn't a registered custom class: " +
+          std::string(c10::util::get_fully_qualified_type_name<T>()));
     }
   }();
   auto ivalue_obj = c10::ivalue::Object::create(std::move(classType), /* numSlots */1);
@@ -2455,17 +2479,29 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
 }
 
 namespace ivalue {
+namespace detail {
+
+template <typename T>
+IValue from_(T&& x, std::true_type /*unused*/) {
+  return IValue(std::forward<T>(x));
+}
+template <typename T>
+IValue from_(c10::intrusive_ptr<T> x, std::false_type /*unused*/) {
+  return IValue(std::move(x));
+}
+template <typename T>
+IValue from_(T&& /*x*/, std::false_type /*unused*/) {
+  static_assert(
+      guts::false_t<T>::value,
+      "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
+  return IValue();
+}
+} // namespace detail
 
 template <typename T>
 IValue from(T&& x) {
-  if constexpr (std::is_constructible_v<IValue, T>) {
-    return IValue(std::forward<T>(x));
-  } else {
-    static_assert(
-        guts::false_t<T>::value,
-        "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
-    return IValue();
-  }
+  return detail::from_(
+      std::forward<T>(x), typename std::is_constructible<IValue, T>::type{});
 }
 
 } // namespace ivalue

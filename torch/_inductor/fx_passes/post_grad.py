@@ -55,7 +55,6 @@ from ..utils import (
     decode_device,
     get_all_devices,
     get_gpu_type,
-    is_bf16x9_matmul,
     is_gpu,
     is_pointwise_use,
     OPTIMUS_EXCLUDE_POST_GRAD,
@@ -998,10 +997,6 @@ def is_valid_mm_plus_mm(match: Match):
     mat4_val = match.kwargs["mat4"].meta.get("val")
 
     if mat1_val is None or mat2_val is None or mat3_val is None or mat4_val is None:
-        return False
-    if is_bf16x9_matmul(mat1_val.device.type, mat1_val.dtype) or is_bf16x9_matmul(
-        mat3_val.device.type, mat3_val.dtype
-    ):
         return False
 
     *_b1, m1, k1 = mat1_val.shape

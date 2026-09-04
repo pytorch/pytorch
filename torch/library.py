@@ -1343,17 +1343,6 @@ def register_autograd(
     :class:`torch.autograd.Function`. The semantics of ``backward_fn`` are the
     same as :meth:`torch.autograd.Function.backward`.
 
-    .. warning::
-        The strides of the gradients passed to ``backward_fn`` are undefined:
-        they may not match the strides of the corresponding forward outputs
-        (for example, the backward of :func:`torch.cat` produces gradients
-        that are non-contiguous views into a larger tensor). If
-        ``backward_fn`` calls a kernel that assumes a particular memory
-        layout (such as a raw Triton or CUDA kernel), it must call
-        :meth:`~torch.Tensor.contiguous` on the gradients or handle their
-        strides explicitly. Backward formulas composed of PyTorch operations
-        handle arbitrary strides automatically.
-
     ``setup_context(ctx, inputs, output)`` runs during the forward pass.
     Please save quantities needed for backward onto the ``ctx`` object via
     either :meth:`torch.autograd.function.FunctionCtx.save_for_backward`

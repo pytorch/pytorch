@@ -530,27 +530,6 @@ class TestTritonHeuristics(TestCase):
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
 
-    @runOnRocm
-    def test_rocm_exhaustive_configs_do_not_enumerate_num_stages(self):
-        """ROCmConfigHeuristic._filter_configs forces num_stages to
-        default_num_stages, so enumerating num_stages in exhaustive_configs would
-        only yield duplicates that get deduped again in _finalize_mm_configs.
-        """
-        from torch._inductor.heuristics.template.triton import (
-            GemmConfig,
-            ROCmConfigHeuristic,
-        )
-
-        heuristic = ROCmConfigHeuristic()
-        self.assertEqual(
-            {c.num_stages for c in heuristic.exhaustive_configs},
-            {heuristic.default_num_stages},
-        )
-
-        # the invariant above is only safe because _filter_configs clobbers it
-        filtered = heuristic._filter_configs([GemmConfig(32, 32, 32, 1, 4, group_m=8)])
-        self.assertEqual(filtered[0].num_stages, heuristic.default_num_stages)
-
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):

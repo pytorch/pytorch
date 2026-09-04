@@ -12,10 +12,8 @@ from subprocess import CalledProcessError
 import torch
 import torch._inductor.config as config
 
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import compile_fx  # noqa: F401
 from torch._inductor.utils import (
-    _device_is_available,
     get_gpu_shared_memory,
     get_gpu_type,
     GPU_TYPES,
@@ -25,11 +23,7 @@ from torch._inductor.utils import (
 )
 from torch.utils._helion import has_helion
 from torch.utils._pallas import has_pallas_package, has_tpu_pallas
-from torch.utils._triton import (
-    has_triton,
-    has_triton_block_ptr,
-    has_triton_cpu_backend,
-)
+from torch.utils._triton import has_triton, has_triton_block_ptr
 from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
@@ -64,12 +58,18 @@ def test_cpu():
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
-# Respect triton_disable_device_detection when probing the CPU backend.
-TRITON_HAS_CPU = has_triton(include_cpu=True) and has_triton_cpu_backend()
 
 HAS_PALLAS = LazyVal(has_pallas_package)
 
 HAS_HELION = has_helion()
+
+if HAS_TRITON:
+    import triton
+
+    TRITON_HAS_CPU = "cpu" in triton.backends.backends
+else:
+    TRITON_HAS_CPU = False
+
 
 HAS_CUDA_AND_TRITON = torch.cuda.is_available() and HAS_TRITON
 
@@ -84,21 +84,10 @@ HAS_GPU_AND_TRITON = HAS_GPU
 
 GPU_TYPE = get_gpu_type()
 
-
-def _is_multigpu(gpu: str) -> bool:
-    # Resolve through the DeviceInterface registry: GPU_TYPES may include
-    # out-of-tree backends with no torch.<gpu> module (getattr would raise)
-    # or with partially-implemented interfaces (base methods raise
-    # NotImplementedError).
-    if not _device_is_available(gpu):
-        return False
-    try:
-        return get_interface_for_device(gpu).device_count() >= 2
-    except NotImplementedError:
-        return False
-
-
-HAS_MULTIGPU = any(_is_multigpu(gpu) for gpu in GPU_TYPES)
+HAS_MULTIGPU = any(
+    getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
+    for gpu in GPU_TYPES
+)
 
 _desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
 RUN_GPU = HAS_GPU and any(

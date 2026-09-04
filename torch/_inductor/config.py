@@ -401,7 +401,7 @@ force_fuse_int_mm_with_mul = False
 # (may improve perf at the cost of accuracy for some models).
 keep_addmm_fused_for_half_dtypes = True
 
-use_mixed_mm: bool = Config(
+use_mixed_mm = Config(
     default=True, deprecated=True, deprecation_message="does not do anything"
 )
 
@@ -2321,13 +2321,9 @@ class triton:
         == "1"
     )
 
-    # Fuse staged reduction pipelines, including block reductions and
-    # lane-resolution pointwise epilogues.
-    nested_reduction: bool = Config(
-        justknob="pytorch/inductor:nested_reduction",
-        env_name_force="TORCHINDUCTOR_NESTED_REDUCTION",
-        default=True,
-    )
+    # Fuse staged reduction pipelines, including dependent cross-axis reductions
+    # and lane-resolution pointwise epilogues.
+    nested_reduction = os.environ.get("TORCHINDUCTOR_NESTED_REDUCTION", "0") == "1"
 
     # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder

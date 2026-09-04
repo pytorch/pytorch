@@ -588,8 +588,7 @@ def region_activation_memory_budget(
         annotation is rejected rather than silently applied graph-wide), and all
         annotated nodes must agree on the budget. To use different budgets for
         different parts of a model, separate them with a graph break (e.g.
-        ``torch._dynamo.graph_break()``) so each part becomes its own graph. The
-        context remains active across graph breaks within the region.
+        ``torch._dynamo.graph_break()``) so each part becomes its own graph.
 
     This only has an effect under :func:`torch.compile`; using it outside of a
     compiled region raises a ``RuntimeError``.
@@ -623,7 +622,9 @@ def region_activation_memory_budget(
             "torch.autograd.graph.region_activation_memory_budget can only be "
             "used inside a torch.compile region; it has no effect in eager mode."
         )
-    return fx_traceback._dynamo_region_activation_memory_budget(float(budget))
+    return fx_traceback.annotate(
+        {fx_traceback.MEMORY_BUDGET_ANNOTATION_KEY: float(budget)}
+    )
 
 
 def set_warn_on_accumulate_grad_stream_mismatch(enabled: bool) -> None:
