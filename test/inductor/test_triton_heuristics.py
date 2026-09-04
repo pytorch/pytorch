@@ -1036,7 +1036,7 @@ class TestDumpLaunchTensors(TestCase):
             kernel_bases = {}
             verified_tensor_load = False
 
-            for root, dirs, files in os.walk(cache_dir()):
+            for root, dirs, _files in os.walk(cache_dir()):
                 for d in dirs:
                     if "_run_" in d:
                         full_path = os.path.join(root, d)

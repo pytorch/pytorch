@@ -1939,7 +1939,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             data = torch.randn((10, 10), dtype=torch.float32)
             result_eager = f_dtype_view(cache.clone(), data)
 
-            for mode_name, mode_ctx in [
+            for _mode_name, mode_ctx in [
                 ("inference", torch.inference_mode()),
                 ("no_grad", torch.no_grad()),
             ]:
