@@ -1194,6 +1194,33 @@ class DecompOneOffTests(TestCase):
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
+    def test_channel_shuffle_matches_eager(self, device):
+        # Which eager kernel a backend lands in is a dispatcher fact rather than
+        # a device list: native_channel_shuffle registers a CPU kernel that keeps
+        # suggest_memory_format(), while every other backend falls through to the
+        # composite math_channel_shuffle, whose trailing contiguous() decides the
+        # layout. Only the composite's strides are the decomposition's contract.
+        has_own_kernel = torch._C._dispatch_has_kernel_for_dispatch_key(
+            "aten::native_channel_shuffle",
+            torch._C._dispatch_key_for_device(torch.device(device).type),
+        )
+
+        for memory_format in (torch.contiguous_format, torch.channels_last):
+            x = torch.randn((2, 4, 3, 3), device=device).to(
+                memory_format=memory_format
+            )
+            for groups in (1, 2, 4):
+                try:
+                    ref = torch.channel_shuffle(x, groups)
+                except NotImplementedError:
+                    self.skipTest(f"channel_shuffle has no {device} kernel")
+                res = torch._refs.nn.functional.channel_shuffle(x, groups)
+                self.assertEqual(res, ref)
+                if not has_own_kernel:
+                    self.assertEqual(res.stride(), ref.stride())
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
     def test_contiguous_log_softmax(self, device):
         size = (2, 4, 3, 3)
         stride = (9, 18, 3, 1)
