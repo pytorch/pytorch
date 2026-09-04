@@ -8,7 +8,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
-from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
+from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeGuard, TypeVar
 
 import torch
 import torch.utils._pytree as pytree
@@ -26,7 +26,11 @@ from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    FakeTensorMode,
+    is_fake_tensor,
+    unset_fake_temporarily,
+)
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
@@ -98,6 +102,140 @@ def _is_raw_triton_kernel_data_ptr_error(
         if "/triton/runtime/" in filename:
             return True
     return False
+
+
+_TENSOR_NUMPY_DTYPES = frozenset(
+    {
+        torch.bool,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
+        torch.float16,
+        torch.float32,
+        torch.float64,
+        torch.complex64,
+        torch.complex128,
+    }
+)
+
+_TRACEABLE_NUMPY_SUM_DTYPES = (
+    torch.float16,
+    torch.float32,
+    torch.float64,
+)
+
+
+def _check_numpy_available() -> None:
+    from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
+
+    with unset_fake_temporarily(), disable_proxy_modes_tracing():
+        torch.empty(0, device="cpu").numpy()
+
+
+class _NonStrictNumpyProxy:
+    __slots__: tuple[str, ...] = ()
+    __hash__: None = None
+
+    def _unsupported(self, operation: str) -> NoReturn:
+        raise RuntimeError(
+            f"non-strict torch.export does not support {operation} on the result "
+            "of Tensor.numpy(). Replace the NumPy operation with an equivalent "
+            "PyTorch operation."
+        )
+
+    @property
+    def __class__(self) -> type:
+        return self._numpy_class()
+
+    @__class__.setter
+    def __class__(self, value: type) -> None:
+        self._unsupported("assigning __class__")
+
+    def _numpy_class(self) -> type:
+        raise NotImplementedError
+
+    def __getattr__(self, name: str) -> NoReturn:
+        self._unsupported(f"NumPy attribute {name!r}")
+
+    def __bool__(self) -> NoReturn:
+        self._unsupported("truth-value testing")
+
+    def __eq__(self, other: object) -> NoReturn:
+        self._unsupported("equality comparison")
+
+    def __ne__(self, other: object) -> NoReturn:
+        self._unsupported("inequality comparison")
+
+    def __array__(self, *args: object, **kwargs: object) -> NoReturn:
+        self._unsupported("conversion through numpy.asarray")
+
+    def __array_function__(self, *args: object, **kwargs: object) -> NoReturn:
+        self._unsupported("a NumPy function")
+
+    def __array_ufunc__(self, *args: object, **kwargs: object) -> NoReturn:
+        self._unsupported("a NumPy ufunc")
+
+
+class _NonStrictNumpyScalar(_NonStrictNumpyProxy):
+    __slots__: tuple[str, ...] = ("_tensor",)
+
+    def __init__(self, tensor: torch.Tensor, /) -> None:
+        self._tensor = tensor
+
+    def _numpy_class(self) -> type:
+        import numpy as np
+
+        return {
+            torch.float16: np.float16,
+            torch.float32: np.float32,
+            torch.float64: np.float64,
+        }[self._tensor.dtype]
+
+    def __add__(self, other: object) -> object:
+        if is_fake_tensor(other) and other.dtype == self._tensor.dtype:
+            return self._tensor + other
+        self._unsupported("addition")
+
+    def __radd__(self, other: object) -> object:
+        if is_fake_tensor(other) and other.dtype == self._tensor.dtype:
+            return other + self._tensor
+        self._unsupported("addition")
+
+
+class _NonStrictNumpyArray(_NonStrictNumpyProxy):
+    __slots__: tuple[str, ...] = ("_tensor",)
+
+    def __init__(self, tensor: torch.Tensor, /) -> None:
+        self._tensor = tensor
+
+    def _numpy_class(self) -> type:
+        import numpy as np
+
+        return np.ndarray
+
+    def sum(self, *args: object, **kwargs: object) -> _NonStrictNumpyScalar:
+        if args or kwargs:
+            raise RuntimeError(
+                "non-strict torch.export only supports numpy.ndarray.sum() "
+                "without arguments after Tensor.numpy(). Replace the NumPy "
+                "reduction with an equivalent PyTorch operation."
+            )
+        if self._tensor.dtype not in _TRACEABLE_NUMPY_SUM_DTYPES:
+            raise RuntimeError(
+                "non-strict torch.export cannot safely trace numpy.ndarray.sum() "
+                f"for dtype {self._tensor.dtype}. NumPy scalar semantics differ "
+                "from Tensor semantics for this dtype. Replace the NumPy reduction "
+                "with Tensor.sum() or convert the tensor to a real floating dtype."
+            )
+
+        from torch._numpy import _reductions_impl
+
+        return _NonStrictNumpyScalar(_reductions_impl.sum(self._tensor, None))
 
 
 class _KeyPath:
@@ -1236,6 +1374,10 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
     Usage: TORCHEXPORT_EXTENDED_DEBUG_CURRENT_LOC=1 TORCH_LOGS="+export" ...
     """
 
+    def __init__(self, zero_tensor_storage_ids: set[int] | None = None) -> None:
+        super().__init__()
+        self.zero_tensor_storage_ids = zero_tensor_storage_ids or set()
+
     def _override(
         self, func: Callable[..., object], args: Sequence[Any], kwargs: dict[str, Any]
     ) -> tuple[Callable[..., object], Sequence[Any], dict[str, Any]]:
@@ -1259,6 +1401,75 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 for a in pytree.tree_flatten(args[0])[0]
             ):
                 return torch._refs.tensor, args, kwargs
+        if (
+            func is torch.Tensor.numpy
+            and len(args) == 1
+            and isinstance(args[0], torch.Tensor)
+        ):
+            t = args[0]
+            if not is_fake_tensor(t):
+
+                def run_numpy() -> object:
+                    # Plain tensor constants can still execute genuine NumPy code.
+                    with unset_fake_temporarily():
+                        array = cast(Any, func(*args, **kwargs))
+                    # NumPy writes bypass tracing and would mutate only during export.
+                    array.setflags(write=False)
+                    return array
+
+                return run_numpy, [], {}
+
+            if not all(k == "force" for k in kwargs) or not isinstance(
+                kwargs.get("force", False), bool
+            ):
+                return func, args, kwargs
+
+            def run() -> _NonStrictNumpyArray:
+                tensor = t
+                _check_numpy_available()
+                if tensor.layout != torch.strided:
+                    raise TypeError(
+                        f"can't convert {tensor.layout} layout tensor to numpy. "
+                        "Use Tensor.to_dense() first"
+                    )
+                if not kwargs.get("force", False):
+                    if tensor.untyped_storage()._cdata in self.zero_tensor_storage_ids:
+                        raise RuntimeError(
+                            "Cannot convert a ZeroTensor to numpy. Set force=True "
+                            "if you need the zero array."
+                        )
+                    if tensor.device.type != "cpu":
+                        raise TypeError(
+                            f"can't convert {tensor.device} device type tensor to "
+                            "numpy. Use Tensor.cpu() to copy the tensor to host "
+                            "memory first."
+                        )
+                    if torch.is_grad_enabled() and tensor.requires_grad:
+                        raise RuntimeError(
+                            "Can't call numpy() on Tensor that requires grad. "
+                            "Use tensor.detach().numpy() instead."
+                        )
+                    if tensor.is_conj():
+                        raise RuntimeError(
+                            "Can't call numpy() on Tensor that has conjugate bit set. "
+                            "Use tensor.resolve_conj().numpy() instead."
+                        )
+                    if tensor.is_neg():
+                        raise RuntimeError(
+                            "Can't call numpy() on Tensor that has negative bit set. "
+                            "Use tensor.resolve_neg().numpy() instead."
+                        )
+                    tensor = tensor.detach()
+                else:
+                    tensor = tensor.detach().cpu().resolve_conj().resolve_neg()
+                if tensor.dtype not in _TENSOR_NUMPY_DTYPES:
+                    raise TypeError(
+                        "Tensor.numpy() does not support "
+                        f"dtype {tensor.dtype} during non-strict torch.export."
+                    )
+                return _NonStrictNumpyArray(tensor.view_as(tensor))
+
+            return run, [], {}
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
 
             def is_scalar_tensor_index(item: object) -> TypeGuard[torch.Tensor]:
