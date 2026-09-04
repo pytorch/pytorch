@@ -316,6 +316,109 @@ class CudaReproTests(TestCase):
                 runtime_mask_fn(query, key, value, padding_mask),
             )
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_effn_attn_uniform_zero_bias_backward(self):
+        batch_size, num_heads, seq_len, head_dim = 2, 4, 128, 64
+
+        def fn(query, key, value):
+            additive_mask = torch.full(
+                (batch_size, num_heads, seq_len, seq_len),
+                0.0,
+                device=query.device,
+                dtype=query.dtype,
+            )
+            return aten._scaled_dot_product_efficient_attention.default(
+                query, key, value, additive_mask, True
+            )[0]
+
+        inputs = tuple(
+            torch.randn(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                device=device_type,
+                requires_grad=True,
+            )
+            for _ in range(3)
+        )
+        eager_inputs = tuple(
+            tensor.detach().clone().requires_grad_() for tensor in inputs
+        )
+        compiled_inputs = tuple(
+            tensor.detach().clone().requires_grad_() for tensor in inputs
+        )
+        expected = fn(*eager_inputs)
+        expected.sum().backward()
+
+        biases = {}
+
+        def capture_biases(graph):
+            for target, bias_index in (
+                (aten._scaled_dot_product_efficient_attention.default, 3),
+                (aten._scaled_dot_product_efficient_attention_backward.default, 4),
+            ):
+                nodes = graph.find_nodes(op="call_function", target=target)
+                self.assertEqual(len(nodes), 1)
+                biases[target] = nodes[0].args[bias_index]
+
+        torch._dynamo.reset()
+        with (
+            config.patch(joint_custom_post_pass=capture_biases),
+            sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+        ):
+            compiled = torch.compile(fn, fullgraph=True)
+            actual = compiled(*compiled_inputs)
+            actual.sum().backward()
+
+        self.assertEqual(actual, expected)
+        for actual_input, expected_input in zip(compiled_inputs, eager_inputs):
+            self.assertEqual(actual_input.grad, expected_input.grad)
+        # check zero bias is removed.
+        self.assertIsNone(biases[aten._scaled_dot_product_efficient_attention.default])
+        self.assertIsNone(
+            biases[aten._scaled_dot_product_efficient_attention_backward.default]
+        )
+
+        def bias_grad_fn(query, key, value, bias_seed):
+            additive_mask = bias_seed * 0.0
+            return aten._scaled_dot_product_efficient_attention.default(
+                query, key, value, additive_mask, True
+            )[0]
+
+        bias_seed = torch.randn(
+            batch_size,
+            num_heads,
+            seq_len,
+            seq_len,
+            device=device_type,
+            requires_grad=True,
+        )
+        bias_grad_bias = []
+
+        def capture_bias_grad_bias(graph):
+            nodes = graph.find_nodes(
+                op="call_function",
+                target=aten._scaled_dot_product_efficient_attention_backward.default,
+            )
+            self.assertEqual(len(nodes), 1)
+            bias_grad_bias.append(nodes[0].args[4])
+
+        torch._dynamo.reset()
+        with (
+            config.patch(joint_custom_post_pass=capture_bias_grad_bias),
+            sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+        ):
+            compiled = torch.compile(bias_grad_fn, fullgraph=True)
+            compiled(*compiled_inputs, bias_seed).sum().backward()
+        # check zero bias is NOT removed due to rqurie bias grad.
+        self.assertEqual(len(bias_grad_bias), 1)
+        self.assertIsInstance(bias_grad_bias[0], torch.fx.Node)
+        self.assertIsNotNone(bias_seed.grad)
+
     def test_effn_attn_bias_padding(self):
         batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
 
