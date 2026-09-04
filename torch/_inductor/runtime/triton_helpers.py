@@ -1186,6 +1186,19 @@ def aten_erfcx(x):
     )
     result = tl.where(x >= 0.0, positive, negative)
     return tl.where(x != x, x, result)
+
+
+@triton.jit
+def aten_log_ndtr(x):
+    t = x * 0.707106781186547524400844362104849039
+    log_term = libdevice.log(libdevice.erfcx(-t) * 0.5)
+    left = tl.fma(-t, t, log_term)
+    right = libdevice.log1p(-libdevice.erfc(t) * 0.5)
+    result = tl.where(x < -1.0, left, right)
+    negative = tl.full(x.shape, -1.0, x.dtype)
+    return tl.where(libdevice.isnan(x), result, libdevice.copysign(result, negative))
+
+
 @triton.jit
 def is_floating(x):
     return promote_to_tensor(x).dtype.is_floating()

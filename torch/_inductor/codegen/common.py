@@ -1673,6 +1673,7 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     log_ndtr=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"calc_log_ndtr({x})",
+        triton=lambda x: f"triton_helpers.aten_log_ndtr({x})",
         name="special_log_ndtr",
     ),
     # logit
