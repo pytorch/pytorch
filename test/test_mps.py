@@ -1169,6 +1169,55 @@ class TestMPS(TestCaseMPS):
                 mismatches += 1
         self.assertEqual(mismatches, 0)
 
+    # Tests that a `torch.mps.Event` records against the stream it's given
+    @parametrize("stream", ["default", "pool"])
+    def test_stream_mps_event_record(self, stream):
+        s = self._get_stream_by_name(stream)
+        numel = 4_000_000
+        mismatches = 0
+        for i in range(20):
+            e = torch.mps.Event()
+            with torch.mps.stream(s):
+                x = torch.full((numel,), float(i), device="mps") * 2
+            e.record(s)
+            e.synchronize()
+            if not torch.equal(x.cpu(), torch.full((numel,), float(i) * 2)):
+                mismatches += 1
+        self.assertEqual(mismatches, 0)
+
+    # Tests that `torch.mps.Event.wait` makes the given stream wait,
+    # independent of whichever stream recorded the event.
+    @parametrize("stream1", ["default", "pool"])
+    @parametrize("stream2", ["default", "pool"])
+    def test_stream_mps_event_wait(self, stream1, stream2):
+        producer = self._get_stream_by_name(stream1)
+        consumer = self._get_stream_by_name(stream2)
+        if producer == consumer:
+            self.skipTest("test requires two distinct streams")
+
+        # Use a fairly large tensor and a chain of several dependent ops on the
+        # producer so it takes significantly longer to execute than the
+        # consumer, making it more likely that the test would fail without the
+        # `e.wait()` call.
+        numel = 200_000
+        num_producer_ops = 10
+        mismatches = 0
+        for i in range(20):
+            with torch.mps.stream(producer):
+                x = torch.full((numel,), float(i), device="mps")
+                for _ in range(num_producer_ops):
+                    x = x + 1
+            e = torch.mps.Event()
+            e.record(producer)
+            with torch.mps.stream(consumer):
+                e.wait(consumer)
+                y = x + 1
+            consumer.synchronize()
+            expected = float(i + num_producer_ops + 1)
+            if not torch.equal(y.cpu(), torch.full((numel,), expected)):
+                mismatches += 1
+        self.assertEqual(mismatches, 0)
+
     # Tests that autograd's gradient accumulation is correct when a tensor is
     # used by forward ops on two different streams, and backward() is called
     # on a third stream.

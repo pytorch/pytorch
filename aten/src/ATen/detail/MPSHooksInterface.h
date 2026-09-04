@@ -88,10 +88,10 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual void releaseEvent(uint32_t /*event_id*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  virtual void recordEvent(uint32_t /*event_id*/) const {
+  virtual void recordEvent(uint32_t event_id, int64_t stream_id) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  virtual void waitForEvent(uint32_t /*event_id*/) const {
+  virtual void waitForEvent(uint32_t event_id, int64_t stream_id) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   virtual void synchronizeEvent(uint32_t /*event_id*/) const {
