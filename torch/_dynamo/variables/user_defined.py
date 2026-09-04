@@ -109,11 +109,11 @@ from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
     GetSet,
-    getset_read,
     Member,
     Method,
     MutationType,
     NO_SUCH_SUBOBJ,
+    readonly_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -3579,6 +3579,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         can_use_mro_source = self.cls_source is not None and self.source is not None
 
+        # LOAD_ATTR + CALL (3.11+) never hits call_method unless getattr
+        # returns CallMethodVariable. object_generic_getattr already does this;
+        # UDOV must too, or tp_methods handlers are skipped and the class
+        # function is inlined. That breaks when Dynamo has replaced the method
+        # (Optimizer._init_group is wrapped with torch.compiler.disable).
+        from .object_protocol import _is_method_type
+
+        if self.lookup_tp_method(name) is not None and (
+            _is_method_type(type_attr)
+            or getattr(type_attr, "_torchdynamo_disable", False)
+        ):
+            return variables.CallMethodVariable(self, name, source=source)
+
         if isinstance(type_attr, staticmethod):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
@@ -4287,6 +4300,17 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         )
 
 
+# The writable BaseException attributes, whose state lives on the wrapped
+# ExceptionVariable rather than in the instance __dict__.
+_BASE_EXCEPTION_ATTRS = (
+    "args",
+    "__cause__",
+    "__context__",
+    "__suppress_context__",
+    "__traceback__",
+)
+
+
 class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
@@ -4328,9 +4352,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         if (
             name == "__setattr__"
             and len(args) == 2
-            and args[0].is_constant_match(
-                "__cause__", "__context__", "__suppress_context__", "__traceback__"
-            )
+            and args[0].is_constant_match(*_BASE_EXCEPTION_ATTRS)
         ):
             return self._base_vt.call_method(tx, "__setattr__", args, kwargs)  # type: ignore[missing-attribute]
         return super().call_method(tx, name, args, kwargs)
@@ -4353,19 +4375,31 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         "with_traceback": Method(_with_traceback),
     }
 
+    tp_getset = {
+        "args": GetSet(
+            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "args"),
+            lambda s, tx, value: s._base_vt._set_args(tx, value),
+        ),
+        "__cause__": GetSet(
+            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__cause__"),
+            lambda s, tx, value: s._base_vt._set_cause(tx, value),
+        ),
+        "__context__": GetSet(
+            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__context__"),
+            lambda s, tx, value: s._base_vt._set_context(tx, value),
+        ),
+        "__traceback__": GetSet(
+            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__traceback__"),
+            lambda s, tx, value: s._base_vt._set_traceback(tx, value),
+        ),
+    }
+
     # BaseException args/__cause__/__context__/__suppress_context__/__traceback__
     # are members/getsets; delegate each to the wrapped base exception VT.
     tp_members = {
-        "args": Member(lambda s, tx: s._base_vt.tp_getattro_impl(tx, "args")),
-        "__cause__": Member(lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__cause__")),
-        "__context__": Member(
-            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__context__")
-        ),
         "__suppress_context__": Member(
-            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__suppress_context__")
-        ),
-        "__traceback__": Member(
-            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__traceback__")
+            lambda s, tx: s._base_vt.tp_getattro_impl(tx, "__suppress_context__"),
+            lambda s, tx, value: s._base_vt._set_suppress_context(tx, value),
         ),
     }
 
@@ -4450,9 +4484,9 @@ class InspectVariable(UserDefinedObjectVariable):
     # avoid tracing the property getters. The redirect is per-type, so a getter
     # declines (returns None) when the attribute doesn't apply to self.value.
     tp_getset = {
-        "parameters": GetSet(_parameters, None),
-        "kind": GetSet(_kind, None),
-        "name": GetSet(_name, None),
+        "parameters": GetSet(_parameters, readonly_setter),
+        "kind": GetSet(_kind, readonly_setter),
+        "name": GetSet(_name, readonly_setter),
     }
 
 
@@ -4821,10 +4855,25 @@ class DefaultDictVariable(UserDefinedDictVariable):
             f"{tracked_repr(tx, self._base_vt)})",
         )
 
+    def _set_default_factory(
+        self, tx: "InstructionTranslatorBase", value: VariableTracker | None
+    ) -> VariableTracker:
+        # PyMember_SetOne on a T_OBJECT member: deleting stores NULL, which
+        # reads back as None. CPython type-checks the factory at __missing__
+        # time, not on assignment, so anything is accepted here.
+        if value is None:
+            value = variables.ConstantVariable.create(None)
+        self.default_factory = value
+        se = tx.output.side_effects
+        if not se.is_attribute_mutation(self):
+            se.track_attribute_mutation_new(self)
+        se.store_attr(self, "default_factory", value)
+        return variables.ConstantVariable.create(None)
+
     # ref: defdict_members[] in CPython Modules/_collectionsmodule.c
     # {"default_factory", T_OBJECT, offsetof(defdictobject, default_factory)}
     tp_members = {
-        "default_factory": Member(getset_read(lambda s: s.default_factory)),
+        "default_factory": Member(lambda s, _: s.default_factory, _set_default_factory),
     }
 
     def _missing_impl(
@@ -5172,7 +5221,7 @@ class UserDefinedDequeVariable(UserDefinedObjectVariable):
     # ref: deque_getset[] in CPython Modules/_collectionsmodule.c; maxlen is a
     # read-only getset (deque_get_maxlen, no setter).
     tp_getset = {
-        "maxlen": GetSet(_maxlen, None),
+        "maxlen": GetSet(_maxlen, readonly_setter),
     }
 
 
@@ -5516,7 +5565,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
             return variables.UserMethodVariable(polyfills.mapping_get, self)
         return None
 
-    tp_getset = {"get": GetSet(_get, None)}
+    tp_getset = {"get": GetSet(_get, readonly_setter)}
 
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self._maybe_get_baseclass_method("__len__") in dict_methods:
