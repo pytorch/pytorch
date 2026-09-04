@@ -189,6 +189,10 @@ static void laguerre_polynomial_l_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "laguerre_polynomial_l");
 }
 
+static void heaviside_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "heaviside");
+}
+
 static void polar_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "polar");
 }
@@ -411,6 +415,7 @@ REGISTER_DISPATCH(mul_stub, &mul_mps_kernel)
 REGISTER_DISPATCH(div_true_stub, &div_true_mps_kernel)
 REGISTER_DISPATCH(div_floor_stub, &div_floor_mps_kernel)
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_mps_kernel)
+REGISTER_DISPATCH(heaviside_stub, &heaviside_mps_kernel)
 REGISTER_DISPATCH(fmod_stub, &fmod_mps_kernel)
 REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
 REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)
