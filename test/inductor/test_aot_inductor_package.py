@@ -312,7 +312,15 @@ class TestAOTInductorPackage(TestCase):
                     # The loader should be able to load from temp_dir which contains 'data/...'
                     # or 'some_prefix/data/...'
 
-                    loaded = torch._inductor.aoti_load_package(temp_dir)
+                    with (
+                        self.assertNoLogs(
+                            "torch._inductor.package.package", level="WARNING"
+                        ),
+                        self.assertNoLogs(
+                            "torch.export.pt2_archive._package", level="WARNING"
+                        ),
+                    ):
+                        loaded = torch._inductor.aoti_load_package(temp_dir)
                     actual = loaded(*example_inputs)
                     self.assertEqual(actual, expected)
 

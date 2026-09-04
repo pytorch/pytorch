@@ -3258,6 +3258,11 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(input_tensor, sorted_bins,
                           weight=weight_tensor, density=density)
 
+    # A bin count whose edge array is large enough to exceed the size limit some
+    # backends have on inline kernel arguments.
+    yield SampleInput(torch.linspace(0., 1., 6, dtype=dtype, device=device),
+                      torch.linspace(0., 1., 9000, dtype=dtype, device=device))
+
 def sample_inputs_histogramdd(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -3275,6 +3280,13 @@ def sample_inputs_histogramdd(op_info, device, dtype, requires_grad, **kwargs):
         bins_tensor = [make_arg(ct + 1) for ct in bin_ct]
         yield SampleInput(input_tensor, bins_tensor,
                           weight=weight_tensor, density=density)
+
+    # The edge count accumulates across dimensions, so the combined array can exceed
+    # that limit even when no single dimension does. The per dimension counts are
+    # deliberately lopsided so the edges are large while the output stays small.
+    yield SampleInput(torch.linspace(0., 1., 8, dtype=dtype, device=device).reshape(4, 2),
+                      [torch.linspace(0., 1., 8001, dtype=dtype, device=device),
+                       torch.linspace(0., 1., 301, dtype=dtype, device=device)])
 
 def error_inputs_histogramdd(opinfo, device, **kwargs):
     invalid_bins = [1, 1, 1, 1, 1]
@@ -13244,16 +13256,6 @@ op_db: list[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, )),
                        DecorateInfo(unittest.skip("Skipped! conj_physical_ not implemented for sparse"),
                                     'TestSparseUnaryUfuncs', 'test_inplace'),
-                       # RuntimeError: false INTERNAL ASSERT FAILED at
-                       # "/Users/kurtamohler/develop/pytorch-1/aten/src/ATen/native/DispatchStub.cpp":276
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                           device_type='mps', dtypes=(torch.complex64,)
-                       ),
-                       # RuntimeError: Expected self.is_complex() to be true, but got false.
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-
                    )),
     OpInfo('resolve_conj',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -14887,13 +14889,6 @@ op_db: list[OpInfo] = [
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8, torch.bool),
                     supports_autograd=False,
                     always_returns_bool=True,
-                    skips=(
-                        # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-                        # AssertionError: RuntimeError not raised : Expected RuntimeError when calling with
-                        # input.device=mps:0 and out.device=cpu.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                    ),
                     supports_rhs_python_scalar=False),
     BinaryUfuncInfo('logical_or',
                     ref=np.logical_or,
@@ -14901,13 +14896,6 @@ op_db: list[OpInfo] = [
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int8, torch.bool),
                     supports_autograd=False,
                     always_returns_bool=True,
-                    skips=(
-                        # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-                        # AssertionError: RuntimeError not raised : Expected RuntimeError when calling with
-                        # input.device=mps:0 and out.device=cpu.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                    ),
                     supports_rhs_python_scalar=False),
     BinaryUfuncInfo('logical_xor',
                     ref=np.logical_xor,
@@ -14915,14 +14903,7 @@ op_db: list[OpInfo] = [
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int8, torch.bool),
                     supports_autograd=False,
                     always_returns_bool=True,
-                    supports_rhs_python_scalar=False,
-                    skips=(
-                        # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-                        # AssertionError: RuntimeError not raised : Expected RuntimeError when calling with
-                        # input.device=mps:0 and out.device=cpu.
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                    )),
+                    supports_rhs_python_scalar=False),
     BinaryUfuncInfo('bitwise_and',
                     ref=np.bitwise_and,
                     dtypes=integral_types_and(torch.bool),
@@ -21395,11 +21376,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         sample_inputs_func=sample_inputs_softmax_variant,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        skips=(
-            # The following dtypes worked in forward but are not listed by the
-            # OpInfo: {torch.int16, torch.int8, torch.uint8, torch.int32}.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-        ),
         assert_autodiffed=True),
     OpInfo(
         'log_softmax',

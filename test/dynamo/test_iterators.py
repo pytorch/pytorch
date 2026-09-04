@@ -471,6 +471,49 @@ class TestIterators(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(list(gen()), [1, 2, 3])
 
+    def test_deque_reverse_iterator_not_a_deque_iterator(self):
+        """reverse deque iterators must not subclass DequeIteratorVariable.
+
+        In CPython, _deque_reverse_iterator is not a subclass of
+        _deque_iterator; the VTs should mirror that.
+        """
+        import collections
+
+        from torch._dynamo.variables.lists import (
+            DequeIteratorVariable,
+            DequeReverseIteratorVariable,
+        )
+
+        self.assertFalse(
+            issubclass(DequeReverseIteratorVariable, DequeIteratorVariable)
+        )
+        self.assertIs(
+            DequeReverseIteratorVariable._cpython_type,
+            type(reversed(collections.deque())),
+        )
+        self.assertIs(
+            DequeIteratorVariable._cpython_type, type(iter(collections.deque()))
+        )
+
+    @make_dynamo_test
+    def test_yield_from_deque_reverse_iterator(self):
+        """yield from over a reverse deque iterator still traces after the VT split."""
+        import collections
+
+        def gen():
+            yield from reversed(collections.deque([1, 2, 3]))
+
+        self.assertEqual(list(gen()), [3, 2, 1])
+
+    @make_dynamo_test
+    def test_deque_reverse_iterator_python_type(self):
+        """type(reversed(deque)) inside compile must be _deque_reverse_iterator."""
+        import collections
+
+        it = reversed(collections.deque([1, 2, 3]))
+        self.assertIs(type(it), type(reversed(collections.deque())))
+        self.assertIsNot(type(it), type(iter(collections.deque())))
+
     def test_tuple_iterator_not_a_list_iterator(self):
         """tuple iterators must not subclass ListIteratorVariable (CPython parity).
 

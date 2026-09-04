@@ -7,7 +7,8 @@ from torch._dynamo.utils import counters
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
+from torch.testing._internal.common_utils import recover_orig_fp32_precision, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -48,6 +49,30 @@ class B2BGEMMTest(TestCase):
         res = f_opt(A, B, C)
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
+
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @recover_orig_fp32_precision
+    @torch._inductor.config.patch(b2b_gemm_pass=True)
+    def test_bfx9_rejects_mixed_dtype_b2b_gemm(self):
+        def fn(a, b, c):
+            return torch.mm(torch.mm(a, b).float(), c)
+
+        a = torch.randn((256, 32), device=self.device, dtype=torch.float16)
+        b = torch.randn((32, 256), device=self.device, dtype=torch.float16)
+        c = torch.randn((256, 32), device=self.device, dtype=torch.float32)
+        for precision, should_fuse in (("ieee", True), ("bfx9", False)):
+            with self.subTest(fp32_precision=precision):
+                torch.backends.cuda.matmul.fp32_precision = precision
+                torch._dynamo.reset()
+                counters.clear()
+                actual = torch.compile(fn)(a, b, c)
+                if should_fuse:
+                    self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
+                else:
+                    self.assertEqual(actual, fn(a, b, c))
+                    self.assertEqual(counters["inductor"]["b2b_gemm"], 0)
 
     @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)

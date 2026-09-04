@@ -80,6 +80,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.nn import functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
+    BF16X9_SUPPORTED,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
     TEST_CUDA,
@@ -5309,6 +5310,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = torch.compile(fn, backend="eager", fullgraph=True)(x, config)
         self.assertEqual(result, correct)
 
+    @recover_orig_fp32_precision
     def test_global_state_guard_serialization(self):
         GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
         guards = GlobalStateGuard()
@@ -5319,6 +5321,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # Test on non autocast state and autocast cache states.
         self.assertIn("autocast_state", json_guards)
         for key, value in json_guards.items():
+            # Compatibility alias; cuda_matmul_precision is authoritative in
+            # payloads written by current versions.
+            if key == "allow_tf32":
+                continue
             if type(value) is int:
                 variant = value + 1
             elif type(value) is bool:
@@ -5339,6 +5345,33 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         guards.__setstate__(json.dumps(json_guards))
         self.assertTrue(guards.check())
+
+        legacy_json_guards = json_guards.copy()
+        legacy_json_guards.pop("cuda_matmul_precision")
+        legacy_json_guards["allow_tf32"] = (
+            torch.backends.cuda.matmul.fp32_precision == "tf32"
+        )
+        guards.__setstate__(json.dumps(legacy_json_guards))
+        self.assertTrue(guards.check())
+        legacy_roundtrip = json.loads(guards.__getstate__())
+        self.assertNotIn("cuda_matmul_precision", legacy_roundtrip)
+        guards.__setstate__(json.dumps(legacy_roundtrip))
+        self.assertTrue(guards.check())
+
+        legacy_json_guards["allow_tf32"] = not legacy_json_guards["allow_tf32"]
+        guards.__setstate__(json.dumps(legacy_json_guards))
+        self.assertFalse(guards.check())
+
+        if BF16X9_SUPPORTED:
+            legacy_json_guards["allow_tf32"] = False
+            guards.__setstate__(json.dumps(legacy_json_guards))
+            torch.backends.cuda.matmul.fp32_precision = "bfx9"
+            self.assertFalse(guards.check())
+
+            x9_json_guards = json.loads(GlobalStateGuard().__getstate__())
+            self.assertNotIn("allow_tf32", x9_json_guards)
+            guards.__setstate__(json.dumps(x9_json_guards))
+            self.assertTrue(guards.check())
 
         # Test on autocast states.
         def _test_autocast(dtype):
@@ -7452,6 +7485,29 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertTrue(p_ref() is not None)
         del x
         self.assertTrue(p_ref() is None)
+
+    @skipIfWindows(msg="Tensor lifetime checks are unreliable on Windows")
+    def test_release_input_memory_hop_dunder_dict(self):
+        # Accessing a nested function's __dict__ inside a HOP body used to
+        # create a reference cycle through the speculated SideEffects table,
+        # keeping the frame's input tensors alive until a full gc.collect().
+        def fn(pred, x):
+            def branch():
+                def inner():
+                    return x + 1
+
+                inner.attr = 1
+                return inner()
+
+            return torch.cond(pred, branch, branch)
+
+        x = torch.randn(4)
+        x_ref = weakref.ref(x)
+        pred = torch.tensor(True)
+        out = torch.compile(fn, backend="eager", fullgraph=True)(pred, x)
+        self.assertEqual(out, x + 1)
+        del x, out
+        self.assertIsNone(x_ref())
 
     def test_update_locals_and_stack_uses_shared_cache(self):
         def fn(x):
@@ -12121,6 +12177,31 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                             )
         finally:
             write_state(initial_state)
+
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @recover_orig_fp32_precision
+    def test_recompile_on_bfx9_precision_change(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(10)
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        fn(x)
+        self.assertEqual(counter.frame_count, 1)
+
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        fn(x)
+        fn(x)
+        self.assertEqual(counter.frame_count, 2)
+
+        torch.backends.cuda.matmul.fp32_precision = "ieee"
+        fn(x)
+        self.assertEqual(counter.frame_count, 2)
 
     def test_grad_state_mutated(self):
         prior = torch.is_grad_enabled()
