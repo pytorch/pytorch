@@ -285,9 +285,66 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
                 FSDP.optim_state_dict(model, optim)
 
 
+class TestDTensorRedistributeReturnValue(DTensorContinuousTestBase):
+    """Regression test for the redistribute() return value invariant.
+
+    DTensor.redistribute() is out-of-place: it returns a new DTensor and
+    leaves the original unchanged. This invariant was violated in
+    _unflatten_orig_param_states() in
+    torch/distributed/fsdp/_optim_utils.py,
+    where the return value was discarded, causing silently wrong optimizer state
+    in the TP+FSDP checkpoint reconstruction path.
+
+    This test guards the API contract that callers must capture the return
+    value. While it does not exercise the full _unflatten_orig_param_states
+    integration path (which requires a complex TP+FSDP setup), it prevents
+    regressions in the fundamental invariant that was the root cause.
+    """
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_redistribute_return_value_must_be_captured(self):
+        from torch.distributed.tensor import Replicate
+
+        device_mesh = init_device_mesh(device_type.type, (self.world_size,))
+        global_tensor = torch.arange(8, dtype=torch.float32, device=device_type.type)
+
+        dt = DTensor.from_local(
+            global_tensor.chunk(self.world_size)[self.rank],
+            device_mesh,
+            [Shard(0)],
+            run_check=False,
+        )
+
+        # redistribute is out-of-place: original must be unchanged
+        original_placement = dt.placements[0]
+        result = dt.redistribute(placements=(Replicate(),))
+
+        self.assertEqual(dt.placements[0], original_placement)
+        self.assertTrue(dt.placements[0].is_shard())
+
+        # Returned value must have the new placement
+        self.assertEqual(result.placements[0], Replicate())
+
+        # Simulate the correct calling pattern from _optim_utils.py:
+        #   value = value.redistribute(placements=(Replicate(),))
+        # The buggy pattern was: value.redistribute(...) without assignment.
+        value = dt
+        value = value.redistribute(placements=(Replicate(),))
+        self.assertEqual(value.placements[0], Replicate())
+        self.assertEqual(value.to_local().numel(), global_tensor.numel())
+
+
 devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
     TestFSDPWithDeviceMeshAndDTensor, globals(), only_for=devices, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestDTensorRedistributeReturnValue, globals(), only_for=devices, allow_xpu=True
 )
 if __name__ == "__main__":
     run_tests()
