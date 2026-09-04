@@ -20,6 +20,7 @@ import sysconfig
 import textwrap
 import threading
 import types
+import unittest
 import weakref
 from unittest import mock
 
@@ -40,18 +41,23 @@ from torch._dynamo.package import (
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.precompile_package import (
+    _compose_with_default,
     _dynamo_alias_module,
     _fact_order,
     _GuardFact,
+    _normalize,
     _SingleFileStore,
+    default_guard_filter_fn,
     precompile_capture,
     precompile_load,
     serving,
+    varying_guard_slots,
 )
-from torch._dynamo.types import FrameAction, FrameExecStrategy
+from torch._dynamo.types import FrameAction, FrameExecStrategy, GuardFilterEntry
 from torch._dynamo.utils import CleanupHook
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.compiler._precompile_types import PrecompileSummary
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1052,6 +1058,18 @@ def _names(scope, *prefixes):
     return sorted(name for name in scope if name.startswith(prefixes))
 
 
+def _precompile_unreachable_helper(y):
+    z = y * 3
+    torch._dynamo.graph_break()
+    return z.sum()
+
+
+def _precompile_unreachable_entry(x, scale=2.0):
+    # Without nested_graph_breaks the helper's break stops its inlining: its
+    # frame is entered by an ordinary call no name in the entry reaches.
+    return _precompile_unreachable_helper(x * 2) * scale
+
+
 @instantiate_parametrized_tests
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def setUp(self):
@@ -1359,6 +1377,28 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(module.__dict__.get("g"), want)
         self.assertEqual(dynamo_package._GLOBAL_BINDINGS.get(module, {}), {})
 
+    def test_joining_a_dead_owners_binding_survives_its_cleanup(self):
+        # A package collected without uninstall() parks its cleanup when the
+        # registry lock is busy. A later install of the same artifact writes the
+        # same builtins dict under the same name; the drain must find the new
+        # owner on the binding and keep the name, not delete it as the dead
+        # package's leftover.
+        module = types.ModuleType("test_precompile_dead_owner")
+        shared = {}
+        dead = self._bare_package()
+        dead._install_global(module, "g", shared)
+        installed = dead._installed_globals
+        del dead
+        gc.collect()
+        dynamo_package._DEAD_PACKAGES.append(
+            dynamo_package._DeadPackageState(installed, [])
+        )
+        live = self._bare_package()
+        live._install_global(module, "g", shared)
+        self.assertIs(module.__dict__.get("g"), shared)
+        live.uninstall()
+        self.assertNotIn("g", module.__dict__)
+
     def test_source_graph_module_copies_are_isolated(self):
         # _src and the exec'd forward are shared between copies; everything else
         # nn.Module keeps on an instance is state, hook dicts included, and a
@@ -1391,8 +1431,55 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(original(x), x + 100)
         self.assertEqual(dup(x), x + 1)  # live isolation
         self.assertEqual(pickle.loads(pickle.dumps(dup))(x), x + 1)
-        # And an instance pickles its CURRENT state, not its load-time state.
+        # And an instance pickles its CURRENT parameters/buffers/submodules,
+        # not its load-time ones (other nn.Module state still comes from _src).
         self.assertEqual(pickle.loads(pickle.dumps(original))(x), x + 100)
+
+    def test_eager_artifact_round_trips_a_hop_graph_as_source(self):
+        # GraphModule.__reduce__ re-traces the generated source at load; cond
+        # rejects the Proxy and autocast enter/exit EXECUTE and leave no node.
+        # The top level must travel as source, its HOP bodies as real Graphs.
+        from torch._dynamo.precompile_context import (
+            _SourceGraphModule,
+            EagerCacheArtifact,
+        )
+
+        def fn(x):
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                y = torch.cond(x.sum() > 0, lambda t: t.sin(), lambda t: t.cos(), (x,))
+            return y + 1
+
+        gms = []
+
+        def backend(gm, example_inputs):
+            gms.append(gm)
+            return gm.forward
+
+        x = torch.randn(3)
+        torch.compile(fn, backend=backend, fullgraph=True)(x)
+        (gm,) = gms
+        artifact = EagerCacheArtifact(key="k", content=gm.forward)
+        loaded = pickle.loads(pickle.dumps(artifact)).after_deserialization()
+        module = loaded.__self__
+        self.assertIsInstance(module, _SourceGraphModule)
+        self.assertFalse(hasattr(module, "graph"))
+        self.assertTrue(module._modules)
+        for sub in module._modules.values():
+            self.assertIsInstance(sub, torch.fx.GraphModule)
+            self.assertGreater(len(sub.graph.nodes), 0)
+        self.assertEqual(loaded(x), gm.forward(x))
+        self.assertEqual(loaded(-x.abs()), gm.forward(-x.abs()))
+        # Re-serializing a loaded artifact goes through _SourceGraphModule.__reduce__.
+        reloaded = pickle.loads(pickle.dumps(pickle.loads(pickle.dumps(artifact))))
+        self.assertEqual(reloaded.after_deserialization()(x), gm.forward(x))
+
+    def test_take_artifact_removes_the_staged_backend(self):
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+
+        PrecompileContext.record_artifact(EagerCacheArtifact(key="k", content=None))
+        self.assertEqual(PrecompileContext.take_artifact("k").key, "k")
+        self.assertIsNone(PrecompileContext.take_artifact("k"))
+        self.assertIsNone(PrecompileContext.serialize_artifact_by_key("k"))
 
     def test_library_module_requires_the_name_to_resolve_to_the_stdlib(self):
         # The risky-drop waiver keys on the OWNER's module name, and a name is
@@ -1483,9 +1570,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             )
 
     def test_guard_policy_classification_is_total(self):
-        # survives() defaults to KEEP for a guard type in no set, so the
-        # policy can only ever drop what _INVARIANT_DROPPABLE_GUARD_TYPES
-        # names. This test is what makes the never-drop claim enforceable:
+        # A guard type in no set is KEPT, so a drop policy can only ever
+        # drop what _INVARIANT_DROPPABLE_GUARD_TYPES names. This test is
+        # what makes the never-drop claim enforceable:
         # a guard type added to GuardBuilder fails here until someone triages
         # it into exactly one of the four sets.
         from torch._dynamo.guards import GuardBuilder
@@ -1522,6 +1609,82 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         for (a_name, a), (b_name, b) in itertools.combinations(sets.items(), 2):
             self.assertEqual(sorted(a & b), [], f"{a_name} overlaps {b_name}")
+
+    def test_varying_guard_slots_counts_presence_as_variation(self):
+        def fact(guard_type, source, value):
+            return _GuardFact(guard_type, source, (), value, True)
+
+        both = fact("TENSOR_MATCH", "x", "shape=(4,)")
+        differs_a = fact("CONSTANT_MATCH", "n", "1")
+        differs_b = fact("CONSTANT_MATCH", "n", "2")
+        only_one = fact("ID_MATCH", "G['fn']", "is m.f")
+        guard_sets = {
+            ("f", "f.py", 1): [
+                frozenset({both, differs_a, only_one}),
+                frozenset({both, differs_b}),
+            ]
+        }
+        self.assertEqual(
+            varying_guard_slots(guard_sets),
+            frozenset({("CONSTANT_MATCH", "n"), ("ID_MATCH", "G['fn']")}),
+        )
+
+    def test_composed_guard_filter_ands_with_the_default_and_checks_length(self):
+        def entry(guard_type, derived=()):
+            return GuardFilterEntry(
+                name="x",
+                has_value=False,
+                value=None,
+                guard_type=guard_type,
+                derived_guard_types=tuple(derived),
+                is_global=False,
+                orig_guard=None,
+            )
+
+        entries = [
+            entry("TENSOR_MATCH"),
+            entry("ID_MATCH"),
+            entry("TYPE_MATCH", ["NN_MODULE"]),
+        ]
+        self.assertEqual(default_guard_filter_fn(entries), [True, False, False])
+        drop_first = _compose_with_default(lambda es: [False] + [True] * (len(es) - 1))
+        self.assertEqual(drop_first(entries), [False, False, False])
+        with self.assertRaisesRegex(ValueError, "returned 1 decisions for 3 guards"):
+            _compose_with_default(lambda es: [True])(entries)
+
+    def test_summary_is_incomplete_without_a_backend_graph(self):
+        def summary(**kw):
+            base = dict(
+                frames=1,
+                resume_functions=0,
+                guarded_codes=1,
+                backend_graphs=1,
+                bypassed=(),
+            )
+            base.update(kw)
+            return PrecompileSummary(**base)
+
+        self.assertTrue(summary().complete)
+        self.assertFalse(summary(backend_graphs=0).complete)
+        self.assertFalse(summary(guarded_codes=0).complete)
+        self.assertFalse(summary(capture_errors=("boom",)).complete)
+
+    def test_normalize_scrubs_addresses_and_compile_counters(self):
+        self.assertEqual(
+            _normalize(
+                "___check_obj_id(G['fn'], 140234567890123), type=<class 'function'>"
+            ),
+            "___check_obj_id(G['fn'], <id>), type=<class 'function'>",
+        )
+        self.assertEqual(
+            _normalize("G['__builtins_dict___6']['len']"),
+            "G['__builtins_dict___<n>']['len']",
+        )
+        self.assertEqual(_normalize("__compiled_fn_3_0"), "__compiled_fn_<n>")
+        self.assertEqual(
+            _normalize("G['__tmp_140234567890123_c7']"), "G['__tmp_<id>_c<n>']"
+        )
+        self.assertEqual(_normalize("x[1234567890]"), "x[1234567890]")
 
     def test_subgraph_renaming_leaves_lookalikes_alone(self):
         # Per-subgraph renaming is driven by AST positions. An attribute
@@ -1665,6 +1828,27 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with self.assertRaisesRegex(PackageError, "captured no compiled code"):
             session.save(self.path())
 
+    def test_save_refuses_capture_that_compiled_no_graph(self):
+        # allow_empty_graphs turns a frame that compiled nothing into one guarded
+        # code, so guarded_codes alone cannot tell this from a real capture.
+        @torch._dynamo.disable
+        def body(x):
+            return x.sin()
+
+        def outer(x):
+            return body(x)
+
+        session = self._capture(outer, torch.randn(4))
+        summary = session.summary()
+        self.assertGreater(summary.guarded_codes, 0)
+        self.assertEqual(summary.backend_graphs, 0)
+        self.assertFalse(summary.complete)
+        with self.assertRaisesRegex(PackageError, "compiled no graph"):
+            session.save(self.path())
+        with self.assertRaisesRegex(PackageError, "compiled no graph"):
+            session.artifact()
+        session.save(self.path(), require_complete=False)
+
     def test_truncation_report_is_a_lower_bound(self):
         # Hitting recompile_limit sets FrameExecStrategy(RUN_ONLY, RUN_ONLY),
         # whose recursive half silences every frame called beneath the offender,
@@ -1760,9 +1944,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         package.uninstall()
 
     def test_inductor_artifact_records_compile_time_cpu_target(self):
+        from torch._inductor import cpu_vec_isa
+
+        isa = cpu_vec_isa.pick_vec_isa()
+        if not isa:
+            raise unittest.SkipTest("no vector ISA on this host")
         model = PrecompileEmptyGraph()
         x = torch.randn(16)
-        with torch._inductor.config.patch({"cpp.simdlen": 256}):
+        with torch._inductor.config.patch({"cpp.simdlen": isa.bit_width()}):
             session = precompile_capture(
                 model,
                 backend="inductor",
@@ -1775,7 +1964,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         session.save(self.path())
         saved = _SingleFileStore().read(self.path()).dynamo.system_info
 
-        self.assertEqual(capture_target.cpu_codegen_target[2], 256)
+        self.assertEqual(capture_target.cpu_codegen_target[2], isa.bit_width())
         self.assertEqual(saved.cpu_codegen_target, capture_target.cpu_codegen_target)
 
     @torch._dynamo.config.patch(caching_precompile=True)
@@ -2116,10 +2305,133 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                     (frame.frame, needle, invariant),
                 )
 
+    def test_policy_keeps_input_pins_on_a_single_example(self):
+        # A constant passed as an argument is a CONSTANT_MATCH on an input; one
+        # example makes it invariant, but dropping it would change a served
+        # answer, so the fail-closed policy must keep it.
+        def f(x, k):
+            return x * k
+
+        session = precompile_capture(
+            f,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(torch.ones(4), 3)],
+            prune_invariant_guards=True,
+        )
+        with session:
+            pass
+        kept = {(t, n) for t, n in session.summary().kept_guards}
+        self.assertIn(("CONSTANT_MATCH", "k"), kept)
+        self.assertNotIn(
+            ("CONSTANT_MATCH", "k"),
+            set(session.summary().policy_dropped_guards),
+        )
+        self.assertTrue(any(t == "TENSOR_MATCH" for t, _ in kept))
+
+    def test_policy_drops_are_absent_from_the_reserialized_guards(self):
+        from torch._dynamo.guards import strip_local_scope
+        from torch._dynamo.package import load_guards_state
+
+        session = precompile_capture(
+            PrecompileStockSequential(),
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(torch.randn(n, 8),) for n in (4, 5)],
+            prune_invariant_guards=True,
+        )
+        with session:
+            pass
+        dropped = set(session.summary().policy_dropped_guards)
+        self.assertTrue(dropped)
+        for entry in session._package.code_entries():
+            for guarded in entry.guarded_codes:
+                state = load_guards_state(guarded.guards_state)
+                names = {
+                    (g.create_fn_name(), strip_local_scope(g.name))
+                    for g in state.output_graph.guards
+                }
+                self.assertEqual(names & dropped, set())
+        # The report re-marks a policy-dropped fact rather than deleting it.
+        facts = [f for fr in session.invariants() for f in fr.invariant]
+        for slot in dropped:
+            self.assertTrue(
+                any(not f.enforced and (f.guard_type, f.source) == slot for f in facts),
+                slot,
+            )
+
+    def test_policy_reserialization_failure_leaves_the_package_unpruned(self):
+        session = precompile_capture(
+            PrecompileStockSequential(),
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(torch.randn(4, 8),)],
+            prune_invariant_guards=True,
+        )
+        with (
+            mock.patch(
+                "torch._dynamo.package.load_guards_state",
+                side_effect=RuntimeError("boom"),
+            ),
+            self.assertRaisesRegex(
+                PackageError, "cannot be rebuilt from their serialized form"
+            ),
+        ):
+            with session:
+                pass
+        # Nothing was pruned, and the accounting still says so.
+        summary = session.summary()
+        self.assertEqual(summary.policy_dropped_guards, ())
+        self.assertIn(("AUTOGRAD_SAVED_TENSORS_HOOKS", ""), set(summary.kept_guards))
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_unreachable_frame_capture_is_served_by_installing(self):
+        from torch._dynamo.utils import counters
+        from torch._precompile import (
+            _parse_artifact_metadata,
+            PrecompiledCallable,
+            PrecompileError,
+        )
+
+        x = torch.randn(4)
+        session = precompile_capture(
+            _precompile_unreachable_entry,
+            backend="eager",
+            dynamic=False,
+            example_inputs=[(x,)],
+        )
+        with session:
+            pass
+        code, cache = session.artifact()
+        meta = _parse_artifact_metadata(code)
+        self.assertEqual(meta["SERVING_MODE"], "installed")
+        self.assertIn(
+            "_precompile_unreachable_helper", str(meta["UNREACHABLE_WITHOUT_INSTALL"])
+        )
+
+        torch._dynamo.reset()
+        loaded = torch.compiler.precompile.load(code, cache)
+        self.assertIsInstance(loaded, PrecompiledCallable)
+        helper_code = _precompile_unreachable_helper.__code__
+        self.assertEqual(_debug_get_precompile_entries(helper_code), [])
+        counters.clear()
+        with loaded, torch.no_grad():
+            # The omitted default comes back from the artifact.
+            self.assertEqual(loaded(x), _precompile_unreachable_entry(x))
+            self.assertTrue(_debug_get_precompile_entries(helper_code))
+            self.assertEqual(counters["stats"]["unique_graphs"], 0)
+        self.assertEqual(_debug_get_precompile_entries(helper_code), [])
+        with self.assertRaisesRegex(PrecompileError, "has been unloaded"):
+            loaded(x)
+        with loaded, torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_unreachable_entry(x))
+
     def test_hook_guards_dynamo_skips_are_not_policy_drops(self):
         # Under skip_nnmodule_hook_guards, the default, GuardBuilder emits
         # nothing for EMPTY_NN_MODULE_HOOKS_DICT, so there is no check for the
-        # invariance policy to drop and none to report as dropped.
+        # invariance policy to drop and none to report as dropped. With the
+        # guards on, they are rooted at the served module -- an input -- so
+        # the policy keeps them: only environment-rooted guards may be dropped.
         def hook_slots(session):
             return [
                 slot
@@ -2141,10 +2453,16 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         session = capture()
         self.assertEqual(hook_slots(session), [])
-        self.assertTrue(session.summary().policy_dropped_guards)
+        self.assertIn(
+            ("AUTOGRAD_SAVED_TENSORS_HOOKS", ""),
+            session.summary().policy_dropped_guards,
+        )
         torch._dynamo.reset()
         with torch._dynamo.config.patch(skip_nnmodule_hook_guards=False):
-            self.assertTrue(hook_slots(capture()))
+            session = capture()
+        self.assertEqual(hook_slots(session), [])
+        kept_types = {t for t, _ in session.summary().kept_guards}
+        self.assertIn("EMPTY_NN_MODULE_HOOKS_DICT", kept_types)
 
     def test_graph_breaks_and_recompiles_round_trip(self):
         shapes = [(4, 8), (5, 8), (6, 8)]
