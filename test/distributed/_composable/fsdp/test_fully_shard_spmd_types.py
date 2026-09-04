@@ -218,14 +218,11 @@ class TestFullyShardSpmdTypes(TestCase):
                 with CommDebugMode() as comm_mode:
                     loss.backward()
                 comm_counts = comm_mode.get_comm_counts()
-                if seq_parallel:
-                    self.assertEqual(
-                        comm_counts[torch.ops.c10d._reduce_scatter_base_], 2
-                    )
-                else:
-                    self.assertEqual(
-                        comm_counts[torch.ops.c10d._reduce_scatter_base_], 1
-                    )
+                reduce_scatter_count = (
+                    comm_counts[torch.ops.c10d._reduce_scatter_base_]
+                    + comm_counts[torch.ops.c10d_functional.reduce_scatter_tensor]
+                )
+                self.assertEqual(reduce_scatter_count, 2 if seq_parallel else 1)
                 self.assertEqual(
                     comm_counts[torch.ops.c10d.allreduce_]
                     + comm_counts[torch.ops.c10d_functional.all_reduce],
