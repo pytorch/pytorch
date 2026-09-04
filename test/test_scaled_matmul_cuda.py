@@ -2912,12 +2912,12 @@ class TestFP8Matmul(TestCase):
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @unittest.skipIf(not torch.version.hip, "The MX scale layout is fixed by arch and ROCm version only on ROCm")
-    @runOnRocmArch(MI350_ARCH)
     def test_rocm_mx_swizzle_size_error_names_arch(self, device) -> None:
         # This size check runs before the kernel's arch gate, so on an arch
         # without SWIZZLE_32_8 it is the first thing a caller hits and has to
-        # name the requirement itself. gfx950 reaches it only by mis-sizing the
-        # scales, as here: default-layout scales with SWIZZLE_32_8 requested.
+        # name the requirement itself. An arch that has SWIZZLE_32_8 reaches it
+        # only by mis-sizing the scales, as here: default-layout scales with
+        # SWIZZLE_32_8 requested. The check is arch-independent either way.
         M, K, N = 128, 128, 128
         BLOCK_SIZE = 32
         A = (torch.randn((M, K), device=device, dtype=torch.bfloat16)).to(torch.float8_e4m3fn)
@@ -2942,7 +2942,6 @@ class TestFP8Matmul(TestCase):
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @unittest.skipIf(not torch.version.hip, "The MX scale layout is fixed by arch and ROCm version only on ROCm")
-    @runOnRocmArch(MI350_ARCH)
     @parametrize("recipe", ["mxfp8", "mxfp4"])
     def test_rocm_v1_mx_takes_unswizzled_scales(self, device, recipe) -> None:
         # v1 `_scaled_mm` has no swizzle argument, so it takes the default
