@@ -101,8 +101,10 @@ bool ExtraState::has_relevant_entries(int64_t isolate_recompiles_id) {
   // Reaped nodes die AFTER the lock releases (locals declared before it).
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
+  std::vector<ExtraState::PendingEviction> reaped_evictions;
   CacheLock lock(this->cache_mutex);
-  this->apply_pending_evictions(reaped_precompile, reaped_cache);
+  this->apply_pending_evictions(
+      reaped_precompile, reaped_cache, reaped_evictions);
   return this->cache_entry_map.count(isolate_recompiles_id) > 0 ||
       (isolate_recompiles_id >= 0 && this->cache_entry_map.count(-1) > 0);
 }
@@ -189,7 +191,8 @@ void ExtraState::park_eviction(PendingEviction eviction) {
 
 void ExtraState::apply_pending_evictions(
     std::list<PrecompileEntry>& dead_precompile,
-    std::unordered_map<int64_t, std::list<CacheEntry>>& dead_cache) {
+    std::unordered_map<int64_t, std::list<CacheEntry>>& dead_cache,
+    std::vector<PendingEviction>& dead_evictions) {
   if (this->cache_python_depth != 0) {
     // A lookup below this frame on this thread holds iterators into these
     // lists; the next depth-zero holder applies the evictions.
@@ -249,6 +252,9 @@ void ExtraState::apply_pending_evictions(
       }
     }
   }
+  // The drained evictions carry py::object owners; hand them to the
+  // caller to destroy after cache_mutex releases, never here.
+  dead_evictions.swap(evictions);
 }
 
 void ExtraState::invalidate(
@@ -377,8 +383,10 @@ CacheEntry* extract_cache_entry(
   // Reaped nodes die AFTER the lock releases (locals declared before it).
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
+  std::vector<ExtraState::PendingEviction> reaped_evictions;
   CacheLock lock(extra_state->cache_mutex);
-  extra_state->apply_pending_evictions(reaped_precompile, reaped_cache);
+  extra_state->apply_pending_evictions(
+      reaped_precompile, reaped_cache, reaped_evictions);
   extra_state->drain_pending_invalidations();
   // Search own bucket first, then fall back to default bucket (-1),
   // matching lookup() behavior.
@@ -670,8 +678,10 @@ void lookup(
   // Reaped nodes die AFTER the lock releases (locals declared before it).
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
+  std::vector<ExtraState::PendingEviction> reaped_evictions;
   CacheLock lock(extra_state->cache_mutex);
-  extra_state->apply_pending_evictions(reaped_precompile, reaped_cache);
+  extra_state->apply_pending_evictions(
+      reaped_precompile, reaped_cache, reaped_evictions);
   extra_state->drain_pending_invalidations();
   // Guard evaluation below runs Python that can re-enter this state on this
   // thread (reset_code -> clear_in_place); the depth tells clear_in_place to
@@ -750,8 +760,10 @@ bool try_lookup_without_guard_eval(
   // Reaped nodes die AFTER the lock releases (locals declared before it).
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
+  std::vector<ExtraState::PendingEviction> reaped_evictions;
   CacheLock lock(extra_state->cache_mutex);
-  extra_state->apply_pending_evictions(reaped_precompile, reaped_cache);
+  extra_state->apply_pending_evictions(
+      reaped_precompile, reaped_cache, reaped_evictions);
   // A parked invalidation must not keep serving through this no-guard-eval
   // fast path (a guardless entry would never be re-checked otherwise).
   extra_state->drain_pending_invalidations();
@@ -820,8 +832,10 @@ CacheEntry* create_cache_entry(
   // Reaped nodes die AFTER the lock releases (locals declared before it).
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
+  std::vector<ExtraState::PendingEviction> reaped_evictions;
   CacheLock lock(extra_state->cache_mutex);
-  extra_state->apply_pending_evictions(reaped_precompile, reaped_cache);
+  extra_state->apply_pending_evictions(
+      reaped_precompile, reaped_cache, reaped_evictions);
   extra_state->drain_pending_invalidations();
   // The pybind attribute stores below run Python; same re-entrancy rule as
   // lookup().
@@ -867,8 +881,10 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
     // Reaped nodes die AFTER the lock releases (locals declared before it).
     std::list<PrecompileEntry> reaped_precompile;
     std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
+    std::vector<ExtraState::PendingEviction> reaped_evictions;
     CacheLock lock(extra->cache_mutex);
-    extra->apply_pending_evictions(reaped_precompile, reaped_cache);
+    extra->apply_pending_evictions(
+        reaped_precompile, reaped_cache, reaped_evictions);
     extra->drain_pending_invalidations();
     // py::cast below runs Python; same re-entrancy rule as lookup().
     CachePythonDepth python_depth(extra);
@@ -901,8 +917,10 @@ py::list _get_cache_entries_for_region(
     // Reaped nodes die AFTER the lock releases (locals declared before it).
     std::list<PrecompileEntry> reaped_precompile;
     std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
+    std::vector<ExtraState::PendingEviction> reaped_evictions;
     CacheLock lock(extra->cache_mutex);
-    extra->apply_pending_evictions(reaped_precompile, reaped_cache);
+    extra->apply_pending_evictions(
+        reaped_precompile, reaped_cache, reaped_evictions);
     extra->drain_pending_invalidations();
     // py::cast below runs Python; same re-entrancy rule as lookup().
     CachePythonDepth python_depth(extra);
@@ -928,8 +946,10 @@ size_t _get_cache_entry_count_for_region(
   // Reaped nodes die AFTER the lock releases (locals declared before it).
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
+  std::vector<ExtraState::PendingEviction> reaped_evictions;
   CacheLock lock(extra->cache_mutex);
-  extra->apply_pending_evictions(reaped_precompile, reaped_cache);
+  extra->apply_pending_evictions(
+      reaped_precompile, reaped_cache, reaped_evictions);
   auto it = extra->cache_entry_map.find(isolate_recompiles_id);
   return it == extra->cache_entry_map.end() ? 0 : it->second.size();
 }
@@ -1006,8 +1026,10 @@ size_t _get_total_cache_entry_count(const py::handle& code_obj) {
   // Reaped nodes die AFTER the lock releases (locals declared before it).
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
+  std::vector<ExtraState::PendingEviction> reaped_evictions;
   CacheLock lock(extra->cache_mutex);
-  extra->apply_pending_evictions(reaped_precompile, reaped_cache);
+  extra->apply_pending_evictions(
+      reaped_precompile, reaped_cache, reaped_evictions);
   return extra->total_cache_entry_count;
 }
 
@@ -1149,10 +1171,12 @@ void _load_precompile_entry(
   // Reaped nodes die AFTER the lock releases (locals declared before it).
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
+  std::vector<ExtraState::PendingEviction> reaped_evictions;
   CacheLock lock(extra->cache_mutex);
   // A parked CLEAR_ALL / PRECOMPILE_ALL applied by the next depth-zero holder
   // would otherwise take this install with it; drain first, then add.
-  extra->apply_pending_evictions(reaped_precompile, reaped_cache);
+  extra->apply_pending_evictions(
+      reaped_precompile, reaped_cache, reaped_evictions);
   extra->precompile_entries.push_back(std::move(entry));
 }
 
@@ -1173,8 +1197,10 @@ py::list _debug_get_precompile_entries(const py::handle& code_obj) {
     // Reaped nodes die AFTER the lock releases (locals declared before it).
     std::list<PrecompileEntry> reaped_precompile;
     std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
+    std::vector<ExtraState::PendingEviction> reaped_evictions;
     CacheLock lock(extra->cache_mutex);
-    extra->apply_pending_evictions(reaped_precompile, reaped_cache);
+    extra->apply_pending_evictions(
+        reaped_precompile, reaped_cache, reaped_evictions);
     // The casts and appends run Python (a package finalizer reached from GC
     // may re-enter and try to splice this list); same re-entrancy rule as
     // lookup(): raise the depth so such an eviction is parked, not applied
@@ -1204,8 +1230,10 @@ bool _has_precompile_entries(
   // Reaped nodes die AFTER the lock releases (locals declared before it).
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
+  std::vector<ExtraState::PendingEviction> reaped_evictions;
   CacheLock lock(extra->cache_mutex);
-  extra->apply_pending_evictions(reaped_precompile, reaped_cache);
+  extra->apply_pending_evictions(
+      reaped_precompile, reaped_cache, reaped_evictions);
   for (const PrecompileEntry& entry : extra->precompile_entries) {
     if (entry.isolate_recompiles_id == isolate_recompiles_id) {
       return true;
