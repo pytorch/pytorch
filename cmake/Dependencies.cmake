@@ -1144,6 +1144,10 @@ if(USE_ROCM)
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       hip::host MIOpen hiprtc::hiprtc)
 
+    if(TARGET amd_smi)
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS amd_smi)
+    endif()
+
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt roc::rocsolver)
