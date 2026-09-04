@@ -15,7 +15,7 @@ from torch._inductor.lowering import lowerings
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import SM100OrLater
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
 K_SPLIT = 8
@@ -107,9 +107,9 @@ class TestBlackwellDecomposeKPartial(TestCase):
             )
 
         m, k, n = 256, 8193, 128
-        a_storage = torch.randn(k, m, device="cuda", dtype=torch.bfloat16)
+        a_storage = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16)
         a = a_storage.T
-        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
 
         def fn(x, y):
             partial = blackwell_decompose_k_partial(x, y, two_ctas)
@@ -152,9 +152,9 @@ class TestBlackwellDecomposeKPartial(TestCase):
 
     def test_tuned_mm_choice_smoke(self):
         m, k, n = 256, 8193, 128
-        a_storage = torch.randn(k, m, device="cuda", dtype=torch.bfloat16)
+        a_storage = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16)
         a = a_storage.T
-        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
 
         with config.patch(
             max_autotune_gemm=True,
@@ -175,9 +175,9 @@ class TestBlackwellDecomposeKPartial(TestCase):
 
     def test_complete_plan_direct(self):
         m, k, n = 256, 8193, 128
-        a_storage = torch.randn(k, m, device="cuda", dtype=torch.bfloat16)
+        a_storage = torch.randn(k, m, device=GPU_TYPE, dtype=torch.bfloat16)
         a = a_storage.T
-        b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
         with config.patch(
             compile_threads=1,
             **{
