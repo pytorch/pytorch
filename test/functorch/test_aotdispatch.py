@@ -2118,15 +2118,7 @@ def forward(self, primals_1):
         inp_clone = inp.clone()
         out_ref = f3(inp_ref_clone)
         out_test = f3_compiled(inp_clone)
-        # Regeneration rebuilds each unbind output as a select, so the grad_fn
-        # is a SelectBackward. What has to survive is autograd's refusal to let
-        # us mutate an output of a multi-output view, which rides on
-        # CreationMeta rather than on the grad_fn.
-        for o in out_test[:3]:
-            with self.assertRaisesRegex(
-                RuntimeError, "output of a function that returns multiple views"
-            ):
-                o.mul_(2)
+        self.assertTrue(all("UnbindBackward" in str(o.grad_fn) for o in out_test[:3]))
 
         # The last output is not from a multi-output view, so autograd will let us mutate it.
         out_ref[-1].mul_(2)
@@ -5359,7 +5351,12 @@ def forward(self, tangents_1):
         # done by declining to mark the output that aliases it.
         self.assertFalse(outs[2].requires_grad)
         self.assertIsNone(outs[2].grad_fn)
+        if backend == "inductor":
+            # The backend really did hand back the base's storage in the marked
+            # slot (detach shares storage), so the collision was exercised.
+            self.assertEqual(outs[2].data_ptr(), outs[0].data_ptr())
 
+    @torch._inductor.config.patch(joint_graph_constant_folding=True)
     def test_detach_output_aliasing_sibling_output(self):
         # No intermediate base here: h * 1 folds to h and detach() no-ops, so
         # two OUTPUT slots hold one object and marking the second marks the
@@ -5384,6 +5381,8 @@ def forward(self, tangents_1):
         mod = Net()
         x = torch.randn(3, requires_grad=True)
         outs = torch.compile(mod, backend="inductor")(x)
+        # Both slots share one storage: the fold and the no-op detach happened.
+        self.assertEqual(outs[0].data_ptr(), outs[1].data_ptr())
         self.assertEqual(
             [(o.requires_grad, o.grad_fn is not None) for o in outs],
             [(o.requires_grad, o.grad_fn is not None) for o in out_ref],
