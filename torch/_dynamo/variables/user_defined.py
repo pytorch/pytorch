@@ -3013,7 +3013,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 tx,
                 args=[
                     f"property '{name_str}' of "
-                    f"'{type(self.value).__name__}' object has no {action}"
+                    f"'{type(self.value).__qualname__}' object has no {action}"
                 ],
             )
 
