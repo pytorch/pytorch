@@ -512,6 +512,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "math.remainder",
         "math.sin",
         "math.sinh",
+        "math.sumprod",
         "math.tan",
         "math.tanh",
         "math.trunc",
