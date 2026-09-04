@@ -36,6 +36,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_CUDNN,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
     skipIfNoONEDNN,
@@ -371,9 +372,10 @@ def _test_qlinear_fp8_fast_path_helper(error_conn=None):
         if error_conn is not None:
             error_conn.close()
 
-class TestQuantizedOps(TestCase):
+class _QuantizedActivationTestMixin:
 
     """Helper function to test quantized activation functions."""
+
     def _test_activation_function(self, X, fn_name, test_configs):
         r"""
             When writing a unit test for the activation function,
@@ -467,41 +469,8 @@ class TestQuantizedOps(TestCase):
 
                     self.assertEqual(qY, qY_hat, msg=lambda msg: f'{msg}\n{fn_name} - {q_op} failed: ({qY} vs. {qY_hat})')
 
-    """Tests the correctness of the quantized::relu op."""
-    @override_qengines
-    def test_qrelu(self):
-        relu_test_configs = [
-            {
-                'quantized_fn': [
-                    torch.relu,
-                    torch.relu_,
-                    torch.nn.functional.relu,
-                    torch.nn.functional.relu,
-                ],
-                'reference_fn': torch.nn.functional.relu
-            },
-            {
-                'quantized_fn': [
-                    torch.nn.functional.relu,
-                    torch.nn.functional.relu,
-                ],
-                'reference_fn': torch.nn.functional.relu,
-                'extra_kwargs': {
-                    'inplace': True
-                }
-            }
-        ]
-        devices = ["cpu", "cuda"] if TEST_CUDA else ["cpu"]
-        for device in devices:
-            shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
-            dtypes = (torch.quint8, torch.qint8)
-            scales = (0.05, 0.1)
-            zero_points = (0, 5)
-            test_cases = itertools.product(shapes, dtypes, scales, zero_points)
-            for shape, dtype, scale, zero_point in test_cases:
-                X = torch.randn(*shape, device=device)
-                X = (X, (scale, zero_point, dtype))
-                self._test_activation_function(X, 'relu', relu_test_configs)
+
+class TestQuantizedOps(_QuantizedActivationTestMixin, TestCase):
 
     """Tests the correctness of the quantized::relu6 op."""
     def test_qrelu6(self):
@@ -704,35 +673,6 @@ class TestQuantizedOps(TestCase):
         qY = torch.ops.quantized.celu(qX, output_scale, output_zero_point, alpha=alpha)
         self.assertEqual(qY, qY_hat,
                          msg=lambda msg: f"{msg}\nF.celu failed ({qY} vs {qY_hat})")
-
-    """Tests the correctness of the quantized::gelu op."""
-    def test_qgelu(self):
-        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
-        dtypes = (torch.quint8, torch.qint8)
-        memory_formats = (torch.channels_last, torch.contiguous_format)
-        approximation = ['none', 'tanh']
-        test_cases = itertools.product(shapes, dtypes, memory_formats, approximation)
-        devices = ["cpu", "cuda"] if TEST_CUDA else ["cpu"]
-        for shape, dtype, memory_format, approximate in test_cases:
-            if memory_format == torch.channels_last and len(shape) != 4:
-                continue
-
-            X, scale, zero_point, torch_type = \
-                torch.randn(*shape), 0.1, 0, dtype
-            X = X.to(memory_format=memory_format)
-            for device in devices:
-                X = X.to(device=device)
-                qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                               dtype=torch_type)
-                dqX = qX.dequantize()
-
-                op = torch.nn.functional.gelu
-                dqY = op(dqX, approximate=approximate)
-                qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
-                                               dtype=torch_type)
-                qY_hat = op(qX, approximate=approximate)
-                self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                                 msg=lambda msg: f"{msg}\nF.gelu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::prelu op."""
     def test_qprelu(self):
@@ -3295,6 +3235,76 @@ class TestQuantizedOps(TestCase):
                 )
             y_ref = y_ref.to(out_dtype)
             self.assertEqual(y, y_ref, msg=lambda msg: f"{msg}\n{y} vs {y_ref}")
+
+
+class TestQuantizedOpsDevice(_QuantizedActivationTestMixin, TestCase):
+    """Quantized ops that have a kernel for more than one device.
+
+    qint dtypes dispatch to QuantizedCPU and QuantizedCUDA only; there is no
+    QuantizedXPU or QuantizedMPS kernel for any of these ops, hence the
+    only_for below."""
+
+    """Tests the correctness of the quantized::relu op."""
+    def test_qrelu(self, device):
+        # override_qengines cannot be used here: it does not forward the
+        # signature, so instantiate_device_type_tests would not inject `device`.
+        relu_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.relu,
+                    torch.relu_,
+                    torch.nn.functional.relu,
+                    torch.nn.functional.relu,
+                ],
+                'reference_fn': torch.nn.functional.relu
+            },
+            {
+                'quantized_fn': [
+                    torch.nn.functional.relu,
+                    torch.nn.functional.relu,
+                ],
+                'reference_fn': torch.nn.functional.relu,
+                'extra_kwargs': {
+                    'inplace': True
+                }
+            }
+        ]
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+        dtypes = (torch.quint8, torch.qint8)
+        scales = (0.05, 0.1)
+        zero_points = (0, 5)
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                for shape, dtype, scale, zero_point in itertools.product(shapes, dtypes, scales, zero_points):
+                    X = torch.randn(*shape, device=device)
+                    X = (X, (scale, zero_point, dtype))
+                    self._test_activation_function(X, 'relu', relu_test_configs)
+
+    """Tests the correctness of the quantized::gelu op."""
+    def test_qgelu(self, device):
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+        dtypes = (torch.quint8, torch.qint8)
+        memory_formats = (torch.channels_last, torch.contiguous_format)
+        approximation = ['none', 'tanh']
+        test_cases = itertools.product(shapes, dtypes, memory_formats, approximation)
+        for shape, dtype, memory_format, approximate in test_cases:
+            if memory_format == torch.channels_last and len(shape) != 4:
+                continue
+
+            X, scale, zero_point, torch_type = \
+                torch.randn(*shape), 0.1, 0, dtype
+            X = X.to(memory_format=memory_format).to(device=device)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+
+            op = torch.nn.functional.gelu
+            dqY = op(dqX, approximate=approximate)
+            qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            qY_hat = op(qX, approximate=approximate)
+            self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
+                             msg=lambda msg: f"{msg}\nF.gelu failed ({qY} vs {qY_hat})")
 
 
 class TestQuantizedOpsCUDNN(TestCase):
@@ -9518,6 +9528,9 @@ class TestQuantizedWithMinMax(TestCase):
                             "weight_incorrectly_quantized should not equal "
                             "weight_quantized_no_rowwise_min_max"
                         )
+
+
+instantiate_device_type_tests(TestQuantizedOpsDevice, globals(), only_for=("cpu", "cuda"))
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")
