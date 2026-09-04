@@ -1,7 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
+import math
 import os
 import sys
+from unittest import mock
 
 import torch
 import torch.cuda
@@ -179,6 +181,141 @@ class TestNCCL(TestCase):
             TypeError, "Inputs should be a collection of tensors"
         ):
             nccl.reduce_scatter(t, t)
+
+    def _call_mocked_reshard(
+        self,
+        *,
+        group_ranks,
+        src_mesh,
+        src_local_shape,
+        src_placements,
+        dst_mesh,
+        dst_local_shape,
+        dst_placements,
+    ):
+        class _Mesh:
+            def __init__(self, mesh):
+                self.mesh = torch.tensor(mesh, dtype=torch.int)
+
+        fake_pg = object()
+        group_name = "test_group"
+        group_rank_by_global = {
+            global_rank: group_rank
+            for group_rank, global_rank in enumerate(group_ranks)
+        }
+        buf = torch.empty(1)
+
+        with (
+            mock.patch.object(symm_mem, "get_backend", return_value="NCCL"),
+            mock.patch.object(
+                symm_mem.c10d, "_resolve_process_group", return_value=fake_pg
+            ),
+            mock.patch.dict(
+                symm_mem.c10d._world.pg_group_ranks,
+                {fake_pg: group_rank_by_global},
+                clear=False,
+            ),
+            mock.patch.object(
+                symm_mem.c10d,
+                "_get_group_size_by_name",
+                return_value=len(group_ranks),
+            ),
+            mock.patch.object(torch.ops.symm_mem, "nccl_reshard") as nccl_reshard,
+        ):
+            symm_mem.reshard(
+                buf,
+                src_local_shape=src_local_shape,
+                src_mesh=_Mesh(src_mesh),
+                src_placements=src_placements,
+                dst_local_shape=dst_local_shape,
+                dst_mesh=_Mesh(dst_mesh),
+                dst_placements=dst_placements,
+                group=group_name,
+            )
+
+        nccl_reshard.assert_called_once()
+        return nccl_reshard.call_args.args
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    def test_reshard_wrapper_normalizes_1d_mesh_roles(self, device):
+        from torch.distributed.tensor.placement_types import Replicate, Shard
+
+        src_shape = torch.Size([2, 3, 5])
+        dst_shape = [4, 3, 5]
+
+        args = self._call_mocked_reshard(
+            group_ranks=[0, 1, 2, 3],
+            src_mesh=[0, 1],
+            src_local_shape=src_shape,
+            src_placements=[Replicate()],
+            dst_mesh=[2, 3],
+            dst_local_shape=dst_shape,
+            dst_placements=[Shard(-1)],
+        )
+
+        self.assertEqual(args[1], [2, 3, 5])
+        self.assertEqual(args[2], [2, 1])
+        self.assertEqual(args[3], 0)
+        self.assertEqual(args[4], [-1, -1])
+        self.assertEqual(args[5], [4, 3, 5])
+        self.assertEqual(args[6], [2, 1])
+        self.assertEqual(args[7], 2)
+        self.assertEqual(args[8], [2, -1])
+        self.assertEqual(args[9], "test_group")
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    def test_reshard_wrapper_rejects_overlapping_2d_meshes(self, device):
+        from torch.distributed.tensor.placement_types import Replicate, Shard
+
+        with self.assertRaisesRegex(ValueError, "meshes must be disjoint"):
+            self._call_mocked_reshard(
+                group_ranks=[0, 1, 2, 3, 4, 5],
+                src_mesh=[[0, 1], [2, 3]],
+                src_local_shape=[6, 4, 2],
+                src_placements=[Replicate(), Shard(1)],
+                dst_mesh=[[2, 3], [4, 5]],
+                dst_local_shape=[3, 8, 2],
+                dst_placements=[Shard(0), Replicate()],
+            )
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    def test_reshard_wrapper_rejects_invalid_mesh_membership(self, device):
+        from torch.distributed.tensor.placement_types import Shard
+
+        try:
+            self._call_mocked_reshard(
+                group_ranks=[0, 1, 2, 3],
+                src_mesh=[0, 4],
+                src_local_shape=[2, 4],
+                src_placements=[Shard(0)],
+                dst_mesh=[2, 3],
+                dst_local_shape=[4, 2],
+                dst_placements=[Shard(1)],
+            )
+        except ValueError as exc:
+            self.assertRegex(str(exc), "DeviceMesh rank 4 is not in group")
+            self.assertIsInstance(exc.__cause__, KeyError)
+            self.assertEqual(exc.__cause__.args[0], 4)
+        else:
+            raise AssertionError("expected ValueError for mesh rank outside group")
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    def test_nccl_m2n_python_lifecycle_wrappers(self, device):
+        with mock.patch.object(torch.ops.symm_mem, "nccl_m2n_init") as init:
+            symm_mem.nccl_m2n_init(max_cta=7)
+        init.assert_called_once_with(7)
+
+        with mock.patch.object(
+            torch.ops.symm_mem,
+            "nccl_m2n_finalize",
+            side_effect=RuntimeError("boom"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                symm_mem.nccl_m2n_finalize()
 
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "only one GPU detected")
@@ -784,6 +921,130 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
                 torch.full_like(out[j], expected),
                 msg=f"rank {self.rank}: out[{j}] should contain the reduced sum",
             )
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 30, 5), "nccl_reshard requires NCCL M2N support from nccl 2.30.5"
+    )
+    @skip_if_lt_x_gpu(4)
+    @parametrize("src_shard_dim", [0, 1])
+    @parametrize("dst_shard_dim", [0, 1])
+    def test_reshard_2d_disjoint_meshes(self, src_shard_dim: int, dst_shard_dim: int):
+        """symm_mem.reshard between two disjoint rank meshes (the canonical
+        producer -> consumer reshard case).  An initial range of WORLD
+        owns the source layout; the remaining ranks own the destination
+        layout.  Each rank participates in exactly one mesh, so on return
+        the source ranks leave ``buf`` untouched and the destination ranks
+        see their local shard of the destination layout."""
+        from torch.distributed.device_mesh import DeviceMesh
+        from torch.distributed.tensor.placement_types import Shard
+
+        if not torch.ops.symm_mem.nccl_m2n_is_available():
+            self.skipTest("PyTorch was built without NCCL M2N support")
+
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        world_size = self.world_size
+        # Use unequal mesh sizes so source and destination local tiles differ.
+        src_size = world_size // 4
+        dst_size = world_size - src_size
+        src_ranks = list(range(src_size))
+        dst_ranks = list(range(src_size, world_size))
+        is_src = self.rank in src_ranks
+        is_dst = self.rank in dst_ranks
+
+        # Pick dims divisible by both src_size and dst_size.
+        global_rows = 8 * src_size * dst_size
+        global_cols = 4 * src_size * dst_size
+        dtype = torch.float
+
+        global_tensor = torch.arange(
+            global_rows * global_cols, dtype=dtype, device=self.device
+        ).reshape(global_rows, global_cols)
+
+        def local_shard(
+            t: torch.Tensor, shard_dim: int, shard_idx: int, mesh_size: int
+        ) -> torch.Tensor:
+            if shard_dim == 0:
+                block = global_rows // mesh_size
+                return t[shard_idx * block : (shard_idx + 1) * block, :].contiguous()
+            else:
+                block = global_cols // mesh_size
+                return t[:, shard_idx * block : (shard_idx + 1) * block].contiguous()
+
+        src_local_shape = list(
+            local_shard(global_tensor, src_shard_dim, 0, src_size).shape
+        )
+        dst_local_shape = list(
+            local_shard(global_tensor, dst_shard_dim, 0, dst_size).shape
+        )
+
+        src_local = None
+        expected_dst = None
+        if is_src:
+            src_shard_idx = src_ranks.index(self.rank)
+            src_local = local_shard(
+                global_tensor, src_shard_dim, src_shard_idx, src_size
+            )
+        if is_dst:
+            dst_shard_idx = dst_ranks.index(self.rank)
+            expected_dst = local_shard(
+                global_tensor, dst_shard_dim, dst_shard_idx, dst_size
+            )
+
+        buffer_numel = max(math.prod(src_local_shape), math.prod(dst_local_shape))
+        buf = symm_mem.empty(buffer_numel, dtype=dtype, device=self.device)
+        buf.fill_(-1.0)  # sentinel so unwritten dst is detectable
+        if is_src:
+            buf[: src_local.numel()].copy_(src_local.reshape(-1))
+        symm_mem.rendezvous(buf, group=group_name)
+        symm_mem.nccl_m2n_init(max_cta=1)
+
+        # Avoid subgroup collectives on ranks outside each mesh.
+        src_mesh = DeviceMesh("cuda", src_ranks, _init_backend=False)
+        dst_mesh = DeviceMesh("cuda", dst_ranks, _init_backend=False)
+
+        try:
+            symm_mem.reshard(
+                buf,
+                src_local_shape=src_local_shape,
+                src_mesh=src_mesh,
+                src_placements=[Shard(src_shard_dim)],
+                dst_local_shape=dst_local_shape,
+                dst_mesh=dst_mesh,
+                dst_placements=[Shard(dst_shard_dim)],
+                group=group_name,
+            )
+
+            if is_src:
+                src_view = buf[: src_local.numel()].view(src_local.shape)
+                self.assertEqual(
+                    src_view,
+                    src_local,
+                    msg=(
+                        f"rank {self.rank} (src): buf was modified after "
+                        f"disjoint reshard. buf: {src_view} expected: {src_local}"
+                    ),
+                )
+            if is_dst:
+                dst_view = buf[: expected_dst.numel()].view(expected_dst.shape)
+                self.assertEqual(
+                    dst_view,
+                    expected_dst,
+                    msg=(
+                        f"rank {self.rank} (dst): disjoint reshard "
+                        f"Shard({src_shard_dim}) -> Shard({dst_shard_dim}) "
+                        f"produced wrong local shard. "
+                        f"dst: {dst_view} expected_dst: {expected_dst}"
+                    ),
+                )
+        finally:
+            torch.cuda.synchronize()
+            symm_mem.nccl_m2n_finalize()
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")

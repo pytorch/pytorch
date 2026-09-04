@@ -581,9 +581,112 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_extension.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reshard.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
+      # NCCL M2N is an opt-in dependency from the official release:
+      # https://github.com/NVIDIA/nccl-extensions/tree/nccl-extensions-v0.1.0
+      # Enable USE_NCCL_M2N and set NCCL_M2N_HOME or explicit paths.
+      set(NCCL_M2N_HOME "" CACHE PATH
+          "NCCL M2N install prefix from NVIDIA/nccl-extensions")
+      set(NCCL_M2N_LIB_DIR "" CACHE PATH "Path to NCCL M2N library directory")
+      if(USE_NCCL_M2N)
+        if(NOT NCCL_M2N_HOME AND DEFINED ENV{NCCL_M2N_HOME})
+          set(NCCL_M2N_HOME "$ENV{NCCL_M2N_HOME}")
+        endif()
+        if(NOT NCCL_M2N_LIB_DIR AND DEFINED ENV{NCCL_M2N_LIB_DIR})
+          set(NCCL_M2N_LIB_DIR "$ENV{NCCL_M2N_LIB_DIR}")
+        endif()
+        if(NOT NCCL_M2N_LIBRARY AND DEFINED ENV{NCCL_M2N_LIBRARY})
+          set(NCCL_M2N_LIBRARY "$ENV{NCCL_M2N_LIBRARY}")
+        endif()
+
+        set(_NCCL_M2N_INCLUDE_HINTS)
+        set(_NCCL_M2N_LIBRARY_HINTS)
+        foreach(_nccl_m2n_prefix IN ITEMS
+            "${NCCL_M2N_HOME}"
+            "$ENV{NCCL_M2N_HOME}"
+            "${NCCL_HOME}"
+            "$ENV{NCCL_HOME}")
+          if(_nccl_m2n_prefix)
+            list(APPEND _NCCL_M2N_INCLUDE_HINTS
+              "${_nccl_m2n_prefix}/include")
+            list(APPEND _NCCL_M2N_LIBRARY_HINTS
+              "${_nccl_m2n_prefix}/lib"
+              "${_nccl_m2n_prefix}/lib64")
+          endif()
+        endforeach()
+        if(NCCL_M2N_LIB_DIR)
+          list(APPEND _NCCL_M2N_LIBRARY_HINTS "${NCCL_M2N_LIB_DIR}")
+        endif()
+        if(DEFINED ENV{NCCL_M2N_INCLUDE_DIR})
+          list(APPEND _NCCL_M2N_INCLUDE_HINTS "$ENV{NCCL_M2N_INCLUDE_DIR}")
+        endif()
+        if(DEFINED ENV{NCCL_M2N_LIB_DIR})
+          list(APPEND _NCCL_M2N_LIBRARY_HINTS "$ENV{NCCL_M2N_LIB_DIR}")
+        endif()
+        if(NCCL_INCLUDE_DIR)
+          list(APPEND _NCCL_M2N_INCLUDE_HINTS "${NCCL_INCLUDE_DIR}")
+        endif()
+        if(NCCL_LIB_DIR)
+          list(APPEND _NCCL_M2N_LIBRARY_HINTS "${NCCL_LIB_DIR}")
+        endif()
+        if(_NCCL_M2N_INCLUDE_HINTS)
+          list(REMOVE_DUPLICATES _NCCL_M2N_INCLUDE_HINTS)
+        endif()
+        if(_NCCL_M2N_LIBRARY_HINTS)
+          list(REMOVE_DUPLICATES _NCCL_M2N_LIBRARY_HINTS)
+        endif()
+
+        find_path(
+          NCCL_M2N_INCLUDE_DIR
+          NAMES nccl_m2n.h
+          HINTS ${_NCCL_M2N_INCLUDE_HINTS}
+        )
+        if(NOT NCCL_M2N_LIBRARY)
+          if(USE_STATIC_NCCL_M2N)
+            set(_NCCL_M2N_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES
+                ${CMAKE_FIND_LIBRARY_SUFFIXES})
+            set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+          endif()
+          find_library(
+            NCCL_M2N_LIBRARY
+            NAMES nccl_m2n
+            HINTS ${_NCCL_M2N_LIBRARY_HINTS}
+          )
+          if(USE_STATIC_NCCL_M2N)
+            set(CMAKE_FIND_LIBRARY_SUFFIXES
+                ${_NCCL_M2N_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
+          endif()
+        endif()
+
+        if(NCCL_M2N_INCLUDE_DIR AND NCCL_M2N_LIBRARY)
+          message(STATUS "Building symm_mem.reshard with NCCL M2N header: ${NCCL_M2N_INCLUDE_DIR}")
+          message(STATUS "Linking symm_mem.reshard with NCCL M2N library: ${NCCL_M2N_LIBRARY}")
+          list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${NCCL_M2N_LIBRARY})
+          list(APPEND Caffe2_GPU_INCLUDE ${NCCL_M2N_INCLUDE_DIR})
+          # Add the M2N gate to the shared symm_mem compile flags.
+          set_property(
+            SOURCE ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reshard.cu
+            APPEND_STRING
+            PROPERTY COMPILE_FLAGS " -DNCCL_HAS_RESHARD_API"
+          )
+          set_source_files_properties(
+            ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reshard.cu
+            PROPERTIES
+              INCLUDE_DIRECTORIES "${NCCL_M2N_INCLUDE_DIR}"
+          )
+        else()
+          message(FATAL_ERROR
+            "USE_NCCL_M2N=ON but NCCL M2N header or library was not found. "
+            "Install https://github.com/NVIDIA/nccl-extensions (tag "
+            "nccl-extensions-v0.1.0) and set NCCL_M2N_HOME, or pass "
+            "NCCL_M2N_INCLUDE_DIR and NCCL_M2N_LIBRARY directly.")
+        endif()
+      else()
+        message(STATUS "USE_NCCL_M2N is OFF; symm_mem.reshard will use the build-time stub")
+      endif()
     endif()
 
     set(ASYNC_MM_FILE "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/AsyncMM.cu")

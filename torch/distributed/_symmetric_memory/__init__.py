@@ -2372,6 +2372,233 @@ def is_symm_mem_tensor(tensor: torch.Tensor) -> bool:
     return _SymmetricMemory.is_symm_mem_tensor(tensor)
 
 
+def _reshard_mesh_to_ints(
+    mesh: torch.distributed.device_mesh.DeviceMesh,
+    group: c10d.GroupName,
+) -> tuple[list[int], int]:
+    """Extract ``(mesh_dims, start_rank)`` from a ``DeviceMesh`` for
+    ``ncclMesh_t::{dims, startRank}``.
+
+    ``DeviceMesh`` stores global ranks, while the NCCL communicator sees
+    ranks local to ``group``.  Translate the mesh into that group-local
+    rank space, then verify it is exactly the contiguous row-major range
+    encoded by ``(dims, startRank)``.
+    """
+    mesh_t = mesh.mesh
+    mesh_ndim = mesh_t.dim()
+    if mesh_ndim == 1:
+        dims = [int(mesh_t.size(0)), 1]
+    elif mesh_ndim == 2:
+        dims = [int(mesh_t.size(0)), int(mesh_t.size(1))]
+    else:
+        raise ValueError(f"reshard: DeviceMesh must be 1-D or 2-D, got {mesh_ndim}-D")
+
+    pg = c10d._resolve_process_group(group)
+    group_rank_by_global = c10d._world.pg_group_ranks[pg]
+    global_ranks = [int(rank) for rank in mesh_t.flatten().tolist()]
+    try:
+        group_ranks = [group_rank_by_global[rank] for rank in global_ranks]
+    except KeyError as exc:
+        raise ValueError(
+            f"reshard: DeviceMesh rank {exc.args[0]} is not in group {group!r}"
+        ) from exc
+
+    start_rank = min(group_ranks)
+    expected = list(range(start_rank, start_rank + len(group_ranks)))
+    if group_ranks != expected:
+        raise ValueError(
+            "reshard: DeviceMesh ranks must map to a contiguous row-major "
+            f"rank range in group {group!r}; global ranks {global_ranks} map "
+            f"to group ranks {group_ranks}, expected {expected}"
+        )
+    return dims, start_rank
+
+
+def _reshard_placements_to_ints(
+    placements: list[torch.distributed.tensor.placement_types.Placement],
+    mesh_ndim: int,
+    tensor_ndim: int,
+) -> list[int]:
+    """Convert ``[Shard|Replicate]`` placements to the two-element int
+    encoding consumed by ``ncclDistTensor_t::placements``: ``Shard(d) -> d``,
+    ``Replicate() -> -1``.  Lists shorter than ``mesh_ndim`` are padded
+    with ``-1``.  Partial placements are not supported.
+    """
+    from torch.distributed.tensor.placement_types import Replicate, Shard
+
+    if mesh_ndim not in (1, 2):
+        raise ValueError(f"reshard: mesh_ndim must be 1 or 2, got {mesh_ndim}")
+    if len(placements) > mesh_ndim:
+        raise ValueError(
+            f"reshard: got {len(placements)} placements for a {mesh_ndim}-D DeviceMesh"
+        )
+
+    ints: list[int] = [-1, -1]
+    shard_mesh_dim: int | None = None
+    for i, p in enumerate(placements):
+        if isinstance(p, Shard):
+            if shard_mesh_dim is not None:
+                raise ValueError(
+                    "reshard: only one mesh dimension may use Shard placement"
+                )
+            shard_dim = int(p.dim)
+            if shard_dim < 0:
+                shard_dim += tensor_ndim
+            if shard_dim < 0 or shard_dim >= tensor_ndim:
+                raise ValueError(
+                    f"reshard: Shard({p.dim}) is out of range for a "
+                    f"{tensor_ndim}-D tensor"
+                )
+            shard_mesh_dim = i
+            ints[i] = shard_dim
+        elif isinstance(p, Replicate):
+            ints[i] = -1
+        else:
+            raise ValueError(
+                f"reshard: unsupported placement type {type(p).__name__}; "
+                "only Shard and Replicate are supported"
+            )
+    return ints
+
+
+def reshard(
+    buf: torch.Tensor,
+    src_local_shape: list[int] | torch.Size,
+    src_mesh: torch.distributed.device_mesh.DeviceMesh,
+    src_placements: list[torch.distributed.tensor.placement_types.Placement],
+    dst_local_shape: list[int] | torch.Size,
+    dst_mesh: torch.distributed.device_mesh.DeviceMesh,
+    dst_placements: list[torch.distributed.tensor.placement_types.Placement],
+    group: str,
+) -> None:
+    r"""
+    reshard(buf, src_local_shape, src_mesh, src_placements, dst_local_shape, dst_mesh, dst_placements, group) -> None
+
+    Reshard a 1-D, 2-D, or 3-D tensor between two rank meshes, backed by
+    the ``ncclReshardWithWindow`` primitive.
+
+    NCCL M2N state is initialized lazily with default config on first use.
+    Call :func:`nccl_m2n_init` before the first reshard if you need to
+    configure NCCL M2N options.
+
+    The call is collective over ``group``, which must span ``src_mesh`` ∪
+    ``dst_mesh``.  A rank's role is derived from mesh membership:
+
+    - If the rank is in ``src_mesh`` only, ``buf`` must contain this rank's
+      source shard on entry and is left untouched on return.
+    - If the rank is in ``dst_mesh`` only, the contents of ``buf`` on entry
+      are don't-care; on return, the first ``prod(dst_local_shape)``
+      elements (viewed as ``dst_local_shape``) hold this rank's destination
+      shard.
+    Source and destination meshes must be disjoint for multi-rank groups.
+
+    All ranks must pass the same source and destination local-shape metadata.
+    A rank absent from one side supplies its shape metadata but has no data
+    pointer for that side.
+
+    ``buf`` must be allocated via NCCL symmetric memory (e.g. :func:`empty`
+    with the NCCL backend). Every rank must allocate the same number of
+    elements, large enough for both layouts::
+
+        buf.numel() >= max(prod(src_local_shape), prod(dst_local_shape))
+
+    Each mesh is described by a :class:`~torch.distributed.device_mesh.DeviceMesh`
+    (1-D or 2-D; 1-D is widened to ``(N, 1)``) whose ``.mesh`` tensor holds
+    the *global* ranks participating in that mesh.  The ranks in each mesh
+    must map to a contiguous row-major range in the process group passed via
+    ``group``.
+
+    Placements (one entry per mesh dim):
+
+    - ``Shard(dim)`` — the global tensor is sharded along tensor dim
+      ``dim`` across that mesh dimension.
+    - ``Replicate()`` — the data is replicated across that mesh dimension.
+
+    Only one mesh dimension may use ``Shard`` at a time (matching the
+    underlying ``ncclDistTensor_t::placements`` constraints).
+
+    Args:
+        buf (Tensor): NCCL-symmetric-memory-allocated buffer sized for the
+            larger source or destination local shape on every rank.
+        src_local_shape (list[int] or torch.Size): Local shape for the source
+            layout. It must be identical on all ranks.
+        src_mesh (DeviceMesh): Mesh describing the ranks holding the
+            source layout.
+        src_placements (list[Placement]): Placements of the source on
+            ``src_mesh`` (one per mesh dim).
+        dst_local_shape (list[int] or torch.Size): Local shape for the
+            destination layout. It must be identical on all ranks.
+        dst_mesh (DeviceMesh): Mesh describing the ranks holding the
+            destination layout.
+        dst_placements (list[Placement]): Placements of the destination on
+            ``dst_mesh`` (one per mesh dim).
+        group (str): Name of the ``ProcessGroup`` spanning all ranks in
+            ``src_mesh`` ∪ ``dst_mesh``.
+    """
+    backend = get_backend(buf.device)
+    if backend != "NCCL":
+        raise NotImplementedError(f"reshard: unsupported backend: {backend}")
+
+    group_name = c10d.GroupName(group)
+    src_mesh_dims, src_start_rank = _reshard_mesh_to_ints(src_mesh, group_name)
+    dst_mesh_dims, dst_start_rank = _reshard_mesh_to_ints(dst_mesh, group_name)
+    src_placement_ints = _reshard_placements_to_ints(
+        src_placements, src_mesh.mesh.dim(), len(src_local_shape)
+    )
+    dst_placement_ints = _reshard_placements_to_ints(
+        dst_placements, dst_mesh.mesh.dim(), len(dst_local_shape)
+    )
+
+    src_ranks = {int(rank) for rank in src_mesh.mesh.flatten().tolist()}
+    dst_ranks = {int(rank) for rank in dst_mesh.mesh.flatten().tolist()}
+    if src_ranks & dst_ranks and c10d._get_group_size_by_name(group_name) > 1:
+        raise ValueError(
+            "reshard: source and destination meshes must be disjoint for "
+            "multi-rank process groups"
+        )
+
+    torch.ops.symm_mem.nccl_reshard(
+        buf,
+        list(src_local_shape),
+        src_mesh_dims,
+        src_start_rank,
+        src_placement_ints,
+        list(dst_local_shape),
+        dst_mesh_dims,
+        dst_start_rank,
+        dst_placement_ints,
+        group_name,
+    )
+
+
+def nccl_m2n_init(*, max_cta: int | None = None) -> None:
+    """Initialize NCCL M2N process-global state.
+
+    Args:
+        max_cta (int, optional): Override ``ncclM2nConfig_t.maxCta``.
+            Environment variables still take precedence inside NCCL M2N.
+
+    This is optional; :func:`reshard` initializes NCCL M2N lazily with default
+    config.  Call this before the first :func:`reshard` if you need non-default
+    config.  Once ``reshard`` has lazily initialized NCCL M2N, later attempts
+    to configure ``max_cta`` will raise.
+    """
+    torch.ops.symm_mem.nccl_m2n_init(max_cta)
+
+
+def nccl_m2n_finalize() -> None:
+    """Release NCCL M2N internal caches and transpose buffers.
+
+    Idempotent. Must be called before ``dist.destroy_process_group()``.
+    It is not registered as an ``atexit`` handler, so call it explicitly
+    when you want a clean release::
+
+        symm_mem.nccl_m2n_finalize()
+        dist.destroy_process_group()
+    """
+    torch.ops.symm_mem.nccl_m2n_finalize()
+
+
 __all__ = [
     "empty",
     "is_symm_mem_tensor",
@@ -2384,4 +2611,7 @@ __all__ = [
     "get_signal_pad_size",
     "get_mem_pool",
     "reduce_scatter_offset",
+    "nccl_m2n_init",
+    "nccl_m2n_finalize",
+    "reshard",
 ]
