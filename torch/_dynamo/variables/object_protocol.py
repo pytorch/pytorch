@@ -35,7 +35,7 @@ from ..exc import (
     UnhandledDescriptorError,
     unimplemented,
 )
-from ..source import AttrSource, Source
+from ..source import AttrSource
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
@@ -2101,59 +2101,6 @@ def mro_lookup(py_type: type, name: str) -> object:
     return NO_SUCH_SUBOBJ
 
 
-def _resolve_descriptor_get(
-    tx: "InstructionTranslatorBase",
-    type_attr: object,
-    obj: VariableTracker,
-    class_vt: VariableTracker,
-    source: "Source | None",
-) -> "VariableTracker | None":
-    """Invoke tp_descr_get on a type attribute if it's a descriptor.
-
-    Handles all descriptor types that have dedicated VTs with
-    tp_descr_get_impl.  Returns None if type_attr is not a recognized
-    descriptor type (plain class variable).
-    """
-    import types as _types
-
-    if isinstance(type_attr, property):
-        prop_vt = variables.PropertyVariable(type_attr, source=source)
-        return prop_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, _types.MemberDescriptorType):
-        md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
-        return md_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, _types.GetSetDescriptorType):
-        gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
-        return gs_vt.tp_descr_get_impl(tx, obj, class_vt)
-    _tuplegetter = collections._tuplegetter  # pyrefly: ignore[missing-attribute]
-    if isinstance(type_attr, _tuplegetter):
-        tg_vt = variables.TupleGetterVariable(type_attr, source=source)
-        return tg_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, staticmethod):
-        sm_vt = variables.StaticMethodVariable(type_attr, source=source)
-        return sm_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, classmethod):
-        cm_vt = variables.ClassMethodVariable(type_attr, source=source)
-        return cm_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, _types.ClassMethodDescriptorType):
-        cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
-        return cmd_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, _types.WrapperDescriptorType):
-        wd_vt = variables.WrapperDescriptorVariable(
-            type_attr, owner=class_vt, source=source
-        )
-        return wd_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, _types.MethodDescriptorType):
-        md_vt = variables.MethodDescriptorVariable(
-            type_attr, owner=class_vt, source=source
-        )
-        return md_vt.tp_descr_get_impl(tx, obj, class_vt)
-    if isinstance(type_attr, _types.FunctionType):
-        return variables.UserMethodVariable(type_attr, obj, source=source)
-
-    return None
-
-
 # BuiltinFunctionType is intentionally excluded: _resolve_descriptor_get
 # does not handle it, so it falls through to _UnhandledDescriptorError
 # and generic_getattr's GetAttrVariable fallback.
@@ -2199,6 +2146,7 @@ def object_generic_getattr(
       6. __getattr__ fallback -> obj.call_getattr_fallback(tx, name)
       7. AttributeError
     """
+    from .functions import _resolve_descriptor_get
     from .user_defined import is_data_descriptor
 
     py_type = obj.python_type()
