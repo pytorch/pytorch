@@ -6,6 +6,7 @@ from expecttest import assert_expected_inline
 
 import torch
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import MockGraphHandler
 
@@ -72,6 +73,12 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, strea
 class TestCuteDSLTemplate(TestCase):
     """Test cases for CuteDSL template functionality."""
 
+    # dense_gemm_efc imports cutlass.operators, which ships in a separate
+    # package that smoke_b200 cannot install (see TODO(#189590) in test.sh).
+    @unittest.skipIf(
+        not ensure_nv_universal_gemm_available(),
+        "NVIDIA Universal GEMM (cutlass_api) library not available",
+    )
     def test_vendored_dense_efc_kernel_configuration(self):
         from cutlass.cute.nvgpu import tcgen05
         from cutlass.operators.providers.cutedsl.evt.converter import EFCConverter
@@ -116,6 +123,11 @@ class TestCuteDSLTemplate(TestCase):
 
         lines = imports.strip().split("\n")
         self.assertEqual(len(lines), 8)
+
+        asm_imports = kernel.gen_imports(uses_inline_asm=True)
+        self.assertIn("inline_asm_elementwise_intrinsic", asm_imports)
+        self.assertNotIn("inline_asm_elementwise_intrinsic", imports)
+        self.assertEqual(len(asm_imports.strip().split("\n")), 9)
 
     def test_render_includes_imports(self):
         template_source = """@cute.kernel
@@ -208,6 +220,15 @@ def {{kernel_name}}_kernel():
                 )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        # ROCm CI images install the CuTeDSL wheel (its pip marker is
+        # x86_64-Linux, not CUDA), so HAS_CUTLASS is true there while
+        # cuInit fails: cudaErrorInsufficientDriver. Only the tests that
+        # actually launch a kernel are affected; the rest of the class is
+        # mock-based and driver-free.
+        torch.version.hip is not None,
+        "CuTeDSL kernels require an NVIDIA driver",
+    )
     def test_cutedsl_add_e2e(self):
         """End-to-end test with CuteDSL template including code generation verification."""
         from torch._inductor.ir import TensorBox
@@ -262,6 +283,10 @@ def {{kernel_name}}_kernel():
             self.assertTrue(torch.allclose(result, expected, atol=1e-5))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        torch.version.hip is not None,
+        "CuTeDSL kernels require an NVIDIA driver",
+    )
     def test_cutedsl_add_e2e_autotune(self):
         """E2E test with multiple CuteDSL template variants for autotuning."""
         from torch._inductor.ir import TensorBox
@@ -806,6 +831,49 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
             mock_cse_a, mock_cse_b, is_tensor=True
         )
         self.assertEqual(tensor_result, "tensor_a")
+
+    def test_inline_asm_three_outputs_are_shared(self):
+        from torch._inductor.codegen.common import CSEVariable
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            CuteDSLOpOverrides,
+        )
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        source = MagicMock(spec=CSEVariable)
+        source.__str__.return_value = "tensor_a"
+        source.dtype = torch.float32
+        source.bounds = ValueRanges.unknown()
+        source.shape = (32, 64)
+        output_dtypes = (torch.float32, torch.float32, torch.float32)
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_inline_asm_three_outputs",
+                input_nodes=[],
+                output_node=None,
+            )
+            with V.set_kernel_handler(kernel):
+                results = tuple(
+                    CuteDSLOpOverrides.inline_asm_elementwise(
+                        source,
+                        asm=("mov.f32 $0, $3; add.f32 $1, $3, $3; mul.f32 $2, $3, $3;"),
+                        constraints="=f,=f,=f,f",
+                        dtype=output_dtype,
+                        input_dtypes=(torch.float32,),
+                        output_dtypes=output_dtypes,
+                        output_index=output_index,
+                    )
+                    for output_index, output_dtype in enumerate(output_dtypes)
+                )
+
+        self.assertTrue(all(isinstance(result, CSEVariable) for result in results))
+        body = kernel.body.getvalue()
+        self.assertEqual(body.count("inline_asm_elementwise_intrinsic("), 1)
+        self.assertIn(
+            "result_type=(cutlass.Float32, cutlass.Float32, cutlass.Float32)",
+            body,
+        )
 
     def test_cutedsl_op_overrides_fast_math(self):
         from torch._inductor.codegen.common import CSEVariable

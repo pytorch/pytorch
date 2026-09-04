@@ -12,6 +12,7 @@ import operator
 import os
 import re
 import secrets
+import sys
 import tempfile
 from collections.abc import Callable
 from enum import Enum
@@ -67,7 +68,9 @@ from ..utils import (
     DeferredLineBase,
     DelayReplaceLine,
     get_benchmark_name,
+    get_constexpr_repr_children,
     get_dtype_size,
+    get_importable_constexpr_types,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
     is_using_cudagraph_partition,
@@ -116,21 +119,20 @@ def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
     return CleanDiv(numerator, denominator)
 
 
-def _sanitize_for_repr(obj: Any) -> Any:
+def _sanitize_for_repr(obj: object) -> object:
     """Convert Enum values to their underlying value for valid Python repr in code generation."""
-    if isinstance(obj, dict):
-        return {_sanitize_for_repr(k): _sanitize_for_repr(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_sanitize_for_repr(v) for v in obj]
-    # For namedtuples (have _fields), reconstruct to preserve the type
-    if isinstance(obj, tuple) and hasattr(obj, "_fields"):
-        return getattr(type(obj), "_make")(  # noqa: B009
-            _sanitize_for_repr(getattr(obj, field)) for field in obj._fields
-        )
-    if isinstance(obj, tuple):
-        return tuple(_sanitize_for_repr(v) for v in obj)
     if isinstance(obj, Enum):
         return _sanitize_for_repr(obj.value)
+    repr_children = get_constexpr_repr_children(obj)
+    if repr_children is not None:
+        children = tuple(_sanitize_for_repr(child) for child in repr_children.values)
+        # Rebuilding arbitrary attrs, pydantic, and container subclasses can
+        # invoke user code, so preserve the original when sanitization is a no-op.
+        if all(
+            child is original for child, original in zip(children, repr_children.values)
+        ):
+            return obj
+        return repr_children.rebuild(children)
     return obj
 
 
@@ -724,6 +726,100 @@ class ExternKernelAllocLine(WrapperLine):
         return converter._generate_extern_kernel_alloc
 
 
+def kernel_profile_enabled() -> bool:
+    """Whether the C shim emits kernel-profiling instrumentation.
+
+    The RAIIAtenRecordFunctionHandle declaration reaches the generated code
+    through an include that only these platforms emit. Callers that build
+    profiling metadata must use this rather than the config flag alone:
+    `_get_profiling_args` emits codegen for ReinterpretView arguments, so
+    building metadata the shim then declines to emit would leak a handle."""
+    return config.cpp.enable_kernel_profile and sys.platform in ("linux", "win32")
+
+
+def _profiling_arg_entry(value: Any) -> str | None:
+    """Profiling metadata for one argument value: an expression yielding a
+    tensor handle, or None for a value the C shim records as a placeholder.
+
+    A ReinterpretView re-derives its codegen expression so the recorded shape
+    is the logical view shape; get_name() would name the base buffer, which a
+    trace consumer would read as a real but wrong shape.
+
+    Generators, torchbind objects and the stand-ins for a None or SymInt
+    argument are IRNodes that no tensor handle can be made from, so they take
+    a placeholder like any other non-tensor."""
+    if isinstance(value, ReinterpretView):
+        return value.codegen_reference()
+    if isinstance(
+        value, (ir.NonTensorObj, ir.NoneAsConstantBuffer, ir.ShapeAsConstantBuffer)
+    ):
+        return None
+    if isinstance(value, IRNode):
+        return value.get_name()
+    return None
+
+
+def _profiling_arg_entries(values: Sequence[Any]) -> list[str | None]:
+    """One entry per value, except that a tensor list expands to one entry per
+    element so the element shapes survive. Eager records a list as a single
+    IValue; expanding it is the one deliberate deviation, and it keeps the
+    shape data for ops like cat, whose list is its only tensor argument. A
+    list holding no tensor, such as a SymInt[] stride, stays a single
+    placeholder."""
+    entries: list[str | None] = []
+    for value in values:
+        if isinstance(value, (list, tuple)) and any(
+            isinstance(element, IRNode) for element in value
+        ):
+            entries.extend(_profiling_arg_entry(element) for element in value)
+        else:
+            entries.append(_profiling_arg_entry(value))
+    return entries
+
+
+def _get_profiling_args(node: ir.ExternKernel) -> list[str | None]:
+    """Profiling metadata for an extern kernel: one entry per operator schema
+    argument, in schema order, except for a tensor list, which expands per
+    element. `out` is left out, so a caller holding an output buffer can append
+    it last, where eager records it.
+
+    The argument list is rebuilt the same way the kernel's own call arguments
+    are, which is what keeps the two in step. A FallbackKernel restores the
+    original interleaving of tensor and non-tensor arguments through
+    unflatten_args, since partitioning into inputs and constant_args discards
+    it; every other ExternKernel follows the tensors-before-constants
+    convention that ExternKernel.codegen_args relies on. Filling in unprovided
+    positional arguments matches the call the shim actually makes; those
+    arguments are then skipped in the keyword pass, because
+    ordered_kwargs_for_cpp_kernel can name a positional argument that was
+    supplied as a keyword (convolution passes its whole stride/padding/groups
+    tail that way) and it must still be recorded once."""
+    if isinstance(node, ir.FallbackKernel):
+        args, kwargs = node.unflatten_args(node.inputs, node.constant_args)
+    else:
+        args, kwargs = [*node.inputs, *node.constant_args], node.kwargs
+    arg_properties = node.arg_properties or []
+    schema_args: Sequence[Any] = (
+        node.fill_non_provided_args(args, kwargs)
+        if arg_properties and isinstance(node.op_overload, torch._ops.OpOverload)
+        else args
+    )
+    profiling_args = _profiling_arg_entries(schema_args)
+    positional_names = OrderedSet(
+        [
+            arg_property.get("name")
+            for arg_property in arg_properties[: len(schema_args)]
+        ]
+    )
+    for arg_name in node.ordered_kwargs_for_cpp_kernel:
+        if arg_name == "out" or arg_name in positional_names:
+            continue
+        profiling_args.append(
+            _profiling_arg_entry(node.get_kwargs_value(arg_name, **kwargs))
+        )
+    return profiling_args
+
+
 @dataclasses.dataclass
 class ExternKernelOutLine(WrapperLine):
     wrapper: PythonWrapperCodegen
@@ -742,6 +838,12 @@ class ExternKernelOutLine(WrapperLine):
         else:
             kernel_name = node.get_kernel_name()
         device = d.type if (d := node.get_device()) else V.graph.device_type
+        # profiling_args is consumed only inside the C shim's
+        # enable_kernel_profile branch, so build it only when the C++ wrapper
+        # is generating code and profiling is on.
+        profiling_args = None
+        if V.graph.cpp_wrapper and kernel_profile_enabled():
+            profiling_args = _get_profiling_args(node)
         self.wrapper._generate_extern_kernel_out_helper(
             kernel_name,
             node.codegen_reference(),
@@ -749,6 +851,7 @@ class ExternKernelOutLine(WrapperLine):
             args,
             device,
             self.node.get_stack_traces(),
+            profiling_args=profiling_args,
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1037,6 +1140,10 @@ class AllocateLine(MemoryPlanningLine):
     def __post_init__(self):
         if V.graph.scheduler.current_node is None:
             raise AssertionError("expected scheduler.current_node to be set")
+        # The index is only meaningful within this scheduler's node list: an inlined
+        # subgraph emits its lines into the parent's list while V.graph is the
+        # SUBGRAPH. See should_reuse_buffer.
+        self.scheduler = V.graph.scheduler
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )
@@ -1044,6 +1151,21 @@ class AllocateLine(MemoryPlanningLine):
     def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
         if self.comm_buffer:
             return True
+        if free_line.scheduler is not self.scheduler:
+            # A parent free paired with an allocation from an inlined invoke_subgraph
+            # region. codegen_invoke_subgraph inlines without the EnterSubgraphLine /
+            # ExitSubgraphLine bracket codegen_switch and codegen_while_loop wrap their
+            # branches in, and only that bracket makes memory_plan_reuse push a fresh
+            # MemoryPlanningState and swap estimate_peak. So the region's lines land in
+            # the parent's pool, scored against the parent's tree, and the two
+            # scheduler_node_index values index different node lists: the adjacency
+            # test below is meaningless and summarize_range raises on the inverted
+            # range. Bailing out costs regions the cross-boundary reuse that cond and
+            # while_loop keep.
+            # TODO: bracket the region instead. EnterSubgraphLine.codegen calls
+            # code.do_indent(), which needs an enclosing Python block statement -- an
+            # if/while branch emits one, a region does not.
+            return False
         if free_line.scheduler_node_index + 1 == self.scheduler_node_index:
             return True
         overall_peak_memory = self.wrapper.estimate_peak.overall_peak_memory
@@ -1161,6 +1283,9 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     def __post_init__(self):
         if V.graph.scheduler.current_node is None:
             raise AssertionError("expected scheduler.current_node to be set")
+        # See AllocateLine.__post_init__ -- the index is only meaningful
+        # relative to this scheduler's node list.
+        self.scheduler = V.graph.scheduler
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )
@@ -1174,6 +1299,11 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
             raise AssertionError("expected line to not be reused")
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
+        if self.node.get_name() in V.graph.never_reuse_but_free_buffers:
+            # Emit the free but keep the storage out of the reuse pool: freeing
+            # only drops inductor's own reference, so a tensor retained behind
+            # inductor's back (stashed away by an effectful op) survives.
+            return self
         if config.allow_buffer_reuse:
             if self.comm_buffer:
                 # Comm buffers use separate pool (comm-comm reuse only)
@@ -1431,6 +1561,23 @@ class GroupedAssertSizeStrideLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class AssertAlignmentLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    name: str
+    alignment: int
+    op_name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._codegen_assert_alignment(
+            code, self.name, self.alignment, self.op_name
+        )
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_assert_alignment
+
+
+@dataclasses.dataclass
 class AssertDivByZeroLine(WrapperLine):
     """Deferred AOTI runtime check that a sizevar divisor is non-zero.
 
@@ -1449,6 +1596,50 @@ class AssertDivByZeroLine(WrapperLine):
 
 BufferName = str
 Line = MemoryPlanningLine | LineContext
+
+
+def _resolve_nested_output(
+    outputs: Any, keypath: pytree.KeyPath
+) -> tuple[ir.IRNode, pytree.KeyPath]:
+    """Follow ``SequenceKey`` entries into (possibly nested) custom-op outputs
+    until reaching the IR node an unbacked symbol is bound to, returning that
+    node together with the keypath entries that still apply to it.
+    """
+    # Fast path for a single output. When a fallback kernel returns a list
+    # consisting of a single tensor, the output is a MultiOutput with non-empty
+    # indices, and we strip the leading keypath entry.
+    if len(outputs) == 1 and isinstance(outputs[0], ir.IRNode):
+        single_output = outputs[0]
+        remaining = (
+            keypath[1:]
+            if isinstance(single_output, ir.MultiOutput) and single_output.indices
+            else keypath
+        )
+        return single_output, remaining
+
+    # Otherwise descend through nested list/tuple containers via SequenceKeys.
+    current_output = outputs
+    remaining_keypath = keypath
+    while isinstance(current_output, (list, tuple)):
+        if not remaining_keypath or not isinstance(
+            remaining_keypath[0], pytree.SequenceKey
+        ):
+            raise AssertionError(
+                "expected SequenceKey while traversing nested "
+                f"outputs, got {remaining_keypath}"
+            )
+        key = remaining_keypath[0]
+        if not 0 <= key.idx < len(current_output):
+            raise AssertionError(
+                f"output index {key.idx} is out of range for "
+                f"{type(current_output).__name__} with "
+                f"{len(current_output)} elements"
+            )
+        current_output = current_output[key.idx]
+        remaining_keypath = remaining_keypath[1:]
+    if not isinstance(current_output, ir.IRNode):
+        raise AssertionError(f"expected IRNode output, got {type(current_output)}")
+    return current_output, remaining_keypath
 
 
 class PythonWrapperCodegen(CodeGen):
@@ -2012,6 +2203,16 @@ class PythonWrapperCodegen(CodeGen):
             f"assert_size_stride_grouped(({names}), ({sizes}), ({strides}), {op_name!r})"
         )
 
+    def write_assert_alignment(self, name: str, alignment: int, op_name: str) -> None:
+        """Queue an assert_alignment for emission during replay."""
+        self.writeline(AssertAlignmentLine(self, name, alignment, op_name))
+
+    def _codegen_assert_alignment(
+        self, code: IndentedBuffer, name: str, alignment: int, op_name: str
+    ) -> None:
+        """Emit one assert_alignment line to `code` (replay-phase target)."""
+        code.writeline(f"assert_alignment({name}, {alignment}, {op_name!r})")
+
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
         Called from the scheduler after mutated_input_idxs is computed."""
@@ -2364,7 +2565,10 @@ class PythonWrapperCodegen(CodeGen):
         args: list[str],
         device: str,
         stack_traces: OrderedSet[str] | None = None,
+        profiling_args: Sequence[str | None] | None = None,
     ) -> None:
+        # profiling_args is consumed only by the CppWrapperCpu override (to
+        # record profiling metadata); the Python wrapper ignores it.
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
@@ -2378,6 +2582,18 @@ class PythonWrapperCodegen(CodeGen):
                 wrapper_name = kernel
             self.writeline(f"{wrapper_name}({', '.join(args)})")
 
+    def _tma_descriptor_tensor_ref(self, desc, in_autotune_block):
+        """Reference to the descriptor's source tensor.
+
+        The compile-time autotune block is Python even when the wrapper emits C++,
+        and it already materializes an example tensor in the descriptor tensor's
+        own layout. Referring to that buffer by name keeps the block valid Python;
+        codegen_reference() would emit a C++ reinterpret (e.g. a `0L` literal).
+        """
+        if in_autotune_block:
+            return desc.get_tensor().get_name()
+        return desc.tensor.codegen_reference()
+
     def _generate_tma_descriptor_call_experimental(self, desc, apply_size_hints=False):
         dims = desc.dims
         block_dims = desc.block_dims
@@ -2385,7 +2601,7 @@ class PythonWrapperCodegen(CodeGen):
             dims = V.graph.sizevars.optimization_hint(dims)
             block_dims = V.graph.sizevars.optimization_hints(block_dims)
 
-        ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
+        ptr = f"{self._tma_descriptor_tensor_ref(desc, apply_size_hints)}.data_ptr()"
         # Explicitly call the Python version of val_to_arg_str
         dims = ", ".join(PythonWrapperCodegen.val_to_arg_str(self, dim) for dim in dims)
         block_dims = ", ".join(
@@ -2405,7 +2621,8 @@ class PythonWrapperCodegen(CodeGen):
 
         prefix = "triton.tools.tensor_descriptor.TensorDescriptor"
         fn = f"{prefix}.from_tensor"
-        args = f"{desc.tensor.codegen_reference()}, {block_shape}"
+        tensor_ref = self._tma_descriptor_tensor_ref(desc, apply_size_hints)
+        args = f"{tensor_ref}, {block_shape}"
         call = f"{fn}({args})"
         return call
 
@@ -3622,6 +3839,7 @@ class PythonWrapperCodegen(CodeGen):
             size_dtype=None,  # try to infer based on symints
             indices=arg_indices,
             argdefs=[ArgName(x) for x in kernel.arg_names],
+            use_fp64_for_python_float=False,
         )
         device = V.graph.get_current_device_or_throw()
         device_props = DeviceProperties.create(device)
@@ -3775,6 +3993,13 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
+        for type_spec in get_importable_constexpr_types(
+            triton_meta.get("constants", {}).values()
+        ):
+            compile_wrapper.writeline(
+                f"from {type_spec.module} import "
+                f"{type_spec.root_name} as {type_spec.root_name}"
+            )
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
@@ -4566,13 +4791,13 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(FreeIfNotReusedLine(self, buffer, comm_buffer=True))
             return
 
-        if not self.can_reuse(buffer):
+        if not self.can_free(buffer):
             return
         self.freed.add(name)
 
         self.writeline(FreeIfNotReusedLine(self, buffer))
 
-    def can_reuse(self, input_buffer, output_buffer=None):
+    def can_free(self, input_buffer):
         name = input_buffer.get_name()
         return not (
             name in V.graph.removed_buffers
@@ -4586,6 +4811,11 @@ class PythonWrapperCodegen(CodeGen):
             or name in V.graph.torchbind_constants
             or name in V.graph.never_reuse_buffers
             or name in self.freed
+        )
+
+    def can_reuse(self, input_buffer, output_buffer=None):
+        return self.can_free(input_buffer) and (
+            input_buffer.get_name() not in V.graph.never_reuse_but_free_buffers
         )
 
     def did_reuse(self, buffer, reused_buffer):
@@ -4685,23 +4915,8 @@ class PythonWrapperCodegen(CodeGen):
                     # because self.get_name() is actually never bound; the
                     # individual output arguments are bound by
                     # generate_c_shim_fallback_kernel
-                    if len(outputs) == 1:
-                        out = outputs[0]
-                        # When fallback kernel returns a list consisting of a single tensor,
-                        # the output is represented as a MultiOutput with non empty indices.
-                        # In this case, we strip the first key path away.
-                        return go(
-                            outputs[0].get_name(),
-                            keypath[1:]
-                            if isinstance(out, ir.MultiOutput) and len(out.indices) != 0
-                            else keypath,
-                        )
-                    else:
-                        if not isinstance(keypath[0], pytree.SequenceKey):
-                            raise AssertionError(
-                                f"expected SequenceKey, got {type(keypath[0])}"
-                            )
-                        return go(outputs[keypath[0].idx].get_name(), keypath[1:])
+                    node, remaining_keypath = _resolve_nested_output(outputs, keypath)
+                    return go(node.get_name(), remaining_keypath)
                 else:
                     return go(output_name, keypath)
 

@@ -362,8 +362,8 @@ except ImportError:
     _NCCL_AVAILABLE = False
 
 try:
-    # In-tree NCCL backend built on the torchcomms engine (selected via the
-    # "nccl2" backend / entry point). Available whenever NCCL is built.
+    # In-tree NCCL backend built on the torchcomms engine (the default "nccl"
+    # implementation, also available explicitly as "nccl2").
     from torch._C._distributed_c10d import ProcessGroupNCCL2
 
     ProcessGroupNCCL2.__module__ = "torch.distributed.distributed_c10d"
@@ -743,14 +743,13 @@ def _nccl2_device(
     if device is not None:
         return device
 
-    if torch.cuda.is_initialized():
-        device_index = torch.cuda.current_device()
-    elif "LOCAL_RANK" in os.environ:
-        device_index = get_node_local_rank()
+    device_count = torch.cuda.device_count()
+    if device_count == 0:
+        raise RuntimeError("nccl2 requires at least one CUDA device")
+
+    if "LOCAL_RANK" in os.environ:
+        device_index = get_node_local_rank() % device_count
     else:
-        device_count = torch.cuda.device_count()
-        if device_count == 0:
-            raise RuntimeError("nccl2 requires at least one CUDA device")
         global_rank = (
             opts.global_ranks_in_group[opts.group_rank]
             if opts.global_ranks_in_group
@@ -876,9 +875,9 @@ def _register_builtin_gloo_backend() -> None:
 
 def _register_builtin_nccl_backend() -> None:
     creator_fn = (
-        _create_nccl2_process_group
-        if os.environ.get("TORCH_DIST_USE_NCCL2") == "1"
-        else _create_nccl_process_group
+        _create_nccl_process_group
+        if os.environ.get("TORCH_DIST_USE_NCCL2") == "0"
+        else _create_nccl2_process_group
     )
     # Record what "nccl" actually resolved to for _maybe_attach_flight_recorder,
     # which must skip a group only if every one of its backends feeds a
@@ -906,6 +905,17 @@ def _register_builtin_nccl_legacy_backend() -> None:
         extended_api=True,
         devices=["cuda"],
         _backend_type=ProcessGroup.BackendType.CUSTOM,
+    )
+
+
+def _register_builtin_nccl_as_legacy() -> None:
+    _FR_SELF_RECORDING_BACKENDS.add(Backend.NCCL)
+    Backend.register_backend(
+        Backend.NCCL,
+        _create_nccl_process_group,
+        extended_api=True,
+        devices=Backend.backend_capability[Backend.NCCL],
+        _backend_type=ProcessGroup.BackendType.NCCL,
     )
 
 
@@ -1456,7 +1466,7 @@ class GroupMember(metaclass=_WorldMeta):
 
 def _get_default_timeout(backend: str) -> timedelta:
     # see note on nccl vs other backend timeout (constants.py)
-    if backend == Backend.NCCL:
+    if backend in (Backend.NCCL, "nccl-legacy", "nccl2", "nccl-lazy"):
         if not isinstance(default_pg_nccl_timeout, timedelta):
             # TODO moco benchmark on CPU initializes pgnccl backend today, triggered this assert in CI before it was
             # changed to be a warning.  We should fix the moco model.
@@ -2720,9 +2730,9 @@ def _get_split_source(pg: ProcessGroup) -> C10DBackend | None:
 # plugins -- is invisible to the flight recorder unless a hook is attached.
 #
 # Backend.NCCL is not in here by construction: which implementation the name
-# builds is a runtime choice, so _register_builtin_nccl_backend puts it in or
-# takes it out when it makes that choice, and this stays the single answer to
-# "does this backend record itself".
+# builds is a runtime choice, so its registrar puts it in or takes it out when
+# it makes that choice, and this stays the single answer to "does this backend
+# record itself".
 _FR_SELF_RECORDING_BACKENDS = {
     Backend.GLOO,
     "nccl-legacy",
@@ -5322,11 +5332,6 @@ def all_gather_single(
 
 
 @_exception_logger
-@deprecated(
-    "`torch.distributed.all_gather_into_tensor` is deprecated. "
-    "Please use `torch.distributed.all_gather_single` instead.",
-    category=FutureWarning,
-)
 def all_gather_into_tensor(
     output_tensor: torch.Tensor,
     input_tensor: torch.Tensor,
@@ -5336,9 +5341,8 @@ def all_gather_into_tensor(
     """
     Gather tensors from all ranks and put them in a single output tensor.
 
-    .. warning::
-        `all_gather_into_tensor` is deprecated. Users should use
-        `all_gather_single` instead.
+    Alias of :func:`all_gather_single`, kept for backward compatibility. New
+    code should call :func:`all_gather_single`, which takes the same arguments.
 
     """
     return all_gather_single(output_tensor, input_tensor, group, async_op)
@@ -5719,11 +5723,6 @@ def gather_single(
 
 
 @_exception_logger
-@deprecated(
-    "`torch.distributed.gather_into_tensor` is deprecated. "
-    "Please use `torch.distributed.gather_single` instead.",
-    category=FutureWarning,
-)
 def gather_into_tensor(
     tensor: torch.Tensor,
     gather_tensor: torch.Tensor | None = None,
@@ -5735,9 +5734,8 @@ def gather_into_tensor(
     """
     Gather the input tensor from all ranks into a single output tensor on ``dst``.
 
-    .. warning::
-        `gather_into_tensor` is deprecated. Users should use `gather_single`
-        instead.
+    Alias of :func:`gather_single`, kept for backward compatibility. New code
+    should call :func:`gather_single`, which takes the same arguments.
 
     """
     return gather_single(tensor, gather_tensor, dst, group, async_op, group_dst)
@@ -6075,11 +6073,6 @@ def reduce_scatter_single(
 
 
 @_exception_logger
-@deprecated(
-    "`torch.distributed.reduce_scatter_tensor` is deprecated. "
-    "Please use `torch.distributed.reduce_scatter_single` instead.",
-    category=FutureWarning,
-)
 def reduce_scatter_tensor(
     output: torch.Tensor,
     input: torch.Tensor,
@@ -6090,9 +6083,9 @@ def reduce_scatter_tensor(
     """
     Reduces, then scatters a tensor to all ranks in a group.
 
-    .. warning::
-        `reduce_scatter_tensor` is deprecated. Users should use
-        `reduce_scatter_single` instead.
+    Alias of :func:`reduce_scatter_single`, kept for backward compatibility.
+    New code should call :func:`reduce_scatter_single`, which takes the same
+    arguments.
 
     """
     return reduce_scatter_single(output, input, op, group, async_op)
@@ -6685,16 +6678,6 @@ def _get_backend_from_str(backend: str | None = None) -> str:
     return Backend(backend)
 
 
-def _is_safe_to_split() -> bool:
-    """
-    Checks if it is safe to split the any process group in the world.
-    This is only safe if the default pg has a bound device id, otherwise
-    users must be aware that a pg is only splittable after the first collective is
-    issued.
-    """
-    return _get_default_group().bound_device_id is not None
-
-
 @_time_logger
 def split_group(
     parent_pg: ProcessGroup | None = None,
@@ -6753,11 +6736,6 @@ def split_group(
 
     global _world
     default_pg = _get_default_group()
-    device_id = default_pg.bound_device_id
-    if not device_id and not _use_torchcomms_enabled():
-        raise RuntimeError(
-            "No device associated with the default pg, not safe to split any process groups"
-        )
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
 
@@ -6801,6 +6779,8 @@ def split_group(
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
+
+    device_id = parent_pg.bound_device_id
 
     # set the group_desc before the color or no_color split
     if hasattr(parent_backend, "comm_split_count") and group_desc is None:

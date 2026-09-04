@@ -10,6 +10,7 @@ from .optimizer import (
     _device_dtype_check_for_fused,
     _differentiable_doc,
     _foreach_doc,
+    _functional_api_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
@@ -290,10 +291,6 @@ def adagrad(
     eps: float,
     maximize: bool,
 ) -> None:
-    r"""Functional API that performs Adagrad algorithm computation.
-
-    See :class:`~torch.optim.Adagrad` for details.
-    """
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
@@ -342,6 +339,9 @@ def adagrad(
         grad_scale=grad_scale,
         found_inf=found_inf,
     )
+
+
+adagrad.__doc__ = _functional_api_doc.format(optimizer="Adagrad")
 
 
 def _make_sparse(grad, grad_indices, values):

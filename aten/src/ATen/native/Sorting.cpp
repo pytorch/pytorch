@@ -62,8 +62,8 @@ TORCH_META_FUNC(topk)
       "selected index k out of range");
   int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
   TORCH_CHECK(k >= 0 && k <= sliceSize, "k not in range for dimension");
-  TORCH_CHECK(!self.is_complex(), " topk does not support complex dtypes on CPU");
-  TORCH_CHECK(!(self.scalar_type() == kBool), "topk does not support bool dtypes on CPU");
+  TORCH_CHECK_TYPE(!self.is_complex(), " topk does not support complex dtypes on CPU");
+  TORCH_CHECK_NOT_IMPLEMENTED(!(self.scalar_type() == kBool), "topk does not support bool dtypes on CPU");
 
   // Build the output size, which is the dim being selected set to
   // size k
@@ -79,7 +79,7 @@ TORCH_META_FUNC2(sort, stable)
 (const Tensor& self, std::optional<bool> stable, int64_t dim, bool descending) {
   maybe_wrap_dim(dim, self.dim());
 
-  TORCH_CHECK(!self.is_complex(), " Sort does not support complex dtypes on CPU");
+  TORCH_CHECK_TYPE(!self.is_complex(), " Sort does not support complex dtypes on CPU");
 
   // See issue: https://github.com/pytorch/pytorch/issues/65863
   // Strides should be dense, so as not to allocate too much memory.
@@ -150,7 +150,7 @@ void quick_select_template(
     }
 
     // Use median of three for pivot choice
-    auto P = L + (R - L) / 2;
+    auto P = std::midpoint(L, R);
     swap_fn(P, L + 1);
     if (gt_or_nan(arr[L + 1], arr[R])) {
       swap_fn(L + 1, R);
@@ -204,7 +204,7 @@ void quantile_select_recurse(
   if (ulo >= uhi) {
     return;
   }
-  const int64_t umid = ulo + (uhi - ulo) / 2;
+  const int64_t umid = std::midpoint(ulo, uhi);
   const int64_t r = ranks[umid];
   std::nth_element(
       idx + lo, idx + r, idx + hi, [data](int64_t a, int64_t b) {

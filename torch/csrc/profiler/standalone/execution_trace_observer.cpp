@@ -455,8 +455,7 @@ convertIValue(
           tensor.numel() != 0) {
         enableRecordFunction(false);
 
-        if (ob.nodeListForSavingIntegerTensor.find(functionName) !=
-                ob.nodeListForSavingIntegerTensor.end() &&
+        if (ob.nodeListForSavingIntegerTensor.contains(functionName) &&
             !ob.resourceDir.empty()) {
           std::string tensor_dump_file_name = ob.resourceDir + "/nid_" +
               std::to_string(opId) + "_tid_" + std::to_string(tensorIndex) +
@@ -608,13 +607,14 @@ static void handleKernelBackendInfo(
     const RecordFunction& fn) {
   // triton kernel related information are in kwinputs
   const auto& kwinputs = fn.kwinputs();
-  if (kwinputs.find("kernel_backend") != kwinputs.end()) {
-    fc.kernelBackend = kwinputs.at("kernel_backend").toStringRef();
+  if (auto it = kwinputs.find("kernel_backend"); it != kwinputs.end()) {
+    fc.kernelBackend = it->second.toStringRef();
     if (fc.kernelBackend == "triton") {
-      fc.kernelFile = kwinputs.at("kernel_file").toStringRef();
+      auto kernel_file_it = kwinputs.find("kernel_file");
       TORCH_INTERNAL_ASSERT(
-          kwinputs.find("kernel_file") != kwinputs.end(),
+          kernel_file_it != kwinputs.end(),
           "kernel file is missing in triton kernel");
+      fc.kernelFile = kernel_file_it->second.toStringRef();
       // Remove the path of the file name
       if (fc.kernelFile.find_last_of('/') != std::string::npos) {
         fc.kernelFile =
