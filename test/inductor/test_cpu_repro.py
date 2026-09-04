@@ -753,7 +753,6 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
-    @torch._dynamo.config.patch(allow_rnn=True)
     @config.patch(freezing=True)
     def _test_lstm_packed(
         self,
@@ -1033,7 +1032,6 @@ class CPUReproTests(TestCase):
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
-    @torch._dynamo.config.patch(allow_rnn=True)
     def test_pack_padded_sequence_lstm(self):
         embedding_dim = 12
         hidden_dim = 10

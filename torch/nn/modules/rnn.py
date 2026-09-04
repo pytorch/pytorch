@@ -239,7 +239,15 @@ class RNNBase(Module):
 
         Right now, this works only if the module is on the GPU and cuDNN is enabled.
         Otherwise, it's a no-op.
+
+        During ``torch.compile``, this method is a no-op because the traced
+        graph captures mathematical ops, not cuDNN weight layout. The
+        ``torch.cuda.device_of`` call below would otherwise hit the Dynamo
+        skip-list and cause a graph break.
         """
+        if torch.compiler.is_compiling():
+            return
+
         # Short-circuits if _flat_weights is only partially instantiated
         if len(self._flat_weights) != len(self._flat_weights_names):
             return
