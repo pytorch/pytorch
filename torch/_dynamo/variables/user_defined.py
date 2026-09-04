@@ -37,7 +37,7 @@ import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, cast, NoReturn, TYPE_CHECKING, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -49,7 +49,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 from torch.utils._pytree import GetAttrKey, is_structseq_class
 
 from .. import config, graph_break_hints, polyfills, variables
-from ..bytecode_transformation import create_call_function
+from ..bytecode_transformation import create_build_tuple, create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..device_interface import get_registered_device_interfaces
 from ..exc import (
@@ -120,7 +120,7 @@ from .base import (
 )
 from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
 from .hashable import HashableTracker
-from .lists import ListVariable
+from .lists import DequeVariable, ListVariable, TupleVariable
 from .object_protocol import (
     _resolve_descriptor_get,
     generic_is_true,
@@ -188,8 +188,6 @@ if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.constant import ConstantVariable
-
-    from .lists import TupleVariable
 
 
 _STANDARD_SETATTRS: tuple[Any, ...] = (object.__setattr__, BaseException.__setattr__)
@@ -5176,58 +5174,49 @@ class UserDefinedListVariable(UserDefinedObjectVariable, ListVariable):
         return ListVariable(list(items), mutation_type=ValueMutationNew())
 
 
-class UserDefinedDequeVariable(UserDefinedObjectVariable):
+class UserDefinedDequeVariable(UserDefinedObjectVariable, DequeVariable):
     """
     Represents user defined objects that are subclasses of collections.deque.
-
-    Internally, it uses a DequeVariable to represent the deque part of the
-    variable tracker. For everything else, it falls back to
-    UserDefinedObjectVariable.
     """
+
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *DequeVariable._nonvar_fields,
+    }
 
     def __init__(
         self,
         value: object,
-        deque_vt: Union["variables.lists.DequeVariable", None] = None,
+        items: list[VariableTracker] | None = None,
+        maxlen: VariableTracker | None = None,
         **kwargs: Any,
     ) -> None:
-        from .lists import DequeVariable
-
-        super().__init__(value, **kwargs)
-        if deque_vt is None:
-            if self.source is not None:
-                raise AssertionError(
-                    "deque_vt must be constructed by builder.py when source is present"
-                )
-            self._base_vt = DequeVariable([], mutation_type=ValueMutationNew())
-        else:
-            self._base_vt = deque_vt
+        super().__init__(
+            value,
+            items=items if items is not None else [],
+            maxlen=maxlen,
+            **kwargs,
+        )
         self._base_methods = deque_methods
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None after initialization")
 
-    def _maxlen(self, tx: "InstructionTranslatorBase") -> VariableTracker | None:
-        # maxlen is a read-only getset on deque, not a method, so it is not
-        # covered by the _base_methods call_method delegation; route it to the
-        # DequeVariable which tracks maxlen on the base deque.
-        if self._base_vt is not None:
-            return self._base_vt.tp_getattro_impl(tx, "maxlen")
-        return None
+    # maxlen is a read-only getset; inherited from DequeVariable.tp_getset
+    # (reads self.maxlen directly).
 
-    # ref: deque_getset[] in CPython Modules/_collectionsmodule.c; maxlen is a
-    # read-only getset (deque_get_maxlen, no setter).
-    tp_getset = {
-        "maxlen": GetSet(_maxlen, readonly_setter),
-    }
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # UDOV.tp_init_impl would vectorcall the C deque.__init__ against the
+        # throwaway _base_vt view; route to DequeVariable's, which populates this
+        # object (contents + maxlen + state) in place with the correct semantics.
+        return DequeVariable.tp_init_impl(self, tx, args, kwargs)
 
 
-class UserDefinedTupleVariable(UserDefinedObjectVariable):
+class UserDefinedTupleVariable(UserDefinedObjectVariable, TupleVariable):
     """
     Represents user defined objects that are subclasses of tuple.
-
-    Internally, it uses a TupleVariable to represent the tuple part of the
-    variable tracker. For everything else, it falls back to
-    UserDefinedObjectVariable.
 
     NamedTupleVariable and StructSequenceVariable are subclasses that handle
     namedtuples and structseqs (torch.return_types.*) respectively.
@@ -5236,6 +5225,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     _nonvar_fields = {
         "tuple_cls",
         *UserDefinedObjectVariable._nonvar_fields,
+        *TupleVariable._nonvar_fields,
     }
 
     @staticmethod
@@ -5244,30 +5234,21 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             return StructSequenceVariable
         return NamedTupleVariable
 
-    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):  # type: ignore[all]
-        from .lists import TupleVariable
-
+    def __init__(self, value, items=None, init_args=None, **kwargs):  # type: ignore[all]
         tx = kwargs.pop("tx", None)
-        super().__init__(value, init_args=init_args, **kwargs)
-        if tuple_vt is None:
-            if self.source is not None:
-                raise AssertionError(
-                    "tuple_vt must be constructed by builder.py when source is present"
-                )
+        if items is None:
             # Emulate `tuple.__new__`: `tuple.__new__(cls)` with no iterable
             # arg builds an empty tuple, `tuple.__new__(cls, iterable)` builds
             # a tuple from the iterable.
             # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
             #
             # TODO this duplicates the logic in `BuiltinVariable(tuple)`
-            elems = unpack_iterable(tx, init_args[0]) if init_args else []
-            self._base_vt = TupleVariable(elems, mutation_type=ValueMutationNew())
-        else:
-            self._base_vt = tuple_vt
+            items: list[VariableTracker] = (
+                unpack_iterable(tx, init_args[0]) if init_args else []
+            )
+        super().__init__(value, items=items, init_args=init_args, **kwargs)
         self.tuple_cls = type(value)
         self._base_methods = tuple_methods
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None after initialization")
 
     def _new_list(
         self,
@@ -5318,7 +5299,9 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
                 codegen.create_load_const_unchecked(create_fn)
             )
         )
-        codegen(self._base_vt)
+        # Build the iterable arg for Type._make(iterable) / Type(iterable).
+        codegen.foreach(self.items)
+        codegen.append_output(create_build_tuple(len(self.items)))
         codegen.extend_output(create_call_function(1, False))
 
     def get_construct_fn(self) -> Callable[..., Any]:
@@ -5343,12 +5326,9 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     def _make_tree_map_result(
         self, new_items: list[VariableTracker]
     ) -> "UserDefinedTupleVariable":
-        from .lists import TupleVariable
-
-        tuple_vt = TupleVariable(new_items, mutation_type=ValueMutationNew())
         return type(self)(
             self.value,
-            tuple_vt=tuple_vt,
+            items=new_items,
             mutation_type=ValueMutationNew(),
         )
 
@@ -5456,6 +5436,13 @@ class NamedTupleVariable(UserDefinedTupleVariable):
     def as_proxy(self) -> Any:
         items = [x.as_proxy() for x in self.items]
         return self.tuple_cls(*items)  # type: ignore[arg-type]
+
+    def debug_repr(self) -> str:
+        fields = namedtuple_fields(self.tuple_cls)
+        items = ", ".join(
+            f"{name}={item.debug_repr()}" for name, item in zip(fields, self.items)
+        )
+        return f"{self.tuple_cls.__name__}({items})"
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         fields = namedtuple_fields(self.tuple_cls)
