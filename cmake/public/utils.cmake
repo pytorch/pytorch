@@ -599,7 +599,7 @@ function(torch_optimize_layout_if_enabled tgt)
               -o "$<TARGET_FILE:${tgt}>"
               "-data=${_profile}" "-log-file=${_logfile}"
               -lite -infer-stale-profile
-              -reorder-blocks=ext-tsp -reorder-functions=hfsort
+              -reorder-blocks=ext-tsp -reorder-functions=cdsort
               -split-functions -split-all-cold -split-eh -dyno-stats
               --update-debug-sections
       COMMENT "Optimizing $<TARGET_FILE_NAME:${tgt}> with LLVM BOLT (original kept in prebolt/)"
