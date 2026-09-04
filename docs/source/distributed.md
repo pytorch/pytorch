@@ -240,6 +240,30 @@ approaches to data-parallelism, including {func}`torch.nn.DataParallel`:
   make heavy use of the Python runtime, including models with recurrent layers or many small
   components.
 
+## Autograd-aware distributed operations
+
+Collective functions under `torch.distributed`, such as
+`torch.distributed.all_reduce`, operate on the tensor data but do not propagate
+autograd through the communication operation. If the result of a collective
+must remain connected to an autograd graph, use the corresponding function
+from `torch.distributed.nn.functional` when one is available:
+
+```python
+import torch.distributed as dist
+from torch.distributed.nn.functional import all_reduce
+
+# This updates `tensor` in place and does not add the collective to autograd.
+dist.all_reduce(tensor)
+
+# This returns a tensor with an autograd-aware collective operation.
+tensor = all_reduce(tensor)
+```
+
+The two APIs have different gradient behavior even when they perform the same
+communication. Choose the `torch.distributed.nn.functional` variant explicitly
+for model code that needs gradients to flow through the collective, and check
+the function documentation for the supported operations and arguments.
+
 ## Initialization
 
 The package needs to be initialized using the {func}`torch.distributed.init_process_group`
