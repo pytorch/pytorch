@@ -225,6 +225,19 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
             deviceTypeFilter.contains(defaultBackendIt->first),
         "splitGroup deviceTypes filter must include the parent process group's default backend device type.");
   }
+  std::unordered_set<BackendType> validatedBackendTypes;
+  for (const auto& [deviceType, backendType] : deviceTypeToBackendType_) {
+    if (!deviceTypeFilter.empty() && !deviceTypeFilter.contains(deviceType)) {
+      continue;
+    }
+    if (!validatedBackendTypes.insert(backendType).second) {
+      continue;
+    }
+    TORCH_CHECK(
+        getBackend(deviceType)->isInitialized(),
+        "Parent process group backend is not initialized; pass device_id "
+        "when creating it or run a collective before split_group");
+  }
   c10::intrusive_ptr<ProcessGroup> newGroup;
   std::string groupName = name.has_value()
       ? name.value()

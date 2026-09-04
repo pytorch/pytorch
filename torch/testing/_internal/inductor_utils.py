@@ -12,10 +12,8 @@ from subprocess import CalledProcessError
 import torch
 import torch._inductor.config as config
 
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import compile_fx  # noqa: F401
 from torch._inductor.utils import (
-    _device_is_available,
     get_gpu_shared_memory,
     get_gpu_type,
     GPU_TYPES,
@@ -84,21 +82,10 @@ HAS_GPU_AND_TRITON = HAS_GPU
 
 GPU_TYPE = get_gpu_type()
 
-
-def _is_multigpu(gpu: str) -> bool:
-    # Resolve through the DeviceInterface registry: GPU_TYPES may include
-    # out-of-tree backends with no torch.<gpu> module (getattr would raise)
-    # or with partially-implemented interfaces (base methods raise
-    # NotImplementedError).
-    if not _device_is_available(gpu):
-        return False
-    try:
-        return get_interface_for_device(gpu).device_count() >= 2
-    except NotImplementedError:
-        return False
-
-
-HAS_MULTIGPU = any(_is_multigpu(gpu) for gpu in GPU_TYPES)
+HAS_MULTIGPU = any(
+    getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
+    for gpu in GPU_TYPES
+)
 
 _desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
 RUN_GPU = HAS_GPU and any(
