@@ -49,8 +49,8 @@ invoke_subgraph_counter = 0
 # Keep this list limited to configs with established region-local semantics.
 _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS = frozenset(
     {
+        "fallback_by_default",
         "max_autotune",
-        "triton.persistent_reductions",
     }
 )
 
