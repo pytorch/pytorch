@@ -40,6 +40,7 @@ from torch._inductor.autotune_process import (
     TuningProcessPool,
     use_pipelined_autotuning,
 )
+from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.registry import override_template_heuristics
@@ -48,6 +49,7 @@ from torch._inductor.heuristics.template.triton import (
     CUDAAddmmPersistentTMATemplateConfigHeuristic,
     CUDAAddMMTemplateConfigHeuristic,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+    CUDABlackwellBMMTemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAMMTemplateConfigHeuristic,
     CUDAPersistentTMATemplateConfigHeuristic,
@@ -58,7 +60,13 @@ from torch._inductor.heuristics.template.triton import (
     XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
+from torch._inductor.kernel.bmm import (
+    blackwell_ws_persistent_tma_bmm_template,
+    BlackwellBMMConfig,
+)
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
+from torch._inductor.kernel_inputs import MMKernelInputs
+from torch._inductor.lowering import lowerings
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
 from torch._inductor.scheduler import Scheduler
@@ -75,7 +83,11 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FP8,
+    SM100OrLater,
+    SM90OrLater,
+)
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -150,6 +162,26 @@ _DECOMPOSE_K_PATCH_ROCM = (
 )
 
 
+@torch.library.custom_op("inductor_test::blackwell_bmm", mutates_args={})
+def blackwell_bmm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return torch.bmm(a, b)
+
+
+@blackwell_bmm.register_fake
+def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return a.new_empty((a.shape[0], a.shape[1], b.shape[2]))
+
+
+@torch.library.custom_op("inductor_test::blackwell_bmm_flat", mutates_args={})
+def blackwell_bmm_flat(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return torch.bmm(a, b).flatten(0, 1)
+
+
+@blackwell_bmm_flat.register_fake
+def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return a.new_empty((a.shape[0] * a.shape[1], b.shape[2]))
+
+
 def benchmark_choice(choice, args, out, expected_out, timings):
     result = choice.benchmark(*args, out=out)
     if expected_out is not None:
@@ -179,6 +211,163 @@ class TestMaxAutotune(TestCase):
         a = make_matrix(M, K, *batch_dims, reduction_dim=-1)
         b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
         return a, b
+
+    def _run_blackwell_bmm_template(
+        self,
+        broadcast_b: bool,
+        data_partition_factor: int,
+        epilogue_subtile: int,
+    ) -> None:
+        bsz, m, k, n = 3, 256, 8193, 128
+        a_storage = torch.randn(bsz, k, m, device=GPU_TYPE, dtype=torch.bfloat16)
+        a = a_storage.transpose(1, 2)
+        if broadcast_b:
+            b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+            b = b.unsqueeze(0).expand(bsz, -1, -1)
+        else:
+            b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        class TestBlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
+            def _get_template_configs_impl(self, kernel_inputs, op_name):
+                for template_config in super()._get_template_configs_impl(
+                    kernel_inputs, op_name
+                ):
+                    if (
+                        template_config["BLOCK_M"] == 128
+                        and template_config["BLOCK_N"] == 128
+                    ):
+                        yield {
+                            **template_config,
+                            "DATA_PARTITION_FACTOR": data_partition_factor,
+                            "EPILOGUE_SUBTILE": epilogue_subtile,
+                        }
+                        return
+
+        def lowering(a_node, b_node):
+            choices = V.choices.get_template_configs(
+                MMKernelInputs([a_node, b_node]),
+                [blackwell_ws_persistent_tma_bmm_template],
+                "bmm",
+            )
+            return choices[0].output_node()
+
+        with (
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[
+                    (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
+                ],
+                override_heuristic_class=TestBlackwellBMMHeuristic,
+            ),
+            mock.patch.dict(
+                lowerings,
+                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
+            ),
+            config.patch(compile_threads=1),
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(lambda x, y: blackwell_bmm(x, y), fullgraph=True),
+                a,
+                b,
+            )
+
+        torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
+        self.assertIn("make_tensor_descriptor", codes[0])
+        self.assertNotIn("two_ctas=True", codes[0])
+        self.assertIn(f"EPILOGUE_SUBTILE : tl.constexpr = {epilogue_subtile}", codes[0])
+        if meta_ws_enabled():
+            self.assertIn(
+                f"DATA_PARTITION_FACTOR : tl.constexpr = {data_partition_factor}",
+                codes[0],
+            )
+            self.assertIn("SEPARATE_EPILOGUE_STORE : tl.constexpr = True", codes[0])
+        else:
+            self.assertNotIn("data_partition_factor", codes[0])
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @parametrize("data_partition_factor", (1, 2))
+    @parametrize("epilogue_subtile", (1, 2, 4))
+    def test_blackwell_bmm_template(
+        self,
+        data_partition_factor: int,
+        epilogue_subtile: int,
+    ) -> None:
+        self._run_blackwell_bmm_template(
+            broadcast_b=False,
+            data_partition_factor=data_partition_factor,
+            epilogue_subtile=epilogue_subtile,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    def test_blackwell_bmm_template_broadcast_b(self) -> None:
+        self._run_blackwell_bmm_template(
+            broadcast_b=True,
+            data_partition_factor=1,
+            epilogue_subtile=1,
+        )
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
+    def test_blackwell_bmm_template_2cta_flat_output(self) -> None:
+        bsz, m, k, n = 2, 256, 8193, 128
+        a_storage = torch.randn(bsz, k, m, device=GPU_TYPE, dtype=torch.bfloat16)
+        a = a_storage.transpose(1, 2)
+        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        class FlatBMMKernelInputs(MMKernelInputs):
+            def output_layout(self, flexible=True):
+                return FixedLayout(
+                    self.device(), self.out_dtype(), [bsz * m, n], [n, 1]
+                )
+
+        class Test2CTABlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
+            bmm_configs = (BlackwellBMMConfig(128, 128, 64, 4, 8, two_ctas=True),)
+
+            def _get_template_configs_impl(self, kernel_inputs, op_name):
+                for template_config in super()._get_template_configs_impl(
+                    kernel_inputs, op_name
+                ):
+                    yield {
+                        **template_config,
+                        "FLATTEN_OUTPUT": True,
+                        "tma_store": True,
+                    }
+
+        def lowering(a_node, b_node):
+            choices = V.choices.get_template_configs(
+                FlatBMMKernelInputs([a_node, b_node]),
+                [blackwell_ws_persistent_tma_bmm_template],
+                "bmm",
+            )
+            return choices[0].output_node()
+
+        with (
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[
+                    (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
+                ],
+                override_heuristic_class=Test2CTABlackwellBMMHeuristic,
+            ),
+            mock.patch.dict(
+                lowerings,
+                {torch.ops.inductor_test.blackwell_bmm_flat.default: lowering},
+            ),
+            config.patch(
+                compile_threads=1,
+                **{"triton.enable_template_tma_store": True},
+            ),
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(blackwell_bmm_flat, fullgraph=True), a, b
+            )
+
+        torch.testing.assert_close(
+            actual.view(bsz, m, n), torch.bmm(a, b), atol=1e-2, rtol=1e-2
+        )
+        self.assertIn("TWO_CTAS : tl.constexpr = True", codes[0])
+        self.assertIn("ctas_per_cga=(2, 1, 1)", codes[0])
+        self.assertIn("make_tensor_descriptor(out_ptr0", codes[0])
 
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
@@ -2894,6 +3083,133 @@ class TestMaxAutotune(TestCase):
                 else:
                     self.assertTrue(decompose_count > 0)
                     self.assertTrue(decompose_count <= num_decompose_k_splits)
+
+    @config.patch(
+        {
+            "triton.num_decompose_k_splits": 10,
+            "max_autotune_gemm_search_space": "DEFAULT",
+        }
+    )
+    def test_decompose_k_blackwell_aten_split_candidates(self):
+        get_k_splits.cache_clear()
+        candidates = get_k_splits(
+            80,
+            72,
+            1_343_232,
+            num_sms=148,
+            ctas_per_tile=2,
+            max_workspace_bytes=128 * 1024 * 1024,
+        )
+        self.assertEqual(
+            candidates,
+            [22, 24, 36, 33, 72, 66, 144, 159],
+        )
+        self.assertLessEqual(len(candidates), config.triton.num_decompose_k_splits)
+        self.assertLessEqual(len(candidates), 8)
+
+        # Occupancy-ranked candidates and the aligned fallback stay in the
+        # low-workspace region.
+        def workspace_bytes(split):
+            return split * 80 * 72 * 4
+
+        self.assertLessEqual(
+            max(workspace_bytes(split) for split in candidates), 4 * 1024 * 1024
+        )
+        self.assertTrue(
+            all(workspace_bytes(split) <= 128 * 1024 * 1024 for split in candidates)
+        )
+        self.assertNotIn(5247, candidates)
+        self.assertNotIn(10494, candidates)
+
+        get_k_splits.cache_clear()
+        one_cta_candidates = get_k_splits(
+            80,
+            72,
+            1_343_232,
+            num_sms=148,
+            ctas_per_tile=1,
+            max_workspace_bytes=128 * 1024 * 1024,
+        )
+        self.assertEqual(
+            one_cta_candidates,
+            [44, 48, 72, 66, 144, 159, 288, 318],
+        )
+
+        get_k_splits.cache_clear()
+        irregular_candidates = get_k_splits(
+            20,
+            20,
+            296_192,
+            num_sms=148,
+            ctas_per_tile=2,
+            max_workspace_bytes=128 * 1024 * 1024,
+        )
+        self.assertEqual(
+            irregular_candidates,
+            [89, 104, 128, 178, 256, 356, 712, 1157],
+        )
+        self.assertLessEqual(len(irregular_candidates), 8)
+
+        # Mathematical divisibility alone is insufficient.  This small shape
+        # cannot produce one GPU wave even at its largest useful exact split,
+        # so do not compile known-underfilled BMM plans.
+        get_k_splits.cache_clear()
+        small_candidates = get_k_splits(
+            64,
+            64,
+            5248,
+            num_sms=148,
+            ctas_per_tile=2,
+            max_workspace_bytes=128 * 1024 * 1024,
+        )
+        self.assertEqual(small_candidates, [])
+        self.assertLessEqual(
+            len(small_candidates), config.triton.num_decompose_k_splits
+        )
+
+        # Sparse factorization must not force a bad choice.  split=7 cannot
+        # fill a wave for this semiprime production K, while the other exact
+        # divisors make Kpart too small or violate the workspace limit.
+        get_k_splits.cache_clear()
+        sparse_candidates = get_k_splits(
+            256,
+            128,
+            11_091_857,
+            num_sms=148,
+            ctas_per_tile=2,
+            max_workspace_bytes=128 * 1024 * 1024,
+        )
+        self.assertEqual(sparse_candidates, [])
+
+        # Sparse does not automatically mean bad: this dynamic production K
+        # has a split that fills the GPU and leaves a still-K-dominant BMM.
+        get_k_splits.cache_clear()
+        useful_sparse_candidates = get_k_splits(
+            256,
+            128,
+            10_954_007,
+            num_sms=148,
+            ctas_per_tile=2,
+            max_workspace_bytes=128 * 1024 * 1024,
+        )
+        self.assertEqual(useful_sparse_candidates, [587])
+
+        # If filtering takes an over-budget divisor set below the configured
+        # limit, it must remain ranked rather than expanding from eight
+        # candidates to every survivor.
+        get_k_splits.cache_clear()
+        filtered_ranked_candidates = get_k_splits(
+            256,
+            256,
+            9_216,
+            num_sms=148,
+            ctas_per_tile=2,
+            max_workspace_bytes=128 * 1024 * 1024,
+        )
+        self.assertEqual(
+            filtered_ranked_candidates,
+            [6, 8, 9, 18, 16, 36, 32],
+        )
 
     @unittest.skipIf(
         config.triton.native_matmul,

@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import dataclasses
 import itertools
 import logging
 from typing import TYPE_CHECKING
@@ -132,6 +133,56 @@ def _bmm_shared_a_configs(dtype):
             "num_stages": stages,
             "num_warps": warps,
         }
+
+
+@SymbolicGridFn
+def blackwell_bmm_grid(*args, cdiv, max, min):
+    # The BMM template supports both [B, M, N] and flattened [B * M, N]
+    # outputs.  Read the logical problem from its compile-time mapping instead
+    # of inferring it from the output layout passed before ``meta``.
+    meta = args[-1]
+    b = meta["BATCH_SIZE"]
+    m = meta["LOGICAL_M"]
+    n = meta["LOGICAL_N"]
+    grid_m = cdiv(m, meta["BLOCK_M"])
+    if meta["TWO_CTAS"]:
+        grid_m = cdiv(grid_m, 2) * 2
+    tiles = grid_m * cdiv(n, meta["BLOCK_N"])
+    grid_x = min(meta["NUM_SMS"], tiles)
+    if meta["TWO_CTAS"]:
+        grid_x = grid_x // 2 * 2
+    max_y_grid = get_max_y_grid()
+    grid_z = max(cdiv(b, max_y_grid), 1)
+    return (grid_x, cdiv(b, grid_z), grid_z)
+
+
+blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
+    name="blackwell_bmm",
+    grid=blackwell_bmm_grid,
+    source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_bmm"),
+    cache_codegen_enabled_for_template=True,
+    prologue_loads_all_inputs=True,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class BlackwellBMMConfig:
+    block_m: int
+    block_n: int
+    block_k: int
+    num_stages: int
+    num_warps: int
+    epilogue_subtile: int = 1
+    data_partition_factor: int = 1
+    separate_epilogue_store: bool = True
+    two_ctas: bool = False
+
+
+BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
+    BlackwellBMMConfig(64, 64, 128, 5, 4),
+    BlackwellBMMConfig(128, 128, 128, 3, 8),
+    BlackwellBMMConfig(128, 256, 64, 4, 8),
+)
 
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
