@@ -206,6 +206,13 @@ def mem_get_info(device: Device = None) -> tuple[int, int]:
         tuple[int, int]: a tuple of two integers (free_memory, total_memory) in bytes.
             The first value is the free memory on the device (available across all processes and applications),
             The second value is the device's total hardware memory capacity.
+
+    .. note::
+        This query relies on the SYCL ``ext_intel_free_memory`` aspect. Devices
+        that do not expose it, integrated Intel GPUs in particular, raise a
+        :class:`RuntimeError` here. Check
+        ``torch.xpu.get_device_properties(device).is_integrated_gpu`` or guard
+        the call if your code must run on both integrated and discrete devices.
     """
     _lazy_init()
     device = _get_device_index(device, optional=True)
