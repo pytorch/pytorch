@@ -4891,6 +4891,20 @@ class TestMPS(TestCaseMPS):
         x_cpu[2:4] = update_mps  # implicit device moving and copy
         self.assertEqual(x_cpu, x_mps)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/119367
+    def test_copy_unaligned_offsets_mps_to_cpu(self):
+        for dtype in [torch.bool, torch.uint8, torch.float16]:
+            for src_off, dst_off in [(0, 1), (1, 0), (1, 1), (3, 2), (0, 2)]:
+                with self.subTest(dtype=dtype, src_off=src_off, dst_off=dst_off):
+                    n = 8
+                    src_cpu = (torch.arange(n) % 3 != 0).to(dtype)
+                    src = src_cpu.to("mps")
+                    backing = torch.zeros(n + dst_off, dtype=dtype)
+                    dst = backing[dst_off:dst_off + n - src_off]
+                    dst.copy_(src[src_off:])
+                    self.assertEqual(dst, src_cpu[src_off:])
+                    self.assertEqual(backing[:dst_off], torch.zeros(dst_off, dtype=dtype))
+
     def test_copy_broadcasting(self):
         def helper(src_shape, dst_shape, src_dtype, dst_dtype):
             cpu_src = torch.randint(0, 127, src_shape).to(src_dtype)
