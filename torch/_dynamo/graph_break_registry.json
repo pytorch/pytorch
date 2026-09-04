@@ -148,6 +148,16 @@
       "Hints": []
     }
   ],
+  "GB7168": [
+    {
+      "Gb_type": "tp_descr_get_impl not implemented",
+      "Context": "{type(self).__name__} has tp_descr_get slot but no tp_descr_get_impl override",
+      "Explanation": "The type {self.python_type_name()} has a tp_descr_get C slot but Dynamo has no model for it.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0010": [
     {
       "Gb_type": "Attempted to read a deleted variable",
