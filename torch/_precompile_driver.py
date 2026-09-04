@@ -700,5 +700,4 @@ def _build_installed_forward():
         _serve,
         _entry_function,
         check_fn=_check_entry,
-        backend_keys=tuple(cache_entry.backends),
     )
