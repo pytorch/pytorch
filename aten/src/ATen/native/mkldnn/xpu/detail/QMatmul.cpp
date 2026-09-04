@@ -466,10 +466,7 @@ inline ScaleSpec make_scale_spec(
       auto dt = (scale_dtype == at::kFloat8_e8m0fnu)
           ? dnnl::memory::data_type::e8m0
           : dnnl::memory::data_type::f32;
-      return {
-          (1 << 0) | (1 << 1),
-          dnnl::memory::dims{128, 128},
-          dt};
+      return {(1 << 0) | (1 << 1), dnnl::memory::dims{128, 128}, dt};
     }
 
     case at::blas::ScalingType::BlockWise1x32: {
@@ -580,8 +577,10 @@ sycl::event scaled_matmul(
   bool bias_as_post_op = with_bias && with_alpha;
 
   // 1.2 Create primitive descriptor and set scales mask
-  const ScaleSpec src_spec = make_scale_spec(scaling_choice_a, M, K, N, "src", scale_a.scalar_type());
-  const ScaleSpec wei_spec = make_scale_spec(scaling_choice_b, M, K, N, "wei", scale_b.scalar_type());
+  const ScaleSpec src_spec =
+      make_scale_spec(scaling_choice_a, M, K, N, "src", scale_a.scalar_type());
+  const ScaleSpec wei_spec =
+      make_scale_spec(scaling_choice_b, M, K, N, "wei", scale_b.scalar_type());
 
   dnnl::primitive_attr op_attr = dnnl::primitive_attr();
 
