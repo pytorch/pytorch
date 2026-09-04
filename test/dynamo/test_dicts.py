@@ -2616,8 +2616,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
         remove_batch = graph.call_function(torch._remove_batch_dim, (x, x, x, x))
         self.assertFalse(_is_safe_to_reorder(remove_batch))
 
-    @staticmethod
-    def _make_dict_with_attr(kind):
+    # NB: not a staticmethod -- see the note in test_repros.py; the generated
+    # subclasses rebind copied staticmethods as instance methods.
+    def _make_dict_with_attr(self, kind):
         # Only a type with a non-zero tp_dictoffset can carry instance
         # attributes; a plain dict cannot. defaultdict is deliberately absent:
         # it is modelled by DefaultDictVariable(UserDefinedDictVariable), so it
@@ -2733,8 +2734,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         ),
     }
 
-    @staticmethod
-    def _seeded_ordered_dict():
+    def _seeded_ordered_dict(self):
         d = OrderedDict(a=1)
         d._metadata = OrderedDict([("", {"version": 1})])
         return d
