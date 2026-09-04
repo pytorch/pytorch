@@ -33,11 +33,6 @@ Please use those APIs instead.
 __all__ = ["custom_op", "CustomOp", "get_ctx"]
 
 
-SUPPORTED_DEVICE_TYPE_TO_KEY = {
-    "cpu": "CPU",
-    "cuda": "CUDA",
-}
-
 # We will not let users register CustomOps with anything that could look like
 # PyTorch internals to avoid confusion.
 RESERVED_NS = {
@@ -233,7 +228,7 @@ class CustomOp:
             for device_type in set(device_types):
                 self._check_doesnt_have_library_impl(device_type)
                 self._register_impl(device_type, f, stacklevel=_stacklevel)
-                dispatch_key = SUPPORTED_DEVICE_TYPE_TO_KEY[device_type]
+                dispatch_key = _C._dispatch_key_for_device[device_type]
                 library.impl(self._lib, self._opname, dispatch_key)(f)
             return f
 
@@ -242,7 +237,7 @@ class CustomOp:
     def _check_doesnt_have_library_impl(self, device_type):
         if self._has_impl(device_type):
             return
-        key = SUPPORTED_DEVICE_TYPE_TO_KEY[device_type]
+        key = _C._dispatch_key_for_device[device_type]
         if _C._dispatch_has_computed_kernel_for_dispatch_key(self._qualname, key):
             raise RuntimeError(
                 f"impl(..., device_types={device_type}): the operator {self._qualname} "
@@ -537,11 +532,12 @@ def parse_qualname(qualname: str) -> tuple[str, str]:
 
 
 def validate_device_type(device_type: str) -> None:
-    if device_type not in SUPPORTED_DEVICE_TYPE_TO_KEY:
+    try:
+        _C._dispatch_key_for_device(device_type)
+    except RuntimeError as e:
         raise ValueError(
-            f"CustomOp.impl(device_types=[{device_type}, ...]): we only support device_type "
-            f"in {SUPPORTED_DEVICE_TYPE_TO_KEY.keys()}."
-        )
+            f"CustomOp.impl(device_types=[{device_type}, ...]): unsupported device_type. {e}"
+        ) from e
 
 
 def supported_param(param: inspect.Parameter) -> bool:
