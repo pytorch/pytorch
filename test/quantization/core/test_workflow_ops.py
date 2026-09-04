@@ -1321,9 +1321,13 @@ class TestFusedObsFakeQuantDevice(TestCase):
         self.assertTrue(x.grad.dtype == torch.float32)
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestFakeQuantizeOpsDevice, globals(), only_for=only_for)
-instantiate_device_type_tests(TestFusedObsFakeQuantDevice, globals(), only_for=only_for)
+only_for = ("cpu", "cuda", "xpu")
+instantiate_device_type_tests(
+    TestFakeQuantizeOpsDevice, globals(), only_for=only_for, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFusedObsFakeQuantDevice, globals(), only_for=only_for, allow_xpu=True
+)
 
 
 if __name__ == '__main__':
