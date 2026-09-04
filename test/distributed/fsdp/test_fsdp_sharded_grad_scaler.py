@@ -361,7 +361,7 @@ instantiate_parametrized_tests(TestShardGradScaler)
 instantiate_device_type_tests(
     TestShardedGradScalerParityWithDDP,
     globals(),
-    only_for=("cuda", "xpu", "privateuse1"),
+    except_for=("cpu", "hpu"),
     allow_xpu=True,
 )
 
