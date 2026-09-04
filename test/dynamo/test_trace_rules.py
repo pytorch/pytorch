@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import cmath
 import dataclasses
 import importlib
 import inspect
@@ -172,7 +173,7 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
                     c_binding_in_graph_functions.add(obj)
 
     def _is_allowed_module_prefix(obj):
-        allowed_modules = ("torch", "math")
+        allowed_modules = ("torch", "math", "cmath")
         # torch.nn.modules.rnn is disallowed because these modules internally
         # flatten their parameters.  This flattening process will call
         # Tensor.set_ with a Storage, and Storages cannot be traced with
@@ -304,6 +305,7 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
 
     _find_torch_objects(torch)
     _find_torch_objects(math)
+    _find_torch_objects(cmath)
 
     return AllowedObjects(
         torch_object_ids,
