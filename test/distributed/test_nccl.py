@@ -1651,10 +1651,15 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             if c10d.is_initialized():
                 c10d.destroy_process_group()
 
+    @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
-    def test_retained_handle_rejected_after_abort(self) -> None:
-        # Aborting reaches teardown through abortComms rather than shutdown,
-        # which is a separate call site for retiring the registration.
+    def test_retained_handle_rejected_after_abort(self, backend_name: str) -> None:
+        # Aborting reaches teardown through abortCommsFromMap rather than
+        # shutdown, which is a separate call site for retiring the
+        # registration. Both backends are covered because only "nccl-legacy"
+        # resolves to stock ProcessGroupNCCL, whose abortCommsFromMap carries
+        # the ROCm retirement call; "nccl" resolves to ProcessGroupNCCL2 and
+        # retires through its own path.
         previous = os.environ.get("TORCH_NCCL_ASYNC_ERROR_HANDLING")
         if previous is None:
             self.addCleanup(os.environ.pop, "TORCH_NCCL_ASYNC_ERROR_HANDLING", None)
@@ -1665,8 +1670,13 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
 
         symm_mem.set_backend("NCCL")
-        self._init_process_group("nccl", "_abort")
-        group_name = c10d.distributed_c10d._get_default_group().group_name
+        self._init_process_group(backend_name, "_abort")
+        pg = c10d.distributed_c10d._get_default_group()
+        expected_backend_type = (
+            c10d.ProcessGroupNCCL2 if backend_name == "nccl" else c10d.ProcessGroupNCCL
+        )
+        self.assertIsInstance(pg._get_backend(self.device), expected_backend_type)
+        group_name = pg.group_name
         c10d.all_reduce(torch.ones(1, device=self.device))
         tensor = symm_mem.empty(4096, dtype=torch.float32, device=self.device).fill_(
             self.rank
@@ -1785,6 +1795,115 @@ class NCCLSymmetricMemoryCapabilityGateTest(MultiProcessTestCase):
             os.environ["NCCL_CUMEM_ENABLE"] = "1"
             os.environ["NCCL_WIN_ENABLE"] = "1"
             self._assert_capture_allocation_rejected()
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
+
+    @skip_if_lt_x_gpu(2)
+    def test_rendezvous_rejected_without_device_api_support(self) -> None:
+        # Without CUMEM+WIN, RCCL reports deviceApiSupport=0, so rendezvous is
+        # refused independently of graph capture. This is the only test that
+        # reaches comm_has_device_api_support(): the two capture tests above
+        # stop earlier, inside the allocator's capture-allocation gate.
+        self._init_process_group()
+        try:
+            group_name = c10d.distributed_c10d._get_default_group().group_name
+            tensor = symm_mem.empty(4096, dtype=torch.float32, device=self.device)
+            with self.assertRaisesRegex(RuntimeError, "requires device API support"):
+                symm_mem.rendezvous(tensor, group=group_name)
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
+
+
+@requires_cuda_p2p_access()
+@skipIfRocmVersionLessThan((10, 1))
+@skip_but_pass_in_sandcastle_if(
+    not TEST_WITH_ROCM, "ROCm-specific subgroup rendezvous ordering test"
+)
+@skip_but_pass_in_sandcastle_if(
+    TEST_WITH_ROCM and nccl.version() < (2, 30, 4),
+    "RCCL host device APIs require RCCL 2.30.4 or newer",
+)
+@skip_but_pass_in_sandcastle_if(
+    TEST_WITH_ROCM and not NCCL_SYMMEM_COMPILED,
+    "RCCL symmetric memory was disabled at build time; nccl_device.h did not "
+    "pass the host-translation-unit compatibility probe",
+)
+class NCCLSymmetricMemorySubgroupTest(MultiProcessTestCase):
+    """Subgroup rendezvous works when it is the first rendezvous in a process.
+
+    NCCLSymmetricMemoryTest skips test_nccl_symmem_rendezvous_subgroup on ROCm
+    because that suite shares processes across tests: an earlier WORLD-group
+    rendezvous makes the subgroup registration a window on a *second*
+    communicator, and only a subset of ranks then enters the bootstrap barrier
+    in RCCL's ncclRmaCeInit. Spawning fresh processes keeps the subgroup
+    communicator the only one holding a window, which is the ordering ROCm
+    does support, so the blanket skip is not hiding a broken subgroup path.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        for name, value in {
+            "TORCH_SYMMEM": "NCCL",
+            "NCCL_CUMEM_ENABLE": "1",
+            "NCCL_WIN_ENABLE": "1",
+        }.items():
+            previous = os.environ.get(name)
+            if previous is None:
+                self.addCleanup(os.environ.pop, name, None)
+            else:
+                self.addCleanup(os.environ.__setitem__, name, previous)
+            os.environ[name] = value
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    @skip_if_lt_x_gpu(2)
+    def test_first_rendezvous_on_subgroup(self) -> None:
+        if not PLATFORM_SUPPORTS_SYMM_MEM:
+            raise SkipTest("Test requires SymmMem support")
+        for peer in range(self.world_size):
+            if peer != self.rank and not torch._C._cuda_canDeviceAccessPeer(
+                self.rank, peer
+            ):
+                raise SkipTest("Test requires p2p access")
+
+        torch.cuda.set_device(self.device)
+        symm_mem.set_backend("NCCL")
+        c10d.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=c10d.FileStore(self.file_name, self.world_size),
+            device_id=self.device,
+        )
+        try:
+            subgroup = c10d.new_group(list(range(self.world_size)))
+            # Create and publish the subgroup communicator with a plain
+            # collective. Deliberately no WORLD-group rendezvous: registering a
+            # window on WORLD first is what makes this hang.
+            c10d.all_reduce(torch.ones(1, device=self.device), group=subgroup)
+
+            tensor = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(
+                self.rank
+            )
+            handle = symm_mem.rendezvous(tensor, group=subgroup)
+            self.assertEqual(handle.world_size, self.world_size)
+            self.assertEqual(handle.rank, self.rank)
+
+            handle.barrier()
+            torch.cuda.synchronize(self.device)
+
+            peer_rank = (self.rank + 1) % self.world_size
+            peer_buffer = handle.get_buffer(peer_rank, (64,), torch.float32)
+            self.assertTrue(peer_buffer.eq(peer_rank).all())
         finally:
             if c10d.is_initialized():
                 c10d.destroy_process_group()
