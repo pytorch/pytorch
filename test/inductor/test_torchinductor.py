@@ -4101,6 +4101,26 @@ class CommonTemplate:
             check_lowp=False,  # a much more elaborate test is required to match finfo max's for float and half
         )
 
+    @skip_if_halide  # halide has buggy nan handling
+    def test_nan_to_num_complex(self):
+        if not self.is_dtype_supported(torch.complex64):
+            raise unittest.SkipTest("complex64 not supported on device")
+
+        def fn(a):
+            return (
+                torch.nan_to_num(a),
+                torch.nan_to_num(a, nan=3.0, posinf=4.0, neginf=-5.0),
+            )
+
+        values = [
+            complex(3, float("nan")),
+            complex(float("inf"), -2.0),
+            complex(float("-inf"), float("nan")),
+        ]
+        self.common(
+            fn, (torch.tensor(values, dtype=torch.complex64),), check_lowp=False
+        )
+
     def test_one_hot(self):
         def fn(a):
             return torch.nn.functional.one_hot(a, 8) + 1
