@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-"""Shared window-finalization machinery for CUPTI monitor observers.
+"""Shared window-finalization machinery for Cuspy observers.
 
 An observer that publishes per *window* (a span ended by a boundary -- a training step or
 profiling window) stamps each boundary in CUPTI's native record clock and finalizes the
@@ -9,7 +9,7 @@ boundary means every earlier one is in hand). This mixin owns the boundary queue
 thread, cover-detection, and teardown; the subclass supplies ``_collect_delivered(sync)``,
 ``_window_watermark_ns()`` (max delivered record start, native clock), and
 ``_finalize_window(window_id, boundary_ns)``. Boundaries use ``now_record_ns()`` from
-:class:`CuptiMonitorObserver`, the same timebase as record START/END.
+:class:`CuspyObserver`, the same timebase as record START/END.
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ class WindowFinalizerMixin:
         """One poll cycle: collect delivered records, then finalize every queued boundary
         they now cover. ``drain_all`` (teardown) finalizes every remaining boundary
         regardless of watermark. ``sync`` sync-flushes CUPTI in the collect (only safe on
-        the monitor-flusher thread); leave False to rely on naturally-delivered records."""
+        the Cuspy flusher thread); leave False to rely on naturally-delivered records."""
         self._collect_delivered(sync=sync)
         watermark = self._window_watermark_ns()
         ready: list[tuple[int, int]] = []
@@ -103,9 +103,9 @@ class WindowFinalizerMixin:
 
     def _stop_observation_window(self, *, sync: bool = True) -> None:
         """Stop the poller and finalize whatever remains. Idempotent. ``sync`` (default)
-        sync-flushes CUPTI in the final drain -- correct on the monitor-flusher thread (e.g.
+        sync-flushes CUPTI in the final drain -- correct on the Cuspy flusher thread (e.g.
         teardown on the training thread). ``sync=False`` finalizes only naturally-delivered
-        records, for off-thread use where a flush would race the monitor."""
+        records, for off-thread use where a flush would race Cuspy."""
         thread = self._poll_thread
         if thread is not None:
             thread.stop()
@@ -121,7 +121,7 @@ class WindowFinalizerMixin:
         return self.now_record_ns()
 
     if TYPE_CHECKING:
-        # Provided by the co-class CuptiMonitorObserver in the MRO; declared here only for
+        # Provided by the co-class CuspyObserver in the MRO; declared here only for
         # the type checker (a real def would shadow it at runtime).
         def now_record_ns(self) -> int: ...
 
