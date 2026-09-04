@@ -1,4 +1,5 @@
 #include <c10/core/StorageImpl.h>
+#include <c10/util/Logging.h>
 #include <c10/util/flat_hash_map.h>
 
 namespace c10 {
@@ -58,6 +59,19 @@ void warnDeprecatedDataPtr() {
     TORCH_CHECK(false, *extra_meta_->custom_data_ptr_error_msg_);
   }
   TORCH_CHECK(false, "Cannot access data pointer of Storage that is invalid.");
+}
+
+void StorageImpl::check_immutable_data_ptr_access() const {
+  if (immutable_data_ptr_check_ == DataPtrCheck::Throw) {
+    throw_data_ptr_access_error();
+  }
+  C10_LOG_API_USAGE_ONCE("c10.storage.invalid_data_ptr_access_warn");
+  if (extra_meta_ && extra_meta_->custom_data_ptr_error_msg_) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    TORCH_WARN(*extra_meta_->custom_data_ptr_error_msg_);
+  } else {
+    TORCH_WARN("Accessed data pointer of Storage that is invalid.");
+  }
 }
 
 void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr) {
