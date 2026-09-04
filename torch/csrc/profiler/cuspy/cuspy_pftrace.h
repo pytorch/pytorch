@@ -1,10 +1,10 @@
 #pragma once
 
-// Perfetto-native (.pftrace) encoder for the CUPTI monitor. The Python side
-// (torch/profiler/_cupti/monitor_trace.py) shapes the columnar trace window
+// Perfetto-native (.pftrace) encoder for Cuspy. The Python side
+// (torch/profiler/_cuspy/trace.py) shapes the columnar trace window
 // into a track list + per-kind groups of flat arrays + annotation specs; the
-// pybind glue in monitor_python.cpp turns those into the plain C++ inputs below
-// and calls cuptiMonitorEncodePftrace, which emits a concatenated stream of
+// pybind glue in cuspy_python.cpp turns those into the plain C++ inputs below
+// and calls cuspyEncodePftrace, which emits a concatenated stream of
 // perfetto TracePackets via protozero (the perfetto SDK amalgamation under
 // third_party/perfetto). Each slice becomes a SLICE_BEGIN (carrying its
 // debug_annotations + flow) and a SLICE_END. Returns the gzip-compressed trace
@@ -247,7 +247,7 @@ struct PftraceGpuCounter {
 //
 // compression_level is the gzip level applied to the serialized trace (0-9;
 // 1 = fast, the default). Invalid levels fall back to uncompressed bytes.
-TORCH_API std::string cuptiMonitorEncodePftrace(
+TORCH_API std::string cuspyEncodePftrace(
     int64_t base_ns,
     const std::vector<PftraceTrack>& tracks,
     const std::vector<std::string>& name_table,
