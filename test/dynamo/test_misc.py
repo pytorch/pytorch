@@ -4111,6 +4111,46 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(opt_fn(*args), correct)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_numpy_class_attr(self):
+        # numpy classes are wrapped in NumpyVariable; `np._CopyMode`'s members
+        # live on the class, while `__name__` comes from the metaclass.
+        def fn(x):
+            return np.array(x, copy=np._CopyMode.IF_NEEDED) + len(np.float32.__name__)
+
+        args = [np.array([1, 2, 3])]
+        correct = fn(*args)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        self.assertEqual(opt_fn(*args), correct)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_class_hasattr(self):
+        # hasattr()/getattr-with-default go through call_obj_hasattr on the
+        # NumpyVariable itself, so it must agree with tp_getattro_impl.
+        # `np._CopyMode.value` is an enum.property that raises on the class.
+        def fn(x):
+            try:
+                np._CopyMode.nonexistent
+                name = None
+            except AttributeError as e:
+                name = e.name
+            return (
+                hasattr(np._CopyMode, "value"),
+                getattr(np._CopyMode, "value", "D"),
+                hasattr(np._CopyMode, "IF_NEEDED"),
+                getattr(np.float32, "zzz", "D"),
+                hasattr(np.add, "reduce"),
+                name,
+                x + 1,
+            )
+
+        args = [np.array([1, 2, 3])]
+        correct = fn(*args)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        self.assertEqual(opt_fn(*args), correct)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_numpy_take_along_axis(self):
         def fn(x, i, a):
             return np.take_along_axis(x, i, a)

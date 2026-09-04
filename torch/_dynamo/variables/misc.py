@@ -2132,6 +2132,30 @@ class NumpyVariable(VariableTracker):
         )
         return ConstantVariable.create(result)
 
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # `is_numpy` keys off a set of numpy callables, which also catches numpy
+        # classes (`np._CopyMode`, the scalar types). The generic object protocol
+        # would treat those as instances and walk only the metaclass MRO, missing
+        # attributes defined on the class itself, e.g. `np._CopyMode.IF_NEEDED`.
+        # `call_obj_hasattr` below must delegate in lockstep with this.
+        if isinstance(self.value, type):
+            return variables.UserDefinedClassVariable(
+                self.value, source=self.source
+            ).tp_getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        # `generic_getattr` asks the receiver, not the delegate.
+        if isinstance(self.value, type):
+            return variables.UserDefinedClassVariable(
+                self.value, source=self.source
+            ).call_obj_hasattr(tx, name)
+        return super().call_obj_hasattr(tx, name)
+
     @classmethod
     def can_constant_fold_through(cls, fn: types.FunctionType) -> bool:
         mod = fn.__module__.split(".")
