@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -2046,7 +2046,8 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = (
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
-                                V.graph.device_node_mapping
+                                V.graph.device_node_mapping,
+                                V.graph.device_type,
                             )
                         )
 
@@ -2218,12 +2219,19 @@ def cudagraphify(
     kernel_free_cudagraph: bool = False,
     user_visible_output_idxs: tuple[int, ...] = (),
 ) -> Callable[..., Any]:
-    from torch._inductor.cudagraph_trees import (
-        cudagraphify_impl as new_cudagraphify_impl,
-    )
-
     cudagraphify_fn: Callable[..., Any]
     if config.triton.cudagraph_trees:
+        from torch._inductor.graph_tree_backend import is_graph_tree_backend_available
+
+        if not is_graph_tree_backend_available():
+            raise RuntimeError(
+                "No Graph Trees backend is available for the current accelerator"
+            )
+
+        from torch._inductor.cudagraph_trees import (
+            cudagraphify_impl as new_cudagraphify_impl,
+        )
+
         cudagraphify_fn = functools.partial(
             new_cudagraphify_impl,
             device_index=device_index,
@@ -2248,7 +2256,11 @@ def cudagraphify(
     def run(new_inputs: Sequence[InputType]) -> Any:
         compiled_fn = getattr(thread_local, "compiled_fn", None)
         if compiled_fn is None:
-            with dynamo_utils.preserve_rng_state():
+            accelerator = torch.accelerator.current_accelerator()
+            with dynamo_utils.preserve_rng_state(
+                device_type=None if accelerator is None else accelerator.type,
+                device_index=device_index,
+            ):
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)  # type: ignore[arg-type]
             thread_local.compiled_fn = compiled_fn
         return compiled_fn(new_inputs)  # type: ignore[arg-type]
@@ -2325,20 +2337,32 @@ def cudagraphify_impl(
         if isinstance(x, torch.Tensor) and idx not in static_input_idxs:
             index_expanded_dims_and_copy_(static_inputs[idx], x, expanded_dims)
 
-    # warmup
-    torch.cuda.synchronize()
-    stream = torch.cuda.Stream()
-    stream.wait_stream(torch.cuda.current_stream())
-    # copy static_inputs because it will be cleared in model
-    with torch.cuda.stream(stream):
+    accelerator = torch.accelerator.current_accelerator()
+    if accelerator is None:
+        raise RuntimeError("Expected a current accelerator, but found none")
+
+    torch.accelerator.synchronize()
+    stream = torch.Stream()
+    stream.wait_stream(torch.accelerator.current_stream())
+    with stream:
         model(list(static_inputs))
     stream.synchronize()
-    torch.cuda.current_stream().wait_stream(stream)
-    torch.cuda.synchronize()
+    torch.accelerator.current_stream().wait_stream(stream)
+    torch.accelerator.synchronize()
 
-    # record
-    graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
+    if accelerator.type == "cuda":
+        graph = torch.cuda.CUDAGraph()
+        graph_context = torch.cuda.graph(
+            graph,
+            stream=cast(torch.cuda.Stream, stream),
+            capture_error_mode="thread_local",
+        )
+        stream_context = contextlib.nullcontext()
+    else:
+        graph = torch.accelerator.Graph(capture_error_mode="thread_local")
+        graph_context = graph
+        stream_context = stream
+    with stream_context, graph_context:
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)

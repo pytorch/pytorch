@@ -2817,6 +2817,12 @@ Call this whenever a new thread is created in order to propagate values from
       });
 
   py_module.def(
+      "_set_storage_access_error_msg", [](const at::Tensor& t, std::string s) {
+        t.unsafeGetTensorImpl()
+            ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
+      });
+
+  py_module.def(
       "_set_storage_data_ptr_access_error_msg",
       [](size_t storage_impl_ptr, std::string s) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -2829,6 +2835,19 @@ Call this whenever a new thread is created in order to propagate values from
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
         storage_impl->clear_data_ptr_access_error_msg_();
+      });
+
+  py_module.def(
+      "_tensors_data_ptrs_at_indices_equal",
+      [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
+        for (auto index : indices) {
+          auto t = tensors[index].cast<at::Tensor>();
+          auto data_ptr = data_ptrs[index].cast<int64_t>();
+          if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
+            return false;
+          }
+        }
+        return true;
       });
 
   ASSERT_TRUE(
@@ -3146,11 +3165,25 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_construct_storage_from_data_pointer",
       [](int64_t data_ptr, c10::Device device, size_t size_bytes) {
+        auto external_data_ptr = at::DataPtr(
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            reinterpret_cast<void*>(data_ptr),
+            device);
+        // A null external DataPtr is valid for a zero-sized tensor;
+        // make_storage_impl would treat it as absent and try to allocate.
+        if (auto create_storage_impl =
+                c10::GetStorageImplCreate(device.type())) {
+          return c10::Storage(create_storage_impl(
+              c10::StorageImpl::use_byte_size_t(),
+              static_cast<int64_t>(size_bytes),
+              std::move(external_data_ptr),
+              /*allocator=*/nullptr,
+              /*resizable=*/false));
+        }
         return c10::Storage(
             c10::Storage::use_byte_size_t(),
             size_bytes,
-            // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            at::DataPtr(reinterpret_cast<void*>(data_ptr), device));
+            std::move(external_data_ptr));
       });
 
   py_module.def(
