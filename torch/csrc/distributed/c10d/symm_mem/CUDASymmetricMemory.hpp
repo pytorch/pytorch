@@ -2,63 +2,13 @@
 
 #include <ATen/ATen.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
-#include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
-#include <mutex>
 #include <shared_mutex>
 
-namespace c10d {
-class ProcessGroup;
-} // namespace c10d
-
 namespace c10d::symmetric_memory {
-
-// RAII guard that serializes built-in CUDA-backend symmetric-memory
-// operations within a (group_name, device) pair. Covered operations:
-// barrier, put_signal, wait_signal (CUDASymmetricMemory.cu), all six
-// collective entry points in CUDASymmetricMemoryOps.cu, and the two
-// custom-kernel signal ops in nccl_extension.cu. NOT covered: NCCL and
-// NVSHMEM backend primitives (ncclPutSignal/ncclWaitSignal), and
-// arbitrary user kernels launched on a cached get_signal_pad() tensor.
-//
-// A per-group mutex is held across the guarded scope so concurrent CPU
-// threads cannot interleave signal-pad operations. When the current
-// CUDA stream differs from the previous operation's stream, an event is
-// recorded on the previous stream and the current stream waits for it
-// before proceeding. Same-stream fast path: one mutex acquisition and a
-// pointer comparison; no event overhead.
-//
-// State is keyed by (group_name, device) and validated via a weak
-// reference to the owning ProcessGroup instance. If a PG is destroyed
-// and a new PG reuses the same name (e.g. after WORLD teardown resets
-// the group counter), the stale entry is detected and replaced.
-//
-// CUDA graph capture: the guard is a no-op during capture. Stream
-// ordering within the graph is maintained by the graph structure.
-// This matches ProcessGroupNCCL's pattern of skipping CPU-side
-// bookkeeping during capture.
-class GroupStreamGuard {
- public:
-  struct State;
-
-  explicit GroupStreamGuard(const std::string& group_name);
-  GroupStreamGuard(
-      const std::string& group_name,
-      const c10::intrusive_ptr<c10d::ProcessGroup>& pg);
-  ~GroupStreamGuard();
-  GroupStreamGuard(const GroupStreamGuard&) = delete;
-  GroupStreamGuard& operator=(const GroupStreamGuard&) = delete;
-
- private:
-  void init_(
-      const std::string& group_name,
-      const c10::intrusive_ptr<c10d::ProcessGroup>& pg);
-  std::shared_ptr<State> state_;
-  std::unique_lock<std::mutex> lock_;
-};
 
 // Resource wrapper that owns a (vaddr, allocation handle) pair. Upon
 // destruction, it unmaps the vaddr and releases the allocation handle.

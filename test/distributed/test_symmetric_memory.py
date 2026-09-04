@@ -7,6 +7,7 @@ import random
 import re
 import tempfile
 import threading
+import time
 from contextlib import contextmanager, nullcontext
 from unittest import skipIf, skipUnless
 
@@ -834,9 +835,11 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(2)
     def test_stream_serialization_barrier_two_streams(self) -> None:
-        """Alternate barriers across two streams with rank-0 GPU-side delay.
-        Without the guard the CAS-based signal protocol deadlocks: the second
-        barrier's put_signal finds the slot still set by the first."""
+        """Alternate barriers across two streams with a rank-0 GPU-side delay.
+        Without the guard the two barrier kernels can be resident at once and
+        the stream-B barrier consumes stream-A's round of signals, so it
+        completes before every rank arrived and the fill on stream B lands
+        before the fill on stream A. The peer then reads the wrong value."""
         self._init_process()
         if symm_mem.get_backend(self.device) != "CUDA":
             self.skipTest("test applies to the CUDA symm mem backend")
@@ -871,8 +874,9 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     def test_stream_serialization_put_wait_two_streams(self) -> None:
         """put_signal/wait_signal across two streams in a ring pattern.
-        Without the guard, the second round's put_signal CAS finds the slot
-        still set from round one, deadlocking."""
+        Without the guard the stream-B wait can consume the stream-A round's
+        signal, so round two completes out of order and the final fill is not
+        the one the peer observes."""
         self._init_process()
         if symm_mem.get_backend(self.device) != "CUDA":
             self.skipTest("test applies to the CUDA symm mem backend")
@@ -910,8 +914,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(2)
     def test_stream_serialization_concurrent_threads(self) -> None:
-        """Two CPU threads issue barriers concurrently on separate streams.
-        The per-(PG, device) mutex serializes them."""
+        """Two CPU threads issue barriers on separate streams. Both must
+        complete; the per-(PG, device) mutex orders the two launches. (The
+        barrier binding holds the GIL, so the two C++ calls do not overlap in
+        time here; this checks completion, not mutex contention.)"""
         self._init_process()
         if symm_mem.get_backend(self.device) != "CUDA":
             self.skipTest("test applies to the CUDA symm mem backend")
@@ -969,11 +975,14 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         stream_b = torch.cuda.Stream()
         peer = (self.rank + 1) % self.world_size
 
-        # WORLD on stream_a with a large GPU sleep on all ranks
+        # WORLD on stream_a, with a GPU sleep long enough that it cannot
+        # finish while the alt group runs.
+        world_done = torch.cuda.Event()
         with torch.cuda.stream(stream_a):
-            torch.cuda._sleep(50_000_000)
+            torch.cuda._sleep(2_000_000_000)
             t_world.fill_(self.rank + 1.0)
             hdl_world.barrier(channel=0)
+            world_done.record()
 
         # Alt group on stream_b. If state were shared with WORLD, the
         # guard would insert an event-wait on stream_a's sleep, blocking
@@ -984,16 +993,19 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             hdl_alt.barrier(channel=0)
             alt_done.record()
 
-        # Spin-wait for the alt-group event without synchronizing
-        # stream_a. If PG state leaked, alt_done would be blocked
-        # behind stream_a's 50M-cycle sleep and this would time out.
-        for _ in range(1000):
-            if alt_done.query():
-                break
-            import time
-
+        # Spin-wait for the alt-group event without synchronizing stream_a.
+        deadline = time.monotonic() + 60.0
+        while not alt_done.query() and time.monotonic() < deadline:
             time.sleep(0.001)
         self.assertTrue(alt_done.query(), "alt-group blocked by WORLD sleep")
+        # The alt group finishing is only meaningful while WORLD is still
+        # running: with a sleep shorter than the wait budget, shared state
+        # would merely delay alt_done and this test would pass regardless.
+        self.assertFalse(
+            world_done.query(),
+            "WORLD stream finished before the alt group; the GPU sleep is too "
+            "short to tell shared state from isolated state",
+        )
 
         torch.cuda.synchronize()
 
@@ -1065,19 +1077,38 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         stream_a = torch.cuda.Stream()
         stream_b = torch.cuda.Stream()
 
-        # Allocation 1 barrier on stream_a
+        # Allocation 1 barrier on stream_a, delayed on every rank so the
+        # barrier cannot complete while allocation 2 is being issued.
+        a_done = torch.cuda.Event()
         with torch.cuda.stream(stream_a):
-            if self.rank == 0:
-                torch.cuda._sleep(10_000_000)
+            torch.cuda._sleep(2_000_000_000)
             t1.fill_(self.rank + 1.0)
             hdl1.barrier(channel=0)
+            a_done.record()
 
         # Allocation 2 barrier on stream_b. The guard serializes this
         # after stream_a because both allocations share the same PG's
-        # (group_name, device) state.
+        # (process group, device) state.
+        b_done = torch.cuda.Event()
         with torch.cuda.stream(stream_b):
             hdl2.barrier(channel=0)
             t2.fill_(self.rank + 20.0)
+            b_done.record()
+
+        # Shared state means allocation 2 cannot run until allocation 1's
+        # barrier has completed. Checking only the final values would pass
+        # with independent per-allocation state too, so assert allocation 2
+        # is still held while allocation 1 is running.
+        time.sleep(0.1)
+        self.assertFalse(
+            a_done.query(),
+            "GPU sleep too short for this test to be meaningful",
+        )
+        self.assertFalse(
+            b_done.query(),
+            "allocation 2 ran ahead of allocation 1; the two allocations are "
+            "not sharing per-process-group serialization state",
+        )
 
         torch.cuda.synchronize()
         buf1 = hdl1.get_buffer(peer, (64,), torch.float32)
@@ -1092,8 +1123,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(2)
     def test_stream_serialization_cuda_graph_capture(self) -> None:
-        """A barrier captured in a CUDA graph replays correctly. The guard
-        is a no-op during capture; the graph structure provides ordering."""
+        """A barrier captured in a CUDA graph replays correctly. Inside a
+        capture the guard's event record and wait become graph nodes."""
         self._init_process()
         if symm_mem.get_backend(self.device) != "CUDA":
             self.skipTest("test applies to the CUDA symm mem backend")
@@ -1122,6 +1153,64 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         buf = hdl.get_buffer(peer, (64,), torch.float32)
         expected = torch.full((64,), peer + 200.0, device="cuda")
         self.assertEqual(buf, expected)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_stream_serialization_cuda_graph_forked_streams(self) -> None:
+        """Two streams forked inside one capture both issue barriers on the
+        same channel. The guard's record/wait become graph edges, so the two
+        pad kernels never overlap in a replay and the last fill wins on every
+        rank. Replayed several times: a balanced pad protocol must leave the
+        pad zero between replays."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        t = symm_mem.empty(64, dtype=torch.float32, device="cuda")
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        peer = (self.rank + 1) % self.world_size
+        n_replays = 4
+
+        main = torch.cuda.Stream()
+        side = torch.cuda.Stream()
+
+        # Warm-up on the capture stream.
+        main.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(main):
+            hdl.barrier(channel=0)
+        torch.cuda.current_stream().wait_stream(main)
+        torch.cuda.synchronize()
+
+        counter = torch.zeros(1, dtype=torch.float32, device="cuda")
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=main):
+            counter.add_(1.0)
+            if self.rank == 0:
+                torch.cuda._sleep(5_000_000)
+            t.fill_(1.0)
+            # Fork before either barrier so side joins the capture without
+            # inheriting a dependency on main's barrier. Forking afterwards
+            # would order the two barriers by itself and the test would pass
+            # with the guard doing nothing.
+            side.wait_stream(main)
+            hdl.barrier(channel=0)
+            with torch.cuda.stream(side):
+                hdl.barrier(channel=0)
+                t.copy_(counter.expand(64) * 100.0 + self.rank)
+            # Join.
+            main.wait_stream(side)
+
+        for _ in range(n_replays):
+            graph.replay()
+        torch.cuda.synchronize()
+
+        buf = hdl.get_buffer(peer, (64,), torch.float32)
+        expected = torch.full((64,), n_replays * 100.0 + peer, device="cuda")
+        self.assertEqual(buf, expected)
+        pad = hdl.get_signal_pad(self.rank)
+        self.assertEqual(pad, torch.zeros_like(pad))
 
 
 # We move AsyncTP tests to a separate test suite because 1) Async TP ops are not

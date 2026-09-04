@@ -4,18 +4,15 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/env.h>
 #include <c10/util/error.h>
-
-#include <mutex>
 
 #include <sys/socket.h>
 #include <unistd.h>
@@ -31,90 +28,6 @@
 #endif
 
 namespace c10d::symmetric_memory {
-
-/* GroupStreamGuard -- per-(PG, device) stream serialization */
-
-struct GroupStreamGuard::State {
-  std::mutex mu;
-  c10::cuda::CUDAEvent event;
-  std::optional<c10::cuda::CUDAStream> last_stream;
-  std::optional<c10::weak_intrusive_ptr<c10d::ProcessGroup>> pg;
-};
-
-namespace {
-
-using StreamStateKey = std::pair<std::string, c10::DeviceIndex>;
-
-struct StreamStateKeyHash {
-  size_t operator()(const StreamStateKey& k) const {
-    return std::hash<std::string>{}(k.first) ^
-        (static_cast<size_t>(k.second) << 32);
-  }
-};
-
-// Keyed by (group_name, device). Stale entries are detected via the
-// weak PG reference: if the PG was destroyed and a new PG reuses the
-// same name (e.g. after WORLD teardown resets the group counter), the
-// weak_ptr expires and the entry is replaced.
-//
-// shared_ptr so that an active guard keeps its state alive even if
-// another thread replaces the map entry (PG reuse race).
-std::mutex g_stream_map_mutex;
-std::unordered_map<
-    StreamStateKey,
-    std::shared_ptr<GroupStreamGuard::State>,
-    StreamStateKeyHash>
-    g_stream_states;
-
-std::shared_ptr<GroupStreamGuard::State> get_group_stream_state(
-    const std::string& group_name,
-    c10::DeviceIndex device,
-    const c10::intrusive_ptr<c10d::ProcessGroup>& pg) {
-  std::lock_guard<std::mutex> lock(g_stream_map_mutex);
-  auto key = StreamStateKey{group_name, device};
-  auto& ptr = g_stream_states[key];
-  if (!ptr || !ptr->pg.has_value() || ptr->pg->expired() ||
-      ptr->pg->lock().get() != pg.get()) {
-    ptr = std::make_shared<GroupStreamGuard::State>();
-    ptr->pg.emplace(pg);
-  }
-  return ptr;
-}
-
-} // namespace
-
-void GroupStreamGuard::init_(
-    const std::string& group_name,
-    const c10::intrusive_ptr<c10d::ProcessGroup>& pg) {
-  auto stream = c10::cuda::getCurrentCUDAStream();
-  // During graph capture, stream ordering is maintained by the graph
-  // structure. Skip mutex and event serialization (they are CPU-side
-  // and would not replay). Matches ProcessGroupNCCL's pattern of
-  // skipping work-enqueue during capture.
-  if (c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
-      c10::cuda::CaptureStatus::None) {
-    return;
-  }
-  state_ = get_group_stream_state(group_name, stream.device_index(), pg);
-  lock_ = std::unique_lock<std::mutex>(state_->mu);
-  if (state_->last_stream.has_value() && *state_->last_stream != stream) {
-    state_->event.record(*state_->last_stream);
-    state_->event.block(stream);
-  }
-  state_->last_stream = stream;
-}
-
-GroupStreamGuard::GroupStreamGuard(const std::string& group_name) {
-  init_(group_name, c10d::resolve_process_group(group_name));
-}
-
-GroupStreamGuard::GroupStreamGuard(
-    const std::string& group_name,
-    const c10::intrusive_ptr<c10d::ProcessGroup>& pg) {
-  init_(group_name, pg);
-}
-
-GroupStreamGuard::~GroupStreamGuard() = default;
 
 /* Start of CUDASymmetricMemory implementation */
 
@@ -277,7 +190,7 @@ void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
-  GroupStreamGuard stream_guard(pai_->group_name_);
+  GroupStreamGuard stream_guard(pai_->group_name_, pg);
   if (get_multicast_ptr() != nullptr) {
     multimem_barrier_kernel<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
         static_cast<uint32_t*>(pai_->signal_pads_[rank_]),
@@ -323,7 +236,7 @@ void CUDASymmetricMemory::put_signal(
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
-  GroupStreamGuard stream_guard(pai_->group_name_);
+  GroupStreamGuard stream_guard(pai_->group_name_, pg);
   put_signal_kernel<<<
       1,
       at::cuda::warp_size(),
@@ -359,7 +272,7 @@ void CUDASymmetricMemory::wait_signal(
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
-  GroupStreamGuard stream_guard(pai_->group_name_);
+  GroupStreamGuard stream_guard(pai_->group_name_, pg);
   wait_signal_kernel<<<
       1,
       at::cuda::warp_size(),
