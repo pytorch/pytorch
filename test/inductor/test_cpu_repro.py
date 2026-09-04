@@ -5441,7 +5441,7 @@ class CPUReproTests(TestCase):
                 dtype if dtype else torch.float32,
             )
 
-    def test_group_norm_vec(self):
+    def test_group_norm_native_fallback(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -5463,20 +5463,74 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod, dynamic=dynamic)
                 actual, code = run_and_get_cpp_code(compiled_m, x)
                 self.assertEqual(expected, actual)
-                # 3 generated kernels (first one for var_mean, last two for result)
-                check_metrics_vec_kernel_count(3)
+                check_metrics_vec_kernel_count(0)
+                FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
 
-                # check loop split optimization
-                if fmt == torch.channels_last:
-                    # check that there are no non_contiguous loads
-                    FileCheck().check_count(
-                        "__at_align__ std::array", 0, exactly=True
-                    ).run(code)
+    def test_group_norm_native_fallback_issue_183120(self):
+        batch_norm = nn.BatchNorm2d(5).eval()
+        elu = nn.ELU()
+        group_norm = nn.GroupNorm(5, 5).eval()
+
+        def fn(x):
+            y = group_norm(elu(batch_norm(x)))
+            return torch.log(torch.clamp(y, min=1e-6))
+
+        x = torch.ones(4, 5, 6, 6)
+        expected = fn(x)
+        actual, code = run_and_get_cpp_code(torch.compile(fn, backend="inductor"), x)
+        self.assertEqual(expected, actual, rtol=0, atol=0)
+        FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
+
+    @parametrize("memory_format", (torch.contiguous_format, torch.channels_last))
+    @parametrize("affine", (True, False))
+    def test_group_norm_native_fallback_precision(self, memory_format, affine):
+        def fn(x, weight, bias):
+            y = F.group_norm(x, 5, weight, bias)
+            return y, torch.log(torch.clamp(y, min=1e-6))
+
+        one = torch.tensor(1.0)
+        lower = torch.nextafter(one, torch.tensor(-torch.inf))
+        upper = torch.nextafter(one, torch.tensor(torch.inf))
+        row = torch.cat((lower.repeat(342), one.repeat(342), upper.repeat(341)))
+        x = row.repeat(5).reshape(1, 5, 1, 1025).to(memory_format=memory_format)
+        weight = torch.ones(5) if affine else None
+        bias = torch.zeros(5) if affine else None
+
+        expected = fn(x, weight, bias)
+        torch._dynamo.reset()
+        actual, code = run_and_get_cpp_code(
+            torch.compile(fn, backend="inductor"), x, weight, bias
+        )
+        self.assertEqual(expected, actual, rtol=0, atol=0)
+        FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
+
+    @parametrize("input_dtype", (torch.float16, torch.bfloat16))
+    def test_group_norm_native_fallback_mixed_dtype_backward(self, input_dtype):
+        def fn(x, weight, bias):
+            return F.group_norm(x, 2, weight, bias)
+
+        torch.manual_seed(0)
+        x = torch.randn(2, 4, 3, 3, dtype=input_dtype, requires_grad=True)
+        weight = torch.randn(4, dtype=torch.float32, requires_grad=True)
+        bias = torch.randn(4, dtype=torch.float32, requires_grad=True)
+        grad_output = torch.randn_like(x)
+
+        expected = fn(x, weight, bias)
+        expected_grads = torch.autograd.grad(expected, (x, weight, bias), grad_output)
+
+        compiled_inputs = tuple(
+            value.detach().clone().requires_grad_() for value in (x, weight, bias)
+        )
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(*compiled_inputs)
+        actual_grads = torch.autograd.grad(actual, compiled_inputs, grad_output)
+
+        self.assertEqual(actual, expected)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad)
 
     @requires_vectorization
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
-    def test_group_norm_sum_conv1d_tail_reduction_store(self):
-        # https://github.com/pytorch/pytorch/issues/181618
+    def test_group_norm_sum_conv1d_native_fallback(self):
         torch.manual_seed(0)
         m_norm = nn.GroupNorm(1, 9).eval()
         m_conv1 = nn.Conv1d(9, 1, 3)
@@ -5493,13 +5547,7 @@ class CPUReproTests(TestCase):
         actual, code = run_and_get_cpp_code(torch.compile(model, backend="inductor"))
 
         torch.testing.assert_close(actual, expected, atol=2e-4, rtol=1e-3)
-        self.assertIn("sum_masked_reduce", code)
-        vec_width = cpu_vec_isa.pick_vec_isa().nelements()
-        tail_width = 9 if vec_width > 9 else 9 % vec_width or vec_width
-        self.assertIn(
-            f"tmp_acc0_vec.store(tmpbuf.data(), static_cast<int64_t>({tail_width}L));",
-            code,
-        )
+        self.assertIn("torch.ops.aten.native_group_norm.default", code)
 
     @unittest.skipIf(
         os.getenv("ATEN_CPU_CAPABILITY") == "default",
@@ -5524,15 +5572,12 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod)
                 actual = compiled_m(x)
                 self.assertEqual(expected, actual)
-                # 3 generated kernels (first one for var_mean, last two for result)
-                check_metrics_vec_kernel_count(3)
-                # check that there is no outer loop fusion.
+                check_metrics_vec_kernel_count(0)
                 self.assertEqual(
                     len(metrics.cpp_outer_loop_fused_inner_counts),
                     0,
                 )
-                # check for parallel reduction.
-                self.assertEqual(metrics.parallel_reduction_count, 1)
+                self.assertEqual(metrics.parallel_reduction_count, 0)
 
     @unittest.skipIf(
         os.getenv("ATEN_CPU_CAPABILITY") == "default",

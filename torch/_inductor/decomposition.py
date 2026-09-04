@@ -35,7 +35,10 @@ from torch._prims_common import (
     suggest_memory_format,
     type_to_dtype,
 )
-from torch._refs import native_layer_norm as decomp_native_layer_norm
+from torch._refs import (
+    native_group_norm as decomp_native_group_norm,
+    native_layer_norm as decomp_native_layer_norm,
+)
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     statically_known_true,
@@ -93,7 +96,6 @@ inductor_decompositions = get_decompositions(
         aten._batch_norm_no_update,
         aten.batch_norm_backward,
         aten.native_batch_norm,
-        aten.native_group_norm,
         aten.native_layer_norm,
         aten.nll_loss2d_backward,
         aten.permute_copy,
@@ -306,6 +308,33 @@ def _native_layer_norm(
         return NotImplemented
     # We can write a util function to update decomp table if we have more ops to fallback.
     return decomp_native_layer_norm(input, normalized_shape, weight, bias, eps)
+
+
+@register_decomposition(aten.native_group_norm)
+def _native_group_norm(
+    input: torch.Tensor,
+    weight: torch.Tensor | None,
+    bias: torch.Tensor | None,
+    batch_size: int,
+    num_channels: int,
+    flattened_inner_size: int,
+    num_groups: int,
+    eps: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    # Native CPU GroupNorm and Inductor reductions use different accumulation
+    # orders, which can become a large error after operations such as clamp/log.
+    if input.device.type == "cpu" and config.cpu_backend == "cpp":
+        return NotImplemented
+    return decomp_native_group_norm(
+        input,
+        weight,
+        bias,
+        batch_size,
+        num_channels,
+        flattened_inner_size,
+        num_groups,
+        eps,
+    )
 
 
 @register_decomposition([aten.sym_constrain_range_for_size.default])

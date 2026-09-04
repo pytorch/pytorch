@@ -1768,6 +1768,31 @@ class TestMeta(TestCase):
         self.assertTrue(grad_input.is_contiguous(memory_format=torch.channels_last))
 
     @onlyCPU
+    @parametrize("input_dtype", (torch.float16, torch.bfloat16))
+    def test_native_group_norm_mixed_dtype(self, input_dtype):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        inputs = (
+            torch.randn(2, 4, 3, 3, dtype=input_dtype),
+            torch.randn(4, dtype=torch.float32),
+            torch.randn(4, dtype=torch.float32),
+        )
+        expected = torch.ops.aten.native_group_norm.default(
+            *inputs, 2, 4, 9, 2, 1e-5
+        )
+
+        mode = FakeTensorMode()
+        with mode:
+            actual = torch.ops.aten.native_group_norm.default(
+                *(mode.from_tensor(x) for x in inputs), 2, 4, 9, 2, 1e-5
+            )
+
+        for expected_tensor, actual_tensor in zip(expected, actual):
+            self.assertEqual(actual_tensor.dtype, expected_tensor.dtype)
+            self.assertEqual(actual_tensor.shape, expected_tensor.shape)
+            self.assertEqual(actual_tensor.stride(), expected_tensor.stride())
+
+    @onlyCPU
     @parametrize("output_mask", list(itertools.product([True], [True, False], [True, False])))
     def test_batch_norm_backward(self, output_mask):
         from torch.testing._internal.common_methods_invocations import sample_inputs_batch_norm
