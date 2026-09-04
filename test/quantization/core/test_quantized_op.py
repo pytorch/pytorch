@@ -1540,50 +1540,6 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(a_ref, a_hat.dequantize(),
                          msg="ops.quantized.max_pool1d results are off")
 
-    # TODO: merge this test with test_max_pool2d
-    """Tests 2D cudnn max pool operation on quantized tensors."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
-                                              min_side=1, max_side=10),
-                       # cudnn's support for quantized pooling is limited to
-                       # int8 currently
-                       qparams=hu.qparams(dtypes=[torch.qint8])),
-           kernel=st.sampled_from((3, 5, 7)),
-           stride=st.sampled_from((None, 1, 2)),
-           # currently there is no support for dilation for cudnn
-           # pooling
-           dilation=st.integers(1, 1),
-           padding=st.integers(0, 2),
-           ceil_mode=st.booleans())
-    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
-    def test_max_pool2d_cudnn(self, X, kernel, stride, dilation, padding, ceil_mode):
-        X, (scale, zero_point, torch_type) = X
-        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
-        iH, iW = X.shape[-2:]
-        oH = pool_output_shape(iH, kernel, padding, stride, dilation, ceil_mode)
-        assume(oH > 0)
-        oW = pool_output_shape(iW, kernel, padding, stride, dilation, ceil_mode)
-        assume(oW > 0)
-
-        a = torch.from_numpy(X).to(device="cuda")
-        a_pool = torch.nn.functional.max_pool2d(a, kernel_size=kernel,
-                                                stride=stride,
-                                                padding=padding, dilation=dilation,
-                                                ceil_mode=ceil_mode)
-        a_ref = torch.quantize_per_tensor(a_pool, scale=scale,
-                                          zero_point=zero_point, dtype=torch_type)
-        a_ref = a_ref.dequantize()
-        qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
-
-        # Test the ops.quantized separately, because None is not treated.
-        a_hat = torch.ops.quantized.max_pool2d(
-            qa, kernel_size=_pair(kernel),
-            stride=_pair(kernel if stride is None else stride),
-            padding=_pair(padding), dilation=_pair(dilation), ceil_mode=ceil_mode)
-        self.assertEqual(a_ref, a_hat.dequantize(),
-                         msg="ops.quantized.max_pool2d results are off")
-
     """Tests 2D max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
@@ -3339,6 +3295,52 @@ class TestQuantizedOps(TestCase):
                 )
             y_ref = y_ref.to(out_dtype)
             self.assertEqual(y, y_ref, msg=lambda msg: f"{msg}\n{y} vs {y_ref}")
+
+
+class TestQuantizedOpsCUDNN(TestCase):
+    # TODO: merge this test with test_max_pool2d
+    """Tests 2D cudnn max pool operation on quantized tensors."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
+                                              min_side=1, max_side=10),
+                       # cudnn's support for quantized pooling is limited to
+                       # int8 currently
+                       qparams=hu.qparams(dtypes=[torch.qint8])),
+           kernel=st.sampled_from((3, 5, 7)),
+           stride=st.sampled_from((None, 1, 2)),
+           # currently there is no support for dilation for cudnn
+           # pooling
+           dilation=st.integers(1, 1),
+           padding=st.integers(0, 2),
+           ceil_mode=st.booleans())
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    def test_max_pool2d_cudnn(self, X, kernel, stride, dilation, padding, ceil_mode):
+        X, (scale, zero_point, torch_type) = X
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iH, iW = X.shape[-2:]
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation, ceil_mode)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation, ceil_mode)
+        assume(oW > 0)
+
+        a = torch.from_numpy(X).to(device="cuda")
+        a_pool = torch.nn.functional.max_pool2d(a, kernel_size=kernel,
+                                                stride=stride,
+                                                padding=padding, dilation=dilation,
+                                                ceil_mode=ceil_mode)
+        a_ref = torch.quantize_per_tensor(a_pool, scale=scale,
+                                          zero_point=zero_point, dtype=torch_type)
+        a_ref = a_ref.dequantize()
+        qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        # Test the ops.quantized separately, because None is not treated.
+        a_hat = torch.ops.quantized.max_pool2d(
+            qa, kernel_size=_pair(kernel),
+            stride=_pair(kernel if stride is None else stride),
+            padding=_pair(padding), dilation=_pair(dilation), ceil_mode=ceil_mode)
+        self.assertEqual(a_ref, a_hat.dequantize(),
+                         msg="ops.quantized.max_pool2d results are off")
 
 
 class TestDynamicQuantizedOps(TestCase):
@@ -5290,6 +5292,101 @@ class TestQuantizedEmbeddingOps(TestCase):
                                                sparsity=sparsity,
                                                atol=1.0, rtol=1e-1)
 
+    """ Tests the correctness of the quantized 8 bit embedding lookup operator """
+    @given(num_embeddings=st.integers(10, 100),
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
+    def test_embedding(self, num_embeddings, embedding_dim):
+        dtypes = [torch.quint8, torch.quint4x2]
+        quant_ops = [torch.ops.quantized.embedding_byte, torch.ops.quantized.embedding_4bit]
+        atols = [0.005, 0.1]
+        rtols = [1e-3, 1e-2]
+        prepack_op = torch.ops.quantized.embedding_bag_prepack
+        for quant_op, dtype, atol, rtol in zip(quant_ops, dtypes, atols, rtols):
+            weights = torch.from_numpy((np.random.random_sample((
+                num_embeddings, embedding_dim)) + 1).astype(np.float32))
+
+            obs = PerChannelMinMaxObserver(dtype=dtype, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+            obs(weights)
+            # Get the scale and zero point for the weight tensor
+            qparams = obs.calculate_qparams()
+
+            # Quantize the weights to 8bits
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=dtype)
+            max_segments = 5
+            max_segment_length = 20
+            num_lengths = np.random.randint(1, max_segments + 1)
+            lengths = np.random.randint(1, max_segment_length + 1,
+                                        size=num_lengths).astype(np.int32)
+            num_indices = np.sum(lengths)
+            indices = torch.from_numpy(np.random.randint(
+                low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
+
+            packed_weight = prepack_op(qweight)
+            qresult = quant_op(packed_weight, indices, pruned_weights=False)
+
+            ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
+            torch.testing.assert_close(ref, qresult, atol=atol, rtol=rtol)
+
+    def test_embedding_2d_indices(self):
+        """
+        Tests the case where 2D indices are passed into the operator
+        In this case the operator computes the correct offsets argument.
+        Output shape is dependent on the indices dimension.
+        """
+        quant_op = torch.ops.quantized.embedding_byte
+        prepack_op = torch.ops.quantized.embedding_bag_prepack
+
+        indices = torch.tensor([[9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8], [3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3]])
+        weights = torch.randn(10, 12, dtype=torch.float32)
+
+        ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
+        obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+        obs(weights)
+        qparams = obs.calculate_qparams()
+
+        qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+        packed_weight = prepack_op(qweight)
+        qresult = quant_op(packed_weight, indices, pruned_weights=False)
+        torch.testing.assert_close(ref, qresult, atol=0.05, rtol=1e-3)
+
+    def test_embedding_bag_2d_indices(self):
+        """
+        Tests the case where 2D indices are passed into the operator
+        In this case the operator computes the correct offsets argument.
+        """
+        indices = torch.tensor([[9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8], [3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3]])
+        weights = torch.randn(10, 12, dtype=torch.float32)
+
+        embedding_bag = torch.nn.EmbeddingBag(
+            num_embeddings=10,
+            embedding_dim=12,
+            include_last_offset=False, _weight=weights,
+            scale_grad_by_freq=False, mode='sum'
+        )
+        result = embedding_bag(indices)
+
+        pt_op = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
+        pt_prepack_op = torch.ops.quantized.embedding_bag_byte_prepack
+        q_weights = pt_prepack_op(weights)
+        qresult = pt_op(q_weights, indices, mode=0, pruned_weights=False)
+        torch.testing.assert_close(result, qresult, atol=0.05, rtol=1e-3)
+
+        # Test TorchBind based embedding_bag operator
+        obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+        obs(weights)
+        # Get the scale and zero point for the weight tensor
+        qparams = obs.calculate_qparams()
+
+        # Quantize the weights to 8bits
+        qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+
+        packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
+        qresult = torch.ops.quantized.embedding_bag_byte(packed_weight, indices, mode=0)
+
+        torch.testing.assert_close(result, qresult, atol=0.05, rtol=1e-3)
+
+
+class TestQuantizedEmbeddingOpsCUDA(TestCase):
     """ Tests that the CUDA quantized embedding_bag operators agree with their
         CPU counterparts. This covers the bit-field extraction the dequantization
         path is built on, which is shared by both bit widths. """
@@ -5638,99 +5735,6 @@ class TestQuantizedEmbeddingOps(TestCase):
                 pruned_weights=True, per_sample_weights=None,
                 compressed_indices_mapping=mapping.cuda(),
                 include_last_offset=False)
-
-    """ Tests the correctness of the quantized 8 bit embedding lookup operator """
-    @given(num_embeddings=st.integers(10, 100),
-           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
-    def test_embedding(self, num_embeddings, embedding_dim):
-        dtypes = [torch.quint8, torch.quint4x2]
-        quant_ops = [torch.ops.quantized.embedding_byte, torch.ops.quantized.embedding_4bit]
-        atols = [0.005, 0.1]
-        rtols = [1e-3, 1e-2]
-        prepack_op = torch.ops.quantized.embedding_bag_prepack
-        for quant_op, dtype, atol, rtol in zip(quant_ops, dtypes, atols, rtols):
-            weights = torch.from_numpy((np.random.random_sample((
-                num_embeddings, embedding_dim)) + 1).astype(np.float32))
-
-            obs = PerChannelMinMaxObserver(dtype=dtype, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
-            obs(weights)
-            # Get the scale and zero point for the weight tensor
-            qparams = obs.calculate_qparams()
-
-            # Quantize the weights to 8bits
-            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=dtype)
-            max_segments = 5
-            max_segment_length = 20
-            num_lengths = np.random.randint(1, max_segments + 1)
-            lengths = np.random.randint(1, max_segment_length + 1,
-                                        size=num_lengths).astype(np.int32)
-            num_indices = np.sum(lengths)
-            indices = torch.from_numpy(np.random.randint(
-                low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
-
-            packed_weight = prepack_op(qweight)
-            qresult = quant_op(packed_weight, indices, pruned_weights=False)
-
-            ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
-            torch.testing.assert_close(ref, qresult, atol=atol, rtol=rtol)
-
-    def test_embedding_2d_indices(self):
-        """
-        Tests the case where 2D indices are passed into the operator
-        In this case the operator computes the correct offsets argument.
-        Output shape is dependent on the indices dimension.
-        """
-        quant_op = torch.ops.quantized.embedding_byte
-        prepack_op = torch.ops.quantized.embedding_bag_prepack
-
-        indices = torch.tensor([[9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8], [3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3]])
-        weights = torch.randn(10, 12, dtype=torch.float32)
-
-        ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
-        obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
-        obs(weights)
-        qparams = obs.calculate_qparams()
-
-        qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
-        packed_weight = prepack_op(qweight)
-        qresult = quant_op(packed_weight, indices, pruned_weights=False)
-        torch.testing.assert_close(ref, qresult, atol=0.05, rtol=1e-3)
-
-    def test_embedding_bag_2d_indices(self):
-        """
-        Tests the case where 2D indices are passed into the operator
-        In this case the operator computes the correct offsets argument.
-        """
-        indices = torch.tensor([[9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8], [3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3]])
-        weights = torch.randn(10, 12, dtype=torch.float32)
-
-        embedding_bag = torch.nn.EmbeddingBag(
-            num_embeddings=10,
-            embedding_dim=12,
-            include_last_offset=False, _weight=weights,
-            scale_grad_by_freq=False, mode='sum'
-        )
-        result = embedding_bag(indices)
-
-        pt_op = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
-        pt_prepack_op = torch.ops.quantized.embedding_bag_byte_prepack
-        q_weights = pt_prepack_op(weights)
-        qresult = pt_op(q_weights, indices, mode=0, pruned_weights=False)
-        torch.testing.assert_close(result, qresult, atol=0.05, rtol=1e-3)
-
-        # Test TorchBind based embedding_bag operator
-        obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
-        obs(weights)
-        # Get the scale and zero point for the weight tensor
-        qparams = obs.calculate_qparams()
-
-        # Quantize the weights to 8bits
-        qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
-
-        packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
-        qresult = torch.ops.quantized.embedding_bag_byte(packed_weight, indices, mode=0)
-
-        torch.testing.assert_close(result, qresult, atol=0.05, rtol=1e-3)
 
 
 class TestQuantizedConv(TestCase):
