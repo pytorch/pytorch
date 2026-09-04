@@ -2261,6 +2261,25 @@ def object_generic_getattr(
     )
 
 
+def constant_fold_getattr_allowed(obj: VariableTracker) -> bool:
+    """Whether reading an attribute off ``obj.as_python_constant()`` is a sound
+    substitute when the VT itself declines the attribute.
+
+    Both getattr entry points -- `GetAttrBuiltinVariable.call_function` and
+    `InstructionTranslatorBase._load_attr` -- fall back to that read on an
+    `Unsupported`, which swallows the decline.  For a dict tracker that read is
+    never sound: ``as_python_constant()`` REBUILDS the dict, so an attribute
+    backed by per-instance storage is read off a throwaway object -- and every
+    decline the dict tracker makes (unguardable source, suppressed guards, a
+    stale aliased instance dict) would be silently converted into an answer.
+    Both call sites must apply this, or the unpatched one silently reinstates
+    the bug.  Refusing here is never a wrong answer, only a graph break.
+    """
+    from .dicts import ConstDictVariable
+
+    return not isinstance(obj, ConstDictVariable)
+
+
 def generic_getattr(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,
