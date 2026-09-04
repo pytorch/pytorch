@@ -22,6 +22,8 @@ from re import escape
 from typing import Dict, List, Union
 from unittest.mock import MagicMock, patch
 
+import numpy as np
+
 import torch
 import torch._dynamo as torchdynamo
 import torch._functorch._aot_autograd.graph_capture as graph_capture
@@ -2884,6 +2886,202 @@ graph():
         args = ([torch.randn(1, 3)], torch.randn(1, 3))
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
+
+    def test_non_strict_export_tensor_numpy(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                a = x.numpy()
+                return x + x.numpy().sum()
+
+        f = Foo()
+        args = (torch.randn(10, 10),)
+        with torch.device("meta"):
+            ep = export(f, args, strict=False)
+        self.assertEqual(ep.module()(*args), f(*args))
+
+    def test_non_strict_export_tensor_numpy_force(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x.numpy(force=True).sum()
+
+        f = Foo()
+        args = (torch._neg_view(torch.randn(10, 10, requires_grad=True)),)
+        ep = export(f, args, strict=False)
+        self.assertEqual(ep.module()(*args), f(*args))
+        if not is_training_ir_test(self._testMethodName):
+            FileCheck().check("torch.ops.aten.detach.default").check(
+                "torch.ops.aten.to.dtype_layout"
+            ).check("torch.ops.aten.resolve_conj.default").check(
+                "torch.ops.aten.resolve_neg.default"
+            ).run(ep.graph_module.code)
+
+    def test_non_strict_export_tensor_numpy_force_fake_cuda(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x.numpy(force=True).sum()
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            args = (torch.ones(3, device="cuda"),)
+            ep = export(Foo(), args, strict=False)
+            result = ep.module()(*args)
+        self.assertEqual(result.device, args[0].device)
+        self.assertEqual(result.dtype, args[0].dtype)
+        self.assertEqual(result.shape, args[0].shape)
+
+    def test_non_strict_export_tensor_numpy_detaches(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                with torch.no_grad():
+                    a = x.numpy().sum()
+                return x + a
+
+        f = Foo()
+        args = (torch.randn(3, requires_grad=True),)
+        ep = export(f, args, strict=False)
+        (grad,) = torch.autograd.grad(ep.module()(*args).sum(), args)
+        self.assertEqual(grad, torch.ones_like(args[0]))
+
+    def test_non_strict_export_tensor_numpy_real_constant(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.tensor([1.0, 2.0])
+
+            def forward(self, x):
+                return x + float(self.const.numpy().max())
+
+        f = Foo()
+        args = (torch.ones(2),)
+        ep = export(f, args, strict=False)
+        self.assertEqual(ep.module()(*args), f(*args))
+
+    def test_non_strict_export_tensor_numpy_real_constant_mutation(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.tensor([1.0, 2.0])
+
+            def forward(self, x):
+                array = self.const.numpy()
+                array[0] += 1
+                return x + self.const[0]
+
+        with self.assertRaisesRegex(ValueError, "read-only"):
+            export(Foo(), (torch.ones(2),), strict=False)
+
+    def test_non_strict_export_tensor_numpy_valid_dtype_unused(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 1 if isinstance(x.numpy(), np.ndarray) else x - 1
+
+        f = Foo()
+        args = (torch.ones(2, dtype=torch.complex64),)
+        ep = export(f, args, strict=False)
+        self.assertEqual(ep.module()(*args), f(*args))
+
+    def test_non_strict_export_tensor_numpy_scalar_type(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 1 if np.isscalar(x.numpy().sum()) else x - 1
+
+        f = Foo()
+        args = (torch.ones(2),)
+        ep = export(f, args, strict=False)
+        self.assertEqual(ep.module()(*args), f(*args))
+
+    def test_non_strict_export_tensor_numpy_unsupported_dtype(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x.numpy()
+                return x + 1
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "Tensor.numpy\\(\\) does not support dtype torch.bfloat16",
+        ):
+            export(Foo(), (torch.ones(2, dtype=torch.bfloat16),), strict=False)
+
+    def test_non_strict_export_tensor_numpy_sum_untraceable_dtypes(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x.numpy().sum()
+
+        f = Foo()
+        for dtype in (torch.complex64, torch.int64):
+            with self.subTest(dtype=dtype):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    f"cannot safely trace numpy.ndarray.sum\\(\\) for dtype {dtype}",
+                ):
+                    export(f, (torch.ones(2, dtype=dtype),), strict=False)
+
+        class MixedDtypes(torch.nn.Module):
+            def forward(self, x, y):
+                return y + x.numpy().sum()
+
+        with self.assertRaisesRegex(RuntimeError, "addition"):
+            export(
+                MixedDtypes(),
+                (torch.ones(2, dtype=torch.float64), torch.ones(2, dtype=torch.int64)),
+                strict=False,
+            )
+
+    def test_non_strict_export_tensor_numpy_zero_tensor(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x.detach().view_as(x).numpy()
+                return x
+
+        with self.assertRaisesRegex(RuntimeError, "ZeroTensor"):
+            export(Foo(), (torch._efficientzerotensor(2),), strict=False)
+
+        class Buffer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("zero", torch._efficientzerotensor(2))
+
+            def forward(self, x):
+                self.zero.numpy()
+                return x
+
+        with self.assertRaisesRegex(RuntimeError, "ZeroTensor"):
+            export(Buffer(), (torch.ones(2),), strict=False)
+
+    def test_non_strict_export_tensor_numpy_unsupported_operations(self):
+        class Std(torch.nn.Module):
+            def forward(self, x):
+                return x.numpy().std()
+
+        x = torch.tensor([1.0, 2.0, 9.0])
+        self.assertNotEqual(x.numpy().std(), x.std())
+        with self.assertRaisesRegex(RuntimeError, "NumPy attribute 'std'"):
+            export(Std(), (x,), strict=False)
+
+        class Truth(torch.nn.Module):
+            def forward(self, x):
+                if x.numpy():
+                    return x
+                return -x
+
+        with self.assertRaisesRegex(RuntimeError, "truth-value testing"):
+            export(Truth(), (x,), strict=False)
+
+        class ScalarAttribute(torch.nn.Module):
+            def forward(self, x):
+                return x.numpy().sum().dtype
+
+        with self.assertRaisesRegex(RuntimeError, "NumPy attribute 'dtype'"):
+            export(ScalarAttribute(), (x,), strict=False)
+
+    def test_non_strict_export_tensor_numpy_tensor_subclass(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.numpy()
+
+        x = TwoTensor(torch.ones(2), torch.ones(2))
+        with self.assertRaisesRegex(RuntimeError, "numpy.*tensor subclasses"):
+            export(Foo(), (x,), strict=False)
 
     def test_where_decomp(self):
         class TestModule(torch.nn.Module):

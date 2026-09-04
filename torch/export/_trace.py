@@ -2366,6 +2366,25 @@ def _non_strict_export(
 
         fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
 
+    zero_tensor_storage_ids = {
+        fake.untyped_storage()._cdata
+        for real, fake in zip(
+            pytree.tree_leaves((args, kwargs)),
+            pytree.tree_leaves((fake_args, fake_kwargs)),
+            strict=True,
+        )
+        if isinstance(real, torch.Tensor) and real._is_zerotensor()
+    }
+    real_params_buffers = {
+        **dict(mod.named_parameters(remove_duplicate=False)),
+        **dict(mod.named_buffers(remove_duplicate=False)),
+    }
+    zero_tensor_storage_ids.update(
+        fake.untyped_storage()._cdata
+        for name, fake in fake_params_buffers.items()
+        if real_params_buffers[name]._is_zerotensor()
+    )
+
     def _produce_guards_callback(gm):
         return produce_guards_and_solve_constraints(
             fake_mode=fake_mode,
@@ -2386,7 +2405,7 @@ def _non_strict_export(
 
     with (
         fake_mode,
-        _NonStrictTorchFunctionHandler(),
+        _NonStrictTorchFunctionHandler(zero_tensor_storage_ids),
         tracing(tx),
         torch._dynamo.config.patch(dynamo_config),
     ):
