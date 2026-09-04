@@ -38,6 +38,7 @@ from cutlass import const_expr, Float32, Float64, Int32, Int64
 import torch
 from torch._tensor_iterator import reduce_op
 
+from ...cutedsl.dtypes import torch2cute
 from .._cutedsl import launch as _L
 from .._cutedsl.plan_cache import cached_plan
 from .._cutedsl.traits import block_reduce, WARP, warp_reduce
@@ -381,9 +382,9 @@ class ReduceBlock:
 # Host plumbing + the geometry chooser. These build ReduceBlock launches; the
 # kernel above is the only @cute.kernel in the whole library.
 # ---------------------------------------------------------------------------
-_cute = _L.cute_tensor
 _stream = _L.stream
-# _L.compile_kernel: cute.compile + options="--enable-tvm-ffi" (fast per-call arg passing)
+# _L.compile_kernel: cute.compile against FAKE operands + options="--enable-tvm-ffi", so the
+# compiled callable takes the torch tensors and there is no per-call wrap.
 _compile = _L.compile_kernel
 _PART_TORCH = {Float32: torch.float32, Float64: torch.float64, Int32: torch.int32}
 
@@ -391,12 +392,17 @@ _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
 _PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
 
 
-def _cute_list(ts, read_only=False):
-    # All K0 operands are 1D flat views (input storage, partials, reshaped outs);
-    # the leading (only) dim is marked DYNAMIC so the structural kernel serves any
-    # length -- required since the grid reads mOuts[0].shape[0] live. read_only
-    # wraps INPUT tensors so a COW input exports without materializing (launch._ro).
-    return [_L.cute_tensor_dynM(t, ndim=1, read_only=read_only) for t in ts]
+def _fakes(ts):
+    # Compile-time descriptors. All K0 operands are 1D flat views (input storage, partials, reshaped
+    # outs) and the leading (only) extent is DYNAMIC, so one structural kernel serves any length --
+    # required since the grid reads mOuts[0].shape[0] live.
+    return [_L.fake_compact(torch2cute[t.dtype], (_L.sym(),)) for t in ts]
+
+
+def _operands(ts, read_only=False):
+    # The real tensors, as the compiled callable takes them. INPUTS go through read_only(), or a COW
+    # input is materialized on export.
+    return [_L.read_only(t) for t in ts] if read_only else list(ts)
 
 
 def _quads(pairs):
@@ -438,19 +444,13 @@ def _launch(op, key, ins, outs):
         fn = cached_plan(
             _COMPILE_CACHE,
             key,
-            lambda: _compile(
-                op,
-                _cute_list(ins, read_only=True),
-                _cute_list(outs),
-                *_geom_args(op),
-                _stream(),
-            ),
+            lambda: _compile(op, _fakes(ins), _fakes(outs), *_geom_args(op), _stream()),
             op=f"aten::{key[1]}",
         )
         plan = (fn, _geom_args(op))
         _PLAN[(key, op.geom_sig)] = plan
     fn, geom = plan
-    fn(_cute_list(ins, read_only=True), _cute_list(outs), *geom, _stream())
+    fn(_operands(ins, read_only=True), _operands(outs), *geom, _stream())
 
 
 def _ti_pairs(x, out):
