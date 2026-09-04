@@ -694,9 +694,9 @@ def add(x, y):
 
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_held_autocast_object_survives_the_package_round_trip(self):
-        # An identity guard on the autocast object used to bypass the package;
-        # the value guards serialize, so the entry installs on reload and still
-        # tells configurations apart.
+        # An identity guard on the autocast object used to be silently dropped
+        # on save; the value guards serialize, so the entry installs on reload
+        # and still tells configurations apart.
         def fn(x, ac):
             with ac:
                 return torch.mm(x, x)
@@ -711,7 +711,8 @@ def add(x, y):
         compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
         self.assertGreater(len(_debug_get_precompile_entries(fn.__code__)), 0)
         with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(compiled(x, same).dtype, torch.bfloat16)
+            fresh = torch.autocast("cpu", dtype=torch.bfloat16)
+            self.assertEqual(compiled(x, fresh).dtype, torch.bfloat16)
             other = torch.autocast("cpu", dtype=torch.bfloat16, enabled=False)
             with self.assertRaisesRegex(
                 RuntimeError,
