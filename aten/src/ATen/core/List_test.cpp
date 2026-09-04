@@ -2,6 +2,27 @@
 #include <gtest/gtest.h>
 
 using namespace c10;
+
+namespace {
+// Ts cover the three shapes ListElementReference's conversion takes.
+template <class T>
+using ListIter =
+    c10::impl::ListIterator<T, c10::detail::ListImpl::list_type::iterator>;
+
+template <class... Ts>
+constexpr bool list_iterators_conform =
+    ((std::random_access_iterator<ListIter<Ts>> &&
+      std::indirectly_writable<ListIter<Ts>, Ts> &&
+      std::permutable<ListIter<Ts>>) &&
+     ...);
+
+static_assert(list_iterators_conform<
+              c10::IValue,
+              int64_t,
+              at::Tensor,
+              std::optional<std::string>>);
+} // namespace
+
 using std::string;
 
 // TODO(NS): Remove me
@@ -527,6 +548,27 @@ TEST(ListTestIValueBasedList, isReferenceType) {
   EXPECT_EQ(1, list1.size());
   EXPECT_EQ(1, list2.size());
   EXPECT_EQ(1, list3.size());
+}
+
+TEST(ListTestIValueBasedList, useCountCountsSharedStorage) {
+  List<string> list;
+  EXPECT_EQ(1, list.use_count());
+  {
+    // A second owner, not a reference: use_count checks two distinct handles.
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+    List<string> shared = list;
+    EXPECT_EQ(2, list.use_count());
+    EXPECT_EQ(2, shared.use_count());
+
+    // copy() takes a separate storage, so neither side gains a reference.
+    List<string> copied = list.copy();
+    EXPECT_EQ(2, list.use_count());
+    EXPECT_EQ(1, copied.use_count());
+  }
+  EXPECT_EQ(1, list.use_count());
+
+  list.push_back("three");
+  EXPECT_EQ(1, list.use_count());
 }
 
 TEST(ListTestIValueBasedList, copyHasSeparateStorage) {
@@ -1070,6 +1112,27 @@ TEST(ListTestNonIValueBasedList, isReferenceType) {
   EXPECT_EQ(1, list1.size());
   EXPECT_EQ(1, list2.size());
   EXPECT_EQ(1, list3.size());
+}
+
+TEST(ListTestNonIValueBasedList, useCountCountsSharedStorage) {
+  List<int64_t> list;
+  EXPECT_EQ(1, list.use_count());
+  {
+    // A second owner, not a reference: use_count checks two distinct handles.
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+    List<int64_t> shared = list;
+    EXPECT_EQ(2, list.use_count());
+    EXPECT_EQ(2, shared.use_count());
+
+    // copy() takes a separate storage, so neither side gains a reference.
+    List<int64_t> copied = list.copy();
+    EXPECT_EQ(2, list.use_count());
+    EXPECT_EQ(1, copied.use_count());
+  }
+  EXPECT_EQ(1, list.use_count());
+
+  list.push_back(3);
+  EXPECT_EQ(1, list.use_count());
 }
 
 TEST(ListTestNonIValueBasedList, copyHasSeparateStorage) {
