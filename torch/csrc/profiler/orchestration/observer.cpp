@@ -117,7 +117,10 @@ ProfilerStateBase::~ProfilerStateBase() {
   if (handle_) {
     auto handle = handle_;
     removeCallback();
-    SOFT_ASSERT(false, "Leaked callback handle: ", handle);
+    // Not SOFT_ASSERT: this destructor runs during static destruction when a
+    // profiler is left running at exit, after libkineto's singleton is gone,
+    // and SOFT_ASSERT logs through libkineto::api().
+    TORCH_WARN("Leaked callback handle: ", handle);
   }
 }
 

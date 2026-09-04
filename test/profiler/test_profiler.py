@@ -1383,6 +1383,22 @@ class TestProfiler(TestCase):
                 )
                 self.assertTrue(ts_to_name[s_ts_2] == "aten::add")
 
+    def test_profiler_left_running_at_exit(self):
+        # A profiler that is never stopped (e.g. an exception between start() and
+        # stop()) used to segfault during static destruction: ~ProfilerStateBase
+        # soft-asserted through libkineto after libkineto's singleton was gone.
+        script = """
+import torch
+from torch.profiler import profile, ProfilerActivity
+p = profile(activities=[ProfilerActivity.CPU])
+p.start()
+torch.ones(10) * 2
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
     def test_profiler_disable_fwd_bwd_link(self):
         try:
             torch._C._profiler._set_fwd_bwd_enabled_val(False)
