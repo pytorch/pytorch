@@ -925,7 +925,9 @@ class TestDynamoDecompositionsNumericsDevice(TestCase):
         self.assertEqual(expected, actual)
 
 
-instantiate_device_type_tests(TestDynamoDecompositionsNumerics, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestDynamoDecompositionsNumerics, globals(), allow_xpu=True
+)
 instantiate_device_type_tests(
     TestDynamoDecompositionsNumericsDevice,
     globals(),
