@@ -1344,15 +1344,16 @@ class TestPassesDevice(TestCase):
         ep = torch.export.export(M(), (torch.ones(3),))
         ep = move_to_device_pass(ep, device_type)
         ep.graph_module.recompile()
-        self.assertExpectedInline(
-            ep.graph_module.code.strip("\n"),
-            f"""\
+        expected = """\
 def forward(self, x):
-    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(x, dtype = torch.float32, device = '{device_type}', layout = torch.strided);  _assert_tensor_metadata_default = None
-    to = torch.ops.aten.to.device(x, '{device_type}', torch.float32);  x = None
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(x, dtype = torch.float32, device = 'cuda', layout = torch.strided);  _assert_tensor_metadata_default = None
+    to = torch.ops.aten.to.device(x, 'cuda', torch.float32);  x = None
     add = torch.ops.aten.add.Tensor(to, to);  to = None
     return (add,)
-    """,
+    """
+        self.assertExpectedInline(
+            ep.graph_module.code.strip("\n"),
+            expected.replace("cuda", device_type),
         )
 
     def test_move_device_submod(self, device):
@@ -1367,15 +1368,16 @@ def forward(self, x):
         ep = torch.export.export(M(), (torch.ones(3),))
         ep = move_to_device_pass(ep, device_type)
         ep.graph_module.submod_1.recompile()
-        self.assertExpectedInline(
-            ep.graph_module.submod_1.code.strip("\n"),
-            f"""\
+        expected = """\
 def forward(self, arg0_1):
-    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(arg0_1, dtype = torch.float32, device = '{device_type}', layout = torch.strided);  _assert_tensor_metadata_default = None
-    to = torch.ops.aten.to.dtype_layout(arg0_1, dtype = torch.float32, layout = torch.strided, device = '{device_type}');  arg0_1 = None
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(arg0_1, dtype = torch.float32, device = 'cuda', layout = torch.strided);  _assert_tensor_metadata_default = None
+    to = torch.ops.aten.to.dtype_layout(arg0_1, dtype = torch.float32, layout = torch.strided, device = 'cuda');  arg0_1 = None
     add = torch.ops.aten.add.Tensor(to, to);  to = None
     return (add,)
-    """,
+    """
+        self.assertExpectedInline(
+            ep.graph_module.submod_1.code.strip("\n"),
+            expected.replace("cuda", device_type),
         )
 
     def test_move_device_example_inputs(self, device):
@@ -1447,9 +1449,7 @@ def forward(self, arg0_1):
         self.assertEqual(outputs.device, target_device)
 
 
-instantiate_device_type_tests(
-    TestPassesDevice, globals(), except_for="cpu", allow_xpu=True
-)
+instantiate_device_type_tests(TestPassesDevice, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
