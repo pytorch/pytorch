@@ -189,6 +189,13 @@ jobs:
           { config: "inductor_amx", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
           { config: "inductor_amx", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
           { config: "inductor_amx", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          # Staging: re-runs the AOTInductor suites under all-fallback mode. Known red
+          # (torch.cond subgraph constants, proxy-executor constant folding) -- the
+          # `unstable` key keeps the name out of trymerge's blocking set while the
+          # failures are triaged. Drop the key to promote; delete the entries if nobody
+          # is driving the failures down.
+          { config: "inductor_aoti_fallback", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", unstable: "unstable" },
+          { config: "inductor_aoti_fallback", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", unstable: "unstable" },
         ]}
       python-version: "3.10"
       compiler: gcc11
