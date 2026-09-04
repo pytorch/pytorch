@@ -1010,7 +1010,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void performNocolorSplit(at::Device device);
 
   // If all comms on this PG are fully initialized, return true.
-  bool isInitialized();
+  bool isInitialized() override;
 
   ErrorType getError() override;
 

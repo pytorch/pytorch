@@ -3528,13 +3528,26 @@ def native_group_norm(
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     out = out.contiguous(memory_format=mem_fmt)
-    mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
-    rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
+    # Native kernels store statistics in the affine parameter dtype for valid
+    # mixed-dtype inputs.
+    parameter = weight if weight is not None else bias
+    stats_dtype = (
+        parameter.dtype
+        if parameter is not None and parameter.dtype != input.dtype
+        else input.dtype
+    )
+    mean = _maybe_convert_to_dtype(mean, stats_dtype)  # type: ignore[assignment]
+    rstd = _maybe_convert_to_dtype(rstd, stats_dtype)  # type: ignore[assignment]
 
     # remove broadcast dimensions from mean and rstd
     mean = torch.squeeze(mean, reduction_dims)
     rstd = torch.squeeze(rstd, reduction_dims)
     return (out, mean, rstd)
+
+
+@torch._subclasses.fake_impls.register_op_impl(aten.native_group_norm.default)
+def native_group_norm_fake(fake_mode, func, *args, **kwargs):
+    return native_group_norm(*args, **kwargs)
 
 
 _SCALAR_TYPE_NAME_OVERRIDES = {
@@ -6250,7 +6263,14 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
         # `masked_fill` allows cpu scalar to be moved to cuda, xpu and hpu but not otherwise.
         is_cpu_scalar = (
             a.device.type
-            in ["cuda", "xpu", "mps", torch._C._get_privateuse1_backend_name(), "hpu"]
+            in [
+                "cuda",
+                "xpu",
+                "mps",
+                torch._C._get_privateuse1_backend_name(),
+                "hpu",
+                "mtia",
+            ]
             and value.device.type == "cpu"
         )
         torch._check(

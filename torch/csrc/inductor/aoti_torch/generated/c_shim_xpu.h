@@ -120,6 +120,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_mul_Tensor(AtenTensorHandle self
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_nanmedian(AtenTensorHandle self, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_narrow(AtenTensorHandle self, int64_t dim, int64_t start, int64_t length, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_native_dropout(AtenTensorHandle input, double p, int32_t* train, AtenTensorHandle* ret0, AtenTensorHandle* ret1);
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_native_group_norm(AtenTensorHandle input, AtenTensorHandle* weight, AtenTensorHandle* bias, int64_t N, int64_t C, int64_t HxW, int64_t group, double eps, AtenTensorHandle* ret0, AtenTensorHandle* ret1, AtenTensorHandle* ret2);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_nonzero(AtenTensorHandle self, AtenTensorHandle* ret0);
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu_nonzero_static(AtenTensorHandle self, int64_t size, int64_t fill_value, AtenTensorHandle* ret0);

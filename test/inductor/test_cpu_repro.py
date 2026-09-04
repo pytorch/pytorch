@@ -5504,6 +5504,30 @@ class CPUReproTests(TestCase):
         self.assertEqual(expected, actual, rtol=0, atol=0)
         FileCheck().check("torch.ops.aten.native_group_norm.default").run(code)
 
+    @parametrize("input_dtype", (torch.float16, torch.bfloat16))
+    def test_group_norm_native_fallback_mixed_dtype_backward(self, input_dtype):
+        def fn(x, weight, bias):
+            return F.group_norm(x, 2, weight, bias)
+
+        torch.manual_seed(0)
+        x = torch.randn(2, 4, 3, 3, dtype=input_dtype, requires_grad=True)
+        weight = torch.randn(4, dtype=torch.float32, requires_grad=True)
+        bias = torch.randn(4, dtype=torch.float32, requires_grad=True)
+        grad_output = torch.randn_like(x)
+
+        expected = fn(x, weight, bias)
+        expected_grads = torch.autograd.grad(expected, (x, weight, bias), grad_output)
+
+        compiled_inputs = tuple(
+            value.detach().clone().requires_grad_() for value in (x, weight, bias)
+        )
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(*compiled_inputs)
+        actual_grads = torch.autograd.grad(actual, compiled_inputs, grad_output)
+
+        self.assertEqual(actual, expected)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad)
+
     @requires_vectorization
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     def test_group_norm_sum_conv1d_native_fallback(self):
