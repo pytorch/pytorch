@@ -481,6 +481,19 @@ class TestPythonArgsToArray(TestCase):
             raise AssertionError(f"Expected w.ndarray, got {type(a)}")
 
 
+class TestArange(TestCase):
+    def test_start_kwarg_requires_stop(self):
+        with self.assertRaisesRegex(
+            TypeError, r"arange\(\) requires stop to be specified"
+        ):
+            w.arange(start=4)
+
+    def test_positional_and_keyword_stop(self):
+        assert_equal(w.arange(4), w.arange(0, 4))
+        assert_equal(w.arange(stop=4), w.arange(4))
+        assert_equal(w.arange(start=1, stop=4), w.arange(1, 4))
+
+
 class TestNormalizations(TestCase):
     """Smoke test generic problems with normalizations."""
 
