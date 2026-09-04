@@ -189,7 +189,7 @@ class TestGpuWrapper(InductorTestCase):
         if not RUN_GPU:
             self.skipTest("GPU not available")
         if GPU_TYPE not in ("cuda", "xpu"):
-            self.skipTest("CUDA/ROCm-only cpp_wrapper debug sync")
+            self.skipTest("CUDA/ROCm/XPU-only cpp_wrapper debug sync")
 
         def test_fn(x):
             return x * 2
