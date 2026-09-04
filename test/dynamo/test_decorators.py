@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
+from torch._dynamo import external_utils
 from torch._dynamo.backends.debugging import invoke_subgraph_inner_compiler
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.trace_rules import is_callable_allowed
@@ -352,6 +353,46 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         ref = fn(x, y)
         res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_none_inputs(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, maybe_y, payload):
+            torch._dynamo.graph_break()
+            if maybe_y is None and payload["bias"] is None:
+                return x + 1
+            if payload["bias"] is None:
+                return x + maybe_y
+            return x + maybe_y + payload["bias"]
+
+        def fn(x, maybe_y):
+            return trace_me(x, maybe_y, {"bias": None}) * 2
+
+        x = torch.randn(3)
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, fullgraph=True, backend=cnts)
+
+        for maybe_y in (None, torch.randn(3)):
+            self.assertEqual(fn(x, maybe_y), opt_fn(x, maybe_y))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_nonstrict_trace_none_outputs(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return x + 1, None, {"bias": None}
+
+        def fn(x):
+            y, maybe_y, payload = trace_me(x)
+            if maybe_y is None and payload["bias"] is None:
+                return y * 2
+            return y
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
         self.assertEqual(ref, res)
 
     def test_nonstrict_trace_pre_existing_dict(self):
@@ -1668,9 +1709,44 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         x = torch.randn(2)
         expected = ((x + 1).sin(), torch.tensor([4.0]))
-        scope = tensor_constant_result.__globals__
+        # debug_force_nested_calls compiles external_utils.wrap_inline as the
+        # top frame, so installed globals belong to that wrapper's scope.
+        scope = (
+            external_utils.__dict__
+            if torch._dynamo.config.debug_force_nested_calls
+            else tensor_constant_result.__globals__
+        )
         prefix = f"{tensor_constant_result.__name__}_"
         globals_before = set(scope)
+
+        with self.assertRaisesRegex(Unsupported, "graph_break") as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertFalse(
+            any(name.startswith(prefix) for name in set(scope) - globals_before)
+        )
+        torch._dynamo.reset()
+
+        def post_trace_fn(x):
+            return x + tensor_constant_result()
+
+        hook_called = False
+
+        def fail_hook(_code, _out_code):
+            nonlocal hook_called
+            hook_called = True
+            raise cm.exception
+
+        handle = torch._dynamo.convert_frame.register_bytecode_hook(fail_hook)
+        try:
+            torch.compile(post_trace_fn, backend="eager")(x)
+        finally:
+            handle.remove()
+        self.assertTrue(hook_called)
+        self.assertFalse(
+            any(name.startswith(prefix) for name in set(scope) - globals_before)
+        )
+        torch._dynamo.reset()
+
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
 
