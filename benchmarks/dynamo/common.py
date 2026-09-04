@@ -69,6 +69,11 @@ except ImportError:
     )
     from _inductor.utils import fresh_cache
 
+try:
+    from .torchbench_llm import add_llm_args, run_llm_benchmark
+except ImportError:
+    from torchbench_llm import add_llm_args, run_llm_benchmark
+
 import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config, metrics
@@ -3918,6 +3923,8 @@ def parse_args(args=None):
     run_mode_group.add_argument(
         "--inference", action="store_true", help="Performs inference"
     )
+    add_llm_args(parser)
+
     parsed = parser.parse_args(args)
     if parsed.batch_invariant and not parsed.accuracy:
         parser.error("--batch-invariant requires --accuracy")
@@ -3972,6 +3979,12 @@ def main(runner, original_dir=None, args=None):
     if original_dir:
         os.chdir(original_dir)
     args = parse_args() if not args else parse_args(args)
+
+    # The decomposed LLM benchmarks own their own loop and model setup, so they
+    # bypass the model-suite runner entirely.
+    if getattr(args, "llm_mode", None):
+        return run_llm_benchmark(args)
+
     if args.baseline:
         args.baseline = os.path.abspath(args.baseline)
 
