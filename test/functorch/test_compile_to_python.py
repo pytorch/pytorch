@@ -574,7 +574,7 @@ class TestAOTCompileToPython(TestCase):
         )
         self.assertIn("FRESH_OK", proc.stdout)
 
-    def test_restride_evaluates_backed_and_refuses_unbacked_strides(self):
+    def test_restride_rebuilds_symbolic_strides_and_refuses_unknown_symbols(self):
         # CompiledFxGraph.output_strides entries are PRINTED stride
         # expressions (strings). A symbolic one is rebuilt over the placeholder's
         # shape symbols and compared proof-only, so a matching stride leaves the
@@ -605,7 +605,7 @@ class TestAOTCompileToPython(TestCase):
         self.assertIs(ph.meta["val"], val)
         with self.assertRaisesRegex(NotImplementedError, "unevaluable"):
             _restride_backward_placeholders(symbolic, [("u0", "1")], spec)
-        # A genuinely different (transposed) layout is applied at its hint.
+        # A genuinely different (transposed) layout is applied, kept symbolic (stride s0, hint 2).
         _restride_backward_placeholders(symbolic, [("1", str(val.size()[0]))], spec)
         self.assertEqual(tuple(ph.meta["val"].stride()), (1, 2))
 
@@ -638,6 +638,29 @@ class TestAOTCompileToPython(TestCase):
             out.sum().backward()
             got = [p.grad for p in m.parameters()] + [xi.grad]
             self.assertEqual(got, expected)
+
+    def test_training_symbolic_metadata_keeps_dynamic_saved_tensors_idxs(self):
+        # dynamic_saved_tensors_idxs is set in ViewAndMutationMeta.__post_init__ and
+        # ViewAndMutationMeta.__eq__ is blind to it, so a value-reduction of the
+        # metadata drops it. The composer reassigns it after construction; a symbolic
+        # capture (its saved activations carry symbolic dims) is where the dict is
+        # non-empty, so it guards the reassignment -- it is empty without the fix.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4, requires_grad=True)
+        gm = _capture(m, x, tracing_mode="symbolic")
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        ns = {"__name__": "_compiled"}
+        exec(compile(src, "<compiled>", "exec"), ns)
+        emitted = ns["_CompiledFunction"]
+        dsi = emitted.metadata.dynamic_saved_tensors_idxs
+        self.assertTrue(dsi)
+        self.assertTrue(
+            all(
+                isinstance(k, int) and all(isinstance(v, int) for v in vs)
+                for k, vs in dsi.items()
+            )
+        )
 
     @skipIfTorchDynamo(
         "the emitted _CompiledFunction refuses compiled autograd with "
@@ -827,6 +850,25 @@ class TestAOTCompileToPython(TestCase):
         _assert_composed(self, src)
         with torch.no_grad():
             self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+
+    def test_graph_has_dynamic_shapes_reads_example_value(self):
+        # A Dynamo graph stashes its fake under "example_value", not "val".
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            _graph_has_dynamic_shapes,
+        )
+        from torch._subclasses import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        graph = torch.fx.Graph()
+        node = graph.placeholder("x")
+        graph.output(node)
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertFalse(_graph_has_dynamic_shapes(gm))
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+        node.meta["example_value"] = mode.from_tensor(
+            torch.randn(3), static_shapes=False
+        )
+        self.assertTrue(_graph_has_dynamic_shapes(gm))
 
     def test_dynamic_shapes_runs_at_multiple_shapes(self):
         # compile_to_python has no dynamic_shapes knob: it auto-detects symbolic shapes
@@ -1166,6 +1208,29 @@ class TestAOTCompileToPython(TestCase):
             src,
         )
         self.assertNotIn("functional_utils.gen_alias_from_base", src)
+
+    def test_training_helpers_imported_from_standalone_runtime_surface(self):
+        # A training artifact's backward closes over runtime helpers
+        # (AOTDispatchAutograd.process_runtime_tangent, TensorAlias); those must import
+        # from the standalone_runtime surface, not their internal AOTAutograd module.
+        # An unused BackwardState must not leak an import either (compose refuses
+        # compiled autograd, so the branch that binds it is never emitted).
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4, requires_grad=True)
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        self.assertIn(
+            "from torch._functorch._aot_autograd.standalone_runtime import "
+            "AOTDispatchAutograd",
+            src,
+        )
+        self.assertIn(
+            "from torch._functorch._aot_autograd.standalone_runtime import TensorAlias",
+            src,
+        )
+        self.assertNotIn("import torch._functorch._aot_autograd.runtime_wrappers", src)
+        self.assertNotIn("_backward_state", src)
 
     @parametrize("target", _EFFECTFUL_TARGETS)
     def test_rejects_effectful_op(self, target):
