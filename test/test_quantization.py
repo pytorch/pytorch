@@ -152,5 +152,15 @@ try:
 except ImportError as e:
     log.warning(e)
 
+# Device-instantiated; the CUDA/XPU variants only exist on a box that has that device.
+try:
+    from quantization.core.test_quantized_op import TestQuantizedOpsDeviceCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.test_quantized_op import TestQuantizedOpsDeviceCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+
 if __name__ == '__main__':
     run_tests()

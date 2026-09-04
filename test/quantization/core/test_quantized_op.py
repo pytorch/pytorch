@@ -36,6 +36,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_CUDNN,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
     skipIfNoONEDNN,
@@ -371,9 +372,10 @@ def _test_qlinear_fp8_fast_path_helper(error_conn=None):
         if error_conn is not None:
             error_conn.close()
 
-class TestQuantizedOps(TestCase):
+class _QuantizedActivationTestMixin:
 
     """Helper function to test quantized activation functions."""
+
     def _test_activation_function(self, X, fn_name, test_configs):
         r"""
             When writing a unit test for the activation function,
@@ -467,41 +469,8 @@ class TestQuantizedOps(TestCase):
 
                     self.assertEqual(qY, qY_hat, msg=lambda msg: f'{msg}\n{fn_name} - {q_op} failed: ({qY} vs. {qY_hat})')
 
-    """Tests the correctness of the quantized::relu op."""
-    @override_qengines
-    def test_qrelu(self):
-        relu_test_configs = [
-            {
-                'quantized_fn': [
-                    torch.relu,
-                    torch.relu_,
-                    torch.nn.functional.relu,
-                    torch.nn.functional.relu,
-                ],
-                'reference_fn': torch.nn.functional.relu
-            },
-            {
-                'quantized_fn': [
-                    torch.nn.functional.relu,
-                    torch.nn.functional.relu,
-                ],
-                'reference_fn': torch.nn.functional.relu,
-                'extra_kwargs': {
-                    'inplace': True
-                }
-            }
-        ]
-        devices = ["cpu", "cuda"] if TEST_CUDA else ["cpu"]
-        for device in devices:
-            shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
-            dtypes = (torch.quint8, torch.qint8)
-            scales = (0.05, 0.1)
-            zero_points = (0, 5)
-            test_cases = itertools.product(shapes, dtypes, scales, zero_points)
-            for shape, dtype, scale, zero_point in test_cases:
-                X = torch.randn(*shape, device=device)
-                X = (X, (scale, zero_point, dtype))
-                self._test_activation_function(X, 'relu', relu_test_configs)
+
+class TestQuantizedOps(_QuantizedActivationTestMixin, TestCase):
 
     """Tests the correctness of the quantized::relu6 op."""
     def test_qrelu6(self):
@@ -704,35 +673,6 @@ class TestQuantizedOps(TestCase):
         qY = torch.ops.quantized.celu(qX, output_scale, output_zero_point, alpha=alpha)
         self.assertEqual(qY, qY_hat,
                          msg=lambda msg: f"{msg}\nF.celu failed ({qY} vs {qY_hat})")
-
-    """Tests the correctness of the quantized::gelu op."""
-    def test_qgelu(self):
-        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
-        dtypes = (torch.quint8, torch.qint8)
-        memory_formats = (torch.channels_last, torch.contiguous_format)
-        approximation = ['none', 'tanh']
-        test_cases = itertools.product(shapes, dtypes, memory_formats, approximation)
-        devices = ["cpu", "cuda"] if TEST_CUDA else ["cpu"]
-        for shape, dtype, memory_format, approximate in test_cases:
-            if memory_format == torch.channels_last and len(shape) != 4:
-                continue
-
-            X, scale, zero_point, torch_type = \
-                torch.randn(*shape), 0.1, 0, dtype
-            X = X.to(memory_format=memory_format)
-            for device in devices:
-                X = X.to(device=device)
-                qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                               dtype=torch_type)
-                dqX = qX.dequantize()
-
-                op = torch.nn.functional.gelu
-                dqY = op(dqX, approximate=approximate)
-                qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
-                                               dtype=torch_type)
-                qY_hat = op(qX)
-                self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                                 msg=lambda msg: f"{msg}\nF.gelu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::prelu op."""
     def test_qprelu(self):
@@ -2065,86 +2005,6 @@ class TestQuantizedOps(TestCase):
                                  msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
                                  X_hat.q_zero_point())))
 
-    @unittest.skip("not currently working and feature isn't used")
-    def test_adaptive_avg_pool(self):
-
-        side_lens = (range(1, 10))
-        dim_lens = (range(3, 5))
-        torch_type = torch.qint8
-        zero_points = (0, 1)
-        combined = [side_lens, dim_lens, zero_points]
-        test_cases = itertools.product(*combined)
-        for test_case in test_cases:
-            output_size_d = random.randint(1, 10)
-            output_size_h = random.randint(1, 10)
-            output_size_w = random.randint(1, 10)
-            side_len, dim_len, zero_point = test_case
-            shapes = [side_len] * dim_len
-            X, X_scale, X_zero_point = \
-                _get_random_tensor_and_q_params(shapes, 1.0, zero_point)
-            X = np.array(X)
-            scale = 1
-            ndim = X.ndim
-            dim_to_check = []
-            if ndim <= 4:
-                dim_to_check.append(2)
-            if ndim >= 4:
-                dim_to_check.append(3)
-
-            D, H, W = X.shape[-3:]
-            output_size_d = min(output_size_d, D)
-            output_size_h = min(output_size_h, H)
-            output_size_w = min(output_size_w, W)
-
-            X = torch.from_numpy(X)
-            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                           dtype=torch_type)
-
-            for dim in dim_to_check:
-                if dim == 2:
-                    if output_size_h == output_size_w:
-                        output_size = output_size_h
-                    else:
-                        output_size = (output_size_h, output_size_w)
-                elif dim == 3:
-                    if output_size_d == output_size_h == output_size_w:
-                        output_size = output_size_h
-                    else:
-                        output_size = (output_size_d, output_size_h, output_size_w)
-
-                # Run reference on int_repr + round to avoid double rounding error.
-                ref_op = getattr(torch.nn.functional, f'adaptive_avg_pool{dim}d')
-                X_ref = ref_op(qX.int_repr().to(torch.float), output_size).round()
-
-                ops_under_test = {
-                    "nn.functional":
-                        getattr(torch.nn.functional, f'adaptive_avg_pool{dim}d'),
-                    "nn.quantized.functional":
-                        getattr(torch.ao.nn.quantized.functional, f'adaptive_avg_pool{dim}d'),
-                    "ao.nn.quantized.functional":
-                        getattr(torch.ao.nn.quantized.functional, f'adaptive_avg_pool{dim}d')
-                }
-
-                error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
-
-                for name, op in ops_under_test.items():
-                    # TODO: torch.cuda.is_available() should be swapped for a flag that checks if cudnn
-                    # is enabled in the build when cudnn supports adaptive average pooling
-                    devices = ["cpu", "cuda"] if (dim == 2 and torch.cuda.is_available()) else ["cpu"]
-                    for device in devices:
-                        qX_hat = op(qX.to(device=device), output_size=output_size)
-                        self.assertEqual(
-                            X_ref, qX_hat.int_repr(), atol=1.0,
-                            rtol=0, msg=lambda msg: f"{msg}\n" + (error_message.format(name, X_ref, qX_hat)), exact_dtype=False)
-                        self.assertEqual(
-                            scale, qX_hat.q_scale(),
-                            msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale,
-                                                     qX_hat.q_scale())))
-                        self.assertEqual(
-                            zero_point, qX_hat.q_zero_point(),
-                            msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
-                                                     qX_hat.q_zero_point())))
-
     """Tests adaptive average pool operation on NHWC quantized tensors."""
     def test_adaptive_avg_pool3d_ndhwc(self):
         side_lens = (range(1, 10))
@@ -3375,6 +3235,155 @@ class TestQuantizedOps(TestCase):
                 )
             y_ref = y_ref.to(out_dtype)
             self.assertEqual(y, y_ref, msg=lambda msg: f"{msg}\n{y} vs {y_ref}")
+
+
+class TestQuantizedOpsDevice(_QuantizedActivationTestMixin, TestCase):
+    """Quantized ops that have a kernel for more than one device.
+
+    qint dtypes dispatch to QuantizedCPU and QuantizedCUDA only; there is no
+    QuantizedXPU or QuantizedMPS kernel for any of these ops, hence the
+    only_for below."""
+
+    """Tests the correctness of the quantized::relu op."""
+    def test_qrelu(self, device):
+        # override_qengines cannot be used here: it does not forward the
+        # signature, so instantiate_device_type_tests would not inject `device`.
+        relu_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.relu,
+                    torch.relu_,
+                    torch.nn.functional.relu,
+                    torch.nn.functional.relu,
+                ],
+                'reference_fn': torch.nn.functional.relu
+            },
+            {
+                'quantized_fn': [
+                    torch.nn.functional.relu,
+                    torch.nn.functional.relu,
+                ],
+                'reference_fn': torch.nn.functional.relu,
+                'extra_kwargs': {
+                    'inplace': True
+                }
+            }
+        ]
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+        dtypes = (torch.quint8, torch.qint8)
+        scales = (0.05, 0.1)
+        zero_points = (0, 5)
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                for shape, dtype, scale, zero_point in itertools.product(shapes, dtypes, scales, zero_points):
+                    X = torch.randn(*shape, device=device)
+                    X = (X, (scale, zero_point, dtype))
+                    self._test_activation_function(X, 'relu', relu_test_configs)
+
+    """Tests the correctness of the quantized::gelu op."""
+    def test_qgelu(self, device):
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+        dtypes = (torch.quint8, torch.qint8)
+        memory_formats = (torch.channels_last, torch.contiguous_format)
+        approximation = ['none', 'tanh']
+        test_cases = itertools.product(shapes, dtypes, memory_formats, approximation)
+        for shape, dtype, memory_format, approximate in test_cases:
+            if memory_format == torch.channels_last and len(shape) != 4:
+                continue
+
+            X, scale, zero_point, torch_type = \
+                torch.randn(*shape), 0.1, 0, dtype
+            X = X.to(memory_format=memory_format).to(device=device)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+
+            op = torch.nn.functional.gelu
+            dqY = op(dqX, approximate=approximate)
+            qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            qY_hat = op(qX)
+            self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
+                             msg=lambda msg: f"{msg}\nF.gelu failed ({qY} vs {qY_hat})")
+
+    @unittest.skip("not currently working and feature isn't used")
+    def test_adaptive_avg_pool(self, device):
+
+        side_lens = (range(1, 10))
+        dim_lens = (range(3, 5))
+        torch_type = torch.qint8
+        zero_points = (0, 1)
+        combined = [side_lens, dim_lens, zero_points]
+        test_cases = itertools.product(*combined)
+        for test_case in test_cases:
+            output_size_d = random.randint(1, 10)
+            output_size_h = random.randint(1, 10)
+            output_size_w = random.randint(1, 10)
+            side_len, dim_len, zero_point = test_case
+            shapes = [side_len] * dim_len
+            X, X_scale, X_zero_point = \
+                _get_random_tensor_and_q_params(shapes, 1.0, zero_point)
+            X = np.array(X)
+            scale = 1
+            ndim = X.ndim
+            dim_to_check = []
+            if ndim <= 4:
+                dim_to_check.append(2)
+            if ndim >= 4:
+                dim_to_check.append(3)
+
+            D, H, W = X.shape[-3:]
+            output_size_d = min(output_size_d, D)
+            output_size_h = min(output_size_h, H)
+            output_size_w = min(output_size_w, W)
+
+            X = torch.from_numpy(X)
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+
+            for dim in dim_to_check:
+                # cudnn only supports the 2d case; the 3d kernel is CPU-only.
+                if device != 'cpu' and dim != 2:
+                    continue
+                if dim == 2:
+                    if output_size_h == output_size_w:
+                        output_size = output_size_h
+                    else:
+                        output_size = (output_size_h, output_size_w)
+                elif dim == 3:
+                    if output_size_d == output_size_h == output_size_w:
+                        output_size = output_size_h
+                    else:
+                        output_size = (output_size_d, output_size_h, output_size_w)
+
+                # Run reference on int_repr + round to avoid double rounding error.
+                ref_op = getattr(torch.nn.functional, f'adaptive_avg_pool{dim}d')
+                X_ref = ref_op(qX.int_repr().to(torch.float), output_size).round()
+
+                ops_under_test = {
+                    "nn.functional":
+                        getattr(torch.nn.functional, f'adaptive_avg_pool{dim}d'),
+                    "nn.quantized.functional":
+                        getattr(torch.ao.nn.quantized.functional, f'adaptive_avg_pool{dim}d'),
+                    "ao.nn.quantized.functional":
+                        getattr(torch.ao.nn.quantized.functional, f'adaptive_avg_pool{dim}d')
+                }
+
+                error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+
+                for name, op in ops_under_test.items():
+                    qX_hat = op(qX.to(device=device), output_size=output_size)
+                    self.assertEqual(
+                        X_ref, qX_hat.int_repr(), atol=1.0,
+                        rtol=0, msg=lambda msg: f"{msg}\n" + (error_message.format(name, X_ref, qX_hat)), exact_dtype=False)
+                    self.assertEqual(
+                        scale, qX_hat.q_scale(),
+                        msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale,
+                                                 qX_hat.q_scale())))
+                    self.assertEqual(
+                        zero_point, qX_hat.q_zero_point(),
+                        msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                                 qX_hat.q_zero_point())))
 
 
 class TestQuantizedOpsCUDNN(TestCase):
@@ -9653,6 +9662,9 @@ class TestQuantizedWithMinMax(TestCase):
                             "weight_incorrectly_quantized should not equal "
                             "weight_quantized_no_rowwise_min_max"
                         )
+
+
+instantiate_device_type_tests(TestQuantizedOpsDevice, globals(), only_for=("cpu", "cuda"))
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")
