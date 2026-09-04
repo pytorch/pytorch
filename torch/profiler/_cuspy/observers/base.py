@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
-"""Base class for CUPTI activity-monitor observers.
+"""Base class for Cuspy observers.
 
-An observer registers the activity kinds it wants with the shared CUPTI monitor and, on
-the monitor's worker thread, is handed the demuxed columns (``{ActivityKind: {field_id:
+An observer registers the activity kinds it wants with the shared Cuspy singleton and, on
+Cuspy's worker thread, is handed the demuxed columns (``{ActivityKind: {field_id:
 column}}``) sliced to its selection -- what it does with them is the subclass's
 ``_on_activities`` hook. This base handles registration, availability, teardown, the
 clock passthroughs, and the user-annotation push/pop for naming regions.
@@ -93,8 +93,8 @@ class ObserverAnnotationSettings:
     record_graph_dependencies: bool = False
 
 
-class CuptiMonitorObserver:
-    """Base for observers backed by the shared CUPTI monitor.
+class CuspyObserver:
+    """Base for observers backed by the shared Cuspy singleton.
 
     Subclasses set up state, then call ``super().__init__(activities)`` with the kinds they
     want (a set, or a field map ``{kind: field ids | "all"}``) -- registration last, so
@@ -155,7 +155,7 @@ class CuptiMonitorObserver:
         # windows, so it holds topology this per-window observer -- created at prepare_trace,
         # long after warm-up capture, and torn down each window -- would otherwise never see.
         if record_deps:
-            from torch.profiler._cupti._graph_deps import _GraphDependencyRecorder
+            from torch.profiler._cuspy._graph_deps import _GraphDependencyRecorder
 
             rec = _GraphDependencyRecorder()
             rec.arm()
@@ -189,26 +189,26 @@ class CuptiMonitorObserver:
         if self._eager:
             activities = self._with_eager_fields(activities)
         # frozenset of requested kinds (a field map collapses to keys) for the observer's
-        # own "is this kind mine?" checks; the full request goes to the monitor singleton.
+        # own "is this kind mine?" checks; the full request goes to Cuspy singleton.
         self._activities: frozenset[int] = frozenset(activities)
-        self._monitor: Any = None
+        self._cuspy: Any = None
         self._obs = None
-        # external_id -> annotation name for the monitor's global pushes. Guarded by
+        # external_id -> annotation name for Cuspy's global pushes. Guarded by
         # _ann_lock (push on the caller's thread; a drain may read/reset from another).
         self._ann_lock = threading.Lock()
         self._ext_names: dict[int, str] = {}
-        # Degrade gracefully (available == False) if the monitor can't be reached or
+        # Degrade gracefully (available == False) if Cuspy can't be reached or
         # registration fails (CUPTI subscribe rejected, libcupti lacks v2)
         try:
-            from torch.profiler._cupti.monitor import CuptiMonitor
+            from torch.profiler._cuspy.core import Cuspy
 
-            self._monitor = CuptiMonitor()
-            self._obs = self._monitor.register(activities, self._on_activities)
+            self._cuspy = Cuspy()
+            self._obs = self._cuspy.register(activities, self._on_activities)
         except Exception:
             self._obs = None
         # Register a graph-destroy hook per installed graph-node resolver so a
         # destroyed CUDA graph purges that resolver's registry and invalidates
-        # its cache. Registering any hook is also the "monitor active" gate
+        # its cache. Registering any hook is also the "Cuspy active" gate
         # torch.cuda.graphs checks before arming its destroy callback. Handles are
         # removed in close() so nothing leaks this observer.
         self._destroy_hook_handles: list[RemovableHandle] = []
@@ -230,7 +230,7 @@ class CuptiMonitorObserver:
 
     @property
     def available(self) -> bool:
-        """True when the monitor was available and this observer registered."""
+        """True when Cuspy was available and this observer registered."""
         return self._obs is not None
 
     def _register_graph_destroy_hooks(self) -> None:
@@ -277,8 +277,8 @@ class CuptiMonitorObserver:
             add(self._lane_resolver_cached, None)
 
     def _on_activities(self, columns: dict[Any, dict[int, Any]]) -> None:
-        """Worker-thread hook: ``{ActivityKind: {field_id: column}}`` demuxed by the
-        monitor and sliced to this observer's selection. Implemented by subclasses."""
+        """Worker-thread hook: ``{ActivityKind: {field_id: column}}`` demuxed by
+        Cuspy and sliced to this observer's selection. Implemented by subclasses."""
         raise NotImplementedError
 
     @staticmethod
@@ -288,7 +288,7 @@ class CuptiMonitorObserver:
         is enabled; RUNTIME is just the carrier). Expects a ``{kind: fields}`` map."""
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
-        from torch.profiler._cupti.records import CORRELATION_FIELD, ExternalCorrelation
+        from torch.profiler._cuspy.records import CORRELATION_FIELD, ExternalCorrelation
 
         aug: dict[int, set[int]] = {}
         for kind, sel in dict(activities).items():
@@ -309,7 +309,7 @@ class CuptiMonitorObserver:
         """Augment a field map so the graph resolver can name nodes: add each GPU-op kind's
         GRAPH_NODE_ID. Collection-free (it's a normal record field, no extra kinds, stays on
         the vectorized path). Expects a ``{kind: fields}`` map."""
-        from torch.profiler._cupti.records import GRAPH_NODE_FIELD
+        from torch.profiler._cuspy.records import GRAPH_NODE_FIELD
 
         aug: dict[int, set[int]] = {}
         for kind, sel in dict(activities).items():
@@ -323,10 +323,10 @@ class CuptiMonitorObserver:
     def push_annotation(self, name: str) -> int | None:
         """Push a global external-correlation id (mapped here to ``name``) so activity
         until the pop is attributed via ``correlation_id -> external_id -> name``. Eager
-        only. No-op returning None when the monitor is unavailable."""
-        if not self.available or self._monitor is None:
+        only. No-op returning None when Cuspy is unavailable."""
+        if not self.available or self._cuspy is None:
             return None
-        ext_id = self._monitor.push_external_correlation_id()
+        ext_id = self._cuspy.push_external_correlation_id()
         if ext_id is not None:
             with self._ann_lock:
                 self._ext_names[ext_id] = name
@@ -334,9 +334,9 @@ class CuptiMonitorObserver:
 
     def pop_annotation(self) -> int | None:
         """Pop the most recent external-correlation id (balances push_annotation)."""
-        if not self.available or self._monitor is None:
+        if not self.available or self._cuspy is None:
             return None
-        return self._monitor.pop_external_correlation_id()
+        return self._cuspy.pop_external_correlation_id()
 
     @contextlib.contextmanager
     def annotate(self, name: str) -> Iterator[int | None]:
@@ -358,32 +358,32 @@ class CuptiMonitorObserver:
 
     def now_ns(self) -> int:
         """Current time on the same unix-epoch clock as record timestamps --
-        passthrough to the monitor."""
-        return self._monitor.now_unix_ns() if self._monitor is not None else 0
+        passthrough to Cuspy."""
+        return self._cuspy.now_unix_ns() if self._cuspy is not None else 0
 
     def now_record_ns(self) -> int:
         """Current value of CUPTI's native record clock -- the unconverted timebase of
         decoded record START/END. Use this to stamp a window boundary compared against
         raw record timestamps (see NodeTimerObserver bucketing). 0 if unavailable."""
-        return self._monitor.now_record_ns() if self._monitor is not None else 0
+        return self._cuspy.now_record_ns() if self._cuspy is not None else 0
 
     def convert_time(self, value: int) -> int:
-        """Convert a CUPTI-clock timestamp to unix-epoch ns -- passthrough to the
-        monitor (identity if clock alignment is unavailable)."""
-        return self._monitor.convert_time(value) if self._monitor is not None else value
+        """Convert a CUPTI-clock timestamp to unix-epoch ns -- passthrough to
+        Cuspy (identity if clock alignment is unavailable)."""
+        return self._cuspy.convert_time(value) if self._cuspy is not None else value
 
     def convert_time_array(self, values: Any) -> Any:
-        """Vectorized :meth:`convert_time` over a whole column -- passthrough to the
-        monitor (identity if clock alignment is unavailable)."""
-        if self._monitor is None:
+        """Vectorized :meth:`convert_time` over a whole column -- passthrough to
+        Cuspy (identity if clock alignment is unavailable)."""
+        if self._cuspy is None:
             return values
-        return self._monitor.convert_time_array(values)
+        return self._cuspy.convert_time_array(values)
 
     def close(self) -> None:
-        """Unregister from the monitor. Idempotent."""
+        """Unregister from Cuspy. Idempotent."""
         for handle in self._destroy_hook_handles:
             handle.remove()
         self._destroy_hook_handles = []
-        if self._obs is not None and self._monitor is not None:
-            self._monitor.unregister(self._obs)
+        if self._obs is not None and self._cuspy is not None:
+            self._cuspy.unregister(self._obs)
             self._obs = None
