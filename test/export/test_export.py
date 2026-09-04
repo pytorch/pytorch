@@ -76,8 +76,10 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     xfailIfDistributedNotSupported,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     find_library_location,
+    HardwareClassification,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
@@ -233,36 +235,43 @@ CPP_RUNTIME_NONSTRICT_SUFFIX = "_cpp_runtime_nonstrict"
 STRICT_EXPORT_V2_SUFFIX = "_strict_export_v2"
 
 
+def _ends_with_harness_suffix(test_name: str, suffix: str) -> bool:
+    # instantiate_device_type_tests appends _<device> after harness suffixes
+    # (e.g. ..._training_ir_to_decomp_strict_cuda), so plain endswith misses.
+    if test_name.endswith(suffix):
+        return True
+    base, sep, _ = test_name.rpartition("_")
+    return bool(sep) and base.endswith(suffix)
+
+
 # Now default mode is non strict, so original unammended test names
 # should be treated as non-strict
 def is_non_strict_test(test_name):
-    return not test_name.endswith(STRICT_SUFFIX) and not test_name.endswith(
-        STRICT_EXPORT_V2_SUFFIX
-    )
+    return not is_strict_test(test_name) and not is_strict_v2_test(test_name)
 
 
 def is_strict_test(test_name):
-    return test_name.endswith(STRICT_SUFFIX)
+    return _ends_with_harness_suffix(test_name, STRICT_SUFFIX)
 
 
 def is_strict_v2_test(test_name):
-    return test_name.endswith(STRICT_EXPORT_V2_SUFFIX)
+    return _ends_with_harness_suffix(test_name, STRICT_EXPORT_V2_SUFFIX)
 
 
 def is_inline_and_install_strict_test(test_name: str) -> bool:
-    return test_name.endswith(INLINE_AND_INSTALL_STRICT_SUFFIX)
+    return _ends_with_harness_suffix(test_name, INLINE_AND_INSTALL_STRICT_SUFFIX)
 
 
 def is_retracebility_test(test_name):
-    return test_name.endswith(RETRACEABILITY_STRICT_SUFFIX) or test_name.endswith(
-        RETRACEABILITY_NON_STRICT_SUFFIX
-    )
+    return _ends_with_harness_suffix(
+        test_name, RETRACEABILITY_STRICT_SUFFIX
+    ) or _ends_with_harness_suffix(test_name, RETRACEABILITY_NON_STRICT_SUFFIX)
 
 
 def is_serdes_test(test_name):
-    return test_name.endswith(SERDES_STRICT_SUFFIX) or test_name.endswith(
-        SERDES_NON_STRICT_SUFFIX
-    )
+    return _ends_with_harness_suffix(
+        test_name, SERDES_STRICT_SUFFIX
+    ) or _ends_with_harness_suffix(test_name, SERDES_NON_STRICT_SUFFIX)
 
 
 def need_serdes_test(test_name):
@@ -270,19 +279,19 @@ def need_serdes_test(test_name):
 
 
 def is_training_ir_test(test_name):
-    return test_name.endswith(TRAINING_IR_DECOMP_STRICT_SUFFIX) or test_name.endswith(
-        TRAINING_IR_DECOMP_NON_STRICT_SUFFIX
-    )
+    return _ends_with_harness_suffix(
+        test_name, TRAINING_IR_DECOMP_STRICT_SUFFIX
+    ) or _ends_with_harness_suffix(test_name, TRAINING_IR_DECOMP_NON_STRICT_SUFFIX)
 
 
 def is_training_ir_strict_test(test_name):
-    return test_name.endswith(TRAINING_IR_DECOMP_STRICT_SUFFIX)
+    return _ends_with_harness_suffix(test_name, TRAINING_IR_DECOMP_STRICT_SUFFIX)
 
 
 def is_cpp_runtime_test(test_name):
-    return test_name.endswith(CPP_RUNTIME_STRICT_SUFFIX) or test_name.endswith(
-        CPP_RUNTIME_NONSTRICT_SUFFIX
-    )
+    return _ends_with_harness_suffix(
+        test_name, CPP_RUNTIME_STRICT_SUFFIX
+    ) or _ends_with_harness_suffix(test_name, CPP_RUNTIME_NONSTRICT_SUFFIX)
 
 
 def get_hop_schema(ep: torch.export.ExportedProgram):
@@ -9481,58 +9490,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         y, _ = ep.module()(x)
         self.assertEqual(x.item(), 4)
         self.assertEqual(id(y), id(x))
-
-    @requires_gpu
-    @testing.expectedFailureCppRuntime
-    def test_device_to_gpu(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                return x.to("cpu")
-
-        ep = export(Foo(), (torch.randn(64).to(GPU_TYPE),))
-        ops = []
-        for node in ep.graph.nodes:
-            if node.op == "call_function":
-                ops.append(node.target)
-        if is_training_ir_test(self._testMethodName):
-            # aten.to decomposes to _to_copy
-            self.assertEqual(
-                ops,
-                [
-                    torch.ops.aten._assert_tensor_metadata.default,
-                    torch.ops.aten._to_copy.default,
-                ],
-            )
-        else:
-            self.assertEqual(
-                ops,
-                [
-                    torch.ops.aten._assert_tensor_metadata.default,
-                    torch.ops.aten.to.dtype_layout,
-                ],
-            )
-
-        # Check device assertion
-        with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
-            ep.module()(torch.randn(64))
-
-        ep = ep.run_decompositions()
-        ops = []
-        for node in ep.graph.nodes:
-            if node.op == "call_function":
-                ops.append(node.target)
-        self.assertEqual(len(ops), 2)
-        self.assertEqual(
-            ops,
-            [
-                torch.ops.aten._assert_tensor_metadata.default,
-                torch.ops.aten._to_copy.default,
-            ],
-        )
-
-        # Check device assertion again after decomp
-        with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
-            ep.module()(torch.randn(64))
 
     def test_tensor_constant_aten_to(self):
         class Module(torch.nn.Module):
@@ -19653,6 +19610,88 @@ def forward(self, x, y):
         decomposed = ep.run_decompositions(decomposition_table)
         result = decomposed.module()(torch.randn(1, 16, 64))
         self.assertEqual(result.shape, (1, 256, 64))
+
+
+class TestExportAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @testing.expectedFailureCppRuntime
+    def test_device_to_accelerator(self, device):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.to("cpu")
+
+        ep = export(Foo(), (torch.randn(64, device=device),))
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        if is_training_ir_test(self._testMethodName):
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten._to_copy.default,
+                ],
+            )
+        else:
+            self.assertEqual(
+                ops,
+                [
+                    torch.ops.aten._assert_tensor_metadata.default,
+                    torch.ops.aten.to.dtype_layout,
+                ],
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
+            ep.module()(torch.randn(64))
+
+        ep = ep.run_decompositions()
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertEqual(len(ops), 2)
+        self.assertEqual(
+            ops,
+            [
+                torch.ops.aten._assert_tensor_metadata.default,
+                torch.ops.aten._to_copy.default,
+            ],
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
+            ep.module()(torch.randn(64))
+
+
+# Split out of TestExport for device-agnostic coverage. Wrapper suites
+# (strict/serdes/retrace/...) only clone TestExport; they must also mock +
+# instantiate these via this list, or those cases silently drop.
+# instantiate_device_type_tests deletes test_* from the class it instantiates,
+# so keep pristine clones here for the wrappers and instantiate the originals.
+def _clone_export_device_test_class(cls):
+    return type(
+        cls.__name__,
+        cls.__bases__,
+        {k: v for k, v in cls.__dict__.items() if k not in ("__dict__", "__weakref__")},
+    )
+
+
+_DEVICE_EXPORT_TEST_SPECS = (
+    (TestExportAccelerator, {"except_for": "cpu", "allow_xpu": True}),
+)
+
+DEVICE_EXPORT_TEST_CLASSES = tuple(
+    (_clone_export_device_test_class(cls), kwargs)
+    for cls, kwargs in _DEVICE_EXPORT_TEST_SPECS
+)
+
+for _cls, _kwargs in _DEVICE_EXPORT_TEST_SPECS:
+    instantiate_device_type_tests(_cls, globals(), **_kwargs)
+del _cls, _kwargs
+del _DEVICE_EXPORT_TEST_SPECS
+del _clone_export_device_test_class
+
 
 
 if __name__ == "__main__":
