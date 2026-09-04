@@ -3998,7 +3998,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
         self.assertEqual(finalized_end, 8)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_schedule_first_compiles_across_kahn_layers(self):
         from torch._inductor.scheduler import ForeachKernelSchedulerNode, Scheduler
 
@@ -4054,7 +4054,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(observed_combo_layers, [{0, 1}])
         FileCheck().check("'num_kernels': 2").run(code[0])
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("gate_enabled", [True, False])
     def test_peak_memory_reorder_order(self, gate_enabled):
         from torch._inductor import memory
@@ -4325,7 +4325,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertIsNone(run(100))
 
     @skipIfRocm  # https://github.com/pytorch/pytorch/issues/182444
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_combo_kernel_peak_memory_wide_resnet(self):
         """A tight peak-memory threshold must measurably reduce the
         runtime CUDA peak memory of the compiled forward pass compared
@@ -4338,9 +4338,9 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         def compile_and_measure_peak(**cfg):
             torch._dynamo.reset()
             torch._inductor.metrics.reset()
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
-            torch.cuda.reset_peak_memory_stats()
+            torch.accelerator.synchronize()
+            torch.accelerator.empty_cache()
+            torch.accelerator.reset_peak_memory_stats()
             with (
                 fresh_cache(),
                 torch._inductor.config.patch(
@@ -4350,13 +4350,13 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                 compiled = torch.compile(model)
                 with torch.no_grad():
                     compiled(x)
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                torch.cuda.reset_peak_memory_stats()
+                torch.accelerator.synchronize()
+                torch.accelerator.empty_cache()
+                torch.accelerator.reset_peak_memory_stats()
                 with torch.no_grad():
                     compiled(x)
-                torch.cuda.synchronize()
-            return torch.cuda.max_memory_allocated()
+                torch.accelerator.synchronize()
+            return torch.accelerator.max_memory_allocated()
 
         # Permissive gate: schedule-first combos can co-allocate freely.
         peak_permissive = compile_and_measure_peak(
