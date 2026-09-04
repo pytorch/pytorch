@@ -223,6 +223,99 @@ class CudaReproTests(TestCase):
         self.assertEqual(compiled_out["ten0"], eager_out["ten0"])
         self.assertEqual(compiled_out["ten1"], eager_out["ten1"])
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_effn_attn_uniform_zero_bias(self):
+        batch_size, num_heads, seq_len, head_dim = 2, 4, 128, 64
+
+        def fn(query, key, value):
+            additive_mask = torch.full(
+                (batch_size, num_heads, seq_len, seq_len),
+                0.0,
+                device=query.device,
+                dtype=query.dtype,
+            )
+            return aten._scaled_dot_product_efficient_attention.default(
+                query, key, value, additive_mask, False
+            )[0]
+
+        query, key, value = (
+            torch.randn(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                device=device_type,
+            )
+            for _ in range(3)
+        )
+
+        def compile_and_capture_bias(fn, *args, strict=False):
+            biases = []
+
+            def capture_bias(graph):
+                nodes = graph.find_nodes(
+                    op="call_function",
+                    target=aten._scaled_dot_product_efficient_attention.default,
+                )
+                biases.extend(node.args[3] for node in nodes)
+
+            torch._dynamo.reset()
+            with (
+                config.patch(
+                    numerics="strict" if strict else "default",
+                    joint_custom_post_pass=capture_bias,
+                ),
+                sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+            ):
+                compiled = torch.compile(fn, fullgraph=True)
+                actual = compiled(*args)
+            self.assertEqual(len(biases), 1)
+            return actual, biases[0], compiled
+
+        expected = fn(query, key, value)
+        actual, bias, _ = compile_and_capture_bias(fn, query, key, value)
+        self.assertEqual(actual, expected)
+        self.assertIsNone(bias)
+
+        strict_actual, strict_bias, _ = compile_and_capture_bias(
+            fn, query, key, value, strict=True
+        )
+        self.assertEqual(strict_actual, expected)
+        self.assertIsInstance(strict_bias, torch.fx.Node)
+
+        # Only compiler-proven zero masks may be removed; a runtime mask must
+        # remain an FX input because its contents can change between calls.
+        def runtime_mask_fn(query, key, value, attention_mask):
+            return F.scaled_dot_product_attention(
+                query, key, value, attn_mask=attention_mask
+            )
+
+        padding_mask = torch.zeros(
+            batch_size,
+            1,
+            seq_len,
+            seq_len,
+            device=device_type,
+        )
+        padding_mask[..., -1] = torch.finfo(padding_mask.dtype).min
+        expected = runtime_mask_fn(query, key, value, padding_mask)
+        actual, runtime_bias, compiled_runtime_mask_fn = compile_and_capture_bias(
+            runtime_mask_fn, query, key, value, padding_mask
+        )
+        self.assertEqual(actual, expected)
+        self.assertIsInstance(runtime_bias, torch.fx.Node)
+
+        # Reuse the same compiled graph with different mask contents.
+        padding_mask.zero_()
+        with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+            self.assertEqual(
+                compiled_runtime_mask_fn(query, key, value, padding_mask),
+                runtime_mask_fn(query, key, value, padding_mask),
+            )
+
     def test_effn_attn_bias_padding(self):
         batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
 
