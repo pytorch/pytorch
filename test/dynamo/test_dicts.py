@@ -4,6 +4,7 @@
 import enum
 import itertools
 import operator
+import string
 import types
 import unittest
 import weakref
@@ -62,6 +63,11 @@ class FakeMapping:
 
     def __getitem__(self, key: str) -> Any:
         return self._value
+
+
+# Holds the GLOBAL end of the instance-__dict__ aliasing test below, whose
+# whole point is a source pairing make_dupe_guard refuses to relate.
+_ALIASED_INSTANCE_DICT: Any = None
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
@@ -2609,6 +2615,603 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         remove_batch = graph.call_function(torch._remove_batch_dim, (x, x, x, x))
         self.assertFalse(_is_safe_to_reorder(remove_batch))
+
+    # NB: not a staticmethod -- see the note in test_repros.py; the generated
+    # subclasses rebind copied staticmethods as instance methods.
+    def _make_dict_with_attr(self, kind):
+        # Only a type with a non-zero tp_dictoffset can carry instance
+        # attributes; a plain dict cannot. defaultdict is deliberately absent:
+        # it is modelled by DefaultDictVariable(UserDefinedDictVariable), so it
+        # would not exercise ConstDictVariable at all.
+        if kind == "dict":
+            return {"a": 1}
+        d = OrderedDict(a=1)
+        if kind == "ordered_dict_attr":
+            d._metadata = OrderedDict([("", {"version": 1})])
+        return d
+
+    @parametrize("kind", ["dict", "ordered_dict", "ordered_dict_attr"])
+    def test_dict_instance_attr_hasattr(self, kind):
+        def fn(d, t):
+            return t + 1, hasattr(d, "_metadata"), getattr(d, "_metadata", None)
+
+        d = self._make_dict_with_attr(kind)
+        x = torch.zeros(2)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(d, x), fn(d, x)
+        )
+
+    def test_dict_instance_attr_mutation_replays(self):
+        def fn(d, t):
+            d._metadata["module"] = d._metadata.pop("")
+            return t + 1
+
+        d = self._make_dict_with_attr("ordered_dict_attr")
+        expected = OrderedDict([("module", {"version": 1})])
+        torch.compile(fn, backend="eager", fullgraph=True)(d, torch.zeros(2))
+        self.assertEqual(list(d._metadata.items()), list(expected.items()))
+
+    def test_dict_instance_attr_guarded(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(d, t):
+            return t + (1 if hasattr(d, "_metadata") else 0)
+
+        d = OrderedDict(a=1)
+        x = torch.zeros(2)
+        self.assertEqual(fn(d, x), x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        d._metadata = {}
+        self.assertEqual(fn(d, x), x + 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+        del d._metadata
+        self.assertEqual(fn(d, x), x)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_dict_instance_attr_sourceless(self):
+        # A dict built inside the frame starts with an empty instance dict.
+        def fn(t):
+            d = OrderedDict(a=1)
+            return t + 1, hasattr(d, "_metadata"), hasattr(d, "keys")
+
+        x = torch.zeros(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_dict_instance_attr_nonconst_keys(self):
+        # Non-constant keys put the dict source behind a DictGuardManager;
+        # the instance-attribute guard has to survive that.
+        def fn(d, t):
+            return t + 1, hasattr(d, "_metadata"), d._metadata["version"]
+
+        key = torch.zeros(1)
+        d = OrderedDict([(key, 1)])
+        d._metadata = {"version": 3}
+        x = torch.zeros(2)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(d, x), fn(d, x)
+        )
+
+    DUNDER_DICT_GB = "unsupported __dict__ access on a dict subclass"
+    # Stock breaks on hasattr for ANY OrderedDict, so a bare assertRaises here
+    # passes without the source-usability check. Pin the reason instead.
+    UNUSABLE_SOURCE_GB = "instance __dict__ could not be read under a guard"
+
+    # Dynamo never models a dict subclass's instance __dict__ as a view: reuse
+    # of an already-tracked dict under a source of mismatching locality is
+    # unguarded, so the view's stores can replay onto the wrong object. Every
+    # spelling therefore has to graph-break, and to match eager once the break
+    # is allowed -- never a silent divergence.
+    _DUNDER_DICT_READS = {
+        "attr": lambda d: dict(d.__dict__),
+        "vars": lambda d: dict(vars(d)),
+        "getattr": lambda d: dict(getattr(d, "__dict__")),  # noqa: B009
+        "getattr_default": lambda d: dict(getattr(d, "__dict__", {})),
+        "getattribute": lambda d: dict(d.__getattribute__("__dict__")),
+        "attrgetter": lambda d: dict(operator.attrgetter("__dict__")(d)),
+        "len": lambda d: len(d.__dict__),
+        "bool": lambda d: bool(d.__dict__),
+    }
+    _DUNDER_DICT_WRITES = {
+        "setitem": lambda d: d.__dict__.__setitem__("m", 1),
+        "delitem": lambda d: d.__dict__.__delitem__("_metadata"),
+        "update": lambda d: d.__dict__.update({"m": 1}),
+        "ior": lambda d: d.__dict__.__ior__({"m": 1}),
+        "clear": lambda d: d.__dict__.clear(),
+        "pop": lambda d: d.__dict__.pop("_metadata"),
+        "popitem": lambda d: d.__dict__.popitem(),
+        "setdefault": lambda d: d.__dict__.setdefault("m", 1),
+        "init": lambda d: d.__dict__.__init__({"m": 1}),
+        "vars_setitem": lambda d: vars(d).__setitem__("m", 1),
+        "getattr_setitem": lambda d: getattr(d, "__dict__").__setitem__("m", 1),  # noqa: B009
+        # The instance attribute is read as an attribute FIRST, so the tracker
+        # already exists when the __dict__ spelling reaches it.
+        "read_then_store": lambda d: (
+            dict(d._metadata),
+            d.__dict__.__setitem__("m", 1),
+        ),
+    }
+
+    def _seeded_ordered_dict(self):
+        d = OrderedDict(a=1)
+        d._metadata = OrderedDict([("", {"version": 1})])
+        return d
+
+    def _check_dunder_dict_declines(self, body, gb_regex=None):
+        # The graph-break message is asserted, not just its type: seeding an
+        # instance attribute is itself an unsupported setattr, so a bare
+        # assertRaises(Unsupported) passes even when the body never touches
+        # __dict__ at all.
+        gb_regex = gb_regex or self.DUNDER_DICT_GB
+        mk = self._seeded_ordered_dict
+        x = torch.zeros(2)
+
+        def fn(d, t):
+            return t + 1, body(d)
+
+        with self.assertRaisesRegex(Unsupported, gb_regex):
+            torch.compile(fn, backend="eager", fullgraph=True)(mk(), x)
+
+        torch._dynamo.reset()
+        d_eager, d = mk(), mk()
+        expected = fn(d_eager, x)
+        self.assertEqual(torch.compile(fn, backend="eager")(d, x), expected)
+        self.assertEqual(d.__dict__, d_eager.__dict__)
+        self.assertEqual(list(d.__dict__), list(d_eager.__dict__))
+        self.assertEqual(list(d.keys()), list(d_eager.keys()))
+
+    @parametrize("spelling", sorted(_DUNDER_DICT_READS))
+    def test_dunder_dict_read_declines(self, spelling):
+        self._check_dunder_dict_declines(self._DUNDER_DICT_READS[spelling])
+
+    @parametrize("spelling", sorted(_DUNDER_DICT_WRITES))
+    def test_dunder_dict_write_declines(self, spelling):
+        self._check_dunder_dict_declines(self._DUNDER_DICT_WRITES[spelling])
+
+    @parametrize("spelling", ["store", "read"])
+    def test_dunder_dict_sourceless_declines(self, spelling):
+        # A dict built in-frame has no source, so a store through its __dict__
+        # would be dropped on the floor rather than replayed. The read is
+        # declined too: the answer would come from a rebuilt copy.
+        def fn(t):
+            d = OrderedDict(a=1)
+            if spelling == "store":
+                d.__dict__["m"] = 1
+            return t + 1, hasattr(d, "m"), dict(d.__dict__)
+
+        x = torch.zeros(2)
+        with self.assertRaisesRegex(Unsupported, self.DUNDER_DICT_GB):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_dict_instance_attr_sourceless_setattr_declines(self):
+        # Seeding an instance attribute on a dict built in-frame is a
+        # sourceless setattr on a dict subclass. There is nothing to replay it
+        # onto, so it graph-breaks rather than silently dropping the store --
+        # this is why an OrderedDict carrying _metadata cannot be BUILT inside
+        # a fullgraph region, only passed in.
+        def fn(t):
+            d = OrderedDict(a=1)
+            d._metadata = OrderedDict([("", {"version": 1})])
+            return t + 1, hasattr(d, "_metadata"), list(d._metadata.items())
+
+        x = torch.zeros(2)
+        with self.assertRaisesRegex(Unsupported, "setattr\\(\\) on unsupported"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    @parametrize("fullgraph", [True, False])
+    @unittest.expectedFailure
+    def test_dunder_dict_descriptor_get_declines(self, fullgraph):
+        # PRE-EXISTING WRONG ANSWER, byte-identical before this change: calling
+        # the __dict__ getset descriptor directly bypasses the decline above
+        # and constant-folds through a rebuilt container, so it answers {} for
+        # an object whose instance dict is not empty. Every other spelling
+        # graph-breaks. When this is fixed the xfail flips loudly.
+        desc = OrderedDict.__dict__["__dict__"]
+
+        def fn(d, t):
+            return t + 1, dict(desc.__get__(d))
+
+        x = torch.zeros(2)
+        d_eager, d = self._seeded_ordered_dict(), self._seeded_ordered_dict()
+        expected = fn(d_eager, x)
+        if fullgraph:
+            with self.assertRaisesRegex(Unsupported, self.DUNDER_DICT_GB):
+                torch.compile(fn, backend="eager", fullgraph=True)(d, x)
+        else:
+            self.assertEqual(torch.compile(fn, backend="eager")(d, x), expected)
+
+    def test_issubclass_on_dict_instance_matches_eager(self):
+        # A dict tracker models no Python class, but issubclass() still has to
+        # raise the same TypeError eager does rather than answer from the type.
+        def fn(d, t):
+            try:
+                issubclass(d, dict)
+                return t + 1, "no-raise"
+            except TypeError as e:
+                return t + 1, str(e)
+
+        x = torch.zeros(2)
+        d = self._seeded_ordered_dict()
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(d, x), fn(d, x)
+        )
+
+    def test_dunder_dict_aliased_reverse_order_declines(self):
+        # The same instance dict also reaches the frame as a GLOBAL, a locality
+        # pairing make_dupe_guard refuses to relate. A view would leave the
+        # aliasing an unguarded compile-time id() coincidence, so the second
+        # call keeps the first call's code and replays its store onto the first
+        # object. The view is built BEFORE the global is wrapped, so no
+        # build-time check on the view can see this.
+        def fn(d, t):
+            d.__dict__["_x"] = 5
+            _ALIASED_INSTANCE_DICT["_y"] = 7
+            return t + 1
+
+        x = torch.zeros(2)
+
+        def run(f):
+            global _ALIASED_INSTANCE_DICT
+            first, second = OrderedDict(a=1), OrderedDict(a=1)
+            _ALIASED_INSTANCE_DICT = first.__dict__
+            f(first, x)
+            f(second, x)
+            return dict(first.__dict__), dict(second.__dict__)
+
+        with self.assertRaisesRegex(Unsupported, self.DUNDER_DICT_GB):
+            run(torch.compile(fn, backend="eager", fullgraph=True))
+
+        torch._dynamo.reset()
+        expected = run(fn)
+        self.assertEqual(run(torch.compile(fn, backend="eager")), expected)
+
+    def test_dunder_dict_export_strict_declines(self):
+        # torch.export(strict=True) has no graph-break fallback, so the decline
+        # is a hard failure there rather than a slow path. Stock answered from
+        # the rebuilt copy -- right by accident while the instance dict is
+        # empty, silently wrong the moment the object carries an attribute.
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.d = OrderedDict(a=1)
+
+            def forward(self, t):
+                return t + 1, len(self.d.__dict__)
+
+        with self.assertRaisesRegex(Unsupported, self.DUNDER_DICT_GB):
+            torch.export.export(Mod(), (torch.zeros(2),), strict=True)
+
+    def test_dict_instance_attr_unguardable_source_graph_breaks(self):
+        # An answer that cannot be guarded must not be returned: a
+        # ConstantSource cannot carry a HASATTR guard, so hasattr has to break
+        # rather than assume the attribute is absent.
+        d = OrderedDict(a=1)
+        d._metadata = {"v": 1}
+
+        @torch._dynamo.assume_constant_result
+        def get_d():
+            return d
+
+        def fn(t):
+            return t + (1 if hasattr(get_d(), "_metadata") else 0)
+
+        def fn_read(t):
+            return t + get_d()._metadata["v"]
+
+        x = torch.zeros(2)
+        with self.assertRaisesRegex(Unsupported, self.UNUSABLE_SOURCE_GB):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+        # The read path defers to a GetAttrVariable instead of answering
+        # "absent", so it still produces the right value after a graph break.
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn_read, backend="eager")(x), fn_read(x))
+
+    @parametrize("method", ["init", "clear"])
+    def test_immutable_dict_mutation_breaks(self, method):
+        # functools.partial(...).keywords is a user-reachable immutable dict
+        # tracker. __init__ and clear() were the two mutating dict entry points
+        # missing the is_mutable() gate their siblings have, so they reached
+        # side_effects.mutation() and died with an internal AssertionError
+        # instead of graph-breaking.
+        def base(a=0, b=0):
+            return a + b
+
+        def fn(p, t):
+            if method == "init":
+                p.keywords.__init__({"a": 5})
+            else:
+                p.keywords.clear()
+            return t + 1
+
+        x = torch.zeros(2)
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(partial(base, b=1), x)
+
+        torch._dynamo.reset()
+        p_eager, p_compiled = partial(base, b=1), partial(base, b=1)
+        fn(p_eager, x)
+        torch.compile(fn, backend="eager")(p_compiled, x)
+        self.assertEqual(dict(p_compiled.keywords), dict(p_eager.keywords))
+
+    @parametrize("method", ["move_to_end", "popitem"])
+    def test_immutable_ordered_dict_mutation_breaks(self, method):
+        # nn.Module hook dicts are NNModuleHooksDictVariable, built with no
+        # mutation_type, so they are immutable OrderedDict trackers. The two
+        # odict-only mutators were missing the is_mutable() gate their dict
+        # siblings have and died with an internal AssertionError.
+        def fn(mod, t):
+            if method == "move_to_end":
+                mod._forward_hooks.move_to_end(next(iter(mod._forward_hooks)))
+            else:
+                mod._forward_hooks.popitem()
+            return t + 1
+
+        def mk():
+            m = torch.nn.Linear(3, 3)
+            m.register_forward_hook(lambda mod, i, o: o)
+            m.register_forward_hook(lambda mod, i, o: o)
+            return m
+
+        x = torch.zeros(2)
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(mk(), x)
+
+        # Hook keys are globally unique ints, so compare the permutation of the
+        # original key order rather than the keys themselves.
+        torch._dynamo.reset()
+        m_eager, m_compiled = mk(), mk()
+        before_eager, before_compiled = (
+            list(m_eager._forward_hooks),
+            list(m_compiled._forward_hooks),
+        )
+        self.assertEqual(
+            torch.compile(fn, backend="eager")(m_compiled, x), fn(m_eager, x)
+        )
+        self.assertEqual(
+            [before_compiled.index(k) for k in m_compiled._forward_hooks],
+            [before_eager.index(k) for k in m_eager._forward_hooks],
+        )
+
+    def test_dict_instance_attr_stale_alias_all_spellings(self):
+        # dir(), hasattr() and a plain read of the same object must agree that
+        # the live instance dict is behind the traced stores, and say so: the
+        # hasattr spelling used to blame the source instead.
+        def dir_body(d, alias, t):
+            alias["_metadata"] = {"v": 8}
+            return t + 1, "_metadata" in dir(d)
+
+        def hasattr_body(d, alias, t):
+            alias["_metadata"] = {"v": 8}
+            return t + 1, hasattr(d, "_metadata")
+
+        x = torch.zeros(2)
+
+        def mk():
+            d = OrderedDict(a=1)
+            d._metadata = {"v": 1}
+            return d, d.__dict__, x
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "dir\\(\\) on a rebuilt container"):
+            torch.compile(dir_body, backend="eager", fullgraph=True)(*mk())
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "stale instance __dict__ read"):
+            torch.compile(hasattr_body, backend="eager", fullgraph=True)(*mk())
+
+        for body in (dir_body, hasattr_body):
+            torch._dynamo.reset()
+            expected = body(*mk())[1:]
+            self.assertEqual(torch.compile(body, backend="eager")(*mk())[1:], expected)
+
+        # Same shape on an object whose real instance dict is EMPTY: only the
+        # aliased tracker knows about the store, so a helper that looked at the
+        # live object alone would answer "no attributes" and be wrong.
+        def dir_body_empty(d, alias, t):
+            alias["m"] = 1
+            return t + 1, "m" in dir(d)
+
+        def mk_empty():
+            d = OrderedDict(a=1)
+            return d, d.__dict__, x
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "dir\\(\\) on a rebuilt container"):
+            torch.compile(dir_body_empty, backend="eager", fullgraph=True)(*mk_empty())
+        torch._dynamo.reset()
+        expected = dir_body_empty(*mk_empty())[1:]
+        self.assertEqual(
+            torch.compile(dir_body_empty, backend="eager")(*mk_empty())[1:], expected
+        )
+
+    @parametrize("kind", ["plain_dict", "ordered_dict"])
+    def test_dict_instance_attr_hasattr_dunder_dict(self, kind):
+        # hasattr(d, "__dict__") must answer from the instance, not the class:
+        # every class has a __dict__, a plain dict instance does not. The plain
+        # dict can also be READ, since there is no instance dict to model.
+        def has(d, t):
+            return t + 1, hasattr(d, "__dict__")
+
+        def read(d, t):
+            return t + 1, getattr(d, "__dict__", None)
+
+        d = {"a": 1} if kind == "plain_dict" else OrderedDict(a=1)
+        x = torch.zeros(2)
+        self.assertEqual(
+            torch.compile(has, backend="eager", fullgraph=True)(d, x), has(d, x)
+        )
+        if kind == "plain_dict":
+            self.assertEqual(
+                torch.compile(read, backend="eager", fullgraph=True)(d, x), read(d, x)
+            )
+
+    def test_dict_instance_attr_dir_empty_is_guarded(self):
+        # dir() answering from an empty instance dict bakes that emptiness in
+        # just as tp_getattro_impl does, so it needs the same keys guard.
+        def fn(d, t):
+            return t + 1, "_metadata" in dir(d)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        cf = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.zeros(2)
+        d = OrderedDict(a=1)
+        self.assertEqual(cf(d, x)[1], fn(d, x)[1])
+
+        d._metadata = 5
+        with self.assertRaisesRegex(Unsupported, "dir\\(\\) on a rebuilt container"):
+            cf(d, x)
+
+    def test_dict_instance_attr_aliased_stale_read_breaks(self):
+        # An aliased instance-dict tracker with pending stores makes the live
+        # dict stale. Deferring the read is not enough: restore_stack rebuilds
+        # the GetAttrVariable BEFORE codegen_update_mutated replays the stores,
+        # so it would still observe the pre-replay value. It has to break.
+        def fn(d, alias, t):
+            alias["_metadata"] = {"v": 8}
+            return t + 1, d._metadata
+
+        x = torch.zeros(2)
+        d = OrderedDict(a=1)
+        d._metadata = {"v": 1}
+        expected = fn(d, d.__dict__, x)[1:]
+
+        d2 = OrderedDict(a=1)
+        d2._metadata = {"v": 1}
+        with self.assertRaisesRegex(Unsupported, "stale instance __dict__ read"):
+            torch.compile(fn, backend="eager", fullgraph=True)(d2, d2.__dict__, x)
+
+        torch._dynamo.reset()
+        d3 = OrderedDict(a=1)
+        d3._metadata = {"v": 1}
+        got = torch.compile(fn, backend="eager")(d3, d3.__dict__, x)[1:]
+        self.assertEqual(got, expected)
+
+    def test_dict_instance_attr_dir(self):
+        # dir() is built from as_python_constant(), i.e. a rebuilt object, so
+        # it would report the attribute absent while hasattr reports it present
+        # -- Dynamo contradicting itself within one frame.
+        self._check_dunder_dict_declines(
+            lambda d: ("_metadata" in dir(d), hasattr(d, "_metadata")),
+            gb_regex="dir\\(\\) on a rebuilt container",
+        )
+
+    def test_dict_instance_attr_skip_guard_source_graph_breaks(self):
+        # A global read from a stdlib-module frame gets a SkipGuardSource, whose
+        # guards install_guard drops on the floor. Answering from the instance
+        # dict there would bake in an unguarded answer.
+        probe_src = (
+            "def probe():\n"
+            "    return 1 if hasattr(_dynamo_test_probe, '_metadata') else 0\n"
+        )
+        ns = {}
+        exec(compile(probe_src, "<probe>", "exec"), ns)  # noqa: P204
+        probe = types.FunctionType(ns["probe"].__code__, string.__dict__, "probe")
+
+        d = OrderedDict(a=1)
+        d._metadata = {"v": 1}
+        string._dynamo_test_probe = d
+
+        def fn(t):
+            return t + probe()
+
+        x = torch.zeros(2)
+        try:
+            with self.assertRaisesRegex(Unsupported, self.UNUSABLE_SOURCE_GB):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+        finally:
+            del string._dynamo_test_probe
+
+    def test_dict_instance_attr_skip_guard_install_graph_breaks(self):
+        # Inside reuse_hash_fn, install_guard no-ops, so an instance-attribute
+        # answer would be baked in unguarded. It has to decline instead, which
+        # surfaces as reuse_hash_fn's own "not fully traceable" error.
+        from torch.compiler import nested_compile_region
+
+        def hash_fn(d, x):
+            return 1 if hasattr(d, "_metadata") else 0
+
+        @nested_compile_region(reuse_hash_fn=hash_fn)
+        def region(d, x):
+            return x.sin() + len(d)
+
+        def fn(d, x):
+            return region(d, x)
+
+        d = OrderedDict(a=1)
+        d._metadata = {"v": 1}
+        with self.assertRaisesRegex(
+            RuntimeError, "reuse_hash_fn must be fully traceable"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(d, torch.randn(4))
+
+    @parametrize("kind", ["plain_dict", "instance_dict", "empty_ordered_dict"])
+    def test_dir_on_dict_without_instance_dict(self, kind):
+        # dir() must only decline when the REAL object carries an instance
+        # attribute the rebuilt copy would miss. A plain dict cannot hold one,
+        # an object's __dict__ is itself a plain dict, and an OrderedDict that
+        # simply has none is just as safe -- gating on the type instead would
+        # break every OrderedDict, including nn.Module's hook dicts.
+        class Obj:
+            def __init__(self):
+                self.a = 1
+
+        if kind == "plain_dict":
+
+            def fn(t):
+                return t + 1, "keys" in dir({"a": 1})
+
+            args = ()
+        elif kind == "empty_ordered_dict":
+
+            def fn(d, t):  # type: ignore[misc]
+                return t + 1, "keys" in dir(d), "_metadata" in dir(d)
+
+            args = (OrderedDict(a=1),)  # type: ignore[assignment]
+        else:
+            # obj.__dict__ is a plain dict reached through a DunderDictVariable,
+            # a different VT from the plain-dict literal above.
+            def fn(o, t):  # type: ignore[misc]
+                return t + 1, "a" in dir(o.__dict__), "keys" in dir(o.__dict__)
+
+            args = (Obj(),)  # type: ignore[assignment]
+
+        x = torch.zeros(2)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(*args, x), fn(*args, x)
+        )
+
+    def test_dict_instance_attr_skip_guard_install_getattr_spelling(self):
+        # Same decline, spelled with getattr-and-default instead of hasattr.
+        # That spelling reaches the constant-fold fallback, which used to
+        # swallow the decline and hash a rebuilt (empty) instance dict.
+        from torch.compiler import nested_compile_region
+
+        def hash_fn(d, x):
+            return 1 if getattr(d, "_metadata", None) is not None else 0
+
+        @nested_compile_region(reuse_hash_fn=hash_fn)
+        def region(d, x):
+            return x.sin() + len(d)
+
+        def fn(d, x):
+            return region(d, x)
+
+        d = OrderedDict(a=1)
+        d._metadata = {"v": 1}
+        with self.assertRaisesRegex(
+            RuntimeError, "reuse_hash_fn must be fully traceable"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(d, torch.randn(4))
 
 
 instantiate_parametrized_tests(DictTests)
