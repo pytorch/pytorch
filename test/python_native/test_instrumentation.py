@@ -289,6 +289,43 @@ class TestInstrumentation(_LoggerCaptureTest):
         self.assertEqual(calls, [(256, 64)])
         self.assertEqual(len(self.messages), 1)
 
+    def test_explicit_compiled_signal_beats_inference(self):
+        # A caller owning its own memo (plan_cache.cached_plan) hands the decorator a plain closure
+        # it invokes ONLY on a miss. There is no cache_info to read a miss delta from, so inference
+        # reports a hit -- which is every real compile mislabelled. `compiled=True` says so directly.
+        def plain(n):
+            return "ok"
+
+        inferred = instrument_cutedsl_compile("aten::sum")(plain)
+        self.assertEqual(inferred(8), "ok")
+        self.assertIn("cache_hit", self.messages[-1])
+
+        told = instrument_cutedsl_compile("aten::sum", compiled=True)(plain)
+        self.assertEqual(told(8), "ok")
+        self.assertIn("compiled", self.messages[-1])
+        self.assertNotIn("cache_hit", self.messages[-1])
+
+    def test_cached_plan_reports_a_compile(self):
+        # The wiring, end to end: cached_plan's FIRST call for a key builds (a real compile) and must
+        # report `compiled`; the second is served from its dict and emits nothing, since the
+        # instrumentation only wraps the miss arm.
+        from torch._native.ops._cutedsl.plan_cache import cached_plan
+
+        cache, built = {}, []
+        plan = cached_plan(
+            cache, ("sum", 8), lambda: built.append(1) or "plan", op="aten::sum"
+        )
+        self.assertEqual(plan, "plan")
+        self.assertEqual(len(self.messages), 1)
+        self.assertIn("compiled", self.messages[0])
+        self.assertNotIn("cache_hit", self.messages[0])
+
+        cached_plan(
+            cache, ("sum", 8), lambda: built.append(1) or "plan", op="aten::sum"
+        )
+        self.assertEqual(built, [1])
+        self.assertEqual(len(self.messages), 1)
+
     def test_no_work_when_artifact_disabled(self):
         # With the artifact off, the wrapper must run the wrapped fn but skip
         # all instrumentation: no log line, and crucially no key_fn call (user
