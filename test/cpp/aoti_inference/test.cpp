@@ -273,10 +273,15 @@ void test_aoti_constants_update(
       data_loader.attr(weights_attr.c_str()).toTensor();
   const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
 
+  // The container rejects constants that are not on its own device.
+  at::DeviceType device_type = device == "cuda" ? at::kCUDA : at::kCPU;
   torch::inductor::TensorConstantMap missing_map, rand_map, real_map;
-  missing_map.emplace("L__self___w_pre", new at::Tensor(at::randn({4, 4})));
-  rand_map.emplace("L__self___w_pre", new at::Tensor(at::randn({10})));
-  rand_map.emplace("L__self___w_add", new at::Tensor(at::randn({10})));
+  missing_map.emplace(
+      "L__self___w_pre", new at::Tensor(at::randn({4, 4}).to(device_type)));
+  rand_map.emplace(
+      "L__self___w_pre", new at::Tensor(at::randn({10}).to(device_type)));
+  rand_map.emplace(
+      "L__self___w_add", new at::Tensor(at::randn({10}).to(device_type)));
   real_map.emplace("L__self___w_pre", new at::Tensor(weight_tensors));
   real_map.emplace("L__self___w_add", new at::Tensor(add_tensors));
 
@@ -452,9 +457,13 @@ void test_aoti_double_buffering(
       data_loader.attr(weights_attr.c_str()).toTensor();
   const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
 
+  // The container rejects constants that are not on its own device.
+  at::DeviceType device_type = device == "cuda" ? at::kCUDA : at::kCPU;
   torch::inductor::TensorConstantMap rand_map, real_map;
-  rand_map.emplace("L__self___w_pre", new at::Tensor(at::randn({4, 4})));
-  rand_map.emplace("L__self___w_add", new at::Tensor(at::randn({4, 4})));
+  rand_map.emplace(
+      "L__self___w_pre", new at::Tensor(at::randn({4, 4}).to(device_type)));
+  rand_map.emplace(
+      "L__self___w_add", new at::Tensor(at::randn({4, 4}).to(device_type)));
   real_map.emplace("L__self___w_pre", new at::Tensor(weight_tensors));
   real_map.emplace("L__self___w_add", new at::Tensor(add_tensors));
 
@@ -765,8 +774,10 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
 
   torch::inductor::TensorConstantMap rand_map, real_map;
-  rand_map.emplace("L__self___w_pre", new at::Tensor(at::randn({4096, 4096})));
-  rand_map.emplace("L__self___w_add", new at::Tensor(at::randn({4096, 4096})));
+  rand_map.emplace(
+      "L__self___w_pre", new at::Tensor(at::randn({4096, 4096}).to(at::kCUDA)));
+  rand_map.emplace(
+      "L__self___w_add", new at::Tensor(at::randn({4096, 4096}).to(at::kCUDA)));
   real_map.emplace("L__self___w_pre", new at::Tensor(weight_tensors));
   real_map.emplace("L__self___w_add", new at::Tensor(add_tensors));
 
@@ -1340,7 +1351,10 @@ void test_aoti_observer(const std::string& device) {
   // as if it had completed normally.
   const size_t ends_before = observer->ends.size();
   torch::inductor::TensorConstantMap missing_map;
-  missing_map.emplace("L__self___w_pre", new at::Tensor(at::randn({4, 4})));
+  missing_map.emplace(
+      "L__self___w_pre",
+      new at::Tensor(
+          at::randn({4, 4}).to(device == "cuda" ? at::kCUDA : at::kCPU)));
   try {
     runner->update_constant_buffer(
         missing_map,
