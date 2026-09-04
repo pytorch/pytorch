@@ -23,20 +23,19 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
-    requires_cuda,
     run_tests,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._debug_mode import (
     _OpCall,
     _RedistributeCall,
@@ -50,6 +49,8 @@ from torch.utils._triton import has_triton_package
 
 
 class TestDebugModeLogSerialization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _run_hashed_debug_mode(self, x):
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
             x.sin().sum()
@@ -202,8 +203,9 @@ class TestDebugModeLogSerialization(TestCase):
         self.assertTrue(any(math.isinf(mismatch["hash2"]) for mismatch in mismatches))
 
 
-@requires_cuda
 class TestDTensorDebugMode(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -225,10 +227,9 @@ class TestDTensorDebugMode(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda"
 
-    def test_debug_mode_mm(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+    def test_debug_mode_mm(self, device):
+        mesh = DeviceMesh(torch.device(device).type, list(range(self.world_size)))
 
         x = torch.randn(1, 8, requires_grad=False)
         y = torch.randn(1, 32, requires_grad=True)
@@ -314,8 +315,8 @@ class TestDTensorDebugMode(TestCase):
         self.assertEqual(hash_(torch.ones(4, dtype=torch.int8)), 0)
         self.assertEqual(hash_(torch.ones(5, dtype=torch.int8)), 1)
 
-    def test_debug_string_inside_context(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+    def test_debug_string_inside_context(self, device):
+        mesh = DeviceMesh(torch.device(device).type, list(range(self.world_size)))
 
         x = torch.randn(1, 8, requires_grad=False)
         y = torch.randn(1, 32, requires_grad=True)
@@ -328,8 +329,8 @@ class TestDTensorDebugMode(TestCase):
         s1 = debug_mode.debug_string()
         self.assertEqual(s0, s1)
 
-    def test_debug_mode_backward(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+    def test_debug_mode_backward(self, device):
+        mesh = DeviceMesh(torch.device(device).type, list(range(self.world_size)))
 
         x = torch.randn(1, 8, requires_grad=True)
         y = torch.randn(8, 1, requires_grad=True)
@@ -409,7 +410,7 @@ class TestDTensorDebugMode(TestCase):
         # check stack trace
         self.assertTrue("z.sum().backward()" in debug_mode.operators[-1].stack_trace)
 
-    def test_stack_trace_in_compiled_region(self):
+    def test_stack_trace_in_compiled_region(self, device):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -451,8 +452,10 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue("x = self.l2(x)" in op_calls[2].stack_trace)
         self.assertTrue("x = x.relu()" in op_calls[12].stack_trace)
 
-    def test_debug_mode_densor_redistribution_trace(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
+    def test_debug_mode_densor_redistribution_trace(self, device):
+        mesh = DeviceMesh(
+            torch.device(device).type, torch.arange(self.world_size).view(4, 2)
+        )
 
         x = torch.randn(16, 8, requires_grad=True)
         y = torch.randn(8, 16, requires_grad=True)
@@ -484,9 +487,9 @@ class TestDTensorDebugMode(TestCase):
     aten::sum(t: f32[16, 128])""",
         )
 
-    def test_debug_mode_explicit_redistribute(self):
+    def test_debug_mode_explicit_redistribute(self, device):
         """Test that explicit user-called redistribute shows [explicit] annotation."""
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(torch.device(device).type, list(range(self.world_size)))
 
         x = torch.randn(1, 8)
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
@@ -516,9 +519,9 @@ class TestDTensorDebugMode(TestCase):
     aten::view(t: f32[8, 8], [8, 8])  ->  t: f32[8, 8]""",
         )
 
-    def test_output_placements(self):
+    def test_output_placements(self, device):
         """Test that output placements are recorded for multi-output DTensor ops."""
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(torch.device(device).type, list(range(self.world_size)))
 
         # Use topk which returns multiple outputs (values, indices)
         # Shard on dim=1 (the topk dimension) to trigger redistribution
@@ -544,8 +547,10 @@ class TestDTensorDebugMode(TestCase):
     aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",
         )
 
-    def test_debug_mode_einsum(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
+    def test_debug_mode_einsum(self, device):
+        mesh = DeviceMesh(
+            torch.device(device).type, torch.arange(self.world_size).view(4, 2)
+        )
 
         # Create test tensors with mixed Partial placements: P(sum)R and RP(sum).
         # Per-input linearity allows bmm to operate directly on Partial inputs
@@ -595,7 +600,7 @@ class TestDTensorDebugMode(TestCase):
       aten::view(t: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])""",
         )
 
-    def test_real_tensor(self):
+    def test_real_tensor(self, device):
         x = torch.randn(8, 8, 8)
         linear = torch.nn.Linear(8, 8)
 
@@ -614,7 +619,7 @@ class TestDTensorDebugMode(TestCase):
       aten::sum(t: f32[8, 8, 8])""",
         )
 
-    def test_fake_tensor(self):
+    def test_fake_tensor(self, device):
         with FakeTensorMode():
             x = torch.randn(8, 8)
             y = torch.randn(8, 8, 8)
@@ -633,7 +638,7 @@ class TestDTensorDebugMode(TestCase):
       aten::_unsafe_view(ft: f32[64, 8], [8, 8, 8])""",
         )
 
-    def test_tensor_attributes(self):
+    def test_tensor_attributes(self, device):
         x = torch.randn(8, 8)
         x.a1 = "x1"
         x.a2 = "x2"
@@ -663,7 +668,7 @@ class TestDTensorDebugMode(TestCase):
 
     @parametrize("has_inner_mode", [True, False])
     @parametrize("has_outer_mode", [True, False])
-    def test_nested_debug_mode(self, has_inner_mode, has_outer_mode):
+    def test_nested_debug_mode(self, device, has_inner_mode, has_outer_mode):
         class DummyTorchDispatchMode1(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 return func(*args, **kwargs)
@@ -672,7 +677,7 @@ class TestDTensorDebugMode(TestCase):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 return func(*args, **kwargs)
 
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(torch.device(device).type, list(range(self.world_size)))
 
         x = torch.randn(1, 8, requires_grad=True)
         y = torch.randn(1, 32, requires_grad=True)
@@ -695,7 +700,7 @@ class TestDTensorDebugMode(TestCase):
             "redistribute_input [implicit] (1, S(0) -> R)" in debug_mode.debug_string()
         )
 
-    def test_debug_mode_higher_order_cond(self):
+    def test_debug_mode_higher_order_cond(self, device):
         """Test DebugMode with higher order operation."""
         x = torch.randn(1, 8, requires_grad=True)
 
@@ -708,7 +713,7 @@ class TestDTensorDebugMode(TestCase):
         # Verify that cond operations are captured in debug mode
         self.assertIn("torch.ops.higher_order.cond", debug_mode.debug_string())
 
-    def test_compile(self):
+    def test_compile(self, device):
         cnt = CompileCounterWithBackend("inductor")
 
         @torch.compile(backend=cnt)
@@ -726,7 +731,7 @@ class TestDTensorDebugMode(TestCase):
             cnt.frame_count, 1
         )  # check DebugMode doesn't trigger additional recompilations
 
-    def test_annotate(self):
+    def test_annotate(self, device):
         x = torch.randn(8, 8)
 
         class Foo(torch.nn.Module):
@@ -774,7 +779,7 @@ class TestDTensorDebugMode(TestCase):
   [aot_eager region (compile)] exit""",
                 )
 
-    def test_nn_module_in_eager(self):
+    def test_nn_module_in_eager(self, device):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -834,7 +839,7 @@ class TestDTensorDebugMode(TestCase):
             fn(inp)
 
     @torch._functorch.config.patch(guess_tangent_strides_as_outputs=True)
-    def test_nn_module_in_compiled_regions(self):
+    def test_nn_module_in_compiled_regions(self, device):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -965,7 +970,7 @@ class TestDTensorDebugMode(TestCase):
     aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]""",
         )
 
-    def test_record_function(self):
+    def test_record_function(self, device):
         def fn(x, y):
             z = x @ y
             with torch.profiler.record_function("this_is_ignored"):
@@ -1002,7 +1007,7 @@ class TestDTensorDebugMode(TestCase):
     aten::detach(t: f32[4, 2])  ->  t: f32[4, 2]""",
         )
 
-    def test_in_place_mutation(self):
+    def test_in_place_mutation(self, device):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 y = x + 1
@@ -1024,9 +1029,8 @@ class TestDTensorDebugMode(TestCase):
     aten::add_.Tensor(t: i64[], 1)  ->  t: i64[]  # {'input_hash': ((2.0, None), {}), 'hash': 3.0}""",
         )
 
-    @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(not has_triton_package(), "requires triton")
-    def test_triton_kernel_logs(self):
+    def test_triton_kernel_logs(self, device):
         import triton
 
         from torch.testing._internal.triton_utils import add_kernel_autotuned
@@ -1038,8 +1042,8 @@ class TestDTensorDebugMode(TestCase):
             add_kernel_autotuned[grid](x, y, output, n_elements)
             return output
 
-        x = torch.randn(128, device=GPU_TYPE)
-        y = torch.randn(128, device=GPU_TYPE)
+        x = torch.randn(128, device=device)
+        y = torch.randn(128, device=device)
 
         with DebugMode() as debug_mode:
             torch.compile(call_triton)(x, y)
@@ -1050,9 +1054,9 @@ class TestDTensorDebugMode(TestCase):
         self.assertGreater(len(triton_calls), 0)
         self.assertIn("[triton]", triton_calls[0].render([]))
 
-    def test_check_hash_mismatches(self):
-        x = torch.randn(64, 64, device=GPU_TYPE)
-        x_different = torch.randn(64, 64, device=GPU_TYPE)
+    def test_check_hash_mismatches(self, device):
+        x = torch.randn(64, 64, device=device)
+        x_different = torch.randn(64, 64, device=device)
 
         # Identical runs should have no mismatches
         with DebugMode() as dm1, DebugMode.log_tensor_hashes():
@@ -1078,11 +1082,11 @@ class TestDTensorDebugMode(TestCase):
         or torch.cuda.get_device_properties(0).total_memory < 2**26,
         "Being conservative, test peak memory is 25MB?",
     )
-    def test_tensor_hash_redistribute(self):
+    def test_tensor_hash_redistribute(self, device):
         # test that hashing collectives gives correct results
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = DeviceMesh(torch.device(device).type, list(range(self.world_size)))
 
-        local_tensor = torch.ones(2**18, device=self.device_type)
+        local_tensor = torch.ones(2**18, device=device)
         dt = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
@@ -1099,9 +1103,8 @@ class TestDTensorDebugMode(TestCase):
         actual_hash = all_gather_logs[0].log["hash"]
         self.assertEqual(actual_hash, float(local_tensor.numel() * self.world_size))
 
-    @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(not has_triton_package(), "requires triton")
-    def test_check_triton_hash_mismatches(self):
+    def test_check_triton_hash_mismatches(self, device):
         import triton
 
         from torch.testing._internal.triton_utils import add_kernel_autotuned
@@ -1113,9 +1116,9 @@ class TestDTensorDebugMode(TestCase):
             add_kernel_autotuned[grid](x, y, output, n_elements)
             return output
 
-        a = torch.randn(128, device=GPU_TYPE)
-        b = torch.randn(128, device=GPU_TYPE)
-        c = torch.randn(128, device=GPU_TYPE)
+        a = torch.randn(128, device=device)
+        b = torch.randn(128, device=device)
+        c = torch.randn(128, device=device)
 
         # Run with hash logging to verify triton kernels can be hashed
         with DebugMode() as dm_t1, DebugMode.log_tensor_hashes(hash_inputs=True):
@@ -1138,8 +1141,8 @@ class TestDTensorDebugMode(TestCase):
             len([m for m in triton_mismatches if not m["is_input_hash"]]), 0
         )
 
-    def test_check_structure_mismatches(self):
-        x = torch.randn(32, 32, device=self.device_type)
+    def test_check_structure_mismatches(self, device):
+        x = torch.randn(32, 32, device=device)
 
         with DebugMode() as dm1, DebugMode.log_tensor_hashes():
             x.sin()
@@ -1154,8 +1157,8 @@ class TestDTensorDebugMode(TestCase):
         with self.assertRaisesRegex(ValueError, "Log lengths don't match"):
             DebugMode.check_hash_mismatches(dm1.logs, dm3.logs)
 
-    def test_pretty_print_dtensor_make_fx(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+    def test_pretty_print_dtensor_make_fx(self, device):
+        mesh = DeviceMesh(torch.device(device).type, list(range(self.world_size)))
 
         A = torch.randn(8, 32)
         B = torch.randn(32, 32)
@@ -1180,7 +1183,7 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue('"DTensor(f32[8, 32], S(0))" = torch.ops.aten.mm' in gm_str)
 
     @torch._functorch.config.patch(guess_tangent_strides_as_outputs=True)
-    def test_invoke_subgraph(self):
+    def test_invoke_subgraph(self, device):
         # Test that DebugMode can trace the operations inside
         # invoke_subgraph HOP
 
@@ -1245,7 +1248,7 @@ class TestDTensorDebugMode(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
 
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    def test_nested_invoke_subgraph(self):
+    def test_nested_invoke_subgraph(self, device):
         # Test that DebugMode can trace the operations inside
         # invoke_subgraph HOP
         @torch.compiler.nested_compile_region
@@ -1295,6 +1298,8 @@ class TestDTensorDebugMode(TestCase):
 class TestDebugModeUtils(TestCase):
     """Test DebugMode with NCCL backend without using DTensor."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_hash_empty_tensor(self):
         t = torch.tensor([])
         # hash tensor fn should not error out with empty tensor
@@ -1305,6 +1310,8 @@ class TestDebugModeUtils(TestCase):
 
 
 class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self):
         return 2  # Need at least 2 ranks for collectives
@@ -1313,17 +1320,17 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         super().setUp()
         self._spawn_processes()
 
-    def _init_process_group(self):
+    def _init_process_group(self, device_type):
         """Initialize NCCL process group for each spawned process."""
-        torch.cuda.set_device(self.rank)
+        torch.get_device_module(device_type).set_device(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            "nccl",
+            dist.get_default_backend_for_device(device_type),
             world_size=self.world_size,
             rank=self.rank,
             store=store,
         )
-        self.device = f"cuda:{self.rank}"
+        self.device = torch.device(device_type, self.rank)
 
     def _destroy_process_group(self):
         """Destroy the process group."""
@@ -1338,13 +1345,11 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_allgather_base(self):
-        self._init_process_group()
-        tensor = torch.ones(10, 10, device=torch.device(self.device)) * (self.rank + 1)
+    def test_allgather_base(self, device):
+        self._init_process_group(torch.device(device).type)
+        tensor = torch.ones(10, 10, device=self.device) * (self.rank + 1)
         # Output size must be world_size * input_size
-        output_tensor = torch.zeros(
-            10 * self.world_size, 10, device=torch.device(self.device)
-        )
+        output_tensor = torch.zeros(10 * self.world_size, 10, device=self.device)
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
             dist.all_gather_single(output_tensor, tensor)
@@ -1364,14 +1369,12 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_allgather_base_async_op(self):
+    def test_allgather_base_async_op(self, device):
         """Test all_gather_into_tensor with async_op=True."""
-        self._init_process_group()
-        tensor = torch.ones(10, 10, device=torch.device(self.device)) * (self.rank + 1)
+        self._init_process_group(torch.device(device).type)
+        tensor = torch.ones(10, 10, device=self.device) * (self.rank + 1)
         # Output size must be world_size * input_size
-        output_tensor = torch.zeros(
-            10 * self.world_size, 10, device=torch.device(self.device)
-        )
+        output_tensor = torch.zeros(10 * self.world_size, 10, device=self.device)
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
             # Call with async_op=True returns a work handle
@@ -1399,9 +1402,9 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_allgather_functional_with_async_collective_tensor(self):
-        self._init_process_group()
-        tensor = torch.ones(10, 10, device=torch.device(self.device)) * (self.rank + 1)
+    def test_allgather_functional_with_async_collective_tensor(self, device):
+        self._init_process_group(torch.device(device).type)
+        tensor = torch.ones(10, 10, device=self.device) * (self.rank + 1)
 
         # Use functional collectives which return AsyncCollectiveTensor
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
@@ -1428,7 +1431,16 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         self._destroy_process_group()
 
 
-instantiate_parametrized_tests(TestDTensorDebugMode)
+instantiate_device_type_tests(
+    TestDTensorDebugMode,
+    globals(),
+    only_for=["cuda"],
+)
+instantiate_device_type_tests(
+    TestDTensorDebugModeNCCLBackend,
+    globals(),
+    only_for=["cuda"],
+)
 
 
 if __name__ == "__main__":
