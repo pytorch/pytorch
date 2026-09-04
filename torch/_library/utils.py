@@ -203,10 +203,14 @@ def mutates_and_returns_first_arg(op: OpOverload):
 
 
 def fill_defaults(schema, args, kwargs):
+    # Reading schema.arguments converts the underlying std::vector into a new
+    # Python list, so hoist it out of the loop to keep this linear in the
+    # number of arguments.
+    arguments = schema.arguments
     new_args = []
     new_kwargs = {}
-    for i in range(len(schema.arguments)):
-        info = schema.arguments[i]
+    for i in range(len(arguments)):
+        info = arguments[i]
         if info.kwarg_only:
             if info.name in kwargs:
                 new_kwargs[info.name] = kwargs[info.name]
