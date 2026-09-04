@@ -677,6 +677,7 @@ class Node(_NodeBase):
                 maybe_return_typename[0] = f" -> {_type_repr(self.type)}"
             return f"return {self.args[0]}"
         else:
+            from torch._subclasses.meta_utils import is_sparse_compressed_layout
 
             def stringify_shape(shape: Iterable[Any]) -> str:
                 return f"[{', '.join([str(x) for x in shape])}]"
@@ -689,11 +690,7 @@ class Node(_NodeBase):
             if (
                 include_tensor_metadata
                 and isinstance(meta_val, torch.Tensor)
-                and meta_val.layout
-                not in (
-                    torch.sparse_csc,
-                    torch.sparse_csr,
-                )
+                and not is_sparse_compressed_layout(meta_val.layout)
             ):
                 stride_annotation = f"{stringify_shape(meta_val.stride())}"
                 device_annotation = _device_annotation(meta_val.device)
