@@ -735,6 +735,12 @@ class TestAOTInductorPackage(TestCase):
 
                 compiled_model = torch._inductor.aoti_load_package(package_path)
 
+            input_names = compiled_model.get_input_names()
+            output_names = compiled_model.get_output_names()
+            self.assertEqual(len(input_names), 2)
+            self.assertEqual(len(output_names), 1)
+            self.assertTrue(all(input_names))
+            self.assertTrue(all(output_names))
             actual = compiled_model(*example_inputs)
             self.assertEqual(actual, expected)
 

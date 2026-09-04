@@ -156,7 +156,10 @@ void AOTIModelContainerRunner::load_aoti_symbols(
   var = reinterpret_cast<decltype(var)>(model_so_->sym(name_str));
   LOAD_SYMBOL(create_func_, "AOTInductorModelContainerCreateWithDevice")
   LOAD_SYMBOL(delete_func_, "AOTInductorModelContainerDelete")
+  LOAD_SYMBOL(get_num_inputs_func_, "AOTInductorModelContainerGetNumInputs")
+  LOAD_SYMBOL(get_input_name_func_, "AOTInductorModelContainerGetInputName")
   LOAD_SYMBOL(get_num_outputs_func_, "AOTInductorModelContainerGetNumOutputs")
+  LOAD_SYMBOL(get_output_name_func_, "AOTInductorModelContainerGetOutputName")
   LOAD_SYMBOL(
       get_num_constants_func_, "AOTInductorModelContainerGetNumConstants")
   LOAD_SYMBOL(
@@ -596,6 +599,36 @@ std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       get_call_spec_func_(container_handle_, &in_spec, &out_spec));
   return {in_spec, out_spec};
+}
+
+std::vector<std::string> AOTIModelContainerRunner::get_input_names() {
+  size_t num_inputs{0};
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      get_num_inputs_func_(container_handle_, &num_inputs));
+  std::vector<std::string> input_names;
+  input_names.reserve(num_inputs);
+  for (size_t i = 0; i < num_inputs; ++i) {
+    const char* name{nullptr};
+    AOTI_RUNTIME_ERROR_CODE_CHECK(
+        get_input_name_func_(container_handle_, i, &name));
+    input_names.emplace_back(name);
+  }
+  return input_names;
+}
+
+std::vector<std::string> AOTIModelContainerRunner::get_output_names() {
+  size_t num_outputs{0};
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      get_num_outputs_func_(container_handle_, &num_outputs));
+  std::vector<std::string> output_names;
+  output_names.reserve(num_outputs);
+  for (size_t i = 0; i < num_outputs; ++i) {
+    const char* name{nullptr};
+    AOTI_RUNTIME_ERROR_CODE_CHECK(
+        get_output_name_func_(container_handle_, i, &name));
+    output_names.emplace_back(name);
+  }
+  return output_names;
 }
 
 std::unordered_map<std::string, CreateAOTIModelRunnerFunc>&

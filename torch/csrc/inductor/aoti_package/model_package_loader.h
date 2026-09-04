@@ -29,6 +29,8 @@ class TORCH_API AOTIModelPackageLoader {
       void* stream_handle = nullptr);
 
   std::vector<std::string> get_call_spec();
+  std::vector<std::string> get_input_names();
+  std::vector<std::string> get_output_names();
   // When allow_h2d_copy is true, CPU tensors in constants_map are silently
   // copied to the model's device. allow_h2d_copy is incompatible with
   // user_managed.

@@ -986,6 +986,14 @@ std::vector<std::string> AOTIModelPackageLoader::get_call_spec() {
   return runner_->get_call_spec();
 }
 
+std::vector<std::string> AOTIModelPackageLoader::get_input_names() {
+  return runner_->get_input_names();
+}
+
+std::vector<std::string> AOTIModelPackageLoader::get_output_names() {
+  return runner_->get_output_names();
+}
+
 void AOTIModelPackageLoader::load_constants(
     std::unordered_map<std::string, at::Tensor>& constants_map,
     bool use_inactive,

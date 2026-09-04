@@ -72,6 +72,8 @@ class TORCH_API AOTIModelContainerRunner {
   bool did_call_load_constants() const;
 
   std::vector<std::string> get_call_spec();
+  std::vector<std::string> get_input_names();
+  std::vector<std::string> get_output_names();
 
   // Returns the torchbind custom-class constants embedded in the loaded
   // model. The IValue payloads alias the live entries inside the proxy
@@ -141,7 +143,13 @@ class TORCH_API AOTIModelContainerRunner {
   std::unique_ptr<at::DynamicLibrary> model_so_;
   decltype(&AOTInductorModelContainerCreateWithDevice) create_func_{nullptr};
   decltype(&AOTInductorModelContainerDelete) delete_func_{nullptr};
+  decltype(&AOTInductorModelContainerGetNumInputs) get_num_inputs_func_{
+      nullptr};
+  decltype(&AOTInductorModelContainerGetInputName) get_input_name_func_{
+      nullptr};
   decltype(&AOTInductorModelContainerGetNumOutputs) get_num_outputs_func_{
+      nullptr};
+  decltype(&AOTInductorModelContainerGetOutputName) get_output_name_func_{
       nullptr};
   decltype(&AOTInductorModelContainerRun) run_func_{nullptr};
   decltype(&AOTInductorModelContainerGetNumConstants) get_num_constants_func_{
