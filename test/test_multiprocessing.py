@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyAccelerator,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -185,14 +186,17 @@ def sum_tensors(inq, outq):
             )
 
 
-def queue_get_exception(inqueue, outqueue):
-    os.close(2)  # hide expected error message
-    try:
-        torch.zeros(5, 5).cuda()
-    except Exception as e:
-        outqueue.put(e)
-    else:
-        outqueue.put("no exception")
+def queue_get_exception_device(device):
+    def queue_get_exception(inqueue, outqueue):
+        os.close(2)  # hide expected error message
+        try:
+            torch.zeros(5, 5).to(device)
+        except Exception as e:
+            outqueue.put(e)
+        else:
+            outqueue.put("no exception")
+
+    return queue_get_exception
 
 
 # Multiply by two in a separate stream
@@ -516,15 +520,18 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
             return mp
         return mp.get_context("spawn")
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4000")
     def test_simple_sharing(self, device):
         ctx = self._get_ctx(device)
         self._test_sharing(ctx, device, torch.float)
 
+    @skipXPUIf(IS_WINDOWS, "https://github.com/intel/torch-xpu-ops/issues/4068")
     @dtypes(torch.float32, torch.int64)
     def test_empty_tensor_sharing(self, device, dtype):
         self._test_empty_tensor_sharing(dtype, torch.device(device))
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/92131")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4000")
     @unittest.skipIf(
         TEST_WITH_ASAN,
         "non-deterministically hangs with ASAN "
@@ -540,14 +547,17 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
             )
             self._test_autograd_sharing(var, ctx)
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4000")
     def test_parameter_sharing(self, device):
         ctx = self._get_ctx(device)
         param = Parameter(torch.arange(1.0, 26, device=device).view(5, 5))
         self._test_autograd_sharing(param, ctx, is_parameter=True)
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5219")
     def test_integer_parameter_serialization(self, device):
         self._test_integer_parameter_serialization(device=device)
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5219")
     # See https://github.com/pytorch/pytorch/issues/14997
     @unittest.skipIf(TEST_WITH_ASAN, "non-deterministically hangs with ASAN")
     def test_leaf_variable_sharing(self, device):
@@ -587,7 +597,7 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
         t = torch.zeros(5, 5).to(device).cpu()
         inq = mp.Queue()
         outq = mp.Queue()
-        p = mp.Process(target=queue_get_exception, args=(inq, outq))
+        p = mp.Process(target=queue_get_exception_device(device), args=(inq, outq))
         p.start()
         inq.put(t)
         p.join()
@@ -634,7 +644,7 @@ if __name__ == "__main__":
                 pool.map(simple_autograd_function, [1, 2, 3])
 
 
-instantiate_device_type_tests(TestMultiprocessingDevice, globals())
+instantiate_device_type_tests(TestMultiprocessingDevice, globals(), allow_xpu=True)
 
 
 @unittest.skipIf(
