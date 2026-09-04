@@ -4177,7 +4177,9 @@ class TestPrecompile(TestCase):
         # Regression: in the mark_unbacked path the example params are fakeified BEFORE
         # the grad clear. A model with a pre-existing .grad (the warmup-step-then-
         # precompile flow) plus a backward in fn must still capture -- the clear must
-        # precede fakeify so the fakes inherit no grad -- and the real .grad is restored.
+        # precede fakeify so the fakes inherit no grad. The trace itself leaves the real
+        # .grad untouched; capture then runs the step once for real (caller-driven
+        # contract), accumulating a second identical backward onto the warmup grad.
         from torch._dynamo.decorators import mark_unbacked
 
         torch.manual_seed(0)
@@ -4192,8 +4194,9 @@ class TestPrecompile(TestCase):
             cap(m, x)
         code, _ = cap.result()
         self.assertIn("USER_INPUT_SHAPES = [(None, 4)]", code)  # dim 0 is dynamic
+        # warmup + capture's identical backward
         for n, p in m.named_parameters():
-            self.assertEqual(p.grad, saved[n])  # warmup grad restored, not clobbered
+            self.assertEqual(p.grad, saved[n] * 2)
 
     def test_backend_eager_no_inductor_lowering(self):
         # backend="eager" skips Inductor: the generated code has no inductor ``call``
@@ -4259,8 +4262,10 @@ class TestPrecompile(TestCase):
         ) as cap:
             cap(m, x)
         code, cache = cap.result()
-        # Capture must not mutate the example model's pre-existing grad (restored).
-        self.assertEqual(m.weight.grad, grad_before)
+        # Capture runs the step once for real (caller-driven contract), so it
+        # accumulates a second identical backward onto the warmup grad -- exactly what a
+        # second eager model(x).sum().backward() would do (same weights, same x).
+        self.assertEqual(m.weight.grad, grad_before * 2)
 
         run = torch.nn.Linear(4, 3)
         run.load_state_dict(m.state_dict())
@@ -5293,6 +5298,9 @@ class TestPrecompile(TestCase):
             cap(m, t)
         code, cache = cap.result()
         self.assertIn("PARAM_NAMES = ['l1.weight']", code)  # tie collapsed to one
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # deepcopy'd reference and the loaded artifact each see exactly one backward.
+        m.zero_grad(set_to_none=True)
 
         ref = copy.deepcopy(m)  # deepcopy preserves the tie within the object graph
         ref(t).sum().backward()
@@ -5340,6 +5348,9 @@ class TestPrecompile(TestCase):
         ) as cap:
             cap(m, t)
         code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # deepcopy'd reference and the loaded artifact each see exactly one backward.
+        m.zero_grad(set_to_none=True)
 
         ref = copy.deepcopy(m)
         ref(t).sum().backward()
@@ -6238,28 +6249,27 @@ class TestPrecompile(TestCase):
     def test_capture_accumulates_gradients_like_eager(self, tracer):
         # The caller makes the calls inside the block, so precompile has no
         # example backward of its own: a grad already present when capture starts
-        # is neither cleared nor snapshotted. Under the dynamo tracer each cap()
-        # runs fn for real, so a .backward() ACCUMULATES onto the model's .grad
-        # exactly as eager does; the make_fx tracer runs fn under proxies, so it
-        # touches .grad not at all. Either way the same grad OBJECT stays in
-        # place (optimizer state can be keyed on its identity).
+        # is neither cleared nor snapshotted. Both tracers run each cap() for
+        # real, so a .backward() ACCUMULATES onto the model's .grad exactly as
+        # eager does, and the same grad OBJECT stays in place (the make_fx driver
+        # accumulates in place onto a pre-existing grad, so optimizer state keyed
+        # on its identity survives).
         torch.manual_seed(0)
         model = _PrecompileTrainMod()
         xs = [torch.randn(n, 8) for n in (3, 5)]
-        # make_fx captures a single call and executes nothing real; dynamo runs
-        # each call, so its backwards land on .grad.
+        # make_fx captures a single call; dynamo takes as many as we make. Each
+        # captured call runs for real either way, so its backward lands on .grad.
         capture_calls = xs[:1] if tracer == "make_fx" else xs
-        eager_calls = [] if tracer == "make_fx" else xs
         extra = {} if tracer == "make_fx" else {"dynamic": False}
         with torch.enable_grad():
             _precompile_backward_step(model, xs[0])  # warmup populates .grad
             before = [(p.grad, p.grad.detach().clone()) for p in model.parameters()]
             # Deepcopy drops .grad, so replay the warmup on the reference and
-            # then whatever cap() executes for real, so the reference is warmup
-            # plus the captured calls' contribution.
+            # then every captured call cap() executes for real, so the reference
+            # is warmup plus the captured calls' contribution.
             reference = copy.deepcopy(model)
             _precompile_backward_step(reference, xs[0])
-            for x in eager_calls:
+            for x in capture_calls:
                 _precompile_backward_step(reference, x)
             with torch.compiler.precompile.artifact(
                 _precompile_backward_step,
@@ -7000,6 +7010,10 @@ class TestPrecompileNumerics(TestCase):
         with torch.compiler.precompile.artifact(train_step, training=True) as cap:
             cap(model, x, target)
         code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract), so the example
+        # model already carries one backward; reset so what we measure below is the
+        # loaded artifact's own scatter, matching one eager step.
+        model.zero_grad(set_to_none=True)
         f_c = torch.compiler.precompile.load(code, cache)
 
         # The model is passed at runtime (no weights baked); the artifact mutates
@@ -7048,6 +7062,9 @@ class TestPrecompileNumerics(TestCase):
         with torch.compiler.precompile.artifact(train_step, training=True) as cap:
             cap(model, x, target)
         code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # check below sees only the loaded artifact's scatter, matching one eager step.
+        model.zero_grad(set_to_none=True)
         f_c = torch.compiler.precompile.load(code, cache)
         f_c(model, x, target)
         for (n, p), (_, rp) in zip(model.named_parameters(), ref.named_parameters()):
@@ -7077,6 +7094,10 @@ class TestPrecompileNumerics(TestCase):
         with torch.compiler.precompile.artifact(train_step, training=True) as cap:
             cap(a, b, x, target)
         code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset both
+        # models so the check sees only the loaded artifact's scatter.
+        a.zero_grad(set_to_none=True)
+        b.zero_grad(set_to_none=True)
         f_c = torch.compiler.precompile.load(code, cache)
         f_c(a, b, x, target)
         for (n, p), (_, rp) in zip(a.named_parameters(), ref_a.named_parameters()):
@@ -7124,6 +7145,9 @@ class TestPrecompileNumerics(TestCase):
         ) as cap:
             cap(m, x)
         code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # check below sees only the loaded artifact's single scatter onto the tie.
+        m.zero_grad(set_to_none=True)
         f_c = torch.compiler.precompile.load(code, cache)
         f_c(m, x)
         self.assertEqual(m.a.weight.grad, ref_grad)
@@ -7180,6 +7204,9 @@ class TestPrecompileNumerics(TestCase):
         ) as cap:
             cap(model, x, target)
         code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # check below sees only the loaded artifact's own scatter.
+        model.zero_grad(set_to_none=True)
         f_c = torch.compiler.precompile.load(code, cache)
         out = f_c(model, x, target)
         self.assertIsNone(out)

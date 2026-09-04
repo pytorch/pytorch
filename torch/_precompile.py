@@ -911,6 +911,7 @@ class _MakeFxCapture(_InMemoryCapture):
         )
         self._training = training
         self._traced = False
+        self._rendered: tuple[str, bytes] | None = None
 
     def __enter__(self) -> Self:
         return self
@@ -931,24 +932,28 @@ class _MakeFxCapture(_InMemoryCapture):
                 "graph breaks and recompilations between them."
             )
         self._traced = True
-        # A make_fx trace runs fn under proxy tensors, so it has no real result
-        # to hand back; it is single-shot precisely because there is no live
-        # execution to thread a value through. The caller drives the grad mode.
+        # make_fx traces one execution of fn and lowers it to the artifact; we then
+        # serve that artifact on the real args through the SAME load() path a caller
+        # would take, so the value handed back is exactly what serving produces
+        # (invariants checked, grads scattered onto the model) rather than a bare
+        # trace with no result. Single-shot: a make_fx trace records one path, so a
+        # second call has nothing new to add. Build python_code ONCE and thread it
+        # into to_cache_bytes (the metadata + embedded kernel source is not rebuilt,
+        # and code_hash is sha256 over exactly the bytes result() hands back). The
+        # caller drives the grad mode, for both the trace and the serve.
         with torch.enable_grad() if self._training else torch.no_grad():
-            return self._module._compile(args)
+            self._module._compile(args)
+            python_code = self._module.to_python_code()
+            self._rendered = (python_code, self._module.to_cache_bytes(python_code))
+            return precompile.load(*self._rendered, _trusted=True)(*args)
 
     def result(self) -> tuple[str, bytes]:
-        if not self._traced:
+        if self._rendered is None:
             raise PrecompileError(
                 "nothing was captured: call the capture with your example "
                 "arguments inside a `with` block before result()."
             )
-        # Build the (expensive) python_code ONCE and thread it into
-        # to_cache_bytes so the metadata + embedded kernel source is not rebuilt,
-        # and so code_hash is sha256 over exactly the bytes returned to the
-        # caller (a matched pair loads).
-        python_code = self._module.to_python_code()
-        return python_code, self._module.to_cache_bytes(python_code)
+        return self._rendered
 
 
 class _DynamoCapture(_InMemoryCapture):
@@ -1597,15 +1602,39 @@ def _capture(
     for a in real_flat:
         if isinstance(a, torch.Tensor):
             a.grad = None
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    # ``fake_mode`` is the DYNAMIC (symbolic) fake mode -- set only on the unbacked path,
+    # where it threads its ShapeEnv to the lowering (and turns on scalar_asserts). The
+    # static path also traces on fakes, but with a plain (non-symbolic) fake mode kept in
+    # ``capture_cm`` only, so ``_Capture.fake_mode`` stays None and the lowering treats
+    # the capture as static. Either way ``capture_cm`` is the FakeTensorMode we trace in.
     fake_mode = None
+    capture_cm: FakeTensorMode
     if any(marks):
         flat_args, fake_mode = _fakeify_with_unbacked(pb_flat, user_flat, marks)
+        capture_cm = fake_mode
         user_input_shapes = [
             None
             if base is None
             else tuple(None if i in per else s for i, s in enumerate(base))
             for base, per in zip(user_input_shapes, marks)
         ]
+    else:
+        # Static capture: fakeify every input so the trace runs no real compute (no
+        # in-place input mutation, no grad on the example model). allow_non_fake_inputs
+        # lets a real tensor that fn closes over (an unregistered attr, a global, a
+        # captured constant -- invariant 1) flow through as a baked constant, so
+        # _check_no_constant_tensors below rejects it with the same clean PrecompileError
+        # a real trace gave, rather than a raw mixed-fake AssertionError.
+        capture_cm = FakeTensorMode(allow_non_fake_inputs=True)
+        with capture_cm:
+            flat_args = [
+                capture_cm.from_tensor(a, static_shapes=True)
+                if isinstance(a, torch.Tensor)
+                else a
+                for a in flat_args
+            ]
 
     # flat_fn (traced by make_fx) writes these back so _capture can thread the output
     # structure and the harvested-grad param indices into the _Capture result.
@@ -1683,8 +1712,15 @@ def _capture(
     # leave the user's example model with clobbered .grad fields.
     from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 
-    tracing_mode = "symbolic" if fake_mode is not None else "real"
-    capture_cm = fake_mode if fake_mode is not None else contextlib.nullcontext()
+    # Trace on FAKE tensors either way (flat_args were fakeified above), so the trace
+    # runs NO real compute and has no real side effects (no in-place input mutation, no
+    # grad accumulation on the example model): the single real execution is the graph run
+    # on the real inputs, which the caller-driven capture does by serving the built
+    # artifact and handing back its result. The unbacked path keeps its symbolic ShapeEnv
+    # ("symbolic"); a static capture uses concrete fake shapes ("fake"). A data-dependent
+    # op (.item(), .nonzero(), a tensor-value branch) that a real trace would silently
+    # specialize now raises at capture rather than baking an unsound constant.
+    tracing_mode = "symbolic" if fake_mode is not None else "fake"
     try:
         with capture_cm:
             try:
@@ -3273,22 +3309,26 @@ def _read_artifact(
     return python_code, cache
 
 
-def _make_inlined_forward(python_code: str) -> Callable[..., object]:
+def _make_inlined_forward(
+    python_code: str, *, warn: bool = True
+) -> Callable[..., object]:
     """Fallback: execute the self-contained python string (JITs kernels).
 
     ``python_code`` needs no cache -- the kernels (inductor) or graph (eager) are
     inlined, so we just exec it and hand back its ``forward``. The returned
     ``forward`` takes the same args the traced fn took (model(s) plus runtime
-    inputs)."""
+    inputs). ``warn`` is off only for the capture-time self-load, where the source
+    was just produced in-process and so is not untrusted input."""
     # python_code is untrusted EXECUTABLE input -- exec'ing it runs whatever it contains
     # (JIT-compiling inlined kernels or running the inlined graph). Warn per load (not
     # warning_once) before the exec so the inlined fallback is never silent about it.
-    log.warning(
-        "torch.compiler.precompile.load is about to EXEC python_code, which is untrusted "
-        "executable input (it runs inlined kernels / graph code). Only exec python_code "
-        "you produced or otherwise trust (Note [precompile programming model], "
-        "invariant 7)."
-    )
+    if warn:
+        log.warning(
+            "torch.compiler.precompile.load is about to EXEC python_code, which is "
+            "untrusted executable input (it runs inlined kernels / graph code). Only "
+            "exec python_code you produced or otherwise trust (Note [precompile "
+            "programming model], invariant 7)."
+        )
     module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
     exec(compile(python_code, "<precompile>", "exec"), module_ns)
     return cast("Callable[..., object]", module_ns["forward"])
@@ -3749,6 +3789,7 @@ class _PrecompileApi:
         artifact_path: str | os.PathLike[str] | None = None,
         cache_path: str | os.PathLike[str] | None = None,
         fn: Callable[..., object] | None = None,
+        _trusted: bool = False,
     ) -> PrecompiledRunnable:
         """Reconstruct a runnable from ``(python_code, cache)`` from precompile.
 
@@ -3922,7 +3963,7 @@ class _PrecompileApi:
         # input/model validation) and JITs the kernels -- which hit the primed cache when
         # the bundle above loaded, so the "cache" path is exec-with-warm-kernels rather than
         # a separate runtime.
-        forward = _make_inlined_forward(python_code)
+        forward = _make_inlined_forward(python_code, warn=not _trusted)
 
         if meta.get("SERVING_MODE") == "installed":
             # The exec above only built the handle; entering or calling it installs.
