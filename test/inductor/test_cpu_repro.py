@@ -7754,6 +7754,44 @@ class CPUReproTests(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "index out of bounds"):
                     fn_opt(x, out_of_bounds)
 
+    def test_exception_plumbing_only_when_kernel_can_throw(self):
+        # https://github.com/pytorch/pytorch/issues/195402
+        # Only kernels that emit a throwing check need the try/catch and the
+        # exception_ptr that ferries the throw out of the OpenMP region.  The
+        # vast majority of parallel kernels have no bounds check at all, and
+        # their generated code must be left exactly as it was.
+        def no_bounds_check(x):
+            return x * 2.0
+
+        def with_bounds_check(x, idx):
+            return (x - 0.5)[idx]
+
+        patches = {"cpp.threads": 8, "cpp.min_chunk_size": 1}
+
+        with config.patch(patches):
+            torch._dynamo.reset()
+            _, code = run_and_get_cpp_code(
+                torch.compile(no_bounds_check, dynamic=False), torch.randn(65536)
+            )
+        self.assertIn("#pragma omp", code)
+        # assert on the C++ constructs rather than the variable names inductor
+        # happens to pick, so a rename cannot make this pass vacuously
+        self.assertNotIn("std::exception_ptr", code)
+        self.assertNotIn("std::rethrow_exception", code)
+        self.assertNotIn("catch (...)", code)
+
+        with config.patch(patches):
+            torch._dynamo.reset()
+            _, code = run_and_get_cpp_code(
+                torch.compile(with_bounds_check, dynamic=False),
+                torch.randn(8, 4096),
+                torch.tensor([0, 1, 3]),
+            )
+        self.assertIn("#pragma omp", code)
+        self.assertIn("std::exception_ptr", code)
+        self.assertIn("std::rethrow_exception", code)
+        self.assertIn("catch (...)", code)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
