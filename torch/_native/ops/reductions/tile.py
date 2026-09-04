@@ -63,6 +63,13 @@ def _decode_offset(linear, vals, npairs):
     return off + rem * vals[4 * (npairs - 1) + 3]
 
 
+def _ilog2(n: int) -> int:
+    # No clamp: both callers pass >= 2 by construction (Es // vec is 4, 8 or 16, and the other
+    # site passes max(ntiles, 2)), and clamping to 1 would make this return the wrong answer for
+    # n == 1 rather than protect anything.
+    return n.bit_length() - 1
+
+
 def _off(base, i: int):
     # Keep a static base static (see TileMap.col_base): int + int stays foldable.
     return base + i if isinstance(base, int) else base + Int32(i)
@@ -386,6 +393,10 @@ def fold_itree_warp(
     )
 
 
+# Buffers in the staged fold's pipeline (see _fold_itree_smem). ONE: this fold feels the smem
+# footprint's effect on occupancy more than it feels transfer latency.
+_ITREE_STAGE_DEPTH = 1
+
 _ROLL_UNROLL = 4
 
 
@@ -622,6 +633,8 @@ class TileReduce:
             # Its thread map IS its plan: `wpr` chunks per row (0 for the one-thread-per-row
             # shapes) folded by `wpr // kchunk` warps, and `rows_per_block` rows per block.
             tpr = WARP * (itree.wpr // itree.kchunk) if itree.wpr else 1
+            if itree.stage_e:
+                tpr = WARP
             nt = tpr * itree.rows_per_block
         if axis == "general":
             # Every thread of the block folds the one output, so the tail is the row axis's
@@ -924,6 +937,140 @@ class TileReduce:
         return final
 
     @cute.jit
+    def _fold_itree_smem(self, mX, r, lane, row_in_block):
+        """Stage through smem in TILES, so one warp folds a batch with `span/T` butterflies while
+        smem stays at T columns per row however wide the batch is.
+
+        A coalesced load leaves a lane owning only `vec` adjacent columns, but in-register tree
+        levels need an aligned contiguous run; staging breaks the tie, so one butterfly covers a
+        whole tile and the DAG is unchanged. `T = stage_e * WARP` trades butterflies against smem.
+
+        ONE BUFFER, stage-then-fold: the refill MUST NOT move ahead of the fold -- that is a
+        write-after-read race that stays invisible until M is large enough for the transfer to land
+        mid-fold. See `_ITREE_STAGE_DEPTH` for the two-buffer measurements.
+
+        SMEM LAYOUT (stage_e, WARP) per buffer, lane stride padded by `vec`: column c sits at
+        `c + vec * (c // stage_e)`, which keeps a lane's run contiguous and 16-byte wide while the
+        run starts land `vec` words apart, so 32 lanes hit distinct bank groups.
+        """
+        trait = self.trait
+        it = self.itree
+        # The leaf/mask/vec-tree work lives in fold_groups now; this body only needs the combiner
+        # for the cross-tile carry and the identity for the seed.
+        op, ident = leaf_op(trait), identity(trait)
+        Es = const_expr(it.stage_e)  # columns per lane PER TILE
+        vec = const_expr(it.vec)
+        span = const_expr(it.batches[0][2] * it.wpr * WARP * it.vec)
+        wle = const_expr(WARP * vec)
+        tile_cols = const_expr(Es * WARP)
+        ntiles = const_expr(span // tile_cols)
+        pitch = const_expr(Es + vec)
+        stride = const_expr(pitch * WARP)  # one buffer, one row
+        depth = const_expr(min(_ITREE_STAGE_DEPTH, ntiles))
+        smem = cutlass.utils.SmemAllocator()
+        sX = smem.allocate_tensor(
+            self.dtype,
+            cute.make_layout(const_expr(stride * depth * it.rows_per_block)),
+            byte_alignment=16,
+        )
+        base = row_in_block * Int32(const_expr(stride * depth))
+        rowv = mX[Int64(r), None]
+        hi = Int32(const_expr(it.batches[0][1]))  # this batch's real column count
+        gv = cute.flat_divide(rowv, (vec,))
+        sv = cute.flat_divide(sX, (vec,))
+        g2s = cute.make_copy_atom(
+            cpasync.CopyG2SOp(),
+            mX.element_type,
+            num_bits_per_copy=const_expr(vec * mX.element_type.width),
+        )
+        runfrag = cute.make_rmem_tensor(
+            cute.make_layout((vec, const_expr(Es // vec))), mX.element_type
+        )
+
+        # cp.async goes GLOBAL -> SMEM directly, so the data never lands in registers: one
+        # instruction per vec group instead of a load plus a store. The atom needs a statically
+        # 16-byte-aligned source AND destination, which a raw `iterator + offset` does not carry --
+        # flat_divide views inherit the wrap's alignment.
+        for pre in cutlass.range_constexpr(depth):
+            for i in cutlass.range_constexpr(tile_cols // wle):
+                off = const_expr(pre * tile_cols + i * wle)
+                col = Int32(const_expr(off)) + lane * Int32(vec)
+                k = Int32(const_expr(off // vec)) + lane
+                ks = k if col + Int32(vec) <= hi else Int32(0)  # clamp a short batch
+                local = Int32(const_expr(i * wle)) + lane * Int32(vec)
+                dst = (
+                    base
+                    + Int32(const_expr((pre % depth) * stride))
+                    + (local // Int32(Es)) * Int32(pitch)
+                    + local % Int32(Es)
+                )
+                cute.copy(g2s, gv[None, ks], sv[None, dst // Int32(vec)])
+            cute.arch.cp_async_commit_group()
+
+        tree: list = []
+        for t in cutlass.range_constexpr(ntiles):
+            # Only THIS tile's transfer has to have landed; the ones for tiles t+1..t+depth-1 stay
+            # in flight, which is where the overlap comes from.
+            cute.arch.cp_async_wait_group(const_expr(min(depth - 1, ntiles - 1 - t)))
+            cute.arch.sync_warp()
+
+            # FOLD this lane's own contiguous run of the tile, then ONE butterfly for the tile.
+            run = base + Int32(const_expr((t % depth) * stride)) + lane * Int32(pitch)
+            col0 = Int32(const_expr(t * tile_cols)) + lane * Int32(Es)
+            # Read the whole run into registers first, so the SHARED fold body applies: the same
+            # (fragment, columns) interface as the per-chunk arm. Only the columns differ -- they
+            # are contiguous here -- and the lane merge happens once at the end.
+            for i in cutlass.range_constexpr(Es // vec):
+                cute.autovec_copy(
+                    cute.make_tensor(
+                        sX.iterator + run + Int32(const_expr(i * vec)),
+                        cute.make_layout(vec),
+                    ),
+                    runfrag[None, i],
+                )
+            _streaming_push(
+                tree,
+                fold_groups(
+                    trait,
+                    runfrag,
+                    [col0 + Int32(const_expr(i * vec)) for i in range(Es // vec)],
+                    vec,
+                    hi,
+                    const_expr(_ilog2(Es // vec)),
+                    WARP,
+                    merge_per_group=False,
+                ),
+                t,
+                const_expr(_ilog2(max(ntiles, 2))),
+                op,
+            )
+            if const_expr(t + depth < ntiles):
+                # This buffer is free now, so refill it for the tile `depth` ahead. It MUST come
+                # after the fold: issuing it earlier is a write-after-read race on the buffer we
+                # are reading, which shows up as wrong results only once M is large enough for the
+                # transfer to actually land mid-fold.
+                cute.arch.sync_warp()
+                nxt = const_expr(t + depth)
+                for i in cutlass.range_constexpr(tile_cols // wle):
+                    off = const_expr(nxt * tile_cols + i * wle)
+                    col = Int32(const_expr(off)) + lane * Int32(vec)
+                    k = Int32(const_expr(off // vec)) + lane
+                    ks = k if col + Int32(vec) <= hi else Int32(0)
+                    local = Int32(const_expr(i * wle)) + lane * Int32(vec)
+                    dst = (
+                        base
+                        + Int32(const_expr((nxt % depth) * stride))
+                        + (local // Int32(Es)) * Int32(pitch)
+                        + local % Int32(Es)
+                    )
+                    cute.copy(g2s, gv[None, ks], sv[None, dst // Int32(vec)])
+                cute.arch.cp_async_commit_group()
+        # SEED with the identity, exactly as the looped shape does: this path only ever serves a
+        # single batch, and `ident + x` is NOT a no-op for a signed zero -- dropping it returns
+        # -0.0 where ATen returns +0.0.
+        return op(ident, tree[0])
+
+    @cute.jit
     def _fold_itree_combine(self, mIns, row):
         """Stage 2 of the split shape: fold one row's partials LINEARLY, ascending.
 
@@ -1057,6 +1204,13 @@ class TileReduce:
                 # One thread per row (the multirow fold and the split's combine): no lane to
                 # merge with, so every thread holds its own total and stores it.
                 lane_w, warp_id, row_in_block, lane = (Int32(0),) * 4
+            elif const_expr(self.itree.stage_e):
+                # SMEM-STAGED: exactly one warp per row, so there is no chunk index and no
+                # cross-warp merge -- the whole batch lands in one butterfly.
+                lane_w = Int32(tx % WARP)
+                lane = lane_w
+                warp_id = Int32(0)
+                row_in_block = Int32(tx // WARP)
             else:
                 # `warp_id` is the thread group, i.e. which BLOCK of kchunk adjacent chunks
                 # this warp folds -- the fold multiplies it up to real chunk indices.
@@ -1105,6 +1259,8 @@ class TileReduce:
         if const_expr(self.order == "inner_tree"):
             if const_expr(self.itree.shape == "combine"):
                 accs = (self._fold_itree_combine(mIns, unit),)
+            elif const_expr(self.itree.stage_e):
+                accs = (self._fold_itree_smem(mIns[0], unit, lane_w, row_in_block),)
             else:
                 accs = (
                     self._fold_itree(
