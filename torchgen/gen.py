@@ -2393,15 +2393,6 @@ def gen_source_files(
                 return headers
 
         backend_index = backend_indices[dispatch_key]
-        ns_grouped_native_functions = defaultdict(list)
-        for grouped_native_function in grouped_native_functions:
-            namespace = (
-                grouped_native_function.namespace
-                if isinstance(grouped_native_function, NativeFunction)
-                else grouped_native_function.functional.namespace
-            )
-            ns_grouped_native_functions[namespace].append(grouped_native_function)
-
         dispatch_namespace = str(dispatch_key).lower()
 
         # CompositeImplicitAutogradNestdTensor does not currently user the helpers generated
