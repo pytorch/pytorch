@@ -1923,6 +1923,19 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
     M, N, K = 512, 512, 512
 
+    def _supports_scalar_reduce(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            NVUniversalGemmScheduling,
+        )
+
+        return NVUniversalGemmScheduling._supports_scalar_reduce()
+
+    def _assert_scalar_reduce_marker(self, code, marker):
+        if self._supports_scalar_reduce():
+            self.assertIn(marker, code)
+        else:
+            self.assertNotIn("'local_reduce': GemmReductionArguments", code)
+
     def _compile_and_check(self, fn, *args):
         torch._dynamo.reset()
         with (
@@ -2564,7 +2577,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self.assertIn("output=", code)
+        self._assert_scalar_reduce_marker(code, "output=")
 
         if case == (1, "sum", 32):
             if not has_triton_reduction_ordering():
@@ -2641,7 +2654,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertIn("'local_reduce_type': 'mean'", code)
+        self._assert_scalar_reduce_marker(code, "'local_reduce_type': 'mean'")
 
     def test_scaled_mm_grouped_reduce_source_fusion(self):
         m, n, k, group = 128, 128, 512, 32
@@ -2676,11 +2689,14 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self.assertIn("output=", code)
-        self.assertNotIn("_LOCAL_REDUCE_SOURCE_FN_SRC", code)
-        self.assertIn("reduction_type=None", code)
-        self.assertIn("source_fn=None", code)
-        self.assertIn(" * ", code)
+        if self._supports_scalar_reduce():
+            self.assertIn("output=", code)
+            self.assertNotIn("_LOCAL_REDUCE_SOURCE_FN_SRC", code)
+            self.assertIn("reduction_type=None", code)
+            self.assertIn("source_fn=None", code)
+            self.assertIn(" * ", code)
+        else:
+            self.assertNotIn("'local_reduce': GemmReductionArguments", code)
 
     @config.patch(emulate_precision_casts=True)
     def test_scaled_mm_grouped_reduce_rejects_intermediate_fp16(self):
@@ -2748,7 +2764,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertIn("feeds_main=True", code)
+        self._assert_scalar_reduce_marker(code, "feeds_main=True")
         self.assertNotIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
 
     def test_scaled_mm_grouped_reduce_raw_feed_and_finalized_output(self):
