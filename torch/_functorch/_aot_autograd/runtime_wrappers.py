@@ -245,19 +245,23 @@ def _replay_input_mutation(
     compile_id: str | None,
     warned: set[int],
     hidden: bool,
+    under_no_grad: bool,
 ) -> None:
     """Write functionalized input mutation ``idx`` back onto the caller's tensor.
 
     A tracked ``copy_``, except under grad mode onto a requires-grad view stamped
     IN_CUSTOM_FUNCTION (an input a custom autograd.Function returned as-is),
     which autograd then refuses to modify in place: that write is replayed under
-    no_grad with the version counter preserved, as a ``.data`` write did in
-    eager. With grad mode off eager itself writes such a view tracked, version
+    no_grad. With grad mode off eager itself writes such a view tracked, version
     bump included, so the plain copy_ stands. Decided per call: nothing guards
     the view's provenance. The invisible replay deliberately diverges from eager,
     which raises on a visible write, and warns once per input (``warned`` is the
-    owning epilogue's set) unless ``hidden`` says the traced write was itself
-    invisible to autograd.
+    owning epilogue's set). ``hidden`` (the traced write bypassed autograd, e.g.
+    through ``.data``) replays with the version counter preserved and does not
+    warn; ``under_no_grad`` (the traced write ran under no_grad or inference
+    mode) replays as a plain no_grad ``copy_``, which bumps the version counter
+    as eager's write did so a stale saved tensor is still caught, and does not
+    warn either.
     """
     # pybind11 hands back a fresh enum object each call, so this cannot be `is`.
     if (
@@ -267,7 +271,7 @@ def _replay_input_mutation(
         and torch._C._autograd._get_creation_meta(orig)
         == torch._C._autograd.CreationMeta.IN_CUSTOM_FUNCTION
     ):
-        if not hidden and idx not in warned:
+        if not (hidden or under_no_grad) and idx not in warned:
             warned.add(idx)
             graph = f" of compiled graph [{compile_id}]" if compile_id else ""
             warnings.warn(
@@ -279,8 +283,12 @@ def _replay_input_mutation(
                 ".data), so it replays the mutation invisibly and gradients that "
                 "later flow through this input see its pre-mutation history only."
             )
-        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(orig):
-            orig.copy_(updated)
+        with torch.no_grad():
+            if under_no_grad and not hidden:
+                orig.copy_(updated)
+            else:
+                with torch.autograd._unsafe_preserve_version_counter(orig):
+                    orig.copy_(updated)
     else:
         orig.copy_(updated)
 
@@ -856,8 +864,8 @@ class _RuntimeForwardEpilogue:
                         inpt_idx,
                         self.runtime_metadata.compile_id_str,
                         self.warned_inputs,
-                        meta.mutations_hidden_from_autograd
-                        or meta.mutations_under_no_grad_or_inference_mode,
+                        meta.mutations_hidden_from_autograd,
+                        meta.mutations_under_no_grad_or_inference_mode,
                     )
 
     def _replay_output_aliases(
@@ -1207,13 +1215,12 @@ def _create_runtime_wrapper(
                         )
                         write_back = f"raise RuntimeError({msg_name})"
                     else:
-                        hidden = (
-                            meta.mutations_hidden_from_autograd
-                            or meta.mutations_under_no_grad_or_inference_mode
-                        )
+                        hidden = meta.mutations_hidden_from_autograd
+                        no_grad = meta.mutations_under_no_grad_or_inference_mode
                         cid = runtime_metadata.compile_id_str
                         args = (
-                            f"{oi}, {ui}, {inpt_idx}, {cid!r}, _warned_inputs, {hidden}"
+                            f"{oi}, {ui}, {inpt_idx}, {cid!r}, _warned_inputs, "
+                            f"{hidden}, {no_grad}"
                         )
                         write_back = f"_replay_input_mutation({args})"
                     if meta.is_leaf:

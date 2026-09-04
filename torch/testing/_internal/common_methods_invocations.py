@@ -13244,16 +13244,6 @@ op_db: list[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, )),
                        DecorateInfo(unittest.skip("Skipped! conj_physical_ not implemented for sparse"),
                                     'TestSparseUnaryUfuncs', 'test_inplace'),
-                       # RuntimeError: false INTERNAL ASSERT FAILED at
-                       # "/Users/kurtamohler/develop/pytorch-1/aten/src/ATen/native/DispatchStub.cpp":276
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                           device_type='mps', dtypes=(torch.complex64,)
-                       ),
-                       # RuntimeError: Expected self.is_complex() to be true, but got false.
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-
                    )),
     OpInfo('resolve_conj',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
