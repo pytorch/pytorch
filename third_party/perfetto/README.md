@@ -1,8 +1,8 @@
 # Perfetto C++ Tracing SDK (vendored amalgamation)
 
 This directory vendors the Perfetto C++ Tracing SDK *amalgamation* -- the two
-self-contained files `sdk/perfetto.h` and `sdk/perfetto.cc`. The CUPTI monitor's
-native `.pftrace` encoder (`torch/csrc/profiler/cupti/monitor_pftrace.cpp`) uses
+self-contained files `sdk/perfetto.h` and `sdk/perfetto.cc`. Cuspy's
+native `.pftrace` encoder (`torch/csrc/profiler/cuspy/cuspy_pftrace.cpp`) uses
 the protozero message builders from these files to emit Perfetto traces.
 
 Only the amalgamation is vendored, not the full Perfetto source tree: the
