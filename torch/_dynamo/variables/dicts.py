@@ -488,7 +488,7 @@ class ConstDictVariable(VariableTracker):
         from .iter import DictIterator
 
         if self.source and not is_constant_source(self.source):
-            install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+            self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
         return DictIterator(self.items.keys())
 
