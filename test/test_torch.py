@@ -3491,6 +3491,67 @@ class TestTorchDeviceType(TestCase):
             dst.copy_(src.conj())
             self.assertEqual(dst, src.conj_physical())
 
+    # Exercises the tiled CUDA kernel for dense 2D transpose copies. The
+    # shapes are deliberately larger than the 4 MB dispatch threshold, and
+    # cover 1/2/4/8-byte elements plus non-multiple-of-32 extents.
+    @onlyCUDA
+    @dtypes(torch.uint8, torch.float16, torch.bfloat16,
+            torch.float32, torch.float64, torch.complex64)
+    def test_copy_transpose_tiled(self, device, dtype):
+        for h, w in ((2048, 2048), (1024, 4096), (4096, 1024), (1000, 4099)):
+            src = make_tensor((h, w), dtype=dtype, device=device)
+            out = src.t().contiguous()
+            self.assertEqual(out.shape, (w, h))
+            self.assertTrue(out.is_contiguous())
+            # bitwise-exact: a transpose copy must not perturb values
+            self.assertEqual(out, src.t(), atol=0, rtol=0)
+            self.assertEqual(out.cpu(), src.cpu().t().contiguous(), atol=0, rtol=0)
+        # uint8 needs larger extents to clear the 4 MB gate at 1 byte/element;
+        # (1000, 4099) above is below threshold for 1-byte types, so the
+        # partial-tile path would otherwise go untested there.
+        if dtype == torch.uint8:
+            for h, w in ((2001, 4099), (2048, 4099)):
+                src = make_tensor((h, w), dtype=dtype, device=device)
+                out = src.t().contiguous()
+                self.assertEqual(out.cpu(), src.cpu().t().contiguous(), atol=0, rtol=0)
+        base = make_tensor((4096, 8192), dtype=dtype, device=device)
+        for view in (base[:, :4096], base[:2048], base[::2]):
+            out = view.t().contiguous()
+            self.assertEqual(out.cpu(), view.cpu().t().contiguous(), atol=0, rtol=0)
+
+    # Shapes that must NOT take the tiled path, to guard the dispatch check.
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_copy_transpose_tiled_rejects(self, device, dtype):
+        big = make_tensor((4096, 4096), dtype=dtype, device=device)
+
+        # broadcast source: zero stride
+        expanded = make_tensor((1, 4096), dtype=dtype, device=device).expand(4096, 4096)
+        self.assertEqual(expanded.contiguous().cpu(), expanded.cpu(), atol=0, rtol=0)
+
+        # dtype conversion alongside the transpose
+        casted = big.t().to(torch.float64)
+        self.assertEqual(casted.cpu(), big.cpu().t().to(torch.float64), atol=0, rtol=0)
+
+    # Pins the 4 MB dispatch threshold and the element-size switch.
+    @onlyCUDA
+    def test_copy_transpose_tiled_boundary(self, device):
+        # 1024x1024 fp32 is exactly 4 MB, the first size that takes the tiled
+        # path; 1024x1023 is the last that does not. Both must be correct.
+        for w in (1023, 1024):
+            src = make_tensor((1024, w), dtype=torch.float32, device=device)
+            out = src.t().contiguous()
+            self.assertEqual(out.cpu(), src.cpu().t().contiguous(), atol=0, rtol=0)
+        # 16-byte elements hit the default arm of the element-size switch and
+        # must fall through to the generic path rather than dispatching.
+        src = make_tensor((1024, 1024), dtype=torch.complex128, device=device)
+        self.assertEqual(src.t().contiguous().cpu(),
+                         src.cpu().t().contiguous(), atol=0, rtol=0)
+        # bool is 1 byte and rides the uint8 instantiation.
+        src = torch.randint(0, 2, (2048, 4099), dtype=torch.bool, device=device)
+        self.assertEqual(src.t().contiguous().cpu(),
+                         src.cpu().t().contiguous(), atol=0, rtol=0)
+
     def test_clone_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
             x = torch.tensor((1, 1), dtype=dt, device=device)
