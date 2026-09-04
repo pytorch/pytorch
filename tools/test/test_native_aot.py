@@ -308,7 +308,7 @@ class TestNativeAotWorkflow(unittest.TestCase):
     )
 
     def _workflow(self) -> str:
-        path = os.path.join(self.REPO, ".github/workflows/b200-native-aot.yml")
+        path = os.path.join(self.REPO, ".github/workflows/native-aot.yml")
         with open(path) as f:
             return f.read()
 

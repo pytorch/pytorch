@@ -1,5 +1,5 @@
 # Owner(s): ["module: dsl-native-ops"]
-name: CI for native-AOT embedded DSL kernels on B200
+name: CI for native-AOT embedded DSL kernels
 
 # Exercises the full native-AOT path: stage 2 of the build exports the DSL kernels and
 # embeds them in libtorch_cuda, then the test job asserts the wheel carries them and
@@ -9,7 +9,7 @@ name: CI for native-AOT embedded DSL kernels on B200
 on:
   pull_request:
     paths:
-      - .github/workflows/b200-native-aot.yml
+      - .github/workflows/native-aot.yml
       - tools/native_aot/**
       - torch/_native/**
       - torchgen/native_aot.py
@@ -29,7 +29,7 @@ on:
     - cron: 15 7 * * *  # about 12:15am PDT
   push:
     tags:
-      - ciflow/b200-native-aot/*
+      - ciflow/native-aot/*
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
