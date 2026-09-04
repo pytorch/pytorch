@@ -5725,6 +5725,8 @@ class TestDistributionShapes(DistributionsTestCase):
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestKL(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
 
@@ -6250,6 +6252,8 @@ class TestKL(DistributionsTestCase):
 
 
 class TestConstraints(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_params_constraints(self):
         normalize_probs_dists = (
             Categorical,
@@ -6307,6 +6311,8 @@ class TestConstraints(DistributionsTestCase):
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestNumericalStability(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_pdf_score(
         self,
         dist_class,
@@ -6588,6 +6594,8 @@ class TestNumericalStability(DistributionsTestCase):
 
 # TODO: make this a pytest parameterized test
 class TestLazyLogitsInitialization(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # ContinuousBernoulli is not tested because log_prob is not computed simply
@@ -6992,6 +7000,8 @@ class TestFunctors(DistributionsTestCase):
 
 
 class TestValidation(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_valid(self):
         for Dist, params in _get_examples():
             for param in params:
@@ -7082,6 +7092,8 @@ class TestValidation(DistributionsTestCase):
 
 
 class TestJit(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _examples(self):
         for Dist, params in _get_examples():
             for param in params:
