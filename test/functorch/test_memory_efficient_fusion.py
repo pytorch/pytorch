@@ -509,7 +509,10 @@ class RandomOpTestCase(TestCase):
 
 
 instantiate_device_type_tests(
-    TestMemoryEfficientOpAuthoringDevice, globals(), only_for=("cuda",)
+    TestMemoryEfficientOpAuthoringDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 
 
