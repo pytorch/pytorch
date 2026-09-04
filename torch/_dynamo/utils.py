@@ -41,6 +41,7 @@ import time
 import traceback
 import types
 import typing
+import unicodedata
 import uuid
 import warnings
 import weakref
@@ -5113,6 +5114,23 @@ def _fix_offset(str: str, offset: int) -> int:
     return len(as_utf8[:offset].decode("utf-8", errors="replace"))
 
 
+def _expand_source_and_marker(source: str, marker: str) -> tuple[str, str]:
+    expanded_source: list[str] = []
+    expanded_marker: list[str] = []
+    column = 0
+    for index, char in enumerate(source):
+        if char == "\t":
+            width = 8 - column % 8
+            expanded_source.append(" " * width)
+        else:
+            width = 2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1
+            expanded_source.append(char)
+        if index < len(marker):
+            expanded_marker.append(marker[index] * width)
+        column += width
+    return "".join(expanded_source), "".join(expanded_marker)
+
+
 @dataclasses.dataclass
 class _Anchors:
     # inclusive
@@ -5305,6 +5323,7 @@ def format_source_range(
         and end_lineno != lineno
         and col_offset is not None
         and end_col_offset is not None
+        and not any("\t" in line for line in source_lines)
     ):
         # Keep single-line ranges on Dynamo's manual path. The stdlib traceback
         # formatter is useful for multiline spans on 3.13+, but for single-line
@@ -5391,6 +5410,7 @@ def format_source_range(
 
     result = ""
     for line, marker in zip(source_lines, markers):
+        line, marker = _expand_source_and_marker(line, marker)
         result += line + "\n"
         result += marker + "\n"
     return result

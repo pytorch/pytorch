@@ -103,6 +103,7 @@ from .exc import (
     BackendCompilerFailed,
     collapse_resume_frames,
     format_frame_info,
+    format_user_stack,
     get_stack_above_dynamo,
     raise_observed_exception,
     raise_value_error,
@@ -5197,10 +5198,8 @@ class InstructionTranslatorBase(
     ) -> str:
         if additional_stack_frames is None:
             additional_stack_frames = []
-        return "".join(
-            traceback.format_list(
-                [self.frame_summary()] + list(reversed(additional_stack_frames))
-            )
+        return format_user_stack(
+            [self.frame_summary()] + list(reversed(additional_stack_frames))
         )
 
     def frame_summary(self) -> traceback.FrameSummary:
@@ -5208,6 +5207,7 @@ class InstructionTranslatorBase(
         # colno/end_colno kwargs were added to FrameSummary in 3.11
         kwargs: dict[str, Any] = {}
         if sys.version_info >= (3, 11) and positions is not None:
+            kwargs["end_lineno"] = positions.end_lineno
             kwargs["colno"] = positions.col_offset
             kwargs["end_colno"] = positions.end_col_offset
         return traceback.FrameSummary(
@@ -5345,13 +5345,11 @@ class InstructionTranslatorBase(
         stack_above_dynamo_formatted = ""
         if config.verbose:
             stack_above_dynamo = get_stack_above_dynamo()
-            stack_above_dynamo_formatted = "".join(
-                traceback.format_list(stack_above_dynamo)
-            )
+            stack_above_dynamo_formatted = format_user_stack(stack_above_dynamo)
         else:
             user_stack = get_stack_above_dynamo() + user_stack  # type: ignore[assignment]
             user_stack = collapse_resume_frames(user_stack)
-        user_stack_formatted = "".join(traceback.format_list(user_stack))
+        user_stack_formatted = format_user_stack(user_stack)
 
         # Add HOP context after the first line of reason if present
         if exc is not None:

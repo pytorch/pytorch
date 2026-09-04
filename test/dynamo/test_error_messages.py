@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import operator
 import re
 import sys
 import traceback
@@ -21,7 +22,7 @@ from torch._dynamo.exc import (
     TorchRuntimeError,
     Unsupported,
 )
-from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
+from torch._dynamo.testing import skipIfNotPy311, skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import IS_FBCODE, IS_S390X, munge_exc
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -236,6 +237,10 @@ from user code:
             with obj:
                 return 1
 
+        def post_munge(s):
+            # Python 3.11 attributes BEFORE_WITH to the whole with statement.
+            return s.replace("\n        return 1", "")
+
         self.assertExpectedInlineMunged(
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(3),
@@ -253,6 +258,7 @@ Unsupported context manager
 from user code:
    File "test_error_messages.py", line N, in fn
     with obj:""",
+            post_munge=post_munge,
         )
 
     def test_backend_fake_tensor_exc(self):
@@ -262,11 +268,12 @@ from user code:
         def fn(x):
             return x + 1
 
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend=bad_backend, fullgraph=True)(
-                torch.ones(3, 3)
-            ),
+        with self.assertRaises(Unsupported) as cm:
+            torch.compile(fn, backend=bad_backend, fullgraph=True)(torch.ones(3, 3))
+
+        msg = munge_exc(cm.exception, suppress_suffix=True)
+        self.assertExpectedInline(
+            msg,
             """\
 Backend compiler exception
   Explanation: Backend compiler `bad_backend` failed with test. Adding a graph break.
@@ -281,6 +288,20 @@ Backend compiler exception
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0219.html""",
         )
+
+        if sys.version_info >= (3, 11):
+            msg_with_carets = munge_exc(
+                cm.exception,
+                suppress_suffix=True,
+                strip_carets=False,
+            )
+            self.assertIn(
+                """\
+      File "test_error_messages.py", line N, in fn
+        return x + 1
+        ^^^^^^^^^^^^""",
+                msg_with_carets,
+            )
 
     @make_logging_test()
     def test_backend_fake_tensor_exc_no_warning(self, records):
@@ -832,6 +853,11 @@ User code traceback:
 
             return Foo
 
+        def post_munge(s):
+            # Python 3.11+ column metadata can identify the whole class
+            # definition span, including the indented body line.
+            return re.sub(r"\n        pass(?=\n|\Z)", "", s)
+
         self.assertExpectedInlineMunged(
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
@@ -847,6 +873,7 @@ Invalid call to __build_class__
 from user code:
    File "test_error_messages.py", line N, in fn
     class Foo:""",
+            post_munge=post_munge,
         )
 
     @skipIfNotPy312
@@ -1105,6 +1132,14 @@ from user code:
                 tensors = torch.clamp(tensors, min=-clamp_value, max=clamp_value)
             return tensors
 
+        def post_munge(s):
+            # Python 3.11 attributes the conditional jump to the whole if body.
+            return s.replace(
+                "\n        clamp_value = torch.finfo(tensors.dtype).max - offset"
+                "\n        tensors = torch.clamp(tensors, min=-clamp_value, max=clamp_value)",
+                "",
+            )
+
         self.assertExpectedInlineMunged(
             Unsupported,
             lambda: torch.compile(
@@ -1125,6 +1160,7 @@ Data-dependent branching
 from user code:
    File "test_error_messages.py", line N, in cast_overflow_tensors
     if tensors.isinf().any() or tensors.isnan().any():""",
+            post_munge=post_munge,
         )
 
     # Test that the bytecode source attribution is correct with VariableTracker
@@ -1303,6 +1339,71 @@ from user code:
 Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
 
 """,
+        )
+
+    @skipIfNotPy311
+    def test_from_user_code_traceback_carets(self):
+        def gn():
+            torch._dynamo.graph_break()
+
+        def fn(x):
+            return gn()
+
+        with self.assertRaises(Unsupported) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
+
+        msg = munge_exc(
+            cm.exception,
+            suppress_suffix=True,
+            strip_carets=False,
+        )
+        self.assertExpectedInline(
+            msg,
+            """\
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return gn()
+           ~~^^
+  File "test_error_messages.py", line N, in gn
+    torch._dynamo.graph_break()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^""",
+        )
+
+    @skipIfNotPy311
+    def test_tensor_item_graph_break_warning_caret_points_to_item(self):
+        from torch._dynamo.variables.tensor import TensorVariable
+
+        self.addCleanup(TensorVariable._warn_capture_scalar_outputs.cache_clear)
+        TensorVariable._warn_capture_scalar_outputs.cache_clear()
+
+        def fn(a, b):
+            torch._check(operator.or_(a.item() == 5, b.item() == 5))
+
+        with (
+            torch._dynamo.config.patch(capture_scalar_outputs=False),
+            self.assertLogs("torch._dynamo.variables.tensor", level="WARNING") as logs,
+        ):
+            torch.compile(fn, backend="eager")(torch.tensor([5]), torch.tensor([100]))
+
+        msg = munge_exc(
+            "\n".join(logs.output),
+            suppress_suffix=True,
+            strip_carets=False,
+        )
+        self.assertIn(
+            """\
+  File "test_error_messages.py", line N, in fn
+    torch._check(operator.or_(a.item() == 5, b.item() == 5))
+                              ~~~~~~^^""",
+            msg,
         )
 
     @torch._dynamo.config.patch(verbose=True)
