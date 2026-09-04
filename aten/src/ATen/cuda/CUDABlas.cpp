@@ -1939,8 +1939,12 @@ void scaled_gemm(
   TORCH_INTERNAL_ASSERT(c_ptr != nullptr || beta_val == 0.0f);
   TORCH_INTERNAL_ASSERT(c_ptr == nullptr || bias_ptr == nullptr);
 #ifdef USE_ROCM
+  // Cdesc is unused on ROCm (c_ptr is never set, beta is 0), but hipblaslt
+  // needs it set to something reasonable.
   const auto c_desc_dtype = result_dtype;
 #else
+  // Without a C operand, Cdesc describes the bias, matching the pre-existing
+  // bias epilogue. With a C operand it must describe C itself.
   const auto c_desc_dtype = c_ptr == nullptr ? bias_dtype : result_dtype;
 #endif
   CuBlasLtMatrixLayout Cdesc(

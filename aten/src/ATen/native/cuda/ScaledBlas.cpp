@@ -9,7 +9,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/MemoryOverlap.h>
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
@@ -1458,21 +1457,6 @@ void check_swizzle_lengths(ScaledGemmImplementation impl,
   }
 }
 
-bool is_cublas_accumulator_layout(const Tensor& tensor) {
-  return tensor.dim() == 2 && tensor.stride(1) == 1 &&
-      tensor.stride(0) == std::max<int64_t>(1, tensor.size(1));
-}
-
-bool is_exact_alias(const Tensor& lhs, const Tensor& rhs) {
-  return lhs.is_same(rhs) ||
-      (lhs.is_alias_of(rhs) && lhs.const_data_ptr() == rhs.const_data_ptr() &&
-       lhs.sizes() == rhs.sizes() && lhs.strides() == rhs.strides());
-}
-
-bool is_aligned_for_cublas(const Tensor& tensor) {
-  return reinterpret_cast<uintptr_t>(tensor.const_data_ptr()) % 16 == 0;
-}
-
 // Shared v2 implementation for scaled_mm and scaled_addmm. The accumulator
 // path is limited to recipes that execute through cuBLASLt.
 void scaled_mm_cuda_v2_impl(
@@ -1500,14 +1484,13 @@ void scaled_mm_cuda_v2_impl(
       !accumulator.has_value(), op_name, " is not implemented for ROCm");
 #endif
   if (accumulator) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(is_cublas_accumulator_layout(*accumulator));
+    // Layout was validated by the meta function; cuBLASLt additionally needs
+    // a 16-byte aligned C pointer, which in-place callers can violate.
     TORCH_CHECK_VALUE(
-        is_aligned_for_cublas(*accumulator),
+        reinterpret_cast<uintptr_t>(accumulator->const_data_ptr()) % 16 == 0,
         "input data pointer must be 16-byte aligned");
     TORCH_CHECK_VALUE(
-        !accumulator->is_conj() && !accumulator->is_neg() &&
-            !out.is_conj() && !out.is_neg(),
-        "input and out must not have conjugate or negative view bits set");
+        !accumulator->is_neg(), "input must not be a negative view");
   }
 
   // Materialize the scale lists so the existing acceptance helpers (which
@@ -1520,6 +1503,8 @@ void scaled_mm_cuda_v2_impl(
   // If any of M, K, N is 0 - return early (the float8/float4 gemm kernels
   // do not support this case). The output has already been sized by the
   // structured-op meta function; we only need to zero-fill when K=0.
+  // scaled_addmm still owes `beta * input` for empty shapes, so it handles
+  // this case together with alpha == 0 after recipe validation below.
   if (!accumulator &&
       (mat_a.size(0) == 0 || mat_a.size(1) == 0 || mat_b.size(1) == 0)) {
     if (mat_a.size(1) == 0) {
@@ -1601,24 +1586,8 @@ void scaled_mm_cuda_v2_impl(
     checkAllSameGPU(__func__, targs);
   }
 
-  bool accumulator_is_out = false;
-  if (accumulator) {
-    accumulator_is_out = is_exact_alias(out, *accumulator);
-    at::assert_no_internal_overlap(out);
-    if (!accumulator_is_out) {
-      at::assert_no_overlap(out, *accumulator);
-    }
-    at::assert_no_overlap(out, mat_a);
-    at::assert_no_overlap(out, mat_b);
-    for (const auto& scale : scale_a) {
-      at::assert_no_overlap(out, scale);
-    }
-    for (const auto& scale : scale_b) {
-      at::assert_no_overlap(out, scale);
-    }
-  }
-
   auto out_dtype_ = out.scalar_type();
+  Tensor& out_mut = const_cast<Tensor&>(out);
 
   // Conversion of implicitly-defined enums to explicit
   auto scale_recipe_a_enum = convert_int_to_enum<ScalingType>(scale_recipe_a);
@@ -1674,11 +1643,10 @@ void scaled_mm_cuda_v2_impl(
     epilogue.alpha = alpha.to<float>();
     if (mat_a.size(0) == 0 || mat_a.size(1) == 0 ||
         mat_b.size(1) == 0 || epilogue.alpha == 0.0f) {
-      Tensor& result = const_cast<Tensor&>(out);
       if (epilogue.beta == 0.0f) {
-        result.zero_();
+        out_mut.zero_();
       } else {
-        at::mul_out(result, *accumulator, beta);
+        at::mul_out(out_mut, *accumulator, beta);
       }
       return;
     }
@@ -1687,12 +1655,6 @@ void scaled_mm_cuda_v2_impl(
     }
   }
 
-  Tensor temporary;
-  if (accumulator && !accumulator_is_out &&
-      (!is_cublas_accumulator_layout(out) || !is_aligned_for_cublas(out))) {
-    temporary = at::empty(out.sizes(), out.options());
-  }
-  Tensor& kernel_out = temporary.defined() ? temporary : const_cast<Tensor&>(out);
   // dispatch to appropriate lower-level calls for error checking & execution
   if (gemm_impl == ScaledGemmImplementation::TENSORWISE_TENSORWISE) {
     _scaled_tensorwise_tensorwise(
@@ -1703,7 +1665,7 @@ void scaled_mm_cuda_v2_impl(
         bias,
         out_dtype_,
         use_fast_accum,
-        kernel_out,
+        out_mut,
         epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::ROWWISE_ROWWISE) {
     _scaled_rowwise_rowwise(
@@ -1714,7 +1676,7 @@ void scaled_mm_cuda_v2_impl(
         bias,
         out_dtype_,
         use_fast_accum,
-        kernel_out,
+        out_mut,
         epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::BLOCK_128x128_1x128) {
     _scaled_block128x128_block1x128(
@@ -1725,7 +1687,7 @@ void scaled_mm_cuda_v2_impl(
         bias,
         out_dtype_,
         use_fast_accum,
-        kernel_out,
+        out_mut,
         epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::BLOCK_1x128_128x128) {
     _scaled_block1x128_block128x128(
@@ -1736,7 +1698,7 @@ void scaled_mm_cuda_v2_impl(
         bias,
         out_dtype_,
         use_fast_accum,
-        kernel_out,
+        out_mut,
         epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::BLOCK_1x128_1x128) {
     _scaled_block1x128_block1x128(
@@ -1747,7 +1709,7 @@ void scaled_mm_cuda_v2_impl(
         bias,
         out_dtype_,
         use_fast_accum,
-        kernel_out,
+        out_mut,
         epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::MXFP8_MXFP8) {
     _scaled_mxfp8_mxfp8(
@@ -1759,7 +1721,7 @@ void scaled_mm_cuda_v2_impl(
         swizzle_b_enum[0],
         bias,
         out_dtype_,
-        kernel_out,
+        out_mut,
         epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4) {
     _scaled_nvfp4_nvfp4(
@@ -1771,7 +1733,7 @@ void scaled_mm_cuda_v2_impl(
         swizzle_b_enum[0],
         bias,
         out_dtype_,
-        kernel_out,
+        out_mut,
         scale_a[1],
         scale_b[1],
         epilogue);
@@ -1785,19 +1747,16 @@ void scaled_mm_cuda_v2_impl(
         swizzle_b_enum[0],
         bias,
         out_dtype_,
-        kernel_out,
+        out_mut,
         std::nullopt,
         std::nullopt,
         epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::MXFP4_MXFP4) {
-    _scaled_mxfp4_mxfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, kernel_out);
+    _scaled_mxfp4_mxfp4(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out_mut);
   } else {
     TORCH_CHECK_VALUE(false, "Invalid state - found an implementation, but not really");
   }
 
-  if (temporary.defined()) {
-    const_cast<Tensor&>(out).copy_(temporary);
-  }
 }
 
 } // namespace
