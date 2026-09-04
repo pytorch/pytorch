@@ -1028,11 +1028,14 @@ class _TargetArgsExpr(_TargetExpr):
         if (
             _is_commutative_binary_tensor_op(node)
             and len(_args) == len(self.args) == 2
+            # aten.add.Tensor(a, b, alpha=k) means a + k*b which is only
+            # commutative when alpha is absent or equals 1.
+            and node.kwargs.get("alpha", 1) == 1
         ):
             # `add`/`mul` are commutative, so e.g. `attn_mask + scores` should
             # match the same pattern as `scores + attn_mask`. Try both operand
             # orders, only committing the matched state to ctx on success.
-            swapped_items = node_items[:2][::-1] + node_items[2:]
+            swapped_items = list(node_items[:2][::-1]) + list(node_items[2:])
             return self._match_commutative(
                 node, ctx, self_items, node_items, swapped_items
             )

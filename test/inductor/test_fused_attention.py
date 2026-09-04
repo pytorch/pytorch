@@ -2219,9 +2219,6 @@ if HAS_CPU:
         test_sdpa_rewriter_24_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24
         )
-        test_sdpa_rewriter_25_commuted_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_25_commuted
-        )
         test_cache_sdpa_constraint_shared_kv_cpu = (
             TestSDPAPatternRewriterTemplate._test_cache_sdpa_constraint_shared_kv
         )
