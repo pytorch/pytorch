@@ -37,9 +37,10 @@ from torch._prims_common import is_float_dtype
 from torch.autograd.functional import vjp
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     get_gcc_major_version,
-    instantiate_parametrized_tests,
+    HardwareClassification,
     IS_ARM64,
     IS_CI,
     IS_CPU_EXT_SVE_SUPPORTED,
@@ -151,8 +152,9 @@ class LstmModule(torch.nn.Module):
         return x, h
 
 
-@instantiate_parametrized_tests
 class CPUReproTests(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     common = check_model
 
     @skipIfNoLapack
@@ -7689,6 +7691,8 @@ class CPUReproTests(TestCase):
         )
         self.assertTrue(cuda_storage.has_exceeded_max_reads())
 
+
+instantiate_device_type_tests(CPUReproTests, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
