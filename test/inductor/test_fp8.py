@@ -46,7 +46,10 @@ from torch.testing._internal.inductor_utils import (
     is_big_gpu,
 )
 from torch.utils._sympy.symbol import SymT
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import (
+    has_datacenter_blackwell_tma_device,
+    has_triton_tma_device,
+)
 
 
 _PRIOR_FP32_MATMUL_PRECISION: str | None = None
@@ -1136,6 +1139,536 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize(
+        "shape",
+        (
+            (32, 64, 64),
+            (256, 768, 512),
+            (384, 128, 1280),
+            (512, 512, 512),
+            (256, 128, 256),
+            (256, 256, 128),
+        ),
+    )
+    def test_deepseek_blockwise_scaling_sm100(self, shape, device):
+        from torch._inductor.select_algorithm import (
+            add_preprocessing_fn,
+            clear_preprocessing_fns,
+        )
+
+        M, N, K = shape
+        tile_size = 128
+        k_blocks = ceil_div(K, tile_size)
+        padded_k_blocks = ceil_div(k_blocks, 4) * 4
+        n_blocks = ceil_div(N, tile_size)
+
+        torch.manual_seed(0)
+        a = torch.randint(-8, 9, (M, K), device=device).to(torch.float8_e4m3fn)
+        b = torch.randint(-8, 9, (N, K), device=device).to(torch.float8_e4m3fn)
+        b = b.t()
+
+        scale_a = (
+            (torch.arange(k_blocks * M, device=device).reshape(k_blocks, M) % 13)
+            .add(1)
+            .float()
+            .div(128)
+            .t()
+        )
+        scale_b_storage = torch.zeros(
+            n_blocks, padded_k_blocks, dtype=torch.float32, device=device
+        )
+        scale_b_storage[:, :k_blocks] = (
+            torch.arange(n_blocks * k_blocks, device=device)
+            .reshape(n_blocks, k_blocks)
+            .remainder(7)
+            .add(1)
+            .float()
+            .div(128)
+        )
+        scale_b = scale_b_storage.t()
+
+        self.assertEqual(scale_a.shape, (M, k_blocks))
+        self.assertEqual(scale_a.stride(), (1, M))
+        self.assertEqual(scale_b.shape, (padded_k_blocks, n_blocks))
+        self.assertEqual(scale_b.stride(), (1, padded_k_blocks))
+
+        scale_a_full = scale_a.repeat_interleave(tile_size, dim=1)[:, :K]
+        scale_b_full = scale_b[:k_blocks].repeat_interleave(tile_size, dim=0)
+        scale_b_full = scale_b_full.repeat_interleave(tile_size, dim=1)[:K, :N]
+        expected = ((a.float() * scale_a_full) @ (b.float() * scale_b_full)).to(
+            torch.bfloat16
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                ScalingType.BlockWise1x128,
+                scale_b,
+                ScalingType.BlockWise128x128,
+                output_dtype=torch.bfloat16,
+                use_fast_accum=False,
+            )
+
+        generic_name = "triton_scaled_mm_device_tma_main_loop_scaling_"
+        ws_name = "triton_blackwell_ws_persistent_device_tma_main_loop_scaling_"
+        choice_records = []
+
+        def record_and_keep_ws_tail(choices):
+            choice_records.extend(
+                (choice.name, choice.description) for choice in choices
+            )
+            generic_choices = [
+                choice for choice in choices if generic_name in choice.name
+            ]
+            ws_choices = [choice for choice in choices if ws_name in choice.name]
+            self.assertFalse(generic_choices, choice_records)
+            forced_choices = [
+                choice
+                for choice in ws_choices
+                if "BLOCK_K=128" in choice.description
+                and "BLOCK_M=128" in choice.description
+                and "BLOCK_N=128" in choice.description
+            ]
+            self.assertTrue(forced_choices, choice_records)
+            return forced_choices[:1]
+
+        torch._dynamo.reset()
+        add_preprocessing_fn(record_and_keep_ws_tail)
+        try:
+            with config.patch(
+                {
+                    "fx_graph_cache": False,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": True,
+                    "test_configs.autotune_choice_name_regex": None,
+                    "test_configs.autotune_choice_desc_regex": None,
+                }
+            ):
+                actual, code = run_and_get_code(
+                    torch.compile(fn, backend="inductor", fullgraph=True),
+                    a,
+                    b,
+                    scale_a,
+                    scale_b,
+                )
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        self.assertEqual(actual, expected, rtol=5e-2, atol=5e-2)
+        FileCheck().check(
+            f"SCALE_RECIPE_A : tl.constexpr = {ScalingType.BlockWise1x128.value}"
+        ).run(code[0])
+        FileCheck().check(
+            f"SCALE_RECIPE_B : tl.constexpr = {ScalingType.BlockWise128x128.value}"
+        ).run(code[0])
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize("api", ("v1", "v2"))
+    @parametrize("recipe_case", ("a1_b128", "a1_b1", "a128_b1"))
+    def test_deepseek_blockwise_scale_layouts(self, api: str, recipe_case: str, device):
+        from torch._inductor.select_algorithm import (
+            add_preprocessing_fn,
+            clear_preprocessing_fns,
+        )
+
+        M, N, K = 256, 320, 384
+        tile_size = 128
+        k_blocks = ceil_div(K, tile_size)
+        padded_k_blocks = ceil_div(k_blocks, 4) * 4
+        recipe_a, recipe_b = {
+            "a1_b128": (
+                ScalingType.BlockWise1x128,
+                ScalingType.BlockWise128x128,
+            ),
+            "a1_b1": (
+                ScalingType.BlockWise1x128,
+                ScalingType.BlockWise1x128,
+            ),
+            "a128_b1": (
+                ScalingType.BlockWise128x128,
+                ScalingType.BlockWise1x128,
+            ),
+        }[recipe_case]
+
+        def make_scale(recipe: ScalingType, outer_size: int, is_rhs: bool):
+            block_outer = 1 if recipe == ScalingType.BlockWise1x128 else tile_size
+            outer_blocks = ceil_div(outer_size, block_outer)
+            stored_k_blocks = (
+                padded_k_blocks
+                if api == "v2" and recipe == ScalingType.BlockWise128x128
+                else k_blocks
+            )
+            values = (
+                torch.arange(outer_blocks * stored_k_blocks, device=device)
+                .reshape(outer_blocks, stored_k_blocks)
+                .remainder(7 if is_rhs else 13)
+                .add(1)
+                .float()
+                .div(128)
+            )
+
+            if api == "v2":
+                scale = _prepare_blockwise_scale(
+                    values, block_outer, tile_size, transposed=False
+                )
+            elif is_rhs:
+                scale = (
+                    values.t().contiguous()
+                    if recipe == ScalingType.BlockWise1x128
+                    else values.t()
+                )
+            else:
+                scale = (
+                    values.t().contiguous().t()
+                    if recipe == ScalingType.BlockWise1x128
+                    else values
+                )
+
+            if recipe == ScalingType.BlockWise1x128:
+                if api == "v1" and is_rhs:
+                    expected_shape = (k_blocks, outer_size)
+                    expected_stride = (outer_size, 1)
+                else:
+                    expected_shape = (outer_size, k_blocks)
+                    expected_stride = (1, outer_size)
+            elif api == "v2":
+                expected_shape = (padded_k_blocks, outer_blocks)
+                expected_stride = (1, padded_k_blocks)
+            elif is_rhs:
+                expected_shape = (k_blocks, outer_blocks)
+                expected_stride = (1, k_blocks)
+            else:
+                expected_shape = (outer_blocks, k_blocks)
+                expected_stride = (k_blocks, 1)
+            self.assertEqual(scale.shape, expected_shape)
+            self.assertEqual(scale.stride(), expected_stride)
+
+            expanded = values[:, :k_blocks].repeat_interleave(block_outer, dim=0)
+            expanded = expanded.repeat_interleave(tile_size, dim=1)
+            expanded = expanded[:outer_size, :K]
+            return scale, expanded.t() if is_rhs else expanded
+
+        torch.manual_seed(0)
+        a = torch.randint(-8, 9, (M, K), device=device).to(torch.float8_e4m3fn)
+        b = torch.randint(-8, 9, (N, K), device=device).to(torch.float8_e4m3fn)
+        b = b.t()
+        scale_a, scale_a_full = make_scale(recipe_a, M, False)
+        scale_b, scale_b_full = make_scale(recipe_b, N, True)
+        expected = ((a.float() * scale_a_full) @ (b.float() * scale_b_full)).to(
+            torch.bfloat16
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            if api == "v1":
+                return torch._scaled_mm(
+                    a,
+                    b,
+                    scale_a,
+                    scale_b,
+                    out_dtype=torch.bfloat16,
+                    use_fast_accum=False,
+                )
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                recipe_a,
+                scale_b,
+                recipe_b,
+                output_dtype=torch.bfloat16,
+                use_fast_accum=False,
+            )
+
+        generic_name = "triton_scaled_mm_device_tma_main_loop_scaling_"
+        blackwell_name = "triton_blackwell_ws_persistent_device_tma_main_loop_scaling_"
+        blackwell_base_name = "triton_blackwell_ws_persistent_device_tma_"
+        choice_records = []
+
+        def record_and_force_template(choices):
+            choice_records.extend(
+                (choice.name, choice.description) for choice in choices
+            )
+            generic_choices = [
+                choice for choice in choices if generic_name in choice.name
+            ]
+            blackwell_choices = [
+                choice for choice in choices if blackwell_name in choice.name
+            ]
+            self.assertFalse(generic_choices, choice_records)
+            forced_choices = [
+                choice
+                for choice in blackwell_choices
+                if "BLOCK_K=128" in choice.description
+                and "BLOCK_M=64" in choice.description
+                and "BLOCK_N=256" in choice.description
+                and "num_stages=4" in choice.description
+                and "num_warps=4" in choice.description
+            ]
+            self.assertEqual(len(forced_choices), 1, choice_records)
+            return forced_choices
+
+        torch._dynamo.reset()
+        add_preprocessing_fn(record_and_force_template)
+        try:
+            with config.patch(
+                {
+                    "fx_graph_cache": False,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": True,
+                    "test_configs.autotune_choice_name_regex": None,
+                    "test_configs.autotune_choice_desc_regex": None,
+                }
+            ):
+                actual = torch.compile(
+                    fn,
+                    backend="inductor",
+                    fullgraph=True,
+                    dynamic=api == "v2",
+                )(a, b, scale_a, scale_b)
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        self.assertEqual(actual, expected, rtol=5e-2, atol=5e-2)
+        generic_choices = [
+            record for record in choice_records if generic_name in record[0]
+        ]
+        blackwell_choices = [
+            record for record in choice_records if blackwell_name in record[0]
+        ]
+        old_blackwell_choices = [
+            record
+            for record in choice_records
+            if blackwell_base_name in record[0] and blackwell_name not in record[0]
+        ]
+        self.assertFalse(generic_choices, choice_records)
+        self.assertTrue(blackwell_choices, choice_records)
+        self.assertTrue(
+            all("BLOCK_K=128" in description for _, description in blackwell_choices),
+            choice_records,
+        )
+        self.assertFalse(old_blackwell_choices, choice_records)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    def test_deepseek_blockwise_v2_blackwell_ws_main_loop(
+        self,
+        device,
+    ):
+        from torch._inductor.select_algorithm import (
+            add_preprocessing_fn,
+            clear_preprocessing_fns,
+        )
+
+        M, N, K = 256, 320, 384
+        tile_size = 128
+        k_blocks = ceil_div(K, tile_size)
+        padded_k_blocks = ceil_div(k_blocks, 4) * 4
+        n_blocks = ceil_div(N, tile_size)
+
+        torch.manual_seed(0)
+        a = torch.randint(-8, 9, (M, K), device=device).to(torch.float8_e4m3fn)
+        b = torch.randint(-8, 9, (N, K), device=device).to(torch.float8_e4m3fn).t()
+        scale_a_values = (
+            torch.arange(M * k_blocks, device=device)
+            .reshape(M, k_blocks)
+            .remainder(13)
+            .add(1)
+            .float()
+            .div(128)
+        )
+        scale_b_values = torch.zeros(
+            n_blocks, padded_k_blocks, device=device, dtype=torch.float32
+        )
+        scale_b_values[:, :k_blocks] = (
+            torch.arange(n_blocks * k_blocks, device=device)
+            .reshape(n_blocks, k_blocks)
+            .remainder(7)
+            .add(1)
+            .float()
+            .div(128)
+        )
+        scale_a = scale_a_values.t().contiguous().t()
+        scale_b = scale_b_values.t()
+
+        self.assertEqual(scale_a.shape, (M, k_blocks))
+        self.assertEqual(scale_a.stride(), (1, M))
+        self.assertEqual(scale_b.shape, (padded_k_blocks, n_blocks))
+        self.assertEqual(scale_b.stride(), (1, padded_k_blocks))
+
+        # Eager blockwise scaling is SM90-only, so build the reference per K block.
+        expected = torch.zeros((M, N), device=device, dtype=torch.float32)
+        for block in range(k_blocks):
+            k_start = block * tile_size
+            k_end = k_start + tile_size
+            partial = a[:, k_start:k_end].float() @ b[k_start:k_end].float()
+            scale_a_block = scale_a_values[:, block]
+            scale_b_block = scale_b_values[:, block].repeat_interleave(tile_size)
+            scale_b_block = scale_b_block[:N]
+            expected += partial * scale_a_block[:, None] * scale_b_block[None, :]
+        expected = expected.to(torch.bfloat16)
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                ScalingType.BlockWise1x128,
+                scale_b,
+                ScalingType.BlockWise128x128,
+                output_dtype=torch.bfloat16,
+                use_fast_accum=True,
+            )
+
+        generic_name = "triton_scaled_mm_device_tma_main_loop_scaling_"
+        ws_name = "triton_blackwell_ws_persistent_device_tma_main_loop_scaling_"
+        choice_records = []
+
+        def record_and_keep_ws_main_loop(choices):
+            choice_records.extend(
+                (choice.name, choice.description) for choice in choices
+            )
+            generic_choices = [
+                choice for choice in choices if generic_name in choice.name
+            ]
+            ws_choices = [choice for choice in choices if ws_name in choice.name]
+            self.assertFalse(generic_choices, choice_records)
+            self.assertTrue(ws_choices, choice_records)
+            for choice in ws_choices:
+                self.assertIn("BLOCK_K=128", choice.description)
+            forced_choices = [
+                choice
+                for choice in ws_choices
+                if "BLOCK_M=128" in choice.description
+                and "BLOCK_N=256" in choice.description
+            ]
+            self.assertEqual(len(forced_choices), 1, choice_records)
+            return forced_choices
+
+        config_values = {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.enable_persistent_tma_matmul": True,
+            "test_configs.autotune_choice_name_regex": None,
+            "test_configs.autotune_choice_desc_regex": None,
+        }
+        torch._dynamo.reset()
+        add_preprocessing_fn(record_and_keep_ws_main_loop)
+        try:
+            with config.patch(config_values):
+                actual, code = run_and_get_code(
+                    torch.compile(
+                        fn,
+                        backend="inductor",
+                        fullgraph=True,
+                        dynamic=True,
+                    ),
+                    a,
+                    b,
+                    scale_a,
+                    scale_b,
+                )
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        self.assertEqual(actual, expected, rtol=5e-2, atol=5e-2)
+        FileCheck().check("tl.static_assert(BLOCK_K == 128").check(
+            "partial = tl.dot("
+        ).check("a if A_ROW_MAJOR else a.T,").check("b if B_ROW_MAJOR else b.T,").check(
+            "scale_a = tl.load("
+        ).check("scale_b_blocks = tl.load(").check(
+            "accumulator += partial * scale_a[:, None] * scale_b[None, :]"
+        ).run(code[0])
+        self.assertNotIn("a_scaled", code[0])
+        self.assertNotIn("b_scaled", code[0])
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize("legacy_layout", ("a128", "b1"))
+    def test_deepseek_blockwise_v2_rejects_v1_layout_sm100(
+        self, legacy_layout: str, device
+    ):
+        from torch._inductor.exc import InductorError
+
+        M = N = 256
+        K = 384
+        k_blocks = ceil_div(K, 128)
+
+        a = torch.ones((M, K), device=device, dtype=torch.float8_e4m3fn)
+        b = torch.ones((N, K), device=device, dtype=torch.float8_e4m3fn).t()
+        if legacy_layout == "a128":
+            recipe_a = ScalingType.BlockWise128x128
+            scale_a = torch.ones(
+                (ceil_div(M, 128), k_blocks), device=device, dtype=torch.float32
+            )
+            recipe_b = ScalingType.BlockWise1x128
+            scale_b = torch.ones((k_blocks, N), device=device, dtype=torch.float32).t()
+        else:
+            recipe_a = ScalingType.BlockWise1x128
+            scale_a = torch.ones((k_blocks, M), device=device, dtype=torch.float32).t()
+            recipe_b = ScalingType.BlockWise1x128
+            scale_b = torch.ones((k_blocks, N), device=device, dtype=torch.float32)
+
+        if legacy_layout == "a128":
+            self.assertEqual(scale_a.shape, (ceil_div(M, 128), k_blocks))
+            self.assertEqual(scale_a.stride(), (k_blocks, 1))
+            self.assertEqual(scale_b.shape, (N, k_blocks))
+            self.assertEqual(scale_b.stride(), (1, N))
+        else:
+            self.assertEqual(scale_a.shape, (M, k_blocks))
+            self.assertEqual(scale_a.stride(), (1, M))
+            self.assertEqual(scale_b.shape, (k_blocks, N))
+            self.assertEqual(scale_b.stride(), (N, 1))
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                recipe_a,
+                scale_b,
+                recipe_b,
+                output_dtype=torch.bfloat16,
+            )
+
+        torch._dynamo.reset()
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+            }
+        ):
+            with self.assertRaisesRegex(
+                InductorError,
+                "_scaled_mm_v2 blockwise scale shapes do not match their recipes",
+            ):
+                torch.compile(fn, backend="inductor", fullgraph=True)(
+                    a, b, scale_a, scale_b
+                )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
