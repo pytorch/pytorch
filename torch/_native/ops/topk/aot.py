@@ -13,6 +13,11 @@ torch is imported lazily inside covered_axes.
 ATEN_OP = "topk"
 DISPATCH_KEY = "CUDA"
 KERNEL_MODULE = "cutedsl_kernels.py"
+# Stated rather than defaulted: the radix kernel is measured against aten on both
+# (48/48 of the grid faster on an H100, median 2.16x; Blackwell is the tuning target).
+# Both spellings of each capability, since either can appear in TORCH_CUDA_ARCH_LIST
+# and they are distinct nvcc targets.
+ARCHS = ("sm_90", "sm_90a", "sm_100", "sm_100a")
 
 _DTYPES = {"float32": "at::kFloat", "bfloat16": "at::kBFloat16"}
 _NS = [2048, 4096, 8192, 16384]
@@ -76,6 +81,15 @@ def cpp_dispatch_prelude():
       if (self.dim() < 1) return false;
       if (c10::maybe_wrap_dim(dim, self.dim()) != self.dim() - 1) return false;
       if (!self.is_contiguous() || !values.is_contiguous() || !indices.is_contiguous()) return false;
+      // The exported kernels were compiled with assumed_align = 4 elements (see
+      // _make_fake_tensor in cutedsl_kernels.py), which every allocator block
+      // satisfies. A tensor viewing a mid-block byte offset would not, and a
+      // misaligned vector load faults or reads wrong rather than declining.
+      auto _naot_aligned = [](const at::Tensor& t) {{
+        return reinterpret_cast<uintptr_t>(t.const_data_ptr()) %
+            static_cast<uintptr_t>(4 * t.element_size()) == 0;
+      }};
+      if (!_naot_aligned(self) || !_naot_aligned(values) || !_naot_aligned(indices)) return false;
       const bool det = at::globalContext().deterministicAlgorithms();
       const int64_t N = self.size(-1);
       if (N == 0) return false;
