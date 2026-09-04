@@ -159,6 +159,7 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("linalg.lu_solve"),
     xfail("linalg.polar"),
     xfail("linalg.qr"),
+    xfail("linalg.qr_piv"),
     xfail("linalg.slogdet"),
     xfail("linalg.solve"),
     xfail("linalg.solve_ex"),
@@ -2727,6 +2728,7 @@ fake_skips = (
     "linalg.matrix_rank.hermitian",  # Could not run 'aten::linalg_eigvalsh.out' with arguments from the 'Meta' backend
     "linalg.pinv.hermitian",  # tensor.mH is only supported on matrices or batches of matrices. Got 1-D tensor
     "linalg.solve",  # Could not run 'aten::linalg_solve' with arguments from the 'Meta' backend
+    "linalg.qr_piv",  # For input tensor A of size m x n, the pivot matrix P has size n causing this test to fail
     "linalg.tensorsolve",  # Could not run 'aten::linalg_solve' with arguments from the 'Meta'
     "lu_solve",  # MALLOC ERROR: debug
     "multinomial",  # Could not run 'aten::multinomial' with arguments from the 'Meta' backend
