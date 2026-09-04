@@ -223,6 +223,9 @@ void ExtraState::apply_pending_evictions(
       case PendingEviction::CACHE_REGION: {
         auto it = this->cache_entry_map.find(eviction.region_id);
         if (it != this->cache_entry_map.end()) {
+          TORCH_CHECK(
+              this->total_cache_entry_count >= it->second.size(),
+              "cache entry count underflow while applying a parked eviction");
           this->total_cache_entry_count -= it->second.size();
           auto& dst = dead_cache[eviction.region_id];
           dst.splice(dst.end(), it->second);
@@ -251,6 +254,11 @@ void ExtraState::apply_pending_evictions(
 void ExtraState::invalidate(
     py::object deleted_guard_manager,
     py::object live_guard_manager) {
+  // The old signature was (cache_entry, deleted_guard_manager); both
+  // parameters are py::object, so a stale caller would be silently a no-op.
+  TORCH_CHECK_TYPE(
+      !py::isinstance<CacheEntry>(deleted_guard_manager),
+      "ExtraState.invalidate takes (deleted_guard_manager, live_guard_manager)");
   // Sometimes setting the cache_entry->code to None causes the orig_code to be
   // freed. This calls destroy_extra_state, which deletes the extra_state and
   // all the cache_entries. This causes the `this` pointer to be a dangling
@@ -313,6 +321,9 @@ void ExtraState::clear_in_place() {
       // racing a lookup from another thread.
       this->park_eviction(
           PendingEviction{PendingEviction::CLEAR_ALL, -1, py::none()});
+      // Split state until that holder runs: the strategy, frame state and
+      // region maps below are cleared now, while the cache entries stay in
+      // place (and stay lookup-able) until the parked eviction applies.
     } else {
       dead_precompile_entries.swap(this->precompile_entries);
       dead_cache_entries.swap(this->cache_entry_map);
@@ -803,7 +814,9 @@ bool try_lookup_without_guard_eval(
 CacheEntry* create_cache_entry(
     ExtraState* extra_state,
     PyObject* guarded_code,
-    PyObject* backend) {
+    PyObject* backend,
+    py::object* code_out,
+    std::string* trace_annotation_out) {
   // Reaped nodes die AFTER the lock releases (locals declared before it).
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
@@ -834,6 +847,12 @@ CacheEntry* create_cache_entry(
       py::cast(*new_iter, py::return_value_policy::reference);
   guard_manager.attr("extra_state") =
       py::cast(extra_state, py::return_value_policy::reference);
+  // Handed out under the lock: once it releases, a concurrent reset_code (the
+  // GIL is not held for the wait on a free-threaded build) can destroy the
+  // node, so the caller must not touch the returned pointer again.
+  *code_out = py::reinterpret_borrow<py::object>(
+      (PyObject*)CacheEntry_get_code(&*new_iter));
+  *trace_annotation_out = CacheEntry_get_trace_annotation(&*new_iter);
   return &*new_iter;
 }
 
@@ -1120,12 +1139,20 @@ void _load_precompile_entry(
   if (extra == nullptr) {
     extra = init_and_set_extra_state(code);
   }
-  CacheLock lock(extra->cache_mutex);
+  // Built before the lock: the constructor runs Python (attribute reads), and
+  // nothing under the lock below does.
   auto entry = PrecompileEntry(
       std::move(guard_manager),
       std::move(dynamo_code),
       isolate_recompiles_id,
       std::move(owner));
+  // Reaped nodes die AFTER the lock releases (locals declared before it).
+  std::list<PrecompileEntry> reaped_precompile;
+  std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
+  CacheLock lock(extra->cache_mutex);
+  // A parked CLEAR_ALL / PRECOMPILE_ALL applied by the next depth-zero holder
+  // would otherwise take this install with it; drain first, then add.
+  extra->apply_pending_evictions(reaped_precompile, reaped_cache);
   extra->precompile_entries.push_back(std::move(entry));
 }
 
@@ -1148,6 +1175,11 @@ py::list _debug_get_precompile_entries(const py::handle& code_obj) {
     std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
     CacheLock lock(extra->cache_mutex);
     extra->apply_pending_evictions(reaped_precompile, reaped_cache);
+    // The casts and appends run Python (a package finalizer reached from GC
+    // may re-enter and try to splice this list); same re-entrancy rule as
+    // lookup(): raise the depth so such an eviction is parked, not applied
+    // under the live range-for.
+    CachePythonDepth python_depth(extra);
     for (PrecompileEntry& e : extra->precompile_entries) {
       result.append(py::cast(e, py::return_value_policy::reference));
     }
