@@ -1,96 +1,82 @@
-# Shared CuteDSL launch glue: torch <-> cute tensor wrapping, stream handle, and the
-# EnableTVMFFI-compiled launcher, reused by every CuteDSL native op. Three host-overhead levers,
-# measured on B200:
-#   enable_tvm_ffi=True on from_dlpack        ~0.8us against ~3.6 for the __dlpack__() capsule
-#   options="--enable-tvm-ffi" on cute.compile  skips per-arg marshalling, ~30% off the dispatch
-#   _stream via _cuda_getCurrentRawStream     the raw cudaStream_t in ~0.07us against ~2.7, and it
-#     tracks the graph-capture stream. NOT _cuda_getCurrentStream(dev)[0], a packed id rather than a
-#     pointer, which deadlocks capture.
+# Shared CuteDSL launch glue: the dtype map, the operand DESCRIPTORS a kernel is compiled against,
+# and the tvm-ffi launcher. Reused by every CuteDSL native op.
+#
+# A kernel is compiled against FAKE operands -- dtype, extents (static or symbolic), strides,
+# declared alignment -- and the compiled callable then takes the torch tensors themselves. There is
+# no per-call wrap at all, which is where the host time went: MEASURED on H100 over a two-operand
+# kernel, 5.98us/call against 19.16 for wrapping each operand on every call. It is also the shape the
+# vendored reference kernels and the RNG / topk / scatter_add families already use.
+#
+# The STREAM stays an explicit argument: _cuda_getCurrentRawStream gives the raw cudaStream_t in
+# ~0.07us and tracks the graph-capture stream. The tvm-ffi ENV stream cannot serve here -- its
+# detector needs a top-level GPU tensor argument, and these kernels pass their operands as lists.
+# NOT _cuda_getCurrentStream(dev)[0], a packed id rather than a pointer, which deadlocks capture.
+#
+# INPUTS go through read_only(). A copy-on-write input has to export via const_data_ptr() or it is
+# MATERIALIZED, which the autograd backward contract forbids under a transparent override -- and
+# passing the bare tensor does materialize it, silently.
 
 import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
-import cutlass
 import cutlass.cute as cute
-from cutlass import Float32, Float64, Int32
 
 import torch
 from torch.utils.dlpack import ReadOnlyTensorWrapper
 
 
-# torch dtype -> cute numeric type. Extend as new dtypes are supported.
-torch2cute = {
-    torch.float32: Float32,
-    torch.float64: Float64,
-    torch.float16: cutlass.Float16,
-    torch.bfloat16: cutlass.BFloat16,
-    torch.int32: Int32,
-}
+def sym(divisibility: int = 1):
+    """A DYNAMIC extent or stride, guaranteed divisible by `divisibility`.
 
-# The inverse, for sizing a SCRATCH buffer from an accumulator type (a trait's field dtypes are
-# cute types, and a partials buffer has to be allocated in torch).
-cute2torch = {v: k for k, v in torch2cute.items()}
+    One compiled kernel then serves every value sharing that divisor -- the vec class -- instead of
+    one kernel per distinct shape. The divisor is what lets the kernel keep emitting wide loads.
+    """
+    return cute.sym_int(divisibility=divisibility)
 
 
-def _ro(t, read_only):
-    # Wrap an INPUT tensor read-only so the fast tvm-ffi from_dlpack exports through
-    # const_data_ptr(): a copy-on-write input is exported WITHOUT materializing (the
-    # autograd backward contract forbids materializing a COW view under a transparent
-    # override), so the overrides no longer need a COW cond check. Apply ONLY to
-    # inputs -- outputs are written by the kernel and must stay writable, so callers
-    # pass read_only=False for them. The wrapper is export-only and rejects every
-    # non-DLPack op, so it must wrap the FINAL-shape tensor, immediately before the
-    # from_dlpack call (after any reshape/expand the helper did itself).
-    return ReadOnlyTensorWrapper(t) if read_only else t
+def fake_compact(dtype, shape, *, order=None, align=None):
+    """Compile-time descriptor for a COMPACT operand.
 
-
-def cute_tensor(t, read_only=False):
-    # Wrap a torch tensor as a cute tensor via the fast tvm-ffi exchange.
-    ct = cute.runtime.from_dlpack(_ro(t, read_only), enable_tvm_ffi=True)
-    ct.element_type = torch2cute[t.dtype]
-    return ct
-
-
-def cute_tensor_dynM(t, align=None, ndim=None, read_only=False):
-    # Like cute_tensor but marks the LEADING dim (mode 0 = the M / output-row axis)
-    # DYNAMIC while keeping the others static. For row reductions M is just the grid
-    # size; baking it forces a recompile per distinct M (e.g. every batch size in a
-    # training loop). mark_compact_shape_dynamic(mode=0) lets ONE compiled kernel
-    # serve any M at a fixed N. stride_order is row-major outer->inner: (0,1) for 2D
-    # (M, N), (0,) for 1D (M,). N stays static so the kernel's const_expr vec/tile
-    # checks still resolve.
-    # A single-element tensor is contiguous by definition -- with one element the stride
-    # is unobservable, since every stride addresses the same element -- but torch may
-    # still carry a leftover non-unit stride from the view that produced it
-    # (a.diagonal(offset=2) on (5,3) gives shape (1,) stride (4,)). The DSL compares the
-    # declared stride against stride_order and rejects that outright ("The stride_order
-    # is not consistent with the layout"), so restride to the canonical contiguous form
-    # first. Same tensor, same data, stride the DSL accepts.
-    if t.numel() == 1:
-        t = t.as_strided(t.shape, (1,) * t.dim())
-    w = _ro(t, read_only)
-    ct = (
-        cute.runtime.from_dlpack(w, assumed_align=align, enable_tvm_ffi=True)
-        if align is not None
-        else cute.runtime.from_dlpack(w, enable_tvm_ffi=True)
+    `order` lists the modes fastest-varying LAST, so (1, 0) is a row-major 2D tensor and (2, 1, 0) a
+    row-major 3D one; None takes the DSL default. `align` is the alignment the kernel may assume:
+    declaring it is not optional for a wide load, and the caller must have checked that the real base
+    pointer meets it -- a declared claim the pointer breaks faults at launch.
+    """
+    return cute.runtime.make_fake_compact_tensor(
+        dtype, tuple(shape), stride_order=order, assumed_align=align
     )
-    ct.element_type = torch2cute[t.dtype]
-    nd = ndim if ndim is not None else t.dim()
-    ct.mark_compact_shape_dynamic(mode=0, stride_order=tuple(range(nd)), divisibility=1)
-    return ct
 
 
-# tvm-ffi launcher. Compile every native CuteDSL kernel through this (not bare
-# cute.compile) for the fast arg-passing convention that skips per-arg
-# get_c_pointers marshalling. The `--enable-tvm-ffi` codegen flag is equivalent to
-# the cute.compile[EnableTVMFFI] typed form (measured identical host dispatch on
-# B200, +-0.03us) and matches the convention used by the other native CuteDSL ops.
+def fake_strided(dtype, shape, stride, *, align=None):
+    """Compile-time descriptor for a GAPPED operand: a dense run per row, rows further apart than
+    the run. Strides may be symbolic (see `sym`), which is how one kernel serves every row pitch.
+    """
+    return cute.runtime.make_fake_tensor(
+        dtype, tuple(shape), stride=tuple(stride), assumed_align=align
+    )
+
+
+def read_only(t):
+    """Wrap an INPUT so it exports through const_data_ptr().
+
+    A copy-on-write input is then NOT materialized. Apply to inputs only -- outputs are written by
+    the kernel and must stay writable. The wrapper rejects every non-DLPack op, so it wraps the
+    final-shape tensor, after any reshape the caller did itself.
+    """
+    return ReadOnlyTensorWrapper(t)
+
+
 def compile_kernel(op, *args):
+    """Compile `op` against FAKE operands, for the fast tvm-ffi arg convention.
+
+    The flag is equivalent to the cute.compile[EnableTVMFFI] typed form (measured identical host
+    dispatch) and matches the convention the other native CuteDSL ops use.
+    """
     return cute.compile(op, *args, options="--enable-tvm-ffi")
 
 
 def stream():
-    # Live current stream handle, read every call (never cached: callers may set a
-    # different stream/device per call, and the kernel must launch on whatever is
-    # current, including the CUDA-graph capture stream). _cuda_getCurrentRawStream
-    # returns the real cudaStream_t pointer cheaply and capture-correctly.
-    dev = torch.cuda.current_device()
-    return cuda.CUstream(torch._C._cuda_getCurrentRawStream(dev))
+    # Live current stream handle, read every call (never cached: callers may set a different
+    # stream/device per call, and the kernel must launch on whatever is current, including the
+    # CUDA-graph capture stream).
+    return cuda.CUstream(
+        torch._C._cuda_getCurrentRawStream(torch.cuda.current_device())
+    )

@@ -9,6 +9,11 @@
 # A tree fold cannot use `reduce` -- it needs each contribution separately -- so anything that
 # TRANSFORMS an element must say so in `leaf`, or a tree order silently folds raw values.
 #
+# reduce / combine / project are ATen's own names and semantics for this
+# (aten/src/ATen/native/SharedReduceOps.h). `leaf` is the addition a tree fold needs: ATen folds
+# serially from an identity, so its per-element transform can hide inside reduce (MeanOps::reduce is
+# combine(a, cast(b))), while a tree has no serial accumulator to hide it in.
+#
 # The ACCUMULATOR DTYPE is a parameter (`acc`), threaded through fdtypes and every literal, with the
 # identity taken from the dtype via _zero/_one/_pos_id/_neg_id so it is correct for any acc type. An
 # index field is Int32, or Int64 when the reduced extent can exceed 2^31.
@@ -141,6 +146,18 @@ class NormOps:
             return cute.math.exp(cute.math.log(s) / self.acc(self.p))
 
 
+@cute.jit
+def _welford_denom(acc_dtype, nf, correction):
+    # var/std divisor, CLAMPED AT ZERO like aten: `correction >= n` must divide by 0
+    # (-> +inf, which is what aten returns and what the numpy-reference tests expect
+    # after their inf->nan mapping), NOT by a negative number. Unclamped, a
+    # correction larger than the reduced extent returned a NEGATIVE variance.
+    # `nf` is a runtime value, so this is a select, not a python max().
+    d = nf - acc_dtype(correction)
+    z = acc_dtype(0.0)
+    return d if d > z else z  # noqa: FURB136 -- see the note above _maxnan
+
+
 class WelfordOps:
     # acc = (mean, m2, nf) all in the accumulator dtype.
     #   reduce  = ONLINE (Welford) update of a single element.
@@ -203,7 +220,7 @@ class WelfordOps:
         mean, m2, nf = acc
         if const_expr(self.return_mean):
             return mean
-        var = m2 / (nf - self.acc(self.correction))
+        var = m2 / _welford_denom(self.acc, nf, self.correction)
         if const_expr(self.take_sqrt):
             return cute.math.sqrt(var)
         return var
@@ -776,7 +793,7 @@ class VarMeanOps(WelfordOps):
     @cute.jit
     def project(self, acc, n):
         mean, m2, nf = acc
-        var = m2 / (nf - self.acc(self.correction))
+        var = m2 / _welford_denom(self.acc, nf, self.correction)
         result = cute.math.sqrt(var) if const_expr(self.take_sqrt) else var
         return (result, mean)
 
