@@ -5913,12 +5913,14 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
             f" and grid with sizes {grid.shape}"
         ),
     )
+    # CPU and CUDA sample 5D bicubic, the other backends reject it in eager, so the
+    # trace rejects it too instead of succeeding and failing at run time. A FakeTensor
+    # reports its device as meta while a meta kernel runs, hence device_hint.
     torch._check(
-        not (
-            input.ndim == 5
-            and interpolation_mode == GridSamplerInterpolation.BICUBIC.value
-        ),
-        lambda: "grid_sampler(): bicubic interpolation only supports 4D input",
+        interpolation_mode != GridSamplerInterpolation.BICUBIC.value
+        or device_hint(input) in ("cpu", "cuda"),
+        lambda: "grid_sampler(): bicubic interpolation with 5D input is not supported "
+        f"on {device_hint(input)}",
     )
 
 
@@ -6014,6 +6016,126 @@ def grid_sampler_3d_backward(
 ):
     check_grid_sampler_common(input, grid)
     check_grid_sampler_3d(input, grid, interpolation_mode)
+    input_requires_grad = output_mask[0]
+    if input_requires_grad:
+        grad_input = torch.zeros_like(
+            input, memory_format=torch.legacy_contiguous_format
+        )
+    else:
+        grad_input = None
+    grad_grid = torch.empty_like(grid, memory_format=torch.legacy_contiguous_format)
+    return grad_input, grad_grid
+
+
+def check_grid_sampler_pixel(input: Tensor, grid: Tensor):
+    torch._check(
+        grid.dtype == input.dtype or grid.dtype == torch.double,
+        lambda: "grid_sampler(): expected grid dtype to match the input's "
+        f"({input.dtype}) or to be Double, but got {grid.dtype}",
+    )
+    torch._check(
+        device_hint(input) in ("cpu", "cuda"),
+        lambda: "grid_sampler(): pixel units are not supported "
+        f"on {device_hint(input)}",
+    )
+
+
+@register_meta(aten._grid_sampler_2d_pixel)
+@out_wrapper()
+def _grid_sampler_2d_pixel(
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+    cubic_coeff_a=-0.75,
+):
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_2d(input, grid)
+    check_grid_sampler_pixel(input, grid)
+    N = input.shape[0]
+    C = input.shape[1]
+    out_H = grid.shape[1]
+    out_W = grid.shape[2]
+    return input.new_empty((N, C, out_H, out_W))
+
+
+@register_meta(aten._grid_sampler_2d_pixel_backward)
+@out_wrapper("grad_input", "grad_grid")
+def _grid_sampler_2d_pixel_backward(
+    grad_output,
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+    cubic_coeff_a,
+    output_mask,
+):
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_2d(input, grid)
+    check_grid_sampler_pixel(input, grid)
+    input_requires_grad = output_mask[0]
+    if input_requires_grad:
+        grad_input = torch.zeros_like(
+            input, memory_format=torch.legacy_contiguous_format
+        )
+    else:
+        grad_input = None
+    grad_grid = torch.empty_like(grid, memory_format=torch.legacy_contiguous_format)
+    return grad_input, grad_grid
+
+
+@register_meta(aten._grid_sampler_3d_pixel)
+@out_wrapper()
+def _grid_sampler_3d_pixel(
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+    cubic_coeff_a=-0.75,
+):
+    check_grid_sampler_common(input, grid)
+    torch._check(
+        input.ndim == 5 and input.ndim == grid.ndim,
+        lambda: (
+            f"grid_sampler(): expected 5D input and grid with same number of "
+            f"dimensions, but got input with sizes {input.shape}"
+            f" and grid with sizes {grid.shape}"
+        ),
+    )
+    check_grid_sampler_pixel(input, grid)
+    N = input.shape[0]
+    C = input.shape[1]
+    out_D = grid.shape[1]
+    out_H = grid.shape[2]
+    out_W = grid.shape[3]
+    return input.new_empty((N, C, out_D, out_H, out_W))
+
+
+@register_meta(aten._grid_sampler_3d_pixel_backward)
+@out_wrapper("grad_input", "grad_grid")
+def _grid_sampler_3d_pixel_backward(
+    grad_output,
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+    cubic_coeff_a,
+    output_mask,
+):
+    check_grid_sampler_common(input, grid)
+    torch._check(
+        input.ndim == 5 and input.ndim == grid.ndim,
+        lambda: (
+            f"grid_sampler(): expected 5D input and grid with same number of "
+            f"dimensions, but got input with sizes {input.shape}"
+            f" and grid with sizes {grid.shape}"
+        ),
+    )
+    check_grid_sampler_pixel(input, grid)
     input_requires_grad = output_mask[0]
     if input_requires_grad:
         grad_input = torch.zeros_like(

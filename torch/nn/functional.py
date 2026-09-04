@@ -5512,6 +5512,8 @@ def grid_sample(
     mode: str = "bilinear",
     padding_mode: str = "zeros",
     align_corners: bool | None = None,
+    pixel_coords: bool = False,
+    cubic_coeff_a: float | None = None,
 ) -> Tensor:
     r"""Compute grid sample.
 
@@ -5531,17 +5533,18 @@ def grid_sample(
     which are used to interpolate the output value ``output[n, :, h, w]``.
     In the case of 5D inputs, ``grid[n, d, h, w]`` specifies the
     ``x``, ``y``, ``z`` pixel locations for interpolating
-    ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest`` or
-    ``bilinear`` interpolation method to sample the input pixels.
+    ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest``,
+    ``bilinear`` or ``bicubic`` interpolation method to sample the input pixels.
 
-    :attr:`grid` specifies the sampling pixel locations normalized by the
-    :attr:`input` spatial dimensions. Therefore, it should have most values in
+    By default (``pixel_coords=False``), :attr:`grid` specifies the sampling pixel
+    locations normalized by the :attr:`input` spatial dimensions. Therefore, it should have most values in
     the range of ``[-1, 1]``. For example, values ``x = -1, y = -1`` is the
     left-top pixel of :attr:`input`, and values  ``x = 1, y = 1`` is the
     right-bottom pixel of :attr:`input`.
 
-    If :attr:`grid` has values outside the range of ``[-1, 1]``, the corresponding
-    outputs are handled as defined by :attr:`padding_mode`. Options are
+    Coordinates outside ``[-1, 1]`` for a normalized grid, and outside the input's
+    spatial extent for a pixel-unit grid, are handled as defined by
+    :attr:`padding_mode`. Options are
 
         * ``padding_mode="zeros"``: use ``0`` for out-of-bound grid locations,
         * ``padding_mode="border"``: use border values for out-of-bound grid locations,
@@ -5554,7 +5557,8 @@ def grid_sample(
 
     Note:
         This function is often used in conjunction with :func:`affine_grid`
-        to build `Spatial Transformer Networks`_ .
+        to build `Spatial Transformer Networks`_ . :func:`affine_grid` produces a
+        normalized grid, so its output is not directly a pixel-unit grid.
 
     Note:
         When using the CUDA backend, this operation may induce nondeterministic
@@ -5562,7 +5566,10 @@ def grid_sample(
         Please see the notes on :doc:`/notes/randomness` for background.
 
     Note:
-        NaN values in :attr:`grid` would be interpreted as ``-1``.
+        On the normalized route, NaN values in :attr:`grid` would be interpreted
+        as ``-1``; with ``pixel_coords=True`` a non-finite or absurdly large
+        coordinate behaves as a coordinate far outside the volume, on both
+        devices.
 
     Args:
         input (Tensor): input of shape :math:`(N, C, H_\text{in}, W_\text{in})` (4-D case)
@@ -5571,14 +5578,16 @@ def grid_sample(
                        or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
         mode (str): interpolation mode to calculate output values
             ``'bilinear'`` | ``'nearest'`` | ``'bicubic'``. Default: ``'bilinear'``
-            Note: ``mode='bicubic'`` supports only 4-D input.
             When ``mode='bilinear'`` and the input is 5-D, the interpolation mode
             used internally will actually be trilinear. However, when the input is 4-D,
-            the interpolation mode will legitimately be bilinear.
+            the interpolation mode will legitimately be bilinear. Likewise
+            ``mode='bicubic'`` is tricubic on a 5-D input, the separable cubic kernel
+            extended over the third axis; CPU and CUDA, ROCm included, implement the 5-D case.
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
-            input  as squares rather than points.
+            input as squares rather than points; on the pixel-unit route this only
+            shapes the ``'reflection'`` padding.
             If set to ``True``, the extrema (``-1`` and ``1``) are considered as referring
             to the center points of the input's corner pixels. If set to ``False``, they
             are instead considered as referring to the corner points of the input's corner
@@ -5587,6 +5596,22 @@ def grid_sample(
             :func:`interpolate`, and so whichever option is used here
             should also be used there to resize the input image before grid sampling.
             Default: ``False``
+        pixel_coords (bool, optional): If set to ``True``, :attr:`grid` holds pixel
+            indices of the input instead of normalized coordinates: ``x = 0`` is the
+            center of the leftmost pixel and :math:`x = W_\text{in} - 1` the center of
+            the rightmost one, at any resolution. :attr:`align_corners` then only shapes
+            the ``'reflection'`` padding, and sampling at integer locations reproduces
+            the input values exactly. :attr:`grid` may also be double while
+            :attr:`input` is float64, float32, float16 or bfloat16, keeping
+            coordinate precision over large volumes. Only implemented on CPU and CUDA, and registered with
+            no autocast policy: the grid is a coordinate payload, so autocast
+            neither downcasts it nor upcasts the input. Inside an autocast
+            region, pass a double grid or cast the grid to the payload's dtype
+            yourself. Default: ``False``
+        cubic_coeff_a (float, optional): the :math:`\alpha` constant of the
+            ``'bicubic'`` kernel. Only supported together with ``pixel_coords=True``;
+            ``-0.5`` selects the Catmull-Rom spline. Default: ``None``, which
+            samples with ``-0.75``
 
     Returns:
         output (Tensor): output Tensor
@@ -5607,6 +5632,7 @@ def grid_sample(
         ``mode='bicubic'`` is implemented using the `cubic convolution algorithm`_ with :math:`\alpha=-0.75`.
         The constant :math:`\alpha` might be different from packages to packages.
         For example, `PIL`_ and `OpenCV`_ use -0.5 and -0.75 respectively.
+        With ``pixel_coords=True`` the constant is :attr:`cubic_coeff_a`.
         This algorithm may "overshoot" the range of values it's interpolating.
         For example, it may produce negative values or values greater than 255 when interpolating input in [0, 255].
         Clamp the results with :func:`torch.clamp` to ensure they are within the valid range.
@@ -5623,6 +5649,8 @@ def grid_sample(
             mode=mode,
             padding_mode=padding_mode,
             align_corners=align_corners,
+            pixel_coords=pixel_coords,
+            cubic_coeff_a=cubic_coeff_a,
         )
     if mode != "bilinear" and mode != "nearest" and mode != "bicubic":
         raise ValueError(
@@ -5653,16 +5681,46 @@ def grid_sample(
     else:  # padding_mode == 'reflection'
         padding_mode_enum = 2
 
+    if cubic_coeff_a is not None:
+        if not pixel_coords:
+            raise ValueError(
+                "nn.functional.grid_sample(): cubic_coeff_a is only supported together "
+                "with pixel_coords=True; the normalized path samples with the fixed "
+                "coefficient -0.75"
+            )
+        if mode != "bicubic":
+            raise ValueError(
+                f"nn.functional.grid_sample(): cubic_coeff_a only applies to "
+                f"mode='bicubic', but got mode='{mode}'"
+            )
+
     if align_corners is None:
-        warnings.warn(
-            "Default grid_sample and affine_grid behavior has changed "
-            "to align_corners=False since 1.3.0. Please specify "
-            "align_corners=True if the old behavior is desired. "
-            "See the documentation of grid_sample for details.",
-            stacklevel=2,
-        )
+        # In pixel units align_corners only shapes the reflection padding, so the
+        # normalized route's 1.3.0 behavior-change warning does not apply there.
+        if not pixel_coords:
+            warnings.warn(
+                "Default grid_sample and affine_grid behavior has changed "
+                "to align_corners=False since 1.3.0. Please specify "
+                "align_corners=True if the old behavior is desired. "
+                "See the documentation of grid_sample for details.",
+                stacklevel=2,
+            )
         align_corners = False
 
+    if pixel_coords:
+        if input.dim() != 4 and input.dim() != 5:
+            raise ValueError(
+                f"nn.functional.grid_sample(): expected 4D or 5D input, got input "
+                f"with {input.dim()} dimensions"
+            )
+        coeff = -0.75 if cubic_coeff_a is None else cubic_coeff_a
+        if input.dim() == 4:
+            return torch.ops.aten._grid_sampler_2d_pixel(
+                input, grid, mode_enum, padding_mode_enum, align_corners, coeff
+            )
+        return torch.ops.aten._grid_sampler_3d_pixel(
+            input, grid, mode_enum, padding_mode_enum, align_corners, coeff
+        )
     return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners)
 
 

@@ -2883,6 +2883,33 @@
     XPU: grid_sampler_3d_backward_xpu
   autogen: grid_sampler_3d_backward.out
 
+# The _pixel variants read the grid in pixel units (continuous indices into the input,
+# align_corners only keeps its reflection-padding role), accept a grid in the input's
+# dtype or in double, and take the cubic convolution coefficient as an argument.
+- func: _grid_sampler_2d_pixel(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners, float cubic_coeff_a=-0.75) -> Tensor
+  dispatch:
+    CPU: _grid_sampler_2d_pixel_cpu
+    CUDA: _grid_sampler_2d_pixel_cuda
+  autogen: _grid_sampler_2d_pixel.out
+
+- func: _grid_sampler_2d_pixel_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners, float cubic_coeff_a, bool[2] output_mask) -> (Tensor, Tensor)
+  dispatch:
+    CPU: _grid_sampler_2d_pixel_backward_cpu
+    CUDA: _grid_sampler_2d_pixel_backward_cuda
+  autogen: _grid_sampler_2d_pixel_backward.out
+
+- func: _grid_sampler_3d_pixel(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners, float cubic_coeff_a=-0.75) -> Tensor
+  dispatch:
+    CPU: _grid_sampler_3d_pixel_cpu
+    CUDA: _grid_sampler_3d_pixel_cuda
+  autogen: _grid_sampler_3d_pixel.out
+
+- func: _grid_sampler_3d_pixel_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners, float cubic_coeff_a, bool[2] output_mask) -> (Tensor, Tensor)
+  dispatch:
+    CPU: _grid_sampler_3d_pixel_backward_cpu
+    CUDA: _grid_sampler_3d_pixel_backward_cuda
+  autogen: _grid_sampler_3d_pixel_backward.out
+
 - func: hann_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: hann_window
