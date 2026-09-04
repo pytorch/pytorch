@@ -136,7 +136,14 @@ def _bmm_shared_a_configs(dtype):
 
 
 @SymbolicGridFn
-def blackwell_bmm_grid(b, m, n, meta, *, cdiv, max, min):
+def blackwell_bmm_grid(*args, cdiv, max, min):
+    # The BMM template supports both [B, M, N] and flattened [B * M, N]
+    # outputs.  Read the logical problem from its compile-time mapping instead
+    # of inferring it from the output layout passed before ``meta``.
+    meta = args[-1]
+    b = meta["BATCH_SIZE"]
+    m = meta["LOGICAL_M"]
+    n = meta["LOGICAL_N"]
     grid_m = cdiv(m, meta["BLOCK_M"])
     if meta["TWO_CTAS"]:
         grid_m = cdiv(grid_m, 2) * 2
@@ -176,6 +183,7 @@ BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
     BlackwellBMMConfig(128, 128, 128, 3, 8),
     BlackwellBMMConfig(128, 256, 64, 4, 8),
 )
+
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
