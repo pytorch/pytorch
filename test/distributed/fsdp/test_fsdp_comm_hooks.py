@@ -11,6 +11,7 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     requires_nccl_version,
@@ -19,7 +20,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
 )
@@ -109,6 +110,8 @@ class DummyHook:
 
 
 class TestCommunicationHooks(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy",
@@ -119,7 +122,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_default_communication_hook_behavior(
-        self, sharding_strategy: ShardingStrategy | None
+        self, device, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's default communication hook's behavior and correctness.
@@ -172,7 +175,7 @@ class TestCommunicationHooks(FSDPTest):
         ]
 
     def _init_model(self, core, sharding_strategy, mixed_precision=None):
-        device = torch.device(device_type)
+        device = torch.device(self.device_type)
         return FSDP(
             core,
             device_id=torch.accelerator.current_device_index(),
@@ -191,7 +194,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_default_communication_hook_initialization(
-        self, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
+        self, device, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's communication hook interface behavior.
@@ -241,7 +244,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_registering_hook_non_root(
-        self, sharding_strategy: ShardingStrategy | None
+        self, device, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's communication hook registering for submodules.
@@ -272,12 +275,12 @@ class TestCommunicationHooks(FSDPTest):
             submodules[1].register_comm_hook(dummy_state, dummy_hook)
 
     @skip_if_lt_x_gpu(2)
-    def test_registering_hook_hybrid_strategy(self):
+    def test_registering_hook_hybrid_strategy(self, device):
         for sharding_strategy in (
             ShardingStrategy.HYBRID_SHARD,
             ShardingStrategy._HYBRID_SHARD_ZERO2,
         ):
-            model = Net(False, None, None).to(device=device_type)
+            model = Net(False, None, None).to(device=torch.device(device).type)
             fsdp_model = FSDP(
                 model,
                 auto_wrap_policy=ModuleWrapPolicy({nn.Linear}),
@@ -301,7 +304,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_registering_hook_submodules(
-        self, sharding_strategy: ShardingStrategy | None
+        self, device, sharding_strategy: ShardingStrategy | None
     ):
         """
         Tests FSDP's communication hook registering for submodules.
@@ -337,7 +340,7 @@ class TestCommunicationHooks(FSDPTest):
     ):
         # keep everything deterministic for input data
         torch.manual_seed(0)
-        torch.get_device_module(device_type).manual_seed(0)
+        torch.get_device_module(self.device_type).manual_seed(0)
 
         fsdp_with_hook = self._init_model(
             Net(has_wrapping=has_wrapping, sharding_strategy=sharding_strategy),
@@ -359,7 +362,7 @@ class TestCommunicationHooks(FSDPTest):
         optim_hook = torch.optim.SGD(fsdp_with_hook.parameters(), lr=0.1)
         optim_mp = torch.optim.SGD(fsdp_with_mp.parameters(), lr=0.1)
 
-        in_data = torch.rand(16, 8).to(device=device_type)
+        in_data = torch.rand(16, 8).to(device=self.device_type)
         fsdp_with_hook.train()
         fsdp_with_mp.train()
         loss_hook = fsdp_with_hook(in_data).sum()
@@ -390,7 +393,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_fp16_hook(
-        self, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
+        self, device, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
     ):
         state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.fp16_compress_hook
@@ -416,7 +419,7 @@ class TestCommunicationHooks(FSDPTest):
         ],
     )
     def test_bf16_hook(
-        self, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
+        self, device, has_wrapping: bool, sharding_strategy: ShardingStrategy | None
     ):
         state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.bf16_compress_hook
@@ -426,7 +429,10 @@ class TestCommunicationHooks(FSDPTest):
         )
 
 
-instantiate_parametrized_tests(TestCommunicationHooks)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(
+    TestCommunicationHooks, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
