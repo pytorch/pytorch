@@ -9,8 +9,8 @@ from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import tf32_off
-from torch.testing._internal.common_utils import skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER", "1") == "1"
@@ -34,8 +34,9 @@ class Model2Conv(nn.Module):
         return (torch.rand(2, 3, 16, 16),)
 
 
-@skipIfXpu(msg="ccl doesn't currently work on the XPU stack")
 class TestLayoutOptim(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -47,10 +48,7 @@ class TestLayoutOptim(TestCase):
         for retry_no in range(tot_retry):
             try:
                 port = random.randint(10000, 60000)
-                if GPU_TYPE == "cuda":
-                    backend = "nccl"
-                elif GPU_TYPE == "xpu":
-                    backend = "ccl"
+                backend = dist.get_default_backend_for_device(cls.device_type)
                 dist.init_process_group(
                     backend=backend,
                     init_method=f"tcp://localhost:{port}",
@@ -65,7 +63,7 @@ class TestLayoutOptim(TestCase):
                     continue
 
     def verify_accuracy(
-        self, model_class, use_ddp_wrapper=USE_DDP_WRAPPER, is_train=False
+        self, model_class, device, use_ddp_wrapper=USE_DDP_WRAPPER, is_train=False
     ):
         # there are 2 potential ways to introduce graph breaks
         # 1. manually
@@ -91,8 +89,8 @@ class TestLayoutOptim(TestCase):
                 return m
 
         manual_graph_break = not use_ddp_wrapper
-        mod = model_class(manual_graph_break=manual_graph_break).to(GPU_TYPE)
-        inp = [t.to(GPU_TYPE) for t in mod.get_example_inputs()]
+        mod = model_class(manual_graph_break=manual_graph_break).to(device)
+        inp = [t.to(device) for t in mod.get_example_inputs()]
         expected_out = wrap_mod(mod)(*inp)
 
         fp64_mod = copy.deepcopy(mod).to(torch.float64)
@@ -116,19 +114,19 @@ class TestLayoutOptim(TestCase):
             print(f"Expected sum {expected_sum}, actual sum {actual_sum}")
             self.assertTrue(same(expected_out, actual_out, fp64_ref=fp64_out))
 
-    def verify_accuracy_for_infer(self, *args, **kwargs):
-        self.verify_accuracy(*args, **kwargs, is_train=False)
+    def verify_accuracy_for_infer(self, model_class, device, **kwargs):
+        self.verify_accuracy(model_class, device, is_train=False, **kwargs)
 
-    def verify_accuracy_for_train(self, *args, **kwargs):
-        self.verify_accuracy(*args, **kwargs, is_train=True)
+    def verify_accuracy_for_train(self, model_class, device, **kwargs):
+        self.verify_accuracy(model_class, device, is_train=True, **kwargs)
 
-    def test_2conv_with_graph_break(self):
+    def test_2conv_with_graph_break(self, device):
         """
         Make sure graph break does not cause any accuracy issue.
         """
-        self.verify_accuracy_for_infer(Model2Conv)
+        self.verify_accuracy_for_infer(Model2Conv, device)
 
-    def test_3conv_with_graph_break(self):
+    def test_3conv_with_graph_break(self, device):
         class Model(nn.Module):
             def __init__(
                 self, dim=512, patch_size=7, kernel_size=7, manual_graph_break=False
@@ -155,10 +153,10 @@ class TestLayoutOptim(TestCase):
             def get_example_inputs(self):
                 return (torch.randn(2, 3, 16, 16),)
 
-        self.verify_accuracy_for_infer(Model)
+        self.verify_accuracy_for_infer(Model, device)
 
     @torch.no_grad()
-    def test_keep_output_layout_infer(self):
+    def _run_keep_output_layout_infer(self, device):
         class Model(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -173,8 +171,8 @@ class TestLayoutOptim(TestCase):
             def get_example_inputs(self):
                 return (torch.randn(2, 3, 5, 5),)
 
-        mod = Model().to(GPU_TYPE)
-        inp = [t.to(GPU_TYPE) for t in mod.get_example_inputs()]
+        mod = Model().to(device)
+        inp = [t.to(device) for t in mod.get_example_inputs()]
         out = mod(*inp)
 
         opt_mod = torch.compile(mod)
@@ -187,18 +185,21 @@ class TestLayoutOptim(TestCase):
         # Note that if the output is channels last, the view op will fail.
         opt_out.view(5, -1)
 
-    def test_keep_output_layout_with_freezing(self):
+    def test_keep_output_layout_infer(self, device):
+        self._run_keep_output_layout_infer(device)
+
+    def test_keep_output_layout_with_freezing(self, device):
         with config.patch(
             {
                 "freezing": True,
             }
         ):
-            self.test_keep_output_layout_infer()
+            self._run_keep_output_layout_infer(device)
 
-    def test_training_acc(self):
-        self.verify_accuracy_for_train(Model2Conv)
+    def test_training_acc(self, device):
+        self.verify_accuracy_for_train(Model2Conv, device)
 
-    def test_mutate_view(self):
+    def test_mutate_view(self, device):
         """
         The GraphModule passed to GraphLowering init method is like:
         https://gist.github.com/shunting314/07228313fd017e2267101ff32edc6d64
@@ -212,11 +213,11 @@ class TestLayoutOptim(TestCase):
             y = x.view(3, 2)
             y.mul_(2)
 
-        x = torch.ones(2, 3).to(GPU_TYPE)
+        x = torch.ones(2, 3).to(device)
         f(x)
-        self.assertTrue(torch.equal(x, torch.ones(2, 3).to(GPU_TYPE) * 2))
+        self.assertTrue(torch.equal(x, torch.ones(2, 3).to(device) * 2))
 
-    def test_mutate_base(self):
+    def test_mutate_base(self, device):
         """
         The GraphModule passed to GraphLowering init method is like:
         https://gist.github.com/shunting314/fd60fe11d1f844c6db76aba7b06811bc
@@ -231,12 +232,12 @@ class TestLayoutOptim(TestCase):
             x.mul_(2)
             return y
 
-        x = torch.ones(2, 3).to(GPU_TYPE)
+        x = torch.ones(2, 3).to(device)
         y = f(x)
-        self.assertTrue(torch.equal(y, torch.ones(3, 2).to(GPU_TYPE) * 2))
+        self.assertTrue(torch.equal(y, torch.ones(3, 2).to(device) * 2))
 
     @tf32_off()
-    def test_mutate_base_for_conv_output(self):
+    def test_mutate_base_for_conv_output(self, device):
         class Model(nn.Module):
             def __init__(self, manual_graph_break=False):
                 super().__init__()
@@ -251,10 +252,10 @@ class TestLayoutOptim(TestCase):
             def get_example_inputs(self):
                 return (torch.rand(2, 3, 16, 16),)
 
-        self.verify_accuracy_for_infer(Model)
+        self.verify_accuracy_for_infer(Model, device)
 
     @tf32_off()
-    def test_mutate_view_for_conv_output(self):
+    def test_mutate_view_for_conv_output(self, device):
         class Model(nn.Module):
             def __init__(self, manual_graph_break=False):
                 super().__init__()
@@ -269,9 +270,9 @@ class TestLayoutOptim(TestCase):
             def get_example_inputs(self):
                 return (torch.rand(2, 3, 16, 16),)
 
-        self.verify_accuracy_for_infer(Model)
+        self.verify_accuracy_for_infer(Model, device)
 
-    def test_dynamic_shape_specialization(self):
+    def test_dynamic_shape_specialization(self, device):
         """
         Previously in aot_autograd.py we compare strides of FakeTensor
         with real tensor. That cause dynamic dimensions of the FakeTensor
@@ -285,19 +286,19 @@ class TestLayoutOptim(TestCase):
             return z
 
         for size in [4, 8, 16]:
-            a = torch.randn(2, size, requires_grad=True).to(GPU_TYPE)
-            b = torch.randn(2, size).to(GPU_TYPE)
+            a = torch.randn(2, size, requires_grad=True).to(device)
+            b = torch.randn(2, size).to(device)
             actual = torch.compile(f, dynamic=True)(a, b)
             self.assertTrue(torch.allclose(f(a, b), actual))
 
             # Trigger the compiling of the backward graph
             actual.sum().backward()
 
-    def test_nll_loss_backward(self):
+    def test_nll_loss_backward(self, device):
         """
         Repro for issue https://github.com/pytorch/pytorch/issues/120759
 
-        The CUDA implementation of aten.nll_loss2d_backward.default requires
+        The accelerator implementation of aten.nll_loss2d_backward.default requires
         the self tensor (whose layout will be used to create grad_input)
         to be contiguous. Layout optimization may change the self tensor's layout
         and cause failure. We fix that by adding layout constraints to the
@@ -318,7 +319,6 @@ class TestLayoutOptim(TestCase):
                 loss = torch.nn.functional.cross_entropy(logits, targets)
                 return loss
 
-        device = GPU_TYPE
         batch_size = 48
         seq_len = 144
         input_dim = 39
@@ -341,6 +341,11 @@ class TestLayoutOptim(TestCase):
         self.assertTrue(torch.allclose(ref, loss))
 
 
+instantiate_device_type_tests(TestLayoutOptim, globals(), except_for="cpu")
+
+
 if __name__ == "__main__":
-    if HAS_GPU:
+    from torch.utils._triton import has_triton
+
+    if has_triton():
         run_tests()
