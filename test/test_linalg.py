@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import \
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionAtLeast, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
-     skipIfNoNvmath)
+     skipIfNoNvmath, skipIfCrossRef)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
@@ -1105,6 +1105,59 @@ class TestLinalg(TestCase):
             out_v = torch.empty(0, device=wrong_device, dtype=dtype)
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.eigh(a, out=(out_w, out_v))
+
+    @skipCPUIfNoLapack
+    @onlyCPU
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_eigh_large_matrix_error(self, device, dtype):
+        # n=33000 needs lwork = 2*33000^2 + 6*33000 + 1 > INT32_MAX for real,
+        # and similar large workspace size for complex.
+        # Use expand (zero-stride) to create a large logical shape without
+        # allocating O(n^2) memory.
+        small = torch.zeros(1, 1, device=device, dtype=dtype)
+        large = small.expand(33000, 33000)
+        with self.assertRaisesRegex(
+            RuntimeError, "exceeds the 32-bit LAPACK interface limit"
+        ):
+            torch.linalg.eigh(large)
+
+    @skipCPUIfNoLapack
+    @onlyCPU
+    @skipIfCrossRef
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_svd_large_matrix_error(self, device, dtype):
+        # n=47000 guarantees early overflow checks for both real SVD (min(m, n) < 26755)
+        # and complex SVD (min(m, n) < 46340) to prevent huge workspace allocation.
+        small = torch.zeros(1, 1, device=device, dtype=dtype)
+        large = small.expand(47000, 47000)
+        with self.assertRaisesRegex(
+            RuntimeError, "exceed.*the 32-bit LAPACK interface limit"
+        ):
+            torch.linalg.svd(large)
+
+    @skipCPUIfNoLapack
+    @onlyCPU
+    @skipIfCrossRef
+    @dtypes(torch.float)
+    def test_linalg_ops_dimension_overflow_error(self, device, dtype):
+        small = torch.zeros(1, 1, device=device, dtype=dtype)
+        large_qr = small.expand(2147483648, 10)
+        with self.assertRaisesRegex(
+            RuntimeError, "exceed.*the 32-bit LAPACK interface limit"
+        ):
+            torch.linalg.qr(large_qr)
+
+        large_eig = small.expand(2147483648, 2147483648)
+        with self.assertRaisesRegex(
+            RuntimeError, "exceed.*the 32-bit LAPACK interface limit"
+        ):
+            torch.linalg.eig(large_eig)
+
+        large_lstsq = small.expand(2147483648, 10)
+        with self.assertRaisesRegex(
+            RuntimeError, "exceed.*the 32-bit LAPACK interface limit"
+        ):
+            torch.linalg.lstsq(large_lstsq, small.expand(2147483648, 1))
 
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
