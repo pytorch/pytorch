@@ -925,6 +925,11 @@ class AllowInGraphKind(enum.Enum):
     LEAF_FUNCTION = "leaf_function"
 
 
+_CONSTANT_FN_METADATA_ATTRS = frozenset(
+    {"__name__", "__qualname__", "__module__", "__doc__"}
+)
+
+
 class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a torch function/method that should be put in FX graph"""
 
@@ -3512,6 +3517,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
         ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
             return TorchInGraphFunctionVariable(member, source=source)
+        # Function metadata (__name__, __module__, __qualname__, ...) is
+        # immutable on builtins and descriptors, so it can be constant folded.
+        if name in _CONSTANT_FN_METADATA_ATTRS and ConstantVariable.is_literal(member):
+            return ConstantVariable.create(member)
         return variables.GetAttrVariable(self, name, source=source)
 
     def call_function(
