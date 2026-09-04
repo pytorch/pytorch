@@ -40,12 +40,15 @@ from torch.profiler import (
     _utils,
     DeviceType,
     kineto_available,
+    PerformanceMetricsConfig,
     profile,
     ProfilerAction,
     ProfilerActivity,
+    ProfilerActivityConfig,
     record_function,
     supported_activities,
 )
+from torch.profiler.profiler import _get_profiler_extensions
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -2137,6 +2140,36 @@ class TestProfiler(TestCase):
                 ],
             ) as p:
                 pass
+
+    def test_profiler_activity_config(self):
+        performance_metrics = PerformanceMetricsConfig(
+            metric_names=["metric_a", "metric_b"],
+            sampling_interval_ms=0.5,
+            lookback_window_ms=2000,
+        )
+        config = ProfilerActivityConfig(
+            activity_types=["CUDA_RUNTIME"],
+            profiler_configs=[performance_metrics],
+        )
+        p = profile(activities=[{ProfilerActivity.CUDA: config}])
+        self.assertEqual(p.activity_configs, {ProfilerActivity.CUDA: config})
+
+        self.assertEqual(
+            _get_profiler_extensions(config),
+            {
+                "PERFORMANCE_METRICS": "metric_a,metric_b",
+                "PERFORMANCE_METRICS_SAMPLING_INTERVAL_MS": "0.5",
+                "PERFORMANCE_METRICS_LOOKBACK_WINDOW_MS": "2000",
+            },
+        )
+        self.assertEqual(
+            _get_profiler_extensions(
+                ProfilerActivityConfig(
+                    profiler_configs=[PerformanceMetricsConfig(metric_names=[])]
+                )
+            ),
+            {"PERFORMANCE_METRICS": ""},
+        )
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_invalid_type_name(self):
