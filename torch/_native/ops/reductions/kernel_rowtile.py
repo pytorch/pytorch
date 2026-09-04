@@ -13,6 +13,7 @@ from cutlass import Int32
 
 import torch
 
+from ...cutedsl.dtypes import torch2cute
 from .._cutedsl import launch as _L
 from .._cutedsl.plan_cache import cached_plan
 from .._cutedsl.traits import WARP
@@ -125,7 +126,7 @@ def reduce_row_tile(
     tpr = max(WARP, cfg.tpr) if tpr is None else tpr
     nt = max(tpr, cfg.nt) if nt is None else nt
     nt -= nt % tpr  # rows_per_block must be whole
-    dt = _L.torch2cute[x.dtype]
+    dt = torch2cute[x.dtype]
     op = tile.TileReduce(
         trait,
         dt,
@@ -149,12 +150,19 @@ def reduce_row_tile(
     # wide load survives) and one compiled kernel serves the whole vec class.
     align = tile.align_bytes(N, x.element_size())
 
-    def _wrap():
-        # q/npar belong to the COL axis: None, not a dummy value -- an unused Int32 param
-        # costs real time (see tile.TileReduce.kernel).
+    def _fake():
+        # Compile-time descriptors: the input is 2D row-major with BOTH extents dynamic -- mode 1
+        # divisible by vec, so one kernel serves the whole vec class -- and each output is a 1D
+        # dynamic run. `align` is what lets the load stay wide, narrowed to what the base pointer
+        # actually meets. q/npar belong to the COL axis: None, not a dummy value -- an unused Int32
+        # param costs real time (see tile.TileReduce.kernel).
         return (
-            [_L.cute_tensor_dynMN(x, op.vec, align=align, read_only=True)],
-            [_L.cute_tensor_dynM(o, ndim=1) for o in outs],
+            [
+                _L.fake_compact(
+                    dt, (_L.sym(), _L.sym(op.vec)), order=(1, 0), align=align
+                )
+            ],
+            [_L.fake_compact(torch2cute[o.dtype], (_L.sym(),)) for o in outs],
             nchunks,
             nwaves,
             Int32(N),
@@ -164,7 +172,8 @@ def reduce_row_tile(
         )
 
     key = ("rowtile", trait_key, x.dtype, tuple(out_dtypes[:ndst])) + op.cache_sig
-    build = lambda: _compile(op, *_wrap())  # noqa: E731
+    build = lambda: _compile(op, *_fake())  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
-    fn(*_wrap())
+    # The real operands: read_only on the INPUT, or a COW input is materialized on export.
+    fn([_L.read_only(x)], list(outs), nchunks, nwaves, Int32(N), None, None, _stream())
     return tuple(outs)
