@@ -5071,6 +5071,53 @@ class CPUReproTests(TestCase):
         self.assertRaises(RuntimeError, lambda: func(example_inputs))
         self.assertRaises(RuntimeError, lambda: jit_func(example_inputs))
 
+    def test_normal_negative_std_raises(self):
+        # https://github.com/pytorch/pytorch/issues/185248
+        # torch.compile must raise for torch.normal when std tensor has negative
+        # elements, matching eager behavior instead of silently returning garbage.
+        def fn(mean, std):
+            return torch.normal(mean, std)
+
+        mean = torch.zeros(4)
+        std_bad = torch.full((4,), -1.0)
+        std_ok = torch.full((4,), 1.0)
+
+        self.assertRaisesRegex(RuntimeError, "std >= 0.0", lambda: fn(mean, std_bad))
+        compiled_fn = torch.compile(fn, backend="inductor")
+        # Valid inputs must still work
+        compiled_fn(mean, std_ok)
+        # Invalid inputs must raise, not silently return garbage
+        self.assertRaisesRegex(
+            RuntimeError,
+            "std >= 0.0",
+            lambda: compiled_fn(mean, std_bad),
+        )
+
+    def test_bernoulli_invalid_prob_raises(self):
+        # https://github.com/pytorch/pytorch/issues/185246
+        # torch.compile must raise for torch.bernoulli when the probability tensor
+        # has elements outside [0, 1], matching eager behavior.
+        def fn(p):
+            return torch.bernoulli(p)
+
+        p_bad = torch.full((4,), 2.0)
+        p_ok = torch.full((4,), 0.5)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "p_in >= 0 && p_in <= 1",
+            lambda: fn(p_bad),
+        )
+        compiled_fn = torch.compile(fn, backend="inductor")
+        # Valid inputs must still work
+        compiled_fn(p_ok)
+        # Invalid inputs must raise, not silently return ones
+        self.assertRaisesRegex(
+            RuntimeError,
+            "p_in >= 0 && p_in <= 1",
+            lambda: compiled_fn(p_bad),
+        )
+
     def test_nn_param_assign(self):
         # https://github.com/pytorch/pytorch/issues/99569
         class Model2(nn.Module):
