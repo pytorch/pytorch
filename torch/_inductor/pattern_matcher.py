@@ -195,22 +195,28 @@ def _common_custom_context(nodes: Sequence[torch.fx.Node]) -> dict[str, Any]:
     if not nodes:
         return {}
 
-    stream = nodes[0].meta.get("custom", {}).get("stream", 0)
-    mempool = nodes[0].meta.get("custom", {}).get("mempool")
-    mempool_device = nodes[0].meta.get("custom", {}).get("mempool_device")
+    c0 = nodes[0].meta.get("custom")
+    stream = c0.get("stream", 0) if c0 else 0
+    mempool = c0.get("mempool") if c0 else None
+    mempool_device = c0.get("mempool_device") if c0 else None
     if any(
         (
-            node.meta.get("custom", {}).get("stream", 0),
-            node.meta.get("custom", {}).get("mempool"),
-            node.meta.get("custom", {}).get("mempool_device"),
+            c.get("stream", 0) if c else 0,
+            c.get("mempool") if c else None,
+            c.get("mempool_device") if c else None,
         )
         != (stream, mempool, mempool_device)
         for node in nodes[1:]
+        for c in (node.meta.get("custom"),)  # bind custom once per node
     ):
         return {}
 
     context: dict[str, Any] = {}
-    if stream != 0 or any("stream" in node.meta.get("custom", {}) for node in nodes):
+    if stream != 0 or any(
+        c is not None and "stream" in c
+        for node in nodes
+        for c in (node.meta.get("custom"),)  # bind custom once per node
+    ):
         context["stream"] = stream
     if mempool is not None:
         context["mempool"] = mempool
@@ -2672,11 +2678,12 @@ class PatternMatcherPass:
                         and len(
                             OrderedSet(
                                 (
-                                    n.meta.get("custom", {}).get("stream", 0),
-                                    n.meta.get("custom", {}).get("mempool"),
-                                    n.meta.get("custom", {}).get("mempool_device"),
+                                    c.get("stream", 0) if c else 0,
+                                    c.get("mempool") if c else None,
+                                    c.get("mempool_device") if c else None,
                                 )
                                 for n in m.nodes
+                                for c in (n.meta.get("custom"),)  # bind custom once per node
                             )
                         )
                         != 1
