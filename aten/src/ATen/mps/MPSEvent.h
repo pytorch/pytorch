@@ -3,13 +3,14 @@
 #pragma once
 
 #include <ATen/mps/MPSStream.h>
+#include <c10/util/intrusive_ptr.h>
 #include <ctime>
 #include <stack>
 
 namespace at::mps {
 
 // NOTE: don't create instances of this class directly.
-// Use MPSEventPool to acquire instances of MPSEvent.
+// Use MPSEventPool to acquire instances of MPSEventPtr.
 class MPSEvent {
  public:
   explicit MPSEvent(id_t ID, MPSStream* stream, bool enable_timing);
@@ -65,7 +66,37 @@ class MPSEvent {
   }
 };
 
-typedef std::unique_ptr<MPSEvent, std::function<void(MPSEvent*)>> MPSEventPtr;
+class MPSEventPool;
+
+// Refcounted handle to an MPSEvent. When all `intrusive_ptr`s to the same event
+// are destroyed, the event is returned to the event pool instead of being
+// destroyed, to avoid some overhead of creating new events.
+class MPSEventPtrTarget : public c10::intrusive_ptr_target {
+ public:
+  MPSEventPtrTarget(MPSEvent* event, MPSEventPool* pool)
+      : m_event(event), m_pool(pool) {}
+  ~MPSEventPtrTarget() override;
+
+  MPSEvent* get() const {
+    return m_event;
+  }
+
+  void record(bool needsLock, bool syncEvent = false) {
+    m_event->record(needsLock, syncEvent);
+  }
+  bool synchronize() {
+    return m_event->synchronize();
+  }
+  id_t getID() const {
+    return m_event->getID();
+  }
+
+ private:
+  MPSEvent* m_event;
+  MPSEventPool* m_pool;
+};
+
+using MPSEventPtr = c10::intrusive_ptr<MPSEventPtrTarget>;
 
 class MPSEventPool {
  public:
@@ -94,7 +125,9 @@ class MPSEventPool {
   // for torch.mps.Event() bindings.
   std::unordered_map<id_t, MPSEventPtr> m_in_use_events{};
   uint64_t m_event_counter = 0;
-  std::function<void(MPSEvent*)> m_default_deleter;
+
+  friend class MPSEventPtrTarget;
+  void returnEventToPool(MPSEvent* event);
 
   MPSEvent* getInUseEvent(id_t event_id, bool locked = true);
 };
