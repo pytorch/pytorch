@@ -517,6 +517,7 @@
   - '**XPU**'
   - '**sycl**'
   - '**SYCL**'
+  - torch/_C/__init__.pyi.in
   approved_by:
   - EikanWang
   - jgong5
@@ -576,7 +577,6 @@
   - atalman
   - blaine-rister
   - bobrenjc93
-  - BoyuanFeng
   - choijon5
   - ColinPeppler
   - d4l3k
@@ -600,13 +600,11 @@
   - jathu
   - jbschlosser
   - jeanschmidt
-  - jijunyan
   - kapilsh
   - karthickai
   - kqfu
   - laithsakka
   - liangel-02
-  - meetv18
   - Microve
   - mlazos
   - njriasan
@@ -621,14 +619,13 @@
   - slayton58
   - soulitzer
   - tushar00jain
+  - vkuzo
   - warrendeng
   - wconstab
   - weifengpy
   - williamwen42
-  - xmfan
   - ydwu4
   - yushangdi
-  - zpcore
   mandatory_checks_name:
   - EasyCLA
   - Lint

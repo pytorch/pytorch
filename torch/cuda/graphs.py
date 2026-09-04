@@ -8,7 +8,7 @@ import warnings
 import weakref
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import overload, TYPE_CHECKING, TypeAlias, TypeGuard, Union
+from typing import Any, overload, TYPE_CHECKING, TypeAlias, TypeGuard, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -384,7 +384,7 @@ class CUDAGraph(_CUDAGraph):
         # stream off it without pinning the graph.
         self._retained = _RetainedCallbacks()
         self._retained_finalizer = weakref.finalize(self, self._retained.fire)
-        # When a consumer (e.g. the CUPTI monitor) has registered graph-destroy
+        # When a consumer (e.g. Cuspy) has registered graph-destroy
         # hooks, arm the per-graph state purge for this capture cycle. The callback
         # captures the exec-id SET OBJECT (empty now, filled as this graph
         # records/instantiates) and the module fan-out function, never self and never
@@ -421,6 +421,13 @@ class CUDAGraph(_CUDAGraph):
         is live (via :meth:`raw_cuda_graph`) for both ``keep_graph`` modes. Hooks
         fire in registration order. Returns a handle whose ``remove()``
         deregisters the hook.
+
+        These hooks are best-effort: they do not run if ending the capture itself
+        fails (a mid-capture error typically leaves a forked stream unjoined, so
+        ``cudaStreamEndCapture`` raises), and a hook that raises prevents the ones
+        registered after it from running. Anything that must happen exactly once
+        per capture -- disarming a callback, releasing a subscription -- needs its
+        own cleanup on the capture's error path rather than relying on this hook.
         """
         from torch.utils.hooks import RemovableHandle
 
@@ -1144,9 +1151,9 @@ class graph:
         annotation_config (dict, optional): Options for annotation recording, used when
             ``enable_annotations=True``. An unrecognized key or value raises. Currently
             supports ``"backend"``, which selects how ``mark_kernels`` scopes discover their
-            nodes: ``"auto"`` (default) uses CUPTI node-creation callbacks when the CUPTI
-            monitor already holds a subscription and otherwise walks the capture graph's
-            dependent edges; ``"cupti"`` requires the CUPTI path, bringing the monitor up if
+            nodes: ``"auto"`` (default) uses CUPTI node-creation callbacks when Cuspy
+            already holds a subscription and otherwise walks the capture graph's
+            dependent edges; ``"cupti"`` requires the CUPTI path, bringing Cuspy up if
             needed -- which prevents kineto from initializing, so a later
             :class:`torch.profiler.profile` records no GPU activity; ``"edge_walk"`` forces
             the walk, which cannot see nodes created while the current stream was not yet
@@ -1252,8 +1259,8 @@ class graph:
             elif force:
                 raise RuntimeError(
                     "annotation_config={'backend': 'cupti'} could not register CUPTI "
-                    "node-creation callbacks. This needs the cupti-python package and a "
-                    "CUPTI monitor able to subscribe; use 'auto' to fall back to the "
+                    "node-creation callbacks. This needs the cupti-python package and "
+                    "Cuspy able to subscribe; use 'auto' to fall back to the "
                     "dependent-edge walk instead."
                 )
 
@@ -1279,20 +1286,36 @@ class graph:
         # capture_end). One read serves everything downstream: mark_kernels telling a
         # conditional-node body apart from this graph, the CUPTI backend's body-node filter,
         # and the stamp remap_to_exec_graph later rekeys from.
-        maybe_stamp_capture_root(self.cuda_graph)
+        # Everything from here on runs with the stream already capturing, so a failure
+        # would return from __enter__ without __exit__ ever running and leave it that way
+        # -- after which every CUDA call in the process fails with "operation not
+        # permitted when stream is capturing". End the capture before propagating.
+        try:
+            maybe_stamp_capture_root(self.cuda_graph)
 
-        # Arming needs the capture live. If it does not work out, settle on the edge walk
-        # before any mark_kernels scope runs rather than recording keys that would match
-        # nothing -- which is why the backend is published only now.
-        if backend == "cupti" and not _graph_node_callbacks.arm():
+            # Arming needs the capture live. If it does not work out, settle on the edge
+            # walk before any mark_kernels scope runs rather than recording keys that
+            # would match nothing -- which is why the backend is published only now.
+            if backend == "cupti" and not _graph_node_callbacks.arm():
+                _graph_node_callbacks.disarm()
+                backend = "edge_walk"
+            _set_annotation_backend(backend)
+        except BaseException:
             _graph_node_callbacks.disarm()
-            backend = "edge_walk"
-        _set_annotation_backend(backend)
+            _set_annotations_enabled(False)
+            try:
+                self.cuda_graph.capture_end_pre()
+            except Exception:
+                # Already unusable; the original error is the one worth reporting.
+                pass
+            self.stream_ctx.__exit__(None, None, None)
+            raise
 
     def __exit__(self, *args: object) -> None:
         from torch.cuda import _graph_node_callbacks
         from torch.cuda._graph_annotations import (
             _set_annotations_enabled,
+            discard_capture_annotations,
             resolve_pending_annotations,
         )
 
@@ -1304,12 +1327,24 @@ class graph:
             if self._enable_annotations:
                 resolve_pending_annotations()
 
-            # capture_end stamps the capture id and, for keep_graph=False,
-            # instantiates (which remaps annotations to the exec id). For
+            # For keep_graph=False capture_end instantiates, which remaps annotations
+            # from the capture id (stamped back at capture_begin) to the exec id. For
             # keep_graph=True the remap is owned by the later instantiate()/replay().
-            self.cuda_graph.capture_end()
-            self.stream_ctx.__exit__(*args)
+            try:
+                self.cuda_graph.capture_end()
+            except BaseException:
+                # No exec graph, so the resolve above left entries keyed by the capture id
+                # that nothing can reach later. Scoped to capture_end alone: once it
+                # returns the capture is usable and its annotations are worth keeping.
+                if self._enable_annotations:
+                    discard_capture_annotations(self.cuda_graph)
+                raise
         finally:
+            # Unwind unconditionally. The stream context has to outlive capture_end, which
+            # checks the current stream is still the one capture began on, but it must not
+            # outlive a capture_end that raised: that would return from __exit__ leaving
+            # the graph's private stream current for the caller.
+            self.stream_ctx.__exit__(*args)
             # Annotation recording is capture-scoped; clear it unconditionally. disarm() is
             # idempotent, so repeating it here just covers a capture that raised before the
             # call above (it must not stay armed past this context either way).
@@ -1603,10 +1638,23 @@ def make_graphed_callables(
         static_grad_outputs: tuple[Tensor | None, ...],
         static_grad_inputs: tuple[Tensor, ...],
     ) -> Callable[..., object]:
+        # Handed to Graphed.apply per call rather than closed over. A class and its
+        # methods' closure cells form a reference cycle, so anything the methods close
+        # over is freed by the cyclic collector rather than by refcount -- and freeing a
+        # CUDAGraph runs cudaGraphDestroy/releasePool, which are illegal while some
+        # unrelated stream is capturing. Passing them in keeps the graphs off the class,
+        # so dropping the graphed callable releases them immediately, while ctx still
+        # holds bwd_graph for as long as a backward can be run.
+        graphs = (fwd_graph, bwd_graph)
+
         class Graphed(torch.autograd.Function):
             @staticmethod
             # pyrefly: ignore [bad-override]
-            def forward(ctx: object, *inputs: Tensor) -> tuple[Tensor, ...]:
+            def forward(
+                ctx: Any, graphs: tuple[CUDAGraph, CUDAGraph], *inputs: Tensor
+            ) -> tuple[Tensor, ...]:
+                fwd_graph, bwd_graph = graphs
+                ctx.bwd_graph = bwd_graph
                 # At this stage, only the user args may (potentially) be new tensors.
                 for i in range(len_user_args):
                     if static_input_surface[i].data_ptr() != inputs[i].data_ptr():
@@ -1621,7 +1669,7 @@ def make_graphed_callables(
             @staticmethod
             @torch.autograd.function.once_differentiable
             # pyrefly: ignore [bad-override]
-            def backward(ctx: object, *grads: Tensor) -> tuple[Tensor, ...]:
+            def backward(ctx: Any, *grads: Tensor) -> tuple[Tensor | None, ...]:
                 if len(grads) != len(static_grad_outputs):
                     raise AssertionError(
                         f"len(grads)={len(grads)} != len(static_grad_outputs)={len(static_grad_outputs)}"
@@ -1632,14 +1680,15 @@ def make_graphed_callables(
                         # incoming grad is already in the right place
                         if g.data_ptr() != grad.data_ptr():
                             g.copy_(grad)
-                bwd_graph.replay()
+                ctx.bwd_graph.replay()
 
                 # Input args that didn't require grad expect a None gradient.
                 if not isinstance(static_grad_inputs, tuple):
                     raise AssertionError(
                         f"static_grad_inputs must be tuple, got {type(static_grad_inputs)}"
                     )
-                return tuple(
+                # Leading None is the gradient for the graphs argument of forward.
+                return (None,) + tuple(
                     # pyrefly: ignore [bad-argument-type]
                     b.detach() if b is not None else b
                     for b in static_grad_inputs
@@ -1650,7 +1699,7 @@ def make_graphed_callables(
             # (explicit user args + module parameters)
             # Assumes module params didn't change since capture.
             flatten_user_args = torch.utils._pytree.arg_tree_leaves(*user_args)
-            out = Graphed.apply(*(tuple(flatten_user_args) + module_params))
+            out = Graphed.apply(graphs, *(tuple(flatten_user_args) + module_params))
             return torch.utils._pytree.tree_unflatten(out, output_unflatten_spec)
 
         return functionalized
@@ -1678,13 +1727,41 @@ def make_graphed_callables(
                 graphed: Callable[_P, _R],
                 orig_fwd: Callable[_P, _R],
             ) -> Callable[_P, _R]:
+                # This closure is installed as func.forward, so closing over func (or over
+                # orig_fwd, which is bound to it) would make the module a reference cycle
+                # and everything it reaches -- including the CUDAGraphs graphed owns --
+                # collectable only by the cyclic GC. That matters because freeing a
+                # CUDAGraph runs cudaGraphDestroy/releasePool, which are illegal while an
+                # unrelated stream is capturing, and the collector picks its own moment.
+                # Hold the module weakly and rebind its original forward per call instead.
+                func_ref = weakref.ref(func)
+                # Exactly one of these ends up in new_fwd's closure. orig_fwd is bound to
+                # func, so keeping it would reinstate the very cycle func_ref avoids;
+                # unbind it and rebind per call. If forward was already an instance
+                # attribute rather than a bound method there is nothing to unbind, and
+                # that (rare) case keeps holding the module.
+                orig_bound_to_func = getattr(orig_fwd, "__self__", None) is func
+                orig_call: Callable[..., _R] = (
+                    orig_fwd.__func__  # type: ignore[attr-defined]
+                    if orig_bound_to_func
+                    else orig_fwd
+                )
+
                 def new_fwd(*user_args: _P.args, **user_kwargs: _P.kwargs) -> _R:
+                    module = func_ref()
+                    if module is None:
+                        raise RuntimeError(
+                            "the graphed module has been freed; its forward cannot be "
+                            "called on its own"
+                        )
                     # If the module's training-or-eval state matches what we graphed,
                     # run the graph, otherwise run the original forward method
-                    if func.training == graph_training_state:
+                    if module.training == graph_training_state:
                         return graphed(*user_args, **user_kwargs)
+                    elif orig_bound_to_func:
+                        return orig_call(module, *user_args, **user_kwargs)
                     else:
-                        return orig_fwd(*user_args, **user_kwargs)
+                        return orig_call(*user_args, **user_kwargs)
 
                 return new_fwd
 

@@ -220,6 +220,9 @@ class ProcessGroupNCCLNoHeartbeatCaught
   // Commented this override, we do see process aborted with core dump without
   // this override.
   void terminateProcess(const std::string& errMsg) override {
+    // TestHeartbeatMonitor::runLoop above catches std::runtime_error by name to
+    // set hasMonitorThreadCaughtError_; a c10::Error would not be caught.
+    // @allow-raw-throw: caught by name in this file
     throw std::runtime_error(errMsg);
   }
 
