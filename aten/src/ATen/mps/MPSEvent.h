@@ -16,8 +16,12 @@ class MPSEvent {
   explicit MPSEvent(id_t ID, MPSStream* stream, bool enable_timing);
   ~MPSEvent();
 
-  // records an event on the stream
-  void record(bool needsLock, bool syncEvent = false);
+  // records an event on the stream. If `stream` is null, records on the
+  // stream this event was last recorded or reset on.
+  void record(
+      bool needsLock,
+      bool syncEvent = false,
+      MPSStream* stream = nullptr);
   // makes all future work submitted to the stream wait for this event.
   // If `stream` is null, wait on the stream this event was last recorded or
   // reset on.
@@ -64,7 +68,7 @@ class MPSEvent {
   // used to compute elapsed time
   uint64_t m_completion_time = 0;
 
-  void recordLocked(bool syncEvent);
+  void recordLocked(bool syncEvent, MPSStream* stream);
   bool waitLocked(bool syncEvent, MPSStream* stream);
   bool notifyLocked(MTLSharedEventNotificationBlock block);
   void notifyCpuSync();
@@ -88,8 +92,11 @@ class MPSEventPtrTarget : public c10::intrusive_ptr_target {
     return m_event;
   }
 
-  void record(bool needsLock, bool syncEvent = false) {
-    m_event->record(needsLock, syncEvent);
+  void record(
+      bool needsLock,
+      bool syncEvent = false,
+      MPSStream* stream = nullptr) {
+    m_event->record(needsLock, syncEvent, stream);
   }
   bool synchronize() {
     return m_event->synchronize();
@@ -118,7 +125,7 @@ class MPSEventPool {
   void releaseEvent(id_t event_id);
   // rebinds an already-acquired event to `stream`
   void resetEvent(id_t event_id, MPSStream* stream, bool enable_timing);
-  void recordEvent(id_t event_id, bool syncEvent);
+  void recordEvent(id_t event_id, bool syncEvent, MPSStream* stream = nullptr);
   void waitForEvent(id_t event_id, bool syncEvent, MPSStream* stream = nullptr);
   void synchronizeEvent(id_t event_id);
   bool queryEvent(id_t event_id);

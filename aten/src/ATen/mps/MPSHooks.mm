@@ -130,16 +130,16 @@ void MPSHooks::releaseEvent(uint32_t event_id) const {
   at::mps::getMPSEventPool()->releaseEvent(event_id);
 }
 
-void MPSHooks::recordEvent(uint32_t event_id) const {
-  at::mps::getMPSEventPool()->recordEvent(event_id, /* syncEvent*/ true);
+void MPSHooks::recordEvent(uint32_t event_id, int64_t stream_id) const {
+  at::mps::getMPSEventPool()->recordEvent(event_id, /* syncEvent*/ true, at::mps::getStreamByID(stream_id));
 }
 
 Device MPSHooks::getDeviceFromPtr(void* data) const {
   return at::mps::getDeviceFromPtr(data);
 }
 
-void MPSHooks::waitForEvent(uint32_t event_id) const {
-  at::mps::getMPSEventPool()->waitForEvent(event_id, /* syncEvent*/ true);
+void MPSHooks::waitForEvent(uint32_t event_id, int64_t stream_id) const {
+  at::mps::getMPSEventPool()->waitForEvent(event_id, /* syncEvent*/ true, at::mps::getStreamByID(stream_id));
 }
 
 void MPSHooks::synchronizeEvent(uint32_t event_id) const {

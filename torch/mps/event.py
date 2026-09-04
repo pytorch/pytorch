@@ -1,5 +1,12 @@
 import torch
 
+from .streams import Stream
+
+
+__all__ = [
+    "Event",
+]
+
 
 class Event:
     r"""Wrapper around an MPS event.
@@ -20,17 +27,29 @@ class Event:
         if hasattr(torch._C, "_mps_releaseEvent") and self.__eventId > 0:
             torch._C._mps_releaseEvent(self.__eventId)
 
-    def record(self) -> None:
-        r"""Records the event in the current stream."""
-        if torch.mps.current_stream() != torch.mps.default_stream():
-            raise NotImplementedError("Non-default streams are not yet supported.")
-        torch._C._mps_recordEvent(self.__eventId)
+    def record(self, stream: Stream | None = None) -> None:
+        r"""Records the event in a given stream.
 
-    def wait(self) -> None:
-        r"""Makes all future work submitted to the current stream wait for this event."""
-        if torch.mps.current_stream() != torch.mps.default_stream():
-            raise NotImplementedError("Non-default streams are not yet supported.")
-        torch._C._mps_waitForEvent(self.__eventId)
+        Args:
+            stream (torch.mps.Stream, torch.Stream, optional): Uses ``torch.mps.current_stream()`` if no stream is specified.
+        """
+        if stream is None:
+            stream = torch.mps.current_stream()
+        elif stream.device.type != "mps":
+            raise RuntimeError(f"expected an MPS stream, but got {stream.device.type}")
+        torch._C._mps_recordEvent(self.__eventId, stream.stream_id)
+
+    def wait(self, stream: Stream | None = None) -> None:
+        r"""Makes all future work submitted to the given stream wait for this event.
+
+        Args:
+            stream (torch.mps.Stream, torch.Stream, optional): Uses ``torch.mps.current_stream()`` if no stream is specified.
+        """
+        if stream is None:
+            stream = torch.mps.current_stream()
+        elif stream.device.type != "mps":
+            raise RuntimeError(f"expected an MPS stream, but got {stream.device.type}")
+        torch._C._mps_waitForEvent(self.__eventId, stream.stream_id)
 
     def query(self) -> bool:
         r"""Returns True if all work currently captured by event has completed."""
