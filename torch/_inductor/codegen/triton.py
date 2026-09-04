@@ -1498,7 +1498,7 @@ class TritonOverrides(OpOverrides):
         if (
             x_dtype == torch.float32
             and y_dtype == torch.float32
-            and config.eager_numerics.division_rounding
+            and config.use_eager_division_rounding()
         ):
             # x / y in Triton is lowered to div.full which is approx
             # we want div_rn to adhere with eager
@@ -7184,9 +7184,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     @classmethod
     def triton_meta_common(cls) -> TritonMeta:
         return {
-            "enable_fp_fusion": not config.emulate_precision_casts,
+            "enable_fp_fusion": not config.should_emulate_precision_casts(),
             "launch_pdl": cls._enable_pdl_codegen(),
-            "disable_ftz": config.eager_numerics.disable_ftz,
+            "disable_ftz": config.should_disable_ftz(),
         }
 
     @classmethod

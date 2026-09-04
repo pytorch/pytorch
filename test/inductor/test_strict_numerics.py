@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
-"""Tests for strict inner-contiguous reduction ordering."""
+"""Tests for strict numerics mode."""
 
 import os
+import subprocess
+import sys
 import unittest
 
 
@@ -85,6 +87,83 @@ FUSION_CASES = (
     "multi_kernel",
     "multi_output",
 )
+
+EFFECTIVE_NUMERICS = {
+    "eager_numerics.division_rounding": config.use_eager_division_rounding,
+    "eager_numerics.disable_ftz": config.should_disable_ftz,
+    "emulate_precision_casts": config.should_emulate_precision_casts,
+}
+
+
+def _numerics_options(numerics, enabled):
+    return {
+        key: numerics if key == "numerics" else enabled
+        for key in ("numerics", *EFFECTIVE_NUMERICS)
+    }
+
+
+def _effective_numerics():
+    return {key: value() for key, value in EFFECTIVE_NUMERICS.items()}
+
+
+class StrictNumericsConfigTest(TestCase):
+    def test_config_patch_enables_eager_numerics(self):
+        with config.patch(_numerics_options("strict", False)):
+            self.assertEqual(
+                _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
+            )
+            with config.patch(numerics="default"):
+                self.assertEqual(
+                    _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, False)
+                )
+        with config.patch(_numerics_options("default", True)):
+            self.assertEqual(
+                _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
+            )
+
+    def test_strict_env_enables_eager_numerics(self):
+        env = os.environ.copy()
+        env["TORCHINDUCTOR_NUMERICS"] = "strict"
+        env["TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING"] = "0"
+        env["TORCHINDUCTOR_EMULATE_PRECISION_CASTS"] = "0"
+        output = subprocess.check_output(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from torch._inductor import config; "
+                    "print(config.use_eager_division_rounding(), "
+                    "config.should_disable_ftz(), "
+                    "config.should_emulate_precision_casts())"
+                ),
+            ],
+            env=env,
+            text=True,
+        )
+        self.assertEqual(output.strip(), "True True True")
+
+
+@unittest.skipUnless(
+    HAS_CUDA_AND_TRITON and torch.version.hip is None,
+    "requires NVIDIA CUDA and Triton",
+)
+class StrictNumericsCompileTest(TestCase):
+    def test_compile_options_enable_eager_division(self, device):
+        x = torch.full((1024,), 11.0, device=device)
+        y = torch.full((1024,), 7.0, device=device)
+
+        result, codes = run_and_get_code(
+            torch.compile(
+                lambda a, b: a / b,
+                fullgraph=True,
+                options={"numerics": "strict"},
+            ),
+            x,
+            y,
+        )
+
+        self.assertEqual(result.view(torch.int32), (x / y).view(torch.int32))
+        self.assertIn("div_rn", "\n".join(codes))
 
 
 @unittest.skipUnless(
@@ -384,6 +463,7 @@ class StrictNumericsTest(TestCase):
         self.assertIn("tensor_descriptor" if kind == "split" else "tl.store", code)
 
 
+instantiate_device_type_tests(StrictNumericsCompileTest, globals(), only_for="cuda")
 instantiate_device_type_tests(StrictNumericsTest, globals(), only_for="cuda")
 
 
