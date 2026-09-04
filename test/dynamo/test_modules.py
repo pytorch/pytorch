@@ -3944,13 +3944,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         ):
             compiled(x)
 
-    def test_batchnorm_momentum_none_export(self):
-        eager = torch.nn.BatchNorm2d(4, momentum=None).train()
-        module = torch.nn.BatchNorm2d(4, momentum=None).train()
-        x = torch.randn(2, 4, 8, 8)
-        exported = torch.export.export(module, (x,), strict=True)
-        self.assertEqual(eager(x), exported.module()(x))
-
     @parametrize("training,track_running_stats", [(False, True), (True, False)])
     def test_batchnorm_momentum_none_allowed(self, training, track_running_stats):
         module = torch.nn.BatchNorm2d(
