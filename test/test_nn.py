@@ -9110,6 +9110,23 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(x_cpu.grad, x.grad.cpu())
 
     @onlyCUDA
+    def test_MarginLoss_invalid_target_from_dlpack(self, device):
+        # Run in a different process to prevent the device-side assert from affecting other tests.
+        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
+import torch
+import torch.nn.functional as F
+
+x = torch.ones((1024,), dtype=torch.float32, device='{device}', requires_grad=True)
+target = torch.tensor(0, dtype=torch.int64, device='{device}')
+target_alias = torch.from_dlpack(target)
+loss = F.multi_margin_loss(x, target, p=1, margin=0.1, reduction="mean")
+target_alias.fill_(2147483647)
+loss.backward()
+torch.cuda.synchronize()
+""")
+        self.assertIn("CUDA error: device-side assert triggered", stderr)
+
+    @onlyCUDA
     def test_MarginLoss_warnings(self, device):
         model = torch.nn.Linear(128, 22, device=device)
         loss = torch.nn.MultiMarginLoss()
