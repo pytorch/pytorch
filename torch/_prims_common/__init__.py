@@ -2247,3 +2247,38 @@ class CUDARngStateHelper:
     @staticmethod
     def set_new_offset(relative_offset):
         torch.cuda._set_rng_state_offset(relative_offset.item())
+
+
+class XPURngStateHelper:
+    @staticmethod
+    def get_torch_state_as_tuple(
+        fake_mode: AbstractContextManager[Any] = nullcontext(),
+    ):
+        if not torch.xpu.is_available():
+            raise RuntimeError("XPU not available")
+
+        with fake_mode:
+            seed = torch.tensor(torch.xpu.initial_seed())
+            offset = torch.tensor(torch.xpu._get_rng_state_offset())
+            return seed, offset
+
+    @staticmethod
+    def set_torch_state_tensor(seed, offset):
+        seed_portion = seed.reshape([1]).view(torch.uint8)
+        offset_portion = offset.reshape([1]).view(torch.uint8)
+        new_state = torch.cat([seed_portion, offset_portion])
+        torch.xpu.set_rng_state(new_state)
+
+    @staticmethod
+    def set_new_offset(relative_offset):
+        torch.xpu._set_rng_state_offset(relative_offset.item())
+
+
+def get_rng_state_helper(device: torch.device):
+    if device.type == "cuda":
+        return CUDARngStateHelper
+    if device.type == "xpu":
+        return XPURngStateHelper
+    raise RuntimeError(
+        f"functionalizing {device.type} RNG operators is not supported"
+    )

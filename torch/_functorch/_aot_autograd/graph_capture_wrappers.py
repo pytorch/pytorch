@@ -25,7 +25,7 @@ from torch import Tensor
 from torch._custom_class_base import CustomClassBase
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
-from torch._prims_common import CUDARngStateHelper
+from torch._prims_common import get_rng_state_helper
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
     get_proxy_mode,
@@ -517,6 +517,12 @@ def create_functionalized_rng_ops_wrapper(
     if fake_mode_det is not None:
         fake_mode = fake_mode_det
 
+    rng_device = next(
+        arg.device for arg in pytree.tree_leaves(args) if isinstance(arg, Tensor)
+    )
+    rng_state_helper = get_rng_state_helper(rng_device)
+    rng_module = torch.get_device_module(rng_device.type)
+
     def override_get_rng_state(
         device: int | str | torch.device = "cuda",
     ) -> Tensor:
@@ -562,25 +568,25 @@ def create_functionalized_rng_ops_wrapper(
         tuple[tuple[AOTOutput, ...], tuple[AOTOutput, ...]],
     ]:
         with (
-            patch("torch.cuda.get_rng_state", override_get_rng_state),
-            patch("torch.cuda.set_rng_state", override_set_rng_state),
+            patch.object(rng_module, "get_rng_state", override_get_rng_state),
+            patch.object(rng_module, "set_rng_state", override_set_rng_state),
         ):
             return append_rng_offsets(*func(primals, tangents))
 
     def traced_forward(*primals_fwd_seed_fwd_base_offset: Any) -> Any:
         # The signature is (*primals, seed, offset)
         with (
-            patch("torch.cuda.get_rng_state", override_get_rng_state),
-            patch("torch.cuda.set_rng_state", override_set_rng_state),
+            patch.object(rng_module, "get_rng_state", override_get_rng_state),
+            patch.object(rng_module, "set_rng_state", override_set_rng_state),
         ):
             return append_rng_offsets(*func(*primals_fwd_seed_fwd_base_offset[:-2]))
 
     if trace_joint:
         # Get the current seed and offset to setup tracing.
-        fwd_seed, fwd_base_offset = CUDARngStateHelper.get_torch_state_as_tuple(
+        fwd_seed, fwd_base_offset = rng_state_helper.get_torch_state_as_tuple(
             fake_mode
         )
-        bwd_seed, bwd_base_offset = CUDARngStateHelper.get_torch_state_as_tuple(
+        bwd_seed, bwd_base_offset = rng_state_helper.get_torch_state_as_tuple(
             fake_mode
         )
         PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")
@@ -604,7 +610,7 @@ def create_functionalized_rng_ops_wrapper(
         )
     else:
         # Get the current seed and offset to setup tracing.
-        fwd_seed, fwd_base_offset = CUDARngStateHelper.get_torch_state_as_tuple(
+        fwd_seed, fwd_base_offset = rng_state_helper.get_torch_state_as_tuple(
             fake_mode
         )
         PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")
