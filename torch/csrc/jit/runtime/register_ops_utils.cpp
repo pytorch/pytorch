@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <limits>
+#include <numeric>
 
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
@@ -140,7 +141,7 @@ int64_t partProduct(int n, int m) {
     return (int64_t)n;
   if (m == (n + 2))
     return (int64_t)n * m;
-  auto k = n + (m - n) / 2; // Overflow-safe midpoint
+  auto k = std::midpoint(n, m);
   if ((k & 1) != 1)
     k = k - 1;
   return partProduct(n, k) * partProduct(k + 2, m);

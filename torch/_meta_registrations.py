@@ -8570,7 +8570,7 @@ def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
 
     out_dtype = out_dtype or mat1.dtype
 
-    if torch.version.cuda:
+    if torch.version.cuda or device_hint(mat1) == "mps":
         alignment = 16 // out_dtype.itemsize
         size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
         if mat1_is_2d == mat2_is_2d:

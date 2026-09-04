@@ -108,67 +108,21 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
 
+GPU_TYPES = ["cuda", "mps", "xpu", "mtia"]
 T = TypeVar("T")
 
 
-# Defined before the torch._dynamo import below to avoid a circular import
-# when pulled in from dynamo; hence the lazy registry imports in the bodies.
-def _gpu_types() -> list[str]:
-    """Freshly scan the DeviceInterface registry for GPU-class device types,
-    skipping indexed aliases such as "cuda:0". Production code should use the
-    GPU_TYPES snapshot below; this scan exists to compute it and for tests.
-    """
-    from torch._dynamo.device_interface import get_registered_device_interfaces
-
-    return [
-        name
-        for name, device_interface in get_registered_device_interfaces()
-        if ":" not in name and device_interface.is_gpu()
-    ]
-
-
-def _device_is_available(device: str) -> bool:
-    """Whether a registered DeviceInterface reports the device available.
-
-    Tolerates partially-implemented out-of-tree interfaces: the base-class
-    is_available() raises NotImplementedError, which must not propagate out
-    of registry-driven consumers (some run at module import time). Device
-    types with no registered interface are likewise treated as unavailable.
-    """
-    from torch._dynamo.device_interface import get_interface_for_device
-
-    try:
-        return get_interface_for_device(device).is_available()
-    except NotImplementedError:
-        return False
-
-
+# defines here before import torch._dynamo is for avoiding circular import
+# when get_gpu_type is imported from dynamo
 @functools.cache
 def get_gpu_type() -> str:
-    avail_gpus = [gpu for gpu in GPU_TYPES if _device_is_available(gpu)]
-
-    if not avail_gpus:
-        return "cuda"
-    if len(avail_gpus) == 1:
-        return avail_gpus[0]
-
-    # >1 GPU type available: disambiguate via the current accelerator.
-    acc = torch.accelerator.current_accelerator()
-    if acc is not None and acc.type in avail_gpus:
-        return acc.type
-    # Registry order is insertion order and may differ between processes
-    # (out-of-tree backends register at import time), so fall back to a
-    # stable choice rather than a positional one.
-    chosen = "cuda" if "cuda" in avail_gpus else sorted(avail_gpus)[0]
-    log.warning(
-        "Multiple GPU types %s are available but the current accelerator (%s) "
-        "is not one of them; defaulting to %r. Codegen may target the wrong "
-        "device.",
-        avail_gpus,
-        acc,
-        chosen,
-    )
-    return chosen
+    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
+    if not len(avail_gpus) <= 1:
+        raise AssertionError(
+            f"Expected at most 1 available GPU type, got {len(avail_gpus)}: {avail_gpus}"
+        )
+    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+    return gpu_type
 
 
 from torch._dynamo.device_interface import get_interface_for_device
@@ -195,15 +149,6 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
-
-# Scanned exactly once, when this module is imported. Safe because both
-# registration paths precede any import of inductor: autoloaded out-of-tree
-# backends register during `import torch` (TORCH_DEVICE_BACKEND_AUTOLOAD, end
-# of torch/__init__.py) and explicit ones at their package import (e.g.
-# `import torch_npu`), while in-tree backends are registered by
-# init_device_reg() inside the scan itself. Registering after this module is
-# imported is not supported (see register_interface_for_device).
-GPU_TYPES: list[str] = _gpu_types()
 
 
 _DO_BENCH_PROFILE_EVENT_NAME = "inductor_do_bench_using_profiling"
@@ -2257,6 +2202,22 @@ def use_triton_template(
     )
 
 
+def tma_inner_dim(strides: Sequence[_IntLike]) -> int | None:
+    """Index of the single stride-1 ("inner") dim, or None if there is not
+    exactly one. TMA requires exactly one contiguous dim, so None means the
+    tensor is not TMA-compatible. `strides` must already be resolved to ints or
+    hinted symbols by the caller.
+    """
+    from .virtualized import V
+
+    inner = [
+        i
+        for i, st in enumerate(strides)
+        if V.graph.sizevars.statically_known_equals(st, 1)
+    ]
+    return inner[0] if len(inner) == 1 else None
+
+
 def can_use_tma(
     *matrices: IRNode, output_layout: Layout | None = None, add_guards: bool = False
 ) -> bool:
@@ -2333,15 +2294,9 @@ def can_use_tma(
                 V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
             ]
 
-        # Find the single contiguous ("inner") dim
-        inner = [
-            i
-            for i, st in enumerate(strides_i)
-            if V.graph.sizevars.statically_known_equals(st, 1)
-        ]
-        if len(inner) != 1:
+        inner_idx = tma_inner_dim(strides_i)
+        if inner_idx is None:
             return False
-        inner_idx = inner[0]
 
         # All "outer" dims must have 16-byte aligned strides
         for i, st in enumerate(strides_i):
@@ -2872,11 +2827,23 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 
 @functools.lru_cache
+def rocm_gfx_arch() -> str:
+    """Canonical gfx target of the current device, e.g. "gfx950". Empty if not ROCm.
+
+    Prefer this over get_device_capability() for target-specific behaviour. On
+    ROCm that call reports the gfx major/minor, which does not order by
+    capability and spans two product lines: gfx1250 (MI450) reports (12, 5) and
+    gfx1100 (RDNA3) reports (11, 0), both greater than gfx950's (9, 5). Target
+    features are stripped, so "gfx950:sramecc+:xnack-" becomes "gfx950".
+    """
+    if not torch.version.hip or not torch.cuda.is_available():
+        return ""
+    return _rocm_native_device_arch_name("cuda").split(":", 1)[0]
+
+
 def using_rocm_rdna3() -> bool:
     """Returns true if the device is based on RDNA3, otherwise returns false."""
-    return torch.cuda.is_available() and _rocm_native_device_arch_name(
-        "cuda"
-    ).startswith("gfx11")
+    return rocm_gfx_arch().startswith("gfx11")
 
 
 @functools.cache
@@ -3896,11 +3863,7 @@ def is_triton_fp8_dtype_supported(
 
 
 def device_need_guard(device: str) -> bool:
-    if not is_gpu(device):
-        return False
-    # A GPU-class device still only needs stream guards if it exposes streams;
-    # e.g. MPS is a GPU but does not, so it must be excluded here.
-    return get_interface_for_device(device).exposes_streams()
+    return device != "mps" and is_gpu(device)  # TODO: MPS does not expose streams now
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:

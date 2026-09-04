@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 """CUPTI PM-sampling: continuous GPU performance-monitor sampling (SM-active %, DRAM-throughput
-%) that runs concurrently with the activity monitor.
+%) that runs concurrently with Cuspy.
 
 Each CUDA device has at most one :class:`PmSampler` -- a per-device singleton (``PmSampler(device)``
 returns the one instance) -- so no device is ever driven by two collectors. Lifecycle follows
