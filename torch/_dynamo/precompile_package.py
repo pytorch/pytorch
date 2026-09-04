@@ -1704,9 +1704,10 @@ class PrecompileSession:
                         raise AssertionError("save_guards produced no guards_state")
                 except Exception as e:
                     raise PackageError(
-                        f"precompile: could not re-serialize the guards of "
-                        f"{code_entry.python_code.co_name} while dropping "
-                        f"invariant ones: {type(e).__name__}: {e}"
+                        f"precompile: the guards captured for "
+                        f"{code_entry.python_code.co_name} cannot be rebuilt "
+                        f"from their serialized form while dropping invariant "
+                        f"ones: {type(e).__name__}: {e}"
                     ) from e
                 pruned_states.append((guarded, pruned))
 
