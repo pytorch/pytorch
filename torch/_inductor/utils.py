@@ -2053,6 +2053,10 @@ def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
             return False
         return True
 
+    from torch._utils import _is_privateuse1_backend_available
+    if _is_privateuse1_backend_available():
+        return True
+
     min_sms = 16 if device.type == "xpu" else 68  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
