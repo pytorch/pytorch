@@ -26,6 +26,7 @@ from torchvision.models.detection import (
 import torch
 from torch import nn
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def exportTest(
@@ -201,6 +202,8 @@ def _init_test_roi_heads_faster_rcnn():
     class_name_func=onnx_test_common.parameterize_class_name,
 )
 class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()  # Faster RCNN model is not scriptable
     def test_faster_rcnn(self):
