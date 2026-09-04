@@ -29,8 +29,9 @@ from torch._inductor.compile_worker.subproc_pool import (
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     IS_LINUX,
     parametrize,
     skipIfWindows,
@@ -40,6 +41,8 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
 
 
 class TestCompileWorker(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def make_pool(self, size):
         return SubprocPool(size)
 
@@ -340,11 +343,14 @@ class TestCompileWorker(TestCase):
 
 @config.patch("quiesce_async_compile_time", 0.1)
 class TestCompileWorkerWithTimer(TestCompileWorker):
+    hw_classification = HardwareClassification.CPU
     def make_pool(self, size):
         return SubprocPool(size, quiesce=True)
 
 
 class TestSubprocPoolCallbackSafety(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_done_callback_can_submit_job(self):
         code = textwrap.dedent(
@@ -552,12 +558,13 @@ def _run_callback(future, job_id, pickler):
         return parent_read.read()
 
 
-@instantiate_parametrized_tests
 class TestSubprocMainResultDelivery(TestCase):
     # Drive SubprocMain's result callback in-process against a fake pool, so the
     # two escapes in the pre-send work can be reproduced directly. Running the
     # callback here rather than through a real sidecar is what lets these tests
     # fail -- instead of hanging -- when it dies without sending anything.
+
+    hw_classification = HardwareClassification.CPU
 
     @parametrize(
         "future",
@@ -676,6 +683,8 @@ class TestSubprocPoolResultHandling(TestCase):
     # the read thread keep running, so the follow-up jobs below are ordinary
     # round trips through a real pool.
 
+    hw_classification = HardwareClassification.CPU
+
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_bookkeeping_failure_does_not_strand_result(self):
         class BrokenWaitCounter:
@@ -786,6 +795,8 @@ class TestSubprocPoolResultHandling(TestCase):
 
 
 class TestCompileWorkerWatchdog(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     # The sidecar runs a watchdog that, every interval (shortened to 1s here via
     # env), reports jobs still running past that interval to the parent, which
     # turns them into a "compile_worker_status" structured-trace artifact -- so a
@@ -982,6 +993,8 @@ class TestCompileWorkerWatchdog(TestCase):
 
 
 class TestTimer(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def test_basics(self):
         done = Event()
 
@@ -1047,6 +1060,8 @@ class _FakeTritonKernel:
 
 
 class TestSubprocessEnv(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def assert_path_in_dir(self, path, expected_dir):
         expected_dir = os.path.abspath(expected_dir)
         self.assertEqual(
@@ -1377,20 +1392,22 @@ class TestSubprocessEnv(TestCase):
 
 
 class TestSetTritonLibdevicePath(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
-    def test_emulate_precision_casts_sets_libdevice_path(self):
+    def test_emulate_precision_casts_sets_libdevice_path(self, device):
         """Test eager numerics mode sets libdevice path for CUDA libdevice calls."""
-        self._test_libdevice_path_with_compilation()
+        self._test_libdevice_path_with_compilation(device)
 
     @config.patch({"compile_threads": 1, "eager_numerics.use_pytorch_libdevice": True})
-    def test_libdevice_path_no_subprocess(self):
+    def test_libdevice_path_no_subprocess(self, device):
         """Test libdevice path is set with compile_threads=1 (no subprocess)."""
-        self._test_libdevice_path_with_compilation()
+        self._test_libdevice_path_with_compilation(device)
 
     @config.patch("eager_numerics.use_pytorch_libdevice", True)
-    def test_libdevice_path_default_threads(self):
+    def test_libdevice_path_default_threads(self, device):
         """Test libdevice path is set with default compile_threads (subprocess)."""
-        self._test_libdevice_path_with_compilation()
+        self._test_libdevice_path_with_compilation(device)
 
     @config.patch(
         {
@@ -1400,12 +1417,12 @@ class TestSetTritonLibdevicePath(TestCase):
             "compile_threads": 1,
         }
     )
-    def test_pow_bitwise_precision(self):
+    def test_pow_bitwise_precision(self, device):
         """Test that compiled pow matches eager bitwise with system libdevice."""
         import torch
         from torch.utils.cpp_extension import CUDA_HOME
 
-        if not torch.cuda.is_available():
+        if not torch.accelerator.is_available():
             self.skipTest("CUDA not available")
         if CUDA_HOME is None:
             self.skipTest("CUDA_HOME not set")
@@ -1415,20 +1432,20 @@ class TestSetTritonLibdevicePath(TestCase):
 
         torch._dynamo.reset()
         torch.manual_seed(42)
-        base = torch.randn(1000, device="cuda", dtype=torch.float32).abs() + 1e-6
-        exp = torch.randn(1000, device="cuda", dtype=torch.float32)
+        base = torch.randn(1000, device=device, dtype=torch.float32).abs() + 1e-6
+        exp = torch.randn(1000, device=device, dtype=torch.float32)
 
         eager_result = torch.pow(base, exp)
         compiled_result = torch.compile(torch.pow)(base, exp)
         self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
 
     @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
-    def test_erf_bitwise_precision_with_emulate_precision_casts(self):
+    def test_erf_bitwise_precision_with_emulate_precision_casts(self, device):
         """Test that erf matches eager bitwise when eager numerics mode is active."""
         import torch
         from torch.utils.cpp_extension import CUDA_HOME
 
-        if not torch.cuda.is_available():
+        if not torch.accelerator.is_available():
             self.skipTest("CUDA not available")
         if CUDA_HOME is None:
             self.skipTest("CUDA_HOME not set")
@@ -1445,7 +1462,7 @@ class TestSetTritonLibdevicePath(TestCase):
                 1.0,
                 3.9194295406341553,
             ],
-            device="cuda",
+            device=device,
             dtype=torch.float32,
         )
 
@@ -1456,11 +1473,11 @@ class TestSetTritonLibdevicePath(TestCase):
         compiled_result = torch.compile(fn)(values)
         self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
 
-    def _test_libdevice_path_with_compilation(self):
+    def _test_libdevice_path_with_compilation(self, device):
         import torch
         from torch.utils.cpp_extension import CUDA_HOME
 
-        if not torch.cuda.is_available():
+        if not torch.accelerator.is_available():
             self.skipTest("CUDA not available")
 
         if CUDA_HOME is None:
@@ -1475,7 +1492,7 @@ class TestSetTritonLibdevicePath(TestCase):
         def fn(x):
             return torch.pow(x, 2.0)
 
-        x = torch.randn(10, device="cuda", dtype=torch.float32)
+        x = torch.randn(10, device=device, dtype=torch.float32)
         fn(x)
 
         # Verify libdevice path was set. The exact path is environment-specific
@@ -1493,6 +1510,8 @@ class TestSetTritonLibdevicePath(TestCase):
 
 
 class TestTritonCompileWorker(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_worker_compile_triton_warm_cache_skips_gpu_driver_setup(self):
         from torch._inductor.runtime import triton_helpers
@@ -1555,6 +1574,17 @@ class TestTritonCompileWorker(TestCase):
             with self.assertRaisesRegex(RuntimeError, "0 active drivers"):
                 triton_helpers.set_driver_to_gpu()
 
+
+instantiate_device_type_tests(TestCompileWorker, globals(), only_for="cpu")
+instantiate_device_type_tests(TestCompileWorkerWithTimer, globals(), only_for="cpu")
+instantiate_device_type_tests(TestSubprocPoolCallbackSafety, globals(), only_for="cpu")
+instantiate_device_type_tests(TestSubprocMainResultDelivery, globals(), only_for="cpu")
+instantiate_device_type_tests(TestSubprocPoolResultHandling, globals(), only_for="cpu")
+instantiate_device_type_tests(TestCompileWorkerWatchdog, globals(), only_for="cpu")
+instantiate_device_type_tests(TestTimer, globals(), only_for="cpu")
+instantiate_device_type_tests(TestSubprocessEnv, globals(), only_for="cuda")
+instantiate_device_type_tests(TestSetTritonLibdevicePath, globals(), only_for="cuda")
+instantiate_device_type_tests(TestTritonCompileWorker, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
