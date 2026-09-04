@@ -661,6 +661,16 @@
       ]
     }
   ],
+  "GB2431": [
+    {
+      "Gb_type": "Attempted to access _saved_* attribute of autograd Node",
+      "Context": "attribute {attr_name} of {type(obj_value).__name__}",
+      "Explanation": "Accessing `{attr_name}` on an autograd Node can trigger checkpoint recomputation hooks, i.e. it has observable side effects, so Dynamo cannot run the getter at trace time.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0047": [
     {
       "Gb_type": "Encountered unconverted argument when attempting to inline",
