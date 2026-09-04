@@ -12085,6 +12085,114 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     out.add_(100)
                 self.assertEqual(x, x_after_call)
 
+    @config.patch(implicit_fallbacks=True)
+    def test_reinplace_result_escapes_via_auto_functionalized(self):
+        # https://github.com/pytorch/pytorch/pull/195484
+        # auto_functionalized{,_v2} is a second way this pass drops a clone: a
+        # mutable argument the pass leaves out of only_clone_these_tensors is
+        # mutated in place, so the output holding its new value aliases it.
+        # A scatter on either side of such an op must not let that turn the
+        # returned result into an alias of the graph input.
+        device = self.device
+
+        def scatter_then_mutate(x, diag):
+            updated = torch.diagonal_scatter(x, diag)
+            torch.ops.mylib.inc_(updated)
+            x.copy_(updated)
+            return updated
+
+        def mutate_then_scatter(x, diag):
+            torch.ops.mylib.inc_(x)
+            updated = torch.diagonal_scatter(x, diag)
+            x.copy_(updated)
+            return updated
+
+        def mutate_view_then_scatter(x, diag):
+            view = x.view_as(x)
+            torch.ops.mylib.inc_(view)
+            updated = torch.diagonal_scatter(view, diag)
+            x.copy_(updated)
+            return updated
+
+        def make_inputs():
+            return (
+                torch.arange(16.0, device=device).reshape(4, 4),
+                torch.full((4,), -1.0, device=device),
+            )
+
+        def inc_(x):
+            x.add_(1.0)
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("inc_(Tensor(a!) x) -> ()")
+            m.impl("inc_", inc_, "CompositeExplicitAutograd")
+            torch.library.register_fake("mylib::inc_", lambda x: None, lib=m)
+
+            for v2 in (False, True):
+                for fn in (
+                    scatter_then_mutate,
+                    mutate_then_scatter,
+                    mutate_view_then_scatter,
+                ):
+                    with self.subTest(fn=fn.__name__, auto_functionalized_v2=v2):
+                        eager_args = make_inputs()
+                        out_eager = fn(*eager_args)
+
+                        compiled_args = make_inputs()
+                        with config.patch(enable_auto_functionalized_v2=v2):
+                            torch._dynamo.reset()
+                            out = torch.compile(fn, fullgraph=True)(*compiled_args)
+
+                        x = compiled_args[0]
+                        self.assertEqual(out_eager, out)
+                        self.assertEqual(eager_args[0], x)
+                        self.assertIsNot(out, x)
+                        self.assertNotEqual(
+                            out.untyped_storage().data_ptr(),
+                            x.untyped_storage().data_ptr(),
+                        )
+                        x_after_call = x.clone()
+                        out.add_(100)
+                        self.assertEqual(x, x_after_call)
+
+    def test_scatter_reinplace_not_blocked_by_functional_user(self):
+        # https://github.com/pytorch/pytorch/pull/195484
+        # The scatter's escape check reads the graph this pass has already
+        # rewritten, so an index_put that was *not* reinplaced (its result has
+        # to stay live for the return) is not mistaken for an alias of the
+        # scatter. Reinplacing the scatter is safe here and saves a kernel and
+        # a full-size buffer over refusing on the possibility.
+        def fn(x, diag, idx, val):
+            a = torch.diagonal_scatter(x, diag)
+            b = torch.index_put(a, (idx,), val)
+            x.copy_(a)
+            return b
+
+        def make_inputs():
+            return (
+                torch.arange(16.0, device=self.device).reshape(4, 4),
+                torch.full((4,), -1.0, device=self.device),
+                torch.tensor([0, 2], device=self.device),
+                torch.full((2, 4), 10.0, device=self.device),
+            )
+
+        eager_args = make_inputs()
+        out_eager = fn(*eager_args)
+
+        compiled_args = make_inputs()
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out = torch.compile(fn, fullgraph=True)(*compiled_args)
+
+        self.assertEqual(out_eager, out)
+        self.assertEqual(eager_args[0], compiled_args[0])
+        self.assertNotEqual(
+            out.untyped_storage().data_ptr(),
+            compiled_args[0].untyped_storage().data_ptr(),
+        )
+        # diagonal copy_, index_put, copy_ back into x -- no extra clone kernel
+        assertGeneratedKernelCountEqual(self, 3)
+
     def test_slice_scatter_dtype_consistency(self):
         # Test dtype consistency of slice_scatter
         def fn(x, y):
