@@ -284,13 +284,24 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   // immutable for the lifetime of this object, so they only ever need to be
   // written once, and writing them off the capturing stream means the handle
   // is fully initialized when rendezvous returns instead of depending on a
-  // later graph replay. Synchronizing the setup stream is legal during capture
-  // because that stream is not itself capturing. The synchronize also retires
-  // the enqueued copies before a failure can unwind this object, whose members
-  // are the copy sources. CUDA keeps its existing synchronous path.
+  // later graph replay. The synchronize also retires the enqueued copies
+  // before a failure can unwind this object, whose members are the copy
+  // sources. CUDA keeps its existing synchronous path.
+  //
+  // Being off the capturing stream is not by itself enough to make the
+  // synchronize legal: under a Global-mode capture any host-side wait is a
+  // prohibited action, so cudaStreamSynchronize on this stream returns HIP 900
+  // and the subsequent end-capture fails with 901 (measured on gfx950 /
+  // HIP 7.16; hipStreamWaitEvent is the only wait that survives untouched).
+  // The Relaxed guard opts this thread out of that check for the duration,
+  // which keeps the capture usable and replayable while preserving the
+  // host-side ordering above. This mirrors alloc(), which already wraps its
+  // setup-stream memset the same way.
   if (mgr.capture_allocation_supported()) {
     std::lock_guard<std::mutex> setup_lock(mgr.capture_setup_mutex());
     const cudaStream_t setup_stream = mgr.capture_setup_stream();
+    c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
+        cudaStreamCaptureModeRelaxed};
     const cudaError_t buffers_copy_status = cudaMemcpyAsync(
         buffers_dev_,
         buffers_.data(),
