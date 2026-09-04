@@ -179,7 +179,11 @@ class SaveGpuKernelAOTIE2ETest(TestCase):
         # NOTE: triton.fb is fbcode-only; OSS CI sets CUDA_HOME via env.
         import os
 
-        if GPU_TYPE == 'cuda' and "CUDA_HOME" not in os.environ and "CUDA_PATH" not in os.environ:
+        if (
+            GPU_TYPE == "cuda"
+            and "CUDA_HOME" not in os.environ
+            and "CUDA_PATH" not in os.environ
+        ):
             try:
                 from triton.fb.build import build_paths
 
