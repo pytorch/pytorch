@@ -89,6 +89,10 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // Total cache entries across all compile scopes (for O(1)
   // _get_total_cache_entry_count)
   size_t total_cache_entry_count{0};
+  // Lock ordering: a thread that needs both convert_frame.compile_lock and
+  // this cache_mutex must take compile_lock FIRST (reset()/remove_from_cache
+  // do). cache_mutex is recursive and drops the GIL while waiting; taking it
+  // before compile_lock anywhere would risk a cycle against that path.
   mutable std::recursive_mutex cache_mutex;
   // Frame state to detect dynamic shape dims in the default compile scope.
   py::dict frame_state;
@@ -184,11 +188,14 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // Apply parked evictions, moving the evicted nodes into the caller's
   // containers, which the caller destroys AFTER cache_mutex releases. No-op
   // unless cache_python_depth is zero: an in-flight same-thread lookup's
-  // iterators must see its lists untouched until it finishes. Caller must
-  // hold cache_mutex (and must NOT hold pending_invalidation_mutex).
+  // iterators must see its lists untouched until it finishes. dead_evictions
+  // receives the drained PendingEviction records so their owner py::objects
+  // are destroyed by the caller after the lock too, never under it. Caller
+  // must hold cache_mutex (and must NOT hold pending_invalidation_mutex).
   void apply_pending_evictions(
       std::list<PrecompileEntry>& dead_precompile,
-      std::unordered_map<int64_t, std::list<CacheEntry>>& dead_cache);
+      std::unordered_map<int64_t, std::list<CacheEntry>>& dead_cache,
+      std::vector<PendingEviction>& dead_evictions);
   // Empty this state back to freshly-constructed contents WITHOUT freeing it.
   // reset_code uses this instead of destroy: destroying while another thread
   // is blocked on cache_mutex (CacheLock releases the GIL while it waits)
