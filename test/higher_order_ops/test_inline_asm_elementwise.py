@@ -12,14 +12,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch.testing._internal.common_cuda import evaluate_gfx_arch_within, SM70OrLater
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyCUDA,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     MI200_ARCH,
     MI300_ARCH,
     NAVI3_5_ARCH,
@@ -29,7 +28,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
-    TEST_CUDA,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -75,7 +73,7 @@ TEST_CASES = [
     # Basic float32 operations
     AsmTestCase(
         "identity_f32",
-        lambda: (torch.randn(100, device="cuda", dtype=torch.float32),),
+        lambda device: (torch.randn(100, device=device, dtype=torch.float32),),
         "v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
         "=v, v" if torch.version.hip else "=f,f",
         torch.float32,
@@ -83,9 +81,9 @@ TEST_CASES = [
     ),
     AsmTestCase(
         "add_f32",
-        lambda: (
-            torch.randn(100, device="cuda", dtype=torch.float32),
-            torch.randn(100, device="cuda", dtype=torch.float32),
+        lambda device: (
+            torch.randn(100, device=device, dtype=torch.float32),
+            torch.randn(100, device=device, dtype=torch.float32),
         ),
         "v_add_f32 $0, $1, $2" if torch.version.hip else "add.f32 $0, $1, $2;",
         "=v, v, v" if torch.version.hip else "=f,f,f",
@@ -94,9 +92,9 @@ TEST_CASES = [
     ),
     AsmTestCase(
         "mul_f32",
-        lambda: (
-            torch.randn(100, device="cuda", dtype=torch.float32),
-            torch.randn(100, device="cuda", dtype=torch.float32),
+        lambda device: (
+            torch.randn(100, device=device, dtype=torch.float32),
+            torch.randn(100, device=device, dtype=torch.float32),
         ),
         "v_mul_f32 $0, $1, $2" if torch.version.hip else "mul.f32 $0, $1, $2;",
         "=v, v, v" if torch.version.hip else "=f,f,f",
@@ -105,10 +103,10 @@ TEST_CASES = [
     ),
     AsmTestCase(
         "fma_f32",
-        lambda: (
-            torch.randn(100, device="cuda", dtype=torch.float32),
-            torch.randn(100, device="cuda", dtype=torch.float32),
-            torch.randn(100, device="cuda", dtype=torch.float32),
+        lambda device: (
+            torch.randn(100, device=device, dtype=torch.float32),
+            torch.randn(100, device=device, dtype=torch.float32),
+            torch.randn(100, device=device, dtype=torch.float32),
         ),
         "v_fma_f32 $0, $1, $2, $3"
         if torch.version.hip
@@ -120,7 +118,7 @@ TEST_CASES = [
     # Multi-line inline asm. PTX uses curly braces; AMDGCN uses newlines.
     AsmTestCase(
         "double_multiline",
-        lambda: (torch.randn(100, device="cuda", dtype=torch.float32),),
+        lambda device: (torch.randn(100, device=device, dtype=torch.float32),),
         (
             """
             v_mov_b32 $0, $1
@@ -136,7 +134,7 @@ TEST_CASES = [
     # bf16/fp16 upcasting (compile-only: Jiterator can't handle dtype mismatch)
     AsmTestCase(
         "bf16_upcast",
-        lambda: (torch.randn(100, device="cuda", dtype=torch.bfloat16),),
+        lambda device: (torch.randn(100, device=device, dtype=torch.bfloat16),),
         "v_add_f32 $0, $1, $1" if torch.version.hip else "add.f32 $0, $1, $1;",
         "=v, v" if torch.version.hip else "=f,f",
         torch.float32,
@@ -146,7 +144,7 @@ TEST_CASES = [
     ),
     AsmTestCase(
         "fp16_upcast",
-        lambda: (torch.randn(100, device="cuda", dtype=torch.float16),),
+        lambda device: (torch.randn(100, device=device, dtype=torch.float16),),
         "v_add_f32 $0, $1, $1" if torch.version.hip else "add.f32 $0, $1, $1;",
         "=v, v" if torch.version.hip else "=f,f",
         torch.float32,
@@ -156,9 +154,9 @@ TEST_CASES = [
     # Integer operations
     AsmTestCase(
         "bitwise_and",
-        lambda: (
-            torch.randint(0, 2**16, (100,), device="cuda", dtype=torch.int32),
-            torch.randint(0, 2**16, (100,), device="cuda", dtype=torch.int32),
+        lambda device: (
+            torch.randint(0, 2**16, (100,), device=device, dtype=torch.int32),
+            torch.randint(0, 2**16, (100,), device=device, dtype=torch.int32),
         ),
         "v_and_b32 $0, $1, $2" if torch.version.hip else "and.b32 $0, $1, $2;",
         "=v, v, v" if torch.version.hip else "=r,r,r",
@@ -167,9 +165,9 @@ TEST_CASES = [
     ),
     AsmTestCase(
         "bitwise_or",
-        lambda: (
-            torch.randint(0, 2**16, (100,), device="cuda", dtype=torch.int32),
-            torch.randint(0, 2**16, (100,), device="cuda", dtype=torch.int32),
+        lambda device: (
+            torch.randint(0, 2**16, (100,), device=device, dtype=torch.int32),
+            torch.randint(0, 2**16, (100,), device=device, dtype=torch.int32),
         ),
         "v_or_b32 $0, $1, $2" if torch.version.hip else "or.b32 $0, $1, $2;",
         "=v, v, v" if torch.version.hip else "=r,r,r",
@@ -181,8 +179,8 @@ TEST_CASES = [
     # shift-and-mask sequence in a single instruction.
     AsmTestCase(
         "exponent_extract",
-        lambda: (
-            torch.tensor([1.0, 2.0, 0.5, 16.0], device="cuda", dtype=torch.float32),
+        lambda device: (
+            torch.tensor([1.0, 2.0, 0.5, 16.0], device=device, dtype=torch.float32),
         ),
         (
             "v_bfe_u32 $0, $1, 23, 8"
@@ -201,7 +199,9 @@ TEST_CASES = [
     # with v_mov_b16 instead of using a 32-bit instruction.
     AsmTestCase(
         "truncate_to_uint16",
-        lambda: (torch.randint(0, 256, (100,), device="cuda", dtype=torch.int32),),
+        lambda device: (
+            torch.randint(0, 256, (100,), device=device, dtype=torch.int32),
+        ),
         "v_bfe_u32 $0, $1, 0, 16" if torch.version.hip else "cvt.u16.u32 $0, $1;",
         "=v, v" if torch.version.hip else "=h,r",
         torch.uint16,
@@ -212,9 +212,9 @@ TEST_CASES = [
     # Broadcasting
     AsmTestCase(
         "broadcast_add",
-        lambda: (
-            torch.randn(4, 1, device="cuda", dtype=torch.float32),
-            torch.randn(1, 8, device="cuda", dtype=torch.float32),
+        lambda device: (
+            torch.randn(4, 1, device=device, dtype=torch.float32),
+            torch.randn(1, 8, device=device, dtype=torch.float32),
         ),
         "v_add_f32 $0, $1, $2" if torch.version.hip else "add.f32 $0, $1, $2;",
         "=v, v, v" if torch.version.hip else "=f,f,f",
@@ -224,7 +224,7 @@ TEST_CASES = [
     # Non-contiguous
     AsmTestCase(
         "noncontiguous",
-        lambda: (torch.randn(8, 16, device="cuda", dtype=torch.float32).t(),),
+        lambda device: (torch.randn(8, 16, device=device, dtype=torch.float32).t(),),
         "v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
         "=v, v" if torch.version.hip else "=f,f",
         torch.float32,
@@ -239,9 +239,9 @@ TEST_CASES = [
     # declare it as a clobber so LLVM does not reuse it across the asm block.
     AsmTestCase(
         "add_fp16_native",
-        lambda: (
-            torch.randn(100, device="cuda", dtype=torch.float16),
-            torch.randn(100, device="cuda", dtype=torch.float16),
+        lambda device: (
+            torch.randn(100, device=device, dtype=torch.float16),
+            torch.randn(100, device=device, dtype=torch.float16),
         ),
         (
             "v_add_f32 $0, $1, $2\nv_cvt_f16_f32 $0, $0"
@@ -260,9 +260,9 @@ TEST_CASES = [
     # bf16 slot) are used by Triton.
     AsmTestCase(
         "add_bf16_native",
-        lambda: (
-            torch.randn(100, device="cuda", dtype=torch.bfloat16),
-            torch.randn(100, device="cuda", dtype=torch.bfloat16),
+        lambda device: (
+            torch.randn(100, device=device, dtype=torch.bfloat16),
+            torch.randn(100, device=device, dtype=torch.bfloat16),
         ),
         (
             "v_add_f32 $0, $1, $2\nv_cvt_pk_bf16_f32 $0, $0, $0"
@@ -278,7 +278,7 @@ TEST_CASES = [
     # pack=2: each asm invocation processes 2 elements (compile-only)
     AsmTestCase(
         "identity_pack2",
-        lambda: (torch.randn(128, device="cuda", dtype=torch.float32),),
+        lambda device: (torch.randn(128, device=device, dtype=torch.float32),),
         (
             """
             v_mov_b32 $0, $2
@@ -295,9 +295,9 @@ TEST_CASES = [
     ),
     AsmTestCase(
         "add_pack2",
-        lambda: (
-            torch.randn(128, device="cuda", dtype=torch.float32),
-            torch.randn(128, device="cuda", dtype=torch.float32),
+        lambda device: (
+            torch.randn(128, device=device, dtype=torch.float32),
+            torch.randn(128, device=device, dtype=torch.float32),
         ),
         (
             """
@@ -317,16 +317,43 @@ TEST_CASES = [
 TEST_CASE_NAMES = [tc.name for tc in TEST_CASES]
 
 
-@unittest.skipIf(not TEST_CUDA, "CUDA not available")
+def _require_device_triton(device, *, xfail=False):
+    reason = None
+    if not has_triton():
+        reason = "Triton not available"
+    else:
+        try:
+            device_interface = get_interface_for_device(torch.device(device).type)
+        except NotImplementedError:
+            reason = f"Triton not available for {device}"
+        else:
+            if not device_interface.is_triton_capable(device):
+                reason = f"Triton not available for {device}"
+            else:
+                try:
+                    device_interface.raise_if_triton_unavailable(device)
+                except TritonUnavailableError as exc:
+                    reason = str(exc)
+
+    if reason is None:
+        return
+    if xfail:
+        import pytest
+
+        pytest.xfail(reason)
+    raise unittest.SkipTest(reason)
+
+
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
-@instantiate_parametrized_tests
 class TestInlineAsmElementwise(TestCase):
     """Parametrized tests for inline_asm_elementwise."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @parametrize(
         "case_idx", list(range(len(TEST_CASES))), name_fn=lambda i: TEST_CASE_NAMES[i]
     )
-    def test_eager_vs_compiled_bitwise(self, case_idx):
+    def test_eager_vs_compiled_bitwise(self, device, case_idx):
         """Verify eager and compiled produce bitwise identical results."""
         tc = TEST_CASES[case_idx]
         if not torch.version.hip and torch.cuda.get_device_capability() < (
@@ -349,7 +376,7 @@ class TestInlineAsmElementwise(TestCase):
         ):
             self.skipTest("Requires gfx950+")
 
-        inputs = tc.input_gen_fn()
+        inputs = tc.input_gen_fn(device)
         asm_str, constraints = _get_asm_config(tc)
 
         def fn(*args):
@@ -362,8 +389,7 @@ class TestInlineAsmElementwise(TestCase):
             )
 
         # This test always runs torch.compile(inductor); Inductor needs Triton for CUDA.
-        if not has_triton():
-            self.skipTest("Requires Triton")
+        _require_device_triton(device)
 
         torch._dynamo.reset()
         compiled_result = torch.compile(fn, backend="inductor")(*inputs)
@@ -385,7 +411,7 @@ class TestInlineAsmElementwise(TestCase):
     @parametrize(
         "case_idx", list(range(len(TEST_CASES))), name_fn=lambda i: TEST_CASE_NAMES[i]
     )
-    def test_correctness(self, case_idx):
+    def test_correctness(self, device, case_idx):
         """Verify result matches reference function."""
         tc = TEST_CASES[case_idx]
         if not torch.version.hip and torch.cuda.get_device_capability() < (
@@ -408,7 +434,7 @@ class TestInlineAsmElementwise(TestCase):
         ):
             self.skipTest("Requires gfx950+")
 
-        inputs = tc.input_gen_fn()
+        inputs = tc.input_gen_fn(device)
         asm_str, constraints = _get_asm_config(tc)
 
         def fn(*args):
@@ -421,8 +447,7 @@ class TestInlineAsmElementwise(TestCase):
             )
 
         if tc.compile_only:
-            if not has_triton():
-                self.skipTest("torch.compile requires Triton")
+            _require_device_triton(device)
             torch._dynamo.reset()
             result = torch.compile(fn, backend="inductor")(*inputs)
         else:
@@ -432,9 +457,10 @@ class TestInlineAsmElementwise(TestCase):
         self.assertEqual(result.float(), expected.float(), atol=1e-5, rtol=1e-5)
 
 
-@unittest.skipIf(not TEST_CUDA, "CUDA not available")
-class TestInlineAsmElementwiseErrors(TestCase):
-    """Tests for error handling."""
+class TestInlineAsmElementwiseInputValidation(TestCase):
+    """Device-independent tests for error handling."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_error_no_inputs(self):
         with self.assertRaises(ValueError):
@@ -446,9 +472,25 @@ class TestInlineAsmElementwiseErrors(TestCase):
                 dtype=torch.float32,
             )
 
-    def test_error_constraint_mismatch(self):
-        x = torch.randn(100, device="cuda", dtype=torch.float32)
-        y = torch.randn(100, device="cuda", dtype=torch.float32)
+
+class TestInlineAsmElementwiseErrors(TestCase):
+    """CUDA-specific tests for error handling."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    def test_error_cpu_tensor(self, device):
+        x = torch.randn(100, dtype=torch.float32)
+        with self.assertRaises(RuntimeError):
+            inline_asm_elementwise(
+                x,
+                asm_str="v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
+                constraints="=v,v" if torch.version.hip else "=f,f",
+                dtype=torch.float32,
+            )
+
+    def test_error_constraint_mismatch(self, device):
+        x = torch.randn(100, device=device, dtype=torch.float32)
+        y = torch.randn(100, device=device, dtype=torch.float32)
         with self.assertRaises(ValueError):
             inline_asm_elementwise(
                 x,
@@ -460,9 +502,9 @@ class TestInlineAsmElementwiseErrors(TestCase):
                 dtype=torch.float32,
             )
 
-    def test_error_mixed_dtypes(self):
-        x = torch.randn(100, device="cuda", dtype=torch.float32)
-        y = torch.randint(0, 10, (100,), device="cuda", dtype=torch.int32)
+    def test_error_mixed_dtypes(self, device):
+        x = torch.randn(100, device=device, dtype=torch.float32)
+        y = torch.randint(0, 10, (100,), device=device, dtype=torch.int32)
         with self.assertRaises(ValueError):
             inline_asm_elementwise(
                 x,
@@ -474,18 +516,8 @@ class TestInlineAsmElementwiseErrors(TestCase):
                 dtype=torch.float32,
             )
 
-    def test_error_cpu_tensor(self):
-        x = torch.randn(100, dtype=torch.float32)
-        with self.assertRaises(RuntimeError):
-            inline_asm_elementwise(
-                x,
-                asm_str="v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
-                constraints="=v,v" if torch.version.hip else "=f,f",
-                dtype=torch.float32,
-            )
-
-    def test_error_multiple_outputs_require_compile(self):
-        x = torch.arange(8, device="cuda", dtype=torch.int32)
+    def test_error_multiple_outputs_require_compile(self, device):
+        x = torch.arange(8, device=device, dtype=torch.int32)
         with self.assertRaisesRegex(
             RuntimeError, "requires torch.compile.*multiple outputs"
         ):
@@ -496,8 +528,8 @@ class TestInlineAsmElementwiseErrors(TestCase):
                 dtype=(torch.int32, torch.int32),
             )
 
-    def test_error_multiple_output_constraint_mismatch(self):
-        x = torch.arange(8, device="cuda", dtype=torch.int32)
+    def test_error_multiple_output_constraint_mismatch(self, device):
+        x = torch.arange(8, device=device, dtype=torch.int32)
         with self.assertRaisesRegex(ValueError, "Expected 2 output constraint"):
             inline_asm_elementwise(
                 x,
@@ -508,6 +540,8 @@ class TestInlineAsmElementwiseErrors(TestCase):
 
 
 class TestInlineAsmElementwiseMultipleOutputs(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _check_stochastic_rounding(self, device, fn, rng_state):
         halfway = torch.tensor([0x3F808000], device=device, dtype=torch.int32)
         x = halfway.expand(2).view(torch.float32)
@@ -525,10 +559,11 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
         self.assertEqual(code.count("@triton_heuristics"), 1)
         self.assertEqual(code.count("tl.inline_asm_elementwise("), 1)
 
-    @onlyCUDA
     @xfailIfNoAcceleratorTriton
     @skipIfRocm(msg="PTX test")
     def test_multiple_outputs_compile(self, device):
+        _require_device_triton(device, xfail=True)
+
         def asm(x):
             return inline_asm_elementwise(
                 x,
@@ -557,10 +592,11 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
         self.assertEqual(result, x.float() * 4)
         self.assertEqual("\n".join(sources).count("tl.inline_asm_elementwise("), 1)
 
-    @onlyCUDA
     @xfailIfNoAcceleratorTriton
     @skipIfRocm(msg="PTX test")
     def test_stochastic_rounding_with_rng_input(self, device):
+        _require_device_triton(device, xfail=True)
+
         def fn(x, rng):
             lower, remainder = inline_asm_elementwise(
                 x,
@@ -578,10 +614,11 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
         rng = torch.tensor([0x7FFF, 0x8000], device=device, dtype=torch.int32)
         self._check_stochastic_rounding(device, fn, rng)
 
-    @onlyCUDA
     @xfailIfNoAcceleratorTriton
     @skipIfRocm(msg="PTX test")
     def test_stochastic_rounding_with_inline_rng(self, device):
+        _require_device_triton(device, xfail=True)
+
         def fn(x, counter):
             lower, remainder, rng = inline_asm_elementwise(
                 x,
@@ -601,10 +638,11 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
         counter = torch.tensor([1, 0], device=device, dtype=torch.int32)
         self._check_stochastic_rounding(device, fn, counter)
 
-    @onlyCUDA
     @xfailIfNoAcceleratorTriton
     @skipIfRocm(msg="PTX test")
     def test_multiple_outputs_with_pack_compile(self, device):
+        _require_device_triton(device, xfail=True)
+
         def fn(x):
             return inline_asm_elementwise(
                 x,
@@ -621,13 +659,14 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
         self.assertEqual(torch.compile(fn, fullgraph=True)(x), (x, x + 1))
 
 
-@unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
 class TestInlineAsmElementwiseEdgeCases(TestCase):
     """Tests for edge cases."""
 
-    def test_empty_tensor(self):
-        x = torch.empty(0, device="cuda", dtype=torch.float32)
+    hw_classification = HardwareClassification.CUDA
+
+    def test_empty_tensor(self, device):
+        x = torch.empty(0, device=device, dtype=torch.float32)
         result = inline_asm_elementwise(
             x,
             asm_str="v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
@@ -636,8 +675,8 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
         )
         self.assertEqual(result.shape, torch.Size([0]))
 
-    def test_scalar_tensor(self):
-        x = torch.tensor(3.14, device="cuda", dtype=torch.float32)
+    def test_scalar_tensor(self, device):
+        x = torch.tensor(3.14, device=device, dtype=torch.float32)
         result = inline_asm_elementwise(
             x,
             asm_str="v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
@@ -647,8 +686,8 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
         self.assertEqual(result.shape, torch.Size([]))
         self.assertEqual(result, x)
 
-    def test_4d_tensor(self):
-        x = torch.randn(2, 3, 4, 5, device="cuda", dtype=torch.float32)
+    def test_4d_tensor(self, device):
+        x = torch.randn(2, 3, 4, 5, device=device, dtype=torch.float32)
         result = inline_asm_elementwise(
             x,
             asm_str="v_mov_b32 $0, $1" if torch.version.hip else "mov.f32 $0, $1;",
@@ -659,7 +698,9 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
         self.assertEqual(result, x)
 
     @xfailIfNoAcceleratorTriton
-    def test_composition_with_pytorch_ops(self):
+    def test_composition_with_pytorch_ops(self, device):
+        _require_device_triton(device, xfail=True)
+
         def fn(x, y):
             z = x * 2
             w = inline_asm_elementwise(
@@ -673,8 +714,8 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
             )
             return w + 1.0
 
-        x = torch.randn(100, device="cuda", dtype=torch.float32)
-        y = torch.randn(100, device="cuda", dtype=torch.float32)
+        x = torch.randn(100, device=device, dtype=torch.float32)
+        y = torch.randn(100, device=device, dtype=torch.float32)
 
         eager_result = fn(x, y)
         compiled_fn = torch.compile(fn, backend="inductor")
@@ -683,14 +724,14 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
         self.assertEqual(eager_result, compiled_result)
         self.assertEqual(eager_result, x * 2 + y + 1.0)
 
-    def test_output_strides_mixed_inputs(self):
+    def test_output_strides_mixed_inputs(self, device):
         """Verify fake mode output strides match eager (TensorIterator) strides."""
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         # Two inputs with different strides: one contiguous, one transposed.
         # This exercises TensorIterator's slow path for stride computation.
-        x = torch.randn(8, 16, device="cuda", dtype=torch.float32)
-        y = torch.randn(16, 8, device="cuda", dtype=torch.float32).t()
+        x = torch.randn(8, 16, device=device, dtype=torch.float32)
+        y = torch.randn(16, 8, device=device, dtype=torch.float32).t()
 
         eager_result = inline_asm_elementwise(
             x,
@@ -718,7 +759,7 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
         self.assertEqual(eager_result.shape, fake_result.shape)
         self.assertEqual(eager_result.stride(), fake_result.stride())
 
-    def test_vmap(self):
+    def test_vmap(self, device):
         asm_str = "v_add_f32 $0, $1, $2" if torch.version.hip else "add.f32 $0, $1, $2;"
         constraints = "=v, v, v" if torch.version.hip else "=f,f,f"
 
@@ -727,13 +768,13 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
                 a, b, asm_str=asm_str, constraints=constraints, dtype=torch.float32
             )
 
-        bias = torch.randn(64, device="cuda")
-        x = torch.randn(8, 64, device="cuda")
+        bias = torch.randn(64, device=device)
+        x = torch.randn(8, 64, device=device)
         # batched vector + unbatched vector
         self.assertEqual(torch.vmap(add, in_dims=(0, None))(x, bias), x + bias)
         # batched scalar + unbatched vector: batch dim must not be consumed by
         # trailing-dim broadcasting
-        y = torch.randn(8, device="cuda")
+        y = torch.randn(8, device=device)
         self.assertEqual(torch.vmap(add, in_dims=(0, None))(y, bias), y[:, None] + bias)
         # non-zero batch dim
         self.assertEqual(
@@ -744,7 +785,9 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
         self.assertEqual(nested, x + x)
 
     @xfailIfNoAcceleratorTriton
-    def test_dynamic_shapes(self):
+    def test_dynamic_shapes(self, device):
+        _require_device_triton(device, xfail=True)
+
         def fn(x, y):
             return inline_asm_elementwise(
                 x,
@@ -759,21 +802,24 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
         compiled_fn = torch.compile(fn, backend="inductor", dynamic=True)
 
         for size in [50, 100, 200]:
-            x = torch.randn(size, device="cuda", dtype=torch.float32)
-            y = torch.randn(size, device="cuda", dtype=torch.float32)
+            x = torch.randn(size, device=device, dtype=torch.float32)
+            y = torch.randn(size, device=device, dtype=torch.float32)
             eager_result = fn(x, y)
             compiled_result = compiled_fn(x, y)
             self.assertEqual(eager_result, compiled_result)
 
 
-@unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @unittest.skipIf(not SM70OrLater, "Requires SM70+")
 @xfailIfNoAcceleratorTriton
 class TestInlineAsmPackPadding(TestCase):
     """Test that pack padding works when block size < pack."""
 
-    def test_pack2_xblock1_padding(self):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_pack2_xblock1_padding(self, device):
         """Force XBLOCK=1 with pack=2 so padding is needed."""
+        _require_device_triton(device, xfail=True)
+
         from torch._inductor.choices import InductorChoices
         from torch._inductor.codegen.triton import FixedTritonConfig
         from torch._inductor.utils import run_and_get_code
@@ -802,7 +848,7 @@ class TestInlineAsmPackPadding(TestCase):
                 pack=2,
             )
 
-        x = torch.randn(128, device="cuda", dtype=torch.float32)
+        x = torch.randn(128, device=device, dtype=torch.float32)
         with torch._inductor.virtualized.V.set_choices_handler(ForceXBlock1()):
             torch._dynamo.reset()
             result, (code,) = run_and_get_code(torch.compile(fn, backend="inductor"), x)
@@ -811,8 +857,10 @@ class TestInlineAsmPackPadding(TestCase):
         # Verify padding helpers are emitted in the generated code
         FileCheck().check("inline_asm_pack").check("inline_asm_unpack").run(code)
 
-    def test_pack4_xblock1_padding(self):
+    def test_pack4_xblock1_padding(self, device):
         """Force XBLOCK=1 with pack=4 so padding is needed."""
+        _require_device_triton(device, xfail=True)
+
         from torch._inductor.choices import InductorChoices
         from torch._inductor.codegen.triton import FixedTritonConfig
         from torch._inductor.utils import run_and_get_code
@@ -847,7 +895,7 @@ class TestInlineAsmPackPadding(TestCase):
                 pack=4,
             )
 
-        x = torch.randn(128, device="cuda", dtype=torch.float32)
+        x = torch.randn(128, device=device, dtype=torch.float32)
         with torch._inductor.virtualized.V.set_choices_handler(ForceXBlock1()):
             torch._dynamo.reset()
             result, (code,) = run_and_get_code(torch.compile(fn, backend="inductor"), x)
@@ -855,8 +903,10 @@ class TestInlineAsmPackPadding(TestCase):
         self.assertEqual(result, x)
         FileCheck().check("inline_asm_pack").check("inline_asm_unpack").run(code)
 
-    def test_pack4_xblock2_partial_padding(self):
+    def test_pack4_xblock2_partial_padding(self, device):
         """XBLOCK=2 < pack=4, so 1 round of padding is needed (not 2)."""
+        _require_device_triton(device, xfail=True)
+
         from torch._inductor.choices import InductorChoices
         from torch._inductor.codegen.triton import FixedTritonConfig
         from torch._inductor.utils import run_and_get_code
@@ -891,7 +941,7 @@ class TestInlineAsmPackPadding(TestCase):
                 pack=4,
             )
 
-        x = torch.randn(128, device="cuda", dtype=torch.float32)
+        x = torch.randn(128, device=device, dtype=torch.float32)
         with torch._inductor.virtualized.V.set_choices_handler(ForceXBlock2()):
             torch._dynamo.reset()
             result, (code,) = run_and_get_code(torch.compile(fn, backend="inductor"), x)
@@ -899,8 +949,10 @@ class TestInlineAsmPackPadding(TestCase):
         self.assertEqual(result, x)
         FileCheck().check("inline_asm_pack").check("inline_asm_unpack").run(code)
 
-    def test_pack2_xblock1_yblock1_padding(self):
+    def test_pack2_xblock1_yblock1_padding(self, device):
         """Force XBLOCK=1, YBLOCK=1 with pack=2 on a 2D-tiled kernel."""
+        _require_device_triton(device, xfail=True)
+
         from torch._inductor.choices import InductorChoices
         from torch._inductor.codegen.triton import FixedTritonConfig
         from torch._inductor.utils import run_and_get_code
@@ -930,9 +982,9 @@ class TestInlineAsmPackPadding(TestCase):
                 pack=2,
             )
 
-        x = torch.randn(8, 16, device="cuda", dtype=torch.float32)
+        x = torch.randn(8, 16, device=device, dtype=torch.float32)
         # Transposed input triggers 2D tiling (different stride patterns)
-        y = torch.randn(16, 8, device="cuda", dtype=torch.float32).T
+        y = torch.randn(16, 8, device=device, dtype=torch.float32).T
         with torch._inductor.virtualized.V.set_choices_handler(ForceXY1()):
             torch._dynamo.reset()
             result, (code,) = run_and_get_code(
@@ -945,6 +997,14 @@ class TestInlineAsmPackPadding(TestCase):
         ).run(code)
 
 
+instantiate_device_type_tests(TestInlineAsmElementwise, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestInlineAsmElementwiseErrors, globals(), only_for=("cuda",)
+)
+instantiate_device_type_tests(
+    TestInlineAsmElementwiseEdgeCases, globals(), only_for=("cuda",)
+)
+instantiate_device_type_tests(TestInlineAsmPackPadding, globals(), only_for=("cuda",))
 instantiate_device_type_tests(
     TestInlineAsmElementwiseMultipleOutputs, globals(), only_for=("cuda",)
 )
