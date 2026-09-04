@@ -862,8 +862,8 @@ if __name__ == "__main__":
 
 
 class TestScaleConfigPrefix(TestCase):
-    """The scale-config (EC2) fleets use a dot scheme and AMI variants, unlike
-    the ARC prefixes on label-type. Windows binary builds consume this."""
+    """scale-config-label-type names a scale-config AMI variant. Only the
+    wincanary/wincanarylf experiments drive it; fleet selection must not."""
 
     SETTINGS = """
 experiments:
@@ -876,39 +876,40 @@ experiments:
 ---
 @lfuser,lf
 @wcuser,wincanary
+@wclfuser,wincanarylf
 @bothuser,lf,wincanarylf
 @plainuser,
 """
     ALL = frozenset({"lf", "wincanary", "wincanarylf"})
 
-    def _prefix(self, user: str, is_canary: bool = False) -> str:
+    def _result(self, user: str, is_canary: bool = False) -> rd.RunnerPrefixResult:
         return rd.get_runner_prefix(
             self.SETTINGS, (user, user), "somebranch", self.ALL, frozenset(), is_canary
-        ).scale_config_prefix
+        )
 
-    def test_default_is_bare(self) -> None:
-        # scale-config.yml declares windows.12xlarge with no prefix
-        self.assertEqual("", self._prefix("plainuser"))
+    def test_no_variant_means_no_prefix(self) -> None:
+        self.assertEqual("", self._result("plainuser").scale_config_prefix)
 
-    def test_lf(self) -> None:
-        # lf-scale-config.yml declares lf.windows.12xlarge
-        self.assertEqual("lf.", self._prefix("lfuser"))
+    def test_lf_alone_does_not_set_a_prefix(self) -> None:
+        # lf runs at a percentage rollout over ALL workflows; it must not move
+        # Windows builds onto another fleet as a side effect.
+        self.assertEqual("", self._result("lfuser").scale_config_prefix)
+        self.assertEqual("", self._result("lfuser", is_canary=True).scale_config_prefix)
 
-    def test_lf_canary(self) -> None:
-        # lf-canary-scale-config.yml declares lf.c.windows.12xlarge
-        self.assertEqual("lf.c.", self._prefix("lfuser", is_canary=True))
-
-    def test_ami_variant(self) -> None:
+    def test_wincanary(self) -> None:
         # wincanary is an AMI variant of windows.12xlarge
-        self.assertEqual("wincanary.", self._prefix("wcuser"))
+        self.assertEqual("wincanary.", self._result("wcuser").scale_config_prefix)
 
-    def test_fleet_comes_first(self) -> None:
-        self.assertEqual("lf.wincanarylf.", self._prefix("bothuser"))
+    def test_wincanarylf(self) -> None:
+        self.assertEqual("wincanarylf.", self._result("wclfuser").scale_config_prefix)
+
+    def test_lf_does_not_compose_with_the_variant(self) -> None:
+        # Opting into both yields the variant alone, never "lf.wincanarylf."
+        self.assertEqual("wincanarylf.", self._result("bothuser").scale_config_prefix)
 
     def test_arc_label_type_is_untouched(self) -> None:
         # label-type keeps the ARC scheme so Linux workflows are unaffected
-        for user, expected in (("plainuser", "mt-"), ("lfuser", "lf-")):
-            result = rd.get_runner_prefix(
-                self.SETTINGS, (user, user), "somebranch", self.ALL, frozenset(), False
-            )
-            self.assertEqual(expected, result.prefix)
+        self.assertEqual("mt-", self._result("plainuser").prefix)
+        self.assertEqual("lf-", self._result("lfuser").prefix)
+        self.assertEqual("c-mt-", self._result("plainuser", is_canary=True).prefix)
+        self.assertEqual("lf-", self._result("bothuser").prefix)

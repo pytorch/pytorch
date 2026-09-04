@@ -93,15 +93,18 @@ META_LABEL_PREFIX = "mt-"
 META_CANARY_LABEL_PREFIX = "c-mt-"
 LF_LABEL_PREFIX = "lf-"
 
-# Scale-config fleets (the EC2 autoscaler runners declared in test-infra's
-# {,canary-,lf-,lf-canary-}scale-config.yml) name their labels with a dot
-# scheme -- "", "lf.", "lf.c." -- and hang per-runner AMI `variants:` off the
-# experiment name, e.g. the wincanary variant of lf.windows.12xlarge is
-# reached as wincanary.lf.windows.12xlarge. Windows never moved to ARC, so it
-# needs this scheme rather than the ARC prefixes above; it is published on its
-# own output so ARC consumers keep seeing mt-/c-mt-/lf- unchanged.
-SCALE_CONFIG_LF_PREFIX = "lf"
-SCALE_CONFIG_CANARY_SUFFIX = ".c"
+# The EC2 autoscaler runners declared in test-infra's scale-config.yml hang
+# per-runner AMI `variants:` off an experiment name, reached by prefixing the
+# runner type with it: the wincanary variant of windows.12xlarge is
+# wincanary.windows.12xlarge. That is how a new Windows AMI gets exercised
+# before rollout, and the ARC prefixes above cannot express it.
+#
+# Deliberately limited to the AMI-variant experiments. Fleet selection is NOT
+# folded in: `lf` runs at a percentage rollout over ALL workflows, so deriving
+# a prefix from it would silently move Windows builds onto another fleet for
+# every run that happens to be sampled. Anything not listed here leaves the
+# prefix empty and the caller lands on the bare label it uses today.
+SCALE_CONFIG_VARIANT_EXPERIMENTS = frozenset({"wincanary", "wincanarylf"})
 
 AMD_SANDBOX_EXPERIMENT = "amd-sandbox"
 AMD_SANDBOX_LABEL_PREFIX = "amd-sandbox-"
@@ -669,13 +672,16 @@ def get_runner_prefix(
             elif experiment_name == LF_FLEET_EXPERIMENT:
                 lf_enabled = True
                 log.info("lf experiment enabled. Using the Linux Foundation fleet.")
-            else:
-                # Not an ARC fleet selector, but it may name a scale-config AMI
-                # variant, which is how Windows canary AMIs are reached.
+            elif experiment_name in SCALE_CONFIG_VARIANT_EXPERIMENTS:
                 scale_config_experiments.append(experiment_name)
                 log.info(
-                    f"Experiment '{experiment_name}' enabled; it does not affect the "
-                    "ARC label prefix but is offered on scale-config-label-type."
+                    f"Experiment '{experiment_name}' enabled; it names a scale-config "
+                    "AMI variant and is offered on scale-config-label-type."
+                )
+            else:
+                log.info(
+                    f"Experiment '{experiment_name}' enabled but no longer affects "
+                    "the runner label prefix; ignoring."
                 )
 
     # Fleet selection: the Meta (OSDC) fleet is the default; the lf experiment
@@ -685,22 +691,17 @@ def get_runner_prefix(
     else:
         prefix = META_CANARY_LABEL_PREFIX if is_canary else META_LABEL_PREFIX
 
-    # Scale-config scheme, assembled fleet-first and dot-joined with a trailing
-    # dot, e.g. "" / "lf." / "lf.c." / "wincanary." / "lf.wincanary.".
+    # AMI-variant prefix: "" when no variant experiment is enabled, otherwise
+    # "<variant>.", e.g. "wincanary." -> wincanary.windows.12xlarge.
     if len(scale_config_experiments) > 1:
         log.error(
-            "Only a fleet and one other experiment can be enabled for a job at any "
-            f"time. Enabling {scale_config_experiments[0]} and ignoring the rest, "
-            f"which are {', '.join(scale_config_experiments[1:])}"
+            "Only one scale-config AMI variant can be enabled for a job at any time. "
+            f"Enabling {scale_config_experiments[0]} and ignoring the rest, which "
+            f"are {', '.join(scale_config_experiments[1:])}"
         )
         del scale_config_experiments[1:]
-    if lf_enabled:
-        fleet = SCALE_CONFIG_LF_PREFIX + (
-            SCALE_CONFIG_CANARY_SUFFIX if is_canary else ""
-        )
-        scale_config_experiments.insert(0, fleet)
     scale_config_prefix = (
-        ".".join(scale_config_experiments) + "." if scale_config_experiments else ""
+        f"{scale_config_experiments[0]}." if scale_config_experiments else ""
     )
 
     return RunnerPrefixResult(
