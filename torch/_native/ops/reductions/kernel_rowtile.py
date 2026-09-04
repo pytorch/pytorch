@@ -10,7 +10,7 @@ from cutlass import Int32
 
 import torch
 
-from ...cutedsl.dtypes import torch2cute
+from ...cutedsl.dtypes import cute2torch, torch2cute
 from .._cutedsl import launch as _L
 from .._cutedsl.plan_cache import cached_plan
 from .._cutedsl.traits import WARP
@@ -98,6 +98,249 @@ def tma_ok(N: int, itemsize: int, M: int, device=None) -> bool:
     return True
 
 
+# --- INNER-TREE ORDER (opt-in) ---
+# Every other order here derives its add association from the LAUNCH SHAPE, so it moves with tpr, nt
+# or M. This one fixes the DAG from N alone -- stride-doubling tree per load, streaming carry at most
+# `depth` deep, warp-major chunks, ascending butterfly across lanes -- which is what makes it
+# hash-pinnable and so usable for a determinism claim. It covers EVERY N in three shapes (see
+# _ItreePlan); total coverage is required, since a shape it skipped would silently keep the
+# launch-shape order.
+#
+# OPT-IN because it costs: 0.92-1.41x the device time of the rolled fold at a fixed 256 MiB
+# footprint, winning where the rolled fold underfills or its gcd `vec` collapses to scalar loads,
+# losing ~1.3x on mid-width rows. It also gives up the N-free compile key.
+#
+# Our OWN env var, not upstream's PYTORCH_SUM_INNER_TREE: upstream's kernels register first and keep
+# their eligible calls, so the two must be switchable independently and stay comparable.
+_INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
+# Block size for the two ONE-THREAD-PER-ROW shapes (upstream's kMultiRowThreads and
+# kAccumulateThreads, both 128), and the multirow carry's cap, which is fixed rather than
+# plan-derived (kMaxDepth).
+_MULTIROW_ROWS_PER_BLOCK = 128
+_MULTIROW_MAX_DEPTH = 6
+
+# Per-thread width for the order, in ELEMENTS (k*vec*eff live in registers at once). Width is bought
+# by fusing adjacent CHUNKS, which keeps a full warp -- and so coalesced loads -- on each: worth
+# 1.79x at (65536, 1024). 64 is within 2% of the best point at every shape measured, and the shape
+# falls off a cliff at 256 (127.6us against 56.7 at N=100000).
+_ITREE_THREAD_ELEMS = 64
+
+# Vector-width multiplier for the order's `vec`. 1: a wider thread run strides the lanes by its
+# width, which costs ~2x per doubling. Bit-exact at any value -- `bte` pins the batch decomposition,
+# which is what fixes the bits.
+_ITREE_VEC_MUL = 1
+
+# Target BLOCK SIZE, which is how rows-per-block is picked. DAG-free (only independent rows share a
+# block), so this is pure occupancy. 256, because a 64-thread block starves the SM of rows at small
+# N: (524288, 128) 145.3 vs 68.2us, (262144, 256) 74.0 vs 50.8.
+_ITREE_BLOCK_THREADS = 256
+
+
+def inner_tree_order_enabled() -> bool:
+    """Is the reproducible-DAG order requested? Read live, so tests can toggle it."""
+    import os
+
+    return os.environ.get(_INNER_TREE_ENV, "") not in ("", "0")
+
+
+class _ItreePlan(NamedTuple):
+    """Everything the order's DAG depends on, all compile-time. One of three SHAPES, chosen from N as
+    upstream's host dispatch chooses between its three kernels -- the shape is part of the DAG, so it
+    cannot be a launch-time preference:
+
+    "multirow"  one thread per row, the whole row in one static fragment (N <= vec * 8)
+    "looped"    `wpr` warps per row, in up to three compile-time batches with a tile each
+    "split"     one block per (row, batch) writing a partial, then a linear per-row combine
+
+    `batches` holds (offset, remaining, loads, warp_chunk) per batch and `tms` a warp-major tile
+    each. The split shape's batch index is a RUNTIME value, so its two entries are the two distinct
+    WIDTHS -- a full batch and the short last one -- and `split` says what selects between them.
+    """
+
+    shape: str
+    vec: int
+    wpr: int  # warps cooperating on one row; 0 == one thread per row
+    rows_per_block: int
+    depth: int
+    batches: tuple
+    tms: tuple
+    # split only: (nbatch, batch_total_elements, last_remaining, chunk_full, chunk_last)
+    split: tuple = ()
+    # ADJACENT CHUNKS one thread group folds. NOT part of the DAG: the chunks and their trees are
+    # unchanged, and the k results combine locally exactly where the cross-chunk merge would have
+    # combined them. Must divide wpr.
+    kchunk: int = 1
+    # Fold a thread's run as one LINEAR chain instead of a tree. DOES change the DAG.
+    vec_linear: bool = False
+
+    @property
+    def sig(self):
+        return (
+            self.shape,
+            self.vec,
+            self.wpr,
+            self.rows_per_block,
+            self.depth,
+            self.batches,
+            tuple(t.sig for t in self.tms),
+            self.split,
+            self.kchunk,
+            self.vec_linear,
+        )
+
+
+def _fuse_factor(want: int | None, wpr: int, vec: int, loads: int) -> int:
+    """Adjacent chunks per thread group: as many as the register budget and wpr allow."""
+    k = _ITREE_THREAD_ELEMS // max(1, vec * loads) if want is None else want
+    k = max(1, 1 << (max(k, 1).bit_length() - 1))  # floor to a power of two
+    return math.gcd(k, max(wpr, 1))
+
+
+def _loads_per_warp(remaining: int, lanes: int) -> int:
+    # Loads a warp takes to cover its share, rounded UP to a power of two: the streaming carry
+    # merges on the trailing-zero count of (load + 1), which only spans the tree when the load
+    # count is a power of two.
+    lpw = -(-remaining // lanes)
+    return 1 << (lpw - 1).bit_length() if lpw > 1 else lpw
+
+
+def itree_plan(
+    N: int,
+    M: int,
+    itemsize: int,
+    kchunk: int | None = None,
+    vmul: int | None = None,
+    vec_linear: bool = False,
+):
+    """The order's plan for this shape, or None when it does not apply.
+
+    Mirrors upstream's try_inner_tree_reduction selection (inner_tree_plan.py owns the
+    parameter computation, so the two cannot drift). None means "use the default order" --
+    never "decline the call".
+    """
+    from .inner_tree_plan import (
+        _K_MULTIROW_MAX_LOADS,
+        _K_TWO_KERNEL_THRESHOLD,
+        _next_power_of_2,
+        compute_inner_tree_params,
+    )
+
+    if N < 1:
+        return None
+    kc = kchunk
+    # NOT tile.vec_size: the order defines its vec from the itemsize alone and identity-pads a
+    # ragged row, because the gcd form would make the DAG depend on N's divisibility.
+    base_vec = 16 // itemsize
+    vm = _ITREE_VEC_MUL if vmul is None else vmul
+    vec = base_vec * vm
+    wle = WARP * vec
+    if N <= base_vec * _K_MULTIROW_MAX_LOADS:
+        # The whole row lives in one thread's fragment, padded up to a power-of-two load count.
+        # Always the BASE vec: this shape has no lane merge to trade away, so widening it would
+        # move the bits for nothing.
+        loads = _next_power_of_2(-(-N // base_vec))
+        tm = tile.TileMap(N, itemsize, 1, loads, vec=base_vec)
+        return _ItreePlan(
+            "multirow",
+            vec,
+            0,
+            _MULTIROW_ROWS_PER_BLOCK,
+            _MULTIROW_MAX_DEPTH,
+            ((0, N, loads, N),),
+            (tm,),
+        )
+    prm = compute_inner_tree_params(N, M, vec)
+    wpr = prm.num_warps
+    if prm.num_batches > _K_TWO_KERNEL_THRESHOLD:
+        # One tile serves both widths: it is the FULL batch's, and the short last batch reaches
+        # fewer of its loads through a runtime per-warp bound (see tile._fold_itree).
+        last = N - (prm.num_batches - 1) * prm.batch_total_elements
+        chunk_full = prm.effective_loads * wle
+        chunk_last = _loads_per_warp(last, wpr * wle) * wle
+        tm = tile.TileMap(
+            N,
+            itemsize,
+            WARP * wpr,
+            prm.effective_loads,
+            warp_major=True,
+            vec=vec,
+            exact=False,
+        )
+        k = _fuse_factor(kc, wpr, vec, prm.effective_loads)
+        return _ItreePlan(
+            "split",
+            vec,
+            wpr,
+            1,
+            prm.depth,
+            ((0, prm.batch_total_elements, prm.effective_loads, chunk_full),),
+            (tm,),
+            (
+                prm.num_batches,
+                prm.batch_total_elements,
+                last,
+                chunk_full,
+                chunk_last,
+            ),
+            k,
+            vec_linear,
+        )
+    batches = []
+    for b in range(prm.num_batches):
+        off = b * prm.batch_total_elements
+        remaining = min(prm.batch_total_elements, N - off)
+        lpw = _loads_per_warp(remaining, wpr * wle)
+        batches.append((off, remaining, lpw, lpw * wle))
+    # EXACT per batch: the tile spans [off, off + wpr*lpw*wle), so when that stays inside the row
+    # every load is unconditionally in range and the fold needs no per-element mask (and `load`
+    # can take its unconditional wide path). A ragged tail or a short last batch is not exact.
+    tms = tuple(
+        tile.TileMap(
+            N,
+            itemsize,
+            WARP * wpr,
+            lpw_b,
+            warp_major=True,
+            vec=vec,
+            exact=off_b + wpr * lpw_b * WARP * vec <= N,
+        )
+        for (off_b, _rem, lpw_b, _wc) in batches
+    )
+    k = _fuse_factor(kc, wpr, vec, prm.effective_loads)
+    rpb = max(1, min(M, _ITREE_BLOCK_THREADS // max(1, WARP * (wpr // k))))
+    # SMEM STAGING serves the SINGLE-BATCH shapes only for now: one warp per row, E = span/WARP
+    # columns per lane. Needs the batch to cover the row (so `hi` is one compile-time bound) and
+    # E within the unroll ceiling.
+    # Only worth staging when it actually REMOVES butterflies: at span == wle there is already
+    # just one, so staging would buy nothing and still pay the smem round trip.
+    return _ItreePlan(
+        "looped",
+        vec,
+        wpr,
+        rpb,
+        prm.depth,
+        tuple(batches),
+        tms,
+        (),
+        k,
+        vec_linear,
+    )
+
+
+def itree_combine_plan(itree: _ItreePlan) -> _ItreePlan:
+    """Stage 2 of the split shape: one thread per row, folding that row's partials."""
+    return _ItreePlan(
+        "combine",
+        1,
+        0,
+        _MULTIROW_ROWS_PER_BLOCK,
+        itree.depth,
+        (),
+        (),
+        itree.split,
+    )
+
+
 class _RowConfig(NamedTuple):
     # Row-reduce knob set. reduce_row_tile() knobs left None are filled from row_config;
     # explicit values (autotuner / per-machine retune) override per field. This is the row
@@ -148,6 +391,118 @@ def single_row_config(N: int, dtype_width: int, nfields: int = 1, hw=None):
     return _RowConfig(tpr=rungs[-1], nt=rungs[-1])
 
 
+def _launch_itree(
+    trait, trait_key, plan, dt, fakes, operands, N, tag, nouts=1, dsts=()
+):
+    """Compile-or-fetch and launch one stage of the order.
+
+    `fakes` describes the operands for the compile; `operands` are the real tensors for the launch.
+    """
+    op = tile.TileReduce(
+        trait,
+        dt,
+        "row",
+        N,
+        nouts=nouts,
+        final=plan.shape != "split",
+        order="inner_tree",
+        itree=plan,
+    )
+
+    # N is baked into the DAG, so only M rides in dynamically; the col axis's args and the
+    # general axis's decode are None, not dummies (an unused Int32 param costs real time).
+    def _args(pair):
+        mIns, mOuts = pair
+        return (
+            mIns,
+            mOuts,
+            Int32(N // plan.vec),
+            None,
+            Int32(N),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            _stream(),
+        )
+
+    # dsts: the kernel bakes each destination's element type, so two calls differing only in an
+    # output dtype are different kernels. Every sibling driver keys on them; without it the second
+    # call fetches the first's plan and the launch fails on a mismatched tensor.
+    key = (tag, trait_key, dt, tuple(dsts)) + op.cache_sig
+    build = lambda: _compile(op, *_args(fakes))  # noqa: E731
+    cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_args(operands))
+
+
+def _run_itree(trait, trait_key, x, out_dtypes, itree, nouts=1):
+    """Run the inner-tree order for `x`, one launch per stage of its shape.
+
+    Serves any trait: `nouts` projected outputs at the end, and the split shape's intermediate
+    partials get one buffer PER TRAIT FIELD (an index or Welford accumulator is not one number).
+    """
+    M, N = x.shape
+    dt = torch2cute[x.dtype]
+    # A ragged row's stride is not a vec multiple, so the wide load's alignment is only what the
+    # gcd allows -- declaring 16 there would be a lie and the load faults.
+    align = tile.align_bytes(N, x.element_size())
+    # N is baked into the DAG, so the row extent is static and only M rides in dynamically.
+    fake_in = _L.fake_compact(dt, (_L.sym(), N), order=(1, 0), align=align)
+    fake_1d = lambda t: _L.fake_compact(  # noqa: E731
+        torch2cute[t.dtype], (_L.sym(),)
+    )
+    if itree.shape != "split":
+        outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
+        _launch_itree(
+            trait,
+            trait_key,
+            itree,
+            dt,
+            ([fake_in], [fake_1d(o) for o in outs]),
+            ([_L.read_only(x)], list(outs)),
+            N,
+            "rowitree",
+            nouts,
+            tuple(o.dtype for o in outs),
+        )
+        return tuple(outs)
+    # The split shape cannot bake its batch count, so it writes one partial per (row, batch) and
+    # a second stage folds each row's partials LINEARLY -- both halves of upstream's two-kernel
+    # path. Partials stay in the FIELD dtypes so the cross-batch fold rounds once.
+    nbatch = itree.split[0]
+    parts = [
+        torch.empty(M * nbatch, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
+        for f in range(trait.nfields)
+    ]
+    _launch_itree(
+        trait,
+        trait_key,
+        itree,
+        dt,
+        ([fake_in], [fake_1d(p) for p in parts]),
+        ([_L.read_only(x)], list(parts)),
+        N,
+        "rowitree1",
+        nouts,
+        tuple(p.dtype for p in parts),
+    )
+    outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
+    _launch_itree(
+        trait,
+        trait_key,
+        itree_combine_plan(itree),
+        dt,
+        ([fake_1d(p) for p in parts], [fake_1d(o) for o in outs]),
+        ([_L.read_only(p) for p in parts], list(outs)),
+        N,
+        "rowitree2",
+        nouts,
+        tuple(o.dtype for o in outs),
+    )
+    return tuple(outs)
+
+
 def reduce_row_tile(
     trait,
     trait_key,
@@ -159,15 +514,40 @@ def reduce_row_tile(
     final=True,
     unroll=None,
     use_tma=None,
+    order=None,
 ):
     """Tile-based row reduction: reduce the contiguous last dim of a 2D `x` -> (M,).
 
     Returns a tuple of `nouts` outputs. tpr=1 is the NARROW-row shape (one thread per row);
-    it stages through TMA where that wins, unless `use_tma` says otherwise.
+    it stages through TMA where that wins, unless `use_tma` says otherwise. `order` selects the
+    fold order: the default rolled one, or the reproducible inner-tree DAG when its env gate is
+    set (see itree_plan, which covers every N of a plain 1-field reduction).
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
     M, N = x.shape
+    # The reproducible-DAG order, when asked for: every N and every TRAIT, since the fold is
+    # written on `leaf`/`combine` rather than on the serial `reduce`. Two things it still cannot
+    # serve -- a raw stage-1 partial pass (`final=False`), whose consumer imposes its own layout,
+    # and an explicit tpr, which is a launch-shape request a fixed DAG cannot honour. Those keep
+    # the default order; neither falls back to aten.
+    if order not in (None, "linear", "inner_tree"):
+        raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
+    itree = None
+    if (order == "inner_tree" or (order is None and inner_tree_order_enabled())) and (
+        final and tpr is None
+    ):
+        itree = itree_plan(N, M, x.element_size())
+    if order == "inner_tree" and itree is None:
+        # An EXPLICIT request for a reproducible DAG must not be served with another one. Only
+        # order=None (the env gate) may fall back to the default order, since that reads as "use
+        # the order where it applies" rather than as a demand.
+        raise ValueError(
+            f"order='inner_tree' cannot be honoured here: {final=} {tpr=} "
+            f"plan={itree_plan(N, M, x.element_size()) is not None}"
+        )
+    if itree is not None:
+        return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts)
     cfg = row_config(N, x.element_size() * 8, trait.nfields)
     # Unroll depth of the rolled wave loop. A SCALAR row (vec == 1, i.e. an odd or prime N,
     # where gcd(N, 16//itemsize) is 1) has no wide load to hide latency behind, so it wants more
