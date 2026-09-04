@@ -34,6 +34,13 @@ import torch
 from functorch.compile import min_cut_rematerialization_partition
 from torch import _guards
 from torch._dynamo.output_graph import GraphCompileReason
+from torch._dynamo.utils import (
+    dynamo_compiler_modules,
+    dynamo_runtime_modules,
+    DynamoRuntimeModuleRef,
+    get_dynamo_runtime_module_refs,
+    wrap_dynamo_runtime_module_call,
+)
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
 from torch._inductor.output_code import OutputCode
@@ -185,7 +192,10 @@ def invoke_subgraph_inner_compiler(
 
     invoke_subgraph_wrapper._boxed_call = True  # type: ignore[attr-defined]
 
-    return invoke_subgraph_wrapper
+    return wrap_dynamo_runtime_module_call(
+        invoke_subgraph_wrapper,
+        get_dynamo_runtime_module_refs(subgraph),
+    )
 
 
 # I cannot say how many times I had to revert to this vibe coded version of
@@ -279,11 +289,19 @@ class AOTEagerOutputCode(OutputCode):
 
     gm: torch.fx.GraphModule | None = None
     _serialized_gm: bytes | None = dataclasses.field(default=None, init=False)
+    _runtime_module_refs: tuple[DynamoRuntimeModuleRef, ...] = dataclasses.field(
+        default=(), init=False, repr=False
+    )
+
+    def __post_init__(self) -> None:
+        if self.gm is not None:
+            self._runtime_module_refs = get_dynamo_runtime_module_refs(self.gm)
 
     def __call__(self, inputs: Any) -> Any:
         if self.gm is None:
             raise AssertionError("gm must not be None")
-        return self.gm.forward(inputs)
+        with dynamo_runtime_modules(self._runtime_module_refs):
+            return self.gm.forward(inputs)
 
     def prepare_for_serialization(self) -> None:
         from torch.fx._graph_pickler import GraphPickler, Options
@@ -297,6 +315,7 @@ class AOTEagerOutputCode(OutputCode):
 
         self._serialized_gm = GraphPickler.dumps(self.gm, Options(ops_filter=None))
         self.gm = None
+        self._runtime_module_refs = ()
 
     def post_compile(self, *args: Any, **kwargs: Any) -> None:
         if self.gm is None and self._serialized_gm is not None:
@@ -313,6 +332,8 @@ class AOTEagerOutputCode(OutputCode):
             self.gm.graph.set_codegen(_BoxedCodeGen())
             self.gm.recompile()
             self._serialized_gm = None
+        if self.gm is not None:
+            self._runtime_module_refs = get_dynamo_runtime_module_refs(self.gm)
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass
@@ -346,7 +367,7 @@ def boxed_nop(
         return forward_fn(args)
 
     run._boxed_call = True  # type: ignore[attr-defined]
-    return run
+    return wrap_dynamo_runtime_module_call(run, get_dynamo_runtime_module_refs(fx_g))
 
 
 def boxed_nop_with_mode(
@@ -369,7 +390,7 @@ def boxed_nop_with_mode(
             return forward_fn(args)
 
     run._boxed_call = True  # type: ignore[attr-defined]
-    return run
+    return wrap_dynamo_runtime_module_call(run, get_dynamo_runtime_module_refs(fx_g))
 
 
 def fake_crossref_boxed_nop(
@@ -391,7 +412,7 @@ def fake_crossref_boxed_nop(
             return forward_fn(args)
 
     run._boxed_call = True  # type: ignore[attr-defined]
-    return run
+    return wrap_dynamo_runtime_module_call(run, get_dynamo_runtime_module_refs(fx_g))
 
 
 def ignore_builtins(op: torch._ops.OpOverload) -> bool:
@@ -533,7 +554,14 @@ register_backend(
 # AOT Autograd with torchscript backend. Default partitioner.
 # aot_ts uses torchscript backend. We can use this with both nnc and nvfuser
 # by using the relevant fuser with torch.jit.fuser(...)
-aot_ts = aot_autograd(fw_compiler=ts_compile)
+def _aot_ts_compile(
+    gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor]
+) -> Callable[..., Any]:
+    with dynamo_compiler_modules():
+        return ts_compile(gm, fake_tensor_inputs)
+
+
+aot_ts = aot_autograd(fw_compiler=_aot_ts_compile)
 register_backend(name="aot_ts", compiler_fn=aot_ts)
 
 # These buggy backends are used for inducing bugs so that we can test

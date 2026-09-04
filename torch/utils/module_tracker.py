@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
+import sys
 import weakref
 from typing import TYPE_CHECKING
 
@@ -13,6 +14,8 @@ from torch.utils._pytree import tree_flatten
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.utils.hooks import RemovableHandle
 
 
@@ -67,6 +70,10 @@ class ModuleTracker:
         self._seen_modules: weakref.WeakSet = weakref.WeakSet()
         self._has_callback = False
         self._hooks: list[RemovableHandle] = []
+        self._dynamo_runtime_module_checker: (
+            Callable[[torch.nn.Module], bool] | None
+        ) = None
+        self._dynamo_optimized_module_cls: type[torch.nn.Module] | None = None
 
     def _maybe_set_engine_callback(self) -> None:
         # This assumes no concurrent calls to backward
@@ -98,6 +105,29 @@ class ModuleTracker:
             self._seen_modules.add(mod)
         return mod_name
 
+    def _is_dynamo_runtime_module(self, mod):
+        # Dynamo registers compiler-owned modules at its backend and
+        # compiled-autograd boundaries. Query lazily so eager ModuleTracker
+        # users do not import Dynamo just for this check.
+        is_dynamo_runtime_module = self._dynamo_runtime_module_checker
+        if is_dynamo_runtime_module is None:
+            dynamo_utils = sys.modules.get("torch._dynamo.utils")
+            is_dynamo_runtime_module = getattr(
+                dynamo_utils, "is_dynamo_runtime_module", None
+            )
+            self._dynamo_runtime_module_checker = is_dynamo_runtime_module
+        if is_dynamo_runtime_module is not None and is_dynamo_runtime_module(mod):
+            return True
+
+        optimized_module_cls = self._dynamo_optimized_module_cls
+        if optimized_module_cls is None:
+            eval_frame = sys.modules.get("torch._dynamo.eval_frame")
+            optimized_module_cls = getattr(eval_frame, "OptimizedModule", None)
+            self._dynamo_optimized_module_cls = optimized_module_cls
+        return optimized_module_cls is not None and isinstance(
+            mod, optimized_module_cls
+        )
+
     def _get_append_fn(self, name, is_bw):
         def fn(*args) -> None:
             if is_bw:
@@ -126,6 +156,9 @@ class ModuleTracker:
         return fn
 
     def _fw_pre_hook(self, mod, input) -> None:
+        if self._is_dynamo_runtime_module(mod):
+            return
+
         name = self._get_mod_name(mod)
         self._get_append_fn(name, False)()
 
@@ -137,6 +170,9 @@ class ModuleTracker:
             )
 
     def _fw_post_hook(self, mod, input, output) -> None:
+        if self._is_dynamo_runtime_module(mod):
+            return
+
         name = self._get_mod_name(mod)
         self._get_pop_fn(name, False)()
 
