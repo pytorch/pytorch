@@ -713,21 +713,15 @@ PyObject* dynamo__custom_eval_frame(
     // extract_cache_entry returns a borrowed reference. Modifying a borrowed
     // reference seems wrong. Therefore, we directly access the
     // extra->cache_entry. extra won't be NULL here.
-    CacheEntry* new_cache_entry =
-        create_cache_entry(extra, guarded_code, backend);
-
-    // Update the existing cache_entry on the extra object. This extra object
-    // is sitting on the extra scratch space, we are just changing the
-    // cache_entry ptr. As a result, extra now becomes the owner of CacheEntry
-    // object. This will be cleaned up when set_extra_state is called.
-    // Re-enable custom behavior. eval_custom() can run Python (fullgraph
-    // nested-compile handling, the bytecode debugger) before consuming
-    // these, so own the code object and copy the annotation now -- a
-    // concurrent clear can destroy new_cache_entry in that window.
-    cached_code = CacheEntry_get_code(new_cache_entry);
-    cached_code_owner =
-        py::reinterpret_borrow<py::object>((PyObject*)cached_code);
-    trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
+    // The extra object owns the CacheEntry; it is cleaned up when
+    // set_extra_state is called. The entry's code (owned) and annotation come
+    // back filled under the cache lock: eval_custom() can run Python
+    // (fullgraph nested-compile handling, the bytecode debugger), and once the
+    // lock released a concurrent clear can destroy the entry, so nothing here
+    // dereferences the returned pointer.
+    create_cache_entry(
+        extra, guarded_code, backend, &cached_code_owner, &trace_annotation);
+    cached_code = (PyCodeObject*)cached_code_owner.ptr();
     eval_custom();
   } else {
     eval_default();
