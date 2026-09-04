@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import Any, TYPE_CHECKING
 
 import sympy
@@ -12,6 +11,7 @@ from ...ir import get_free_symbols
 from ...kernel.decompose_k import (
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
     decompose_k_subgraph_template,
+    get_blackwell_decompose_k_splits,
 )
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
@@ -108,38 +108,23 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         ):
             return
 
-        # Keep Triton's split policy separate from the ATen-oriented occupancy
-        # ranking above. A follow-up can use Triton's known tile geometry and
-        # support uneven aligned partitions.
-        triton_k_splits = [
-            k_split
-            for k_split in get_k_splits(m, n, k)
-            if V.graph.sizevars.statically_known_true(
-                sympy.Eq(sympy.Mod(k, k_split), 0)
-            )
-        ]
-
         m_hint, n_hint, k_hint = map(int, (m, n, k))
+        device_properties = DeviceProperties.create(kernel_inputs.device())
         config_indices = [0, 3]
         if m_hint > 128:
             config_indices.extend((1, 4) if n_hint <= 128 else (2, 5))
 
-        for k_split in triton_k_splits:
-            for config_index in config_indices:
-                partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
-                m_tiles = math.ceil(m_hint / partial_config.block_m)
-                if partial_config.two_ctas:
-                    m_tiles = math.ceil(m_tiles / 2) * 2
-                k_part = (
-                    math.ceil(math.ceil(k_hint / k_split) / partial_config.block_k)
-                    * partial_config.block_k
-                )
-                workspace_bytes = (
-                    k_split * m_tiles * partial_config.block_m * n_hint * 4
-                )
-                if (k_split - 1) * k_part < k_hint and workspace_bytes <= 128 * 1024**2:
-                    yield {
-                        "k_split": k_split,
-                        "bmm_backend": "triton",
-                        "bmm_config_index": config_index,
-                    }
+        for config_index in config_indices:
+            partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
+            for k_split in get_blackwell_decompose_k_splits(
+                m_hint,
+                n_hint,
+                k_hint,
+                device_properties.multi_processor_count,
+                partial_config,
+            ):
+                yield {
+                    "k_split": k_split,
+                    "bmm_backend": "triton",
+                    "bmm_config_index": config_index,
+                }
