@@ -15,14 +15,20 @@ static PyObject* THPMPSStream_pynew(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
 
+  int64_t stream_id = -1;
+
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  constexpr const char* kwlist[] = {nullptr};
+  constexpr const char* kwlist[] = {
+      "stream_id",
+      nullptr,
+  };
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "",
+          "|L",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-          const_cast<char**>(kwlist))) {
+          const_cast<char**>(kwlist),
+          &stream_id)) {
     return nullptr;
   }
 
@@ -31,7 +37,9 @@ static PyObject* THPMPSStream_pynew(
     return nullptr;
   }
 
-  at::mps::MPSStream* stream = at::mps::getStreamFromPool();
+  at::mps::MPSStream* stream = (stream_id == -1)
+      ? at::mps::getStreamFromPool()
+      : at::mps::getStreamByID(stream_id);
   c10::Stream unwrapped = stream->unwrap();
 
   THPMPSStream* self = (THPMPSStream*)ptr.get();

@@ -164,6 +164,11 @@ TORCH_API MPSStream* getDefaultMPSStream();
 TORCH_API MPSStream* getStreamFromPool();
 
 /**
+ * Get a stream by its ID. 0 is the default stream, 1 - 32 are pool streams.
+ */
+TORCH_API MPSStream* getStreamByID(int64_t stream_id);
+
+/**
  * Synchronize the default stream and any pool streams created so far.
  */
 TORCH_API void synchronizeAllMPSStreams(SyncType syncType);
