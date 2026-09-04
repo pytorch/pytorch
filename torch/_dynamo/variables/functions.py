@@ -2021,10 +2021,19 @@ def invoke_and_store_as_constant(
     args = [convert(x) for x in args]
     kwargs = {k: convert(v) for k, v in kwargs.items()}
     res = fn(*args, **kwargs)
+    if isinstance(res, torch.Tensor):
+        # ConstantSource reconstructs with LOAD_GLOBAL. Unlike the non-tensor
+        # branch of register_attr_or_module, the tensor branch does not install
+        # its source name as a global.
+        source_name = tx.output.install_global_by_id(name, res)
+        tx.output.update_co_names(source_name)
+        source = ConstantSource(source_name)
+    else:
+        source = ConstantSource(name)
     return tx.output.register_attr_or_module(
         res,
         name,
-        source=ConstantSource(name),
+        source=source,
     )
 
 
