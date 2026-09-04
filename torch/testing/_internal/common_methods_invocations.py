@@ -2946,7 +2946,7 @@ def error_inputs_multinomial(op_info, device, **kwargs):
                      error_regex="prob_dist must be 1 or 2 dim")
 
     x = torch.empty(1, 2, dtype=torch.long, device=device)
-    yield ErrorInput(SampleInput(x, args=(2,)),
+    yield ErrorInput(SampleInput(x, args=(2,)), error_type=TypeError,
                      error_regex="multinomial only supports floating-point dtypes for input")
 
     x = torch.empty(1, 2, dtype=dtype, device=device)
