@@ -4894,17 +4894,25 @@ class GetSetDescriptorVariable(VariableTracker):
                 f"Cannot resolve getset_descriptor '{attr_name}' "
                 f"on {type(obj).__name__}"
             )
-        # _saved_* descriptors on autograd Nodes trigger checkpoint
-        # recomputation hooks when __get__ is called.  Graph-break
-        # instead of executing the side-effecting getter during tracing.
-        if attr_name.startswith("_saved_") and isinstance(
-            obj_value, torch.autograd.graph.Node
+        # SavedVariable-backed _saved_* descriptors on autograd Nodes unpack the
+        # saved tensor, which triggers checkpoint recomputation hooks. The codegen
+        # emits a _raw_saved_<name> sibling getset if and only if the field is a
+        # SavedVariable (tools/autograd/gen_autograd_functions.py), so probing for
+        # that sibling distinguishes the side-effecting getters from the plain
+        # C-struct reads (_saved_dim, _saved_self_sym_sizes, ...) which are safe to
+        # constant-fold. Graph-break instead of running the side-effecting getter.
+        if (
+            attr_name.startswith("_saved_")
+            and isinstance(obj_value, torch.autograd.graph.Node)
+            and hasattr(type(obj_value), f"_raw{attr_name}")
         ):
-            from .object_protocol import _UnhandledDescriptorError
-
-            raise _UnhandledDescriptorError(
-                f"Cannot resolve _saved_* descriptor '{attr_name}' "
-                f"on autograd Node during tracing"
+            unimplemented(
+                gb_type="Attempted to access _saved_* attribute of autograd Node",
+                context=f"attribute {attr_name} of {type(obj_value).__name__}",
+                explanation=f"Accessing `{attr_name}` on an autograd Node can trigger "
+                "checkpoint recomputation hooks, i.e. it has observable side effects, "
+                "so Dynamo cannot run the getter at trace time.",
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
         try:
             resolved = self.descriptor.__get__(obj_value, type(obj_value))

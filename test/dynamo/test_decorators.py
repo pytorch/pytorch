@@ -2362,24 +2362,145 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         self.assertEqual(cnts.frame_count, 3)
 
     def test_saved_tensor_descriptor_graph_break(self):
-        # Regression test: _saved_* getset descriptors on autograd Nodes
-        # must graph-break rather than calling __get__ during tracing,
-        # which would trigger checkpoint recomputation hooks as a
-        # tracing-time side effect.
+        # SavedVariable-backed _saved_* getset descriptors on autograd Nodes
+        # must graph-break rather than calling __get__ during tracing, which
+        # would trigger checkpoint recomputation hooks as a tracing-time side
+        # effect.
+        x = torch.randn(3, requires_grad=True)
+        y = x.exp()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(node, t):
+            return t + node._saved_result.sum()
+
+        with self.assertRaisesRegex(
+            Unsupported, r"Attempted to access _saved_\* attribute of autograd Node"
+        ):
+            fn(y.grad_fn, torch.randn(3))
+
+        # std::vector<SavedVariable> fields unpack too.
+        torch._dynamo.reset()
+        indexed = torch.randn(3, requires_grad=True)[torch.tensor([0, 1])]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn_vec(node, t):
+            return t + node._saved_indices[0].sum()
+
+        with self.assertRaisesRegex(
+            Unsupported, r"Attempted to access _saved_\* attribute of autograd Node"
+        ):
+            fn_vec(indexed.grad_fn, torch.randn(3))
+
+    def test_saved_tensor_descriptor_no_graph_break_for_plain_field(self):
+        # Only SavedVariable-backed _saved_* getters have side effects. The
+        # scalar/IntArrayRef ones are plain C-struct reads and must still
+        # constant-fold, or a read in a loop escalates to a whole-frame skip.
+        a = torch.randn(3, 4, requires_grad=True)
+        node = a.sum(dim=1).grad_fn
+        self.assertFalse(hasattr(node, "_raw_saved_dim"))
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(n, t):
+            return t + 1, n._saved_dim, n._saved_keepdim, n._saved_self_sym_sizes
+
+        _, dim, keepdim, sym_sizes = fn(node, torch.randn(3))
+        self.assertEqual(dim, (1,))
+        self.assertEqual(keepdim, False)
+        self.assertEqual(sym_sizes, (3, 4))
+        self.assertEqual(cnt.frame_count, 1)
+
+        torch._dynamo.reset()
         cnt = torch._dynamo.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
-        def fn(gf):
-            return gf._saved_result.sum()
+        def fn_loop(n, t):
+            for _ in range(3):
+                t = t + n._saved_dim[0]
+            return t
 
-        x = torch.randn(3, requires_grad=True)
-        y = x.exp()
-        result = fn(y.grad_fn)
-        self.assertEqual(result, y.sum())
-        # The graph break at _saved_result produces one compiled frame
-        # (the .sum() in the resume function) on some Python versions,
-        # and a full frame skip on others.
-        self.assertLessEqual(cnt.frame_count, 1)
+        self.assertEqual(fn_loop(node, torch.zeros(3)), torch.full((3,), 3.0))
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Same node type can carry both kinds: IndexBackward0 has a
+        # SavedVariable _saved_indices and a plain _saved_self_sym_sizes.
+        torch._dynamo.reset()
+        index_node = torch.randn(3, requires_grad=True)[torch.tensor([0, 1])].grad_fn
+        self.assertTrue(hasattr(index_node, "_raw_saved_indices"))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn_mixed(n, t):
+            return t + 1, n._saved_self_sym_sizes
+
+        self.assertEqual(fn_mixed(index_node, torch.randn(3))[1], (3,))
+
+    @parametrize(
+        "access",
+        [
+            "direct",
+            "assign",
+            "getattr",
+            "descr_get",
+            "try_block",
+            "inlined_fn",
+        ],
+    )
+    def test_saved_tensor_descriptor_side_effect_runs_once(self, access):
+        # The _saved_* getter recomputes a non-reentrant checkpoint. Without the
+        # graph break the getter runs at trace time and then again on every
+        # evaluation of the source-backed guard installed over it, so the
+        # recomputation count blows up (12 instead of 2).
+        def direct(node):
+            return node._saved_result
+
+        def assign(node):
+            r = node._saved_result
+            return r
+
+        def getattr_(node):
+            return getattr(node, "_saved_result")  # noqa: B009
+
+        def descr_get(node):
+            return type(node).__dict__["_saved_result"].__get__(node)
+
+        def try_block(node):
+            try:
+                return node._saved_result
+            except RuntimeError:
+                return None
+
+        def inlined_fn(node):
+            def inner(n):
+                return n._saved_result
+
+            return inner(node)
+
+        bodies = {
+            "direct": direct,
+            "assign": assign,
+            "getattr": getattr_,
+            "descr_get": descr_get,
+            "try_block": try_block,
+            "inlined_fn": inlined_fn,
+        }
+        body = bodies[access]
+
+        count = [0]
+
+        def foo(a):
+            count[0] += 1
+            return torch.exp(a)
+
+        @torch.compile(backend="eager")
+        def fn(node, t):
+            y = t + 1
+            return y * 2 + body(node).sum()
+
+        a = torch.randn(5, requires_grad=True)
+        d = torch.utils.checkpoint.checkpoint(foo, a, use_reentrant=False)
+        self.assertEqual(count[0], 1)
+        fn(d.grad_fn, torch.randn(3))
+        self.assertEqual(count[0], 2)
 
     def test_grad_fn_none_recompiles_for_non_leaf(self):
         # grad_fn constant-folds to None for a leaf tensor.  TENSOR_MATCH does
