@@ -1328,13 +1328,15 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
     return decorator  # type: ignore[return-value]
 
 
-# Float dtypes for which numerics="strict" applies eager-matching pointwise fixups.
-_STRICT_FLOAT = (
-    torch.float16,
-    torch.bfloat16,
-    torch.float32,
-    torch.float64,
-)
+# Float dtypes for which numerics="strict" applies eager-matching pointwise fixups,
+# mapped to the same-width integer type used for sign-bit manipulation.
+_STRICT_FLOAT_INT_TY = {
+    torch.float16: "tl.int16",
+    torch.bfloat16: "tl.int16",
+    torch.float32: "tl.int32",
+    torch.float64: "tl.int64",
+}
+_STRICT_FLOAT = tuple(_STRICT_FLOAT_INT_TY)
 
 
 class TritonOverrides(OpOverrides):
@@ -1495,6 +1497,26 @@ class TritonOverrides(OpOverrides):
     # pyrefly: ignore [bad-override]
     def abs(x):
         return f"tl_math.abs({x})"
+
+    @staticmethod
+    def neg(x):
+        x_dtype = getattr(x, "dtype", None)
+        if config.numerics == "strict" and x_dtype in _STRICT_FLOAT_INT_TY:
+            # Eager `neg` flips the IEEE sign bit for finite/inf/zero values but
+            # canonicalizes NaN, which is not a single primitive: Triton's `-x` (and any
+            # `x * -1.0` / `-0.0 - x`) folds to `0.0 - x` or `fneg`. `0.0 - x` canonicalizes
+            # NaN like eager but collapses both +-0.0 to +0.0; `fneg` keeps zero sign but
+            # sign-flips the NaN payload. So keep `0.0 - x` (== `-x`) for the general case
+            # and only special-case zeros with an explicit sign-bit flip.
+            int_ty = _STRICT_FLOAT_INT_TY[x_dtype]
+            sign_bit = -(1 << (torch.finfo(x_dtype).bits - 1))
+            flip = (
+                f"(({x}).to({int_ty}, bitcast=True) ^ "
+                f"tl.full([], {sign_bit}, {int_ty})).to("
+                f"{triton_type(x_dtype)}, bitcast=True)"
+            )
+            return f"tl.where({x} == 0, {flip}, -{x})"
+        return f"-{x}"
 
     # TODO - register these ops as having divergent dtype
     # output if doing graph pass to remove consecutive casts
