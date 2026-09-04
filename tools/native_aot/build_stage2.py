@@ -538,10 +538,14 @@ def _backend() -> str:
 
 
 def _cache_entries() -> dict[str, tuple[str, str]]:
-    """This build's cache as name -> (TYPE=value, the doc line above it).
+    """This build's cache as name -> (value, the doc line above it).
 
     Last assignment wins, as in _cmake_cache_value. The doc line names the source of an
     entry EnvVarForwarding wrote ("From environment", "From env <NAME>").
+
+    The entry TYPE is deliberately not part of the value: a reconfigure re-declares
+    settled options as INTERNAL (USE_XCCL:BOOL=OFF becomes USE_XCCL:INTERNAL=OFF),
+    which is CMake bookkeeping rather than a configuration change.
     """
     entries: dict[str, tuple[str, str]] = {}
     doc = ""
@@ -554,8 +558,8 @@ def _cache_entries() -> dict[str, tuple[str, str]]:
                     continue
                 key, sep, value = line.partition("=")
                 if sep and not line.startswith("#") and ":" in key:
-                    name, _, kind = key.partition(":")
-                    entries[name] = (f"{kind}={value}", doc)
+                    name, _, _kind = key.partition(":")
+                    entries[name] = (value, doc)
                 doc = ""
     except OSError:
         return {}
