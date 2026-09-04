@@ -107,8 +107,10 @@ struct XPUEvent {
   void record(const XPUStream& stream) {
     namespace syclex = sycl::ext::oneapi::experimental;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    bool just_created = false;
     if (!isCreated()) {
       createEvent(stream.device_index());
+      just_created = true;
       if (!reusable_) {
         assignEvent(stream.queue());
       }
@@ -130,7 +132,9 @@ struct XPUEvent {
       syclex::enqueue_signal_event(stream.queue(), *event_);
 #endif
     } else {
-      reassignEvent(stream.queue());
+      if (!just_created) {
+        reassignEvent(stream.queue());
+      }
     }
 
     if (C10_UNLIKELY(interp)) {
