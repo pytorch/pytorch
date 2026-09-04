@@ -15,7 +15,7 @@ import types
 import unittest
 import unittest.mock as mock
 import zipfile
-from typing import Any
+from typing import Any, cast
 
 # Ordinary package imports: these modules keep their scope torch-free so the
 # Test tools job, which runs in the linter image, can import them without torch.
@@ -44,6 +44,30 @@ SIDECAR = {
         {"name": "mOut", "dynamic_sizes": [0, 1], "dynamic_strides": [0]},
     ],
 }
+
+
+@contextlib.contextmanager
+def _fake_cute_compile():
+    """Stand in for cutlass.cute, yielding the options export() compiled with."""
+    seen: dict[str, Any] = {}
+
+    def fake_compile(fn, *args, **kwargs):
+        seen["options"] = kwargs.get("options")
+        return types.SimpleNamespace(export_to_c=lambda **kw: None)
+
+    fake_cute = types.ModuleType("cutlass.cute")
+    # cast: a ModuleType instance has no declared attributes, so plain assignment
+    # fails type checking (idiom from test/test_utils.py).
+    cast(Any, fake_cute).compile = fake_compile
+    fake_cutlass = types.ModuleType("cutlass")
+    cast(Any, fake_cutlass).cute = fake_cute
+    with (
+        mock.patch.dict(
+            sys.modules, {"cutlass": fake_cutlass, "cutlass.cute": fake_cute}
+        ),
+        mock.patch.object(toolchains.CuteDslToolchain, "_warm_up_exporter"),
+    ):
+        yield seen
 
 
 def _no_ambient_arch(device=None):
@@ -214,44 +238,37 @@ class TestExportJobs(unittest.TestCase):
     def test_cutedsl_export_passes_gpu_arch(self):
         # A --gpu-arch option rather than process state, which is what lets one
         # worker serve several arches, appended to any builder-supplied options.
-        import sys
-        import types
-        from typing import cast
-
-        seen = {}
-
-        def fake_compile(fn, *args, **kwargs):
-            seen["options"] = kwargs.get("options")
-            return types.SimpleNamespace(export_to_c=lambda **kw: None)
-
-        fake_cute = types.ModuleType("cutlass.cute")
-        # cast: a ModuleType instance has no declared attributes, so plain
-        # assignment fails type checking (idiom from test/test_utils.py).
-        cast(Any, fake_cute).compile = fake_compile
-        fake_cutlass = types.ModuleType("cutlass")
-        cast(Any, fake_cutlass).cute = fake_cute
         tc = toolchains.CuteDslToolchain()
-        with (
-            mock.patch.dict(
-                sys.modules, {"cutlass": fake_cutlass, "cutlass.cute": fake_cute}
-            ),
-            mock.patch.object(toolchains.CuteDslToolchain, "_warm_up_exporter"),
-        ):
-            for opts, want in (
-                (None, "--gpu-arch sm_90a"),
-                ("--enable-assertions", "--enable-assertions --gpu-arch sm_90a"),
-            ):
+        with _fake_cute_compile() as seen:
+            for opts in (None, "--enable-assertions"):
                 b = {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}
                 if opts:
                     b["options"] = opts
                 tc.export(b, "/tmp", arch="sm_90a")
-                self.assertEqual(seen["options"], want)
-            # No arch: builder options pass through untouched (the
-            # detect-from-device path must not inject --gpu-arch).
+                self.assertTrue(seen["options"].endswith("--gpu-arch sm_90a"))
+                if opts:
+                    self.assertTrue(seen["options"].startswith(opts))
+            # No arch: the detect-from-device path must not inject --gpu-arch.
             tc.export(
                 {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}, "/tmp"
             )
-            self.assertIsNone(seen["options"])
+            self.assertNotIn("--gpu-arch", seen["options"] or "")
+
+    def test_cutedsl_export_pins_the_host_isa(self):
+        # Left to the DSL it targets the build machine's CPU, so an AVX512 builder emits
+        # module loaders that SIGILL elsewhere; a declaration's own choice still wins.
+        # Local import: a test below binds `platform` as a loop variable.
+        import platform
+
+        tc = toolchains.CuteDslToolchain()
+        pin = tc._HOST_TARGETS[platform.machine()]
+        self.assertIn("-mtriple=", pin)
+        b = {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}
+        with _fake_cute_compile() as seen:
+            tc.export(dict(b), "/tmp", arch="sm_90a")
+            self.assertIn(f"--host-target '{pin}'", seen["options"])
+            tc.export(dict(b, options="--host-target 'llvm -mcpu=neoverse-n1'"), "/tmp")
+            self.assertEqual(seen["options"], "--host-target 'llvm -mcpu=neoverse-n1'")
 
     def test_toolchains_declare_their_backend(self):
         # Backends are data, not a platform check in the gate, so a future ROCm DSL
@@ -4797,6 +4814,13 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
             self.assertEqual(run.outcome, "returned 0")
         self.assertEqual(run.content, self.NEW)
 
+    def test_an_entry_retyped_by_the_reconfigure_is_not_drift(self):
+        # cmake_dependent_option redeclares a settled option as INTERNAL on reconfigure.
+        retyped = "CUDAToolkit_VERSION_MAJOR:INTERNAL=13\n"
+        with self._main(cache_after=retyped) as run:
+            self.assertEqual(run.outcome, "returned 0")
+        self.assertEqual(run.content, self.NEW)
+
     def test_a_relink_that_rebuilt_a_dependency_is_refused(self):
         # --target torch_cuda builds its dependencies too, and only torch_cuda ships.
         with self._main(rebuild_sibling=True) as run:
@@ -4807,7 +4831,7 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
         # EnvVarForwarding creates the entry when the build had none.
         added = "//From environment\nWERROR:STRING=1\n"
         with self._main(cache_after=added) as run:
-            self.assertIn("WERROR: absent -> STRING=1", run.outcome)
+            self.assertIn("WERROR: absent -> 1", run.outcome)
             self.assertNotIn("--build", run.children)
 
     def test_both_children_run_the_cmake_that_configured_the_build(self):
