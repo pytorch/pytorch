@@ -143,6 +143,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
 
@@ -176,6 +177,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             compiled = torch.compile(func)
@@ -215,6 +217,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs = torch.ones(
                 4, 4, dtype=torch.float, device=device_type
@@ -313,6 +316,7 @@ graph():
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             func_c = functools.partial(func, **self.get_world_trs())
@@ -361,6 +365,7 @@ graph():
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             compiled = torch.compile(func)
@@ -408,7 +413,11 @@ graph():
             return grad3, grad2, grad1
 
         with _dynamo_dist_per_rank_init(
-            self.rank, self.world_size, self.backend(device_type), fake_pg=True
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=True,
+            rdvz_file=self.file_name,
         ):
             # all_reduces remain in order!
             # note: this isn't actually invariant of pass currently..
@@ -442,6 +451,7 @@ graph():
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
 
@@ -508,6 +518,7 @@ graph():
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             q = torch.randn(1, 1, 128, 16, device=device_type, requires_grad=True)
             k = torch.randn(1, 1, 128, 16, device=device_type, requires_grad=True)
@@ -565,6 +576,7 @@ graph():
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs_a = (
                 torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
@@ -628,6 +640,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs_a = (
                 torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
@@ -666,6 +679,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs_a = torch.ones(8, 4, dtype=torch.float, device=device_type)
             inputs_b = torch.ones(8, 4, dtype=torch.float, device=device_type) * 2
@@ -707,6 +721,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs_a = torch.ones(4, 4, dtype=torch.float, device=device_type)
             inputs_b = torch.ones(4, 4, dtype=torch.float, device=device_type)
@@ -746,6 +761,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs = torch.ones(4, 4, dtype=torch.float, device=device_type)
             ranks = list(range(self.world_size))
@@ -799,6 +815,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(8, 8, dtype=torch.float, device=device_type)
             b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
@@ -862,6 +879,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(8, 8, dtype=torch.float, device=device_type)
             b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
@@ -915,6 +933,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(8, 8, dtype=torch.float, device=device_type)
             b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
@@ -983,6 +1002,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
                 self.world_size,
                 self.backend(device_type),
                 fake_pg=not at_least_x_gpu(2),
+                rdvz_file=self.file_name,
             ),
             torch._inductor.config.patch(
                 "aten_distributed_optimizations.insert_overlap_deps", True
@@ -1055,6 +1075,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs_a = torch.ones(4, 4, dtype=torch.float, device=device_type)
             inputs_b = torch.ones(4, 4, dtype=torch.float, device=device_type) * 2
@@ -1102,6 +1123,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs = torch.ones(8, 8, dtype=torch.float, device=device_type) + self.rank
 
@@ -1143,6 +1165,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(4, 4, dtype=torch.float32, device=device_type)
             b = torch.ones(4, 4, dtype=torch.float16, device=device_type) * 2
@@ -1180,6 +1203,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             b = torch.ones(4, 4, dtype=torch.float, device=device_type) * 2
@@ -1224,6 +1248,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(8, 8, dtype=torch.float, device=device_type)
             b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
@@ -1285,6 +1310,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(4, 4, dtype=torch.float32, device=device_type)
             b = torch.ones(4, 4, dtype=torch.float64, device=device_type) * 2
@@ -1343,6 +1369,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             import torch.distributed as dist
             from torch._subclasses.fake_tensor import unset_fake_temporarily
@@ -1405,6 +1432,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             world_size = self.world_size
             full_chunk = (7 + world_size - 1) // world_size
@@ -1602,6 +1630,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(8, 8, dtype=torch.float, device=device_type)
             b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
@@ -1647,6 +1676,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(8, 8, dtype=torch.float, device=device_type)
             b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
@@ -1881,6 +1911,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(8, 8, dtype=torch.float, device=device_type)
             b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
@@ -2053,6 +2084,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(8, 8, dtype=torch.float, device=device_type)
             b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
@@ -2093,6 +2125,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             with FakeTensorMode():
                 a_val = torch.empty(8, 8, device=device_type)
@@ -2223,6 +2256,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(8, 8, dtype=torch.float, device=device_type)
             b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
@@ -2277,6 +2311,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(8, 8, dtype=torch.float, device=device_type)
             b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
@@ -2318,6 +2353,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(8, 8, dtype=torch.float, device=device_type)
             b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
@@ -2373,6 +2409,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(8, 8, dtype=torch.float, device=device_type)
             b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
@@ -2439,6 +2476,7 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             a = torch.ones(8, 8, dtype=torch.float, device=device_type)
             b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
