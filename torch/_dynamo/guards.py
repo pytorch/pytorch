@@ -4893,6 +4893,13 @@ def pickle_guards_state(
 
     leaves = pytree.tree_leaves(state.output_graph.local_scope)
     for leaf in leaves:
+        # A guard rooted at a bound method reads through __func__, so the
+        # function _reduce_bound_method carries must be rebuilt, not pruned.
+        # reducer_override checks missing_values before guard_tree_values, so
+        # register the func here, before missing_values is populated below.
+        if inspect.ismethod(leaf) and id(leaf) in guard_tree_values:
+            guard_tree_values.setdefault(id(leaf.__func__), leaf.__func__)
+    for leaf in leaves:
         if inspect.ismethod(leaf) and hasattr(leaf, "__self__"):
             base = leaf.__self__
             if id(base) not in guard_tree_values:
