@@ -14,7 +14,7 @@ constant constexpr int kFragDim = 8;
 // simdgroup_load rows do not land on the same threadgroup memory banks.
 constant constexpr int kTilePad = kFragDim;
 
-enum class GroupedMMMode { rows, k, cols };
+enum class GroupedMMMode { rows, cols, k };
 
 inline uint32_t grouped_mm_offset(int32_t offset, uint32_t limit) {
   if (offset <= 0) {
@@ -306,6 +306,7 @@ kernel void grouped_mm(
   threadgroup T a_tile[BM * (kGroupedMMTileK + kTilePad)];
   threadgroup T b_tile[kGroupedMMTileK * (kGroupedMMTileN + kTilePad)];
   GroupedMMTile<T> tile;
+  // see comment in MPP kernel for the same check, to clarify what this is for
   if (!grouped_mm_tile<BM, kGroupedMMTileN, MODE>(
           mat_a,
           mat_b,
@@ -410,6 +411,17 @@ kernel void grouped_mm_mpp(
     uint tid [[thread_index_in_threadgroup]]) {
   threadgroup uint32_t tile_info[3];
   GroupedMMTile<T> tile;
+  // To explain why if is needed here. Imagine we have 32 num_tokens and 2
+  // groups and the way offsets are setup, 17 tokens go to expert 0 and 15
+  // tokens go to expert 1. Naively we can say, launch 2 threadgroups, one for
+  // each expert, but given that our tile size is 16 we need an extra
+  // threadgroup for the 17 tokens. But here is the problem, on CPU we don't
+  // know what the offsets are unless we read them which causes GPU -> CPU sync
+  // which we want to avoid so because of that, we launch
+  // [ceil_div(sum_of_total_tokens / TILE_SIZE) + num_groups] threadgroups. In
+  // the above scenario that will be [ceil_div(32 / 16) + 2] = 4. However we see
+  // that 4 threadgroups are not needed (inside of the kernel) therefore this if
+  // guards that one threadgroup that needs to do no calculations.
   if (!grouped_mm_tile<BM, BN, MODE>(
           mat_a, mat_b, offsets, output, params, tgid, tid, tile_info, tile)) {
     return;
