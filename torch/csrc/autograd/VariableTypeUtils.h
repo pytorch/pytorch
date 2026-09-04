@@ -335,11 +335,9 @@ inline void check_no_requires_grad(
   if (!GradMode::is_enabled()) {
     return;
   }
-  for (const auto& element : tensors) {
-    const c10::IValue& ivalue = element.get();
-    if (!ivalue.isNone()) {
-      check_no_requires_grad(
-          ivalue.toTensor(), name, fn_name, /*check_grad_mode*/ false);
+  for (std::optional<at::Tensor> tensor : tensors) {
+    if (tensor.has_value()) {
+      check_no_requires_grad(*tensor, name, fn_name, /*check_grad_mode*/ false);
     }
   }
 }
@@ -403,7 +401,7 @@ namespace impl {
 namespace {
 
 // If run_jit_decomposition were not a member function, we would be able
-// to pass this as a template parameter to c10::Boxedkernel::makeFromFunction.
+// to pass this as a template parameter to c10::BoxedKernel::makeFromFunction.
 // However, member functions cannot be passed this way - instead we wrap our
 // call in this functor so it can be passed to c10::BoxedKernel::makeFromFunctor
 class WrapperFunctor final : public c10::OperatorKernel {
