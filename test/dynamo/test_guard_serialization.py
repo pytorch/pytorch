@@ -295,6 +295,22 @@ def _none_cell_base(x):
 NONE_CELL_WRAPPED = none_cell_wrapper(_none_cell_base)
 
 
+def _doc_base(x):
+    """base doc"""
+    return x * 2
+
+
+def doc_wrapper(func):
+    @functools.wraps(func)
+    def wrapper(x):
+        return func(x)
+
+    return wrapper
+
+
+DOC_WRAPPED = doc_wrapper(_doc_base)
+
+
 class UnpicklableGuardedDefault:
     def __init__(self):
         self.flag = 2.0
@@ -1181,6 +1197,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
         finally:
             cell.cell_contents = None
+
+    def test_guard_rooted_at_wrapper_preserves_copied_doc(self):
+        # functools.wraps copies the wrapped function's __doc__ onto a wrapper
+        # whose own code object has none. Rebuilt from the code object alone
+        # the wrapper reads None, the EQUALS_MATCH rebakes against it at load,
+        # and the guard fails forever with no load error.
+        def fn(x):
+            if DOC_WRAPPED.__doc__ == "base doc":
+                x = x + 1
+            return DOC_WRAPPED(x)
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+        DOC_WRAPPED.__doc__ = "other"
+        try:
+            self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
+        finally:
+            DOC_WRAPPED.__doc__ = "base doc"
 
     def test_fqn_mismatched_function_rejects_a_new_global(self):
         # len(func.__globals__) installs SEQUENCE_LENGTH (derived
