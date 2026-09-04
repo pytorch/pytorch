@@ -1215,11 +1215,6 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(input, input_before)
         self.assertEqual(actual, reference, atol=5e-2, rtol=5e-2)
 
-        out = torch.empty(0, device=device, dtype=output_dtype)
-        self.assertIs(scaled_addmm(input, *args, out=out, **kwargs), out)
-        self.assertEqual(out.shape, input.shape)
-        self.assertEqual(out, actual)
-
         self.assert_scaled_addmm_inplace(input.clone(), actual, args, **kwargs)
 
     @onlyCUDA
@@ -1300,42 +1295,16 @@ class TestFP8Matmul(TestCase):
         with self.assertRaisesRegex(ValueError, "real alpha and beta"):
             scaled_addmm(input, *args, alpha=1j)
 
-        input_before = input.clone()
-        noncontiguous_out = torch.empty_like(input).t()
         expected = scaled_addmm(input, *args)
-        self.assertIs(
-            scaled_addmm(input, *args, out=noncontiguous_out), noncontiguous_out
-        )
-        self.assertEqual(noncontiguous_out, expected)
-        self.assertEqual(input, input_before)
-
-        misaligned_out = input.new_empty(input.numel() + 1)[1:].view_as(input)
-        self.assertIs(scaled_addmm(input, *args, out=misaligned_out), misaligned_out)
-        self.assertEqual(misaligned_out, expected)
-
-        overlapping_out = input.new_empty(1).expand_as(input)
-        with self.assertRaisesRegex(RuntimeError, "single memory location"):
-            scaled_addmm(input, *args, out=overlapping_out)
-
-        exact_alias = input.view_as(input)
-        self.assertIs(scaled_addmm(input, *args, out=exact_alias), exact_alias)
-        self.assertEqual(exact_alias, expected, atol=5e-2, rtol=5e-2)
-
-        alignment_offset = 16 // input.element_size()
-        aliased_storage = input.new_empty(input.numel() + alignment_offset)
-        aliased_input = aliased_storage[:-alignment_offset].view_as(input)
-        aliased_out = aliased_storage[alignment_offset:].view_as(input)
-        with self.assertRaisesRegex(RuntimeError, "single memory location"):
-            scaled_addmm(aliased_input, *args, out=aliased_out)
-
         misaligned = input.new_empty(input.numel() + 1)[1:].view_as(input)
         with self.assertRaisesRegex(ValueError, "16-byte aligned"):
             scaled_addmm_(misaligned, *args)
 
+        alignment_offset = 16 // input.element_size()
         aligned_16 = input.new_empty(input.numel() + alignment_offset)[
             alignment_offset:
         ].view_as(input)
-        aligned_16.copy_(input_before)
+        aligned_16.copy_(input)
         self.assertIs(scaled_addmm_(aligned_16, *args), aligned_16)
         self.assertEqual(aligned_16, expected, atol=5e-2, rtol=5e-2)
 
@@ -1526,8 +1495,6 @@ class TestFP8Matmul(TestCase):
             self.assertEqual(result.shape, input.shape)
             self.assertEqual(result.dtype, input.dtype)
 
-            out = torch.empty_like(input)
-            self.assertIs(scaled_addmm(input, *args, out=out), out)
             self.assertIs(scaled_addmm_(input, *args), input)
 
     @onlyCUDA

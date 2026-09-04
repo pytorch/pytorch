@@ -7278,7 +7278,6 @@ def scaled_addmm(
     *,
     beta: float = 1.0,
     alpha: float = 1.0,
-    out: Tensor | None = None,
 ) -> Tensor:
     r"""Compute a scaled matrix product and add it to ``input``.
 
@@ -7291,7 +7290,8 @@ def scaled_addmm(
     The scaling recipes and swizzles have the same meaning as in
     :func:`scaled_mm`. ``input`` must be a canonically contiguous, 16-byte-aligned
     matrix with shape ``(mat1.size(0), mat2.size(1))`` and dtype ``float16``, ``bfloat16``, or
-    ``float32``. CUDA recipes are supported when their selected implementation
+    ``float32``. The result has the dtype of ``input``; there is no separate
+    output dtype. CUDA recipes are supported when their selected implementation
     uses cuBLASLt; non-cuBLAS fallbacks and ROCm are not supported.
 
     Args:
@@ -7308,7 +7308,6 @@ def scaled_addmm(
         use_fast_accum: Whether to enable tensor-core fast accumulation.
         beta: Multiplier for ``input``.
         alpha: Multiplier for the scaled matrix product.
-        out: Optional destination tensor.
 
     .. note::
         Fusing the addition removes an intermediate output rounding step, so
@@ -7336,7 +7335,6 @@ def scaled_addmm(
         beta=beta,
         alpha=alpha,
         use_fast_accum=use_fast_accum,
-        out=out,
     )
 
 
@@ -7358,7 +7356,8 @@ def scaled_addmm_(
 ) -> Tensor:
     r"""In-place version of :func:`scaled_addmm`.
 
-    This function preserves the storage of ``input`` and returns ``input``. A
+    This function accumulates in ``input.dtype`` (``float16``, ``bfloat16``, or
+    ``float32``), preserves the storage of ``input``, and returns ``input``. A
     serialized WGRAD loop can create the first contribution with
     :func:`scaled_mm`, then use ``scaled_addmm_`` for later contributions.
 
