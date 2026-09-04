@@ -386,7 +386,6 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     const int head_size_8x = sizes[3];
     const int seqlen_k = k.size(1);
     const int num_heads_k = k.size(2);
-    TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size_8x % 8 == 0, "head_size_8x should be a multiple of 8");
     TORCH_CHECK(head_size_8x <= 256, "CK FlashAttention backward only supports head dimension at most 256");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
@@ -493,7 +492,9 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
         drop_seed_offset.second = philox_offset.data_ptr<uint64_t>();
     }
 
-    if (seqlen_q > 0) {
+    // An empty batch or query sequence has no work: the grads allocated above are
+    // already the correct empty result, so skip the launch rather than reject it.
+    if (batch_size > 0 && seqlen_q > 0) {
         ck_tile::stream_config stream_config{stream};
         dq.zero_(); // ck use atomic operation on dq
 
@@ -555,7 +556,9 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
 
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
     } else {
-        // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.
+        // No kernel ran, so nothing wrote the grads. All three are empty when
+        // batch_size == 0; when only seqlen_q is 0 they are not, and the grad of an
+        // output that consumed no queries is zero.
         dk_expanded.zero_();
         dv_expanded.zero_();
         softmax_d.zero_();
