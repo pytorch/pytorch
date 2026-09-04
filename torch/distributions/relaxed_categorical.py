@@ -16,7 +16,7 @@ __all__ = ["ExpRelaxedCategorical", "RelaxedOneHotCategorical"]
 
 class ExpRelaxedCategorical(Distribution):
     r"""
-    Creates a ExpRelaxedCategorical parameterized by
+    Creates an ExpRelaxedCategorical parameterized by
     :attr:`temperature`, and either :attr:`probs` or :attr:`logits` (but not both).
     Returns the log of a point in the simplex. Based on the interface to
     :class:`OneHotCategorical`.

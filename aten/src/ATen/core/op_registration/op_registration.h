@@ -110,6 +110,10 @@ public:
       TORCH_CHECK(!schemaOrName_.has_value(), "Tried to register operator ", schemaOrName," but specified schema multiple times. You can only specify the schema once per operator registration.");
 
       #if !defined(EXPOSE_C2_OPS) && defined(CAFFE2_IS_XPLAT_BUILD)
+        // The only build that compiles this branch is the xplat one, and BUCK.oss
+        // sets -DSTRIP_ERROR_MESSAGES alongside -DCAFFE2_IS_XPLAT_BUILD, which
+        // makes TORCH_CHECK discard its message entirely.
+        // @allow-raw-throw: TORCH_CHECK would lose the message in this build
         throw std::logic_error("Tried to register operator " + schemaOrName + ". We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
       #else
         schemaOrName_ = torch::jit::parseSchemaOrName(schemaOrName);

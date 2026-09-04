@@ -722,6 +722,45 @@ def compile_time_record_function(name: str) -> Generator[Any, None, None]:
         yield
 
 
+# Global rather than the thread-local this file uses for other depth counters
+# (see _dynamo_timed_tls): gc.set_threshold is process-wide, so a per-thread
+# depth would let a second thread save the already-raised value as its
+# "original" and restore that permanently when it exits.
+_gc_threshold_lock = threading.Lock()
+_gc_threshold_depth = 0
+_gc_threshold_saved: tuple[int, int, int] | None = None
+
+
+@contextlib.contextmanager
+def deferred_full_gc() -> Generator[None, None, None]:
+    """Raise the gen2 GC threshold for the duration of a compile.
+
+    See config.gc_gen2_threshold_during_compile. Reentrant: nested compiles share
+    the outermost adjustment, and the original thresholds are restored once the
+    outermost one finishes.
+    """
+    global _gc_threshold_depth, _gc_threshold_saved
+    threshold = config.gc_gen2_threshold_during_compile
+    if threshold is None:
+        yield
+        return
+    with _gc_threshold_lock:
+        if _gc_threshold_depth == 0:
+            _gc_threshold_saved = gc.get_threshold()
+            gen0, gen1, gen2 = _gc_threshold_saved
+            # Never lower a threshold the caller already raised past ours.
+            gc.set_threshold(gen0, gen1, max(gen2, threshold))
+        _gc_threshold_depth += 1
+    try:
+        yield
+    finally:
+        with _gc_threshold_lock:
+            _gc_threshold_depth -= 1
+            if _gc_threshold_depth == 0 and _gc_threshold_saved is not None:
+                gc.set_threshold(*_gc_threshold_saved)
+                _gc_threshold_saved = None
+
+
 @contextmanager
 def dynamo_timed(
     key: str,
@@ -1310,9 +1349,11 @@ def _unpack_fast_types() -> tuple[type, ...]:
             variables.ListIteratorVariable,
             variables.TupleIteratorVariable,
             variables.DequeIteratorVariable,
+            variables.DequeReverseIteratorVariable,
             variables.RangeVariable,
             variables.SetVariable,
             variables.FrozensetVariable,
+            variables.DictKeySetVariable,
             variables.TensorVariable,
             variables.TupleVariable,
         )
@@ -2573,6 +2614,7 @@ def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     _copy_dynamo_attr(src, dst, "_dynamo_shape_ids")
     _copy_dynamo_attr(src, dst, "_dynamo_strict_unbacked_indices")
     _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_dynamic_range")
     _copy_dynamo_attr(src, dst, "_dynamo_propagated_dynamic_indices")
     _copy_dynamo_attr(src, dst, "_has_dynamo_dim_marking")
 
@@ -5050,6 +5092,9 @@ def is_compile_supported(device_type: DeviceLikeType) -> Any:
     else:
         compile_supported = False
     return compile_supported
+
+
+is_compile_supported._dynamo_marked_constant = True  # type: ignore[attr-defined]
 
 
 # The following 3.11 source code functions are adapted from
