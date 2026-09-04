@@ -33,13 +33,10 @@
 #if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && \
     NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
 #define NCCL_HAS_DEVCOMM
-#endif
-
-#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && \
-    NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
 #define NCCL_HAS_ONE_SIDED_API
 #endif
 
+// Device-side reduce/copy APIs were completed in NCCL 2.29.7.
 #if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && \
     NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
 #define NCCL_DEVICE_HAS_REDUCE_COPY
