@@ -34,9 +34,11 @@ from .runtime_wrappers import (
     _replay_input_mutation,
     _snapshot_external_objects,
     _unwrap_tensoralias,
+    AOTDispatchAutograd,
     index_to_external_object_weakref,
     mark_dynamo_propagated_dynamic_indices,
 )
+from .schemas import TensorAlias
 from .utils import normalize_as_list
 
 
@@ -52,4 +54,6 @@ __all__ = [
     "_AutogradSavedState",
     "_snapshot_external_objects",
     "index_to_external_object_weakref",
+    "AOTDispatchAutograd",
+    "TensorAlias",
 ]

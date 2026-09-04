@@ -42,8 +42,8 @@ execution-driven: a complete summary describes the calls
 that ran, not every possible input or unexecuted branch. precompile makes the calls, so
 precompile picks the grad mode: ordinary ``torch.no_grad()`` unless ``training=True``.
 Serve the resulting artifact under the mode it was captured in -- grad mode is a
-``GLOBAL_STATE`` guard, and it is checked. Example inputs and module parameters/buffers
-created as inference tensors are rejected.
+``GLOBAL_STATE`` guard, and it is checked. With ``tracer="dynamo"``, example inputs and
+module parameters/buffers created as inference tensors are rejected.
 
 precompile returns a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
@@ -164,10 +164,12 @@ it.
 #    precompile performs, and it happens in Python outside the graph, so the graph stays
 #    functional. precompile does not own optimizer state; bring your own optimizer and
 #    zero grads as usual. The dynamo tracer reaches the SAME observable behavior by a
-#    different route (see the tracer note): the backward stays a traced autograd call
-#    inside the graph and Dynamo's own bytecode does the accumulate, so there is no
-#    harvested-output list -- but which params get a grad is still fixed at trace time,
-#    frozen params still keep ``.grad = None``, and the accumulate still matches eager.
+#    different route (see the tracer note): a ``.backward()`` in ``fn`` graph-breaks
+#    (Dynamo does not trace it while ``trace_autograd_ops`` is off, the default), so at
+#    serve time the live autograd engine runs the compiled backward and does the
+#    accumulate itself; there is no harvested-output list -- but which params get a
+#    grad is still fixed at trace time, frozen params still keep ``.grad = None``, and
+#    the accumulate still matches eager.
 #
 # 6. Shapes are static by default (dynamic dims are opt-in via mark_unbacked, invariant
 #    3), each input's dtype/device is baked, and the inductor backend also specializes
@@ -342,6 +344,8 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
     from torch._subclasses.fake_tensor import FakeTensorMode
 
 
@@ -480,14 +484,11 @@ class _InstalledArtifact:
         entry_factory: Callable[[], Callable[..., object]],
         *,
         check_fn: Callable[[Callable[..., object]], None] | None = None,
-        backend_keys: Sequence[str] = (),
     ) -> None:
         self._serve = serve
         self._entry_factory = entry_factory
         # Refuses a load(fn=...) target the artifact was not captured from.
         self._check_fn = check_fn
-        # PrecompileContext keys serve() records; unload() takes them back out.
-        self._backend_keys = backend_keys
         self._fn: Callable[..., object] | None = None
         self._inner: Any = None
         self._unloaded = False
@@ -542,23 +543,19 @@ class _InstalledArtifact:
         self.unload()
 
     def unload(self) -> None:
-        from torch._dynamo.precompile_context import PrecompileContext
-
         with self._install_lock:
             self._unloaded = True
             inner, self._inner = self._inner, None
         if inner is not None:
             inner.unload()
-            for key in self._backend_keys:
-                PrecompileContext.take_artifact(key)
 
 
 class PrecompileSession:
     r"""Execution-driven multi-graph capture session (internal).
 
-    :func:`precompile` drives one of these itself for ``tracer="dynamo"`` -- entering it,
-    running the example calls, and returning the finished ``(python_code, cache)`` -- so
-    callers never receive one.
+    :func:`precompile` will drive one of these itself for ``tracer="dynamo"`` -- entering
+    it, running the example calls, and returning the finished ``(python_code, cache)`` --
+    so callers never receive one. Not yet wired: ``tracer="dynamo"`` still raises.
     """
 
     def __init__(self, session: Any) -> None:
@@ -1891,7 +1888,14 @@ def _build_multigraph_python_source(
     parts.append("")
     parts.append("# The entry's defaults and closure values: a code object carries")
     parts.append("# neither, and the driver rebuilds the entry from one.")
-    parts.append(f"_ENTRY_BINDING = {_b64(entry_binding or {})!r}")
+    try:
+        binding_blob = _b64(entry_binding or {})
+    except Exception as e:
+        raise PrecompileError(
+            f"precompile cannot carry {entry.fn_name!r}'s default arguments in the "
+            f"artifact; defaults must be picklable ({type(e).__name__}: {e})."
+        ) from e
+    parts.append(f"_ENTRY_BINDING = {binding_blob!r}")
     parts.append("")
     parts.append("# " + "=" * 70)
     parts.append("# 2. Guard trees and transformed bytecode -- OPAQUE")
@@ -1914,10 +1918,10 @@ def _build_multigraph_python_source(
     # A compiled subgraph is Inductor output, which HAS a source form -- unlike
     # the guard trees and bytecode above. Emit that source where the backend can
     # produce it, and fall back to the pickle only for the rest (eager graphs,
-    # anything the lowering refused). The blocks are spliced sequentially into
-    # this module's namespace and each one's ``call`` is snapshotted
-    # immediately, because every block rebinds ``call`` / ``Runner`` /
-    # ``async_compile``; the snapshot is what makes the shadowing harmless.
+    # anything the lowering refused). rendered_backends already suffixed every
+    # top-level name each block defines per slot (namespace_module_names), so the
+    # blocks splice sequentially into ONE namespace and resolve siblings late
+    # without a variant silently running another variant's code.
     rendered = dict(rendered or {})
     parts.append("# " + "=" * 70)
     if rendered:
@@ -2029,7 +2033,16 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
 
     entry_frames = [f for f in frames if f["is_entry"]]
     if not entry_frames:
-        return
+        captured = sorted(
+            SerializedCode.to_code_object(f["code"]).co_name for f in frames
+        )
+        raise PrecompileError(
+            f"precompile found no frame for the entry {entry.fn_name!r} among the "
+            f"frames Dynamo compiled {captured}; the artifact would have nothing to "
+            "dispatch. Capture a plain function or method whose own code object "
+            "Dynamo compiles, e.g. precompile(lambda m, x: m(x), "
+            "example_inputs=[(model, x)])."
+        )
     if not any(f["variants"] for f in entry_frames):
         # The entry frame having no variants has two very different causes, and
         # guessing the wrong one sends the caller restructuring code that was
@@ -2097,10 +2110,9 @@ def _reject_unreachable_frames(frames: list[dict[str, Any]], entry: Any) -> None
     """
     from torch._dynamo.package import SerializedCode
 
+    reachable = _reachable_frames(frames)
     unreachable = [
-        f
-        for f in frames
-        if not f["is_entry"] and not f["resume_names"] and f["variants"]
+        f for i, f in enumerate(frames) if f["variants"] and i not in reachable
     ]
     if unreachable:
         # Correct but under-compiled. A frame Dynamo compiled that is entered by
@@ -2628,7 +2640,9 @@ class _PrecompileApi:
             ``precompile(fn, *example_inputs)`` -- the 2.14 spelling, with the one
             example call passed positionally -- still works and is read as
             ``example_inputs=[example_inputs]``, with a ``FutureWarning``. Passing
-            both forms at once raises ``ValueError``.
+            both forms at once raises ``ValueError``. Unlike 2.14, the example call
+            runs under ``torch.no_grad()`` unless ``training=True``, so a ``fn`` that
+            runs a backward now needs ``training=True``.
 
         ``tracer`` picks the capture front-end. ``"make_fx"`` (the default) is one
         non-strict ATen trace, so it takes exactly one call and refuses a longer
@@ -2638,9 +2652,10 @@ class _PrecompileApi:
 
         Live capture keeps all guards so one example cannot silently reuse another's graph;
         ``guard_filter_fn`` applies only to the serialized artifact. Calls run under
-        ordinary ``torch.no_grad()`` unless ``training=True``, even when the caller is in
-        inference mode; serve the resulting artifact under that same grad mode. Inputs and
-        module parameters/buffers created inside inference mode are rejected because they
+        ordinary ``torch.no_grad()`` unless ``training=True``; serve the resulting
+        artifact under that same grad mode. With ``tracer="dynamo"`` the calls also run
+        with inference mode disabled even when the caller is in it, and inputs or module
+        parameters/buffers created inside inference mode are rejected because they
         remain inference tensors after the ambient mode is disabled.
 
         Capture is execution-driven, not an exhaustive analysis of ``fn``. A complete
@@ -2799,8 +2814,8 @@ class _PrecompileApi:
         returns ``fn``'s own result (``None`` for a bare ``.backward()`` step), not the
         grads (invariant 5). This holds for either ``tracer`` -- only the mechanism
         differs (``make_fx`` harvests the grads as graph outputs and scatters them in the
-        driver; ``dynamo`` traces the backward as an in-graph autograd call whose own
-        bytecode does the accumulate).
+        driver; under ``dynamo`` the ``.backward()`` graph-breaks and the live autograd
+        engine runs the compiled backward and does the accumulate).
 
         Input mutation (incl. module buffers, e.g. BatchNorm running stats in
         training mode), tensor subclasses (e.g. DTensor), and outputs aliasing inputs
@@ -2823,7 +2838,9 @@ class _PrecompileApi:
                 )
             warnings.warn(
                 "torch.compiler.precompile(fn, *example_inputs) is deprecated; pass "
-                "example_inputs=[(...)] instead",
+                "example_inputs=[(...)] instead. The example call now runs under "
+                "torch.no_grad() unless training=True, so a fn that runs a backward "
+                "needs training=True.",
                 FutureWarning,
                 stacklevel=2,
             )

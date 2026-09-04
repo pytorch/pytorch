@@ -351,13 +351,15 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x).dtype, torch.bfloat16)
         self.assertEqual(cnts.frame_count, 1)
 
-        # A different setting is a different graph. Checked on `enabled` rather
-        # than dtype: flipping dtype on a live model reuses autocast's cached
-        # cast of the weight, which is its own behaviour and not what is under
-        # test here.
+        # A different setting is a different graph.
         module.ctx = torch.amp.autocast("cpu", dtype=torch.bfloat16, enabled=False)
         self.assertEqual(compiled(x).dtype, torch.float32)
         self.assertEqual(cnts.frame_count, 2)
+        module.ctx = torch.amp.autocast(
+            "cpu", dtype=torch.bfloat16, cache_enabled=False
+        )
+        self.assertEqual(compiled(x).dtype, torch.bfloat16)
+        self.assertEqual(cnts.frame_count, 3)
 
     def test_autocast_object_mutated_in_place_recompiles(self):
         module, compiled, cnts, x = self._compile_held_autocast_module()
