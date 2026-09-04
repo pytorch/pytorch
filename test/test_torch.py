@@ -6665,7 +6665,10 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "same nbytes"):
             x.untyped_storage()._swap_data_ptr_(y.untyped_storage())
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/193288")
+    @skipIfTorchInductor(
+        "Inductor clamp lowering wraps out-of-range integral bounds instead of "
+        "dropping them; https://github.com/pytorch/pytorch/issues/193288"
+    )
     @dtypes(
         torch.uint8,
         torch.int8,
