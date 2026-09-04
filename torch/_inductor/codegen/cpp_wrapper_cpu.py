@@ -4556,3 +4556,42 @@ if (!custom_op_wrapper) {
             stack_trace_str += "\n"
         stack_trace_str += ')"'
         self.writeline(f'KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});')
+
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        profiling_args: Sequence[str | None] | None = None,
+    ):
+        sanitized = kernel_name.replace("::", "_").replace(".", "_")
+        if profiling_args:
+            # Tensors and placeholders are numbered independently so a name
+            # identifies which kind of argument it holds.
+            ivalue_names = []
+            num_inputs = 0
+            num_scalars = 0
+            for profiling_arg in profiling_args:
+                if profiling_arg is None:
+                    # A non-tensor argument only has to hold its schema
+                    # position, so record a dummy int64.
+                    ivalue_var = f"tmp_{sanitized}_scalar_{num_scalars}"
+                    num_scalars += 1
+                    to_ivalue = f"aoti_torch_int64_to_ivalue(0, &{ivalue_var})"
+                else:
+                    ivalue_var = f"tmp_{sanitized}_input_{num_inputs}"
+                    num_inputs += 1
+                    to_ivalue = (
+                        f"aoti_torch_tensor_to_ivalue({profiling_arg}, &{ivalue_var})"
+                    )
+                self.writelines(_ivalue_conversion(ivalue_var, to_ivalue))
+                ivalue_names.append(ivalue_var)
+            inputs_vec = f"{sanitized}_inputs_"
+            self.writeline(
+                f"std::vector<C10IValueHandle> {inputs_vec}({{{', '.join(ivalue_names)}}});"
+            )
+            self.writeline(
+                f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr, {inputs_vec});'
+            )
+        else:
+            self.writeline(
+                f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr);'
+            )

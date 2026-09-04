@@ -9007,7 +9007,8 @@ class InplaceCopyFallback(ExternKernel):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         (dst, src, non_blocking) = self.codegen_args()
-        wrapper.codegen_device_copy(src, dst, non_blocking)
+        with wrapper.profiled_kernel_scope("aoti_torch_copy_", self):
+            wrapper.codegen_device_copy(src, dst, non_blocking)
 
     def should_allocate(self) -> bool:
         return False
@@ -9305,12 +9306,13 @@ class DeviceCopy(ExternKernelOut):
         args = self.codegen_args()
         if len(args) != 2:
             raise AssertionError("Expected len(args) == 2")
-        if self.output_view:
-            wrapper.codegen_device_copy(
-                args[0], self.output_view.codegen_reference(), args[1]
-            )
-        else:
-            wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
+        with wrapper.profiled_kernel_scope("aoti_torch_copy_", self):
+            if self.output_view:
+                wrapper.codegen_device_copy(
+                    args[0], self.output_view.codegen_reference(), args[1]
+                )
+            else:
+                wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
         if isinstance(self.layout, Layout) and self.layout.is_pinned:
             wrapper.sync_d2h_copy(self.get_name())
 
