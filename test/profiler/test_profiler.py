@@ -2169,6 +2169,16 @@ class TestProfiler(TestCase):
             ),
             {"PERFORMANCE_METRICS": ""},
         )
+        with (
+            patch("torch.cuda.current_device", return_value=3),
+            patch("torch.profiler.profiler.prof.profile") as kineto_profile,
+        ):
+            p.prepare_trace()
+        self.assertEqual(
+            kineto_profile.call_args.kwargs["_profiler_extensions"]
+            ["PERFORMANCE_METRICS_DEVICE_ID"],
+            "3",
+        )
 
     def test_cuspy_config_routes_performance_metrics(self):
         performance_metrics = PerformanceMetricsConfig(
