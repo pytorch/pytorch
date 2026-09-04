@@ -327,6 +327,10 @@ class TestDummyModel(torch.nn.Module):
 class TestFSDPOptimState(FSDPTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
+    def setUp(self):
+        super().setUp()
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._model_class = {
@@ -546,7 +550,6 @@ class TestFSDPOptimState(FSDPTest):
                     continue
                 self.assertEqual(full_osd_value, ref_osd_pg[name])
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", STATE_DICT_TYPES)
     @parametrize("use_multiple_param_groups", [False, True])
@@ -648,7 +651,6 @@ class TestFSDPOptimState(FSDPTest):
             check_same_param_keys=check_same_param_keys,
         )
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_full_optim_state_dict_keys(self, device):
         """Tests that the parameter keys returned by
@@ -676,7 +678,6 @@ class TestFSDPOptimState(FSDPTest):
         for key in optim_state_dict["state"]:
             self.assertNotIn(_CHECKPOINT_WRAPPED_MODULE, key)
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_full_optim_state_dict_nested_invalid(self, device):
         """Tests that :meth:`full_optim_state_dict` raises an error when
@@ -699,7 +700,6 @@ class TestFSDPOptimState(FSDPTest):
         with self.assertRaisesRegex(RuntimeError, error_regex):
             FSDP.full_optim_state_dict(model, optim)
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
     @parametrize("wrap_alt", [False, True])
@@ -742,7 +742,6 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
         )
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_shard_full_optim_state_dict_nested_halve_world_size(self, device):
         """Tests :meth:`shard_full_optim_state_dict` for a non-FSDP-root model
@@ -781,7 +780,6 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
         )
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_shard_full_optim_state_dict_transformer(self, device) -> None:
         """Tests :meth:`shard_full_optim_state_dict` for an FSDP-root
@@ -813,7 +811,6 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
         )
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
     @parametrize("wrap_alt", [False, True])
@@ -856,7 +853,6 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
         )
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_scatter_full_optim_state_dict_nested_halve_world_size(self, device):
         """Tests :meth:`scatter_full_optim_state_dict` for a non-FSDP-root
@@ -895,7 +891,6 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
         )
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_scatter_full_optim_state_dict_transformer(self, device) -> None:
         """Tests :meth:`scatter_full_optim_state_dict` for an FSDP-root
@@ -927,7 +922,6 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
         )
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_flatten_sharded_optim_state_dict_nested(self, device) -> None:
         """Tests :meth:`flatten_sharded_optim_state_dict` for an FSDP-root
@@ -960,7 +954,6 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
         )
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_flatten_sharded_optim_state_dict_transformer(self, device) -> None:
         """Tests :meth:`flatten_sharded_optim_state_dict` for an FSDP-root
@@ -991,7 +984,6 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
         )
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_use_orig_params(self, device) -> None:
         """Tests :meth:`optim_state_dict` for an FSDP-root nested model."""
@@ -1221,7 +1213,6 @@ class TestFSDPOptimState(FSDPTest):
         optim2.load_state_dict(sharded_osd2)
         self._step_model(model2, optim2, device, num_iters=num_iters)
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", STATE_DICT_TYPES)
     @parametrize("add_to_fsdp_module", [False, True])
@@ -1344,7 +1335,6 @@ class TestFSDPOptimState(FSDPTest):
             # Check that we can load the optimizer state dict
             optim.load_state_dict(flattened_osd)
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", STATE_DICT_TYPES)
     @parametrize("use_multiple_param_groups", [False, True])
@@ -1440,7 +1430,6 @@ class TestFSDPOptimState(FSDPTest):
             optim2.load_state_dict(rekeyed_osd)
             self._step_model(model2, optim2, device, num_iters=NUM_ITERS)
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_rekey_optim_state_dict_to_names(self, device):
         """Tests :meth:`rekey_optim_state_dict` with the new keys being
@@ -1529,7 +1518,6 @@ class TestFSDPOptimState(FSDPTest):
         optim1.load_state_dict(sharded_osd)
         self._step_model(model1, optim1, device, num_iters=NUM_ITERS)
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_optim_input_warning(self, device):
         """Tests that passing the ``optim_input`` argument into optimizer state
@@ -1642,7 +1630,6 @@ class TestFSDPOptimState(FSDPTest):
                     optim_input=nonwrapped_optim_input,
                 )
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", STATE_DICT_TYPES)
     def test_save_load_without_0th_param_state(
@@ -1703,7 +1690,6 @@ class TestFSDPOptimState(FSDPTest):
         loss.backward()
         optim.step()
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_compatible_with_trec(self, device):
         device_type = torch.device(device).type
@@ -1792,7 +1778,6 @@ class TestFSDPOptimState(FSDPTest):
             state_dicts[0], state_dicts[1], check_same_param_keys=True
         )
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_optim_state_without_param_groups(self, device):
         device_type = torch.device(device).type
@@ -1857,7 +1842,6 @@ class TestFSDPOptimState(FSDPTest):
         )
         self.assertEqual(original_param_groups, optim.state_dict()["param_groups"])
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     def test_with_empty_optimizer_state(self, device):
         device_type = torch.device(device).type
@@ -1974,10 +1958,9 @@ class TestFSDPOptimState(FSDPTest):
         optim2.load_state_dict(sharded_osd2)
         self._step_model(model2, optim2, device, num_iters=num_iters)
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_interface_arguments(self, device):
-        device_type = torch.device(device).type
+    def test_interface_arguments(self):
+        device_type = self.device_type
         model = FSDP(TestDummyModel().to(device_type))
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
@@ -2045,10 +2028,9 @@ class TestFSDPOptimState(FSDPTest):
                         self.assertEqual(s.device.type, "cpu")
                         self.assertFalse(isinstance(s, ShardedTensor))
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_state_dict_with_none_tensor_state(self, device):
-        device_type = torch.device(device).type
+    def test_state_dict_with_none_tensor_state(self):
+        device_type = self.device_type
 
         def _run_test(use_orig_params, optimizer_has_tensor_state):
             model = FSDP(
@@ -2085,10 +2067,9 @@ class TestFSDPOptimState(FSDPTest):
             _run_test,
         )
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_with_no_shard(self, device):
-        device_type = torch.device(device).type
+    def test_with_no_shard(self):
+        device_type = self.device_type
 
         def _run_test(use_orig_params: bool) -> None:
             model = FSDP(
@@ -2117,10 +2098,9 @@ class TestFSDPOptimState(FSDPTest):
 
         self.run_subtests({"use_orig_params": [False, True]}, _run_test)
 
-    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_no_grad(self, device):
-        device_type = torch.device(device).type
+    def test_no_grad(self):
+        device_type = self.device_type
         model = TestDummyModel(no_grad=True).to(device_type)
         fsdp_model = FSDP(deepcopy(model), use_orig_params=True)
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2)
