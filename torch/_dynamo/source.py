@@ -152,7 +152,7 @@ class LocalSource(Source):
 
     # Whether we know this input is dynamic (based on example_inputs)
     # For non tensors, we simply look at the first index of the tuple
-    dynamism: frozenset[str] | None = None
+    dynamism: frozenset[tuple[str, tuple[bool, ...]]] | None = None
 
     # Whether the item at this source is the _content_ of a cell that is
     # dereferenced from the root frame, i.e., it's a part of the `co_cellvars`

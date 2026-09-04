@@ -4108,14 +4108,9 @@ class SubgraphTracer(fx.Tracer):
         # update reference to original meta if we're tracing a new code object
         is_retracing = False
         if tx.f_code is not self._cur_code:
-            orig_graphmodule_ref = code_context.get_context(tx.f_code).get(
-                "orig_graphmodule"
-            )
-            orig_graphmodule_maybe = (
-                orig_graphmodule_ref()
-                if isinstance(orig_graphmodule_ref, weakref.ReferenceType)
-                else None
-            )
+            orig_graphmodule_maybe = code_context.get_context(tx.f_code).get(
+                "orig_graphmodule", lambda: None
+            )()
             if isinstance(orig_graphmodule_maybe, torch.fx.GraphModule):
                 is_retracing = True
                 self._orig_gm_meta = [
