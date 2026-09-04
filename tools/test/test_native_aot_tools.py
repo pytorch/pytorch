@@ -4807,7 +4807,7 @@ class TestRelinkNeverStrandsTheInstalledTorch(unittest.TestCase):
         # EnvVarForwarding creates the entry when the build had none.
         added = "//From environment\nWERROR:STRING=1\n"
         with self._main(cache_after=added) as run:
-            self.assertIn("WERROR: absent -> STRING=1", run.outcome)
+            self.assertIn("WERROR: absent -> 1", run.outcome)
             self.assertNotIn("--build", run.children)
 
     def test_both_children_run_the_cmake_that_configured_the_build(self):
