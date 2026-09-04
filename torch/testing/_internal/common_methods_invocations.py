@@ -6816,9 +6816,26 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
     )
 
     for a, b, c in cases:
-        yield SampleInput(make_arg(a), args=(make_arg(b), make_arg(c)))
-        yield SampleInput(make_arg(a, noncontiguous=True),
-                          args=(make_arg(b).transpose(0, -1), make_arg(c, noncontiguous=True).transpose(0, -1)))
+        input = make_arg(a)
+        args = (make_arg(b), make_arg(c))
+        output_shape = torch.broadcast_shapes(input.shape, *(arg.shape for arg in args))
+        yield SampleInput(
+            input,
+            args=args,
+            broadcasts_input=input.shape != output_shape,
+        )
+
+        input = make_arg(a, noncontiguous=True)
+        args = (
+            make_arg(b).transpose(0, -1),
+            make_arg(c, noncontiguous=True).transpose(0, -1),
+        )
+        output_shape = torch.broadcast_shapes(input.shape, *(arg.shape for arg in args))
+        yield SampleInput(
+            input,
+            args=args,
+            broadcasts_input=input.shape != output_shape,
+        )
 
     # scalar cases
     if supports_scalars:
@@ -6850,7 +6867,12 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
         )
 
         for a, b, c in cases:
-            yield SampleInput(a, args=(b, c))
+            output_shape = torch.broadcast_shapes(a.shape, b.shape, c.shape)
+            yield SampleInput(
+                a,
+                args=(b, c),
+                broadcasts_input=a.shape != output_shape,
+            )
 
     # NaN propagation
     if dtype.is_floating_point or dtype.is_complex:
