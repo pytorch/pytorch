@@ -64,13 +64,13 @@ inline bool areAnyOptionalTensorSubclassLike(
     const c10::List<std::optional<Tensor>>& tensors) {
   if (c10::impl::dispatch_mode_enabled())
     return true;
-  for (const auto& element : tensors) {
-    const c10::IValue& ivalue = element.get();
-    if (!ivalue.isNone() && isTensorSubclassLike(ivalue.toTensor())) {
-      return true;
-    }
-  }
-  return false;
+  return std::any_of(
+      tensors.begin(),
+      tensors.end(),
+      [](const std::optional<Tensor>& opt_tensor) {
+        return (
+            opt_tensor.has_value() && isTensorSubclassLike(opt_tensor.value()));
+      });
 }
 
 // Helper function to deal testing truthfulness of a scalar tensor

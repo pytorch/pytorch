@@ -7,11 +7,13 @@
 
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 #endif
 
 #include <ATen/ScalarOps.h>
 
 #include <c10/util/irange.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
 #include <limits>
@@ -114,10 +116,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
 
         if (save_symint) {
           auto py_tensor = py::cast(tensor);
-          if (PyObject_SetAttrString(
-                  py_tensor.ptr(), "_wrapped_number", obj.ptr()) < 0) {
-            throw python_error();
-          }
+          TORCH_CHECK_PYTHON(
+              PyObject_SetAttrString(
+                  py_tensor.ptr(), "_wrapped_number", obj.ptr()) >= 0);
         }
 
         return tensor;
@@ -551,7 +552,12 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
           target = obj.attr("real_obj");
         }
         auto cpp_obj = target.cast<c10::intrusive_ptr<c10d::ProcessGroup>>();
-        return IValue::make_capsule(cpp_obj);
+        return IValue::make_capsule(std::move(cpp_obj));
+      }
+      if (py::isinstance<c10d::ReduceOp>(obj)) {
+        const auto& op = obj.cast<const c10d::ReduceOp&>();
+        auto cpp_obj = c10::make_intrusive<c10d::ReduceOp>(op);
+        return IValue::make_capsule(std::move(cpp_obj));
       }
 #endif
 
@@ -703,8 +709,9 @@ py::object toPyObject(IValue ivalue) {
           std::back_inserter(defaults),
           [](const Argument& arg) { return toPyObject(*arg.default_value()); });
 
-      std::vector<std::string> fieldNames =
-          fmap(tuple_args, [](const Argument& arg) { return arg.name(); });
+      std::vector<std::string> fieldNames = fmap(
+          std::move(tuple_args),
+          [](const Argument& arg) { return arg.name(); });
 
       return py::module::import("torch._jit_internal")
           .attr("_create_named_tuple")(
@@ -771,6 +778,11 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isCapsule()) {
     auto capsule = ivalue.toCapsule();
 #ifdef USE_DISTRIBUTED
+    if (dynamic_cast<c10d::ReduceOp*>(capsule.get())) {
+      auto op = c10::static_intrusive_pointer_cast<c10d::ReduceOp>(
+          std::move(capsule));
+      return py::cast(*op);
+    }
     {
       auto pg = c10::static_intrusive_pointer_cast<c10d::ProcessGroup>(capsule);
       if (pg != nullptr) {
@@ -888,6 +900,7 @@ py::object invokeOperatorFromPython(
     const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk) {
+  HANDLE_TH_ERRORS
   auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
@@ -899,6 +912,7 @@ py::object invokeOperatorFromPython(
   }
 
   return createPyObjectForStack(std::move(stack));
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 std::optional<py::object> _maybe_handle_torch_function(
@@ -1012,6 +1026,9 @@ py::object _get_operation_for_overload_or_packet(
 std::optional<InferredType> detail::_tryToInferTypeImpl(py::handle input) {
 #ifdef USE_DISTRIBUTED
   if (py::isinstance<c10d::ProcessGroup>(input)) {
+    return InferredType(CapsuleType::get());
+  }
+  if (py::isinstance<c10d::ReduceOp>(input)) {
     return InferredType(CapsuleType::get());
   }
   // During Dynamo tracing with compile-on-one-rank (CooR), opaque reference
