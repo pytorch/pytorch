@@ -52,6 +52,10 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -677,159 +681,6 @@ def forward(self, x):
         )
 
     @requires_gpu_and_triton
-    def test_triton_hop(self) -> None:
-        @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            fval,
-            ival,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y + fval + ival
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        def custom_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            output = torch.empty_like(x)
-            n_elements = output.numel()
-
-            def grid(meta):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-            wrap_triton(add_kernel)[grid](
-                x, y, output, n_elements, 3.14, 42, BLOCK_SIZE=16
-            )
-
-            return output
-
-        class MyModel(torch.nn.Module):
-            def forward(self, x, y):
-                return custom_add(x, y)
-
-        def custom_add_autotune(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            output = torch.empty_like(x)
-            n_elements = output.numel()
-
-            def grid(meta):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-            wrap_triton(add_kernel)[grid](
-                x, y, output, n_elements, 3.14, 42, BLOCK_SIZE=16, num_warps=8
-            )
-
-            return output
-
-        class MyModelAutotune(torch.nn.Module):
-            def forward(self, x, y):
-                return custom_add_autotune(x, y)
-
-        device = GPU_TYPE
-
-        for m in [MyModel().to(device), MyModelAutotune().to(device)]:
-            args = (torch.randn(3, device=device), torch.randn(3, device=device))
-            ep = torch.export.export(m, args=args)
-            ep = ep.run_decompositions(decompose_custom_triton_ops=False)
-            if not torch.allclose(m(*args), ep.module()(*args)):
-                raise AssertionError(
-                    "Exported model output does not match eager output"
-                )
-
-            serialized = ExportedProgramSerializer().serialize(ep)
-
-            for node in serialized.exported_program.graph_module.graph.nodes:
-                if (
-                    node.target
-                    == "torch.ops.higher_order.triton_kernel_wrapper_functional"
-                ):
-                    triton_node = node
-
-            self.assertIsNotNone(triton_node)
-
-            args = []
-            arg_names = []
-            kwargs = {}
-
-            for arg in triton_node.inputs:
-                if arg.kind == ArgumentKind.POSITIONAL:
-                    args.append(arg.arg)
-                    arg_names.append(arg.name)
-                elif arg.kind == ArgumentKind.KEYWORD:
-                    kwargs[arg.name] = arg.arg
-
-            self.assertEqual(len(args), 6)
-            # Positional args carry kernel parameter names
-            expected_param_names = [
-                "in_ptr0",
-                "in_ptr1",
-                "out_ptr",
-                "n_elements",
-                "fval",
-                "ival",
-            ]
-            self.assertEqual(arg_names, expected_param_names)
-            # Always: name, grid, output_indices, num_warps,
-            # kernel_param_names, kernel_param_types
-            # Triton version dependent: num_cpu_threads, shared_memory_bytes
-            self.assertTrue(len(kwargs) >= 6)
-
-            for i in range(3):
-                self.assertIsNotNone(args[i].as_tensor)
-
-            self.assertEqual(args[3].as_int, 3)
-            self.assertAlmostEqual(args[4].as_float, 3.14, places=2)
-            self.assertEqual(args[5].as_int, 42)
-            kernel_name = kwargs["name"].as_string
-            symbol_name = kernel_name.rpartition("_")[0]
-            self.assertEqual(symbol_name, "add_kernel")
-            self.assertEqual(kwargs["grid"].as_ints, [1, 1, 1])
-            self.assertEqual(kwargs["output_indices"].as_ints, [2])
-            self.assertEqual(
-                kwargs["num_warps"].as_int, 8 if isinstance(m, MyModelAutotune) else 4
-            )
-
-            if "num_cpu_threads" in kwargs:
-                self.assertEqual(kwargs["num_cpu_threads"].as_int, 0)
-            if "shared_memory_bytes" in kwargs:
-                self.assertEqual(kwargs["shared_memory_bytes"].as_int, 0)
-
-            self.assertIn("kernel_param_names", kwargs)
-            self.assertEqual(
-                kwargs["kernel_param_names"].as_strings, expected_param_names
-            )
-            self.assertIn("kernel_param_types", kwargs)
-            self.assertEqual(
-                len(kwargs["kernel_param_types"].as_strings),
-                len(expected_param_names),
-            )
-
-            self.assertEqual(len(triton_node.outputs), 1)
-            self.assertIsNotNone(triton_node.outputs[0].as_tensors)
-            self.assertEqual(
-                len(triton_node.outputs[0].as_tensors),
-                len(kwargs["output_indices"].as_ints),
-            )
-            self.assertEqual(triton_node.outputs[0].as_tensors[0].name, "getitem")
-
-            with self.assertRaisesRegex(
-                SerializeError,
-                "deserialize nyi for torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional",
-            ):
-                ExportedProgramDeserializer().deserialize(
-                    serialized.exported_program,
-                    serialized.state_dict,
-                    serialized.constants,
-                    serialized.example_inputs,
-                )
-
-    @requires_gpu_and_triton
     def test_triton_constexpr_matching(self) -> None:
         """Test that constexpr values are properly matched during serialization.
 
@@ -1183,6 +1034,166 @@ def forward(self, x):
         buffer.seek(0)
         loaded_ep = load(buffer)
         self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestSerializeDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    @requires_gpu_and_triton
+    def test_triton_hop(self, device) -> None:
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            fval,
+            ival,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y + fval + ival
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def custom_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            wrap_triton(add_kernel)[grid](
+                x, y, output, n_elements, 3.14, 42, BLOCK_SIZE=16
+            )
+
+            return output
+
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                return custom_add(x, y)
+
+        def custom_add_autotune(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            wrap_triton(add_kernel)[grid](
+                x, y, output, n_elements, 3.14, 42, BLOCK_SIZE=16, num_warps=8
+            )
+
+            return output
+
+        class MyModelAutotune(torch.nn.Module):
+            def forward(self, x, y):
+                return custom_add_autotune(x, y)
+
+        for m in [MyModel().to(device), MyModelAutotune().to(device)]:
+            args = (torch.randn(3, device=device), torch.randn(3, device=device))
+            ep = torch.export.export(m, args=args)
+            ep = ep.run_decompositions(decompose_custom_triton_ops=False)
+            if not torch.allclose(m(*args), ep.module()(*args)):
+                raise AssertionError(
+                    "Exported model output does not match eager output"
+                )
+
+            serialized = ExportedProgramSerializer().serialize(ep)
+
+            for node in serialized.exported_program.graph_module.graph.nodes:
+                if (
+                    node.target
+                    == "torch.ops.higher_order.triton_kernel_wrapper_functional"
+                ):
+                    triton_node = node
+
+            self.assertIsNotNone(triton_node)
+
+            args = []
+            arg_names = []
+            kwargs = {}
+
+            for arg in triton_node.inputs:
+                if arg.kind == ArgumentKind.POSITIONAL:
+                    args.append(arg.arg)
+                    arg_names.append(arg.name)
+                elif arg.kind == ArgumentKind.KEYWORD:
+                    kwargs[arg.name] = arg.arg
+
+            self.assertEqual(len(args), 6)
+            # Positional args carry kernel parameter names
+            expected_param_names = [
+                "in_ptr0",
+                "in_ptr1",
+                "out_ptr",
+                "n_elements",
+                "fval",
+                "ival",
+            ]
+            self.assertEqual(arg_names, expected_param_names)
+            # Always: name, grid, output_indices, num_warps,
+            # kernel_param_names, kernel_param_types
+            # Triton version dependent: num_cpu_threads, shared_memory_bytes
+            self.assertTrue(len(kwargs) >= 6)
+
+            for i in range(3):
+                self.assertIsNotNone(args[i].as_tensor)
+
+            self.assertEqual(args[3].as_int, 3)
+            self.assertAlmostEqual(args[4].as_float, 3.14, places=2)
+            self.assertEqual(args[5].as_int, 42)
+            kernel_name = kwargs["name"].as_string
+            symbol_name = kernel_name.rpartition("_")[0]
+            self.assertEqual(symbol_name, "add_kernel")
+            self.assertEqual(kwargs["grid"].as_ints, [1, 1, 1])
+            self.assertEqual(kwargs["output_indices"].as_ints, [2])
+            self.assertEqual(
+                kwargs["num_warps"].as_int, 8 if isinstance(m, MyModelAutotune) else 4
+            )
+
+            if "num_cpu_threads" in kwargs:
+                self.assertEqual(kwargs["num_cpu_threads"].as_int, 0)
+            if "shared_memory_bytes" in kwargs:
+                self.assertEqual(kwargs["shared_memory_bytes"].as_int, 0)
+
+            self.assertIn("kernel_param_names", kwargs)
+            self.assertEqual(
+                kwargs["kernel_param_names"].as_strings, expected_param_names
+            )
+            self.assertIn("kernel_param_types", kwargs)
+            self.assertEqual(
+                len(kwargs["kernel_param_types"].as_strings),
+                len(expected_param_names),
+            )
+
+            self.assertEqual(len(triton_node.outputs), 1)
+            self.assertIsNotNone(triton_node.outputs[0].as_tensors)
+            self.assertEqual(
+                len(triton_node.outputs[0].as_tensors),
+                len(kwargs["output_indices"].as_ints),
+            )
+            self.assertEqual(triton_node.outputs[0].as_tensors[0].name, "getitem")
+
+            with self.assertRaisesRegex(
+                SerializeError,
+                "deserialize nyi for torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional",
+            ):
+                ExportedProgramDeserializer().deserialize(
+                    serialized.exported_program,
+                    serialized.state_dict,
+                    serialized.constants,
+                    serialized.example_inputs,
+                )
+
+
+instantiate_device_type_tests(TestSerializeDevice, globals(), allow_xpu=True)
 
 
 class _CheckGraphMixin:
