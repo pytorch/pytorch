@@ -3671,6 +3671,15 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 8, 4, 5))
 
+        # Regression for complex half pow: the polar form exp(y*log(x)) must be
+        # evaluated in float, otherwise moderately large magnitudes overflow half
+        # (e.g. (300+0j)**1 -> NaN). TODO: migrate to the pow OpInfo once chalf is
+        # in its dtype list.
+        base = torch.tensor([300 + 0j, 200 + 200j, 3 + 4j], dtype=torch.chalf, device='mps')
+        exp = torch.tensor([1 + 0j, 1 + 0j, 1.5 + 0j], dtype=torch.chalf, device='mps')
+        ref = torch.pow(base.cpu().to(torch.cfloat), exp.cpu().to(torch.cfloat))
+        self.assertEqual(torch.pow(base, exp).cpu().to(torch.cfloat), ref, atol=1e-2, rtol=1e-2)
+
     # Test addcmul
     def test_addcmul(self):
         def helper(shape, value, xtype=torch.float32, ytype=None, ztype=None):
@@ -5750,6 +5759,25 @@ class TestMPS(TestCaseMPS):
         mps_log_softmax.backward(gradient=mps_grad)
 
         self.assertEqual(cpu_x.grad, mps_x.grad.to('cpu'))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("shape,dim", [((3, 8192), -1), ((4100, 7), 0), ((600, 3000), -1)])
+    def test_log_softmax_metal_paths(self, dtype, shape, dim):
+        # Shapes pin the non-row Metal kernels: the split partial/finalize pair
+        # (dim > 2048, few rows), the 2D kernel (dim not innermost), and the 2D
+        # fallback for long rows (num_rows > 256 disables the split).
+        cpu_x = torch.randn(shape, dtype=dtype)
+        mps_out = F.log_softmax(cpu_x.to('mps'), dim=dim)
+        self.assertEqual(mps_out.cpu(), F.log_softmax(cpu_x, dim=dim))
+
+    def test_log_softmax_split_inf_chunk(self):
+        # A 2048-wide all -inf chunk must not poison the split-path logsumexp;
+        # a fully -inf row stays NaN to match CPU.
+        cpu_x = torch.randn(3, 8192)
+        cpu_x[1, 2048:6144] = -math.inf
+        cpu_x[2] = -math.inf
+        mps_out = F.log_softmax(cpu_x.to('mps'), dim=-1)
+        self.assertEqual(mps_out.cpu(), F.log_softmax(cpu_x, dim=-1))
 
     def test_eq(self):
         values1 = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
@@ -12092,7 +12120,7 @@ class TestPad(TestCaseMPS):
         helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
 
     def test_constant_pad_nd_preserves_memory_format(self):
-        nchw_tensor = torch.rand((1, 2, 5, 3))
+        nchw_tensor = torch.rand((1, 2, 5, 3), device="mps")
         nchw_padded = torch.constant_pad_nd(nchw_tensor, [1, 2], 0.5)
         self.assertTrue(nchw_padded.is_contiguous(memory_format=torch.contiguous_format))
 
@@ -12355,6 +12383,35 @@ class TestLinalgMPS(TestCaseMPS):
         self.assertEqual(mps.residuals.cpu(), cpu.residuals)
         self.assertEqual(mps.rank.cpu(), cpu.rank)
         self.assertEqual(mps.singular_values.cpu(), cpu.singular_values)
+
+    def test_linalg_svd_large_batch(self, device="mps"):
+        # Regression test for https://github.com/pytorch/pytorch/issues/195937:
+        # batches whose numel exceeds 8192 take the native on-device Jacobi
+        # kernel rather than the CPU fallback. That kernel used to crash the
+        # Metal compiler (a runtime mem_flags argument to threadgroup_barrier
+        # fails AGX instruction selection), so nothing above the threshold ran.
+        # Small OpInfo samples stay under the gate, so this is the only coverage
+        # of the kernel itself.
+        for dtype in (torch.float32, torch.complex64):
+            A = torch.randn(4096, 3, 3, dtype=dtype)  # 36864 elements, over the gate
+            Am = A.to(device)
+            U, S, Vh = torch.linalg.svd(Am, full_matrices=False)
+            # Singular values and reconstruction are gauge invariant; the raw
+            # U/Vh differ between the Jacobi solver and LAPACK.
+            self.assertEqual(S.cpu(), torch.linalg.svdvals(A), atol=1e-4, rtol=1e-4)
+            self.assertEqual(((U * S.unsqueeze(-2)) @ Vh).cpu(), A, atol=1e-4, rtol=1e-4)
+            # svdvals shares the same kernel.
+            self.assertEqual(torch.linalg.svdvals(Am).cpu(), torch.linalg.svdvals(A), atol=1e-4, rtol=1e-4)
+
+    def test_linalg_lstsq_large_batch(self, device="mps", dtype=torch.float32):
+        # lstsq is built on the native SVD; exercise a batch above the 8192 gate.
+        A = torch.randn(4096, 6, 3, dtype=dtype)  # overdetermined, well conditioned
+        B = torch.randn(4096, 6, 2, dtype=dtype)
+        xm = torch.linalg.lstsq(A.to(device), B.to(device)).solution.cpu()
+        xc = torch.linalg.lstsq(A, B).solution
+        # Fitted values A@x are unique for full column rank even where the raw
+        # solution is sensitive to conditioning of individual batch members.
+        self.assertEqual(A @ xm, A @ xc, atol=1e-4, rtol=1e-4)
 
     @dtypes(torch.float32, torch.complex64, torch.float16, torch.bfloat16)
     @parametrize("out", ["none", "zeros", "ones"])
@@ -16417,6 +16474,11 @@ class TestConsistency(TestCaseMPS):
         if dtype == torch.complex64:
             if op.name == "mv":
                 return (2e-5, 1e-5)
+            # Complex pow uses the float32 polar form exp(y*log(x)); its
+            # precise:: transcendentals round differently than CPU libm, and
+            # the phase error is amplified by the result magnitude.
+            if op.name in ("pow", "__rpow__"):
+                return (1e-4, 3e-5)
         return (None, None)
 
     # Used for accept mode only
