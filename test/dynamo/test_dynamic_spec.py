@@ -23,6 +23,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     GuardOnDataDependentSymNode,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def _reset_uid_counter():
@@ -52,6 +53,8 @@ def _tensor_placeholders(gm):
 
 class TestShapeVarConstruction(TestCase):
     """Construction of ShapeVar."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -120,6 +123,8 @@ class TestShapeVarConstruction(TestCase):
 class TestIntVarConstruction(TestCase):
     """Construction of IntVar."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -179,6 +184,8 @@ class TestIntVarArithmetic(TestCase):
     ``evaluate_sym_node``) must fail loudly here rather than silently
     returning garbage.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -258,6 +265,8 @@ class TestIntVarArithmetic(TestCase):
 class TestTensorSpecConstruction(TestCase):
     """Construction and list-like interface."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -306,6 +315,8 @@ Tensor:
 
 class TestParamsSpecConstruction(TestCase):
     """Construction of ParamsSpec and ShapesSpec."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -475,6 +486,8 @@ x:
 
 class TestShapeVarCompile(TestCase):
     """ShapeVar + torch.compile integration."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_static_int_spec_mismatch_raises(self):
         """If shapes_spec declares a scalar int as static=10, passing 42 should error."""
@@ -779,6 +792,8 @@ class TestShapeVarDedup(TestCase):
     comparisons inside the compiled fn don't raise DDE.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -902,8 +917,10 @@ class TestShapeVarDedup(TestCase):
         self.assertGreaterEqual(
             len(refined),
             2,
-            lambda msg: f"{msg}\nmin/max [4,16] did not propagate to repeat occurrence; "
-            f"var_to_range={dict(env.var_to_range)}",
+            lambda msg: (
+                f"{msg}\nmin/max [4,16] did not propagate to repeat occurrence; "
+                f"var_to_range={dict(env.var_to_range)}"
+            ),
         )
 
     def test_distinct_shape_vars_still_dde(self):
@@ -934,6 +951,8 @@ class TestShapeVarDedup(TestCase):
 
 
 class TestDerivedDimSpec(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -1223,6 +1242,8 @@ class TestAssumptionsSpec(TestCase):
     """``ShapesSpec.assumptions`` — list of SymBool expressions over spec
     IntVars asserted at runtime via deferred runtime asserts."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -1366,6 +1387,8 @@ class TestAssumptionsSpec(TestCase):
 class TestObjectSpec(TestCase):
     """``ObjectSpec`` data class — construction, access, repr."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -1452,6 +1475,8 @@ class TestObjectSpecCompile(TestCase):
     """End-to-end: ``ObjectSpec`` routes through to a tensor reached
     via attribute access on a function arg (``obj.w``)."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -1527,6 +1552,8 @@ class TestObjectSpecCompile(TestCase):
 
 class TestSeqSpec(TestCase):
     """Construction and integration of SeqSpec."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -1607,6 +1634,8 @@ seq_spec:
 
 
 class TestDictSpecCompile(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -1736,6 +1765,8 @@ class TestDictSpecCompile(TestCase):
 
 
 class TestVarargsCompile(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -1874,6 +1905,8 @@ class TestVarargsCompile(TestCase):
 class TestWalkSpecRaises(TestCase):
     """Tests for spec/source type-mismatch errors raised during compilation."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
@@ -1966,6 +1999,8 @@ class TestWalkSpecRaises(TestCase):
 
 class TestDynamicSpecDecoratorCompile(TestCase):
     """``@dynamic_spec`` auto-applied by ``torch.compile``."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
