@@ -56,6 +56,7 @@ from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
     ObservedKeyError,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -2192,6 +2193,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     sq_ass_item_impl = mp_ass_subscript_impl
 
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9455-L9477
+        if value is None:
+            return self._vectorcall_method(tx, "__delete__", [obj], {})
+        else:
+            return self._vectorcall_method(tx, "__set__", [obj, value], {})
+
     def _maybe_lookup_method(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:
@@ -2255,11 +2268,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def _lookup_method(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L2543-L2551
         m = self._maybe_lookup_method(tx, name)
         if m is None:
-            raise_type_error(
-                tx, f"'{self.python_type_name()}' object has no attribute '{name}'"
-            )
+            raise_attribute_error(tx, name)
         return m
 
     def _vectorcall_method(

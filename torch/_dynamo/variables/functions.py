@@ -39,7 +39,7 @@ import types
 import typing
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
-from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import Never
 from weakref import WeakKeyDictionary
 
@@ -57,6 +57,7 @@ from ..exc import (
     ObservedException,
     ObservedGeneratorExit,
     ObservedUserStopIteration,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     raise_value_error,
@@ -4243,13 +4244,17 @@ class TritonSetAllocatorVariable(VariableTracker):
 # the descriptor binding step faithfully.
 # ---------------------------------------------------------------------------
 
+DescriptorTypes: TypeAlias = (
+    types.MethodDescriptorType
+    | types.WrapperDescriptorType
+    | types.MemberDescriptorType
+    | types.GetSetDescriptorType
+)
+
 
 def _check_descriptor_obj_type(
     tx: "InstructionTranslatorBase",
-    descriptor: types.MethodDescriptorType
-    | types.WrapperDescriptorType
-    | types.MemberDescriptorType
-    | types.GetSetDescriptorType,
+    descriptor: DescriptorTypes,
     obj: "VariableTracker",
 ) -> None:
     """Check that obj's type is compatible with descriptor.__objclass__.
@@ -4260,12 +4265,7 @@ def _check_descriptor_obj_type(
 
     https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L79-L96
     """
-    if obj is None:
-        return
-    try:
-        obj_type = obj.python_type()
-    except NotImplementedError:
-        return
+    obj_type = obj.python_type()
     if not issubclass(obj_type, descriptor.__objclass__):
         raise_type_error(
             tx,
@@ -4881,14 +4881,23 @@ class MemberDescriptorVariable(DescriptorVariable):
         obj: VariableTracker,
         value: VariableTracker | None,
     ) -> VariableTracker:
-        # Mirrors member_set (PyMember_SetOne): store into the C struct field.
-        # STORE_ATTR itself applies the descriptor, so replay via store_attr on
-        # the target (mirrors the __slots__ path in UserDefinedObjectVariable).
-        # value is None for __delete__.
+        # Mirrors member_set: descr_setcheck, then PyMember_SetOne writes the
+        # C struct field. value is None for __delete__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L180-L196
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
+        name = self.descriptor.__name__
+        entry = obj.lookup_tp_getset_member(name)
+        if entry is not None:
+            # A READONLY PyMemberDef is modeled by readonly_setter, which raises
+            # what PyMember_SetOne raises.
+            entry.setter(obj, tx, value)
+            return ConstantVariable.create(None)
+        # No model for this member. STORE_ATTR itself applies the descriptor, so
+        # replay via store_attr on the target (mirrors the __slots__ path in
+        # UserDefinedObjectVariable).
         stored = variables.DeletedVariable() if value is None else value
-        tx.output.side_effects.store_attr(obj, self.descriptor.__name__, stored)
-        return variables.ConstantVariable.create(None)
+        tx.output.side_effects.store_attr(obj, name, stored)
+        return ConstantVariable.create(None)
 
 
 class GetSetDescriptorVariable(DescriptorVariable):
@@ -4944,6 +4953,36 @@ class GetSetDescriptorVariable(DescriptorVariable):
         from .object_protocol import python_constant_richcompare_impl
 
         return python_constant_richcompare_impl(self, tx, other, op)
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
+        name = self.descriptor.__name__
+        entry = obj.lookup_tp_getset_member(name)
+        if entry is None:
+            # No model for this getset. Dynamo cannot see whether the C setter
+            # accepts the write, rejects it as read-only, or type-checks the
+            # value, so it cannot decide between raising AttributeError and
+            # applying an ordinary attribute write. Graph break rather than
+            # guessing "writable" -- forwarding to the setattr/delattr
+            # builtins here would run type(obj).__setattr__, which getset_set
+            # bypasses, and would silently swallow a read-only rejection.
+            unmodeled_setter(obj, tx, value)
+        if entry.setter is readonly_setter:
+            # getset_set's message is more specific than readonly_setter's, and
+            # only this site knows the attribute name and its defining class.
+            raise_attribute_error(
+                tx,
+                f"attribute '{name}' of "
+                f"'{self.descriptor.__objclass__.__name__}' objects "
+                "is not writable",
+            )
+        entry.setter(obj, tx, value)
+        return ConstantVariable.create(None)
 
     def tp_descr_get_impl(
         self,
