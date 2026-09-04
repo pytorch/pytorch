@@ -577,11 +577,6 @@ class MemPool(torch._C._XPUMemPool):
         r"""Returns the ID of this pool as a tuple of two ints."""
         return super().id
 
-    @property
-    def allocator(self) -> torch._C._xpu_XPUAllocator | None:
-        r"""Returns the allocator this MemPool routes allocations to."""
-        return super().allocator
-
     def use_count(self) -> int:
         r"""Returns the reference count of this pool."""
         return super().use_count()
