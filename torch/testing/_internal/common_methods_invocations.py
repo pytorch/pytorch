@@ -6799,6 +6799,16 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
 def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sample_inputs_func, supports_scalars=False, **kwargs):
     yield from sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
 
+    def make_sample(input, arg0, arg1):
+        args = (input, arg0, arg1)
+        shapes = [tuple(arg.shape) for arg in args if isinstance(arg, torch.Tensor)]
+        output_shape = torch.broadcast_shapes(*shapes)
+        return SampleInput(
+            input,
+            args=(arg0, arg1),
+            broadcasts_input=tuple(input.shape) != output_shape,
+        )
+
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_scalar_tensor = partial(make_tensor, (), device='cpu', dtype=dtype, requires_grad=requires_grad)
     supported_dtypes = op.supported_dtypes(device)
@@ -6816,9 +6826,9 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
     )
 
     for a, b, c in cases:
-        yield SampleInput(make_arg(a), args=(make_arg(b), make_arg(c)))
-        yield SampleInput(make_arg(a, noncontiguous=True),
-                          args=(make_arg(b).transpose(0, -1), make_arg(c, noncontiguous=True).transpose(0, -1)))
+        yield make_sample(make_arg(a), make_arg(b), make_arg(c))
+        yield make_sample(make_arg(a, noncontiguous=True),
+                          make_arg(b).transpose(0, -1), make_arg(c, noncontiguous=True).transpose(0, -1))
 
     # scalar cases
     if supports_scalars:
@@ -6835,7 +6845,7 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
             ])
 
         for a, b, c in cases:
-            yield SampleInput(make_arg(a), args=(b, c))
+            yield make_sample(make_arg(a), b, c)
 
     # type promotion cases
     # int x float
@@ -6850,7 +6860,7 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
         )
 
         for a, b, c in cases:
-            yield SampleInput(a, args=(b, c))
+            yield make_sample(a, b, c)
 
     # NaN propagation
     if dtype.is_floating_point or dtype.is_complex:
@@ -6865,8 +6875,7 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
         c = make_arg((12,))
         c[9] = nan
 
-        yield SampleInput(a, args=(b, c))
-
+        yield make_sample(a, b, c)
 
 def _clamp_min_numpy(a, min=None):
     return np.maximum(a, min)
