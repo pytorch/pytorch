@@ -4813,6 +4813,8 @@ class TestDistributionsGPU(DistributionsTestCase):
 # the reparameterization trick and do not need to be tested for accuracy.
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestRsample(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma(self):
         num_samples = 100
@@ -6648,6 +6650,8 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 @skipIfTorchDynamo("FIXME: Tries to trace through SciPy and fails")
 class TestAgainstScipy(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         positive_var = torch.randn(20, dtype=torch.double).exp()
@@ -6857,6 +6861,8 @@ class TestAgainstScipy(DistributionsTestCase):
 
 
 class TestFunctors(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+    
     def test_cat_transform(self):
         x1 = -1 * torch.arange(1, 101, dtype=torch.float).view(-1, 100)
         x2 = (torch.arange(1, 101, dtype=torch.float).view(-1, 100) - 1) / 100
