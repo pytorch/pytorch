@@ -9,6 +9,7 @@ from sympy import Expr
 
 import torch
 from torch.utils._sympy.value_ranges import (
+    AllIn,
     bound_sympy,
     SymPyValueRangeAnalysis,
     ValueRanges,
@@ -209,7 +210,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def to_dtype(
-        x: object,
+        x: AllIn | ValueRanges[Any],
         dtype: torch.dtype,
         src_dtype: torch.dtype | None = None,
         use_compute_types: bool = True,

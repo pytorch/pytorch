@@ -279,10 +279,10 @@ class _ValueUseRules:
         self,
         dtypes: tuple[torch.dtype, ...],
         combine_fn_or_values: object,
-        values: object | None = None,
+        values: tuple[object, ...] | None = None,
     ) -> _ValueUseRule:
         if values is None:
-            values = combine_fn_or_values
+            values = cast(tuple[object, ...], combine_fn_or_values)
         return _ValueUseRule(value_sinks=(values,))
 
     def bucketize(

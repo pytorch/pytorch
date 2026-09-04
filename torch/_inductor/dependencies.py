@@ -913,16 +913,19 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         return (None,) * 2
 
     def scan(
-        self, dtypes: object, combine_fn: object, values: Sequence[object]
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        combine_fn: object,
+        values: Sequence[object],
     ) -> tuple[None, ...]:
         return (None,) * len(values)
 
     def sort(
         self,
-        dtypes: object,
+        dtypes: tuple[torch.dtype, ...],
         values: Sequence[object],
-        stable: object,
-        descending: object,
+        stable: bool,
+        descending: bool,
     ) -> tuple[None, ...]:
         return (None,) * len(values)
 
@@ -936,7 +939,7 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         num_values = reduction_num_outputs(reduction_type)
         return (None,) * num_values if num_values > 1 else None
 
-    def masked(self, mask: object, body: Callable[..., object], other: object) -> None:
+    def masked(self, mask: object, body: Callable[[], object], other: object) -> None:
         if not callable(body):
             raise AssertionError("masked body must always be callable.")
         # The body can make additional calls, for e.g. ops.indirect_indexing
