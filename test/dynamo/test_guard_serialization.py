@@ -776,6 +776,27 @@ class TestGuardSerialization(TestGuardSerializationBase):
             False,
         )
 
+    def test_autocast_equals_match(self):
+        class Module(torch.nn.Module):
+            def __init__(self, ctx):
+                super().__init__()
+                self.ctx = ctx
+
+            def forward(self, x):
+                with self.ctx:
+                    return x @ x
+
+        module = Module(torch.amp.autocast("cpu", dtype=torch.bfloat16))
+        x = torch.randn(4, 4)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", module, x)
+        self._test_check_fn(ref, loaded, {"self": module, "x": x}, True)
+
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.bfloat16)
+        self._test_check_fn(ref, loaded, {"self": module, "x": x}, True)
+
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.float16)
+        self._test_check_fn(ref, loaded, {"self": module, "x": x}, False)
+
     def test_constant_match(self):
         # === bool constant ===
         def fn(x, y):
