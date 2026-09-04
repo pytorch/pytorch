@@ -23,7 +23,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import gen_gm_and_inputs
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU
 
 
 _IS_MACOS = sys.platform.startswith("darwin")
@@ -102,14 +102,16 @@ class TestStandaloneInductor(TestCase):
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
 
-    @unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
+    @unittest.skipUnless(
+        torch.cuda.is_available() or torch.xpu.is_available(), "requires cuda or xpu"
+    )
     @config.patch(cpp_wrapper=True)
     def test_compiled_conv_rejects_mixed_input_weight_devices(self):
         mod = torch.nn.Conv2d(3, 3, kernel_size=3, padding=1).eval()
         inp = torch.randn(1, 3, 8, 8)
         mod_opt = torch.compile(mod, backend="inductor")
 
-        mod.to("cuda")
+        mod.to(GPU_TYPE)
         with self.assertRaisesRegex(
             RuntimeError, "Expected all tensors to be on the same device"
         ):
