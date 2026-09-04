@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 
+import operator
 import contextlib
 import copy
 import dataclasses
@@ -4392,6 +4393,53 @@ def forward(self, dummy_1):
         FakeTensorMode.cache_clear()
         ep.run_decompositions({})
         self.assertBypasses("unrepresented symbol in output", 2)
+
+
+
+    def test_cache_key_rejects_uncomparable_member(self):
+        """_DispatchCacheKey compares key tuples, so an un-comparable member breaks lookup.
+
+        Building and hashing the key succeed -- objects that hash by identity are accepted
+        -- and the failure surfaces only when two keys land in the same bucket and __eq__
+        compares their contents. Hence the symptom is a confusing intermittent error deep
+        inside dispatch rather than a clear one at insertion.
+        """
+        from torch._subclasses.fake_tensor import _DispatchCacheKey
+
+        class _NoEq:
+            __hash__ = object.__hash__
+
+            def __eq__(self, other):
+                raise NotImplementedError("'__eq__' is not implemented for _NoEq")
+
+        key_a = _DispatchCacheKey((_NoEq(),))
+        key_b = _DispatchCacheKey((_NoEq(),))
+        hash(key_a)
+        with self.assertRaises(NotImplementedError):
+            operator.eq(key_a, key_b)
+
+    def test_cache_bypasses_script_object(self):
+        """A ScriptObject argument must bypass the cache rather than enter a key.
+
+        Custom classes registered through the legacy ``torch::class_`` C++ API are not
+        required to bind ``__eq__``, unlike ``register_custom_class``, which enforces it
+        for constant types. A ScriptObject in a cache key therefore risks
+        NotImplementedError on any bucket collision, so it is refused up front, as the
+        surrounding branches already do for non-fake tensors and function arguments.
+        """
+        from torch._subclasses.fake_tensor import (
+            _BypassDispatchCache,
+            _CacheKeyState,
+        )
+        from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
+
+        load_torchbind_test_lib()
+        script_obj = torch.classes._TorchScriptTesting._Foo(10, 20)
+        self.assertIsInstance(script_obj, torch.ScriptObject)
+
+        mode = FakeTensorMode()
+        with self.assertRaisesRegex(_BypassDispatchCache, "script object"):
+            mode._prep_args_for_hash([], [script_obj], _CacheKeyState(), [])
 
 
 class FakeTensorPreferDeviceType(TestCase):
