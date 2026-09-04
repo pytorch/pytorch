@@ -114,11 +114,13 @@ from .base import (
     MutationType,
     NO_SUCH_SUBOBJ,
     readonly_setter,
+    ValueMutationExisting,
     ValueMutationNew,
     VariableTracker,
 )
 from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
 from .hashable import HashableTracker
+from .lists import ListVariable
 from .object_protocol import (
     _resolve_descriptor_get,
     generic_is_true,
@@ -187,7 +189,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.constant import ConstantVariable
 
-    from .lists import ListVariable, TupleVariable
+    from .lists import TupleVariable
 
 
 _STANDARD_SETATTRS: tuple[Any, ...] = (object.__setattr__, BaseException.__setattr__)
@@ -5126,32 +5128,24 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
         return self._base_vt.items  # pyrefly: ignore[missing-attribute]
 
 
-class UserDefinedListVariable(UserDefinedObjectVariable):
+class UserDefinedListVariable(UserDefinedObjectVariable, ListVariable):
     """
     Represents user defined objects that are subclasses of lists.
-
-    Internally, it uses a ListVariable to represent the list part of the
-    variable tracker. For everything else, it falls back to
-    UserDefinedObjectVariable.
     """
 
-    def __init__(
-        self, value: object, list_vt: Union["ListVariable", None] = None, **kwargs: Any
-    ) -> None:
-        from .lists import ListVariable
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *ListVariable._nonvar_fields,
+    }
 
-        super().__init__(value, **kwargs)
-        if list_vt is None:
-            if self.source is not None:
-                raise AssertionError(
-                    "list_vt must be constructed by builder.py when source is present"
-                )
-            self._base_vt = ListVariable([], mutation_type=ValueMutationNew())
-        else:
-            self._base_vt = list_vt
+    def __init__(
+        self,
+        value: object,
+        items: list[VariableTracker] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(value, items=items if items is not None else [], **kwargs)
         self._base_methods = list_methods
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None after initialization")
 
     def tp_init_impl(
         self,
@@ -5167,17 +5161,19 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
         # list, so every subclass tolerates them there.
         if sys.version_info >= (3, 11) and type(self.value).__new__ is list.__new__:
             no_keywords(tx, "list", kwargs)
-        # Delegate to the underlying list VT explicitly. Routing through
-        # call_method("__init__") instead would re-enter this override, since
-        # __init__ is a tp_init slot.
-        method = self._maybe_get_baseclass_method("__init__")
-        if (
-            self._base_vt is not None
-            and self._base_methods is not None
-            and method in self._base_methods
-        ):
-            return self._base_vt.tp_init_impl(tx, args, {})
-        return super().tp_init_impl(tx, args, {})
+        # UDOV.tp_init_impl would vectorcall the C list.__init__. Route to
+        # ListVariable's, which populates this object's storage in place.
+        return ListVariable.tp_init_impl(self, tx, args, {})
+
+    def _new_list(
+        self,
+        items: list[VariableTracker],
+        mutation_type: MutationType | None = None,
+    ) -> "ListVariable":
+        # A slice of a list subclass is a plain list in CPython, not the
+        # subclass. Also avoids BaseListVariable._new_list's type(self)(items),
+        # which would misfire on this class's (value, items) constructor.
+        return ListVariable(list(items), mutation_type=ValueMutationNew())
 
 
 class UserDefinedDequeVariable(UserDefinedObjectVariable):
@@ -5273,11 +5269,16 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None after initialization")
 
-    @property
-    def items(self) -> list[VariableTracker]:
-        if self._base_vt is None:
-            raise AssertionError("_base_vt must not be None in items")
-        return self._base_vt.items  # type: ignore[return-value]
+    def _new_list(
+        self,
+        items: list[VariableTracker],
+        mutation_type: MutationType | None = None,
+    ) -> "TupleVariable":
+        # A slice of a tuple subclass (including namedtuple, structseq) is a
+        # plain tuple in CPython, not the subclass. Also avoids
+        # BaseListVariable._new_list's type(self)(items), which would misfire
+        # on this class's (value, items) constructor.
+        return TupleVariable(list(items), mutation_type=ValueMutationNew())
 
     def resolve_data_descriptor(
         self,
