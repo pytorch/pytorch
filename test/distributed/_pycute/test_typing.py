@@ -40,13 +40,19 @@ Unit tests for _pycute.typing
 import logging
 
 from torch.distributed._pycute import *
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class TestTyping(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def helper_test_typing(self, _cls, _obj, cls, expected: bool):
         _LOGGER.debug(f"issubclass({_cls}, {cls})")
         _LOGGER.debug(f"isinstance({_obj}, {cls})")
