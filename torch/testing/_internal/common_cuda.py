@@ -561,6 +561,13 @@ def _get_torch_rocm_version():
     rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     return tuple(int(x) for x in rocm_version.split("."))
 
+def rocm_mx_swizzle(mat_dtype):
+    """Whether this device takes MX block scales for `mat_dtype` in the swizzled layout."""
+    if not torch.version.hip or not evaluate_gfx_arch_within(["gfx950"]):
+        return False
+    min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
+    return _get_torch_rocm_version() >= min_version
+
 def _get_torch_hipblaslt_version():
     if not TEST_WITH_ROCM:
         return None

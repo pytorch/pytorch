@@ -101,7 +101,9 @@ struct cublasCommonArgs {
       const std::optional<Tensor>& scale_b = std::nullopt,
       const std::optional<Tensor>& scale_result = std::nullopt,
       const std::optional<ScalingType>& scaling_choice_a = std::nullopt,
-      const std::optional<ScalingType>& scaling_choice_b = std::nullopt) {
+      const std::optional<ScalingType>& scaling_choice_b = std::nullopt,
+      SwizzleType swizzle_choice_a = SwizzleType::NO_SWIZZLE,
+      SwizzleType swizzle_choice_b = SwizzleType::NO_SWIZZLE) {
     bool transpose_result = false, transpose_a = false, transpose_b = false;
     result = prepare_matrix_for_cublas(c, transpose_result);
     mata = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_a, transpose_result);
@@ -114,9 +116,11 @@ struct cublasCommonArgs {
       scale_mata_ptr = transpose_result ? scale_b->data_ptr() : scale_a->data_ptr();
       scale_mata_dtype = transpose_result ? scale_b->scalar_type() : scale_a->scalar_type();
       scaling_mata_type = transpose_result ? scaling_choice_b : scaling_choice_a;
+      swizzle_mata_type = transpose_result ? swizzle_choice_b : swizzle_choice_a;
       scale_matb_ptr = transpose_result ? scale_a->data_ptr() : scale_b->data_ptr();
       scale_matb_dtype = transpose_result ? scale_a->scalar_type() : scale_b->scalar_type();
       scaling_matb_type = transpose_result ? scaling_choice_a : scaling_choice_b;
+      swizzle_matb_type = transpose_result ? swizzle_choice_a : swizzle_choice_b;
     }
 
     if (scale_result) {
@@ -175,8 +179,10 @@ struct cublasCommonArgs {
   void* scale_result_ptr = nullptr;
   std::optional<c10::ScalarType> scale_mata_dtype;
   std::optional<ScalingType> scaling_mata_type;
+  SwizzleType swizzle_mata_type = SwizzleType::NO_SWIZZLE;
   std::optional<c10::ScalarType> scale_matb_dtype;
   std::optional<ScalingType> scaling_matb_type;
+  SwizzleType swizzle_matb_type = SwizzleType::NO_SWIZZLE;
   std::optional<c10::ScalarType> scale_result_dtype;
 };
 

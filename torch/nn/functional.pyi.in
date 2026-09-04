@@ -764,6 +764,7 @@ __all__ += ["grouped_mm"]
 class SwizzleType(Enum):
     NO_SWIZZLE = 0
     SWIZZLE_32_4_4 = 1
+    SWIZZLE_32_8 = 2
 
 __all__ += ["SwizzleType"]
 

@@ -5182,6 +5182,37 @@ def _round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
 
 
+@functools.lru_cache
+def _prefers_swizzle_32_8_cached(mat_dtype: torch.dtype, rocm_version: str) -> bool:
+    try:
+        version = tuple(int(x) for x in rocm_version.split("-")[0].split("."))
+    except ValueError:
+        # Preview builds can carry a non-numeric component; assume the layout
+        # every other arch uses rather than raising from shape inference.
+        return False
+    min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
+    if version < min_version:
+        return False
+    return _rocm_native_device_arch_name("cuda").startswith("gfx950")
+
+
+def _prefers_swizzle_32_8(mat_dtype: torch.dtype) -> bool:
+    """
+    gfx950 hipBLASLt takes 1x32 block scales in the 32x8-tiled layout: MX FP4
+    from ROCm 7.13, MX FP8 from 7.14. Every other arch uses the default layout.
+    """
+    # is_available() is not stable across a process lifetime, so it must stay
+    # outside the cache -- a False from before device init would otherwise be
+    # remembered and pick the wrong scale layout for the rest of the run.
+    if not torch.version.hip or not torch.cuda.is_available():
+        return False
+    # torch.version.rocm is the SDK release that the kernel's ROCM_VERSION gate
+    # was compiled against; torch.version.hip only tracks it on shipped ROCm.
+    return _prefers_swizzle_32_8_cached(
+        mat_dtype, getattr(torch.version, "rocm", None) or torch.version.hip
+    )
+
+
 def _infer_scale_swizzle_impl(
     mat_size: tuple[Any, Any],
     scale_size: tuple[Any, ...],
@@ -5263,13 +5294,29 @@ def _infer_scale_swizzle_impl(
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
         else:
-            # AMD/XPU: no swizzle
+            # AMD/XPU: no swizzle. Checked before the gfx950 32x8 layout below
+            # because the two counts are equal whenever the paddings coincide
+            # (M % 32 == 0 and K % 256 == 0), and a tie has to resolve to the
+            # layout existing callers already pass. Getting the 32x8 layout
+            # requires passing the swizzle explicitly.
             expected_numel_a = ceildiv(mat_size[0], 32) * K_multiplier * mat_size[1]
             expected_numel_b = ceildiv(K_multiplier * mat_size[1], 32) * mat_size[0]
             if eq_fn(scale_numel, expected_numel_a) or eq_fn(
                 scale_numel, expected_numel_b
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
+            if _prefers_swizzle_32_8(mat_dtype):
+                # AMD gfx950: 32x8-tiled scales
+                expected_numel_a = _round_up(mat_size[0], 32) * _round_up(
+                    ceildiv(K_multiplier * mat_size[1], 32), 8
+                )
+                expected_numel_b = _round_up(mat_size[1], 32) * _round_up(
+                    ceildiv(K_multiplier * mat_size[0], 32), 8
+                )
+                if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                    scale_numel, expected_numel_b
+                ):
+                    return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_8
 
     return None, None
 
