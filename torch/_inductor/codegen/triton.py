@@ -1328,6 +1328,17 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
     return decorator  # type: ignore[return-value]
 
 
+# Float dtypes for which numerics="strict" applies eager-matching pointwise fixups,
+# mapped to the same-width integer type used for sign-bit manipulation.
+_STRICT_FLOAT_INT_TY = {
+    torch.float16: "tl.int16",
+    torch.bfloat16: "tl.int16",
+    torch.float32: "tl.int32",
+    torch.float64: "tl.int64",
+}
+_STRICT_FLOAT = tuple(_STRICT_FLOAT_INT_TY)
+
+
 class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton e.g., ops.to_dtype(x,...) -> x.to(...)"""
 
@@ -1395,12 +1406,22 @@ class TritonOverrides(OpOverrides):
             # values when converting from floating types.
             # optimization - if source type is known and it's not a floating type, then
             # do not apply conversion to the intermediate type.
-            return f"{x}.to(tl.int16).to(tl.uint8)"
+            # Under strict numerics, match c10 which narrows floats through int64.
+            intermediate = "tl.int64" if config.numerics == "strict" else "tl.int16"
+            return f"{x}.to({intermediate}).to(tl.uint8)"
 
         if use_compute_types:
             out_dtype = triton_compute_type(dtype)
         else:
             out_dtype = triton_store_type(dtype)
+
+        if (
+            config.numerics == "strict"
+            and (src_dtype is None or src_dtype.is_floating_point)
+            and dtype in (torch.int8, torch.int16)
+        ):
+            # CUDA narrows signed float casts through int32; match eager under strict.
+            return f"{x}.to(tl.int32).to({out_dtype})"
 
         if (
             src_dtype is not None
@@ -1487,6 +1508,26 @@ class TritonOverrides(OpOverrides):
     def abs(x):
         return f"tl_math.abs({x})"
 
+    @staticmethod
+    def neg(x):
+        x_dtype = getattr(x, "dtype", None)
+        if config.numerics == "strict" and x_dtype in _STRICT_FLOAT_INT_TY:
+            # Eager `neg` flips the IEEE sign bit for finite/inf/zero values but
+            # canonicalizes NaN, which is not a single primitive: Triton's `-x` (and any
+            # `x * -1.0` / `-0.0 - x`) folds to `0.0 - x` or `fneg`. `0.0 - x` canonicalizes
+            # NaN like eager but collapses both +-0.0 to +0.0; `fneg` keeps zero sign but
+            # sign-flips the NaN payload. So keep `0.0 - x` (== `-x`) for the general case
+            # and only special-case zeros with an explicit sign-bit flip.
+            int_ty = _STRICT_FLOAT_INT_TY[x_dtype]
+            sign_bit = -(1 << (torch.finfo(x_dtype).bits - 1))
+            flip = (
+                f"(({x}).to({int_ty}, bitcast=True) ^ "
+                f"tl.full([], {sign_bit}, {int_ty})).to("
+                f"{triton_type(x_dtype)}, bitcast=True)"
+            )
+            return f"tl.where({x} == 0, {flip}, -{x})"
+        return f"-{x}"
+
     # TODO - register these ops as having divergent dtype
     # output if doing graph pass to remove consecutive casts
 
@@ -1498,7 +1539,7 @@ class TritonOverrides(OpOverrides):
         if (
             x_dtype == torch.float32
             and y_dtype == torch.float32
-            and config.eager_numerics.division_rounding
+            and config.use_eager_division_rounding()
         ):
             # x / y in Triton is lowered to div.full which is approx
             # we want div_rn to adhere with eager
@@ -1597,11 +1638,26 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def minimum(a, b):
+        if config.numerics == "strict" and getattr(a, "dtype", None) in _STRICT_FLOAT:
+            # Eager min returns the NaN operand unchanged (first operand wins when both
+            # are NaN), preserving its payload; Triton's PropagateNan canonicalizes NaN to
+            # 0x7fffffff. Select the NaN operand explicitly and fall back to a plain min
+            # otherwise (which already matches eager on the +-0.0 tie).
+            return (
+                f"tl.where({a} != {a}, {a}, "
+                f"tl.where({b} != {b}, {b}, tl.minimum({a}, {b})))"
+            )
         return f"tl.minimum({a}, {b}, tl.PropagateNan.ALL)"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
+        if config.numerics == "strict" and getattr(a, "dtype", None) in _STRICT_FLOAT:
+            # See minimum: match eager's NaN-payload propagation (first operand wins).
+            return (
+                f"tl.where({a} != {a}, {a}, "
+                f"tl.where({b} != {b}, {b}, tl.maximum({a}, {b})))"
+            )
         return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
 
     @staticmethod
@@ -2101,10 +2157,97 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.erfinv({x})"
 
     @staticmethod
-    @maybe_upcast_float32()
+    def _cuda_hypotf(x: CSEVariable, y: CSEVariable) -> CSEVariable:
+        # Match CUDA's device hypotf implementation. Triton's libdevice uses an
+        # approximate square root that can differ from eager by one ULP.
+        shape = get_broadcasted_shape(x.shape, y.shape)
+
+        def gen(expr: str, dtype: torch.dtype = torch.float32) -> TritonCSEVariable:
+            return V.kernel.cse.generate(
+                V.kernel.compute, expr, dtype=dtype, shape=shape
+            )
+
+        def uint32_const(bits: int) -> str:
+            return f"tl.full([], 0x{bits:08X}, tl.uint32)"
+
+        abs_mask = uint32_const(0x7FFFFFFF)
+        x_bits = gen(f"{x}.to(tl.uint32, bitcast=True) & {abs_mask}", torch.uint32)
+        y_bits = gen(f"{y}.to(tl.uint32, bitcast=True) & {abs_mask}", torch.uint32)
+        lo_bits = gen(f"tl.minimum({x_bits}, {y_bits})", torch.uint32)
+        hi_bits = gen(f"tl.maximum({x_bits}, {y_bits})", torch.uint32)
+        lo = gen(f"{lo_bits}.to(tl.float32, bitcast=True)")
+        hi = gen(f"{hi_bits}.to(tl.float32, bitcast=True)")
+
+        exponent = gen(f"{hi_bits} & {uint32_const(0xFE000000)}", torch.uint32)
+        scale_down_bits = gen(f"{uint32_const(0x7E800000)} - {exponent}", torch.uint32)
+        scale_down = gen(f"{scale_down_bits}.to(tl.float32, bitcast=True)")
+        scaled_lo = gen(f"{lo} * {scale_down}")
+        scaled_hi = gen(f"{hi} * {scale_down}")
+        lo_square = gen(f"{scaled_lo} * {scaled_lo}")
+        square_sum = TritonOverrides._inline_asm_f32(
+            "fma.rn.f32 $0, $1, $2, $3;", [scaled_hi, scaled_hi, lo_square], shape
+        )
+        magnitude = gen(f"tl.sqrt_rn({square_sum})")
+        scale_up_bits = gen(f"{exponent} | {uint32_const(0x00800000)}", torch.uint32)
+        scale_up = gen(f"{scale_up_bits}.to(tl.float32, bitcast=True)")
+        result = gen(f"{magnitude} * {scale_up}")
+
+        result = gen(f"tl.where({lo_bits} == 0, {hi}, {result})")
+        inf_bits = uint32_const(0x7F800000)
+        nan = TritonOverrides._f32_const_from_bits(0x7FFFFFFF)
+        result = gen(f"tl.where({hi_bits} > {inf_bits}, {nan}, {result})")
+        is_inf = gen(f"({x_bits} == {inf_bits}) | ({y_bits} == {inf_bits})", torch.bool)
+        inf = TritonOverrides._f32_const_from_bits(0x7F800000)
+        return gen(f"tl.where({is_inf}, {inf}, {result})")
+
+    @staticmethod
     # pyrefly: ignore [bad-override]
     def hypot(x, y):
-        return f"libdevice.hypot({x}, {y})"
+        # Under strict numerics, match ATen CUDA's scaled float32 hypot (explicit
+        # fma.rn + sqrt_rn) instead of libdevice.hypot, whose approximate sqrt differs
+        # from eager by ~1 ULP. The default path keeps libdevice.hypot (the manual
+        # upcast below reproduces the previous @maybe_upcast_float32 behavior).
+        x_needs_upcast = needs_upcast_to_float32(x)
+        y_needs_upcast = needs_upcast_to_float32(y)
+        if (
+            config.numerics == "strict"
+            and not torch.version.hip
+            and V.graph.get_current_device_or_throw().type == "cuda"
+            and isinstance(x, CSEVariable)
+            and isinstance(y, CSEVariable)
+            and (triton_arg_dtype(x) == torch.float32 or x_needs_upcast)
+            and (triton_arg_dtype(y) == torch.float32 or y_needs_upcast)
+        ):
+            result_dtype = None
+            if x_needs_upcast or y_needs_upcast:
+                result_dtype = get_dtype_handler().hypot(x, y)
+            if x_needs_upcast:
+                x = V.kernel.cse.generate(
+                    V.kernel.compute,
+                    f"{x}.to(tl.float32)",
+                    dtype=torch.float32,
+                    shape=x.shape,
+                )
+            if y_needs_upcast:
+                y = V.kernel.cse.generate(
+                    V.kernel.compute,
+                    f"{y}.to(tl.float32)",
+                    dtype=torch.float32,
+                    shape=y.shape,
+                )
+            result = TritonOverrides._cuda_hypotf(x, y)
+            if result_dtype is not None and result_dtype != torch.float32:
+                return f"{result}.to({triton_type(result_dtype)})"
+            return result
+
+        x_upcast = ".to(tl.float32)" if x_needs_upcast else ""
+        y_upcast = ".to(tl.float32)" if y_needs_upcast else ""
+        result = f"libdevice.hypot({x}{x_upcast}, {y}{y_upcast})"
+        if x_needs_upcast or y_needs_upcast:
+            result_dtype = get_dtype_handler().hypot(x, y)
+            if result_dtype is not None and result_dtype != torch.float32:
+                return f"{result}.to({triton_type(result_dtype)})"
+        return result
 
     @staticmethod
     @maybe_upcast_float32()
@@ -2262,6 +2405,18 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sigmoid(x):
+        # Eager CUDA computes sigmoid as 1 / (1 + exp(-x)); Triton's tl.sigmoid uses an
+        # intrinsic exp and approximate divide that differ by 1-9 ULP on fp32. Under
+        # strict numerics, reproduce eager's formula with libdevice.exp and round-to-
+        # nearest division. Both halves are required: with libdevice.exp but an
+        # approximate divide the result matches neither eager nor tl.sigmoid, so fall
+        # back to the intrinsic unless both knobs are on.
+        if (
+            config.should_use_pytorch_libdevice()
+            and config.use_eager_division_rounding()
+        ):
+            denominator = f"(1.0 + libdevice.exp(-({x})))"
+            return f"triton.language.div_rn(1.0, {denominator})"
         return f"tl.sigmoid({x})"
 
     @staticmethod
@@ -2336,9 +2491,10 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     # pyrefly: ignore [bad-override]
     def log(x):
-        if config.eager_numerics.use_pytorch_libdevice:
-            # Strict numerics should use the backend math library entry point.
-            # On ROCm this maps to OCML and avoids Triton's generic log lowering.
+        if config.should_use_pytorch_libdevice():
+            # Strict numerics, or an explicit opt-in, uses the backend math library
+            # entry point. On ROCm this maps to OCML and avoids Triton's generic log
+            # lowering.
             return f"libdevice.log({x})"
         return f"tl_math.log({x})"
 
@@ -2426,6 +2582,7 @@ class TritonOverrides(OpOverrides):
 # Register the custom pow override after class creation so type checkers see
 # a plain callable instead of the class-body staticmethod descriptor.
 OpDtypeSupport.register_upcast(TritonOverrides.atan, True)
+OpDtypeSupport.register_upcast(TritonOverrides.hypot, True)
 OpDtypeSupport.register_upcast(TritonOverrides.pow, True)
 TritonOverrides._initialize_pointwise_overrides("triton")
 
@@ -2484,6 +2641,38 @@ class TritonKernelOverrides(TritonOverrides):
             )
             fn.__name__ = fn_name  # type: ignore[attr-defined]
             setattr(cls, fn_name, staticmethod(fn))
+
+    @staticmethod
+    def _use_aten_fp32_special(x):
+        return (
+            config.should_use_pytorch_libdevice()
+            and torch.version.cuda is not None
+            and torch.version.hip is None
+            and V.graph.get_current_device_or_throw().type == "cuda"
+            and triton_arg_dtype(x) == torch.float32
+        )
+
+    @staticmethod
+    def i0(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            from torch._inductor.codegen.common import OpDecompositions
+
+            return OpDecompositions.i0(x).value
+        return TritonOverrides.i0(x)
+
+    @staticmethod
+    def i1(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            from torch._inductor.codegen.common import OpDecompositions
+
+            return OpDecompositions.i1(x).value
+        return TritonOverrides.i1(x)
+
+    @staticmethod
+    def erfcx(x):
+        if TritonKernelOverrides._use_aten_fp32_special(x):
+            return f"triton_helpers.aten_erfcx({x})"
+        return TritonOverrides.erfcx(x)
 
     @classmethod
     def constant(cls, value, dtype):
@@ -7184,9 +7373,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     @classmethod
     def triton_meta_common(cls) -> TritonMeta:
         return {
-            "enable_fp_fusion": not config.emulate_precision_casts,
+            "enable_fp_fusion": not config.should_emulate_precision_casts(),
             "launch_pdl": cls._enable_pdl_codegen(),
-            "disable_ftz": config.eager_numerics.disable_ftz,
+            "disable_ftz": config.should_disable_ftz(),
         }
 
     @classmethod
