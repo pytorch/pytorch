@@ -429,6 +429,10 @@ class _KinetoProfile:
                 if config.activity_types is not None:
                     activity_filters[activity] = set(config.activity_types)
                 profiler_extensions.update(_get_profiler_extensions(config))
+            if "PERFORMANCE_METRICS" in profiler_extensions:
+                profiler_extensions["PERFORMANCE_METRICS_DEVICE_ID"] = str(
+                    torch.cuda.current_device()
+                )
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
                 use_device=use_device,
