@@ -488,6 +488,7 @@ test_python_smoke_b200() {
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
       python_native/test_cutedsl_smoketest \
+      python_native/test_kernel_rowtile \
       python_native/test_kernel_general \
       python_native/test_hw_caps \
       python_native/test_traits \
