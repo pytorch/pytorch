@@ -10,6 +10,7 @@ from cutlass import Int32
 
 import torch
 
+from ...cutedsl.dtypes import torch2cute
 from .._cutedsl import launch as _L
 from .._cutedsl.plan_cache import cached_plan
 from .._cutedsl.traits import WARP
@@ -180,7 +181,7 @@ def reduce_row_tile(
     nt -= nt % tpr  # rows_per_block must be whole
     if use_tma is None:
         use_tma = tpr == 1 and tma_ok(N, x.element_size(), M, x.device)
-    dt = _L.torch2cute[x.dtype]
+    dt = torch2cute[x.dtype]
     op = tile.TileReduce(
         trait,
         dt,
@@ -207,17 +208,16 @@ def reduce_row_tile(
     isz = x.element_size()
     align = op.tilemap.align_bytes(isz) if use_tma else tile.align_bytes(N, isz)
 
-    def _wrap():
-        mX = (
-            _L.cute_tensor_dynM(x, align=align, ndim=2, read_only=True)
-            if use_tma
-            else _L.cute_tensor_dynMN(x, op.vec, align=align, read_only=True)
-        )
-        # q/npar belong to the COL axis: None, not a dummy value -- an unused Int32 param
-        # costs real time (see tile.TileReduce.kernel).
+    def _fake():
+        # Compile-time descriptors. The input is 2D row-major with the leading extent dynamic; the
+        # INNER extent is dynamic (divisible by vec, so one kernel serves the whole vec class)
+        # EXCEPT under TMA, where the descriptor is built from the tile's static extents. `align` is
+        # what lets the load stay wide. q/npar belong to the COL axis: None, not a dummy value -- an
+        # unused Int32 param costs real time (see tile.TileReduce.kernel).
+        inner = N if use_tma else _L.sym(op.vec)
         return (
-            [mX],
-            [_L.cute_tensor_dynM(o, ndim=1) for o in outs],
+            [_L.fake_compact(dt, (_L.sym(), inner), order=(1, 0), align=align)],
+            [_L.fake_compact(torch2cute[o.dtype], (_L.sym(),)) for o in outs],
             nchunks,
             nwaves,
             Int32(N),
@@ -231,7 +231,23 @@ def reduce_row_tile(
         )
 
     key = ("rowtile", trait_key, x.dtype, tuple(out_dtypes[:ndst])) + op.cache_sig
-    build = lambda: _compile(op, *_wrap())  # noqa: E731
+    build = lambda: _compile(op, *_fake())  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
-    fn(*_wrap())
+    # The real operands: read_only on the INPUT, or a COW input is materialized on export.
+    # q/npar (col split) and rvals/kvals/in_base/limit (general decode) are unused on this axis:
+    # None rather than a dummy value -- an unused Int32 param costs real time.
+    fn(
+        [_L.read_only(x)],
+        list(outs),
+        nchunks,
+        nwaves,
+        Int32(N),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        _stream(),
+    )
     return tuple(outs)
