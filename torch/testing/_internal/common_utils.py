@@ -1748,6 +1748,7 @@ TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = bool(hasattr(torch, "hpu") and torch.hpu.is_available())
+TEST_MTIA = LazyVal(lambda: hasattr(torch, "mtia") and torch.mtia.is_available())  # type: ignore[call-arg]
 TEST_CUDA = torch.cuda.is_available()
 TEST_ACCELERATOR = LazyVal(lambda: torch.accelerator.is_available())  # type: ignore[call-arg]
 TEST_MULTIACCELERATOR = LazyVal(lambda: torch.accelerator.device_count() > 1)  # type: ignore[call-arg]
@@ -2577,9 +2578,10 @@ def skipIfHpu_BUGGY(fn):
             fn(*args, **kwargs)
     return wrapper
 
-def getRocmVersion() -> tuple[int, ...]:
+def getRocmVersion() -> tuple[int, int]:
     from torch.testing._internal.common_cuda import _get_torch_rocm_version
-    return _get_torch_rocm_version()
+    rocm_version = _get_torch_rocm_version()
+    return (rocm_version[0], rocm_version[1])
 
 # Skips a test on CUDA if ROCm is available and its version is lower than requested.
 def skipIfRocmVersionLessThan(version=None):
