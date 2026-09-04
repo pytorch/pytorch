@@ -236,7 +236,9 @@ class TestHuggingFaceLLMPerformance(TestCase):
             mock.patch.object(common, "empty_gpu_cache"),
             mock.patch.object(common, "get_dynamo_stats", side_effect=get_dynamo_stats),
             mock.patch.object(common, "get_peak_memory", side_effect=get_peak_memory),
-            mock.patch.object(common.time, "perf_counter", side_effect=lambda: clock[0]),
+            mock.patch.object(
+                common.time, "perf_counter", side_effect=lambda: clock[0]
+            ),
             mock.patch.object(torch.cuda, "reset_peak_memory_stats"),
             mock.patch.object(common, "speedup_experiment", experiment),
         ):
