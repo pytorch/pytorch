@@ -2814,7 +2814,8 @@ class BenchmarkRunner:
         model, example_inputs = self.maybe_cast(model, example_inputs)
 
         # Use distributed wrapping as necessary
-        model = self.deepcopy_and_maybe_parallelize(model)
+        if self.args.ddp or self.args.fsdp:
+            model = self.deepcopy_and_maybe_parallelize(model)
 
         if not hasattr(model, name):
             model.name = name
@@ -2995,7 +2996,8 @@ class BenchmarkRunner:
         model, example_inputs = self.maybe_cast(model, example_inputs)
 
         # Use distributed wrapping as necessary
-        model = self.deepcopy_and_maybe_parallelize(model)
+        if self.args.ddp or self.args.fsdp:
+            model = self.deepcopy_and_maybe_parallelize(model)
 
         if not hasattr(model, name):
             model.name = name
