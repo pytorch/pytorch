@@ -347,10 +347,10 @@ class _PipelineSchedule(ABC):
     ) -> None:
         """Run the P2P warm-up protocol for the given stages.
 
-        For ``PipelineStage`` instances this executes the forward/backward vote
-        protocol (which warms up 2-rank sub-communicators) and sets each
-        stage's ``_inference_mode``.  For other stage types it falls back to
-        the legacy ``_get_init_p2p_neighbors_ops`` + ``_batch_p2p`` path.
+        For ``PipelineStage`` instances this determines the metadata mode. When
+        directed-edge communicators are enabled, it also initializes the PP
+        parent, creates the children from the final schedule topology, and
+        warms every child before CUDA graph capture.
 
         Args:
             stages: The pipeline stages owned by this rank.
@@ -358,6 +358,101 @@ class _PipelineSchedule(ABC):
             p2p_done: ``True`` if P2P neighbours have already been initialised
                 (avoids redundant init on eval↔train mode switches).
         """
+        per_direction = {stage.p2p_per_direction for stage in stages}
+        if len(per_direction) != 1:
+            raise RuntimeError(
+                "All local pipeline stages must use the same P2P communicator mode"
+            )
+
+        if next(iter(per_direction)):
+            parent = (
+                stages[0].group
+                if stages[0].group is not None
+                else dist.distributed_c10d._get_default_group()
+            )
+            if any(
+                (
+                    stage.group
+                    if stage.group is not None
+                    else dist.distributed_c10d._get_default_group()
+                )
+                is not parent
+                for stage in stages
+            ):
+                raise RuntimeError("All local pipeline stages must share one PP group")
+
+            pipeline_stages = [
+                stage for stage in stages if isinstance(stage, PipelineStage)
+            ]
+            all_manual = len(pipeline_stages) == len(stages)
+            if pipeline_stages and not all_manual:
+                raise RuntimeError(
+                    "A pipeline schedule cannot mix manual and traced stages"
+                )
+            backend = dist.get_backend(parent)
+            if backend == "fake":
+                if all_manual:
+                    inference_mode = (
+                        InferenceMode.DYNAMIC
+                        if any(
+                            InferenceMode.needs_dynamic(stage._user_meta, has_backward)
+                            for stage in pipeline_stages
+                        )
+                        else InferenceMode.STATIC
+                    )
+                    has_cross_rank = any(
+                        (
+                            not stage.is_first
+                            and not stage._is_same_rank(stage.stage_index - 1)
+                        )
+                        or (
+                            not stage.is_last
+                            and not stage._is_same_rank(stage.stage_index + 1)
+                        )
+                        for stage in pipeline_stages
+                    )
+                    if has_cross_rank and inference_mode == InferenceMode.DYNAMIC:
+                        raise RuntimeError(
+                            "Dynamic shape inference is not supported with a fake "
+                            "process group. Provide complete static metadata to "
+                            "PipelineStage."
+                        )
+                    for stage in pipeline_stages:
+                        stage._inference_mode = inference_mode
+            else:
+                vote = torch.tensor(
+                    [
+                        int(
+                            not all_manual
+                            or all(
+                                not InferenceMode.needs_dynamic(
+                                    stage._user_meta, has_backward
+                                )
+                                for stage in pipeline_stages
+                            )
+                        )
+                    ],
+                    dtype=torch.int32,
+                    device=stages[0].device,
+                )
+                dist.all_reduce(vote, op=dist.ReduceOp.MIN, group=parent)
+                vote_result = vote.item()
+                if all_manual:
+                    inference_mode = (
+                        InferenceMode.STATIC
+                        if vote_result == 1
+                        else InferenceMode.DYNAMIC
+                    )
+                    for stage in pipeline_stages:
+                        stage._inference_mode = inference_mode
+
+            if not p2p_done:
+                for stage in stages:
+                    stage._configure_p2p_direction_groups()
+                if backend != "fake":
+                    self._warmup_p2p_direction_groups(stages, parent)
+            return
+
         if all(isinstance(stage, PipelineStage) for stage in stages):
             # A fake process group cannot exchange real data: a cross-rank
             # vote recv reads zeros and selects DYNAMIC, which then fails in
@@ -419,17 +514,43 @@ class _PipelineSchedule(ABC):
                 all_ops.extend(stage._get_init_p2p_neighbors_ops())
             _wait_batch_p2p(_batch_p2p(all_ops))
 
-        # TODO: STATIC mode group communicator warm-up gap
-        # The vote protocol above warms up 2-rank sub-communicators
-        # (used by `_batch_p2p` homogeneous fast-path).  In DYNAMIC mode,
-        # `_send_meta`/`_recv_meta` (called during `_prepare_forward_infra` →
-        # `_forward_metadata_inference`) also warm up the *group* communicator
-        # (used by `_batch_p2p` mixed-op path).  In STATIC mode, metadata
-        # inference is skipped, so the group communicator is NOT warmed up —
-        # it will be lazily created on the first mixed `_batch_p2p` call
-        # (e.g., 1F1B steady-state with both sends and recvs).
-        # Fix: run `_get_init_p2p_neighbors_ops` + `_batch_p2p` after the
-        # vote, gated by `not p2p_done`.
+    @staticmethod
+    def _warmup_p2p_direction_groups(
+        stages: list[_PipelineStageBase], parent: dist.ProcessGroup
+    ) -> None:
+        """Exercise every directed child communicator once before capture."""
+        topology = stages[0]._p2p_direction_topology
+        if any(stage._p2p_direction_topology != topology for stage in stages):
+            raise RuntimeError("Local stages disagree on P2P communicator topology")
+        rounds = stages[0]._p2p_direction_warmup_rounds
+        if any(stage._p2p_direction_warmup_rounds != rounds for stage in stages):
+            raise RuntimeError("Local stages disagree on P2P warm-up topology")
+
+        group_rank = dist.get_rank(parent)
+        tensor = torch.zeros(1, dtype=torch.int32, device=stages[0].device)
+        for round_edges in rounds:
+            local_edges = [edge for edge in round_edges if group_rank in edge]
+            if not local_edges:
+                continue
+            if len(local_edges) != 1:
+                raise AssertionError("P2P warm-up round is not a matching")
+            source, destination = local_edges[0]
+            child = stages[0]._p2p_direction_groups[(source, destination)]
+            if group_rank == source:
+                op = dist.P2POp(
+                    dist.isend,
+                    tensor,
+                    dist.get_global_rank(parent, destination),
+                    child,
+                )
+            else:
+                op = dist.P2POp(
+                    dist.irecv,
+                    tensor,
+                    dist.get_global_rank(parent, source),
+                    child,
+                )
+            _wait_batch_p2p(dist.batch_isend_irecv([op]))
 
     def _initialize_pp_stages(
         self,
