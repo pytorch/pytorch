@@ -11511,9 +11511,9 @@ class TestGroupedMM(TestCase):
         a.requires_grad_(backward)
         b.requires_grad_(backward)
         out = F.grouped_mm(a, b.transpose(-2, -1), offs=offs, out_dtype=a.dtype)
-        # Odd output widths need padded gradients to satisfy grouped_mm alignment.
-        grad = self._make_grouped_mm_matrix(out.shape, True, out.device, out.dtype)
         if backward:
+            # Odd output widths need padded gradients to satisfy grouped_mm alignment.
+            grad = self._make_grouped_mm_matrix(out.shape, True, out.device, out.dtype)
             out.backward(grad)
         ends = offs.cpu().tolist() if offs is not None else [0] * a.size(0)
         start = 0
@@ -11540,75 +11540,29 @@ class TestGroupedMM(TestCase):
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    @parametrize("m,n,ka,kb,offsets", [
-        subtest((16, 32, 256, 256, [64, 128, 192, 256]), name="regular"),
-        # Adds partial M/N/K tiles and empty K groups to forward/backward checks; regular groups are aligned and nonempty.
-        subtest((24, 69, 33, 33, [0, 17, 17, 33]), name="ragged"),
-        # Checks unequal backing K dimensions and unused tails; regular cases consume equal-sized inputs.
-        subtest((24, 69, 40, 32, [8, 20, 28]), name="unequal_backing_k"),
-        # Checks nonempty zero outputs with K=0; ragged empty groups still have nonzero input K dimensions.
-        subtest((5, 7, 0, 0, [0, 0]), name="empty_k"),
+    @parametrize("a_shape,b_shape,offsets,backward", [
+        subtest(((16, 256), (32, 256), [64, 128, 192, 256], True), name="2d_2d_regular"),
+        subtest(((24, 48), (69, 48), [17, 30, 38, 48], True), name="2d_2d_ragged"),
+        subtest(((24, 40), (69, 32), [8, 20, 28], False), name="2d_2d_unequal_backing_k"),
+        subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64], True), name="2d_3d_regular"),
+        subtest(((48, 19), (4, 67, 19), [17, 30, 38, 48], True), name="2d_3d_ragged"),
+        subtest(((4, 16, 64), (4, 32, 64), None, True), name="3d_3d"),
+        subtest(((4, 16, 64), (128, 64), [32, 64, 96, 128], True), name="3d_2d_regular"),
     ])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_2d_2d(self, device, strided, a_row_major, b_row_major, m, n, ka, kb, offsets, dtype):
-        unaligned = any(size % (16 // dtype.itemsize) for size in (m, n, ka, kb, *offsets))
+    def test_grouped_gemm(self, device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype):
+        sizes = a_shape[-2:] + b_shape[-2:] + tuple(offsets or ())
+        unaligned = any(size % (16 // dtype.itemsize) for size in sizes)
         if self.device_type == "cuda" and dtype != torch.float32 and unaligned:
             self.skipTest("Unaligned cases require the CUDA float32 fallback")
-        a = self._make_grouped_mm_matrix((m, ka), a_row_major, device, dtype, strided)
-        b = self._make_grouped_mm_matrix((n, kb), b_row_major, device, dtype, strided)
-        offs = torch.tensor(offsets, device=device, dtype=torch.int32)
-        self.grouped_mm_helper(a, b, offs, backward=ka > 0 and ka == kb == offsets[-1])
-
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
-    @parametrize("strided", [False, True])
-    @parametrize("a_row_major", [False, True])
-    @parametrize("b_row_major", [False, True])
-    @parametrize("m,n,k,offsets", [
-        subtest((64, 32, 64, [16, 32, 48, 64]), name="regular"),
-        subtest((64, 32, 64, [32, 32, 48, 64]), name="empty_group"),
-        # Checks jagged-row mapping with partial M/N/K tiles and a leading empty group; regular boundaries are aligned.
-        subtest((50, 67, 19, [0, 50]), name="ragged"),
-        # Checks the empty-output dispatch return; an empty group inside a nonempty result still launches kernels.
-        subtest((0, 7, 8, [0, 0]), name="empty"),
-    ])
-    @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_2d_3d(self, device, strided, a_row_major, b_row_major, m, n, k, offsets, dtype):
-        unaligned = any(size % (16 // dtype.itemsize) for size in (m, n, k, *offsets))
-        if self.device_type == "cuda" and dtype != torch.float32 and unaligned:
-            self.skipTest("Unaligned cases require the CUDA float32 fallback")
-        a = self._make_grouped_mm_matrix((m, k), a_row_major, device, dtype, strided)
-        b = self._make_grouped_mm_matrix((len(offsets), n, k), b_row_major, device, dtype, strided)
-        offs = torch.tensor(offsets, device=device, dtype=torch.int32)
-        self.grouped_mm_helper(a, b, offs, backward=m > 0)
-
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
-    @parametrize("strided", [False, True])
-    @parametrize("a_row_major", [False, True])
-    @parametrize("b_row_major", [False, True])
-    @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_3d_3d(self, device, strided, a_row_major, b_row_major, dtype):
-        a = self._make_grouped_mm_matrix((4, 16, 64), a_row_major, device, dtype, strided)
-        b = self._make_grouped_mm_matrix((4, 32, 64), b_row_major, device, dtype, strided)
-        self.grouped_mm_helper(a, b)
-
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
-    @parametrize("strided", [False, True])
-    @parametrize("a_row_major", [False, True])
-    @parametrize("b_row_major", [False, True])
-    @parametrize("offsets", [
-        subtest([32, 64, 96, 128], name="regular"),
-        subtest([64, 64, 96, 128], name="empty_group"),
-    ])
-    @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_3d_2d(self, device, strided, a_row_major, b_row_major, offsets, dtype):
-        a = self._make_grouped_mm_matrix((4, 16, 64), a_row_major, device, dtype, strided)
-        b = self._make_grouped_mm_matrix((128, 64), b_row_major, device, dtype, strided)
-        offs = torch.tensor(offsets, device=device, dtype=torch.int32)
-        self.grouped_mm_helper(a, b, offs)
+        a = self._make_grouped_mm_matrix(a_shape, a_row_major, device, dtype, strided)
+        b = self._make_grouped_mm_matrix(b_shape, b_row_major, device, dtype, strided)
+        offs = None if offsets is None else torch.tensor(offsets, device=device, dtype=torch.int32)
+        self.grouped_mm_helper(a, b, offs, backward=backward)
 
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("a_shape,b_shape,offsets,a_row_major,b_row_major", [
-        subtest(((25, 8192), (1, 1024, 8192), [1], True, False), name="rows_bn128"),
+        subtest(((25, 8192), (1, 1024, 8192), [25], True, False), name="rows_bn128"),
         subtest(((2, 49, 8192), (1024, 8192), [257, 1024], False, True), name="cols_bn256"),
     ])
     @dtypes(torch.float32)
@@ -11619,7 +11573,7 @@ class TestGroupedMM(TestCase):
         a = self._make_grouped_mm_matrix(a_shape, a_row_major, device, dtype).div_(math.sqrt(a_shape[-1]))
         b = self._make_grouped_mm_matrix(b_shape, b_row_major, device, dtype)
         offs = torch.tensor(offsets, device=device, dtype=torch.int32)
-        self.grouped_mm_helper(a, b, offs, backward=a.dim() == 3)
+        self.grouped_mm_helper(a, b, offs)
 
     @onlyOn(["cuda", "mps"])
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
