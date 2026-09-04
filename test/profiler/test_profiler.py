@@ -2176,8 +2176,9 @@ class TestProfiler(TestCase):
         ):
             p.prepare_trace()
         self.assertEqual(
-            kineto_profile.call_args.kwargs["_profiler_extensions"]
-            ["PERFORMANCE_METRICS_DEVICE_ID"],
+            kineto_profile.call_args.kwargs["_profiler_extensions"][
+                "PERFORMANCE_METRICS_DEVICE_ID"
+            ],
             "3",
         )
 
