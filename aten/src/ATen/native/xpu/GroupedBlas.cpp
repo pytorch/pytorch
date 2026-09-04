@@ -144,7 +144,7 @@ void _check_scales_blocked(
       const int fp4_elems_per_byte = 2;
       K *= fp4_elems_per_byte;
     }
-    int blocked_scaled_K = (K + blocksize - 1) / blocksize;
+    int64_t blocked_scaled_K = (K + blocksize - 1) / blocksize;
     int64_t N = mat.size(2);
 
     // OneDNN expects scales as 3d tensor, shape (G, ceil(K/block_size), N).
@@ -281,8 +281,8 @@ Tensor _scaled_grouped_mm_xpu(
 
   const int scale_multiplier =
       (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs->size(0) : 1;
-  xpu::check_scale(mat_a, scale_a, 0, 0, scale_multiplier);
-  xpu::check_scale(mat_b, scale_b, 1, 1, scale_multiplier);
+  check_scale(mat_a, scale_a, 0, 0, scale_multiplier);
+  check_scale(mat_b, scale_b, 1, 1, scale_multiplier);
 
   const auto out_dtype_ = out_dtype.value_or(at::kBFloat16);
   TORCH_CHECK_VALUE(

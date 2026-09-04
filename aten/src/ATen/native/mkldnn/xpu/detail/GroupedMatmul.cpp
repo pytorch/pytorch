@@ -11,6 +11,9 @@
 
 namespace at::native::onednn {
 
+// Identifies which matmul operand a GroupedScaleSpec is being built for.
+enum class GroupedGemmArgType { Src, Wei };
+
 // Describes how to configure oneDNN scales for a given role/ScalingType.
 // When use_mask_only is true, apply via set_scales_mask(arg, mask).
 // Otherwise, apply via set_scales(arg, mask, groups, dtype).
@@ -31,18 +34,13 @@ struct GroupedScaleSpec {
 
 inline GroupedScaleSpec make_grouped_scale_spec(
     at::blas::ScalingType scaling_type,
-    const std::string& arg_type,
+    GroupedGemmArgType arg_type,
     bool a_is_2d,
     bool b_is_2d) {
   TORCH_CHECK(
-      arg_type == "src" || arg_type == "wei",
-      "Expected arg_type to be 'src' or 'wei', but got '",
-      arg_type,
-      "'");
-  TORCH_CHECK(
       a_is_2d && !b_is_2d,
       "Currently only 2d x 3d grouped matmul with offsets is supported");
-  bool is_src = (arg_type == "src");
+  bool is_src = (arg_type == GroupedGemmArgType::Src);
 
   switch (scaling_type) {
     case at::blas::ScalingType::RowWise:
@@ -116,7 +114,6 @@ get_grouped_gemm_md(
     int64_t group_count,
     dnnl::memory::data_type dtype,
     dnnl::memory::data_type dst_dtype,
-    const Tensor& mat_a,
     const Tensor& mat_b,
     const Tensor& out,
     bool a_is_2d,
@@ -216,7 +213,6 @@ sycl::event scaled_grouped_matmul(
       group_count,
       dtype,
       dst_dtype,
-      prepared_mat_a,
       prepared_mat_b,
       prepared_out,
       a_is_2d,
@@ -227,9 +223,9 @@ sycl::event scaled_grouped_matmul(
 
   if (scaling_choice_a.has_value() && scaling_choice_b.has_value()) {
     const GroupedScaleSpec src_spec = make_grouped_scale_spec(
-        scaling_choice_a.value(), "src", a_is_2d, b_is_2d);
+        scaling_choice_a.value(), GroupedGemmArgType::Src, a_is_2d, b_is_2d);
     const GroupedScaleSpec wei_spec = make_grouped_scale_spec(
-        scaling_choice_b.value(), "wei", a_is_2d, b_is_2d);
+        scaling_choice_b.value(), GroupedGemmArgType::Wei, a_is_2d, b_is_2d);
     src_spec.apply(op_attr, DNNL_ARG_SRC);
     wei_spec.apply(op_attr, DNNL_ARG_WEIGHTS);
   }
@@ -237,7 +233,9 @@ sycl::event scaled_grouped_matmul(
   dnnl::memory::desc alpha_md;
   if (alpha.has_value()) {
     // set alpha in post-op attr, this is used for NVFP4 case where we need to
-    // combine two global fp32 scales into a single alpha value
+    // combine two global fp32 scales into a single alpha value.
+    // For grouped_matmul, alpha is per-group, so it should have one scale
+    // per group.
     TORCH_CHECK(
         alpha.value().dim() == 1 && alpha.value().size(0) == group_count,
         "Expected alpha to be a 1D tensor of size ",
