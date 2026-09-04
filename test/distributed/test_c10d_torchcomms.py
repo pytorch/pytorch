@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import C10dTorchCommsTestBase
 from torch.testing._internal.common_utils import (
     find_free_port,
+    HardwareClassification,
     parametrize,
     run_tests,
     subtest,
@@ -22,6 +23,8 @@ from torch.testing._internal.common_utils import (
 
 @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
 class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     REDUCE_OPS = [
         subtest(dist.ReduceOp.SUM, name="SUM"),
         subtest(dist.ReduceOp.AVG, name="AVG"),
@@ -33,15 +36,6 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
     @property
     def _rank_value(self):
         return self.rank + 1
-
-    def _requires_cuda(self):
-        """Return True when the test variant is NOT cuda.
-
-        MultiProcContinuousTest workers wrap unittest.SkipTest as RuntimeError,
-        so @onlyCUDA / self.skipTest() poison the entire class.  Tests that
-        need NCCL should call this and ``return`` early instead.
-        """
-        return self.device_type != "cuda"
 
     def _skip_if_product_overflows(self, op):
         if op == dist.ReduceOp.PRODUCT and self.world_size > 12:
@@ -69,32 +63,32 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         raise ValueError(f"Unsupported op: {op}")
 
     @parametrize("op", REDUCE_OPS)
-    def test_allreduce(self, op):
+    def test_allreduce(self, device, op):
         self._skip_if_product_overflows(op)
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         dist.all_reduce(tensor, op=op, group=self.pg)
         self.assertEqual(tensor.item(), self._expected_reduce_result(op))
 
-    def test_all_gather(self):
+    def test_all_gather(self, device):
         input_tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         gather_list = [torch.empty_like(input_tensor) for _ in range(self.world_size)]
         dist.all_gather(gather_list, input_tensor, group=self.pg)
         expected = list(range(1, self.world_size + 1))
         self.assertEqual([t.item() for t in gather_list], expected)
 
-    def test_all_gather_into_tensor(self):
+    def test_all_gather_into_tensor(self, device):
         input_tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         output_tensor = torch.empty(self.world_size, dtype=torch.float32)
         dist.all_gather_single(output_tensor, input_tensor, group=self.pg)
         expected = list(range(1, self.world_size + 1))
         self.assertEqual([t.item() for t in output_tensor], expected)
 
-    def test_broadcast(self):
+    def test_broadcast(self, device):
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         dist.broadcast(tensor, src=0, group=self.pg)
         self.assertEqual(tensor.item(), 1)
 
-    def test_gather(self):
+    def test_gather(self, device):
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         gather_list = None
         if self.rank == 0:
@@ -104,7 +98,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
             expected = list(range(1, self.world_size + 1))
             self.assertEqual([t.item() for t in gather_list], expected)
 
-    def test_scatter(self):
+    def test_scatter(self, device):
         if self.rank == 0:
             scatter_list = [
                 torch.tensor([i], dtype=torch.float32) for i in range(self.world_size)
@@ -116,7 +110,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         self.assertEqual(tensor.item(), self.rank)
 
     @parametrize("op", REDUCE_OPS)
-    def test_reduce(self, op):
+    def test_reduce(self, device, op):
         self._skip_if_product_overflows(op)
         input_tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         dist.reduce(input_tensor, dst=0, op=op, group=self.pg)
@@ -124,7 +118,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
             self.assertEqual(input_tensor.item(), self._expected_reduce_result(op))
 
     @parametrize("op", REDUCE_OPS)
-    def test_reduce_scatter(self, op):
+    def test_reduce_scatter(self, device, op):
         self._skip_if_product_overflows(op)
         input_tensor = [
             torch.tensor([self._rank_value], dtype=torch.float32)
@@ -135,7 +129,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         self.assertEqual(output_tensor.item(), self._expected_reduce_result(op))
 
     @parametrize("op", REDUCE_OPS)
-    def test_reduce_scatter_tensor(self, op):
+    def test_reduce_scatter_tensor(self, device, op):
         self._skip_if_product_overflows(op)
         input_tensor = torch.full(
             (self.world_size,), self._rank_value, dtype=torch.float32
@@ -144,7 +138,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         dist.reduce_scatter_single(output_tensor, input_tensor, op=op, group=self.pg)
         self.assertEqual(output_tensor.item(), self._expected_reduce_result(op))
 
-    def test_all_to_all(self):
+    def test_all_to_all(self, device):
         input_tensor = [
             torch.tensor([self._rank_value], dtype=torch.float32)
             for _ in range(self.world_size)
@@ -156,7 +150,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         expected = list(range(1, self.world_size + 1))
         self.assertEqual([t.item() for t in output_tensor], expected)
 
-    def test_all_to_all_single(self):
+    def test_all_to_all_single(self, device):
         input_tensor = torch.full(
             (self.world_size,), self._rank_value, dtype=torch.float32
         )
@@ -165,7 +159,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         expected = list(range(1, self.world_size + 1))
         self.assertEqual([t.item() for t in output_tensor], expected)
 
-    def test_all_to_all_single_with_split_sizes(self):
+    def test_all_to_all_single_with_split_sizes(self, device):
         # Each rank sends (rank + 1) elements to every other rank,
         # so rank r's input_split_sizes are all (rank + 1).
         input_split_sizes = [self._rank_value] * self.world_size
@@ -201,7 +195,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
             )
             offset += output_split_sizes[src]
 
-    def test_send_recv(self):
+    def test_send_recv(self, device):
         send_rank = (self.rank + 1) % self.world_size
         recv_rank = (self.rank + self.world_size - 1) % self.world_size
         send_tensor = torch.tensor([self.rank], dtype=torch.float32)
@@ -217,16 +211,19 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         # Each rank receives the rank number of the sender
         self.assertEqual(recv_tensor.item(), recv_rank)
 
-    def test_barrier(self):
+    def test_barrier(self, device):
         dist.barrier(group=self.pg)
         # If we reach this point, the barrier succeeded without deadlock
         self.assertTrue(True)
 
-    def test_monitored_barrier(self):
+    def test_monitored_barrier(self, device):
         # monitored_barrier is gloo-only; the default PG is gloo only on the
         # cpu variant (nccl on cuda/xpu), so run there. This drives the full
         # dist.monitored_barrier dispatch onto BackendWrapper::monitoredBarrier
         # (the torchcomms reimplementation of ProcessGroupGloo::monitoredBarrier).
+        # NOTE: this test requires the class instantiation to keep generating
+        # the cpu variant (no except_for=("cpu",)) — otherwise it silently
+        # stops running on every variant.
         if self.device_type != "cpu":
             return
         self.assertEqual(dist.get_backend(self.pg), dist.Backend.GLOO)
@@ -237,7 +234,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
             wait_all_ranks=True,
         )
 
-    def test_new_group_delegates_to_split_group(self):
+    def test_new_group_delegates_to_split_group(self, device):
         # Under torchcomms, `new_group` routes through `split_group`. The
         # resulting subgroup must contain the requested ranks and be usable
         # for collectives.
@@ -252,34 +249,46 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         else:
             self.assertIs(ng, dist.GroupMember.NON_GROUP_MEMBER)
 
-    def test_new_group_backend_none_narrows_to_default_device(self):
+    def test_new_group_backend_none_narrows_to_default_device(self, device):
         ranks = list(range(self.world_size))
         ng = dist.new_group(ranks=ranks, backend=None)
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
-    def test_new_group_bare_default_backend_is_auto_qualified(self):
-        if self._requires_cuda():
-            return
+    def test_new_group_bare_default_backend_is_auto_qualified(self, device):
+        backend = self.backend(torch.device(device).type)
         ranks = list(range(self.world_size))
-        ng = dist.new_group(ranks=ranks, backend="nccl")
+        ng = dist.new_group(ranks=ranks, backend=backend)
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
-    def test_new_group_qualified_backend_passes_through(self):
-        if self._requires_cuda():
-            return
+    def test_new_group_qualified_backend_passes_through(self, device):
+        backend = self.backend(torch.device(device).type)
         ranks = list(range(self.world_size))
-        ng = dist.new_group(ranks=ranks, backend="cuda:nccl")
+        ng = dist.new_group(
+            ranks=ranks, backend=f"{torch.device(device).type}:{backend}"
+        )
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
-    def test_new_group_with_pg_options(self):
-        if self._requires_cuda():
-            return
+
+instantiate_device_type_tests(TestC10dTorchCommsBasic, globals(), allow_xpu=True)
+
+
+@unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
+class TestC10dTorchCommsBasicCUDA(C10dTorchCommsTestBase):
+    """CUDA-only basic torchcomms tests: NCCL-specific pg_options paths."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    @property
+    def _rank_value(self):
+        return self.rank + 1
+
+    def test_new_group_with_pg_options(self, device):
         ranks = list(range(self.world_size))
         opts = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
         opts.config.cga_cluster_size = 2
@@ -289,9 +298,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
-    def test_new_group_sequential_pg_options_produce_distinct_groups(self):
-        if self._requires_cuda():
-            return
+    def test_new_group_sequential_pg_options_produce_distinct_groups(self, device):
         ranks = list(range(self.world_size))
         opts_a = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
         opts_a.config.cga_cluster_size = 2
@@ -302,20 +309,138 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         self.assertNotEqual(g_a.group_name, g_b.group_name)
 
 
-devices = ["cpu", "cuda", "xpu"]
-instantiate_device_type_tests(
-    TestC10dTorchCommsBasic, globals(), only_for=devices, allow_xpu=True
-)
+instantiate_device_type_tests(TestC10dTorchCommsBasicCUDA, globals(), only_for=["cuda"])
 
 
 @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
 class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
     """Verify init_process_group auto-qualifies bare backends under torchcomms.
 
+    Overrides ``_init_pg`` to pass ``device_id`` with the bare accelerator
+    comm backend of the current device variant (e.g. ``"nccl"``/``"hccl"``) —
+    the auto-qualify logic in ``init_process_group`` should expand it to a
+    multi-backend string (e.g. ``"cpu:gloo,cuda:nccl"``) so both CPU and
+    accelerator backends are available.
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        torch.distributed.config.use_torchcomms = True
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
+        os.environ["RANK"] = str(rank)
+        os.environ["WORLD_SIZE"] = str(world_size)
+        os.environ["TORCHCOMM_STORE_PATH"] = rdvz_file
+        os.environ["LOCAL_RANK"] = str(rank)
+
+        device_type = cls.device_type
+        if callable(device_type):
+            device_type = device_type()
+        if device_type == "privateuse1":
+            device_type = torch._C._get_privateuse1_backend_name()
+        backend = cls.backend(device_type)
+
+        store = dist.FileStore(rdvz_file, world_size)
+        device_id = torch.device(f"{device_type}:{rank}")
+        torch.get_device_module(device_type).set_device(rank)
+
+        dist.init_process_group(
+            backend=backend,
+            world_size=world_size,
+            rank=rank,
+            store=store,
+            device_id=device_id,
+        )
+        cls.pg = dist.distributed_c10d._get_default_group()
+        torch.set_default_device(device_id)
+
+    @property
+    def _rank_value(self):
+        return self.rank + 1
+
+    def test_default_pg_has_cpu_backend(self, device):
+        default_pg = dist.distributed_c10d._get_default_group()
+        cpu_be = default_pg._get_backend(torch.device("cpu"))
+        self.assertIsNotNone(cpu_be)
+
+    def test_default_pg_has_cuda_backend(self, device):
+        default_pg = dist.distributed_c10d._get_default_group()
+        cuda_be = default_pg._get_backend(torch.device(torch.device(device).type))
+        self.assertIsNotNone(cuda_be)
+
+    def test_allreduce_on_auto_qualified_pg(self, device):
+        tensor = torch.tensor([self._rank_value], dtype=torch.float32)
+        dist.all_reduce(tensor, group=self.pg)
+        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
+    def test_new_group_from_auto_qualified_parent(self, device):
+        ranks = list(range(self.world_size))
+        ng = dist.new_group(ranks=ranks)
+        tensor = torch.tensor([self._rank_value], dtype=torch.float32)
+        dist.all_reduce(tensor, group=ng)
+        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
+
+    def test_bound_device_id_is_set(self, device):
+        default_pg = dist.distributed_c10d._get_default_group()
+        self.assertIsNotNone(default_pg.bound_device_id)
+        self.assertEqual(default_pg.bound_device_id.type, torch.device(device).type)
+
+    def test_monitored_barrier_on_multi_backend_group(self, device):
+        # A device-bound world reports a multi-backend string from get_backend
+        # (e.g. "cpu:gloo,cuda:nccl"), which is NOT equal to Backend.GLOO. The
+        # relaxed monitored_barrier guard must still accept it under torchcomms
+        # (because it has a CPU-capable backend) and dispatch to the gloo CPU
+        # backend's BackendWrapper::monitoredBarrier, rather than rejecting it
+        # for not being a plain gloo group.
+        backend = dist.get_backend(self.pg)
+        self.assertNotEqual(backend, dist.Backend.GLOO)
+        self.assertIn("gloo", str(backend))
+        # All ranks check in -> the barrier returns cleanly. Reaching past this
+        # call proves the guard accepted the group and the barrier ran.
+        dist.monitored_barrier(
+            group=self.pg,
+            timeout=datetime.timedelta(seconds=30),
+            wait_all_ranks=True,
+        )
+
+    def test_non_torchcomms_backend_falls_through_to_c10d(self, device):
+        # Under torchcomms, a backend TorchComms does not own (registered the way
+        # mooncake registers a custom c10d backend) must route through the normal
+        # ProcessGroup path, not new_comm. Use a gloo-backed stand-in.
+        def _creator(store, grank, gsize, timeout):
+            return dist.ProcessGroupGloo(store, grank, gsize, timeout)
+
+        name = "tc_gate_stub"
+        if name not in dist.Backend.backend_list:
+            dist.Backend.register_backend(name, _creator, devices=["cpu", "cuda"])
+
+        ranks = list(range(self.world_size))
+        g = dist.new_group(ranks=ranks, backend=name)
+        be = g._get_backend(torch.device("cpu"))
+        # The c10d creator ran (real ProcessGroupGloo), not a TorchComms wrapper.
+        self.assertNotIn("BackendWrapper", type(be).__name__)
+        t = torch.tensor([self._rank_value], dtype=torch.float32)
+        dist.all_reduce(t, group=g)
+        self.assertEqual(t.item(), sum(range(1, self.world_size + 1)))
+
+
+instantiate_device_type_tests(
+    TestC10dTorchCommsInitAutoQualify, globals(), allow_xpu=True
+)
+
+
+@unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
+class TestC10dTorchCommsInitAutoQualifyCUDA(C10dTorchCommsTestBase):
+    """CUDA-only auto-qualify tests: backends registered for CUDA devices only.
+
     Overrides ``_init_pg`` to pass ``device_id`` with bare ``"nccl"`` —
     the auto-qualify logic in ``init_process_group`` should expand it to
     ``"cpu:gloo,cuda:nccl"`` so both CPU and CUDA backends are available.
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
@@ -345,52 +470,7 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
     def _rank_value(self):
         return self.rank + 1
 
-    def test_default_pg_has_cpu_backend(self):
-        default_pg = dist.distributed_c10d._get_default_group()
-        cpu_be = default_pg._get_backend(torch.device("cpu"))
-        self.assertIsNotNone(cpu_be)
-
-    def test_default_pg_has_cuda_backend(self):
-        default_pg = dist.distributed_c10d._get_default_group()
-        cuda_be = default_pg._get_backend(torch.device("cuda"))
-        self.assertIsNotNone(cuda_be)
-
-    def test_allreduce_on_auto_qualified_pg(self):
-        tensor = torch.tensor([self._rank_value], dtype=torch.float32)
-        dist.all_reduce(tensor, group=self.pg)
-        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
-
-    def test_new_group_from_auto_qualified_parent(self):
-        ranks = list(range(self.world_size))
-        ng = dist.new_group(ranks=ranks)
-        tensor = torch.tensor([self._rank_value], dtype=torch.float32)
-        dist.all_reduce(tensor, group=ng)
-        self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
-
-    def test_bound_device_id_is_set(self):
-        default_pg = dist.distributed_c10d._get_default_group()
-        self.assertIsNotNone(default_pg.bound_device_id)
-        self.assertEqual(default_pg.bound_device_id.type, "cuda")
-
-    def test_monitored_barrier_on_multi_backend_group(self):
-        # A device-bound world reports a multi-backend string from get_backend
-        # (e.g. "cpu:gloo,cuda:nccl"), which is NOT equal to Backend.GLOO. The
-        # relaxed monitored_barrier guard must still accept it under torchcomms
-        # (because it has a CPU-capable backend) and dispatch to the gloo CPU
-        # backend's BackendWrapper::monitoredBarrier, rather than rejecting it
-        # for not being a plain gloo group.
-        backend = dist.get_backend(self.pg)
-        self.assertNotEqual(backend, dist.Backend.GLOO)
-        self.assertIn("gloo", str(backend))
-        # All ranks check in -> the barrier returns cleanly. Reaching past this
-        # call proves the guard accepted the group and the barrier ran.
-        dist.monitored_barrier(
-            group=self.pg,
-            timeout=datetime.timedelta(seconds=30),
-            wait_all_ranks=True,
-        )
-
-    def test_new_group_nccl_lazy_builds_per_peer_group(self):
+    def test_new_group_nccl_lazy_builds_per_peer_group(self, device):
         # Passing backend="nccl-lazy" builds a per-peer, lazily-initialized
         # group (a dedicated comm + stream per send/recv peer) usable for P2P.
         # use_local_synchronization makes it members-only. The parent must be
@@ -418,29 +498,9 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
             )
         self.assertEqual(r[0].item(), float(recv_from))
 
-    def test_non_torchcomms_backend_falls_through_to_c10d(self):
-        # Under torchcomms, a backend TorchComms does not own (registered the way
-        # mooncake registers a custom c10d backend) must route through the normal
-        # ProcessGroup path, not new_comm. Use a gloo-backed stand-in.
-        def _creator(store, grank, gsize, timeout):
-            return dist.ProcessGroupGloo(store, grank, gsize, timeout)
-
-        name = "tc_gate_stub"
-        if name not in dist.Backend.backend_list:
-            dist.Backend.register_backend(name, _creator, devices=["cpu", "cuda"])
-
-        ranks = list(range(self.world_size))
-        g = dist.new_group(ranks=ranks, backend=name)
-        be = g._get_backend(torch.device("cpu"))
-        # The c10d creator ran (real ProcessGroupGloo), not a TorchComms wrapper.
-        self.assertNotIn("BackendWrapper", type(be).__name__)
-        t = torch.tensor([self._rank_value], dtype=torch.float32)
-        dist.all_reduce(t, group=g)
-        self.assertEqual(t.item(), sum(range(1, self.world_size + 1)))
-
 
 instantiate_device_type_tests(
-    TestC10dTorchCommsInitAutoQualify, globals(), only_for=["cuda"]
+    TestC10dTorchCommsInitAutoQualifyCUDA, globals(), only_for=["cuda"]
 )
 
 
@@ -454,6 +514,8 @@ class TestC10dTorchCommsMixedBackends(C10dTorchCommsTestBase):
     ``cpu:fake``) is no obstacle: members construct the subgroup and non-members
     return ``NON_GROUP_MEMBER`` without any parent split.
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
@@ -483,7 +545,7 @@ class TestC10dTorchCommsMixedBackends(C10dTorchCommsTestBase):
     def _rank_value(self):
         return self.rank + 1
 
-    def test_mixed_backend_subgroup(self):
+    def test_mixed_backend_subgroup(self, device):
         subg_ranks = list(range(self.world_size // 2))
         ng = dist.new_group(ranks=subg_ranks)
 
@@ -512,6 +574,8 @@ class TestTorchCommsHandlesBackend(TestCase):
     when torchcomms is not installed.
     """
 
+    hw_classification = HardwareClassification.CUDA
+
     def _patch(self, available=True, built=(), registered=()):
         built, registered = set(built), set(registered)
         return mock.patch.multiple(
@@ -522,33 +586,33 @@ class TestTorchCommsHandlesBackend(TestCase):
             create=True,
         )
 
-    def test_unavailable_returns_false(self):
+    def test_unavailable_returns_false(self, device):
         with self._patch(available=False, built=["nccl"]):
             self.assertFalse(c10d._torchcomms_handles_backend("nccl"))
             self.assertFalse(c10d._torchcomms_handles_backend(None))
 
-    def test_none_backend_inherits_parent(self):
+    def test_none_backend_inherits_parent(self, device):
         with self._patch(built=[]):
             self.assertTrue(c10d._torchcomms_handles_backend(None))
 
-    def test_builtin_backend(self):
+    def test_builtin_backend(self, device):
         with self._patch(built=["nccl"]):
             self.assertTrue(c10d._torchcomms_handles_backend("nccl"))
 
-    def test_registered_backend(self):
+    def test_registered_backend(self, device):
         with self._patch(registered=["myadapter"]):
             self.assertTrue(c10d._torchcomms_handles_backend("myadapter"))
 
-    def test_custom_backend_falls_through(self):
+    def test_custom_backend_falls_through(self, device):
         with self._patch(built=["nccl"]):
             self.assertFalse(c10d._torchcomms_handles_backend("mooncake"))
             self.assertFalse(c10d._torchcomms_handles_backend("ucc"))
 
-    def test_case_insensitive(self):
+    def test_case_insensitive(self, device):
         with self._patch(built=["nccl"]):
             self.assertTrue(c10d._torchcomms_handles_backend("NCCL"))
 
-    def test_nccl_lazy_is_own_backend(self):
+    def test_nccl_lazy_is_own_backend(self, device):
         # nccl-lazy is a distinct built torchcomms backend, not aliased to nccl:
         # it is handled iff nccl-lazy itself is built/registered.
         with self._patch(built=["nccl-lazy"]):
@@ -558,18 +622,23 @@ class TestTorchCommsHandlesBackend(TestCase):
         with self._patch(built=[]):
             self.assertFalse(c10d._torchcomms_handles_backend("nccl-lazy"))
 
-    def test_qualified_all_handled(self):
+    def test_qualified_all_handled(self, device):
         with self._patch(built=["gloo", "nccl"]):
             self.assertTrue(c10d._torchcomms_handles_backend("cpu:gloo,cuda:nccl"))
 
-    def test_qualified_one_unhandled_falls_through(self):
+    def test_qualified_one_unhandled_falls_through(self, device):
         with self._patch(built=["gloo"]):
             self.assertFalse(c10d._torchcomms_handles_backend("cpu:gloo,cuda:mooncake"))
 
-    def test_empty_parts_are_skipped(self):
+    def test_empty_parts_are_skipped(self, device):
         with self._patch(built=["nccl"]):
             self.assertTrue(c10d._torchcomms_handles_backend("nccl,"))
             self.assertTrue(c10d._torchcomms_handles_backend(" nccl , "))
+
+
+instantiate_device_type_tests(
+    TestTorchCommsHandlesBackend, globals(), only_for=["cuda"]
+)
 
 
 class TestC10dTorchCommsNewGroupHelper(TestCase):
@@ -583,6 +652,8 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
     TorchComms. Everything TorchComms-specific is patched (``create=True``), so
     these run even when TorchComms is not installed.
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     TIMEOUT = datetime.timedelta(seconds=30)
 
@@ -623,7 +694,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
                 )
         return captured
 
-    def test_new_comm_gets_indexed_device_id(self):
+    def test_new_comm_gets_indexed_device_id(self, device):
         # A subgroup's group-local rank differs from the rank's physical device,
         # so new_comm must receive device_id (WITH index), not a device-type-only
         # device. group_rank (2) deliberately differs from the device index (3).
@@ -635,7 +706,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         )
         self.assertEqual(cap["device"], torch.device("cuda:3"))
 
-    def test_new_comm_device_type_mismatch_not_overridden(self):
+    def test_new_comm_device_type_mismatch_not_overridden(self, device):
         # gloo maps to the cpu device; device_id is a cuda device, so the type
         # guard must leave cpu alone rather than substituting cuda:3.
         cap = self._drive_member(
@@ -646,7 +717,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         )
         self.assertEqual(cap["device"], torch.device("cpu"))
 
-    def test_new_comm_without_device_id_keeps_type_only_device(self):
+    def test_new_comm_without_device_id_keeps_type_only_device(self, device):
         # World-group path: no device_id bound, so the guard must not fire and
         # new_comm gets the device-type-only device from the backend map.
         cap = self._drive_member(
@@ -657,7 +728,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         )
         self.assertEqual(cap["device"], torch.device("cuda"))
 
-    def test_torchcomm_rank_size_seeded_from_group(self):
+    def test_torchcomm_rank_size_seeded_from_group(self, device):
         cap = self._drive_member(
             backend="nccl",
             device_id=torch.device("cuda:1"),
@@ -667,7 +738,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         self.assertEqual(cap["rank_env"], "2")
         self.assertEqual(cap["size_env"], "7")
 
-    def test_torchcomm_rank_size_restored_after_call(self):
+    def test_torchcomm_rank_size_restored_after_call(self, device):
         saved = {k: os.environ.get(k) for k in ("TORCHCOMM_RANK", "TORCHCOMM_SIZE")}
         try:
             for k in ("TORCHCOMM_RANK", "TORCHCOMM_SIZE"):
@@ -728,17 +799,22 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
             )
         return res, split_src
 
-    def test_non_member_skips_nocolor_split_under_torchcomms(self):
+    def test_non_member_skips_nocolor_split_under_torchcomms(self, device):
         res, split_src = self._drive_non_member(torchcomms_enabled=True)
         self.assertEqual(res, (dist.GroupMember.NON_GROUP_MEMBER, None))
         split_src.perform_nocolor_split.assert_not_called()
 
-    def test_non_member_performs_nocolor_split_without_torchcomms(self):
+    def test_non_member_performs_nocolor_split_without_torchcomms(self, device):
         # Contrast: with TorchComms disabled the NCCL-style path still requires
         # non-members to issue the no-color split to stay in sync.
         res, split_src = self._drive_non_member(torchcomms_enabled=False)
         self.assertEqual(res, (dist.GroupMember.NON_GROUP_MEMBER, None))
         split_src.perform_nocolor_split.assert_called_once_with(torch.device("cuda:0"))
+
+
+instantiate_device_type_tests(
+    TestC10dTorchCommsNewGroupHelper, globals(), only_for=["cuda"]
+)
 
 
 class TestC10dGroupNameHashSalt(TestCase):
@@ -757,6 +833,8 @@ class TestC10dGroupNameHashSalt(TestCase):
     before the membership check, on BOTH the hashed and non-hashed paths.
     """
 
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         self._saved_group_count = c10d._world.group_count
@@ -773,7 +851,7 @@ class TestC10dGroupNameHashSalt(TestCase):
         for i in range(n):
             c10d._world.pg_names[object()] = c10d.GroupName(f"dummy_{i}")
 
-    def test_hash_salt_uses_group_count(self):
+    def test_hash_salt_uses_group_count(self, device):
         # Same ranks, different group_count -> different name (salt is live).
         ranks = [0, 1, 2, 3]
         c10d._world.group_count = 5
@@ -782,7 +860,7 @@ class TestC10dGroupNameHashSalt(TestCase):
         name_b = c10d._hash_ranks_to_str(ranks)
         self.assertNotEqual(name_a, name_b)
 
-    def test_hash_independent_of_pg_names_length(self):
+    def test_hash_independent_of_pg_names_length(self, device):
         # ROOT-CAUSE regression: the hash must NOT depend on len(_world.pg_names),
         # the quantity that diverges across ranks under asymmetric membership.
         ranks = [0, 1, 2, 3]
@@ -793,7 +871,7 @@ class TestC10dGroupNameHashSalt(TestCase):
         name_many = c10d._hash_ranks_to_str(ranks)
         self.assertEqual(name_few, name_many)
 
-    def test_two_asymmetric_ranks_agree_on_name(self):
+    def test_two_asymmetric_ranks_agree_on_name(self, device):
         # The deadlock scenario end-to-end through _process_group_name: two ranks
         # that made the SAME sequence of group-creation calls (equal group_count)
         # but registered a DIFFERENT number of PGs must compute the same name.
@@ -810,23 +888,23 @@ class TestC10dGroupNameHashSalt(TestCase):
         name_non_member = c10d._process_group_name(ranks, use_hashed_name=True)
         self.assertEqual(name_member, name_non_member)
 
-    def test_process_group_name_increments_on_hashed_path(self):
+    def test_process_group_name_increments_on_hashed_path(self, device):
         c10d._world.group_count = 10
         c10d._process_group_name([0, 1], use_hashed_name=True)
         self.assertEqual(c10d._world.group_count, 11)
 
-    def test_process_group_name_increments_on_nonhashed_path(self):
+    def test_process_group_name_increments_on_nonhashed_path(self, device):
         c10d._world.group_count = 20
         c10d._process_group_name([0, 1], use_hashed_name=False)
         self.assertEqual(c10d._world.group_count, 21)
 
-    def test_nonhashed_name_is_group_count_before_increment(self):
+    def test_nonhashed_name_is_group_count_before_increment(self, device):
         c10d._world.group_count = 42
         name = c10d._process_group_name([0, 1], use_hashed_name=False)
         self.assertEqual(name, "42")
         self.assertEqual(c10d._world.group_count, 43)
 
-    def test_repeated_hashed_same_ranks_get_distinct_names(self):
+    def test_repeated_hashed_same_ranks_get_distinct_names(self, device):
         # Two distinct PGs over identical ranks must get distinct names; the salt
         # advancing on the hashed path (fixed by this commit) is what
         # disambiguates them. Before the fix the hashed path left group_count
@@ -866,6 +944,9 @@ class _FakeOtherBackend:
     """A c10d backend that is not a _BackendWrapper (must be left untouched)."""
 
 
+instantiate_device_type_tests(TestC10dGroupNameHashSalt, globals(), only_for=["cuda"])
+
+
 class TestC10dTorchCommsDestroyDedup(TestCase):
     """Unit-test the comm-deduplication in ``destroy_process_group``.
 
@@ -875,6 +956,8 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
     is patched (``create=True``), so these run even when TorchComms is not
     installed.
     """
+
+    hw_classification = HardwareClassification.CUDA
 
     _WORLD_ATTRS = (
         "pg_map",
@@ -936,7 +1019,7 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
             c10d.destroy_process_group(pg)
         return pg
 
-    def test_shared_comm_finalized_once(self):
+    def test_shared_comm_finalized_once(self, device):
         # gloo scenario: one _BackendWrapper/comm shared across cuda and cpu.
         comm = _FakeComm()
         wrapper = _FakeBackendWrapper(comm)
@@ -945,7 +1028,7 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
         pg.shutdown.assert_called_once()
         self.assertNotIn(pg, c10d._world.pg_map)
 
-    def test_same_comm_distinct_wrappers_finalized_once(self):
+    def test_same_comm_distinct_wrappers_finalized_once(self, device):
         # Dedup keys on comm identity, not wrapper identity: two distinct
         # _BackendWrapper objects sharing one comm still finalize it once.
         comm = _FakeComm()
@@ -955,7 +1038,7 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
         self.assertEqual(comm.finalize_calls, 1)
         pg.shutdown.assert_called_once()
 
-    def test_distinct_comms_each_finalized_once(self):
+    def test_distinct_comms_each_finalized_once(self, device):
         comm_a, comm_b = _FakeComm(), _FakeComm()
         self._drive_destroy(
             {"cuda": _FakeBackendWrapper(comm_a), "cpu": _FakeBackendWrapper(comm_b)}
@@ -963,7 +1046,7 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
         self.assertEqual(comm_a.finalize_calls, 1)
         self.assertEqual(comm_b.finalize_calls, 1)
 
-    def test_non_backendwrapper_backend_is_skipped(self):
+    def test_non_backendwrapper_backend_is_skipped(self, device):
         # A non-_BackendWrapper backend must not be finalized; the wrapped comm
         # still finalizes exactly once.
         comm = _FakeComm()
@@ -972,7 +1055,7 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
         )
         self.assertEqual(comm.finalize_calls, 1)
 
-    def test_destroy_subgroup_keeps_other_live_comms_tracked(self):
+    def test_destroy_subgroup_keeps_other_live_comms_tracked(self, device):
         world_pg = self._register_pg({}, name="world_pg")
         comm_a, comm_b = _FakeComm(), _FakeComm()
         subgroup_a = self._register_pg(
@@ -1006,8 +1089,17 @@ class TestC10dTorchCommsDestroyDedup(TestCase):
             self.assertEqual(c10d._world.comms, [])
 
 
+instantiate_device_type_tests(
+    TestC10dTorchCommsDestroyDedup, globals(), only_for=["cuda"]
+)
+
+
 class TestC10dTorchCommsBackendConfig(TestCase):
-    def test_registered_device_qualified_torchcomms_backend_uses_custom_type(self):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_registered_device_qualified_torchcomms_backend_uses_custom_type(
+        self, device
+    ):
         backend_name = "tc_test_backend"
         self.assertNotIn(backend_name, dist.Backend.backend_type_map)
 
@@ -1030,6 +1122,7 @@ class TestC10dTorchCommsBackendConfig(TestCase):
 
     def test_unregistered_device_qualified_backend_with_torchcomms_keeps_gloo_type(
         self,
+        device,
     ):
         backend_name = "tc_test_backend"
         self.assertNotIn(backend_name, dist.Backend.backend_type_map)
@@ -1053,6 +1146,7 @@ class TestC10dTorchCommsBackendConfig(TestCase):
 
     def test_registered_device_qualified_backend_without_torchcomms_keeps_gloo_type(
         self,
+        device,
     ):
         backend_name = "tc_test_backend"
         self.assertNotIn(backend_name, dist.Backend.backend_type_map)
@@ -1075,5 +1169,8 @@ class TestC10dTorchCommsBackendConfig(TestCase):
             c10d._torchcomms_is_backend_built = orig_built
 
 
+instantiate_device_type_tests(
+    TestC10dTorchCommsBackendConfig, globals(), only_for=["cuda"]
+)
 if __name__ == "__main__":
     run_tests()
