@@ -6,6 +6,7 @@ from expecttest import assert_expected_inline
 
 import torch
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import MockGraphHandler
 
@@ -72,6 +73,12 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, strea
 class TestCuteDSLTemplate(TestCase):
     """Test cases for CuteDSL template functionality."""
 
+    # dense_gemm_efc imports cutlass.operators, which ships in a separate
+    # package that smoke_b200 cannot install (see TODO(#189590) in test.sh).
+    @unittest.skipIf(
+        not ensure_nv_universal_gemm_available(),
+        "NVIDIA Universal GEMM (cutlass_api) library not available",
+    )
     def test_vendored_dense_efc_kernel_configuration(self):
         from cutlass.cute.nvgpu import tcgen05
         from cutlass.operators.providers.cutedsl.evt.converter import EFCConverter
