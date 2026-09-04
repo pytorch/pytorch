@@ -212,9 +212,7 @@ class TestCodegenMutationEpilogue(TestCase):
         self.assertIn(f"[{cid}]", str(cm.warning))
         self.assertEqual(len(captured), 1)
         calls = re.findall(r"_replay_input_mutation\((.*)\)", captured[0])
-        expected = (
-            f"orig_inputs[1], updated_inputs[0], 1, {cid!r}, _warned_inputs, False"
-        )
+        expected = f"orig_inputs[1], updated_inputs[0], 1, {cid!r}, _warned_inputs, False, False"
         self.assertEqual(calls, [expected])
 
         y_ref = self._custom_function_view(data.clone().requires_grad_() * 1.0)
@@ -261,7 +259,9 @@ class TestCodegenMutationEpilogue(TestCase):
         self.assertEqual(a._version, version + 1)
         self.assertEqual(len(captured), 1)
         calls = re.findall(r"else: _replay_input_mutation\((.*)\)", captured[0])
-        expected = "orig_inputs[0], updated_inputs[0], 0, None, _warned_inputs, False"
+        expected = (
+            "orig_inputs[0], updated_inputs[0], 0, None, _warned_inputs, False, False"
+        )
         self.assertEqual(calls, [expected])
 
         (reference,) = epilogues

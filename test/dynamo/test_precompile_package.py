@@ -4,6 +4,7 @@ import contextlib
 import copy
 import dataclasses
 import functools
+import gc
 import importlib
 import inspect
 import itertools
@@ -16,6 +17,7 @@ import sysconfig
 import textwrap
 import threading
 import types
+import unittest
 from unittest import mock
 
 import torch
@@ -34,15 +36,21 @@ from torch._dynamo.package import (
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.precompile_package import (
+    _compose_with_default,
     _dynamo_alias_module,
     _fact_order,
     _GuardFact,
+    _normalize,
     _SingleFileStore,
+    default_guard_filter_fn,
     precompile_capture,
     serving,
+    varying_guard_slots,
 )
+from torch._dynamo.types import GuardFilterEntry
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.compiler._precompile_types import PrecompileSummary
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -504,6 +512,28 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(module.__dict__.get("g"), want)
         self.assertEqual(dynamo_package._GLOBAL_BINDINGS.get(module, {}), {})
 
+    def test_joining_a_dead_owners_binding_survives_its_cleanup(self):
+        # A package collected without uninstall() parks its cleanup when the
+        # registry lock is busy. A later install of the same artifact writes the
+        # same builtins dict under the same name; the drain must find the new
+        # owner on the binding and keep the name, not delete it as the dead
+        # package's leftover.
+        module = types.ModuleType("test_precompile_dead_owner")
+        shared = {}
+        dead = self._bare_package()
+        dead._install_global(module, "g", shared)
+        installed = dead._installed_globals
+        del dead
+        gc.collect()
+        dynamo_package._DEAD_PACKAGES.append(
+            dynamo_package._DeadPackageState(installed, [])
+        )
+        live = self._bare_package()
+        live._install_global(module, "g", shared)
+        self.assertIs(module.__dict__.get("g"), shared)
+        live.uninstall()
+        self.assertNotIn("g", module.__dict__)
+
     def test_source_graph_module_copies_are_isolated(self):
         # _src and the exec'd forward are shared between copies; everything else
         # nn.Module keeps on an instance is state, hook dicts included, and a
@@ -536,8 +566,55 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(original(x), x + 100)
         self.assertEqual(dup(x), x + 1)  # live isolation
         self.assertEqual(pickle.loads(pickle.dumps(dup))(x), x + 1)
-        # And an instance pickles its CURRENT state, not its load-time state.
+        # And an instance pickles its CURRENT parameters/buffers/submodules,
+        # not its load-time ones (other nn.Module state still comes from _src).
         self.assertEqual(pickle.loads(pickle.dumps(original))(x), x + 100)
+
+    def test_eager_artifact_round_trips_a_hop_graph_as_source(self):
+        # GraphModule.__reduce__ re-traces the generated source at load; cond
+        # rejects the Proxy and autocast enter/exit EXECUTE and leave no node.
+        # The top level must travel as source, its HOP bodies as real Graphs.
+        from torch._dynamo.precompile_context import (
+            _SourceGraphModule,
+            EagerCacheArtifact,
+        )
+
+        def fn(x):
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                y = torch.cond(x.sum() > 0, lambda t: t.sin(), lambda t: t.cos(), (x,))
+            return y + 1
+
+        gms = []
+
+        def backend(gm, example_inputs):
+            gms.append(gm)
+            return gm.forward
+
+        x = torch.randn(3)
+        torch.compile(fn, backend=backend, fullgraph=True)(x)
+        (gm,) = gms
+        artifact = EagerCacheArtifact(key="k", content=gm.forward)
+        loaded = pickle.loads(pickle.dumps(artifact)).after_deserialization()
+        module = loaded.__self__
+        self.assertIsInstance(module, _SourceGraphModule)
+        self.assertFalse(hasattr(module, "graph"))
+        self.assertTrue(module._modules)
+        for sub in module._modules.values():
+            self.assertIsInstance(sub, torch.fx.GraphModule)
+            self.assertGreater(len(sub.graph.nodes), 0)
+        self.assertEqual(loaded(x), gm.forward(x))
+        self.assertEqual(loaded(-x.abs()), gm.forward(-x.abs()))
+        # Re-serializing a loaded artifact goes through _SourceGraphModule.__reduce__.
+        reloaded = pickle.loads(pickle.dumps(pickle.loads(pickle.dumps(artifact))))
+        self.assertEqual(reloaded.after_deserialization()(x), gm.forward(x))
+
+    def test_take_artifact_removes_the_staged_backend(self):
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+
+        PrecompileContext.record_artifact(EagerCacheArtifact(key="k", content=None))
+        self.assertEqual(PrecompileContext.take_artifact("k").key, "k")
+        self.assertIsNone(PrecompileContext.take_artifact("k"))
+        self.assertIsNone(PrecompileContext.serialize_artifact_by_key("k"))
 
     def test_library_module_requires_the_name_to_resolve_to_the_stdlib(self):
         # The risky-drop waiver keys on the OWNER's module name, and a name is
@@ -628,9 +705,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             )
 
     def test_guard_policy_classification_is_total(self):
-        # survives() defaults to KEEP for a guard type in no set, so the
-        # policy can only ever drop what _INVARIANT_DROPPABLE_GUARD_TYPES
-        # names. This test is what makes the never-drop claim enforceable:
+        # A guard type in no set is KEPT, so a drop policy can only ever
+        # drop what _INVARIANT_DROPPABLE_GUARD_TYPES names. This test is
+        # what makes the never-drop claim enforceable:
         # a guard type added to GuardBuilder fails here until someone triages
         # it into exactly one of the four sets.
         from torch._dynamo.guards import GuardBuilder
@@ -667,6 +744,82 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         for (a_name, a), (b_name, b) in itertools.combinations(sets.items(), 2):
             self.assertEqual(sorted(a & b), [], f"{a_name} overlaps {b_name}")
+
+    def test_varying_guard_slots_counts_presence_as_variation(self):
+        def fact(guard_type, source, value):
+            return _GuardFact(guard_type, source, (), value, True)
+
+        both = fact("TENSOR_MATCH", "x", "shape=(4,)")
+        differs_a = fact("CONSTANT_MATCH", "n", "1")
+        differs_b = fact("CONSTANT_MATCH", "n", "2")
+        only_one = fact("ID_MATCH", "G['fn']", "is m.f")
+        guard_sets = {
+            ("f", "f.py", 1): [
+                frozenset({both, differs_a, only_one}),
+                frozenset({both, differs_b}),
+            ]
+        }
+        self.assertEqual(
+            varying_guard_slots(guard_sets),
+            frozenset({("CONSTANT_MATCH", "n"), ("ID_MATCH", "G['fn']")}),
+        )
+
+    def test_composed_guard_filter_ands_with_the_default_and_checks_length(self):
+        def entry(guard_type, derived=()):
+            return GuardFilterEntry(
+                name="x",
+                has_value=False,
+                value=None,
+                guard_type=guard_type,
+                derived_guard_types=tuple(derived),
+                is_global=False,
+                orig_guard=None,
+            )
+
+        entries = [
+            entry("TENSOR_MATCH"),
+            entry("ID_MATCH"),
+            entry("TYPE_MATCH", ["NN_MODULE"]),
+        ]
+        self.assertEqual(default_guard_filter_fn(entries), [True, False, False])
+        drop_first = _compose_with_default(lambda es: [False] + [True] * (len(es) - 1))
+        self.assertEqual(drop_first(entries), [False, False, False])
+        with self.assertRaisesRegex(ValueError, "returned 1 decisions for 3 guards"):
+            _compose_with_default(lambda es: [True])(entries)
+
+    def test_summary_is_incomplete_without_a_backend_graph(self):
+        def summary(**kw):
+            base = dict(
+                frames=1,
+                resume_functions=0,
+                guarded_codes=1,
+                backend_graphs=1,
+                bypassed=(),
+            )
+            base.update(kw)
+            return PrecompileSummary(**base)
+
+        self.assertTrue(summary().complete)
+        self.assertFalse(summary(backend_graphs=0).complete)
+        self.assertFalse(summary(guarded_codes=0).complete)
+        self.assertFalse(summary(capture_errors=("boom",)).complete)
+
+    def test_normalize_scrubs_addresses_and_compile_counters(self):
+        self.assertEqual(
+            _normalize(
+                "___check_obj_id(G['fn'], 140234567890123), type=<class 'function'>"
+            ),
+            "___check_obj_id(G['fn'], <id>), type=<class 'function'>",
+        )
+        self.assertEqual(
+            _normalize("G['__builtins_dict___6']['len']"),
+            "G['__builtins_dict___<n>']['len']",
+        )
+        self.assertEqual(_normalize("__compiled_fn_3_0"), "__compiled_fn_<n>")
+        self.assertEqual(
+            _normalize("G['__tmp_140234567890123_c7']"), "G['__tmp_<id>_c<n>']"
+        )
+        self.assertEqual(_normalize("x[1234567890]"), "x[1234567890]")
 
     def test_subgraph_renaming_leaves_lookalikes_alone(self):
         # Per-subgraph renaming is driven by AST positions. An attribute
@@ -810,6 +963,27 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with self.assertRaisesRegex(PackageError, "captured no compiled code"):
             session.save(self.path())
 
+    def test_save_refuses_capture_that_compiled_no_graph(self):
+        # allow_empty_graphs turns a frame that compiled nothing into one guarded
+        # code, so guarded_codes alone cannot tell this from a real capture.
+        @torch._dynamo.disable
+        def body(x):
+            return x.sin()
+
+        def outer(x):
+            return body(x)
+
+        session = self._capture(outer, torch.randn(4))
+        summary = session.summary()
+        self.assertGreater(summary.guarded_codes, 0)
+        self.assertEqual(summary.backend_graphs, 0)
+        self.assertFalse(summary.complete)
+        with self.assertRaisesRegex(PackageError, "compiled no graph"):
+            session.save(self.path())
+        with self.assertRaisesRegex(PackageError, "compiled no graph"):
+            session.artifact()
+        session.save(self.path(), require_complete=False)
+
     def test_truncation_report_is_a_lower_bound(self):
         # Hitting recompile_limit sets FrameExecStrategy(RUN_ONLY, RUN_ONLY),
         # whose recursive half silences every frame called beneath the offender,
@@ -905,9 +1079,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         package.uninstall()
 
     def test_inductor_artifact_records_compile_time_cpu_target(self):
+        from torch._inductor import cpu_vec_isa
+
+        isa = cpu_vec_isa.pick_vec_isa()
+        if not isa:
+            raise unittest.SkipTest("no vector ISA on this host")
         model = PrecompileEmptyGraph()
         x = torch.randn(16)
-        with torch._inductor.config.patch({"cpp.simdlen": 256}):
+        with torch._inductor.config.patch({"cpp.simdlen": isa.bit_width()}):
             session = precompile_capture(
                 model,
                 backend="inductor",
@@ -920,7 +1099,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         session.save(self.path())
         saved = _SingleFileStore().read(self.path()).dynamo.system_info
 
-        self.assertEqual(capture_target.cpu_codegen_target[2], 256)
+        self.assertEqual(capture_target.cpu_codegen_target[2], isa.bit_width())
         self.assertEqual(saved.cpu_codegen_target, capture_target.cpu_codegen_target)
 
     @torch._dynamo.config.patch(caching_precompile=True)
