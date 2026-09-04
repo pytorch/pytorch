@@ -1073,11 +1073,42 @@ deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
 batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 
-# Use eager's opt-in INNER_TREE order for eligible NVIDIA CUDA sums.
+# Use eager-compatible math settings and INNER_TREE ordering for eligible CUDA reductions.
 # pyrefly: ignore [bad-assignment]
 numerics: Literal["default", "strict"] = os.environ.get(
     "TORCHINDUCTOR_NUMERICS", "default"
 )  # type: ignore[assignment]
+
+
+def _current_config() -> Any:
+    return cast(Any, sys.modules[__name__])
+
+
+def use_eager_division_rounding() -> bool:
+    config = _current_config()
+    return config.numerics == "strict" or config.eager_numerics.division_rounding
+
+
+def should_disable_ftz() -> bool:
+    config = _current_config()
+    return config.numerics == "strict" or config.eager_numerics.disable_ftz
+
+
+def should_emulate_precision_casts() -> bool:
+    config = _current_config()
+    return config.numerics == "strict" or config.emulate_precision_casts
+
+
+def should_use_pytorch_libdevice() -> bool:
+    config = _current_config()
+    # Whether codegen should call into the CUDA toolkit's libdevice (e.g. libdevice.log)
+    # instead of Triton's approximate math, so transcendentals match eager. Strict
+    # numerics needs this; it can also be requested directly via the eager_numerics flag.
+    # (compile_tasks.py selects WHICH libdevice file is linked; this controls WHETHER
+    # codegen calls into it.) Gated on strict only, to leave standalone
+    # emulate_precision_casts=True users unchanged.
+    return config.numerics == "strict" or config.eager_numerics.use_pytorch_libdevice
+
 
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
@@ -3191,8 +3222,9 @@ class eager_numerics:
     # (0.5 * x * (1 + erf(x * sqrt(0.5)))) where a 1 ULP change in erf output
     # can flip the result of a subsequent ceil(log2(...)) and produce a
     # different uint8 encoded value (see gh-178045).
-    # This can be enabled directly; Inductor also enables it while
-    # emulate_precision_casts is active.
+    # This flag can be enabled directly. numerics="strict" does not set it; it takes
+    # the same codegen path via config.should_use_pytorch_libdevice(), which is what
+    # callers should read rather than this flag.
     use_pytorch_libdevice: bool = False
 
 

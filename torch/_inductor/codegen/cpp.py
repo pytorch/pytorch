@@ -672,7 +672,7 @@ class CppOverrides(OpOverrides):
             use_compute_types
             and dtype in DTYPE_LOWP_FP
             and src_dtype == torch.float
-            and not config.emulate_precision_casts
+            and not config.should_emulate_precision_casts()
         ):
             """
             https://github.com/pytorch/pytorch/issues/115260
@@ -725,7 +725,7 @@ class CppOverrides(OpOverrides):
         if (
             dtype in DTYPE_LOWP_FP
             and src_dtype == torch.float
-            and not config.emulate_precision_casts
+            and not config.should_emulate_precision_casts()
         ):
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
@@ -1786,7 +1786,7 @@ class CppVecOverrides(CppOverrides):
             use_compute_types
             and dtype in DTYPE_LOWP_FP
             and src_dtype == torch.float
-            and not config.emulate_precision_casts
+            and not config.should_emulate_precision_casts()
         ):
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
@@ -1808,7 +1808,7 @@ class CppVecOverrides(CppOverrides):
         if (
             dtype in DTYPE_LOWP_FP
             and src_dtype == torch.float
-            and not config.emulate_precision_casts
+            and not config.should_emulate_precision_casts()
         ):
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
