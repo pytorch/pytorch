@@ -120,7 +120,7 @@ class FunctionPicklerBase(pickle.Pickler):
     decides what a rebuilt function carries; this class fixes HOW it is rebuilt
     so a fix in one pickler cannot be missed in the other.
 
-    Defaults, __dict__, and the globals snapshot travel as pickle STATE, applied
+    Defaults, __doc__, __dict__, and the globals snapshot travel as pickle STATE, applied
     after memoization, so `wrapper.me = wrapper` and module-scope cycles end.
     A closure cell is a reduce ARGUMENT: a function closing over itself is
     reduced twice, and save_reduce's recursive-object fallback (present in both
@@ -203,9 +203,12 @@ class FunctionPicklerBase(pickle.Pickler):
 
     @staticmethod
     def _apply_function_state(fn: types.FunctionType, state: tuple[Any, ...]) -> None:
-        defaults, kwdefaults, attributes, globals_snapshot = state
+        defaults, kwdefaults, attributes, globals_snapshot, doc = state
         fn.__defaults__ = defaults
         fn.__kwdefaults__ = kwdefaults
+        # FunctionType took __doc__ from the code object; functools.wraps
+        # overwrote it on the live function, and a guard rooted there rebakes.
+        fn.__doc__ = doc
         fn.__dict__.update(attributes)
         if globals_snapshot is not None:
             fn.__globals__.update(globals_snapshot)
@@ -252,7 +255,7 @@ class FunctionPicklerBase(pickle.Pickler):
             unpickle = type(self)._unpickle_fn_from_module
         else:
             unpickle = type(self)._unpickle_fn_from_snapshot
-        state = (defaults, kwdefaults, attributes, globals_snapshot)
+        state = (defaults, kwdefaults, attributes, globals_snapshot, fn.__doc__)
         return unpickle, args, state, None, None, type(self)._apply_function_state
 
 

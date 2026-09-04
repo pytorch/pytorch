@@ -3,7 +3,6 @@
 
 #include <ATen/core/IListRef.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
 
 #include <c10/util/irange.h>
@@ -261,9 +260,6 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   generation_ = other->generation_;
   view_metas_ = other->view_metas_;
   is_symbolic_ = other->is_symbolic_;
-  // Must travel with view_metas_: the flag describes that chain, and
-  // _functionalize_is_multi_output_view reports it to AOTAutograd.
-  is_multi_output_view_ = other->is_multi_output_view_;
   // FREEZE the old storage, preventing mutations to it.
   // this is a huge pain to handle properly in all cases, so we ban it.
   functional_storage_impl()->freeze();
@@ -800,12 +796,6 @@ Tensor apply_view_meta_sequence(
   Tensor r = base;
   for (auto& vm : sequence) {
     r = vm->forward(r);
-    if (vm->is_multi_output && at::impl::HasVariableHooks()) {
-      // See [Note: multi-output view replay]. `forward` rebuilt this output as
-      // a single-output view, so autograd does not know it came from an op
-      // returning several views and would let the user mutate it in place.
-      at::impl::GetVariableHooks()->mark_multi_output_view(r);
-    }
   }
   return r;
 }
