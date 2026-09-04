@@ -5,6 +5,8 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Pool.h>
 
+#include <limits>
+
 namespace at::native {
 
 inline void check_max_pool1d(
@@ -39,6 +41,18 @@ inline void check_max_pool1d(
   if (stride.empty()) {
     stride = kernel_size;
   }
+
+  const auto check_int_range = [](int64_t value, const char* name) {
+    TORCH_CHECK(
+        value <= std::numeric_limits<int>::max(),
+        "max_pool1d() ",
+        name,
+        " causes integer overflow because it cannot be represented as int, but got ",
+        value);
+  };
+  check_int_range(kernel_size[0], "kernel_size");
+  check_int_range(stride[0], "stride");
+  check_int_range(dilation[0], "dilation");
 
   TORCH_CHECK(
       kernel_size[0] > 0,
