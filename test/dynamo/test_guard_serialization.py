@@ -295,6 +295,22 @@ def _none_cell_base(x):
 NONE_CELL_WRAPPED = none_cell_wrapper(_none_cell_base)
 
 
+def _doc_base(x):
+    """base doc"""
+    return x * 2
+
+
+def doc_wrapper(func):
+    @functools.wraps(func)
+    def wrapper(x):
+        return func(x)
+
+    return wrapper
+
+
+DOC_WRAPPED = doc_wrapper(_doc_base)
+
+
 class UnpicklableGuardedDefault:
     def __init__(self):
         self.flag = 2.0
@@ -886,11 +902,31 @@ class _HolderWithGenerators:
         self.cfg = {"a": 1}
 
 
+class _PipelineWithSetstate:
+    def __init__(self):
+        self.stages = ["a", "b"]
+        self.n = len(self.stages)
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.n = len(self.stages)
+
+
 class _PrecompileLockHolder:
     """Local classes cannot be packaged, so the lock fixture lives here."""
 
 
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
+    def test_guarded_object_with_a_custom_setstate_is_pickled_whole(self):
+        # Attribute pruning assumes the default pickle protocol; a __setstate__
+        # that recomputes a field from an unguarded one would read _Missing.
+        p = _PipelineWithSetstate()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(p): p}, {}, {}, buf).dump({"p": p})
+        out = torch._dynamo.package.load_guards_state(buf.getvalue())
+        self.assertEqual(out["p"].stages, ["a", "b"])
+        self.assertEqual(out["p"].n, 2)
+
     # Pickler-level: these drive GuardsStatePickler directly rather than
     # through a capture, so none of TestGuardSerialization's setup applies.
 
@@ -1166,14 +1202,19 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         state.output_graph = _Scope()
         state.output_graph.local_scope = {"x": _Scope()}
         state.output_graph.global_scope = {"g": _Scope()}
+        from torch._guards import GuardsSet
+
         internal = _Scope()
         internal.lock = threading.RLock()
-        state.output_graph.guards = [internal]
+        # The real shape: a GuardsSet wrapping an OrderedSet, which the walk
+        # has to descend like a list.
+        state.output_graph._guards = GuardsSet()
+        state.output_graph._guards.inner.add(internal)
 
         roots = _scope_roots(state.output_graph)
         self.assertEqual(len(roots), 2)
         self.assertIn(
-            "state.output_graph.guards[0].lock",
+            "state.output_graph._guards.inner[0].lock",
             _offending_value_path(state, internal.lock, roots),
         )
 
@@ -1181,7 +1222,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # rooting at state does not make the common report worse.
         shared = threading.RLock()
         state.output_graph.local_scope["x"].it = shared
-        state.output_graph.guards.append(shared)
+        state.output_graph._guards.inner.add(shared)
         self.assertIn(
             "local_scope['x'].it",
             _offending_value_path(state, shared, _scope_roots(state.output_graph)),
@@ -1258,6 +1299,39 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsInstance(back.installed, _Missing)
         # Everything around it survives, which is the point: the frame is kept.
         self.assertEqual(back.scale, 2.0)
+
+    def test_subclass_grad_survives_pickle(self):
+        # reducer_override rebuilds a wrapper subclass without its .grad, so a
+        # guard chained through L['p'].grad loaded against None. Carry grad in
+        # the state dict when the tensor owns its own autograd bookkeeping.
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        tt = TwoTensor(torch.randn(3), torch.randn(3)).requires_grad_(True)
+        (tt * 2).sum().backward()
+        grad = tt.grad
+        self.assertIsInstance(grad, TwoTensor)
+        buf = io.BytesIO()
+        gtv = {id(tt): tt, id(grad): grad}
+        GuardsStatePickler(gtv, {}, {}, buf).dump(tt)
+        out = pickle.loads(buf.getvalue())
+        self.assertIsInstance(out.grad, TwoTensor)
+        self.assertEqual(out.grad.shape, grad.shape)
+
+    def test_wrapper_subclass_pickles_twice(self):
+        # The reconstructed tensor IS a subclass that owns FakeTensor-style
+        # bookkeeping, so a second pass must skip the same owned attributes it
+        # skipped the first time rather than try to carry them.
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        tt = TwoTensor(torch.randn(3), torch.randn(3))
+        buf = io.BytesIO()
+        GuardsStatePickler({id(tt): tt}, {}, {}, buf).dump(tt)
+        out = pickle.loads(buf.getvalue())
+        buf2 = io.BytesIO()
+        gtv = {id(out): out, id(type(out)): type(out)}
+        GuardsStatePickler(gtv, {}, {}, buf2).dump(out)
+        again = pickle.loads(buf2.getvalue())
+        self.assertIsInstance(again, TwoTensor)
 
     def test_live_guard_leaf_recording_is_thread_scoped(self):
         # A torch.compile on another thread must neither record into a
@@ -1393,6 +1467,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
         finally:
             cell.cell_contents = None
+
+    def test_guard_rooted_at_wrapper_preserves_copied_doc(self):
+        # functools.wraps copies the wrapped function's __doc__ onto a wrapper
+        # whose own code object has none. Rebuilt from the code object alone
+        # the wrapper reads None, the EQUALS_MATCH rebakes against it at load,
+        # and the guard fails forever with no load error.
+        def fn(x):
+            if DOC_WRAPPED.__doc__ == "base doc":
+                x = x + 1
+            return DOC_WRAPPED(x)
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+        DOC_WRAPPED.__doc__ = "other"
+        try:
+            self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, False)
+        finally:
+            DOC_WRAPPED.__doc__ = "base doc"
 
     def test_fqn_mismatched_function_rejects_a_new_global(self):
         # len(func.__globals__) installs SEQUENCE_LENGTH (derived
@@ -1601,6 +1693,22 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(
             ref, loaded, {"x": TwoTensor(torch.randn(3), torch.randn(3))}, False
         )
+
+    def test_tensor_subclass_grad_is_guarded_through(self):
+        # A guard rooted at L['x'].grad reads the outer subclass's own grad,
+        # which reducer_override rebuilt as None -- so the reloaded guard
+        # matched against None and rejected every real input. The grad has to
+        # travel in the carried state.
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        def f(x: torch.Tensor):
+            return x + x.grad
+
+        tt = TwoTensor(torch.randn(3), torch.randn(3)).requires_grad_(True)
+        (tt * 2).sum().backward()
+        self.assertIsInstance(tt.grad, TwoTensor)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", f, tt)
+        self._test_check_fn(ref, loaded, {"x": tt}, True)
 
     def test_tensor_match_through_a_python_attribute(self):
         # A tensor is reconstructed from its metadata, which does not include a

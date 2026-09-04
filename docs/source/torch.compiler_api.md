@@ -82,7 +82,8 @@ releases without a deprecation cycle.
        the other raises. Parent directories are created.
    :param cache_path: File to write ``cache`` to; see ``artifact_path``.
    :returns: What each ``example_inputs`` call returned, in order.
-   :raises PrecompileError: as :meth:`precompile.artifact` does.
+   :raises PrecompileError: as :meth:`precompile.artifact` does; the example calls have
+      already run, so the error's ``result`` carries their results in order.
    :raises ValueError: if ``example_inputs`` is missing or empty, if only one of
        ``artifact_path`` and ``cache_path`` is given, if neither is, or if both name the
        same file.
@@ -165,7 +166,7 @@ releases without a deprecation cycle.
        are lifted and the rest are the runtime inputs. Calls run under ordinary
        ``torch.no_grad()`` unless ``training=True``, even if the caller is in
        ``torch.inference_mode()``; serve the resulting artifact under the same grad mode.
-       Inference mode is a distinct guarded state and must be captured manually if needed.
+       Inference mode is a distinct guarded state that this API does not capture.
        Tensors created inside inference mode remain inference tensors after that context is
        disabled, so they are rejected; create those inputs outside inference mode.
    :param backend: ``"inductor"`` (default) lowers through AOTAutograd + Inductor;
@@ -199,16 +200,16 @@ releases without a deprecation cycle.
        graph; defaults to ``None``. ``tracer="make_fx"`` forwards it to ``make_fx`` during
        capture. It applies only to ``tracer="make_fx"``; the dynamo tracer lowers through
        the backend instead and rejects it.
-   :param guard_filter_fn: Multi-graph serialization filter; returns one boolean per guard
+   :param guard_filter_fn: ``tracer="dynamo"`` only. Multi-graph serialization filter; returns one boolean per guard
        entry. It composes with the default filter (which drops only the identity guards
        that cannot be serialized), so it can drop more guards, never fewer. Live capture
        retains all guards so later examples trigger their recompiles. Risky dropped
        guards are rejected by default when saving, and every drop a custom filter adds
        beyond the default's counts as risky.
-   :param recompile_limit: Maximum multi-graph variants captured per frame; defaults to 256
+   :param recompile_limit: ``tracer="dynamo"`` only. Maximum multi-graph variants captured per frame; defaults to 256
        and overrides a lower ambient accumulated-recompile limit for this capture.
-   :param dynamic: Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
-   :param invariants: Optional path receiving the multi-graph invariant report.
+   :param dynamic: ``tracer="dynamo"`` only. Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
+   :param invariants: ``tracer="dynamo"`` only. Optional path receiving the multi-graph invariant report.
    :param require_complete: ``tracer="dynamo"`` only; defaults to ``True``. Refuse to
        produce an artifact whose capture summary is not complete -- a frame that produced
        no guarded code, hit the recompile limit, or was bypassed, or a capture that
@@ -235,6 +236,10 @@ releases without a deprecation cycle.
        binary acceleration cache.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below).
+   :raises ValueError: for an unknown ``backend`` or ``tracer``; a missing or empty
+       ``example_inputs``; with ``tracer="make_fx"``, more than one example call, a call
+       with keyword arguments, a dynamo-only knob, or a non-default ``require_*`` gate;
+       with ``tracer="dynamo"``, a ``decompositions`` table.
 
    Example::
 
@@ -339,10 +344,11 @@ releases without a deprecation cycle.
 
    .. warning::
 
-      ``load`` runs the artifact as code: it executes ``python_code`` (via ``exec``) and
-      unpickles the ``cache`` bytes (and, for the inductor backend, primes the kernel
-      caches from them). Both are arbitrary code execution -- a crafted ``python_code``
-      runs whatever it contains, and a crafted pickle runs code as it is loaded. Treat
+      ``load`` runs the artifact as code: it executes ``python_code`` (via ``exec``),
+      reads the ``cache`` envelope (a ``weights_only`` load) and, for the inductor
+      backend, writes its bundle into the compile caches. A crafted ``python_code`` runs
+      whatever it contains, and a crafted bundle plants pickles that a later cache hit
+      unpickles. Treat
       ``(python_code, cache)`` as trusted, executable input -- only load a pair you
       produced yourself or otherwise trust, exactly as you would any code you are about to
       run (see Note [precompile programming model], invariant 7). ``load`` also emits a

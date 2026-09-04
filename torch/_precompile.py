@@ -39,8 +39,9 @@ only to ``tracer="make_fx"``). See the ``tracer`` note at the bottom of
 Note [precompile programming model].
 
 For a computation with graph breaks, or to retain several guarded/recompiled variants,
-pass ``tracer="dynamo"`` with as many calls as you need. Either tracer returns the same
-``(python_code, cache)`` pair, reloaded with ``torch.compiler.precompile.load``; add
+pass ``tracer="dynamo"`` with as many calls as you need. Either tracer yields the same
+``(python_code, cache)`` pair (returned by ``artifact``, written to disk by the call),
+reloaded with ``torch.compiler.precompile.load``; add
 ``training=True`` for an artifact that carries a backward. ``make_fx`` produces one trace,
 so it captures exactly one call and refuses a longer ``example_inputs``.
 
@@ -52,10 +53,10 @@ execution-driven: a complete summary describes the calls
 that ran, not every possible input or unexecuted branch. precompile makes the calls, so
 precompile picks the grad mode: ordinary ``torch.no_grad()`` unless ``training=True``.
 Serve the resulting artifact under the mode it was captured in -- grad mode is a
-``GLOBAL_STATE`` guard, and it is checked. Example inputs and module parameters/buffers
-created as inference tensors are rejected.
+``GLOBAL_STATE`` guard, and it is checked. With ``tracer="dynamo"``, example inputs and
+module parameters/buffers created as inference tensors are rejected.
 
-precompile returns a self-contained, executable ``python_code`` string plus a
+The artifact is a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
 captured graph is lowered through the AOT backend contract
 (``torch._functorch.aot_autograd.compile_to_python``, AOTAutograd + Inductor);
@@ -174,10 +175,12 @@ it.
 #    precompile performs, and it happens in Python outside the graph, so the graph stays
 #    functional. precompile does not own optimizer state; bring your own optimizer and
 #    zero grads as usual. The dynamo tracer reaches the SAME observable behavior by a
-#    different route (see the tracer note): the backward stays a traced autograd call
-#    inside the graph and Dynamo's own bytecode does the accumulate, so there is no
-#    harvested-output list -- but which params get a grad is still fixed at trace time,
-#    frozen params still keep ``.grad = None``, and the accumulate still matches eager.
+#    different route (see the tracer note): a ``.backward()`` in ``fn`` graph-breaks
+#    (Dynamo does not trace it while ``trace_autograd_ops`` is off, the default), so at
+#    serve time the live autograd engine runs the compiled backward and does the
+#    accumulate itself; there is no harvested-output list -- but which params get a
+#    grad is still fixed at trace time, frozen params still keep ``.grad = None``, and
+#    the accumulate still matches eager.
 #
 # 6. Shapes are static by default (dynamic dims are opt-in via mark_unbacked, invariant
 #    3), each input's dtype/device is baked, and the inductor backend also specializes
@@ -357,8 +360,15 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 log = logging.getLogger(__name__)
 
+# Installing records backend keys into the process-global PrecompileContext
+# and unload takes them back. Serialize the snapshot/record and the take-back
+# so two handles on one artifact cannot each record, or take, the other's keys.
+_RECORD_LOCK = threading.Lock()
+
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
     from torch._subclasses.fake_tensor import FakeTensorMode
 
 
@@ -411,7 +421,7 @@ class PrecompileError(RuntimeError):
     See Note [precompile programming model] in this module for the full contract.
 
     ``result`` carries what the call that raised returned, when it ran before the
-    refusal; ``None`` otherwise.
+    refusal -- for ``precompile(...)`` the list of example results; ``None`` otherwise.
     """
 
     # Re-exported in torch.compiler.__all__, so pickle and test_public_bindings
@@ -535,6 +545,9 @@ class _InstalledArtifact:
         self._fn: Callable[..., object] | None = None
         self._inner: Any = None
         self._prepared: Any = None
+        # Serve-time compiles survive unload/exit: a job reads this after the
+        # scope, when the live inner is already gone.
+        self._serve_time_compiles = 0
         # unload() retires the handle for good. Without this flag a call after
         # unload would silently re-run _serve() -- re-mutating process-global
         # code objects with no paired unload, exactly the attributable-install
@@ -598,18 +611,22 @@ class _InstalledArtifact:
                     # DynamoStore) can already hold them, with identical content.
                     # _serve records only absent keys; remember which those were
                     # so unload takes back exactly what this install added.
-                    present = {
-                        k
-                        for k in self._backend_keys
-                        if PrecompileContext.serialize_artifact_by_key(k) is not None
-                    }
-                    self._inner = self._serve(fn, prepared=self._prepared)
-                    self._prepared = None
-                    self._recorded = {
-                        k: PrecompileContext.serialize_artifact_by_key(k)
-                        for k in self._backend_keys
-                        if k not in present
-                    }
+                    # Consume the prepared entry first, so a failed serve
+                    # does not reuse it on a later call.
+                    prepared, self._prepared = self._prepared, None
+                    with _RECORD_LOCK:
+                        present = {
+                            k
+                            for k in self._backend_keys
+                            if PrecompileContext.serialize_artifact_by_key(k)
+                            is not None
+                        }
+                        self._inner = self._serve(fn, prepared=prepared)
+                        self._recorded = {
+                            k: PrecompileContext.serialize_artifact_by_key(k)
+                            for k in self._backend_keys
+                            if k not in present
+                        }
                 inner = self._inner
         return inner
 
@@ -629,22 +646,29 @@ class _InstalledArtifact:
 
     def serve_time_compiles(self) -> int:
         inner = self._inner
-        return inner.serve_time_compiles() if inner is not None else 0
+        live = inner.serve_time_compiles() if inner is not None else 0
+        return self._serve_time_compiles + live
 
     def unload(self) -> None:
-        from torch._dynamo.precompile_context import PrecompileContext
-
         with self._install_lock:
             self._unloaded = True
             inner, self._inner = self._inner, None
+            self._prepared = None
         if inner is not None:
+            # Fold the retired install's serve-time count into the running
+            # total so serve_time_compiles() survives unload/exit.
+            self._serve_time_compiles += inner.serve_time_compiles()
             inner.unload()
-            recorded, self._recorded = self._recorded, {}
-            for key, artifact in recorded.items():
-                # Only the object this install filed: a same-key artifact filed
-                # since (an ambient run on the same graph) is not ours to take.
-                if PrecompileContext.serialize_artifact_by_key(key) is artifact:
-                    PrecompileContext.take_artifact(key)
+            from torch._dynamo.precompile_context import PrecompileContext
+
+            with _RECORD_LOCK:
+                recorded, self._recorded = self._recorded, {}
+                for key, artifact in recorded.items():
+                    # Only the object this install filed: a same-key artifact
+                    # filed since (an ambient run on the same graph) is not ours
+                    # to take.
+                    if PrecompileContext.serialize_artifact_by_key(key) is artifact:
+                        PrecompileContext.take_artifact(key)
 
 
 class AccumulatingCapture:
@@ -801,6 +825,14 @@ class AccumulatingCapture:
         with self._lock:
             if self._closed:
                 return
+            # Under the lock, _in_call can only be set by THIS thread's own
+            # in-flight __call__: retire() would wait for a call that is
+            # waiting on it.
+            if self._in_call:
+                raise PrecompileError(
+                    "close() was called from inside fn while this capture is "
+                    "running it; close the capture after the call returns."
+                )
             self._closed = True
             # The session owns the teardown: retire() drains in-flight calls on
             # other threads before clearing the region, the same handshake
@@ -2210,9 +2242,16 @@ def _build_multigraph_python_source(
         f"{sorted((s.module, s.firstlineno, s.lastlineno, s.checksum) for s in entry.source_info.inlined_sources if s.module != '__main__')!r}"
     )
     parts.append("")
-    parts.append("# The entry's default arguments: a code object carries none,")
-    parts.append("# and the driver rebuilds the entry from one.")
-    parts.append(f"_ENTRY_BINDING = {_b64(entry_binding or {})!r}")
+    parts.append("# The entry's defaults and closure values: a code object carries")
+    parts.append("# neither, and the driver rebuilds the entry from one.")
+    try:
+        binding_blob = _b64(entry_binding or {})
+    except Exception as e:
+        raise PrecompileError(
+            f"precompile cannot carry {entry.fn_name!r}'s default arguments in the "
+            f"artifact; defaults must be picklable ({type(e).__name__}: {e})."
+        ) from e
+    parts.append(f"_ENTRY_BINDING = {binding_blob!r}")
     parts.append("")
     parts.append("# " + "=" * 70)
     parts.append("# 2. Guard trees and transformed bytecode -- OPAQUE")
@@ -2235,10 +2274,10 @@ def _build_multigraph_python_source(
     # A compiled subgraph is Inductor output, which HAS a source form -- unlike
     # the guard trees and bytecode above. Emit that source where the backend can
     # produce it, and fall back to the pickle only for the rest (eager graphs,
-    # anything the lowering refused). The blocks are spliced sequentially into
-    # this module's namespace and each one's ``call`` is snapshotted
-    # immediately, because every block rebinds ``call`` / ``Runner`` /
-    # ``async_compile``; the snapshot is what makes the shadowing harmless.
+    # anything the lowering refused). rendered_backends already suffixed every
+    # top-level name each block defines per slot (namespace_module_names), so the
+    # blocks splice sequentially into ONE namespace and resolve siblings late
+    # without a variant silently running another variant's code.
     rendered = dict(rendered or {})
     parts.append("# " + "=" * 70)
     if rendered:
@@ -2423,10 +2462,9 @@ def _reject_unreachable_frames(frames: list[dict[str, Any]], entry: Any) -> None
     """
     from torch._dynamo.package import SerializedCode
 
+    reachable = _reachable_frames(frames)
     unreachable = [
-        f
-        for f in frames
-        if not f["is_entry"] and not f["resume_names"] and f["variants"]
+        f for i, f in enumerate(frames) if f["variants"] and i not in reachable
     ]
     if unreachable:
         # Correct but under-compiled. A frame Dynamo compiled that is entered by
@@ -2946,10 +2984,11 @@ def _write_artifact(
     on every call and its whole promise is that the files on disk are always a
     working artifact, so at hundreds of megabytes that window is the failure it
     is meant to protect against. Two renames are not one atomic step, so the
-    previous artifact is moved aside first and put back if the second rename
-    fails; only a crash in the gap between the renames leaves a mismatched
-    pair, which load refuses on the cache's sha256 rather than serving stale
-    code. The containing directory is fsync'd after, so a rename that returned
+    previous source is hard-linked to a backup first and put back if the second
+    rename fails; the named source path therefore always holds the previous or
+    the new artifact, and only a crash in the gap between the two renames leaves
+    a mismatched pair, which load refuses on the cache's sha256 rather than
+    serving stale code. The containing directory is fsync'd after, so a rename that returned
     is durable.
     """
     written = []
@@ -2986,20 +3025,31 @@ def _write_artifact(
     previous = None
     installed = False
     try:
+        # A hard link, not a move: the named path must resolve to the previous
+        # or the new source at every instant, for a reader racing this write
+        # and for a crash between the two renames below.
         try:
-            os.replace(artifact_path, backup)
+            os.link(artifact_path, backup)
             previous = backup
         except FileNotFoundError:
             pass
+        except OSError:
+            # No hard links on this filesystem: fall back to moving aside.
+            os.replace(artifact_path, backup)
+            previous = backup
         os.replace(artifact_tmp, artifact_path)
         installed = True
         os.replace(cache_tmp, cache_path)
     except BaseException:
-        # Put the previous pair back, best effort, so the named files stay a
-        # loadable artifact; then drop every temp and re-raise.
-        undo = [(artifact_path, artifact_tmp)] if installed else []
+        # Put the previous source back (or remove the new one on a first
+        # write), best effort, so the named files stay a loadable artifact;
+        # then drop every temp and re-raise.
         if previous is not None:
-            undo.append((previous, artifact_path))
+            undo = [(previous, artifact_path)]
+        elif installed:
+            undo = [(artifact_path, artifact_tmp)]
+        else:
+            undo = []
         for src, dst in undo:
             try:
                 os.replace(src, dst)
@@ -3251,7 +3301,14 @@ class _PrecompileApi:
             keep_example_grads=keep_example_grads,
             collect_results=True,
         )
-        _write_artifact(*out_paths, python_code, cache)
+        try:
+            _write_artifact(*out_paths, python_code, cache)
+        except OSError as e:
+            error = PrecompileError(
+                f"precompile ran the example calls but could not write the artifact: {e}"
+            )
+            error.result = results
+            raise error from e
         return results
 
     def artifact(
@@ -3305,9 +3362,10 @@ class _PrecompileApi:
 
         Live capture keeps all guards so one example cannot silently reuse another's graph;
         ``guard_filter_fn`` applies only to the serialized artifact. Calls run under
-        ordinary ``torch.no_grad()`` unless ``training=True``, even when the caller is in
-        inference mode; serve the resulting artifact under that same grad mode. Inputs and
-        module parameters/buffers created inside inference mode are rejected because they
+        ordinary ``torch.no_grad()`` unless ``training=True``; serve the resulting
+        artifact under that same grad mode. With ``tracer="dynamo"`` the calls also run
+        with inference mode disabled even when the caller is in it, and inputs or module
+        parameters/buffers created inside inference mode are rejected because they
         remain inference tensors after the ambient mode is disabled.
 
         Capture is execution-driven, not an exhaustive analysis of ``fn``. A complete
@@ -3467,8 +3525,8 @@ class _PrecompileApi:
         returns ``fn``'s own result (``None`` for a bare ``.backward()`` step), not the
         grads (invariant 5). This holds for either ``tracer`` -- only the mechanism
         differs (``make_fx`` harvests the grads as graph outputs and scatters them in the
-        driver; ``dynamo`` traces the backward as an in-graph autograd call whose own
-        bytecode does the accumulate).
+        driver; under ``dynamo`` the ``.backward()`` graph-breaks and the live autograd
+        engine runs the compiled backward and does the accumulate).
 
         Input mutation (incl. module buffers, e.g. BatchNorm running stats in
         training mode), tensor subclasses (e.g. DTensor), and outputs aliasing inputs
@@ -3649,12 +3707,19 @@ class _PrecompileApi:
             with session:
                 pass
             # The capture is finished, so hand back the artifact rather than a
-            # session the caller has to know to save.
-            python_code, cache = session.artifact(
-                require_complete=require_complete,
-                require_no_risky_drops=require_no_risky_drops,
-                require_no_dropped_guards=require_no_dropped_guards,
-            )
+            # session the caller has to know to save. The example calls have
+            # already run, so a gate refusal carries their results, as
+            # PrecompileError.result documents.
+            try:
+                python_code, cache = session.artifact(
+                    require_complete=require_complete,
+                    require_no_risky_drops=require_no_risky_drops,
+                    require_no_dropped_guards=require_no_dropped_guards,
+                )
+            except PrecompileError as e:
+                if collect_results:
+                    e.result = session.example_results()
+                raise
         return python_code, cache, session.example_results()
 
     def accumulate(
