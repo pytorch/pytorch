@@ -8876,6 +8876,43 @@ class TestMPS(TestCaseMPS):
         for args in test_cases:
             helper(*args)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/189968,
+    # https://github.com/pytorch/pytorch/issues/189969, and
+    # https://github.com/pytorch/pytorch/issues/189970: these ops skipped
+    # index validation and wrote out of bounds. Like index_add_/index_select,
+    # invalid indices are reported asynchronously and surface at the next sync.
+    def test_indexed_write_ops_reject_out_of_bounds_indices(self):
+        def run(op, t, index):
+            if op == "index_copy":
+                t.index_copy_(0, index, torch.ones(index.numel(), 4, device="mps"))
+            elif op == "index_fill":
+                t.index_fill_(0, index, 7.0)
+            elif op == "index_reduce":
+                t.index_reduce_(0, index, torch.ones(index.numel(), 4, device="mps"), "amax")
+            torch.mps.synchronize()
+
+        for op in ("index_copy", "index_fill", "index_reduce"):
+            # index_fill_ wraps negative indices in [-size, -1]; the others
+            # reject all negatives like CPU.
+            bad_indices = (32, 100, -33) if op == "index_fill" else (32, 100, -1)
+            for strided in (False, True):
+                for bad in bad_indices:
+                    with self.subTest(op=op, strided=strided, bad=bad):
+                        t = torch.zeros(4, 64, device="mps").t()[:32, :] if strided \
+                            else torch.zeros(32, 4, device="mps")
+                        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+                            run(op, t, torch.tensor([bad], device="mps"))
+
+        # valid negative indices for index_fill_ keep wrapping
+        t = torch.zeros(32, device="mps")
+        t.index_fill_(0, torch.tensor([-1], device="mps"), 3.0)
+        self.assertEqual(t[-1].item(), 3.0)
+
+        # the mask-based index_fill_ path (high fill rate) must also report
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            torch.zeros(5, device="mps").index_fill_(0, torch.tensor([8], device="mps"), 7.0)
+            torch.mps.synchronize()
+
     def test_index_select_scalar(self):
         def helper(value, dim, index, idx_dtype=torch.int32):
             cpu_x = torch.tensor(value, device='cpu', dtype=torch.float, requires_grad=False)
