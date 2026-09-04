@@ -1,9 +1,9 @@
-#include <torch/csrc/profiler/cupti/monitor_pftrace.h>
+#include <torch/csrc/profiler/cuspy/cuspy_pftrace.h>
 
 // TORCH_CUPTI_PFTRACE is defined (see caffe2/CMakeLists.txt) only when the
 // CUPTI stubs were generated at build time, which is what pulls in perfetto. In
 // that case the real protozero encoder is compiled; otherwise this TU is a
-// dependency-free stub (no perfetto) whose encoder raises -- the CUPTI monitor
+// dependency-free stub (no perfetto) whose encoder raises -- Cuspy
 // is unavailable at runtime without the stubs anyway.
 #ifdef TORCH_CUPTI_PFTRACE
 
@@ -152,7 +152,7 @@ void emitJsonExtraData(
 }
 } // namespace
 
-std::string cuptiMonitorEncodePftrace(
+std::string cuspyEncodePftrace(
     int64_t base_ns,
     const std::vector<PftraceTrack>& tracks,
     const std::vector<std::string>& name_table,
@@ -488,7 +488,7 @@ std::string cuptiMonitorEncodePftrace(
 
 namespace torch::profiler::impl {
 
-std::string cuptiMonitorEncodePftrace(
+std::string cuspyEncodePftrace(
     int64_t /*base_ns*/,
     const std::vector<PftraceTrack>& /*tracks*/,
     const std::vector<std::string>& /*name_table*/,
