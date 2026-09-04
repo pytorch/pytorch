@@ -499,6 +499,19 @@ class DeviceTypeTestBase(TestCase):
         return dist.get_default_backend_for_device(cls.device_type)
 
     @classmethod
+    def has_sufficient_memory(cls, size: int) -> bool:
+        """
+        Returns True if there is sufficient memory available for the given size.
+
+        Device-specific test bases should override this to support
+        memory-aware tests. The default implementation raises an error
+        for device types that do not implement this hook.
+        """
+        raise NotImplementedError(
+            f"{cls.__name__}.has_sufficient_memory() is not implemented"
+        )
+
+    @classmethod
     def _get_test_exclusions(cls, test_class_name):
         test_exclusions = getattr(cls, "test_exclusions", None)
         if test_exclusions is not None and test_class_name in test_exclusions:
@@ -782,6 +795,24 @@ class DeviceTypeTestBase(TestCase):
 class CPUTestBase(DeviceTypeTestBase):
     device_type = "cpu"
 
+    @classmethod
+    def has_sufficient_memory(cls, size: int) -> bool:
+        if not HAS_PSUTIL:
+            raise RuntimeError("Need psutil to query available system memory")
+
+        # The sanitizers have significant memory overheads
+        if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
+            size *= 10
+
+        # don't try using all RAM on s390x, leave some for service processes
+        if IS_S390X:
+            size *= 2
+
+        available = psutil.virtual_memory().available
+        if available < size:
+            gc.collect()
+        return psutil.virtual_memory().available >= size
+
     # No critical error should stop CPU test suite
     def _should_stop_test_suite(self):
         return False
@@ -843,6 +874,22 @@ class CUDATestBase(DeviceTypeTestBase):
         return [prim_device] + non_primary_devices
 
     @classmethod
+    def has_sufficient_memory(cls, size: int) -> bool:
+        device = torch.cuda.current_device()
+        available = int(
+            torch.cuda.memory.mem_get_info(device)[0]
+            * torch.cuda.memory.get_per_process_memory_fraction(device)
+        )
+        if available < size:
+            gc.collect()
+            torch.cuda.empty_cache()
+            available = int(
+                torch.cuda.memory.mem_get_info(device)[0]
+                * torch.cuda.memory.get_per_process_memory_fraction(device)
+            )
+        return available >= size
+
+    @classmethod
     def setUpClass(cls):
         # has_magma shows up after cuda is initialized
         t = torch.ones(1).cuda()
@@ -892,6 +939,22 @@ class MPSTestBase(DeviceTypeTestBase):
         # currently only one device is supported on MPS backend
         prim_device = cls.get_primary_device()
         return [prim_device]
+
+    @classmethod
+    def has_sufficient_memory(cls, size: int) -> bool:
+        if not HAS_PSUTIL:
+            raise RuntimeError("Need psutil to query available system memory")
+        if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
+            size *= 10
+        if IS_S390X:
+            size *= 2
+        available = psutil.virtual_memory().available
+        if available < size:
+            gc.collect()
+            # Sync and cleanup MPS memory before checking available memory
+            torch.mps.synchronize()
+            torch.mps.empty_cache()
+        return psutil.virtual_memory().available >= size
 
     @classmethod
     def setUpClass(cls):
@@ -945,6 +1008,16 @@ class XPUTestBase(DeviceTypeTestBase):
             if idx != primary_device_idx
         ]
         return [prim_device] + non_primary_devices
+
+    @classmethod
+    def has_sufficient_memory(cls, size: int) -> bool:
+        device = torch.xpu.current_device()
+        available = torch.xpu.memory.mem_get_info(device)[0]
+        if available < size:
+            gc.collect()
+            torch.xpu.empty_cache()
+            available = torch.xpu.memory.mem_get_info(device)[0]
+        return available >= size
 
     @classmethod
     def setUpClass(cls):
@@ -1837,7 +1910,20 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
             # an additional array of the same size as the input.
             if inductor and torch._inductor.config.cpp_wrapper and _device != "cpu":
                 size_bytes *= 2
-            if not _has_sufficient_memory(_device, size_bytes):
+            # When device is explicitly given for a *different* device type
+            # (e.g. device="cpu" on a CUDA test class), skip the class hook
+            # and use the generic helper directly.
+            if device is not None and device != getattr(self, "device_type", None):
+                ok = _has_sufficient_memory(_device, size_bytes)
+            else:
+                # Try the class hook first (e.g. CUDATestBase.has_sufficient_memory),
+                # falling back to the generic _has_sufficient_memory helper.
+                check_fn = getattr(self, "has_sufficient_memory", None)
+                if callable(check_fn):
+                    ok = check_fn(size_bytes)
+                else:
+                    ok = _has_sufficient_memory(_device, size_bytes)
+            if not ok:
                 raise unittest.SkipTest(f"Insufficient {_device} memory")
 
             return fn(self, *args, **kwargs)
