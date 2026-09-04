@@ -1089,8 +1089,12 @@ class AutocastModeVariable(ContextWrappingVariable):
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
         # cache_enabled : Optional[bool] = None):cache_enabled
-        bound_args = inspect.signature(func).bind(*args, **kwargs)
+        signature = inspect.signature(func)
+        bound_args = signature.bind(*args, **kwargs)
         bound_args.apply_defaults()
+        for name, parameter in signature.parameters.items():
+            if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+                bound_args.arguments.update(bound_args.arguments.pop(name))
         target_values = []
         kwargs.clear()
 
