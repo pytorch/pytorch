@@ -4492,30 +4492,34 @@ class DispatchKeySetVariable(BaseTorchVariable):
 
         return python_constant_richcompare_impl(self, tx, other, op)
 
-    def is_constant_fold_method(self, name: str) -> bool:
-        return name == "has"
-
-    def call_method(
+    def has(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "VariableTracker":
-        if self.is_constant_fold_method(name) and check_unspec_or_constant_args(
-            args, kwargs
-        ):
-            method = getattr(self.value, name)
-            return VariableTracker.build(
-                tx,
-                method(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-            )
-        elif name == "highestPriorityTypeId":
-            return VariableTracker.build(tx, self.value.highestPriorityTypeId())
-        return super().call_method(tx, name, args, kwargs)
+    ) -> VariableTracker | None:
+        if not check_unspec_or_constant_args(args, kwargs):
+            return None
+        return VariableTracker.build(
+            tx,
+            self.value.has(
+                *[x.as_python_constant() for x in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            ),
+        )
+
+    def highestPriorityTypeId(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.highestPriorityTypeId())
+
+    tp_methods = {
+        "has": Method(has),
+        "highestPriorityTypeId": Method(highestPriorityTypeId),
+    }
 
 
 class FuncTorchInterpreterVariable(BaseTorchVariable):
