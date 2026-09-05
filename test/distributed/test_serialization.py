@@ -9,7 +9,13 @@ import torch
 import torch.distributed as dist
 from torch.distributed._serialization import _streaming_load, _streaming_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+from torch.testing._internal.common_device_type import DeviceTypeTestBase, instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 DEBUG_ENV = "TORCH_SERIALIZATION_DEBUG"
@@ -24,6 +30,8 @@ class MyClass:
 
 
 class TestSerialization(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         # disable debug asserts
@@ -109,9 +117,7 @@ class TestSerialization(TestCase):
         self.assertEqual(result, state_dict)
 
     def test_dtensor(self) -> None:
-        dist.init_process_group(
-            backend="gloo", rank=0, world_size=1, store=dist.HashStore()
-        )
+        dist.init_process_group(backend="fake", rank=0, world_size=1, store=FakeStore())
 
         device_mesh = DeviceMesh("cpu", 1)
         tensor = torch.randn(4, 4)
@@ -124,6 +130,7 @@ class TestSerialization(TestCase):
         result = cast(DTensor, _streaming_load(file))
         torch.testing.assert_close(result.to_local(), state_dict.to_local())
         self.assertEqual(result._spec, state_dict._spec)
+        dist.destroy_process_group()
 
     def test_python_object(self) -> None:
         state_dict = {
@@ -164,9 +171,22 @@ class TestSerialization(TestCase):
         with self.assertRaisesRegex(RuntimeError, "explicit pickle_module"):
             _streaming_load(file, weights_only=True, pickle_module=pickle)
 
-    @requires_cuda
-    def test_cuda(self) -> None:
-        device = torch.device("cuda:0")
+
+class TestSerializationDevice(DeviceTypeTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self) -> None:
+        super().setUp()
+        # disable debug asserts
+        self._old_debug = os.environ.get(DEBUG_ENV)
+        os.environ[DEBUG_ENV] = "0"
+
+    def tearDown(self):
+        if self._old_debug is not None:
+            os.environ[DEBUG_ENV] = self._old_debug
+
+    def test_accelerator(self, device) -> None:
+        device = torch.device(f"{self.device_type}:0")
 
         tensor = torch.tensor(42, dtype=torch.float, device=device)
         state_dict = {"scalar": tensor}
@@ -178,6 +198,10 @@ class TestSerialization(TestCase):
         torch.testing.assert_close(result, state_dict)
         self.assertEqual(result["scalar"].device, device)
 
+
+instantiate_device_type_tests(
+    TestSerializationDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
