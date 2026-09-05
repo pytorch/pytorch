@@ -176,6 +176,7 @@ def _build_test(
             # performance issue.
             new_op = copy.deepcopy(op)
             new_op.init(**init_dict)
+            new_op.extract_inputs_tuple()
             # Input name index will start from input1
             input_name = i + 1
             yield _create_test(
