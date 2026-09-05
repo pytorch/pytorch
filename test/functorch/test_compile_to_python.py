@@ -1,17 +1,30 @@
 # Owner(s): ["oncall: pt2"]
 import ast
+import contextlib
+import copy
+import importlib
+import os
+import subprocess
+import sys
+import tempfile
+import textwrap
+import threading
 import unittest
+from unittest import mock
 
 import torch
+import torch._functorch._aot_autograd.to_standalone_python as to_standalone_python
 import torch._functorch.config as functorch_config
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch._functorch._aot_autograd.codegen import GeneratedSource
 from torch._functorch._aot_autograd.to_standalone_python import (
+    _capture_autograd_specs,
     _compose_standalone_module,
     _find_effectful_op,
     _known_helper_table,
     _module_level_names,
+    _select_training_spec,
 )
 from torch._functorch.aot_autograd import compile_to_python, load_from_python
 from torch._higher_order_ops.effects import _get_effect, hop_print
@@ -22,10 +35,16 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     subtest,
     TestCase,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
+
+
+# ``torch._inductor.standalone_compile`` the attribute is a function that shadows
+# the submodule of the same name, so bind the module explicitly.
+standalone_compile = importlib.import_module("torch._inductor.standalone_compile")
 
 
 def _capture(m, x, tracing_mode="real"):
@@ -122,6 +141,15 @@ class _BufferMutate(torch.nn.Module):
         return x + self.b
 
 
+def _two_views_of_intermediate(x, w):
+    h = torch.tanh(x @ w)
+    return h[:2], h[2:]
+
+
+def _view_of_input_and_dense(x, w):
+    return x.view(-1), torch.tanh(x @ w)
+
+
 class _MatMul(torch.nn.Module):
     # addmm is an autocast-to-bf16 op, so a float32 input under torch.autocast engages
     # autocast and bakes the casts into the graph -- the setup the _DisableAutocast_ test
@@ -202,6 +230,602 @@ class TestAOTCompileToPython(TestCase):
                 self.assertEqual(
                     load_from_python(src, cache)(_flat_inputs(m, x))[0], m(x)
                 )
+
+    @skipIfTorchDynamo(
+        "make_fx of a training closure cannot trace under an outer dynamo"
+    )
+    def test_inline_backward_graph_is_not_lowered_as_inference(self):
+        # A graph that differentiates INLINE (make_fx tracing through a
+        # .backward()) has no joint, so a joint-only check would call it
+        # inference. Inductor's decide_layout_opt branches on that and can
+        # convert a conv to channels-last, which makes cuDNN serve a TF32 NHWC
+        # kernel -- a silent ~2e-4 relative difference in the gradients. The ops
+        # decide, not the graph count.
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            _graph_differentiates,
+        )
+
+        conv = torch.nn.Conv2d(4, 8, 3, padding=1)
+        x = torch.randn(2, 4, 8, 8)
+
+        self.assertFalse(_graph_differentiates(_capture(conv, x)))
+
+        def train_step(*args):
+            names = [n for n, _ in conv.named_parameters()]
+            params = dict(zip(names, args[: len(names)]))
+            with stateless._reparametrize_module(conv, params):
+                conv(args[-1]).sum().backward()
+
+        flat = [t.detach().requires_grad_(True) for t in _flat_inputs(conv, x)]
+        with torch.enable_grad():
+            traced = make_fx(train_step)(*flat)
+        self.assertTrue(_graph_differentiates(traced))
+        self.assertTrue(
+            any("convolution_backward" in str(n.target) for n in traced.graph.nodes)
+        )
+
+    @skipIfTorchDynamo(
+        "the emitted _CompiledFunction refuses compiled autograd with "
+        "NotImplementedError (no fx bw_module to inline); a feature limitation, "
+        "see the module's not-covered list"
+    )
+    def test_training_graph_composes_forward_and_backward(self):
+        # grad_enabled with inputs that require grad makes AOTAutograd emit a
+        # JOINT forward+backward: two dense graphs, bridged by an autograd
+        # Function the composer emits (its forward/backward bodies are
+        # AOTAutograd's own codegen'd source). The served output must therefore
+        # carry grad_fn and its .backward() must run the compiled backward.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4, requires_grad=True)
+        eager_out = m(x)
+        eager_out.sum().backward()
+        expected = {n: p.grad.detach().clone() for n, p in m.named_parameters()}
+        expected_x_grad = x.grad.detach().clone()
+
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        # Both inductor modules and the backward wrappers are inlined as source.
+        self.assertIn("_inner_call_fw", src)
+        self.assertIn("_inner_call_bw", src)
+        self.assertIn("def _backward_prologue(", src)
+        self.assertIn("class _CompiledFunction(torch.autograd.Function):", src)
+        self.assertNotIn("pickle.loads", src)
+
+        out = _exec(src)(_flat_inputs(m, x))
+        out = out[0] if isinstance(out, (list, tuple)) else out
+        self.assertIsNotNone(out.grad_fn)
+        self.assertEqual(out, eager_out)
+        for p in m.parameters():
+            p.grad = None
+        x.grad = None
+        out.sum().backward()
+        for name, param in m.named_parameters():
+            self.assertEqual(param.grad, expected[name])
+        self.assertEqual(x.grad, expected_x_grad)
+
+    def test_training_rebuild_helper_spliced_and_runs(self):
+        # A baked global that reconstructs through the pickle-reduce-as-source
+        # path emits ``_rebuild(...)``, and the training composer must splice the
+        # helper like the inference one does. No real metadata reduces this way,
+        # so plant one on a captured wrapper right before the composer sees it.
+        orig = to_standalone_python._compose_training_module
+
+        def plant(fw, bw, captured, spec, *placeholders):
+            gen = next(g for g in captured if g.artifact_name == "backward_prologue")
+            gen.globals_dict["_baked"] = _NewObjEx(1, b=2)
+            return orig(fw, bw, captured, spec, *placeholders)
+
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with (
+            torch.enable_grad(),
+            mock.patch.object(to_standalone_python, "_compose_training_module", plant),
+        ):
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        self.assertIn("def _rebuild", src)
+        self.assertIn("_baked = _rebuild(", src)
+        ns = {"__name__": "_compiled"}
+        exec(compile(src, "<compiled>", "exec"), ns)
+        self.assertEqual(ns["_baked"], _NewObjEx(1, b=2))
+        self.assertEqual(ns["call"](_flat_inputs(m, x))[0], m(x))
+
+    def test_training_compose_refuses_fakified_forward(self):
+        # fakify_first_call makes AOTAutograd wrap the compiled forward in a
+        # FakifiedOutWrapper. The emitted _CompiledFunction wires compiled_fw
+        # straight to the inner call, so the composer must refuse rather than
+        # silently drop the wrapper (keeping the caller's pickled-bundle fallback).
+        orig = standalone_compile._standalone_context
+
+        @contextlib.contextmanager
+        def fakify(*args, **kwargs):
+            with orig(*args, **kwargs):
+                torch._guards.TracingContext.get().fakify_first_call = True
+                yield
+
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with (
+            torch.enable_grad(),
+            mock.patch.object(standalone_compile, "_standalone_context", fakify),
+            self.assertRaisesRegex(NotImplementedError, "FakifiedOutWrapper"),
+        ):
+            compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+
+    def test_training_backward_under_compiled_autograd_raises_not_implemented(self):
+        # Compiled autograd reads _lazy_backward_info off the forward class before
+        # anything else and, on None, blames AOTAutogradCache -- advice that cannot
+        # apply to a source artifact. The emitted class refuses with its own reason.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        out = _exec(src)(_flat_inputs(m, x))
+        out = out[0] if isinstance(out, (list, tuple)) else out
+        with (
+            torch._dynamo.compiled_autograd._enable(lambda gm: gm),
+            self.assertRaisesRegex(
+                NotImplementedError,
+                "compiled autograd is not supported for a standalone training artifact",
+            ),
+        ):
+            out.sum().backward()
+
+    def test_training_forward_and_backward_do_not_share_names(self):
+        # The two inductor modules are spliced into ONE namespace and both define
+        # call / Runner / their kernels. A module resolves those as late-bound
+        # globals when INVOKED, so without per-module renaming the forward runs
+        # the backward's kernels -- which surfaces as an arity error, or worse.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        tree = ast.parse(src)
+        names = [
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+        ]
+        self.assertEqual(len(names), len(set(names)), f"duplicate top-level: {names}")
+
+    def test_training_compose_refuses_unmodeled_wrappers(self):
+        # Aliased + mutated inputs drive AOTSyntheticBaseWrapper, which the
+        # training compose does not splice. It must REFUSE: silently dropping
+        # the wrapper composes a module whose inner forward was compiled for
+        # the merged synthetic-base calling convention, so it only fails (or
+        # miscomputes) at serve time -- replacing the caller's working
+        # pickled-bundle fallback with a broken artifact.
+        def f(a, b, w):
+            a.mul_(2)
+            return ((a + b) * w).sum()
+
+        def make():
+            base = torch.arange(4, dtype=torch.float32) + 1
+            return base[:], base  # a aliases b
+
+        w = torch.randn(4, requires_grad=True)
+        with torch.enable_grad():
+            gm = make_fx(f)(*make(), w)
+        a0, b0 = make()
+        with (
+            torch.enable_grad(),
+            self.assertRaisesRegex(NotImplementedError, "cannot yet model"),
+        ):
+            compile_to_python(gm, [a0, b0, w], grad_enabled=True)
+
+    def test_training_compose_refuses_inlineable_saved_tensors_hooks(self):
+        # Inlineable (GraphModule) ambient hooks are traced INTO the joint
+        # graph, and at runtime AOTAutograd disables the ambient hooks around
+        # the compiled call so they do not ALSO fire on ctx.save_for_backward.
+        # That disable is plain Python the compose cannot splice, so composing
+        # must refuse: serving would pack already-packed activations.
+        pack_gm = torch.fx.symbolic_trace(lambda x: x * 2)
+        unpack_gm = torch.fx.symbolic_trace(lambda x: x / 2)
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with (
+            torch.enable_grad(),
+            torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm),
+            self.assertRaisesRegex(NotImplementedError, "saved_tensors_hooks"),
+        ):
+            compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+
+    def test_training_backward_lowers_with_is_backward(self):
+        # is_backward gates GraphLowering's backward-only require_contiguous
+        # safeguard for untagged implicit-fallback aten ops (#140452); the
+        # composed training backward must lower the way torch.compile's
+        # backward does. Spy on compile_fx_inner because the safeguard itself
+        # only engages on an op with no lowering, which no small graph has.
+        import torch._inductor.compile_fx as compile_fx_mod
+
+        seen = []
+        orig = compile_fx_mod.compile_fx_inner
+
+        def spy(gm, inputs, **kwargs):
+            seen.append(kwargs.get("is_backward", False))
+            return orig(gm, inputs, **kwargs)
+
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with (
+            torch.enable_grad(),
+            mock.patch.object(compile_fx_mod, "compile_fx_inner", spy),
+        ):
+            compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        self.assertEqual(seen, [False, True])  # forward, then backward
+
+    def test_training_compiled_function_mirrors_runtime_class_attributes(self):
+        # The emitted _CompiledFunction stands in for AOTAutograd's CompiledFunction,
+        # whose class attributes the runtime and compiled autograd read
+        # (_compiled_autograd_key, metadata, _bw_prologue_fn, ...). Every name the
+        # real class body binds must exist on the emitted one.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        ns = {"__name__": "_compiled"}
+        exec(compile(src, "<compiled>", "exec"), ns)
+        emitted = ns["_CompiledFunction"]
+
+        torch._dynamo.reset()
+        real = torch.compile(m, backend="aot_eager")(x).grad_fn._forward_cls
+        expected = [n for n in vars(real) if not n.startswith("__")]
+        self.assertIn("_compiled_autograd_key", expected)
+        for name in expected:
+            # dir(), not hasattr: _lazy_backward_info is a descriptor that
+            # raises (an AttributeError subclass), so hasattr reads it as absent.
+            self.assertIn(name, dir(emitted), f"missing {name}")
+        self.assertIs(emitted.compiled_fw, ns["_inner_call_fw"])
+        self.assertIs(emitted.compiled_bw, ns["_inner_call_bw"])
+        self.assertIsNone(emitted.maybe_subclass_metadata)
+        with self.assertRaisesRegex(NotImplementedError, "compiled autograd"):
+            emitted._lazy_backward_info
+        self.assertEqual(emitted.num_symints_saved_for_bw, 0)
+        self.assertEqual(
+            emitted.metadata.num_forward_returns, real.metadata.num_forward_returns
+        )
+
+    @skipIfTorchDynamo(
+        "the emitted _CompiledFunction refuses compiled autograd with "
+        "NotImplementedError (no fx bw_module to inline); a feature limitation, "
+        "see the module's not-covered list"
+    )
+    @functorch_config.patch(donated_buffer=True)
+    def test_training_donated_buffer_retain_graph_matches_torch_compile(self):
+        # The composed backward is lowered under a fresh TracingContext with no
+        # fw_metadata, so inductor never marks a donated buffer in it and nothing
+        # can be overwritten: retain_graph=True must simply work, and the
+        # accumulated gradients must match torch.compile's, whose backward also
+        # forgoes donation when its first backward runs with retain_graph=True.
+        def f(x, w):
+            return torch.tanh(x @ w).sum()
+
+        x = torch.randn(4, 4, requires_grad=True)
+        w = torch.randn(4, 4, requires_grad=True)
+        with torch.enable_grad():
+            gm = make_fx(f)(x, w)
+            src, _cache = compile_to_python(gm, [x, w], grad_enabled=True)
+        self.assertNotIn("_get_current_graph_task_keep_graph", src)
+        out = _exec(src)([x, w])[0]
+        self.assertEqual(out, f(x, w))
+        out.backward(retain_graph=True)
+        out.backward(retain_graph=True)
+        served = (x.grad.clone(), w.grad.clone())
+
+        x.grad = None
+        w.grad = None
+        torch._dynamo.reset()
+        with fresh_cache():
+            compiled_out = torch.compile(f, backend="inductor")(x, w)
+            compiled_out.backward(retain_graph=True)
+            compiled_out.backward(retain_graph=True)
+        self.assertEqual(served, (x.grad, w.grad))
+
+    def test_training_artifact_execs_in_fresh_process(self):
+        # The artifact's imports are only exercised in a process where nothing has
+        # imported torch yet: a cold ``from ...runtime_wrappers import`` is a
+        # circular import with _dynamo only when it is the first torch import, so
+        # the invariant is that ``import torch`` comes first.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        imports = [l for l in src.splitlines() if l.startswith(("import", "from"))]
+        self.assertEqual(imports[0], "import torch")
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as fh:
+            fh.write(src)
+            path = fh.name
+        driver = textwrap.dedent(
+            f"""
+            import torch
+            ns = {{"__name__": "_fresh_artifact"}}
+            with open({path!r}) as fh:
+                exec(compile(fh.read(), {path!r}, "exec"), ns)
+            torch.manual_seed(0)
+            w = torch.randn(3, 4, requires_grad=True)
+            b = torch.randn(3, requires_grad=True)
+            x = torch.randn(5, 4)
+            out = ns["call"]([w, b, x])[0]
+            assert torch.allclose(out, torch.nn.functional.linear(x, w, b)), "output"
+            out.sum().backward()
+            assert torch.allclose(w.grad, x.sum(0).expand(3, 4)), "grad"
+            print("FRESH_OK")
+            """
+        )
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", driver],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+        finally:
+            os.remove(path)
+        self.assertEqual(
+            proc.returncode, 0, f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+        self.assertIn("FRESH_OK", proc.stdout)
+
+    def test_restride_rebuilds_symbolic_strides_and_refuses_unknown_symbols(self):
+        # CompiledFxGraph.output_strides entries are PRINTED stride
+        # expressions (strings). A symbolic one is rebuilt over the placeholder's
+        # shape symbols and compared proof-only, so a matching stride leaves the
+        # symbolic placeholder alone; a symbol the shape env never created, or an
+        # unevaluable string, refuses, which keeps the pickled-bundle fallback.
+        import types as types_mod
+
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            _restride_backward_placeholders,
+        )
+
+        spec = types_mod.SimpleNamespace(
+            fw_metadata=types_mod.SimpleNamespace(
+                tensors_saved_for_backwards_slice=slice(0, 1)
+            ),
+            num_symints_saved_for_bw=0,
+        )
+        static = make_fx(lambda x: x * 2)(torch.randn(2, 3))
+        _restride_backward_placeholders(static, [("3", "1")], spec)
+        with self.assertRaisesRegex(NotImplementedError, "unevaluable"):
+            _restride_backward_placeholders(static, [("3*s0", "1")], spec)
+
+        symbolic = make_fx(lambda x: x * 2, tracing_mode="symbolic")(torch.randn(2, 3))
+        ph = next(n for n in symbolic.graph.nodes if n.op == "placeholder")
+        val = ph.meta["val"]
+        self.assertIsInstance(val.stride()[0], torch.SymInt)
+        _restride_backward_placeholders(symbolic, [(str(val.stride()[0]), "1")], spec)
+        self.assertIs(ph.meta["val"], val)
+        with self.assertRaisesRegex(NotImplementedError, "unevaluable"):
+            _restride_backward_placeholders(symbolic, [("u0", "1")], spec)
+        # A genuinely different (transposed) layout is applied, kept symbolic (stride s0, hint 2).
+        _restride_backward_placeholders(symbolic, [("1", str(val.size()[0]))], spec)
+        self.assertEqual(tuple(ph.meta["val"].stride()), (1, 2))
+
+    @skipIfTorchDynamo(
+        "the emitted _CompiledFunction refuses compiled autograd with "
+        "NotImplementedError (no fx bw_module to inline); a feature limitation, "
+        "see the module's not-covered list"
+    )
+    def test_training_backed_dynamic_dims_match_eager_across_shapes(self):
+        # A symbolically traced Linear has symbolic saved-activation strides, so
+        # the backward restride has to evaluate them rather than refuse; the one
+        # composed module then serves several shapes with eager's gradients.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4, requires_grad=True)
+        gm = _capture(m, x, tracing_mode="symbolic")
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        self.assertIn("class _CompiledFunction(torch.autograd.Function):", src)
+        fn = _exec(src)
+        for n in (5, 7):
+            xi = torch.randn(n, 4, requires_grad=True)
+            m.zero_grad(set_to_none=True)
+            eager = m(xi)
+            eager.sum().backward()
+            expected = [p.grad.clone() for p in m.parameters()] + [xi.grad.clone()]
+            m.zero_grad(set_to_none=True)
+            xi.grad = None
+            out = fn(_flat_inputs(m, xi))[0]
+            self.assertEqual(out, eager)
+            out.sum().backward()
+            got = [p.grad for p in m.parameters()] + [xi.grad]
+            self.assertEqual(got, expected)
+
+    def test_training_symbolic_metadata_keeps_dynamic_saved_tensors_idxs(self):
+        # dynamic_saved_tensors_idxs is set in ViewAndMutationMeta.__post_init__ and
+        # ViewAndMutationMeta.__eq__ is blind to it, so a value-reduction of the
+        # metadata drops it. The composer reassigns it after construction; a symbolic
+        # capture (its saved activations carry symbolic dims) is where the dict is
+        # non-empty, so it guards the reassignment -- it is empty without the fix.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4, requires_grad=True)
+        gm = _capture(m, x, tracing_mode="symbolic")
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        ns = {"__name__": "_compiled"}
+        exec(compile(src, "<compiled>", "exec"), ns)
+        emitted = ns["_CompiledFunction"]
+        dsi = emitted.metadata.dynamic_saved_tensors_idxs
+        self.assertTrue(dsi)
+        self.assertTrue(
+            all(
+                isinstance(k, int) and all(isinstance(v, int) for v in vs)
+                for k, vs in dsi.items()
+            )
+        )
+
+    @skipIfTorchDynamo(
+        "the emitted _CompiledFunction refuses compiled autograd with "
+        "NotImplementedError (no fx bw_module to inline); a feature limitation, "
+        "see the module's not-covered list"
+    )
+    @parametrize(
+        "f",
+        [
+            subtest(_two_views_of_intermediate, name="two_views_of_intermediate"),
+            subtest(_view_of_input_and_dense, name="view_of_input"),
+        ],
+    )
+    def test_training_output_alias_composes_and_matches_eager(self, f):
+        # An aliased output makes the orchestration close over the codegen'd
+        # output_alias_wrapper (_alias_fn / gen_alias_from_base), which the
+        # training composer splices like the inference one. Values, aliasing,
+        # requires_grad and gradients must all match eager.
+        x0, w0 = torch.randn(4, 4), torch.randn(4, 4)
+
+        def inputs():
+            return x0.clone().requires_grad_(), w0.clone().requires_grad_()
+
+        with torch.enable_grad():
+            gm = make_fx(f)(*inputs())
+            src, _cache = compile_to_python(gm, list(inputs()), grad_enabled=True)
+        self.assertIn("def _alias_fn(", src)
+        self.assertIn("gen_alias_from_base", src)
+
+        ex, ew = inputs()
+        expected = f(ex, ew)
+        sum(o.sum() for o in expected).backward()
+        x, w = inputs()
+        outs = _exec(src)([x, w])
+        self.assertEqual(len(outs), len(expected))
+        for got, want in zip(outs, expected):
+            self.assertEqual(got, want)
+            self.assertEqual(got.requires_grad, want.requires_grad)
+        # The views share storage exactly as eager's do.
+        ptr = lambda t: t.untyped_storage().data_ptr()  # noqa: E731
+        self.assertEqual(
+            ptr(outs[0]) == ptr(outs[1]), ptr(expected[0]) == ptr(expected[1])
+        )
+        if f is _view_of_input_and_dense:
+            self.assertEqual(ptr(outs[0]), ptr(x))
+        sum(o.sum() for o in outs).backward()
+        self.assertEqual((x.grad, w.grad), (ex.grad, ew.grad))
+
+    @skipIfTorchDynamo(
+        "the emitted _CompiledFunction refuses compiled autograd with "
+        "NotImplementedError (no fx bw_module to inline); a feature limitation, "
+        "see the module's not-covered list"
+    )
+    def test_training_input_mutation_on_non_leaf_composes_and_matches_eager(self):
+        # Mutating an input that requires grad keeps the mutation OUT of the
+        # graph (it is replayed by the codegen'd mutation_epilogue, which the
+        # training composer splices). The caller's tensor must end up mutated,
+        # and the gradient must flow through the mutation to its base.
+        def f(x, w):
+            x.mul_(2)
+            return torch.tanh(x @ w)
+
+        x0, w0 = torch.randn(4, 4), torch.randn(4, 4)
+
+        def inputs():
+            base = x0.clone().requires_grad_()
+            return base, base * 1, w0.clone().requires_grad_()
+
+        with torch.enable_grad():
+            _, x, w = inputs()
+            gm = make_fx(f)(x, w)
+            _, x, w = inputs()
+            src, _cache = compile_to_python(gm, [x, w], grad_enabled=True)
+        self.assertIn("def _apply_mutations(", src)
+
+        e_base, ex, ew = inputs()
+        expected = f(ex, ew)
+        expected.sum().backward()
+        base, x, w = inputs()
+        out = _exec(src)([x, w])[0]
+        self.assertEqual(out, expected)
+        self.assertEqual(x, ex)
+        self.assertTrue(out.requires_grad)
+        out.sum().backward()
+        self.assertEqual((base.grad, w.grad), (e_base.grad, ew.grad))
+
+    @skipIfTorchDynamo(
+        "the emitted _CompiledFunction refuses compiled autograd with "
+        "NotImplementedError (no fx bw_module to inline); a feature limitation, "
+        "see the module's not-covered list"
+    )
+    @parametrize(
+        "seed_backward",
+        [
+            subtest(lambda outs: outs[0].sum().backward(), name="partial_outputs"),
+            subtest(
+                lambda outs: outs[0].backward(torch.arange(15.0).view(3, 5).t()),
+                name="noncontiguous_tangent",
+            ),
+        ],
+    )
+    def test_training_multi_output_backward_seeds_match_eager(self, seed_backward):
+        # A backward through ONE of several outputs hands the emitted
+        # _CompiledFunction None tangents for the rest, and a non-contiguous
+        # tangent has to be coerced to the layout the backward was traced for
+        # (the codegen'd backward prologue's tangent processing). Both must
+        # land on eager's gradients.
+        def f(x, w):
+            return torch.tanh(x @ w), (x * 2).sum(0), torch.relu(x)
+
+        x0, w0 = torch.randn(5, 4), torch.randn(4, 3)
+
+        def inputs():
+            return x0.clone().requires_grad_(), w0.clone().requires_grad_()
+
+        with torch.enable_grad():
+            gm = make_fx(f)(*inputs())
+            src, _cache = compile_to_python(gm, list(inputs()), grad_enabled=True)
+        ex, ew = inputs()
+        seed_backward(f(ex, ew))
+        x, w = inputs()
+        seed_backward(_exec(src)([x, w]))
+        self.assertEqual((x.grad, w.grad), (ex.grad, ew.grad))
+
+    @skipIfTorchDynamo(
+        "the emitted _CompiledFunction refuses compiled autograd with "
+        "NotImplementedError (no fx bw_module to inline); a feature limitation, "
+        "see the module's not-covered list"
+    )
+    def test_training_optimizer_step_matches_eager(self):
+        # The served module's gradients land on the caller's parameters, so an
+        # optimizer step over them must produce eager's updated values.
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        served = copy.deepcopy(m)
+        m(x).sum().backward()
+        torch.optim.SGD(m.parameters(), lr=0.1).step()
+        _exec(src)(_flat_inputs(served, x))[0].sum().backward()
+        torch.optim.SGD(served.parameters(), lr=0.1).step()
+        self.assertEqual(dict(served.named_parameters()), dict(m.named_parameters()))
+
+    @skipIfTorchDynamo(
+        "the emitted _CompiledFunction refuses compiled autograd with "
+        "NotImplementedError (no fx bw_module to inline); a feature limitation, "
+        "see the module's not-covered list"
+    )
+    def test_training_partial_requires_grad_matches_eager(self):
+        # An input that does not require grad is non-differentiable at the AOT
+        # boundary: it gets no gradient, and the others get eager's.
+        m = torch.nn.Linear(4, 3)
+        m.bias.requires_grad_(False)
+        x = torch.randn(5, 4, requires_grad=True)
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        m(x).sum().backward()
+        expected = (m.weight.grad.clone(), x.grad.clone())
+        m.zero_grad(set_to_none=True)
+        x.grad = None
+        _exec(src)(_flat_inputs(m, x))[0].sum().backward()
+        self.assertIsNone(m.bias.grad)
+        self.assertEqual((m.weight.grad, x.grad), expected)
 
     def test_linear_addmm_runs_like_eager(self):
         m = torch.nn.Linear(4, 3).eval()
@@ -585,6 +1209,29 @@ class TestAOTCompileToPython(TestCase):
         )
         self.assertNotIn("functional_utils.gen_alias_from_base", src)
 
+    def test_training_helpers_imported_from_standalone_runtime_surface(self):
+        # A training artifact's backward closes over runtime helpers
+        # (AOTDispatchAutograd.process_runtime_tangent, TensorAlias); those must import
+        # from the standalone_runtime surface, not their internal AOTAutograd module.
+        # An unused BackwardState must not leak an import either (compose refuses
+        # compiled autograd, so the branch that binds it is never emitted).
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4, requires_grad=True)
+        gm = _capture(m, x)
+        with torch.enable_grad():
+            src, _cache = compile_to_python(gm, _flat_inputs(m, x), grad_enabled=True)
+        self.assertIn(
+            "from torch._functorch._aot_autograd.standalone_runtime import "
+            "AOTDispatchAutograd",
+            src,
+        )
+        self.assertIn(
+            "from torch._functorch._aot_autograd.standalone_runtime import TensorAlias",
+            src,
+        )
+        self.assertNotIn("import torch._functorch._aot_autograd.runtime_wrappers", src)
+        self.assertNotIn("_backward_state", src)
+
     @parametrize("target", _EFFECTFUL_TARGETS)
     def test_rejects_effectful_op(self, target):
         # A graph carrying an effectful op is rejected up front with a concrete
@@ -637,7 +1284,6 @@ class TestAOTCompileToPython(TestCase):
         # OTHER thread's compile_to_python (which _COMPILE_LOCK covers, but capture is not
         # the serialized entry point), intermittently raising "CURRENT_PATCHER is None in
         # finally block" -- a make_fx concurrency artifact unrelated to the lock under test.
-        import threading
         import traceback
 
         specs = [
@@ -676,8 +1322,6 @@ class TestAOTCompileToPython(TestCase):
         # process-global sink would bleed wrappers across threads and fail this -- the direct
         # pin for the thread-local contract that the lock-serialized smoke test above cannot
         # exercise (the lock prevents real overlap there).
-        import threading
-
         from torch._functorch._aot_autograd.codegen import (
             _compile_and_exec_source,
             capture_generated_sources,
@@ -708,6 +1352,33 @@ class TestAOTCompileToPython(TestCase):
         self.assertEqual(sinks["a"], ["a_fn"])
         self.assertEqual(sinks["b"], ["b_fn"])
 
+    def test_capture_autograd_specs_is_thread_local(self):
+        # Same contract as the wrapper-source sink: two threads mid-capture at once
+        # must each record only the spec built on their own thread, even though the
+        # factory.build hook itself is installed process-wide.
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _AOTDispatchAutogradFunctionFactory as factory,
+        )
+
+        barrier = threading.Barrier(2)
+        sinks: dict = {}
+
+        def run(key):
+            into: list = []
+            with _capture_autograd_specs(into):
+                barrier.wait(timeout=60)
+                factory(spec=key).build()
+                barrier.wait(timeout=60)
+            sinks[key] = [spec for _origin, spec in into]
+
+        with mock.patch.object(factory, "build", lambda self: None):
+            threads = [threading.Thread(target=run, args=(k,)) for k in ("a", "b")]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertEqual(sinks, {"a": ["a"], "b": ["b"]})
+
 
 @instantiate_parametrized_tests
 class TestComposerHelpers(TestCase):
@@ -728,6 +1399,39 @@ class TestComposerHelpers(TestCase):
                 ),
                 f"helper import {import_stmt!r} bypasses the standalone_runtime surface",
             )
+
+    def test_select_training_spec_ignores_foreign_build(self):
+        # A re-entrant lowering during the capture window builds its own
+        # autograd Function under a DISTINCT TracingContext. Its spec is tagged
+        # with that context, like the codegen'd wrappers are, so only the spec
+        # built alongside the captured orchestration is selected.
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _AOTDispatchAutogradFunctionFactory as factory,
+        )
+
+        ours, foreign = object(), object()
+        specs = []
+        with (
+            mock.patch.object(factory, "build", lambda self: None),
+            _capture_autograd_specs(specs),
+        ):
+            ctx = torch._guards.TracingContext(None)
+            with torch._guards.tracing(ctx):
+                factory(spec=foreign).build()
+                factory(spec=ours).build()
+                origin = id(ctx)
+            with torch._guards.tracing(torch._guards.TracingContext(None)):
+                factory(spec=foreign).build()
+        self.assertEqual(len(specs), 3)
+        orch = GeneratedSource(
+            "runtime_wrapper_orchestration", "_runtime_wrapper", "", {}, None, origin
+        )
+        # Two specs share the orchestration's context: refuse rather than guess.
+        with self.assertRaisesRegex(NotImplementedError, "exactly one autograd spec"):
+            _select_training_spec(specs, [orch])
+        del specs[0]
+        self.assertIs(_select_training_spec(specs, [orch]), ours)
+        self.assertIs(_select_training_spec(specs, [orch, orch]), ours)
 
     def test_module_level_names_excludes_deleted(self):
         # Inductor's inner module binds then dels a name (async_compile = AsyncCompile();
@@ -859,6 +1563,44 @@ class TestAOTCompileToPythonCuda(TestCase):
             composed_out = _exec(src)([buf, x])[0]
         self.assertEqual(composed_out, eager_out)
         self.assertEqual(buf, eager.b)
+
+    @skipIfTorchDynamo(
+        "the emitted _CompiledFunction refuses compiled autograd with "
+        "NotImplementedError (no fx bw_module to inline); a feature limitation, "
+        "see the module's not-covered list"
+    )
+    def test_training_conv_restride_matches_eager(self):
+        # Conv nets are what the backward restride exists for: inductor's
+        # layout optimization hands back channels-last saved activations, and
+        # a backward lowered against the joint trace's eager strides raises a
+        # size assert -- or, with size asserts off, silently computes wrong
+        # gradients. Layout optimization is FORCED so the restride is
+        # genuinely engaged (at default heuristics this shape keeps contiguous
+        # strides and the test would pass with the restride deleted), and
+        # cuDNN TF32 is off so the gradients compare at default tolerance.
+        with (
+            torch._inductor.config.patch(force_layout_optimization=True),
+            torch.backends.cudnn.flags(enabled=True, allow_tf32=False),
+        ):
+            m = torch.nn.Conv2d(16, 32, 3).cuda()
+            x = torch.randn(2, 16, 16, 16, device="cuda")
+            for p in m.parameters():
+                p.grad = None
+            m(x).sum().backward()
+            expected = {n: p.grad.detach().clone() for n, p in m.named_parameters()}
+
+            gm = _capture(m, x)
+            with torch.enable_grad():
+                src, _cache = compile_to_python(
+                    gm, _flat_inputs(m, x), grad_enabled=True
+                )
+            out = _exec(src)(_flat_inputs(m, x))
+            out = out[0] if isinstance(out, (list, tuple)) else out
+            for p in m.parameters():
+                p.grad = None
+            out.sum().backward()
+            for name, param in m.named_parameters():
+                self.assertEqual(param.grad, expected[name])
 
 
 class TestAOTComposeGuards(TestCase):
