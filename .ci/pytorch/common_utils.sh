@@ -349,15 +349,6 @@ function install_spmd_types() {
   retry pip_build_and_install "git+https://github.com/meta-pytorch/spmd_types.git@${commit}" dist/spmd_types
 }
 
-function install_flex_gemm_quack() {
-  local quack_checkout repo_root
-  quack_checkout=$(mktemp -d -t quack-flex-gemm-XXXXXX)
-  repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-  trap_add "rm -rf '$quack_checkout'" EXIT
-  "$repo_root/tools/vendoring/quack/prepare_flex_gemm.sh" "$quack_checkout"
-  pip_install "$quack_checkout"
-}
-
 function install_flash_attn_cute() {
   echo "Installing FlashAttention 4 from PyPI..."
   local flash_attn_package=flash-attn-4==4.0.0b17
@@ -369,8 +360,6 @@ function install_flash_attn_cute() {
     "$flash_attn_package" \
     quack-kernels==0.6.4 \
     apache-tvm-ffi==0.1.11
-  # Replace released QuACK with the patched external package used by FlexGEMM.
-  install_flex_gemm_quack
   echo "FlashAttention 4 installation complete."
 }
 

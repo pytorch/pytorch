@@ -511,8 +511,6 @@ Tensor _scaled_mm_xpu(
       out);
 }
 
-using namespace std::placeholders;
-
 namespace scaled_blas = at::native::scaled;
 using scaled_blas::convert_int_to_enum;
 using scaled_blas::ScaledGemmImplementation;
@@ -526,40 +524,22 @@ std::array<ScaleKernelDispatchEntry, 9> scale_kernel_dispatch = {{
      scaled_blas::check_rowwise_recipe,
      ScaledGemmImplementation::ROWWISE_ROWWISE},
     {"block_1x128_128x128",
-     std::bind(
+     std::bind_front(
          scaled_blas::check_deepseek_recipe,
          ScalingType::BlockWise1x128,
-         ScalingType::BlockWise128x128,
-         _1,
-         _2,
-         _3,
-         _4,
-         _5,
-         _6),
+         ScalingType::BlockWise128x128),
      ScaledGemmImplementation::BLOCK_1x128_128x128},
     {"block_128x128_1x128",
-     std::bind(
+     std::bind_front(
          scaled_blas::check_deepseek_recipe,
          ScalingType::BlockWise128x128,
-         ScalingType::BlockWise1x128,
-         _1,
-         _2,
-         _3,
-         _4,
-         _5,
-         _6),
+         ScalingType::BlockWise1x128),
      ScaledGemmImplementation::BLOCK_128x128_1x128},
     {"block_1x128_1x128",
-     std::bind(
+     std::bind_front(
          scaled_blas::check_deepseek_recipe,
          ScalingType::BlockWise1x128,
-         ScalingType::BlockWise1x128,
-         _1,
-         _2,
-         _3,
-         _4,
-         _5,
-         _6),
+         ScalingType::BlockWise1x128),
      ScaledGemmImplementation::BLOCK_1x128_1x128},
     {"mxfp8_mxfp8",
      scaled_blas::check_mxfp8_recipe,

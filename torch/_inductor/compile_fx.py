@@ -3333,6 +3333,12 @@ def _compile_fx_main(
 
         compiler_config_extra = create_compiler_config_extra(model_)
 
+        # Load device backends (privateuse1 vendors) before the decomposition
+        # table is snapshotted below: _inductor_backend_init may register
+        # decompositions, custom passes, and codegen backends, all of which are
+        # consumed from this point on.
+        init_backend_registration()
+
         decompositions = get_decomp_fn()
         inner_compile = functools.partial(inner_compile, get_decomp_fn=get_decomp_fn)
 

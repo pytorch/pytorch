@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import importlib
 import inspect
 import os
 from typing import Any, TYPE_CHECKING
@@ -151,10 +150,8 @@ def flex_gemm_epimod(
     if epimod is not None:
         return epimod
 
-    cute_dsl_utils = importlib.import_module("quack.cute_dsl_utils")
-    epi_math = importlib.import_module("quack.epi_math")
-    epi_ops = importlib.import_module("quack.epilogue.ops")
-    epilogue_module = importlib.import_module("quack.epilogue.frontend")
+    from torch._vendor.quack import cute_dsl_utils, epi_math
+    from torch._vendor.quack.epilogue import frontend as epilogue_module, ops as epi_ops
 
     # Generated callbacks reference epi_math without importing QuACK into the
     # generated source. Inject it only into the original function's globals;
@@ -190,7 +187,8 @@ def flex_gemm_epimod(
     prepass = None
     prepass_outs = ()
     if local_reduce is not None:
-        grouped_reduce = importlib.import_module("quack.grouped_reduce")
+        from torch._vendor.quack import grouped_reduce
+
         finalize = local_reduce.finalize
         store_finalize = local_reduce.store_finalize or finalize
         prepass_finalize = local_reduce.prepass_finalize
@@ -314,7 +312,7 @@ def gemm_epimod(
     config_constraints: tuple[tuple[str, Any], ...] = (),
     stream: int | None = None,
 ) -> torch.Tensor:
-    """Run a dense FlexGEMM call through external QuACK EpiMod."""
+    """Run a dense FlexGEMM call through the vendored QuACK EpiMod."""
     if main_transform is not None and main_transform.chunked and b.stride(-1) == 1:
         raise NotImplementedError(
             "chunked grouped main output requires column-major B storage"
@@ -343,7 +341,8 @@ def gemm_epimod(
         )
     initialize_local_reduce_out = None
     if local_reduce is not None:
-        grouped_reduce = importlib.import_module("quack.grouped_reduce")
+        from torch._vendor.quack import grouped_reduce
+
         local_reduce_out = local_reduce.out
         if local_reduce_out is not None:
             if local_reduce.output_layout is None:
@@ -379,8 +378,7 @@ def gemm_epimod(
         else:
             operands[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = local_reduce_out
 
-    # pyrefly: ignore [missing-import]  # optional external backend
-    from quack.cache import cache_dir_override
+    from torch._vendor.quack.cache import cache_dir_override
 
     output_buffers = (
         {"main": quack_epilogue_arg(out)}
