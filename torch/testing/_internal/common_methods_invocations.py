@@ -9173,6 +9173,31 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_input(shape), args=(target,))
 
 
+def reference_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs)
+
+    make_input = partial(
+        make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+    )
+    for shape, reduction in product(
+        ((0, 3), (0, 3, 5, 7), (2, 3, 0, 7)),
+        ("none", "mean", "sum"),
+    ):
+        target = torch.empty(
+            (shape[0], *shape[2:]),
+            device=device,
+            dtype=torch.long,
+        )
+        yield SampleInput(
+            make_input(shape),
+            args=(target,),
+            kwargs={"reduction": reduction},
+        )
+
+
 def sample_inputs_binary_cross_entropy_with_logits(
     op_info, device, dtype, requires_grad, **kwargs
 ):
@@ -22647,6 +22672,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         ),
         supports_out=False,
         sample_inputs_func=sample_inputs_nll_loss,
+        reference_inputs_func=reference_inputs_nll_loss,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_jit_shape_analysis=True,
@@ -24972,9 +24998,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.nll_loss",
         torch_opinfo_name="nn.functional.nll_loss",
-        # The corresponding PyTorch op doesn't support out.  But the ref is
-        # registered as a decomp and ATen has an out variant.
-        supports_out=True,
         # For simpler indexing, we flatten target indices, then reshape the result tensor.
         # This creates inconsistent view state with reference impl.
         validate_view_consistency=False,
