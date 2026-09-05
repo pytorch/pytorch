@@ -351,11 +351,6 @@ from typing_extensions import Self
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch.compiler._precompile_types import (
-    FrameInvariants,
-    GuardFact,
-    PrecompileSummary,
-)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -374,6 +369,7 @@ if TYPE_CHECKING:
 
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
     from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.compiler._precompile_types import FrameInvariants, PrecompileSummary
 
 
 # ``precompile`` and ``PrecompileError`` are exposed under the compiler namespace as
