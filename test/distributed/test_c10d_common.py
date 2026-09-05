@@ -2183,6 +2183,16 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         except OSError:
             pass
 
+    def _init_process_group(self, backend):
+        # Rendezvous over the per-test temp file rather than a fixed TCP port,
+        # so concurrently running test processes cannot collide.
+        dist.init_process_group(
+            backend,
+            init_method=f"file://{self.file_name}",
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+
     def test_get_backend_name(self):
         dpg = DummyProcessGroup(0, 1)
         self.assertEqual("Dummy", dpg.name())
@@ -2229,9 +2239,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+        self._init_process_group("dummy")
 
         dpg = DummyProcessGroup(0, 124)
         from torch.distributed.distributed_c10d import _canonicalize_group_rank
@@ -2379,11 +2387,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group(
-            "cpu:dummy,cuda:dummy,xpu:dummy", rank=self.rank, world_size=self.world_size
-        )
+        self._init_process_group("cpu:dummy,cuda:dummy,xpu:dummy")
 
         # test all_gather
         input_tensor = torch.ones(2, 2) * 7
@@ -2418,9 +2422,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+        self._init_process_group("dummy")
 
         # test all_gather
         input_tensor = torch.ones(2, 2) * 7
@@ -2454,9 +2456,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+        self._init_process_group("dummy")
 
         # test send
         input_tensor = torch.zeros(2, 2)
@@ -2489,9 +2489,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+        self._init_process_group("dummy")
 
         pg = c10d._get_default_group()
 
@@ -2504,9 +2502,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+        self._init_process_group("dummy")
 
         pg = c10d._get_default_group()
 
@@ -2548,11 +2544,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             extended_api=True,
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group(
-            "delegating", rank=self.rank, world_size=self.world_size
-        )
+        self._init_process_group("delegating")
 
         try:
             sub_pg = dist.new_group(ranks=[0])
