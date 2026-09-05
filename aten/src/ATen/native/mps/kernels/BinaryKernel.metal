@@ -35,7 +35,31 @@ struct sub_alpha_functor {
 struct lerp_alpha_functor {
   template <typename T>
   inline T operator()(const T a, const T b, const T alpha) {
-    return static_cast<T>(a + c10::metal::mul(alpha, b - a));
+    // Mirror CPU (aten/src/ATen/native/Lerp.h): two-branch formula to preserve
+    // infinities. |alpha| < 0.5: a + alpha*(b-a)        [accurate for small
+    // weight] otherwise:     b - (b-a)*(1-alpha)    [avoids (-inf)+inf = NaN
+    // for large weight]
+    if (::metal::abs(float(alpha)) < 0.5f) {
+      return static_cast<T>(a + c10::metal::mul(alpha, b - a));
+    }
+    return static_cast<T>(b - c10::metal::mul(b - a, T(1) - alpha));
+  }
+  // float2/half2 are complex types; magnitude check is |alpha|^2 < 0.25.
+  inline float2 operator()(float2 a, float2 b, float2 alpha) {
+    float2 diff = b - a;
+    if (alpha.x * alpha.x + alpha.y * alpha.y < 0.25f) {
+      return a + c10::metal::mul(alpha, diff);
+    }
+    return b - c10::metal::mul(float2{1.0f - alpha.x, -alpha.y}, diff);
+  }
+  inline half2 operator()(half2 a, half2 b, half2 alpha) {
+    float2 fa{float(a.x), float(a.y)}, fb{float(b.x), float(b.y)},
+        fw{float(alpha.x), float(alpha.y)};
+    float2 diff = fb - fa;
+    float2 result = fw.x * fw.x + fw.y * fw.y < 0.25f
+        ? fa + c10::metal::mul(fw, diff)
+        : fb - c10::metal::mul(float2{1.0f - fw.x, -fw.y}, diff);
+    return half2{half(result.x), half(result.y)};
   }
 };
 
@@ -769,22 +793,41 @@ REGISTER_BINARY_ALPHA_OP(sub_alpha, half2, half2, half2);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, float2, float2, float2);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, half2, half2, half2);
 
-// lerp with tensor weight: lerp(s, e, w) = fma(w, e - s, s)
+// lerp with tensor weight: two-branch formula matching CPU
+// (aten/src/ATen/native/Lerp.h) |w| < 0.5: fma(w, e-s, s)          [accurate
+// for small weight] |w| >= 0.5: e - (e-s)*(1-w)        [avoids (-inf)+inf = NaN
+// for large weight]
 template <typename T>
 inline T lerp_op(T s, T e, T w) {
-  return fma(w, e - s, s);
+  if (::metal::abs(float(w)) < 0.5f) {
+    return fma(w, e - s, s);
+  }
+  return e - (e - s) * (T(1) - w);
 }
 
 inline bfloat lerp_op(bfloat s, bfloat e, bfloat w) {
-  return static_cast<bfloat>(fma(float(w), float(e) - float(s), float(s)));
+  if (::metal::abs(float(w)) < 0.5f) {
+    return static_cast<bfloat>(fma(float(w), float(e) - float(s), float(s)));
+  }
+  return static_cast<bfloat>(
+      float(e) - (float(e) - float(s)) * (1.0f - float(w)));
 }
 
 inline long lerp_op(long s, long e, long w) {
   return s + w * (e - s);
 }
 
+// float2 is a complex type; magnitude check is |w|^2 < 0.25, matching
+// lerp_alpha_functor's complex overloads above. Same NaN-avoidance rationale
+// as the real-valued overloads: for large |w|, s + w*(e-s) can compute
+// (-inf)+inf = NaN component-wise even when the mathematically correct
+// result is finite, so the large-weight branch approaches from e instead.
 inline float2 lerp_op(float2 s, float2 e, float2 w) {
-  return s + mul(w, e - s);
+  float2 diff = e - s;
+  if (w.x * w.x + w.y * w.y < 0.25f) {
+    return s + c10::metal::mul(w, diff);
+  }
+  return e - c10::metal::mul(diff, float2{1.0f - w.x, -w.y});
 }
 
 template <typename T>
