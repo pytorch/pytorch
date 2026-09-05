@@ -2122,6 +2122,132 @@ class _SingleFileStore(DynamoStore):
         return entry
 
 
+def precompile_load(
+    fn: Callable[..., object],
+    path: str,
+    *,
+    backend: str = "inductor",
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+    | None = None,
+    recompile_limit: int = 256,
+    dynamic: bool | None = None,
+) -> _ServedCallable:
+    r"""Load an artifact and return a callable ready to serve it.
+
+    .. warning::
+        Loading unpickles the artifact and executes code from it. Only load
+        artifacts from a trusted source.
+
+    Installing mutates global state on the underlying code objects, so the result
+    is also a context manager that unloads on exit. ``torch._dynamo.reset()`` is
+    not that unload: it destroys the precompile entries while leaving the
+    installed globals in place, so a call after a reset raises rather than
+    silently recompiling. Load the artifact again instead.
+
+    Runtime guards remain intact for any compilation allowed outside
+    ``serving()``. ``guard_filter_fn`` affects only its serialized package state.
+    """
+    entry_fn = _entry_fn_of(fn)
+    store = _SingleFileStore()
+    cache_entry = store.load_cache_entry(path)
+    _check_artifact_matches(cache_entry.dynamo, entry_fn, f"the artifact at {path}")
+    return serve_cache_entry(
+        fn,
+        cache_entry,
+        backend=backend,
+        guard_filter_fn=guard_filter_fn,
+        recompile_limit=recompile_limit,
+        dynamic=dynamic,
+    )
+
+
+def _dynamo_entry_for_serve(cache_entry: PrecompileCacheEntry) -> _DynamoCacheEntry:
+    """A private copy of the artifact's dynamo state, for one serve.
+
+    CompilePackage keeps the entry's per-code records and APPENDS to them, so a
+    serve-time recompile writes its new backend id back into the artifact. The
+    next install then resolves that id against cache_entry.backends, which never
+    had it, and fails -- an artifact served twice breaks on the install after
+    the first recompile. Copying is cheap: deepcopy treats bytes as atomic, so
+    this duplicates the record structure and not the serialized payloads.
+    """
+    return copy.deepcopy(cache_entry.dynamo)
+
+
+def prepare_cache_entry(
+    fn: Callable[..., object], cache_entry: PrecompileCacheEntry
+) -> CompilePackage:
+    """Build everything serving needs that does not touch the interpreter.
+
+    An installed artifact defers its mutation to the first served call, which is
+    the right default -- the mutation should happen where the caller can see it
+    -- but every way an artifact can be wrong for the host it landed on was
+    deferred with it, so the failure arrived several batches into a training
+    loop. The version and inlined-source checks run in the constructor here, and
+    the guard trees and backends are built now and CONSUMED by the later
+    install() rather than rebuilt, so this is not extra work, only earlier work.
+    """
+    package = CompilePackage(
+        _entry_fn_of(fn),
+        _dynamo_entry_for_serve(cache_entry),
+        serialization_guard_filter_fn=default_guard_filter_fn,
+        explicit_capture=True,
+    )
+    try:
+        package.prepare(cache_entry.backends)
+    except Exception as e:
+        raise PackageError(
+            f"precompile: this artifact does not fit this host, so serving it "
+            f"would fail inside the first call rather than here: "
+            f"{type(e).__name__}: {e}"
+        ) from e
+    return package
+
+
+def serve_cache_entry(
+    fn: Callable[..., object],
+    cache_entry: PrecompileCacheEntry,
+    *,
+    backend: str = "inductor",
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+    | None = None,
+    recompile_limit: int = 256,
+    dynamic: bool | None = None,
+    prepared: CompilePackage | None = None,
+) -> _ServedCallable:
+    """Wire an already-loaded cache entry onto ``fn`` and install it.
+
+    Shared by ``precompile_load``, which reads the entry from a path, and by the
+    multi-graph artifact whose driver carries the same entry inline: the wiring
+    is order-sensitive (the package has to be attached to the optimize context
+    before its globals and guarded codes are installed), so it lives in one
+    place rather than being written twice.
+    """
+    entry_fn = _entry_fn_of(fn)
+    # prepare_cache_entry already built this package's guard trees and backends
+    # at load; install() below consumes them instead of rebuilding.
+    package = prepared or CompilePackage(
+        entry_fn,
+        _dynamo_entry_for_serve(cache_entry),
+        serialization_guard_filter_fn=(
+            default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
+        ),
+        explicit_capture=True,
+        serving=True,
+    )
+    backend_obj = _PrecompileBackend(backend, serving=True)
+    optimize_ctx = _optimize_isolated(
+        backend_obj,
+        package,
+        recompile_limit=recompile_limit,
+        dynamic=dynamic,
+    )
+    compiled = optimize_ctx(fn)
+    isolate_recompiles_id = optimize_ctx.isolate_recompiles_id
+    package.install(cache_entry.backends, isolate_recompiles_id=isolate_recompiles_id)
+    return _ServedCallable(compiled, package, isolate_recompiles_id, backend_obj)
+
+
 def precompile_capture(
     fn: Callable[..., object],
     *,
