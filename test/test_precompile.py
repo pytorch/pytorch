@@ -784,7 +784,76 @@ def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
         yield "inlined", _load_pair(code, _strip_artifact(cache))
 
 
+class _PrecompileRebound:
+    def forward(self, x):
+        return x * 2
+
+
+class _PrecompileReboundModule(torch.nn.Module):
+    def forward(self, x):
+        return x * 2
+
+
+def _precompile_rebound_shadow(x):
+    return x * 3
+
+
+class _PrecompileForwardHolder:
+    """The torchrec TrainPipelineSparseDist shape.
+
+    It keeps each module's ORIGINAL bound forward in a list, and optionally
+    rebinds the attribute the way TrainPipelineSparseDist swaps in a
+    PipelinedForward. Both halves matter: the saved method's receiver is what
+    pruning replaces with the sentinel, and whether the attribute still
+    resolves to the saved function is what used to pick the reducer's branch.
+    """
+
+    def __init__(self, inner, shadow):
+        self.inner = inner
+        self._original_forwards = [inner.forward]
+        self.scale = torch.zeros(4)
+        if shadow:
+            inner.forward = _precompile_rebound_shadow
+
+
+def _precompile_rebound_entry(pipeline, x):
+    return pipeline._original_forwards[0](x) + x
+
+
+def _precompile_rebound_unread_entry(pipeline, x):
+    # The holder is passed through and guarded, but nothing reads the saved
+    # method -- the shape the real model has.
+    return x * 2 + pipeline.scale
+
+
+class _PrecompileReadsAttr(torch.nn.Module):
+    def forward(self, x):
+        companion = getattr(x, "_cpu_copy", None)
+        if companion is not None:
+            return x * 2 + companion.to(x.device)
+        return x * 2
+
+
+def _precompile_attr_helper(model, x):
+    # x itself must cross the break: rebinding it to an intermediate would drop
+    # the attribute and the guard under test would never be built.
+    torch._dynamo.graph_break()
+    return model(x).sum()
+
+
+def _precompile_attr_entry(model, x):
+    return _precompile_attr_helper(model, x)
+
+
 _LUT_MODULE = None
+
+
+def _precompile_reads_module_global(x):
+    return x * _LUT_MODULE.LUT.sum()
+
+
+def _precompile_reads_flag(x):
+    return x * getattr(x, "my_flag", 1)
 
 
 _precompile_reads_shadowed = {
