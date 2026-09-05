@@ -34,6 +34,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -1530,6 +1531,30 @@ class DecompOneOffTests(TestCase):
                     lambda x: decomp(x, ord=ord, dim=dim, keepdim=keepdim), (x,)
                 )
             )
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize("dtype", [torch.int64, torch.int32, torch.uint8, torch.bool])
+    def test_uniform_integral_dtype(self, device, dtype):
+        # gh-195673: the decomposition sampled [0, 1) and truncated to dtype, so the
+        # traced path returned a constant where eager raises.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def rand_like(x):
+            return torch.rand_like(x)
+
+        msg = "check_uniform_bounds"
+        x = torch.ones(4, device=device, dtype=dtype)
+
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            rand_like(x)
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            torch.compile(rand_like, backend="aot_eager")(x)
+
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            torch.rand(4, device=device, dtype=dtype)
+        with FakeTensorMode(), self.assertRaisesRegex(NotImplementedError, msg):
+            torch.rand(4, device=device, dtype=dtype)
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
