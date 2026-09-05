@@ -6,6 +6,7 @@ import importlib
 import os
 import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -18,6 +19,7 @@ import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.package import (
     _current_cpu_codegen_target,
+    _rename_globals,
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
@@ -539,8 +541,12 @@ class TestPackage(torch._inductor.test_case.TestCase):
         compiled_fn = torch._dynamo.optimize(package=package)(fn)
         package.install(backends)
 
-        installed = {name for name in scope if name.startswith(prefixes)} - preexisting
+        # The bindings install() is responsible for: its per-install names plus
+        # the builtins dict. The capture-time __compiled_fn global is not among
+        # them (install binds a renamed twin), so its hook popping it is fine.
+        installed = set(package._installed_globals[sys.modules[fn.__module__]])
         self.assertTrue(installed)
+        self.assertTrue(installed - preexisting)
 
         del pinned
         gc.collect()
@@ -741,6 +747,207 @@ def add(x, y):
             with self.assertRaisesRegex(RuntimeError, "Detected recompile"):
                 compiled(x)
         self.assertEqual(compiled(x), expected)
+
+    def test_abandoned_package_uninstalls_on_gc(self):
+        # Without the finalizer, each load+install of one artifact would leave
+        # behind its per-owner entries and per-install uuid-named resume globals.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return y + x.cos()
+
+        def guard_filter_fn(guards):
+            # A nested fn with a graph break produces guards that cannot be
+            # serialized.
+            unserializable = ("MODULE_MATCH", "CLOSURE_MATCH", "FUNCTION_MATCH")
+            return [guard.guard_type not in unserializable for guard in guards]
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=guard_filter_fn
+        )(fn)
+        compiled_fn(torch.randn(3, 2))
+        for backend_id, bknd in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, bknd)
+        ctx.save_package(package, self.path())
+        torch._dynamo.reset()
+        del package, compiled_fn
+        gc.collect()
+
+        module_keys = set(sys.modules[fn.__module__].__dict__)
+        counts = []
+        for _ in range(4):
+            pkg, backends = ctx.load_package(fn, self.path())
+            pkg.install(backends)
+            counts.append(len(_debug_get_precompile_entries(fn.__code__)))
+            del pkg, backends
+            gc.collect()
+        # Each reload sees only its own entries (no growth across the four
+        # generations), the last dead owner's entries are gone, and nothing
+        # the dead packages installed is left in the module globals -- the
+        # shared builtins dict is deliberately left in place.
+        self.assertGreater(counts[0], 0)
+        self.assertEqual(counts, [counts[0]] * 4)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        leaked = set(sys.modules[fn.__module__].__dict__) - module_keys
+        self.assertTrue(all(k.startswith("__builtins_dict") for k in leaked), leaked)
+
+        # A LIVE package is untouched by garbage collection.
+        pkg, backends = ctx.load_package(fn, self.path())
+        pkg.install(backends)
+        gc.collect()
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), counts[0])
+        pkg.uninstall()
+
+    def test_rename_globals_rewrites_nested_code(self):
+        def outer(x):
+            def inner(y):
+                return resume_at_16_3(y)  # noqa: F821
+
+            return inner(x) + resume_at_16_3(x)  # noqa: F821
+
+        old, new = "resume_at_16_3", "resume_at_16_3_0123456789abcdef_tok"
+        code = _rename_globals(outer.__code__, {old: new})
+        (inner_code,) = [c for c in code.co_consts if isinstance(c, types.CodeType)]
+        self.assertIn(new, code.co_names)
+        self.assertNotIn(old, code.co_names)
+        self.assertIn(new, inner_code.co_names)
+        self.assertNotIn(old, inner_code.co_names)
+        # Indices into co_names are preserved, so the bytecode is untouched and
+        # the renamed code follows the new binding.
+        self.assertEqual(code.co_code, outer.__code__.co_code)
+        renamed = types.FunctionType(code, {new: lambda y: y + 1})
+        self.assertEqual(renamed(1), 4)
+        # The original is not mutated, and renames that apply nowhere hand the
+        # same object back.
+        self.assertIn(old, outer.__code__.co_names)
+        self.assertIs(_rename_globals(outer.__code__, {"absent": "x"}), outer.__code__)
+
+    def _save_eager_package(self, fn, ctx, args, guard_filter_fn=None):
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=guard_filter_fn
+        )(fn)
+        compiled_fn(*args)
+        for backend_id, bknd in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, bknd)
+        ctx.save_package(package, self.path())
+        torch._dynamo.reset()
+
+    def test_two_packages_from_one_artifact_coexist(self):
+        # Two loads of one artifact serve the same frame at once: their
+        # precompile entries are told apart by owner and their resume functions
+        # by per-install names, so each is served while the other is live and
+        # unloads without disturbing it.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return y + x.cos()
+
+        def guard_filter_fn(guards):
+            unserializable = ("MODULE_MATCH", "CLOSURE_MATCH", "FUNCTION_MATCH")
+            return [guard.guard_type not in unserializable for guard in guards]
+
+        x = torch.randn(3, 2)
+        expected = fn(x)
+        self._save_eager_package(fn, ctx, (x,), guard_filter_fn)
+        module_dict = sys.modules[fn.__module__].__dict__
+        before = set(module_dict)
+
+        pkg_a, backends_a = ctx.load_package(fn, self.path())
+        pkg_a.install(backends_a)
+        count = len(_debug_get_precompile_entries(fn.__code__))
+        self.assertGreater(count, 0)
+        resume_a = {k for k in set(module_dict) - before if k.startswith("__resume_at")}
+        pkg_b, backends_b = ctx.load_package(fn, self.path())
+        pkg_b.install(backends_b)
+        resume_b = {k for k in set(module_dict) - before if k.startswith("__resume_at")}
+        resume_b -= resume_a
+        self.assertTrue(resume_a)
+        self.assertTrue(resume_b)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 2 * count)
+
+        compiled_fn = torch._dynamo.optimize(package=pkg_a)(fn)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), expected)
+        # a's unload takes only a's entries and a's resume functions. (An
+        # import alias both loads bind to the same module object still goes
+        # with the first unload, so b is not called here; teardown by owner
+        # count for shared names is a separate change.)
+        pkg_a.uninstall()
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), count)
+        self.assertFalse(resume_a & set(module_dict))
+        self.assertTrue(resume_b <= set(module_dict))
+        pkg_b.uninstall()
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        self.assertFalse(resume_b & set(module_dict))
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(RuntimeError, "Detected recompile"):
+                compiled_fn(x)
+
+    def test_uninstall_leaves_a_users_rebinding_alone(self):
+        # uninstall() pops a global only while it still holds the value this
+        # package installed, as the GC finalizer already did.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x + 1
+
+        self._save_eager_package(fn, ctx, (torch.randn(3, 2),))
+        module = sys.modules[fn.__module__]
+        module_dict = module.__dict__
+        pkg, backends = ctx.load_package(fn, self.path())
+        pkg.install(backends)
+        # From the package's own bookkeeping, not a module-dict diff: on a
+        # free-threaded build the capture-time CleanupHook (keyed on a code
+        # object, deferred-refcounted there) may not have popped the previous
+        # compile's name yet, so a diff can be empty.
+        (name,) = [
+            k for k in pkg._installed_globals[module] if k.startswith("__compiled_fn")
+        ]
+        sentinel = object()
+        module_dict[name] = sentinel
+        self.addCleanup(module_dict.pop, name, None)
+        pkg.uninstall()
+        self.assertIs(module_dict[name], sentinel)
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @parametrize("isolate_recompiles", (False, True))
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_automatic_dynamo_serves_an_isolate_recompiles_context(
+        self, device, isolate_recompiles
+    ):
+        # The transparent cache installs the package it loads, and precompile
+        # entries match their own region only, so installing into the default
+        # bucket while the context looks up in its own region loaded the
+        # artifact and then served nothing -- every call recompiled, and under
+        # fail_on_recompile it raised. Nothing combined these two before.
+        def fn(x):
+            return x.sin() + x.cos()
+
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
+        arg = torch.randn(3, 2, device=device)
+        expected = fn(arg)
+        torch.compile(  # noqa: UNSPECIFIED_BACKEND
+            fn, isolate_recompiles=isolate_recompiles
+        )(arg)
+        DynamoCache.clear()
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        warm = torch.compile(  # noqa: UNSPECIFIED_BACKEND
+            fn, isolate_recompiles=isolate_recompiles
+        )
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(warm(arg), expected)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
