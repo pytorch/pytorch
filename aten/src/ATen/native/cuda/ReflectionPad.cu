@@ -667,6 +667,10 @@ void reflection_pad2d_backward_out_template(
       ", Got: ",
       grad_output_.size(dim_h));
 
+  if (grad_output_.numel() == 0) {
+    return;
+  }
+
   Tensor grad_output = grad_output_.contiguous();
 
   int64_t output_plane_size = output_h * output_w;
