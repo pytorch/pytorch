@@ -149,9 +149,8 @@ Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
   checkAllSameGPU("rrelu_with_noise_out_cuda", {self_arg, noise_arg, output_arg});
 
   if (training) {
-    // The kernel writes into noise's raw pointer directly; a non-contiguous
-    // noise used to be silently .contiguous()'d into a temporary that was
-    // never copied back, so the caller's tensor never saw the write.
+    // The kernel writes noise directly; a non-contiguous copy used to go
+    // into a temporary that was never copied back.
     checkContiguous("rrelu_with_noise_out_cuda", noise_arg);
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
         self.scalar_type(), "rrelu_with_noise_out_cuda", [&] {

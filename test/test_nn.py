@@ -12994,9 +12994,8 @@ if __name__ == '__main__':
 
     @onlyCUDA
     def test_rrelu_with_noise_cuda_noncontiguous_noise_rejected(self, device):
-        # A non-contiguous noise used to be silently .contiguous()'d into a
-        # temporary the kernel wrote into and never copied back, leaving the
-        # caller's noise tensor unmodified with no error.
+        # A non-contiguous noise used to be copied into a temporary that
+        # the kernel wrote into and never copied back.
         x = torch.randn(64, device=device)
         noise = torch.empty(128, device=device)[::2]
         out = torch.empty(64, device=device)
