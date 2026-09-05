@@ -1964,6 +1964,9 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
 requires_xpu = unittest.skipUnless(TEST_XPU, "Requires XPU")
 
+requires_gpu = unittest.skipUnless(
+    torch.cuda.is_available() or torch.xpu.is_available(), "requires cuda or xpu"
+)
 
 def lazy_skip_if(condition_fn, reason):
     """Skip a test (function or class) when ``condition_fn()`` is true.
