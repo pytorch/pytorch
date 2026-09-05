@@ -1072,6 +1072,55 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
             self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
 
+    @skipIfNoONEDNN
+    def test_linear_weight_pack_bias_device_mismatch(self):
+        # Regression test for the bias device check in _is_packable_linear:
+        # it used to read the loop-leaked `meta_value` (the weight fake that
+        # was already validated to be on CPU) instead of `bias_meta_value`,
+        # so a bias living on another device silently passed the CPU weight
+        # packing gate.
+        from types import SimpleNamespace
+
+        from torch._inductor.fx_passes.mkldnn_fusion import _is_packable_linear
+
+        if is_mkldnn_bf16_supported("cpu"):
+            dtype = torch.bfloat16
+        elif torch._C.has_mkl or torch.ops.mkldnn._is_mkldnn_acl_supported():
+            # fp32 weights reach the bias check only through the MKL/ACL path.
+            dtype = torch.float32
+        else:
+            self.skipTest("needs bf16 support or MKL/ACL to reach the bias check")
+
+        fake_mode = FakeTensorMode()
+        input_fake = fake_mode.from_tensor(torch.randn(2, 4, dtype=dtype))
+        weight_fake = fake_mode.from_tensor(torch.randn(4, 8, dtype=dtype))
+        output_fake = fake_mode.from_tensor(torch.empty(2, 8, dtype=dtype))
+        bias_cpu_fake = fake_mode.from_tensor(torch.randn(8, dtype=dtype))
+        bias_meta_fake = fake_mode.from_tensor(
+            torch.empty(8, dtype=dtype, device="meta")
+        )
+
+        def is_packable_with_bias(bias_fake):
+            graph = torch.fx.Graph()
+            x = graph.create_node("placeholder", "x")
+            w = graph.create_node("get_attr", "w")
+            b = graph.create_node("get_attr", "b")
+            out = graph.create_node(
+                "call_function", torch.ops.aten.addmm.default, (b, x, w)
+            )
+            x.meta["val"] = input_fake
+            w.meta["val"] = weight_fake
+            b.meta["val"] = bias_fake
+            out.meta["val"] = output_fake
+            match = SimpleNamespace(output_node=lambda: out)
+            return _is_packable_linear(match)
+
+        # Control: a CPU bias on a CPU linear stays packable.
+        self.assertTrue(is_packable_with_bias(bias_cpu_fake))
+        # A bias on a different device must not be packed into a CPU
+        # mkldnn linear.
+        self.assertFalse(is_packable_with_bias(bias_meta_fake))
+
     @reduced_f32_on_and_off()
     def test_linear_binary(self, device="cpu"):
         self.device = device
