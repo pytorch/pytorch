@@ -697,6 +697,87 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     def all_can_inplace(node, mutated_args):
         return all(can_inplace(node, arg) for arg in mutated_args)
 
+    def copy_back_reuse_candidate(node):
+        if node.target is not aten.index_put.default:
+            return None
+
+        field, indices, src = node.args[:3]
+        accumulate = (
+            node.args[3] if len(node.args) > 3 else node.kwargs.get("accumulate", False)
+        )
+        if (
+            accumulate is not False
+            or not isinstance(field, torch.fx.Node)
+            or not isinstance(indices, (list, tuple))
+            or not isinstance(src, torch.fx.Node)
+            or src.target is not aten.mul.Tensor
+        ):
+            return None
+
+        gather = src.args[0]
+        # The matching gather checks the same indices before the copy is moved
+        # ahead of index_put, preserving mutation order when indexing fails.
+        if (
+            not isinstance(gather, torch.fx.Node)
+            or gather.target is not aten.index.Tensor
+            or len(gather.users) != 1
+            or gather.args[0] is not field
+            or not isinstance(gather.args[1], (list, tuple))
+            or len(indices) != 1
+            or len(gather.args[1]) != 1
+            or gather.args[1][0] is not indices[0]
+        ):
+            return None
+
+        candidates = [
+            (dst, copy_node)
+            for (dst, copy_src), copy_node in copy_args_to_copy_nodes.items()
+            if copy_src is src
+        ]
+        if len(candidates) != 1:
+            return None
+        dst, copy_node = candidates[0]
+        non_blocking = (
+            copy_node.args[2]
+            if len(copy_node.args) > 2
+            else copy_node.kwargs.get("non_blocking", False)
+        )
+
+        if (
+            copy_nodes.get(dst) is not copy_node
+            or node_order[copy_node] <= node_order[node]
+            or len(src.users) != 2
+            or non_blocking is not False
+            or not can_inplace(node, dst)
+        ):
+            return None
+
+        if not _same_tensor_metadata(dst, src):
+            return None
+        dst_val = dst.meta["val"]
+        src_val = src.meta["val"]
+        if dst_val.dtype != src_val.dtype or dst_val.device != src_val.device:
+            return None
+        if torch._debug_has_internal_overlap(dst_val) != 0:
+            return None
+
+        dst_storage = get_node_storage(dst)
+        if dst_storage is None or get_node_storage(src) == dst_storage:
+            return None
+
+        pending = list(pytree.tree_leaves((src.args, src.kwargs)))
+        seen: OrderedSet[torch.fx.Node] = OrderedSet()
+        while pending:
+            arg = pending.pop()
+            if not isinstance(arg, torch.fx.Node) or arg in seen:
+                continue
+            seen.add(arg)
+            if get_node_storage(arg) == dst_storage:
+                return None
+            pending.extend(pytree.tree_leaves((arg.args, arg.kwargs)))
+
+        return node, copy_node
+
     def log_inplace_results(
         node_name,
         old_tensors_to_clone,
@@ -742,6 +823,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         ReinplaceCounters.add_missed_bytes(trigger, missed_bytes)
 
     replace_dict: dict[torch.fx.Node, torch.fx.Node] = {}
+    copy_back_reuses: list[tuple[torch.fx.Node, torch.fx.Node]] = []
 
     def reinplace_and_refine_tensors_to_clone(
         old_tensors_to_clone, kwargs, node_name, trigger
@@ -826,6 +908,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
                     if copy_node is not None:
                         replace_dict[copy_node] = copy_node.args[0]
+                if candidate := copy_back_reuse_candidate(node):
+                    copy_back_reuses.append(candidate)
                 node.target = inplaceable_op.inplace_op
         elif node.target is torch.ops.higher_order.auto_functionalized_v2:
             _mutable_op = node.args[0]
@@ -1052,6 +1136,17 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     replace_dict[copy_node] = copy_node.args[0]
 
                 node.target = inplaceable_op.inplace_op
+    for node, copy_node in copy_back_reuses:
+        # Do not move a mutation across nodes whose effects remain observable.
+        if copy_node in replace_dict or any(
+            node_order[node] < node_order[other] < node_order[copy_node]
+            and other not in replace_dict
+            for other in graph.nodes
+        ):
+            continue
+        node.update_arg(2, copy_node)
+        node.prepend(copy_node)
+
     for node, replacement in replace_dict.items():
         while replacement in replace_dict:
             replacement = replace_dict[replacement]
