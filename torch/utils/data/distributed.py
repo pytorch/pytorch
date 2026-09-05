@@ -80,6 +80,10 @@ class DistributedSampler(Sampler[_T_co]):
             if not dist.is_available():
                 raise RuntimeError("Requires distributed package to be available")
             rank = dist.get_rank()
+        if num_replicas <= 0:
+            raise ValueError(
+                f"Invalid num_replicas {num_replicas}, num_replicas should be a positive integer"
+            )
         if rank >= num_replicas or rank < 0:
             raise ValueError(
                 f"Invalid rank {rank}, rank should be in the interval [0, {num_replicas - 1}]"
