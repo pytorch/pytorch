@@ -326,18 +326,18 @@ _CLAMP_SCALAR_TYPE_NAMES = {
 }
 
 
-def _validate_clamp_scalar(value: object, dtype: torch.dtype) -> None:
+def _validate_clamp_scalar(value: object, dtype: torch.dtype, device_type: str) -> None:
     if dtype not in _CLAMP_SCALAR_TYPE_NAMES or type(value) not in (int, float):
         return
+    if device_type == "cuda":
+        dtype = utils.get_computation_dtype(dtype)
     scalar = cast(int | float, value)
     if isinstance(scalar, float) and not math.isfinite(scalar):
         return
     limits = torch.finfo(dtype)
     if scalar < limits.min or scalar > limits.max:
         name = _CLAMP_SCALAR_TYPE_NAMES[dtype]
-        raise RuntimeError(
-            f"value cannot be converted to type {name} without overflow"
-        )
+        raise RuntimeError(f"value cannot be converted to type {name} without overflow")
 
 
 @pw_cast_for_opmath_non_tensor_args
@@ -359,8 +359,12 @@ def clamp(
     min: torch.types.Number | None = None,
     max: torch.types.Number | None = None,
 ) -> torch.Tensor:
-    _validate_clamp_scalar(min, x.dtype)
-    _validate_clamp_scalar(max, x.dtype)
+    if x.dtype in _CLAMP_SCALAR_TYPE_NAMES and any(
+        type(bound) is float and math.isnan(bound) for bound in (min, max)
+    ):
+        return _clamp(x, math.nan, math.nan)
+    _validate_clamp_scalar(min, x.dtype, x.device.type)
+    _validate_clamp_scalar(max, x.dtype, x.device.type)
     return _clamp(x, min, max)
 
 

@@ -8691,13 +8691,13 @@ minimum = register_pointwise(aten.minimum)
 
 @register_lowering(aten.clamp_min)
 def clamp_min(x, min):
-    _validate_clamp_scalar(min, x.get_dtype())
+    _validate_clamp_scalar(min, x.get_dtype(), x.get_device().type)
     return maximum(x, min)
 
 
 @register_lowering(aten.clamp_max)
 def clamp_max(x, max):
-    _validate_clamp_scalar(max, x.get_dtype())
+    _validate_clamp_scalar(max, x.get_dtype(), x.get_device().type)
     return minimum(x, max)
 
 

@@ -3571,23 +3571,45 @@ class CommonTemplate:
         with self.assertRaisesRegex(RuntimeError, error):
             torch.compile(fn)(x)
 
+    @parametrize("min, max", ((math.nan, 3.4e39), (-3.4e39, math.nan)))
+    def test_clamp_scalar_overflow_nan(self, min, max):
+        def fn(x):
+            return torch.clamp(x, min=min, max=max)
+
+        x = torch.randn(4, device=self.device)
+        expected = fn(x)
+        self.assertTrue(expected.isnan().all())
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), expected)
+
+    @parametrize("op", ("clamp", "clamp_min", "clamp_max"))
     @parametrize(
         "dtype, value",
         (
             (torch.float16, 100000.0),
             (torch.bfloat16, 1e40),
             (torch.float16, 100000),
+            (torch.bfloat16, 3.395e38),
         ),
     )
-    def test_clamp_scalar_overflow_lowp(self, dtype, value):
+    def test_clamp_scalar_overflow_lowp(self, op, dtype, value):
+        if self.device not in ("cpu", "cuda"):
+            raise unittest.SkipTest("requires CPU or CUDA scalar conversion semantics")
         if not self.is_dtype_supported(dtype):
             raise unittest.SkipTest(f"{dtype} not supported on {self.device}")
 
         def fn(x):
+            if op == "clamp_min":
+                return torch.clamp_min(x, -value)
+            if op == "clamp_max":
+                return torch.clamp_max(x, value)
             return torch.clamp(x, min=-value, max=value)
 
         x = torch.randn(4, device=self.device, dtype=dtype)
         error = "value cannot be converted to type .* without overflow"
+
+        if self.device == "cuda" and value <= torch.finfo(torch.float32).max:
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+            return
 
         with self.assertRaisesRegex(RuntimeError, error):
             fn(x)
