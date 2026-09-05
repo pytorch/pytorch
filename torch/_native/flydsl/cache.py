@@ -26,7 +26,7 @@ from __future__ import annotations
 import functools
 from collections import namedtuple
 from threading import Lock
-from typing import Any, TYPE_CHECKING
+from typing import Any, Protocol, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -34,6 +34,18 @@ if TYPE_CHECKING:
 
 
 CacheInfo = namedtuple("CacheInfo", ["hits", "misses", "currsize"])
+
+
+class CachedCompile(Protocol):
+    """Compile wrapper returned by ``flydsl_jit_cache`` / ``instrumented_flydsl_cache``."""
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def cache_clear(self) -> None: ...
+
+    def cache_info(self) -> CacheInfo: ...
+
+
 _MISSING = object()
 _CacheKey = tuple[tuple[Any, ...], tuple[tuple[str, Any], ...]]
 

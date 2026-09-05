@@ -264,6 +264,36 @@ class AttributeMutationNew(AttributeMutation):
         self.cls_source = cls_source
 
 
+class ValueAndAttributeMutationExisting(
+    ValueMutationExisting, AttributeMutationExisting
+):
+    """
+    Pre-existing objects whose class subclasses a builtin container: both the
+    builtin layout contents (value) and the instance __dict__ (attributes) can
+    mutate. Inherits both branches so isinstance-based dispatch engages the
+    value-axis machinery (is_modified) and the attribute-axis machinery
+    (store_attr_mutations) for the same object.
+    """
+
+    # The parents' cooperative __init__s conflict across the merged MRO, so
+    # initialize the base directly.
+    def __init__(self) -> None:
+        MutationType.__init__(self, SourceType.Existing)
+        self.is_modified = False
+
+
+class ValueAndAttributeMutationNew(ValueMutationNew, AttributeMutationNew):
+    """
+    Like ValueAndAttributeMutationExisting, for objects created during the
+    trace.
+    """
+
+    def __init__(self, cls_source: Source | None = None) -> None:
+        MutationType.__init__(self, SourceType.New)
+        self.is_modified = False
+        self.cls_source = cls_source
+
+
 def _is_top_level_scope(scope_id: int) -> bool:
     return scope_id == 1
 
@@ -560,6 +590,25 @@ def _wrap_unaryfunc(
     if len(args) != 0:
         raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
     return func(self, tx)
+
+
+def _wrap_hashfunc(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., tuple[int, bool]],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 0:
+        raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
+    from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
+
+    h, is_fake = func(self, tx)
+    if is_fake:
+        return FakeIdVariable(h, kind=FakeValueKind.HASH)
+    return ConstantVariable.create(h)
 
 
 def _wrap_binaryfunc(
@@ -1131,7 +1180,13 @@ _SLOTDEFS: list[SlotDef] = [
     # SlotDef("__setattr__", ),
     # SlotDef("__delattr__", ),
     TPSLOT("__repr__", "tp_repr_impl", PyTypeSlots.TP_REPR, _wrap_unaryfunc),
-    # TPSLOT("__hash__", "tp_hash_impl", PyTypeSlots.TP_HASH, _wrap_unaryfunc),
+    # hash_impl returns (int, bool), not a VariableTracker like other impls.
+    TPSLOT(
+        "__hash__",
+        "hash_impl",
+        PyTypeSlots.TP_HASH,
+        _wrap_hashfunc,  # pyrefly: ignore[bad-argument-type]
+    ),
     TPSLOT("__call__", "call_function", PyTypeSlots.TP_CALL, wrap_call),
     TPSLOT("__str__", "tp_str_impl", PyTypeSlots.TP_STR, _wrap_unaryfunc),
     TPSLOT(

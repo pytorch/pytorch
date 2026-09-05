@@ -71,10 +71,8 @@ template <>
 void listSort<at::Tensor>(Stack& stack) {
   bool reverse = pop(stack).toBool();
   c10::List<at::Tensor> list = pop(stack).toTensorList();
-  std::sort(
-      list.begin(),
-      list.end(),
-      [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
+  std::ranges::sort(
+      list, [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
         // "strict weak ordering" issue - see other sort
         if (a.getIntrusivePtr() == b.getIntrusivePtr()) {
           return false;
@@ -87,12 +85,9 @@ template <>
 void listCopyAndSort<at::Tensor>(Stack& stack) {
   c10::List<at::Tensor> list = pop(stack).toTensorList();
   auto list_copied = list.copy();
-  std::sort(
-      list_copied.begin(),
-      list_copied.end(),
-      [](const at::Tensor& a, const at::Tensor& b) {
-        return at::native::is_nonzero(a.lt(b));
-      });
+  std::ranges::sort(list_copied, [](const at::Tensor& a, const at::Tensor& b) {
+    return at::native::is_nonzero(a.lt(b));
+  });
   push(stack, list_copied);
 }
 
@@ -192,7 +187,7 @@ void listAppend(Stack& stack) {
 void listReverse(Stack& stack) {
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
-  std::reverse(list.begin(), list.end());
+  std::ranges::reverse(list);
 }
 
 void listPopImpl(Stack& stack, const char* empty_message) {
