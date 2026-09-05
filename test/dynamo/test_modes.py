@@ -1119,6 +1119,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), fn(x))
         self.assertTrue(seen)
 
+
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(
         trace_autograd_ops=True,
