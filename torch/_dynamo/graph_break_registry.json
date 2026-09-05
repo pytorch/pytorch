@@ -182,6 +182,14 @@
   "GB2019": [
     {
       "Gb_type": "Unsupported autograd.Function context `mark_dirty`",
+      "Context": "call_method {self} mark_dirty",
+      "Explanation": "Dynamo only supports tracing ctx.mark_dirty inside autograd.Function.apply.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported autograd.Function context `mark_dirty`",
       "Context": "call_method {self} {name}",
       "Explanation": "Dynamo only supports tracing ctx.mark_dirty inside autograd.Function.apply.",
       "Hints": [
@@ -878,6 +886,16 @@
       ]
     }
   ],
+  "GB6404": [
+    {
+      "Gb_type": "Write to unmodeled getset/member attribute",
+      "Context": "{self}",
+      "Explanation": "Dynamo does not model writes to this attribute, which is writable in eager.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0058": [
     {
       "Gb_type": "Failed to set tensor attribute",
@@ -1221,6 +1239,17 @@
       "Context": "{type(self).__name__} has nb_negative slot but no nb_negative_impl override",
       "Explanation": "The type {self.python_type_name()} has an nb_negative C slot but the corresponding VariableTracker doesn't implement nb_negative_impl.",
       "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9193": [
+    {
+      "Gb_type": "Call to a time function",
+      "Context": "Called `{fn_name}()` inside a compiled region",
+      "Explanation": "Dynamo graph breaks on `{fn_name}()` so that the clock read occurs at the correct point relative to compiled operations.",
+      "Hints": [
+        "Move the `{fn_name}()` call outside the compiled function if the graph break is undesirable.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -2104,6 +2133,16 @@
   "GB0138": [
     {
       "Gb_type": "Unsupported autograd.Function context `save_for_backward`",
+      "Context": "call_method {self} save_for_backward",
+      "Explanation": "Dynamo requires the `saved_tensors` attribute to be initialized on the `autograd.Function` context object.",
+      "Hints": [
+        "Ensure that the `saved_tensors` attribute is properly ",
+        "initialized before calling `save_for_backward`. ",
+        "`save_for_backward` only supported on a newly constructed `torch.autograd.function.FunctionCtx`."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported autograd.Function context `save_for_backward`",
       "Context": "call_method {self} {name}",
       "Explanation": "Dynamo requires the `saved_tensors` attribute to be initialized on the `autograd.Function` context object.",
       "Hints": [
@@ -2665,6 +2704,12 @@
     }
   ],
   "GB0166": [
+    {
+      "Gb_type": "Unsupported torch._C._ImperativeEngine.queue_callback()",
+      "Context": "call_method {self} queue_callback",
+      "Explanation": "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True.",
+      "Hints": []
+    },
     {
       "Gb_type": "Unsupported torch._C._ImperativeEngine.queue_callback()",
       "Context": "call_method {self} {name}",
