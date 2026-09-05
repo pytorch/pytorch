@@ -86,7 +86,7 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_regional_codegen_only_config_cpp_wrapper": TestFailure(
-        ("cpu", "cuda"), is_skip=True
+        ("cpu", "cuda", "xpu"), is_skip=True
     ),
     # This manually constructs an FX graph with an OpOverloadPacket target to
     # cover a legacy lowering table entry, which is outside the subprocess
