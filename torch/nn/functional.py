@@ -71,12 +71,12 @@ Note:
     + r"""
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
-    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kW)`
-    bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
-    stride: the stride of the convolving kernel. Can be a single number or
+    input (Tensor): input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
+    weight (Tensor): filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kW)`
+    bias (Tensor, optional): optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
+    stride (int or tuple, optional): the stride of the convolving kernel. Can be a single number or
       a one-element tuple `(sW,)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
+    padding (int, tuple or str, optional): implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a one-element tuple `(padW,)`. Default: 0
       ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
       the input so the output has the same shape as the input. However, this mode
@@ -86,9 +86,9 @@ Args:
           For ``padding='same'``, if the ``weight`` is even-length and
           ``dilation`` is odd in any dimension, a full :func:`pad` operation
           may be needed internally. Lowering performance.
-    dilation: the spacing between kernel elements. Can be a single number or
+    dilation (int or tuple, optional): the spacing between kernel elements. Can be a single number or
       a one-element tuple `(dW,)`. Default: 1
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
+    groups (int, optional): split input into groups, :math:`\text{in\_channels}` should be divisible by
       the number of groups. Default: 1
 
 Examples::
@@ -120,12 +120,12 @@ Note:
     + r"""
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
-    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
-    bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
-    stride: the stride of the convolving kernel. Can be a single number or a
+    input (Tensor): input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+    weight (Tensor): filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
+    bias (Tensor, optional): optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
+    stride (int or tuple, optional): the stride of the convolving kernel. Can be a single number or a
       tuple `(sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
+    padding (int, tuple or str, optional): implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padH, padW)`. Default: 0
       ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
       the input so the output has the same shape as the input. However, this mode
@@ -136,9 +136,9 @@ Args:
           ``dilation`` is odd in any dimension, a full :func:`pad` operation
           may be needed internally. Lowering performance.
 
-    dilation: the spacing between kernel elements. Can be a single number or
+    dilation (int or tuple, optional): the spacing between kernel elements. Can be a single number or
       a tuple `(dH, dW)`. Default: 1
-    groups: split input into groups, both :math:`\text{in\_channels}` and :math:`\text{out\_channels}`
+    groups (int, optional): split input into groups, both :math:`\text{in\_channels}` and :math:`\text{out\_channels}`
       should be divisible by the number of groups. Default: 1
 
 Examples::
@@ -171,12 +171,12 @@ Note:
     + r"""
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
-    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kT , kH , kW)`
-    bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
-    stride: the stride of the convolving kernel. Can be a single number or a
+    input (Tensor): input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
+    weight (Tensor): filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kT , kH , kW)`
+    bias (Tensor, optional): optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
+    stride (int or tuple, optional): the stride of the convolving kernel. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
+    padding (int, tuple or str, optional): implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padT, padH, padW)`. Default: 0
       ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
       the input so the output has the same shape as the input. However, this mode
@@ -187,9 +187,9 @@ Args:
           ``dilation`` is odd in any dimension, a full :func:`pad` operation
           may be needed internally. Lowering performance.
 
-    dilation: the spacing between kernel elements. Can be a single number or
+    dilation (int or tuple, optional): the spacing between kernel elements. Can be a single number or
       a tuple `(dT, dH, dW)`. Default: 1
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
+    groups (int, optional): split input into groups, :math:`\text{in\_channels}` should be divisible by
       the number of groups. Default: 1
 
 Examples::
@@ -218,19 +218,19 @@ Note:
     + r"""
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
-    weight: filters of shape :math:`(\text{in\_channels} , \frac{\text{out\_channels}}{\text{groups}} , kW)`
-    bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
-    stride: the stride of the convolving kernel. Can be a single number or a
+    input (Tensor): input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
+    weight (Tensor): filters of shape :math:`(\text{in\_channels} , \frac{\text{out\_channels}}{\text{groups}} , kW)`
+    bias (Tensor, optional): optional bias of shape :math:`(\text{out\_channels})`. Default: None
+    stride (int or tuple, optional): the stride of the convolving kernel. Can be a single number or a
       tuple ``(sW,)``. Default: 1
-    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
+    padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
       sides of each dimension in the input. Can be a single number or a tuple
       ``(padW,)``. Default: 0
-    output_padding: additional size added to one side of each dimension in the
+    output_padding (int or tuple, optional): additional size added to one side of each dimension in the
       output shape. Can be a single number or a tuple ``(out_padW)``. Default: 0
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
+    groups (int, optional): split input into groups, :math:`\text{in\_channels}` should be divisible by the
       number of groups. Default: 1
-    dilation: the spacing between kernel elements. Can be a single number or
+    dilation (int or tuple, optional): the spacing between kernel elements. Can be a single number or
       a tuple ``(dW,)``. Default: 1
 
 Examples::
@@ -259,20 +259,20 @@ Note:
     + r"""
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
-    weight: filters of shape :math:`(\text{in\_channels} , \frac{\text{out\_channels}}{\text{groups}} , kH , kW)`
-    bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
-    stride: the stride of the convolving kernel. Can be a single number or a
+    input (Tensor): input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+    weight (Tensor): filters of shape :math:`(\text{in\_channels} , \frac{\text{out\_channels}}{\text{groups}} , kH , kW)`
+    bias (Tensor, optional): optional bias of shape :math:`(\text{out\_channels})`. Default: None
+    stride (int or tuple, optional): the stride of the convolving kernel. Can be a single number or a
       tuple ``(sH, sW)``. Default: 1
-    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
+    padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
       sides of each dimension in the input. Can be a single number or a tuple
       ``(padH, padW)``. Default: 0
-    output_padding: additional size added to one side of each dimension in the
+    output_padding (int or tuple, optional): additional size added to one side of each dimension in the
       output shape. Can be a single number or a tuple ``(out_padH, out_padW)``.
       Default: 0
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
+    groups (int, optional): split input into groups, :math:`\text{in\_channels}` should be divisible by the
       number of groups. Default: 1
-    dilation: the spacing between kernel elements. Can be a single number or
+    dilation (int or tuple, optional): the spacing between kernel elements. Can be a single number or
       a tuple ``(dH, dW)``. Default: 1
 
 Examples::
@@ -302,20 +302,20 @@ Note:
     + r"""
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
-    weight: filters of shape :math:`(\text{in\_channels} , \frac{\text{out\_channels}}{\text{groups}} , kT , kH , kW)`
-    bias: optional bias of shape :math:`(\text{out\_channels})`. Default: None
-    stride: the stride of the convolving kernel. Can be a single number or a
+    input (Tensor): input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
+    weight (Tensor): filters of shape :math:`(\text{in\_channels} , \frac{\text{out\_channels}}{\text{groups}} , kT , kH , kW)`
+    bias (Tensor, optional): optional bias of shape :math:`(\text{out\_channels})`. Default: None
+    stride (int or tuple, optional): the stride of the convolving kernel. Can be a single number or a
       tuple ``(sT, sH, sW)``. Default: 1
-    padding: ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
+    padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding will be added to both
       sides of each dimension in the input. Can be a single number or a tuple
       ``(padT, padH, padW)``. Default: 0
-    output_padding: additional size added to one side of each dimension in the
+    output_padding (int or tuple, optional): additional size added to one side of each dimension in the
       output shape. Can be a single number or a tuple
       ``(out_padT, out_padH, out_padW)``. Default: 0
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
+    groups (int, optional): split input into groups, :math:`\text{in\_channels}` should be divisible by the
       number of groups. Default: 1
-    dilation: the spacing between kernel elements. Can be a single number or
+    dilation (int or tuple, optional): the spacing between kernel elements. Can be a single number or
       a tuple `(dT, dH, dW)`. Default: 1
 
 Examples::
@@ -353,17 +353,17 @@ input planes.
 See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
 Args:
-    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
-    kernel_size: the size of the window. Can be a single number or a
+    input (Tensor): input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
+    kernel_size (int or tuple): the size of the window. Can be a single number or a
       tuple `(kW,)`
-    stride: the stride of the window. Can be a single number or a tuple
+    stride (int or tuple, optional): the stride of the window. Can be a single number or a tuple
       `(sW,)`. Default: :attr:`kernel_size`
-    padding: implicit zero paddings on both sides of the input. Can be a single
+    padding (int or tuple, optional): implicit zero paddings on both sides of the input. Can be a single
       number or a tuple `(padW,)`. Should be at most half of effective kernel
       size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
-    ceil_mode: when True, will use `ceil` instead of `floor` to compute the
+    ceil_mode (bool, optional): when True, will use `ceil` instead of `floor` to compute the
         output shape. Default: ``False``
-    count_include_pad: when True, will include the zero-padding in the
+    count_include_pad (bool, optional): when True, will include the zero-padding in the
         averaging calculation. Default: ``True``
 
 Examples::
@@ -389,20 +389,20 @@ input planes.
 See :class:`~torch.nn.AvgPool2d` for details and output shape.
 
 Args:
-    input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
-    kernel_size: size of the pooling region. Can be a single number, a single-element tuple or a
+    input (Tensor): input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+    kernel_size (int or tuple): size of the pooling region. Can be a single number, a single-element tuple or a
       tuple `(kH, kW)`
-    stride: stride of the pooling operation. Can be a single number, a single-element tuple or a
+    stride (int or tuple, optional): stride of the pooling operation. Can be a single number, a single-element tuple or a
       tuple `(sH, sW)`. Default: :attr:`kernel_size`
-    padding: implicit zero paddings on both sides of the input. Can be a
+    padding (int or tuple, optional): implicit zero paddings on both sides of the input. Can be a
       single number, a single-element tuple or a tuple `(padH, padW)`.
       Should be at most half of effective kernel size, that
       is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
-    ceil_mode: when True, will use `ceil` instead of `floor` in the formula
+    ceil_mode (bool, optional): when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape. Default: ``False``
-    count_include_pad: when True, will include the zero-padding in the
+    count_include_pad (bool, optional): when True, will include the zero-padding in the
         averaging calculation. Default: ``True``
-    divisor_override: if specified, it will be used as divisor, otherwise
+    divisor_override (int, optional): if specified, it will be used as divisor, otherwise
          size of the pooling region will be used. Default: None
 """,
 )
@@ -419,20 +419,20 @@ size :math:`sT \times sH \times sW` steps. The number of output features is equa
 See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
-    input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iT \times iH , iW)`
-    kernel_size: size of the pooling region. Can be a single number or a
+    input (Tensor): input tensor :math:`(\text{minibatch} , \text{in\_channels} , iT \times iH , iW)`
+    kernel_size (int or tuple): size of the pooling region. Can be a single number or a
       tuple `(kT, kH, kW)`
-    stride: stride of the pooling operation. Can be a single number or a
+    stride (int or tuple, optional): stride of the pooling operation. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
-    padding: implicit zero paddings on both sides of the input. Can be a
+    padding (int or tuple, optional): implicit zero paddings on both sides of the input. Can be a
       single number or a tuple `(padT, padH, padW)`. Should be at most half
       of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
       Default: 0
-    ceil_mode: when True, will use `ceil` instead of `floor` in the formula
+    ceil_mode (bool, optional): when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape
-    count_include_pad: when True, will include the zero-padding in the
+    count_include_pad (bool, optional): when True, will include the zero-padding in the
         averaging calculation
-    divisor_override: if specified, it will be used as divisor, otherwise
+    divisor_override (int, optional): if specified, it will be used as divisor, otherwise
         size of the pooling region will be used. Default: None
 """,
 )
