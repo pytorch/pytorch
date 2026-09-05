@@ -538,6 +538,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         override_cooperative_reduction: bool | None = None,
         tiling_scores: dict[str, sympy.Expr] | None = None,
         mix_order_reduction: bool = False,
+        split_as_grid_reduction: bool = False,
     ) -> None:
         if pid_cache is None:
             pid_cache = {}
@@ -566,6 +567,18 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             else self.should_use_persistent_reduction()
         )
         self.mix_order_reduction: bool = mix_order_reduction
+        # Split lowered as an extra grid dim; the count is read from the x numel.
+        self.split_as_grid_reduction: bool = split_as_grid_reduction
+        if self.split_as_grid_reduction and self.cooperative_reduction:
+            # Both partition the reduction with their own rsplit_* bounds off
+            # program_id(0); the second definition would silently shadow the first.
+            raise AssertionError(
+                "split_as_grid_reduction and cooperative_reduction are mutually exclusive"
+            )
+        if self.split_as_grid_reduction and self.persistent_reduction:
+            # Only the looped path emits the per-partition bounds; a persistent
+            # kernel would drop them and reduce the full axis in every program.
+            self.persistent_reduction = False
         self.no_x_dim = self.want_no_x_dim()
         self.code_hash: str | None = None
         # Info to enable multiple store_output calls for epilogue subtiling
@@ -5793,6 +5806,20 @@ class SIMDScheduling(BaseScheduling):
                     range_r = node_ranges[1]  # (K)
                     tiling = cls.create_tiling(range_y_x, range_r)
                     return _TilingSelection(tiling, None, None)
+
+        # Split on x, kept rows on y. Flattening rows*split into one x would force
+        # `xindex // split`, a non-affine index the block_ptr matcher rejects.
+        for node in EnableReduction.filter(node_schedule):
+            if isinstance(node.node, ir.ComputedBuffer):
+                split = node.node._grid_split_factor
+                if not split:
+                    continue
+                if V.graph.sizevars.statically_known_equals(numel, split):
+                    tiling = cls.create_tiling([split], [reduction_numel])
+                else:
+                    rows = numel // split
+                    tiling = cls.create_tiling([rows, split], [reduction_numel])
+                return _TilingSelection(tiling, None, None)
 
         # # TODO: enable by default
         if (

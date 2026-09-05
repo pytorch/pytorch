@@ -4858,7 +4858,8 @@ def reduction(
     """args to @triton.heuristics()"""
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint
-    if inductor_meta.get("no_x_dim"):
+    if inductor_meta.get("no_x_dim") or inductor_meta.get("split_as_grid_reduction"):
+        # Pin the split (x) grid axis to XBLOCK == 1: one partition per program.
         size_hints["x"] = 1
 
     if triton_meta is None:
