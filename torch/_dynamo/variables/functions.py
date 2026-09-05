@@ -4670,6 +4670,23 @@ class BoundBuiltinMethodVariable(VariableTracker):
             return self.descriptor.__get__(obj)  # type: ignore[union-attr]
         return getattr(obj, self.descriptor.__name__)
 
+    # meth_getset / meth_members on builtin_function_or_method.
+    # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L266-L296
+    tp_members = {
+        "__name__": Member(
+            getset_build(lambda s: s.descriptor.__name__), readonly_setter
+        ),
+        "__qualname__": Member(
+            getset_build(
+                lambda s: s.as_python_constant().__qualname__
+                if isinstance(s.descriptor, types.ClassMethodDescriptorType)
+                else s.descriptor.__qualname__
+            ),
+            readonly_setter,
+        ),
+        "__self__": Member(lambda s, tx: s.obj, readonly_setter),
+    }
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -4741,6 +4758,16 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         # classmethod_get binds the C method to the class (ignoring obj),
         # producing a builtin_function_or_method via PyCMethod_New.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
+        owner_cls = owner.get_real_python_backed_value()
+        if not isinstance(owner_cls, type) or not issubclass(
+            owner_cls, self.descriptor.__objclass__
+        ):
+            owner_name = getattr(owner_cls, "__name__", type(owner_cls).__name__)
+            raise_type_error(
+                tx,
+                f"descriptor '{self.descriptor.__name__}' requires a subtype of "
+                f"'{self.descriptor.__objclass__.__name__}' but received '{owner_name}'",
+            )
         return BoundBuiltinMethodVariable(self.descriptor, owner, source=self.source)
 
 
