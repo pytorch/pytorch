@@ -2420,7 +2420,7 @@ def epimod_local_reduce_spec(
 
 
 class FlexGemmEpiModEmitter:
-    """Emit external QuACK EpiMod source from shared FlexGEMM analysis."""
+    """Emit QuACK EpiMod source from shared FlexGEMM analysis."""
 
     def __init__(
         self,
@@ -3132,7 +3132,7 @@ def materialize_flex_gemm_epimod(
     swap_ab: bool = False,
     mainloop_scale_count: int = 0,
 ) -> FlexGemmEpiModSource:
-    """Materialize an analyzed FlexGEMM body as external QuACK EpiMod source."""
+    """Materialize an analyzed FlexGEMM body as QuACK EpiMod source."""
     return FlexGemmEpiModEmitter(
         graph_module,
         gemm_op,
