@@ -1,0 +1,23 @@
+# ${generated_comment}
+# ruff: noqa: F401
+
+from collections.abc import Sequence
+from typing import overload
+
+import torch
+from torch import SymInt, Tensor
+from torch._prims_common import DeviceLikeType
+from torch.types import (
+    _bool,
+    _complex,
+    _device,
+    _dtype,
+    _float,
+    _int,
+    _layout,
+    _size,
+    Number,
+    PySymType,
+)
+
+${function_hints}

@@ -216,6 +216,9 @@ endif()
 
 add_custom_target(torch_python_stubs DEPENDS
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
+    "${TORCH_SRC_DIR}/_C/_fft.pyi"
+    "${TORCH_SRC_DIR}/_C/_linalg.pyi"
+    "${TORCH_SRC_DIR}/_C/_special.pyi"
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
@@ -227,6 +230,9 @@ file(GLOB_RECURSE pyi_python CONFIGURE_DEPENDS "${TOOLS_PATH}/pyi/*.py")
 add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
+    "${TORCH_SRC_DIR}/_C/_fft.pyi"
+    "${TORCH_SRC_DIR}/_C/_linalg.pyi"
+    "${TORCH_SRC_DIR}/_C/_special.pyi"
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     COMMAND
@@ -236,6 +242,7 @@ add_custom_command(
       --deprecated-functions-path "tools/autograd/deprecated.yaml"
     DEPENDS
       "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
+      "${TORCH_SRC_DIR}/_C/_native_functions.pyi.in"
       "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
       "${TORCH_SRC_DIR}/nn/functional.pyi.in"
       "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
