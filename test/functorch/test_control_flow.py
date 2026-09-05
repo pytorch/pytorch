@@ -13154,6 +13154,34 @@ class <lambda>(torch.nn.Module):
             random.setstate(rng_state)
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    def test_while_loop_constant_false_explicit_additional_input(self, device):
+        def f(state, x, extra):
+            def cond_fn(x, extra):
+                state.add_(extra.sum())
+                return False
+
+            def body_fn(x, extra):
+                return (x + 1,)
+
+            return torch.ops.higher_order.while_loop(cond_fn, body_fn, (x,), (extra,))
+
+        backend = EagerAndRecordGraphs()
+        state = torch.zeros((), device=device)
+        x = torch.arange(3.0, device=device)
+        extra = torch.tensor([2.0, 3.0], device=device)
+        with torch.no_grad():
+            result = torch.compile(f, backend=backend, fullgraph=True)(state, x, extra)
+        self.assertEqual(result[0], x)
+        self.assertEqual(state, 5)
+        self.assertEqual(len(backend.graphs), 1)
+        graph = backend.graphs[0].graph
+        while_loop_nodes = graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.while_loop
+        )
+        self.assertEqual(len(while_loop_nodes), 0)
+        self.assertEqual(len(graph.find_nodes(op="call_method", target="add_")), 1)
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     def test_while_loop_constant_false_replay_input_mutation(self, device):
         def f(x):
             def cond_fn(x):
