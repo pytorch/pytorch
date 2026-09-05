@@ -330,6 +330,7 @@ def write_decl_impl(
     declarations = cpp_file_header + "#pragma once\n"
     # declarations += f"#ifndef {disable_def}\n"
     declarations += f"""#include {impl_file}\n"""
+    declarations += "#include <c10/cuda/CUDAArchList.h>\n"
     declarations += """using namespace PyTorchMemEffAttention;\n"""
 
     # Declaration of kernel functions
@@ -353,8 +354,8 @@ def write_decl_impl(
             declarations += f"    {_call}"
         declarations += "}\n\n"
         dispatch_all += f"""
-    if (std::is_same_v<DT, {DTYPES[cat_dt]}> && {cat_sm} <= cc && cc <= {cat_sm_max}) {{
-        {dispatch_category_fn}(cb, cc);
+    if constexpr (std::is_same_v<DT, {DTYPES[cat_dt]}> && c10::cuda::targets_any_arch_in({cat_sm}, {cat_sm_max})) {{
+        if ({cat_sm} <= cc && cc <= {cat_sm_max}) {{ {dispatch_category_fn}(cb, cc); }}
     }}"""
 
     declarations += f"""
