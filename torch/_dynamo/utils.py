@@ -5713,6 +5713,23 @@ def clear_torch_function_mode_stack() -> None:
         _pop_torch_function_stack()
 
 
+@contextmanager
+def temporarily_clear_torch_function_mode_stack(
+    expected_num_modes: int,
+) -> Iterator[None]:
+    """Clear and restore a torch function mode stack of the expected size."""
+    stack = get_torch_function_mode_stack()
+    if len(stack) != expected_num_modes:
+        raise AssertionError(
+            f"Expected {expected_num_modes} torch function modes, got {len(stack)}"
+        )
+    clear_torch_function_mode_stack()
+    try:
+        yield
+    finally:
+        set_torch_function_mode_stack(stack)
+
+
 def get_current_stream(device: torch.device) -> torch.Stream:
     return torch.accelerator.current_stream(device)
 
