@@ -72,7 +72,7 @@ from sys import maxsize
 from typing import Any
 
 import torch
-from torch._utils import _sparse_tensors_to_validate, IMPORT_MAPPING, NAME_MAPPING
+from torch._utils import _get_sparse_tensors_to_validate, IMPORT_MAPPING, NAME_MAPPING
 
 
 # modules in this list are never allowed, even if the user attempts to allowlist
@@ -393,7 +393,7 @@ class Unpickler:
                     else:
                         result = cls.__new__(cls, *args)
                     if cls in torch._tensor_classes and "sparse" in cls.__module__:
-                        _sparse_tensors_to_validate.append(result)
+                        _get_sparse_tensors_to_validate().append(result)
                     self.append(result)
                 else:
                     raise UnpicklingError(
@@ -415,7 +415,7 @@ class Unpickler:
                     raise UnpicklingError(error_msg)
                 result = func(*args)
                 if func in torch._tensor_classes and "sparse" in func.__module__:
-                    _sparse_tensors_to_validate.append(result)
+                    _get_sparse_tensors_to_validate().append(result)
                 self.stack[-1] = result
             elif key[0] == BUILD[0]:
                 state = self.stack.pop()
