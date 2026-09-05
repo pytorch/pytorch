@@ -104,6 +104,20 @@ def _get_device_module(device="cuda"):
     return device_module
 
 
+def _is_device_initialized(device_type: str) -> bool:
+    # Whether stashing this device's RNG state is safe, i.e. the device is
+    # already in use. Backends that initialize lazily (cuda, xpu, mtia) must not
+    # have a context created behind the user's back, so they are asked through
+    # their ``_initialized`` flag. Backends with no lazy initialization step
+    # (e.g. mps) have no context to create and are ready as soon as they are the
+    # current accelerator. Plain cpu is never an accelerator, so it stays False.
+    device_module = _get_device_module(device_type)
+    if (initialized := getattr(device_module, "_initialized", None)) is not None:
+        return initialized
+    acc = torch.accelerator.current_accelerator()
+    return acc is not None and acc.type == device_type
+
+
 class DefaultDeviceType:
     r"""
     A class that manages the default device type for checkpointing.
@@ -187,11 +201,11 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
         return arg
     tree_map(add_device_ids, args)
 
-    fwd_device_states = []
     device_module = _get_device_module(_infer_device_type(*args))
-    for device_id in fwd_device_ids:
-        with device_module.device(device_id):
-            fwd_device_states.append(device_module.get_rng_state())
+    # Index the generator directly instead of switching the current device, the
+    # way torch.random.fork_rng does. Backends that never grew a CUDA-style
+    # ``device`` context manager (e.g. MPS) then work here too.
+    fwd_device_states = [device_module.get_rng_state(idx) for idx in fwd_device_ids]
 
     return fwd_device_ids, fwd_device_states
 
@@ -212,8 +226,7 @@ def set_device_states(devices, states, *, device_type=None) -> None:
         return
     device_module = _get_device_module(device_type)
     for device, state in zip(devices, states, strict=False):
-        with device_module.device(device):
-            device_module.set_rng_state(state)
+        device_module.set_rng_state(state, device)
 
 
 def _get_autocast_kwargs(device_type="cuda"):
@@ -254,8 +267,7 @@ class CheckpointFunction(torch.autograd.Function):
             # run_function, we SHOULD actually stash the cuda state here.  Unfortunately,
             # we have no way to anticipate this will happen before we run the function.)
             ctx.had_device_in_fwd = False
-            device_module = _get_device_module(ctx.device_type)
-            if getattr(device_module, "_initialized", False):
+            if _is_device_initialized(ctx.device_type):
                 ctx.had_device_in_fwd = True
                 ctx.fwd_devices, ctx.fwd_device_states = get_device_states(*args)
 
@@ -1899,7 +1911,6 @@ def _checkpoint_without_reentrant_generator_impl(
         )
 
     device_type = _infer_device_type(*args)
-    device_module = _get_device_module(device_type)
     forward_context, recompute_context = context_fn()
     # SAC caches some tensors outside the autograd graph; this tells its caching
     # mode whether to route them through the user's saved_tensors_hooks. Set by
@@ -1927,7 +1938,7 @@ def _checkpoint_without_reentrant_generator_impl(
         # we have no way to anticipate this will happen before we run the function.
         # If they do so, we raise an error.)
         had_device_in_fwd = False
-        if getattr(device_module, "_initialized", False):
+        if _is_device_initialized(device_type):
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
 
@@ -2021,7 +2032,7 @@ def _checkpoint_without_reentrant_generator_impl(
         )
     new_frame.forward_completed = True
 
-    if getattr(device_module, "_initialized", False) and \
+    if _is_device_initialized(device_type) and \
        preserve_rng_state and not had_device_in_fwd:  # type: ignore[possibly-undefined]
         # Device was not initialized before running the forward, so we didn't
         # stash the device state.
