@@ -136,4 +136,10 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
        ``code_hash``), or if a runtime call violates the precompile contract.
 
 .. autoexception:: torch.compiler.PrecompileError
+
+.. autoclass:: torch.compiler.PrecompiledRunnable
+   :members: unload
+
+.. autoclass:: torch.compiler.PrecompiledCallable
+   :members: unload
 ```

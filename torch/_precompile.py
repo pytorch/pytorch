@@ -454,6 +454,34 @@ class MakeFxTracer:
     decompositions: dict | None = None
 
 
+@dataclasses.dataclass(frozen=True)
+class DynamoTracer:
+    """The ``dynamo`` capture front-end (the default), passed as ``tracer=`` to
+    :func:`torch.compiler.precompile.capture` or :func:`torch.compiler.precompile.accumulate`.
+
+    An execution-driven multi-graph capture that analyzes the Python (bytecode) rather
+    than tracing one path: it records graph-break continuations and every guarded
+    recompilation the calls exercise, so a capture with this tracer takes as many calls
+    as you make. Part of the prototype ``torch.compiler.precompile`` API, so it may change
+    without a deprecation cycle.
+
+    The fields configure the multi-variant capture: ``guard_filter_fn`` filters the guards
+    kept in the SERIALIZED artifact (runtime capture guards are always retained);
+    ``recompile_limit`` caps recompilations; ``dynamic`` forces dynamic shapes;
+    ``invariants`` selects the guard-drop policy; and the ``require_*`` gates refuse known
+    coverage gaps and risky dropped guards (``require_no_dropped_guards`` is off by default,
+    since every model drops identity guards that cannot be serialized).
+    """
+
+    guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
+    recompile_limit: int = 256
+    dynamic: bool | None = None
+    invariants: str | None = None
+    require_complete: bool = True
+    require_no_risky_drops: bool = True
+    require_no_dropped_guards: bool = False
+
+
 class PrecompiledRunnable:
     """What :func:`torch.compiler.precompile.load` returns.
 
@@ -734,6 +762,19 @@ class _MakeFxCapture(Capture):
     def __enter__(self) -> Self:
         return self
 
+    def __exit__(self, *exc: object) -> None:
+        # Write the rendered artifact only on a clean exit that captured a call;
+        # a block that raised, or one that never called the capture, leaves the
+        # files untouched.
+        if exc[0] is not None:
+            return
+        if self._rendered is None:
+            raise PrecompileError(
+                "nothing was captured: call the capture with your example "
+                "arguments inside the `with` block."
+            )
+        _write_artifact(self._artifact_path, self._cache_path, *self._rendered)
+
     def __call__(self, *args: object, **kwargs: object) -> object:
         if kwargs:
             raise ValueError(
@@ -761,6 +802,140 @@ class _MakeFxCapture(Capture):
             python_code = self._module.to_python_code()
             self._rendered = (python_code, self._module.to_cache_bytes(python_code))
             return _runnable_from_pair(*self._rendered, _trusted=True)(*args)
+
+
+class _DynamoCapture(Capture):
+    r"""Multi-call capture: the :class:`DynamoTracer` front-end.
+
+    Enter the ``with`` block, call it as many times as you need to exercise the
+    graph breaks and recompiled variants you want captured; the artifact is
+    rendered and written to disk once, when the block exits. The same
+    execution-driven model as :class:`AccumulatingCapture`, without the per-call
+    disk rewrite.
+    """
+
+    def __init__(
+        self,
+        session: Any,
+        artifact_path: str | os.PathLike[str],
+        cache_path: str | os.PathLike[str],
+        *,
+        backend: str,
+        require_complete: bool,
+        require_no_risky_drops: bool,
+        require_no_dropped_guards: bool,
+    ) -> None:
+        self._session = session
+        self._artifact_path = artifact_path
+        self._cache_path = cache_path
+        self._backend = backend
+        self._require_complete = require_complete
+        self._require_no_risky_drops = require_no_risky_drops
+        self._require_no_dropped_guards = require_no_dropped_guards
+        self._call: Callable[..., object] | None = None
+        self._fresh_cache: Any = None
+        self._exited = False
+        self._calls = 0
+        self._rendered: tuple[str, bytes] | None = None
+        self._render_error: BaseException | None = None
+        self._lock = threading.RLock()
+
+    def _map(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
+        from torch._dynamo.exc import PackageError, RecompileError
+
+        try:
+            return method(*args, **kwargs)
+        except (PackageError, RecompileError) as e:
+            raise PrecompileError(str(e)) from e
+
+    def __enter__(self) -> Self:
+        from torch.compiler._cache import CacheArtifactManager
+
+        with self._lock:
+            if self._call is not None or self._exited:
+                raise PrecompileError(
+                    "this capture has already been entered; capture() returns a "
+                    "fresh capture per call."
+                )
+            # The capture's compiles record into the process-global cache-artifact
+            # list, which result() serializes. A fresh one so the bundle holds
+            # only this capture rather than unrelated pending compiles; entered
+            # here and left in __exit__, spanning every captured call.
+            self._fresh_cache = CacheArtifactManager.with_fresh_cache()
+            self._fresh_cache.__enter__()
+            try:
+                self._call = self._map(self._session.__enter__)
+            except BaseException:
+                self._fresh_cache.__exit__(*sys.exc_info())
+                self._fresh_cache = None
+                raise
+        return self
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        with self._lock:
+            if self._call is None or self._exited:
+                raise PrecompileError(
+                    "capture is not active: enter it with a `with` block before "
+                    "calling it."
+                )
+            call = self._call
+        result = self._map(call, *args, **kwargs)
+        with self._lock:
+            self._calls += 1
+        return result
+
+    def __exit__(self, *exc: object) -> None:
+        with self._lock:
+            self._exited = True
+            try:
+                self._map(self._session.__exit__, *exc)
+                if exc[0] is None:
+                    # Render now, while the fresh cache still holds this capture's
+                    # compiles, then write the pair to disk. A gate refusal (or a
+                    # write failure) is held and re-raised below, after the fresh
+                    # cache is released, so summary()/invariants() stay readable.
+                    try:
+                        self._rendered = self._map(
+                            self._session.artifact,
+                            require_complete=self._require_complete,
+                            require_no_risky_drops=self._require_no_risky_drops,
+                            require_no_dropped_guards=self._require_no_dropped_guards,
+                        )
+                        _write_artifact(
+                            self._artifact_path, self._cache_path, *self._rendered
+                        )
+                    except BaseException as e:
+                        self._render_error = e
+            finally:
+                if self._fresh_cache is not None:
+                    self._fresh_cache.__exit__(*sys.exc_info())
+                    self._fresh_cache = None
+        # A clean block whose render/write failed surfaces the failure here; a
+        # block that itself raised propagates its own error and we stay quiet.
+        if exc[0] is None and self._render_error is not None:
+            raise self._render_error
+
+    def summary(self) -> PrecompileSummary:
+        r"""summary() -> PrecompileSummary
+
+        Coverage, recompilation, failure and guard information for everything
+        captured so far.
+        """
+        return self._map(self._session.summary)
+
+    def invariants(self) -> tuple[FrameInvariants, ...]:
+        r"""invariants() -> tuple
+
+        The guards that held across every captured variant of each frame.
+        """
+        return self._map(self._session.invariants)
+
+    def calls(self) -> int:
+        r"""calls() -> int
+
+        How many calls have been folded into this capture.
+        """
+        return self._calls
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:
@@ -2388,6 +2563,43 @@ def _entry_binding(fn: object) -> dict[str, Any]:
     }
 
 
+def _reject_uninstallable_entry_defaults(fn: object) -> None:
+    """Refuse an entry whose default arguments cannot be carried in the artifact.
+
+    The artifact rebuilds the entry from its code object and re-attaches the
+    entry's defaults, pickled into the source. A tensor default would bake a
+    weight in (precompile embeds none), and any unpicklable default would fail
+    only at write time, after the capture has already run. Refuse both up front.
+    """
+    from torch._dynamo.precompile_package import _entry_fn_of
+
+    try:
+        entry = _entry_fn_of(fn)
+    except TypeError:
+        # Not a plain function or nn.Module entry (e.g. a partial): it carries
+        # no defaults to check, and the capture path rejects it with its own
+        # message (see _capture_session).
+        return
+    name = getattr(entry, "__name__", repr(entry))
+    defaults = list(getattr(entry, "__defaults__", None) or ())
+    defaults += list((getattr(entry, "__kwdefaults__", None) or {}).values())
+    for value in defaults:
+        if isinstance(value, torch.Tensor):
+            raise PrecompileError(
+                f"precompile cannot capture {name!r}: it has a tensor default "
+                f"argument, which the artifact would bake in as a weight. "
+                f"precompile embeds no weights -- pass the tensor as an argument."
+            )
+        try:
+            pickle.dumps(value)
+        except Exception as e:
+            raise PrecompileError(
+                f"precompile cannot capture {name!r}: its default argument "
+                f"{value!r} cannot be pickled into the artifact ({e}). Give the "
+                f"parameter a picklable default, or pass the value as an argument."
+            ) from e
+
+
 def _build_multigraph_artifact(
     entry: Any,
     backends: Mapping[str, Any],
@@ -2782,6 +2994,166 @@ def _capture_session(fn, **kwargs):
         raise PrecompileError(str(e)) from e
 
 
+def _artifact_paths(
+    artifact_path: str | os.PathLike[str] | None,
+    cache_path: str | os.PathLike[str] | None,
+    *,
+    who: str,
+    neither: str,
+) -> tuple[str | os.PathLike[str], str | os.PathLike[str]] | None:
+    """Validate the on-disk form's path pair, or ``None`` if it was not requested.
+
+    The two files only load as a matched pair -- the cache carries a sha256 of
+    exactly the python_code bytes it was emitted with -- so accepting one path
+    without the other would name half an artifact that can never be loaded.
+    """
+    if (artifact_path is None) != (cache_path is None):
+        given, missing = (
+            ("artifact_path", "cache_path")
+            if artifact_path is not None
+            else ("cache_path", "artifact_path")
+        )
+        raise ValueError(
+            f"{who} got {given} without {missing}. The artifact and its cache "
+            f"are a matched pair. {neither}"
+        )
+    if artifact_path is None or cache_path is None:
+        return None
+    if os.path.normcase(os.path.abspath(artifact_path)) == os.path.normcase(
+        os.path.abspath(cache_path)
+    ):
+        raise ValueError(
+            f"{who} got the same file for artifact_path and cache_path "
+            f"({os.fspath(artifact_path)!r}); the two halves are separate files."
+        )
+    return artifact_path, cache_path
+
+
+def _write_artifact(
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+    python_code: str,
+    cache: bytes,
+) -> None:
+    """Write the matched (python_code, cache) pair, creating parent directories.
+
+    Both halves are written beside their targets and renamed into place, rather
+    than truncated where they lie. The pair only loads together -- the cache
+    carries a sha256 of exactly the python_code it was emitted with -- so a
+    process that dies mid-write would otherwise leave a new artifact paired with
+    the previous cache, which refuses to load. An accumulating capture rewrites
+    on every call and its whole promise is that the files on disk are always a
+    working artifact, so at hundreds of megabytes that window is the failure it
+    is meant to protect against. Two renames are not one atomic step, so the
+    previous source is hard-linked to a backup first and put back if the second
+    rename fails; the named source path therefore always holds the previous or
+    the new artifact, and only a crash in the gap between the two renames leaves
+    a mismatched pair, which load refuses on the cache's sha256 rather than
+    serving stale code. The containing directory is fsync'd after, so a rename that returned
+    is durable.
+    """
+    written = []
+    try:
+        for path, payload in ((artifact_path, python_code), (cache_path, cache)):
+            parent = os.path.dirname(os.fspath(path))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            # A unique name per writer: two captures targeting one path must
+            # not share a scratch file, or one renames the other's half-written
+            # bytes into place. Beside the target, so the rename stays on one
+            # filesystem. A plain open rather than mkstemp: mkstemp creates the
+            # file 0600 and the rename carries that mode onto the artifact,
+            # which nobody else on a shared directory can then read; open()
+            # honours the umask.
+            tmp = f"{os.fspath(path)}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+            written.append((tmp, path))
+            mode, encoding = (
+                ("wb", None) if isinstance(payload, bytes) else ("w", "utf-8")
+            )
+            with open(tmp, mode, encoding=encoding) as f:
+                f.write(payload)  # type: ignore[arg-type]
+                f.flush()
+                os.fsync(f.fileno())
+    except BaseException:
+        for tmp, _ in written:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        raise
+    (artifact_tmp, _), (cache_tmp, _) = written
+    backup = f"{os.fspath(artifact_path)}.{os.getpid()}.{uuid.uuid4().hex}.bak"
+    previous = None
+    installed = False
+    try:
+        # A hard link, not a move: the named path must resolve to the previous
+        # or the new source at every instant, for a reader racing this write
+        # and for a crash between the two renames below.
+        try:
+            os.link(artifact_path, backup)
+            previous = backup
+        except FileNotFoundError:
+            pass
+        except OSError:
+            # No hard links on this filesystem: fall back to moving aside.
+            os.replace(artifact_path, backup)
+            previous = backup
+        os.replace(artifact_tmp, artifact_path)
+        installed = True
+        os.replace(cache_tmp, cache_path)
+    except BaseException:
+        # Put the previous source back (or remove the new one on a first
+        # write), best effort, so the named files stay a loadable artifact;
+        # then drop every temp and re-raise.
+        if previous is not None:
+            undo = [(previous, artifact_path)]
+        elif installed:
+            undo = [(artifact_path, artifact_tmp)]
+        else:
+            undo = []
+        for src, dst in undo:
+            try:
+                os.replace(src, dst)
+            except OSError:
+                pass
+        for tmp, _ in written:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        raise
+    if previous is not None:
+        try:
+            os.unlink(previous)
+        except OSError:
+            pass
+    parents = {os.path.dirname(os.fspath(path)) or "." for _, path in written}
+    # Durably record the renames: without an fsync of the containing directory
+    # a crash just after os.replace returns can still lose the new directory
+    # entry and resurrect the previous artifact.
+    for parent in parents:
+        try:
+            fd = os.open(parent, os.O_RDONLY)
+        except OSError:
+            continue
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+
+def _read_artifact(
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+) -> tuple[str, bytes]:
+    """Read back a pair written by :func:`_write_artifact`."""
+    with open(artifact_path, encoding="utf-8") as f:
+        python_code = f.read()
+    with open(cache_path, "rb") as f:
+        cache = f.read()
+    return python_code, cache
+
+
 def _make_inlined_forward(
     python_code: str, *, warn: bool = True
 ) -> Callable[..., object]:
@@ -2942,3 +3314,66 @@ def _runnable_from_pair(
             "arguments directly."
         )
     return PrecompiledModule._from_loaded(forward, backend=backend)
+
+
+def load(
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+    *,
+    fn: Callable[..., object] | None = None,
+) -> PrecompiledRunnable:
+    """Reconstruct a runnable from the two files a precompile capture wrote.
+
+    .. warning::
+
+        This is a prototype API. Its signature, error types and artifact
+        format may change between releases without a deprecation cycle.
+
+    Name the two files :func:`capture` or :func:`accumulate` wrote -- the
+    ``python_code`` artifact and its ``cache``. They load only as a matched pair
+    (the cache carries a sha256 of exactly the python_code bytes it was emitted
+    with).
+
+    The driver runs from ``python_code`` -- the single source of truth for the whole
+    calling convention. ``load`` reads the cache's ``BACKEND`` (to check the pairing)
+    and, for the inductor backend, primes the inductor kernel caches from its
+    ``save_cache_artifacts`` bundle (via ``torch.compiler.load_cache_artifacts``) so a
+    warm reload loads precompiled kernels instead of JIT-compiling; then it exec's
+    ``python_code``. With no usable cache it degrades to JIT'ing from ``python_code``.
+
+    Call the result with the SAME argument structure ``fn`` took -- the
+    model(s) in their original positions plus the runtime inputs. Per invariant
+    2 of Note [precompile programming model], the runtime model must match the
+    example model's parameter/buffer structure; precompile re-derives the
+    param/buffer list from it (same interning/order as capture).
+
+    The returned object comes in two shapes, decided by the CAPTURE, not by a
+    load-time choice. A dynamo artifact with captured frames the entry bytecode
+    cannot reach on its own -- e.g. a graph break inside a child module's frame
+    -- serves by INSTALLING onto the captured code objects: the returned callable
+    mutates process state on first call (or on ``__enter__``) and supports
+    ``with`` / ``unload()`` to take that back out. An artifact whose frames are
+    all reachable from the entry -- including one that graph-broke or recompiled
+    only within the entry frame -- is standalone: it installs nothing, and its
+    ``with`` / ``unload()`` are no-ops. Both shapes are a
+    :class:`torch.compiler.PrecompiledRunnable`, so a caller can enter and unload
+    every loaded artifact uniformly; ``installed`` (``True`` for the installing
+    shape, ``False`` for standalone) tells them apart.
+    ``fn=`` applies to the
+    installing shape only -- pass the function object to install onto when it is
+    not importable from where it was captured (defined in ``__main__``, a
+    notebook, or a REPL); it must be passed before the first call, and a
+    standalone artifact rejects it with ``PrecompileError``.
+
+    Raises ``PrecompileError`` if ``python_code`` is malformed or is not a
+    ``torch.compiler.precompile`` artifact (it fails to parse, or is missing the
+    calling-convention metadata), if the cache's ``backend`` or ``tracer`` tag does
+    not match ``python_code``, or if the cache's ``code_hash`` does not match
+    ``sha256(python_code)`` -- i.e. the cache and python_code came from different
+    precompile captures. A cache whose ``format``/``version`` does not match (a
+    foreign or different-build envelope) is NOT fatal: the cache is acceleration
+    only, so ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
+    """
+    torch._C._log_api_usage_once("torch.compiler.precompile.load")
+    python_code, cache = _read_artifact(artifact_path, cache_path)
+    return _runnable_from_pair(python_code, cache, fn=fn)

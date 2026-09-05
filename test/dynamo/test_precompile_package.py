@@ -13,16 +13,10 @@ import math
 import math as _precompile_stdlib_alias
 import os
 import pickle
-import queue
-import re
 import sys
 import sysconfig
 import tempfile
-import textwrap
-import threading
 import types
-import unittest
-import weakref
 from unittest import mock
 
 import torch
@@ -32,8 +26,7 @@ import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
 import torch.nn.functional as F
-from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.exc import PackageError, RecompileError
+from torch._dynamo.exc import PackageError
 from torch._dynamo.package import (
     _defining_module_name,
     CompilePackage,
@@ -41,9 +34,7 @@ from torch._dynamo.package import (
     SystemInfo,
 )
 from torch._dynamo.precompile_context import PrecompileContext
-from torch._dynamo.types import FrameAction, FrameExecStrategy, GuardFilterEntry
-from torch._dynamo.utils import CleanupHook
-from torch._functorch import config as functorch_config
+from torch._dynamo.types import FrameAction, FrameExecStrategy
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.compiler._precompile_types import PrecompileSummary
 from torch.testing._internal.common_utils import (
@@ -85,14 +76,14 @@ def _counting_cpu_probe(toolchain=True):
         yield calls
 
 
-_MIPS_TARGET = ("mips", "DEFAULT", 128, None, "INVALID")
+_MIPS_TARGET = ("mips", "DEFAULT", 128, ("INVALID",), None, "INVALID")
 
 # recorded target, whether the host probe works, what the comparison raises
 _CPU_TARGET_CASES = {
     "no_target_recorded": (None, True, None),
     "skewed_target": (_MIPS_TARGET, True, "built for machine 'mips'"),
     "host_probe_failed": (
-        ("x86_64", "AVX512", 512, None, "avx512"),
+        ("x86_64", "AVX512", 512, ("CPU_CAPABILITY_AVX512",), None, "avx512"),
         False,
         "no usable",
     ),
@@ -1610,6 +1601,31 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             finally:
                 sys.path.remove(d)
                 sys.modules.pop(name, None)
+
+    def test_risky_drop_warning_leads_with_the_shape_bearing_ones(self):
+        # A flat cut is dominated by whichever guard type is most numerous. On a
+        # real capture that meant one SEQUENCE_LENGTH and three CONSTANT_MATCHes
+        # -- the only drops that can change what shape the graph computes --
+        # were invisible behind 392 CLOSURE_MATCHes on function identities.
+        risky = (
+            [("CLOSURE_MATCH", f"c{i}") for i in range(392)]
+            + [("ID_MATCH", f"i{i}") for i in range(81)]
+            + [("SEQUENCE_LENGTH", "impl.__defaults__")]
+            + [("CONSTANT_MATCH", "impl.__defaults__[4]")]
+            + [("TYPE_MATCH", "L['pg'].group_name")]
+        )
+        with self.assertLogs("torch._dynamo.precompile_package", "WARNING") as cm:
+            dynamo_package_lint._warn_risky_drops(risky)
+        message = "\n".join(cm.output)
+
+        self.assertIn("476 dropped guard(s)", message)
+        self.assertIn("COULD BEAR ON SHAPE (3)", message)
+        # Each shape-bearing name survives the truncation, and each is named
+        # ahead of the bulk that used to crowd it out.
+        for name in ("impl.__defaults__", "impl.__defaults__[4]", "group_name"):
+            self.assertIn(name, message)
+            self.assertLess(message.index(name), message.index("CLOSURE_MATCH"))
+        self.assertIn("CLOSURE_MATCH x392", message)
 
 
 if __name__ == "__main__":
