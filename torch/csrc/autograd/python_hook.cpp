@@ -98,13 +98,14 @@ PyFunctionTensorPreHook::PyFunctionTensorPreHook(
   Py_INCREF(dict);
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionTensorPreHook::~PyFunctionTensorPreHook() {
-  // If python is already dead, leak the wrapped python objects
-  if (Py_IsInitialized()) {
-    pybind11::gil_scoped_acquire gil;
-    Py_DECREF(dict);
+  // Leak the wrapped python object if the GIL can't be acquired (e.g.
+  // python is already dead).
+  torch::detail::SafeGilScopedAcquire gil;
+  if (!gil) {
+    return;
   }
+  Py_DECREF(dict);
 }
 
 auto PyFunctionTensorPreHook::operator()(const variable_list& values)
@@ -126,13 +127,14 @@ PyFunctionPreHook::PyFunctionPreHook(PyObject* dict) : dict(dict) {
   Py_INCREF(dict);
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionPreHook::~PyFunctionPreHook() {
-  // If python is already dead, leak the wrapped python objects
-  if (Py_IsInitialized()) {
-    pybind11::gil_scoped_acquire gil;
-    Py_DECREF(dict);
+  // Leak the wrapped python object if the GIL can't be acquired (e.g.
+  // python is already dead).
+  torch::detail::SafeGilScopedAcquire gil;
+  if (!gil) {
+    return;
   }
+  Py_DECREF(dict);
 }
 
 auto PyFunctionPreHook::operator()(const variable_list& grad_outputs_)
@@ -149,13 +151,14 @@ PyFunctionPostHook::PyFunctionPostHook(PyObject* dict) : dict(dict) {
   Py_INCREF(dict);
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionPostHook::~PyFunctionPostHook() {
-  // If python is already dead, leak the wrapped python objects
-  if (Py_IsInitialized()) {
-    pybind11::gil_scoped_acquire gil;
-    Py_DECREF(dict);
+  // Leak the wrapped python object if the GIL can't be acquired (e.g.
+  // python is already dead).
+  torch::detail::SafeGilScopedAcquire gil;
+  if (!gil) {
+    return;
   }
+  Py_DECREF(dict);
 }
 
 auto PyFunctionPostHook::operator()(
@@ -212,13 +215,14 @@ PyFunctionTensorPostAccGradHooks::PyFunctionTensorPostAccGradHooks(
   Py_INCREF(dict);
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 PyFunctionTensorPostAccGradHooks::~PyFunctionTensorPostAccGradHooks() {
-  // If python is already dead, leak the wrapped python objects
-  if (Py_IsInitialized()) {
-    pybind11::gil_scoped_acquire gil;
-    Py_DECREF(dict);
+  // Leak the wrapped python object if the GIL can't be acquired (e.g.
+  // python is already dead).
+  torch::detail::SafeGilScopedAcquire gil;
+  if (!gil) {
+    return;
   }
+  Py_DECREF(dict);
 }
 
 auto PyFunctionTensorPostAccGradHooks::operator()(const Variable& tensor)
