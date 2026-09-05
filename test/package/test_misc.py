@@ -12,6 +12,7 @@ from unittest import skipIf
 from torch.package import is_from_package, PackageExporter, PackageImporter
 from torch.package.package_exporter import PackagingError
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_FBCODE,
     IS_SANDCASTLE,
     run_tests,
@@ -28,6 +29,8 @@ except ImportError:
 
 class TestMisc(PackageTestCase):
     """Tests for one-off or random functionality. Try not to add to this!"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_file_structure(self):
         """
