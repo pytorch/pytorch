@@ -421,6 +421,8 @@ Tensor _histc_cuda(
 }
 
 Tensor& _histc_out_cuda(const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max, Tensor& result) {
+  TORCH_CHECK(self.dtype() == result.dtype(), "torch.histogram: input tensor and hist tensor should",
+      " have the same dtype, but got input ", self.dtype(), " and hist ", result.dtype());
   auto ret = _histc_cuda(self, bins, min, max);
   resize_output(result, ret.sizes());
   result.copy_(ret);

@@ -3348,6 +3348,17 @@ class TestReductions(TestCase):
         linear = torch.linspace(0, 0.99 - 5.0e-7, 101).to(device)
         test_against_np(linear, bins=20, min=0, max=0.99)
 
+    @skipIfMPS
+    def test_histc_out_dtype(self, device):
+        x = torch.randn(8, dtype=torch.float64, device=device)
+        out = torch.empty(4, dtype=torch.int64, device=device)
+        msg = "torch.histogram: input tensor and hist tensor should have the same dtype"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.histc(x, bins=4, min=-2.0, max=2.0, out=out)
+        out = torch.empty(4, dtype=torch.float64, device=device)
+        h = torch.histc(x, bins=4, min=-2.0, max=2.0, out=out)
+        self.assertEqual(h.dtype, torch.float64)
+
     @dtypes(torch.uint8, torch.int8, torch.int, torch.long, torch.float, torch.double)
     @skipIfMPS
     def test_histc_min_max_errors(self, device, dtype):
