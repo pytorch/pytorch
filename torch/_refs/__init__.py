@@ -5546,30 +5546,61 @@ def arange(
     utils.check_pin_memory(pin_memory)
     device = torch.device(utils.device_or_default(device))
 
-    if isinstance(start, complex):
-        raise AssertionError("arange does not support complex start")
-    if isinstance(end, complex):
-        raise AssertionError("arange does not support complex end")
-    if isinstance(step, complex):
-        raise AssertionError("arange does not support complex step")
+    has_complex = (
+        isinstance(start, complex)
+        or isinstance(end, complex)
+        or isinstance(step, complex)
+        or (dtype is not None and dtype.is_complex)
+    )
 
     # Case: torch.arange(5)
     if end is None:
         end = start
         start = 0
     torch._check(step != 0, lambda: "step must be nonzero")
-    if step > 0:
-        torch._check(
-            end >= start,
-            lambda: "upper bound and lower bound inconsistent with step sign",
-        )
-    elif step < 0:
-        torch._check(
-            end <= start,
-            lambda: "upper bound and lower bound inconsistent with step sign",
-        )
+
+    if has_complex:
+        start = complex(start)
+        end = complex(end)
+        step = complex(step)
+
+        if step.real > 0:
+            torch._check(
+                end.real >= start.real,
+                lambda: "upper bound and lower bound inconsistent with step sign in real part",
+            )
+        elif step.real < 0:
+            torch._check(
+                end.real <= start.real,
+                lambda: "upper bound and lower bound inconsistent with step sign in real part",
+            )
+
+        if step.imag > 0:
+            torch._check(
+                end.imag >= start.imag,
+                lambda: "upper bound and lower bound inconsistent with step sign in imaginary part",
+            )
+        elif step.imag < 0:
+            torch._check(
+                end.imag <= start.imag,
+                lambda: "upper bound and lower bound inconsistent with step sign in imaginary part",
+            )
+
+    else:
+        if step > 0:  # type: ignore[operator not supported]
+            torch._check(
+                end >= start,  # type: ignore[operator not supported]
+                lambda: "upper bound and lower bound inconsistent with step sign",
+            )
+        elif step < 0:  # type: ignore[operator not supported]
+            torch._check(
+                end <= start,  # type: ignore[operator not supported]
+                lambda: "upper bound and lower bound inconsistent with step sign",
+            )
 
     def is_finite(x):
+        if isinstance(x, complex):
+            return is_finite(x.real) and is_finite(x.imag)
         return not isinstance(x, FloatWithoutSymFloat) or math.isfinite(x)
 
     torch._check(
@@ -5582,7 +5613,9 @@ def arange(
     )
 
     args = (start, end, step)
-    integer_args = builtins.all(isinstance(arg, IntLike) for arg in args)
+    integer_args = (
+        builtins.all(isinstance(arg, IntLike) for arg in args) and not has_complex
+    )
 
     if dtype is None:
         dtype = torch.int64 if integer_args else torch.get_default_dtype()
@@ -5598,8 +5631,21 @@ def arange(
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
+    elif has_complex:
+        real_length = (
+            math.ceil((end.real - start.real) / step.real)
+            if step.real != 0 and math.isfinite(step.real)
+            else 0
+        )
+        imag_length = (
+            math.ceil((end.imag - start.imag) / step.imag)
+            if step.imag != 0 and math.isfinite(step.imag)
+            else 0
+        )
+
+        length = max(real_length, imag_length)
     else:
-        length = math.ceil((end - start) / step)
+        length = math.ceil((end - start) / step)  # type: ignore[operator not supported]
 
     if is_integer and integer_args:
         return prims.iota(
