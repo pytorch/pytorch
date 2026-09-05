@@ -975,6 +975,20 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         fn()
         self.assertEqual(_len_torch_function_stack(), 0)
 
+    def test_has_torch_function_with_mode_active(self):
+        from torch.overrides import has_torch_function_unary
+
+        def fn(x):
+            if has_torch_function_unary(x):
+                return x + 1
+            return x - 1
+
+        x = torch.zeros(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        with BaseTorchFunctionMode():
+            self.assertEqual(opt_fn(x), fn(x))
+
 
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(
