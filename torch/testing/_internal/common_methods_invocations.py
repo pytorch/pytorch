@@ -12020,11 +12020,11 @@ op_db: list[OpInfo] = [
                        ),
                        DecorateInfo(
                            unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
-                           device_type=('cuda','xpu'), dtypes=(torch.complex64,)
+                           device_type=('cuda', 'xpu'), dtypes=(torch.complex64,)
                        ),
                        DecorateInfo(
                            unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
-                           device_type=('cuda','xpu'), dtypes=(torch.complex64,)
+                           device_type=('cuda', 'xpu'), dtypes=(torch.complex64,)
                        ),
                        # AssertionError: Tensor-likes are not close!
                        DecorateInfo(
