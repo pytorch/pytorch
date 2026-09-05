@@ -613,7 +613,7 @@ op_db: list[OpInfo] = [
             ),
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-05)}),
-                "TestOperators",
+                "TestOperatorsDevice",
                 "test_jvp",
                 device_type="cuda",
             ),
@@ -1273,7 +1273,7 @@ op_db: list[OpInfo] = [
             # Greatest relative difference: nan at index (0,) (up to 0.0001 allowed
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestOperators",
+                "TestOperatorsDevice",
                 "test_vmapvjpvjp",
                 device_type="cpu",
             ),

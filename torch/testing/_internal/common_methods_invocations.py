@@ -15314,16 +15314,16 @@ op_db: list[OpInfo] = [
                          device_type="cuda",
                          active_if=TEST_WITH_ROCM or IS_LINUX or TEST_WITH_TORCHINDUCTOR),
             # Chunked op: no jvp / vmap / second derivatives.
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvmap"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapjvpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp_has_batch_rule"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_grad"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_jvp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_jvpvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vjpvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vjpvmap"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapjvpvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapvjpvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapvjp_has_batch_rule"),
             DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"),
             DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"),
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators",
@@ -15385,17 +15385,17 @@ op_db: list[OpInfo] = [
                          active_if=TEST_WITH_ROCM or IS_LINUX or TEST_WITH_TORCHINDUCTOR),
             # No jvp / vmap / second derivatives; the recompute backward also
             # breaks vmap-over-grad (batched cotangent into in-place buffers).
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_grad"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_jvpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vjpvmap"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapjvpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjpvjp"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmapvjp_has_batch_rule"),
-            DecorateInfo(unittest.expectedFailure, "TestOperators", "test_vmap_autograd_grad"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_grad"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_jvp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_jvpvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vjpvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vjpvmap"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapjvpvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapvjpvjp"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmapvjp_has_batch_rule"),
+            DecorateInfo(unittest.expectedFailure, "TestOperatorsDevice", "test_vmap_autograd_grad"),
             DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"),
             DecorateInfo(unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"),
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators",
@@ -16037,7 +16037,7 @@ op_db: list[OpInfo] = [
                    'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
-                   'TestOperators', 'test_vjpvmap', device_type='cuda'
+                   'TestOperatorsDevice', 'test_vjpvmap', device_type='cuda'
                ),
                DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=9e-3, rtol=2e-1), }),
@@ -16203,27 +16203,27 @@ op_db: list[OpInfo] = [
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
-                   'TestOperators', 'test_vjpvmap',
+                   'TestOperatorsDevice', 'test_vjpvmap',
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
-                   'TestOperators', 'test_jvpvjp', device_type="cuda"
+                   'TestOperatorsDevice', 'test_jvpvjp', device_type="cuda"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-4, rtol=5e-5)}),
-                   'TestOperators', 'test_jvpvjp', device_type="xpu"
+                   'TestOperatorsDevice', 'test_jvpvjp', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
-                   'TestOperators', 'test_vjp', device_type="cuda"
+                   'TestOperatorsDevice', 'test_vjp', device_type="cuda"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=4e-4, rtol=5e-5)}),
-                   'TestOperators', 'test_vjp', device_type="xpu"
+                   'TestOperatorsDevice', 'test_vjp', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=3e-4, rtol=5e-5)}),
-                   'TestOperators', 'test_grad', device_type="xpu"
+                   'TestOperatorsDevice', 'test_grad', device_type="xpu"
                ),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
@@ -16238,7 +16238,7 @@ op_db: list[OpInfo] = [
                # sigma; rtol=2e-5 covers small-|dW|.
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=2e-4, rtol=2e-5)}),
-                   'TestOperators', 'test_grad', device_type="cuda",
+                   'TestOperatorsDevice', 'test_grad', device_type="cuda",
                    active_if=TEST_WITH_ROCM,
                ),
                DecorateInfo(
@@ -16519,8 +16519,8 @@ op_db: list[OpInfo] = [
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # RuntimeError: aten::_upsample_nearest_exact*d hit the vmap fallback which is currently disabled
-               DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
-               DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
+               DecorateInfo(unittest.expectedFailure, 'TestOperatorsDevice', 'test_vmapjvpall_has_batch_rule'),
+               DecorateInfo(unittest.expectedFailure, 'TestOperatorsDevice', 'test_vmapvjp_has_batch_rule'),
                DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule'),
            ),
            supports_out=False),
@@ -18937,7 +18937,7 @@ op_db: list[OpInfo] = [
                ),
                 DecorateInfo(
                     toleranceOverride({torch.float32: tol(atol=5e-5, rtol=3e-6)}),
-                    'TestOperators',
+                    'TestOperatorsDevice',
                     'test_jvp',
                     device_type='cpu',
                 ),
@@ -19293,7 +19293,7 @@ op_db: list[OpInfo] = [
                                                        torch.complex64: tol(atol=4e-02, rtol=4e-02)}),
                                     'TestCommon', 'test_noncontiguous_samples'),
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=5e-05)}),
-                                    'TestOperators', 'test_grad'),
+                                    'TestOperatorsDevice', 'test_grad'),
                        # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
                        # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
                        #              'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
@@ -20474,7 +20474,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_compare_cpu'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestEagerFusionOpInfo'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestOperators'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorsDevice'),
                # AssertionError
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive'),
                # AssertionError

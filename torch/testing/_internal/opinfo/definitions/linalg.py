@@ -1581,7 +1581,7 @@ op_db: list[OpInfo] = [
             # this op (vjp/vmapvjp/jvp/etc.) only generate f32 variants and pass.
             DecorateInfo(
                 unittest.skip("ROCm: 2nd-order vmap(vjp(vjp)) precision accumulation"),
-                "TestOperators",
+                "TestOperatorsDevice",
                 "test_vmapvjpvjp",
                 device_type="cuda",
                 dtypes=(torch.float32,),
