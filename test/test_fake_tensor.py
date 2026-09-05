@@ -2549,6 +2549,72 @@ assert not torch.cuda.is_initialized()
             with self.assertRaisesRegex(IndexError, "index .* out of range"):
                 torch.select(x, dim=1, index=-10)
 
+    def test_bincount_dtype_default(self):
+        """Test bincount output dtype when device supports float64 (default)."""
+        shape_env = ShapeEnv(allow_dynamic_output_shape_ops=True)
+
+        # float32 weights -> float32 (passthrough)
+        with FakeTensorMode(shape_env=shape_env):
+            x = torch.randint(0, 10, (1000,), dtype=torch.int64)
+            w = torch.randn(1000, dtype=torch.float32)
+            r = x.bincount(w)
+            self.assertEqual(r.dtype, torch.float32)
+
+        # non-float32 weights -> float64 (promotion)
+        with FakeTensorMode(shape_env=shape_env):
+            x = torch.randint(0, 10, (1000,), dtype=torch.int64)
+            w = torch.randint(0, 10, (1000,), dtype=torch.int8)
+            r = x.bincount(w)
+            self.assertEqual(r.dtype, torch.float64)
+
+    @patch("torch._dynamo.device_interface.get_interface_for_device")
+    def test_bincount_dtype_restricted(self, mock_get_interface):
+        """Test bincount output dtype when device does not support float64."""
+        mock_iface = unittest.mock.MagicMock()
+        mock_iface.is_dtype_supported.return_value = False
+        mock_get_interface.return_value = mock_iface
+
+        shape_env = ShapeEnv(allow_dynamic_output_shape_ops=True)
+
+        # float32, int32, float16 weights -> keep their dtype
+        for dtype in (torch.float32, torch.int32, torch.float16):
+            with FakeTensorMode(shape_env=shape_env):
+                x = torch.randint(0, 10, (1000,), dtype=torch.int64)
+                if dtype.is_floating_point:
+                    w = torch.randn(1000, dtype=dtype)
+                else:
+                    w = torch.randint(0, 10, (1000,), dtype=dtype)
+                r = x.bincount(w)
+                self.assertEqual(r.dtype, dtype)
+
+        # other dtypes (e.g. float64) -> int32 (restricted fallback)
+        with FakeTensorMode(shape_env=shape_env):
+            x = torch.randint(0, 10, (1000,), dtype=torch.int64)
+            w = torch.randn(1000, dtype=torch.float64)
+            r = x.bincount(w)
+            self.assertEqual(r.dtype, torch.int32)
+
+    @patch("torch._dynamo.device_interface.get_interface_for_device")
+    def test_bincount_dtype_fallback(self, mock_get_interface):
+        """Test bincount output dtype for unregistered device."""
+        mock_get_interface.side_effect = NotImplementedError("No interface")
+
+        shape_env = ShapeEnv(allow_dynamic_output_shape_ops=True)
+
+        # float32 weights -> float32 (fallback to supports_f64=True)
+        with FakeTensorMode(shape_env=shape_env):
+            x = torch.randint(0, 10, (1000,), dtype=torch.int64)
+            w = torch.randn(1000, dtype=torch.float32)
+            r = x.bincount(w)
+            self.assertEqual(r.dtype, torch.float32)
+
+        # non-float32 weights -> float64 (fallback to supports_f64=True)
+        with FakeTensorMode(shape_env=shape_env):
+            x = torch.randint(0, 10, (1000,), dtype=torch.int64)
+            w = torch.randint(0, 10, (1000,), dtype=torch.int8)
+            r = x.bincount(w)
+            self.assertEqual(r.dtype, torch.float64)
+
 
 instantiate_parametrized_tests(FakeTensorTest)
 
