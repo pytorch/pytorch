@@ -353,11 +353,10 @@ class TestShardedGradScalerParityWithDDP(FSDPTestContinuous):
 
 
 instantiate_parametrized_tests(TestShardGradScaler)
-devices = ("cuda", "hpu", "xpu", "privateuse1")
 instantiate_device_type_tests(
     TestShardedGradScalerParityWithDDP,
     globals(),
-    only_for=devices,
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
