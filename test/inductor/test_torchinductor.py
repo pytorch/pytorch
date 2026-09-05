@@ -7494,7 +7494,6 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (torch.arange(6, dtype=torch.float32),))
 
-    @skipIfRocm(msg="loads before the graph input pointer read back 0 on ROCm")
     def test_as_strided_past_input_extent(self):
         # A graph input aliasing a larger storage may legitimately be
         # as_strided'd past its own extent: Inductor rebases the storage-relative
