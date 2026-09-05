@@ -48,9 +48,6 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.4": "9",
 }
 
-# CUDA versions without a Windows installer on the ossci-windows bucket yet.
-CUDA_ARCHES_NO_WINDOWS = ["13.4"]
-
 ROCM_ARCHES = ["7.14", "10.0"]
 
 XPU_ARCHES = ["xpu"]
@@ -366,7 +363,7 @@ def generate_libtorch_matrix(
     if arches is None:
         arches = ["cpu"]
         if os == "windows":
-            arches += list_without(CUDA_ARCHES, CUDA_ARCHES_NO_WINDOWS)
+            arches += CUDA_ARCHES
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -419,7 +416,7 @@ def generate_wheels_matrix(
         if os == "linux":
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
-            arches += list_without(CUDA_ARCHES, CUDA_ARCHES_NO_WINDOWS) + XPU_ARCHES
+            arches += CUDA_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
