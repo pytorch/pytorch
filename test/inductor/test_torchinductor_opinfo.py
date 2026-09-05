@@ -345,6 +345,10 @@ if IS_MACOS:
         i32: "ZeroDivisionError",
         i64: "ZeroDivisionError",
     }
+    inductor_should_fail_with_exception["cpu"]["divmod"] = {
+        i32: "ZeroDivisionError",
+        i64: "ZeroDivisionError",
+    }
     inductor_should_fail_with_exception["cpu"]["__rmod__"] = {
         i32: "ZeroDivisionError",
         i64: "ZeroDivisionError",
@@ -352,6 +356,10 @@ if IS_MACOS:
 
 if IS_LINUX and IS_ARM64:
     inductor_should_fail_with_exception["cpu"]["remainder"] = {
+        i32: "ZeroDivisionError",
+        i64: "ZeroDivisionError",
+    }
+    inductor_should_fail_with_exception["cpu"]["divmod"] = {
         i32: "ZeroDivisionError",
         i64: "ZeroDivisionError",
     }

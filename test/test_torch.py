@@ -642,6 +642,12 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.fmod(zero_d, one_d).shape)
         self.assertEqual((1,), torch.fmod(one_d, zero_d).shape)
 
+        # divmod
+        self.assertEqual([(), ()], [x.shape for x in torch.divmod(zero_d, zero_d)])
+        self.assertEqual([(), ()], [x.shape for x in torch.divmod(zero_d, 2)])
+        self.assertEqual([(1,), (1,)], [x.shape for x in torch.divmod(zero_d, one_d)])
+        self.assertEqual([(1,), (1,)], [x.shape for x in torch.divmod(one_d, zero_d)])
+
         # exp, cos, cosh, tan, atan, tanh, erf, erfc, reciprocal
         self.assertEqual((), torch.exp(zero_d).shape)
         self.assertEqual((), torch.cos(zero_d).shape)
@@ -1152,7 +1158,7 @@ class TestTorchDeviceType(TestCase):
         [
             "dist", "atan2", "pow", "lerp", "add", "sub", "mul", "div", "fmod", "remainder", "eq", "ge", "gt", "le",
             "lt", "max", "min", "ne", "addcdiv", "addcmul", "masked_scatter", "masked_select", "masked_fill", "map",
-            "map2", "copy",
+            "map2", "copy", "divmod",
         ],
     )
     def test_broadcast(self, fn, device):

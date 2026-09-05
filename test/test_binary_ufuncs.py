@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMeta,
     instantiate_device_type_tests,
+    onlyCPU,
     onlyNativeDeviceTypes,
     onlyOn,
     OpDTypes,
@@ -1044,6 +1045,29 @@ class TestBinaryUfuncsDevice(TestCase):
                 f"{broadcasted_shape}, although they are not broadcastable."
             )
             raise AssertionError(msg)
+
+    @dtypes(*all_types_and(torch.half))
+    def test_rdivmod(self, device, dtype):
+        samples = [(2, 3)]
+        if dtype.is_floating_point:
+            samples += [(2.5, 3), (3.3, 2)]
+        if dtype != torch.uint8:
+            samples += [(-2, 3), (2, -3)]
+        for a, b in samples:
+            q, r = divmod(a, b)
+            tq, tr = divmod(a, torch.tensor(b, dtype=dtype, device=device))
+
+            self.assertIsInstance(tq, torch.Tensor)
+            self.assertIsInstance(tr, torch.Tensor)
+            self.assertEqual(tq, torch.tensor(q, dtype=dtype, device=device))
+            self.assertEqual(tr, torch.tensor(r, dtype=dtype, device=device))
+
+    @onlyCPU
+    @dtypes(*integral_types())
+    def test_divmod_zero(self, device, dtype):
+        a = torch.tensor([0, 1], dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+            torch.divmod(a, a)
 
     def test_add_broadcast_empty(self, device):
         # empty + empty
@@ -5092,9 +5116,10 @@ tensor_binary_ops = [
     "__or__",
     "__ror__",
     "__ior__",
+    "__divmod__",
+    "__rdivmod__",
     # Unsupported operators
     # '__imatmul__',
-    # '__divmod__', '__rdivmod__', '__idivmod__',
 ]
 
 

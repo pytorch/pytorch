@@ -41,6 +41,8 @@
 #include <ATen/ops/div_native.h>
 #include <ATen/ops/div_ops.h>
 #include <ATen/ops/divide_native.h>
+#include <ATen/ops/divmod.h>
+#include <ATen/ops/divmod_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/eq_native.h>
 #include <ATen/ops/floor_divide.h>
@@ -1397,6 +1399,23 @@ Tensor& bitwise_right_shift_(Tensor& self, const Scalar& other) {
 
 Tensor bitwise_right_shift(const Scalar& self, const Tensor& other) {
   return at::bitwise_right_shift(wrapped_scalar_tensor(self), other);
+}
+
+std::tuple<Tensor, Tensor> divmod(const Scalar& self, const Tensor& other) {
+  // redispatch to Tensor overload
+  return at::divmod(wrapped_scalar_tensor(self), other);
+}
+
+std::tuple<Tensor, Tensor> divmod(const Tensor& self, const Scalar& other) {
+  // redispatch to Tensor overload
+  return at::divmod(self, wrapped_scalar_tensor(other));
+}
+
+std::tuple<Tensor, Tensor> divmod(const Tensor& self, const Tensor& other) {
+  // Returns a tuple (quotient, remainder) as per Python divmod semantics
+  auto quotient = at::floor_divide(self, other);
+  auto remainder = at::remainder(self, other);
+  return std::make_tuple(quotient, remainder);
 }
 
 template <typename Stub>
