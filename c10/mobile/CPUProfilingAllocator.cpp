@@ -32,6 +32,9 @@ struct MemEvent {
 };
 
 bool overlaps(const MemBlock& a, const MemBlock& b) {
+  // two blocks dont overlap if
+  // |---a--------|--------------b--------|
+  // start_a     end_a <= start_b       end_b
   return !(
       (a.end_offset <= b.start_offset) || (b.end_offset <= a.start_offset));
 }
@@ -42,6 +45,7 @@ bool validate_allocation_plan(
   std::set<MemBlock> allocations;
   for (const auto& event : alloc_events) {
     auto alloc_id = event.allocation_id;
+    // Skip allocations not managed by AllocationPlan
     if (allocation_offsets[alloc_id] == std::numeric_limits<uint64_t>::max()) {
       continue;
     }
@@ -85,6 +89,9 @@ std::vector<MemEvent> create_and_sort_mem_events(
     const std::vector<uint64_t>& allocation_lifetimes) {
   std::vector<MemEvent> events;
   for (uint64_t i = 0; i < allocation_sizes.size(); ++i) {
+    // If observed allocation are freed outside the scope of
+    // observation, then allocations are not managed by the
+    // AllocationPlan.
     if (allocation_lifetimes[i] == std::numeric_limits<uint64_t>::max()) {
       continue;
     }
@@ -104,11 +111,40 @@ std::vector<MemEvent> create_and_sort_mem_events(
 std::vector<uint64_t> formulate_greedy_allocation_plan(
     const std::vector<uint64_t>& allocation_sizes,
     const std::vector<uint64_t>& allocation_lifetimes) {
+  // Step 1. Construct all allocation/free events.
+  //         Sort these events by timestamp.
+  // Step 2. Iterate through all events.
+  //  2.1 If allocate event:
+  //      Find all candidate in free_size_to_offset map
+  //      Greedily pick the first one.
+  //      Remove the entry from free_size_to_offset map.
+  //      new_offset = offset + request_size
+  //      new_size = size - request_size
+  //      Add new entry to both maps
+  //  2.2 If free event.
+  //      Check if the returned offset merges with another chunk.
+  //      If so merge until no more merging is possible.
+  //      If returned offset does not merge, then
+  //      just return it as a chunk.
+
+  // lower_bound on this map will get all candidates of
+  // the right size for allocation.
   std::map<uint64_t, uint64_t> free_size_to_offset;
+  // This provides fast lookup when we want to insert freed block
+  // back, especially when we want to merge blocks.
   ska::flat_hash_map<uint64_t, std::map<uint64_t, uint64_t>::iterator>
       free_start_offset_to_size_iter;
   ska::flat_hash_map<uint64_t, std::map<uint64_t, uint64_t>::iterator>
       free_end_offset_to_size_iter;
+  // Upon free end_ptr = offset + size
+  // If end_ptr exists merge freed allocation
+  // Also find corresponding offset in size_to_offset
+  // Remove that entry and update with new size and offset
+  // If end_ptr does not exist then just insert offset,size
+  // in map and correspondingly size, offset in the other map.
+  // Merging should always be done recursively until no more chunks
+  // that can be found.
+  // After last free we should have only one entry left in these maps.
 
   std::vector<uint64_t> allocation_offsets(
       allocation_sizes.size(), std::numeric_limits<uint64_t>::max());
@@ -121,9 +157,17 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
     if (mem_event.type == EventType::Allocate) {
       auto it = free_size_to_offset.lower_bound(mem_event.size);
       if (it == free_size_to_offset.end()) {
+        // If there is no contiguous block of the size requested
+        // allocate a new one.
         alloc_offset = max_offset;
         max_offset += mem_event.size;
       } else {
+        // If we have found a block of the size we want
+        // 1. change the block by allocating out of it.
+        //    1.1 Erase the entire block
+        //    1.2 Erase the reverse map entries
+        // 2. If block still has space left insert the remainder back in map.
+        //    Including reverse map entries.
         alloc_offset = it->second;
         new_offset = alloc_offset + mem_event.size;
         new_size = it->first - mem_event.size;
@@ -138,9 +182,21 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
       }
       allocation_offsets[mem_event.allocation_id] = alloc_offset;
     } else {
+      // 1. Check if freed block is adjacent to an existing free block
+      //    at its end boundary. This is done by checking
+      //    free_end_offset_to_size_iter.
+      //    If we find such a block, remove it and adjust size of
+      //    the block being freed.
+      // 2. Similarly check if freed block is adjacent to an existing
+      //    free block at start boundary. This is done by checking
+      //    free_start_offset_to_size_iter.
+      //    If we find such a block, remove it and adjust size of
+      //    the block being freed.
+      // 3. Insert the freed block in map.
       auto freed_offset = allocation_offsets[mem_event.allocation_id];
       auto freed_size = mem_event.size;
       auto end_offset = freed_offset + freed_size;
+      // Merge when another free block exist at the end of this block
       auto end_it = free_start_offset_to_size_iter.find(end_offset);
       if (end_it != free_start_offset_to_size_iter.end()) {
         auto merge_block_iter = end_it->second;
@@ -148,8 +204,11 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
         freed_size += merge_block_size;
         free_size_to_offset.erase(merge_block_iter);
         free_start_offset_to_size_iter.erase(end_it);
+        // If the block is being merged then also remove it from
+        // free_end_offset_to_size_iter
         free_end_offset_to_size_iter.erase(end_offset + merge_block_size);
       }
+      // Merge when freed block exist at the end of another free block
       auto start_it = free_end_offset_to_size_iter.find(freed_offset);
       if (start_it != free_end_offset_to_size_iter.end()) {
         auto merge_block_iter = start_it->second;
@@ -158,6 +217,8 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
         freed_offset -= merge_block_size;
         free_size_to_offset.erase(merge_block_iter);
         free_end_offset_to_size_iter.erase(start_it);
+        // If the block is being merged then also remove it from
+        // free_start_offset_to_size_iter
         free_start_offset_to_size_iter.erase(freed_offset);
       }
       auto freed_block_it =
@@ -202,6 +263,7 @@ void AllocationPlanner::record_free(const void* ptr) {
   }
   auto it = allocation_ptr_to_id_.find(ptr);
   if (it == allocation_ptr_to_id_.end()) {
+    // Free being recorded was allocated outside of WithProfileAllocationGuard
     return;
   }
   auto id = it->second;
@@ -226,6 +288,7 @@ bool AllocationPlanner::validate_allocation(
         allocation_plan_->allocation_sizes[allocation_id_],
         ", but got:",
         size);
+
     return false;
   }
   allocation_ptr_to_id_[ptr] = allocation_id_;
@@ -236,6 +299,7 @@ bool AllocationPlanner::validate_allocation(
 bool AllocationPlanner::validate_free(const void* ptr) {
   auto it = allocation_ptr_to_id_.find(ptr);
   if (it == allocation_ptr_to_id_.end()) {
+    // Allocation that was made outside the validation scope is being freed here
     return true;
   }
   auto id = (*it).second;
@@ -274,6 +338,7 @@ void CPUProfilingAllocator::set_plan(const AllocationPlan* plan) {
   allocation_id_ = 0;
   allocation_ptr_to_id_.clear();
   if (current_size_ < plan->total_size) {
+    // Free existing memory and reallocate for larger size.
     c10::free_cpu(blob_);
     blob_ = c10::alloc_cpu(plan->total_size);
     current_size_ = plan->total_size;
@@ -292,6 +357,7 @@ void* CPUProfilingAllocator::allocate(const size_t bytes) {
       "Got allocation request that does not match with the plan.");
   if (plan_->allocation_lifetimes[allocation_id_] ==
       std::numeric_limits<uint64_t>::max()) {
+    // This allocation is not managed by ProfilingAllocator.
     allocation_id_++;
     return c10::alloc_cpu(bytes);
   }
@@ -305,6 +371,19 @@ void* CPUProfilingAllocator::allocate(const size_t bytes) {
 void CPUProfilingAllocator::free(void* const ptr) {
   auto it = allocation_ptr_to_id_.find(ptr);
   if (it == allocation_ptr_to_id_.end()) {
+    // Either
+    // 1. Allocation that was made outside the validation scope is being freed
+    // here or
+    // 2. Allocation that is not managed by profiling allocator is being freed.
+    //    Example of the second type
+    //    Tensor out;
+    //    for (....) {
+    //      {
+    //        CPUProfilingAllocator
+    //        out = ...some op (This also frees previous memory held by out)
+    //      }
+    //      out is used..
+    //    }
     c10::free_cpu(ptr);
     return;
   }
@@ -328,6 +407,7 @@ CPUProfilingAllocator::~CPUProfilingAllocator() {
 }
 
 WithProfileAllocationsGuard::WithProfileAllocationsGuard(AllocationPlan* plan) {
+  // Nesting of allocation profiling does not seem meaningful.
   TORCH_CHECK(
       allocation_planner == nullptr,
       "Nesting profiling allocations is not supported.");
@@ -344,6 +424,7 @@ WithProfileAllocationsGuard::~WithProfileAllocationsGuard() {
 WithValidateAllocationPlanGuard::WithValidateAllocationPlanGuard(
     AllocationPlan* plan,
     bool* success) {
+  // Nesting of allocation profiling does not seem meaningful.
   TORCH_CHECK(
       allocation_planner == nullptr,
       "Nesting profiling allocations is not supported.");
@@ -364,6 +445,7 @@ AllocationPlanner* GetThreadLocalAllocationPlanner() {
 WithProfilingAllocatorGuard::WithProfilingAllocatorGuard(
     CPUProfilingAllocator* allocator,
     const AllocationPlan* plan) {
+  // Nesting of profiling allocator is not supported.
   TORCH_CHECK(
       profiling_allocator == nullptr,
       "Nesting profiling allocators is not supported.");
