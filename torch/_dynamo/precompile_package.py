@@ -7,7 +7,7 @@ and every recompiled variant of each -- is captured into one serializable
 artifact on top of CompilePackage.
 
 Everything here is internal; the session that drives it and the
-``torch.compiler.precompile.artifact(..., tracer="dynamo")`` entry point build on
+``torch.compiler.precompile.capture(..., tracer=DynamoTracer())`` entry point build on
 these in later commits. This is distinct from
 ``torch._dynamo.config.caching_precompile``, which caches ``torch.compile``
 artifacts transparently without an explicit capture.
@@ -18,20 +18,21 @@ every frame Dynamo produces is recorded. Runtime guards stay intact during
 capture; ``guard_filter_fn`` applies only to the serialized copy, and every
 dropped guard is reported in ``PrecompileSummary.dropped_guards``.
 
-    with torch.compiler.precompile.artifact(step, backend="inductor") as cap:
+    with torch.compiler.precompile.capture(
+        step, artifact_path="m.py", cache_path="m.cache", backend="inductor"
+    ) as cap:
         y1 = cap(model, x1)  # runs step(model, x1), returns its result
         y2 = cap(model, x2)  # exercises another variant
-    python_code, cache = cap.result()
 
     # later, in a fresh process
-    compiled = torch.compiler.precompile.load(python_code, cache)
+    compiled = torch.compiler.precompile.load("m.py", "m.cache")
     with compiled, torch.no_grad():
         compiled(model, x1)
 
 The caller's calls ARE the capture: each ``cap(...)`` runs the callable for
 real, returns its result, and records every frame, break continuation and
-guarded variant it exercises. ``precompile.accumulate`` is the same model with
-a disk sink instead of an in-memory one.
+guarded variant it exercises. ``precompile.accumulate`` is the same model, rewriting the artifact on every
+call instead of once at block exit.
 
 Calls run with the grad mode the caller sets -- capture does not force
 ``no_grad()`` or ``enable_grad()``. ``training=True`` lowers the backward
@@ -102,13 +103,13 @@ Know these before relying on an artifact in production:
 This wraps CompilePackage, which is the low-level component and is not meant to
 be used directly.
 
-The public surface is ``torch.compiler.precompile.artifact(...)``, a caller-driven
+The public surface is ``torch.compiler.precompile.capture(...)``, a caller-driven
 capture used as a context manager: the caller's own calls inside the block drive
-the capture, and ``.result()`` returns the ``(python_code, cache)`` pair in memory
-for either tracer (its default ``tracer="make_fx"`` produces a self-contained
-Python source artifact from one call); ``torch.compiler.precompile.accumulate(...)``,
-the on-disk counterpart where the caller's own loop drives the capture and the
-artifact is rewritten to files each call; and ``torch.compiler.precompile.load``.
+the capture, and the ``(python_code, cache)`` artifact is written to the given files
+when the block exits (its default ``tracer=DynamoTracer()`` records many calls;
+``tracer=MakeFxTracer()`` produces a self-contained Python source artifact from one
+call); ``torch.compiler.precompile.accumulate(...)``, the counterpart that rewrites
+the files after every call; and ``torch.compiler.precompile.load``.
 The helpers in this module, including the capture session, implement that surface
 and remain internal. All of it is distinct from ``torch._dynamo.config.caching_precompile``,
 which caches ``torch.compile`` artifacts transparently without an explicit

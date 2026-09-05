@@ -2468,7 +2468,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
 
         torch._dynamo.reset()
-        loaded = torch.compiler.precompile.load(code, cache)
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "m.py")
+            cache_path = os.path.join(d, "m.cache")
+            with open(artifact_path, "w", encoding="utf-8") as f:
+                f.write(code)
+            with open(cache_path, "wb") as f:
+                f.write(cache)
+            loaded = torch.compiler.precompile.load(artifact_path, cache_path)
         self.assertIsInstance(loaded, PrecompiledCallable)
         helper_code = _precompile_unreachable_helper.__code__
         self.assertEqual(_debug_get_precompile_entries(helper_code), [])
