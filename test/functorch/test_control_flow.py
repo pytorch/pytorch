@@ -13114,6 +13114,8 @@ class <lambda>(torch.nn.Module):
     @parametrize("compile_mode", ["direct", "aot_eager", "inductor"])
     def test_while_loop_constant_false_cond_mutation(self, device, compile_mode):
         def f(state, x):
+            before = x.new_zeros(()) + random.random()
+
             def cond_fn(x):
                 r = random.randint(1, 10) if x.is_contiguous() else random.random()
                 state.add_(1 if torch.tensor(r).is_floating_point() else 10)
@@ -13122,15 +13124,14 @@ class <lambda>(torch.nn.Module):
             def body_fn(x):
                 return (x + 1,)
 
-            return torch.while_loop(cond_fn, body_fn, (x,))
+            result = torch.while_loop(cond_fn, body_fn, (x,))
+            after = x.new_zeros(()) + random.random()
+            return (*result, before, after)
 
         rng_state = random.getstate()
         try:
             random.seed(0)
             expected_rng = random.Random(0)
-            expected_rng.random()
-            expected_rng.random()
-            expected_next_random = expected_rng.random()
             fn = (
                 f
                 if compile_mode == "direct"
@@ -13140,15 +13141,19 @@ class <lambda>(torch.nn.Module):
             x = torch.arange(8.0, device=device)[::2]
             with torch.no_grad():
                 for _ in range(2):
+                    expected_before = expected_rng.random()
+                    expected_rng.random()
+                    expected_after = expected_rng.random()
                     result = fn(state, x)
+                    self.assertEqual(result[1], expected_before)
+                    self.assertEqual(result[2], expected_after)
             self.assertEqual(result[0], x)
             self.assertEqual(state, 2)
-            self.assertEqual(random.random(), expected_next_random)
+            self.assertEqual(random.random(), expected_rng.random())
         finally:
             random.setstate(rng_state)
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
-    @skipCUDAIf(not SM70OrLater, "triton")
     def test_while_loop_constant_false_replay_input_mutation(self, device):
         def f(x):
             def cond_fn(x):
