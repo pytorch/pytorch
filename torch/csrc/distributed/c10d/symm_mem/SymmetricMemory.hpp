@@ -4,6 +4,8 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 
+#include <functional>
+
 namespace c10d::symmetric_memory {
 
 // Validates a peer rank used to index the per-peer arrays of buffer/signal
@@ -109,7 +111,7 @@ class TORCH_API SymmetricMemory : public torch::CustomClassHolder {
   }
 };
 
-class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
+class TORCH_API SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
  public:
   ~SymmetricMemoryAllocator() override = default;
 
@@ -129,6 +131,27 @@ class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
   virtual bool has_allocation(void* ptr) {
     return false;
   }
+
+  // Wraps a pointer returned by alloc() in a tensor. Backends that require
+  // custom TensorImpl, StorageImpl, or storage metadata for externally
+  // allocated memory can override this method. group_name is the logical
+  // group supplied to empty_strided_p2p() and may be ignored by backends whose
+  // tensor wrapping is group-independent. The returned tensor must use ptr as
+  // its exact storage data pointer:
+  //
+  //   tensor.storage().data_ptr().get() == ptr
+  //
+  // rendezvous() and has_allocation() use this pointer as the allocation
+  // identity. Implementations must not copy or rebase the allocation. The
+  // default implementation preserves the existing at::from_blob() behavior.
+  virtual at::Tensor make_tensor(
+      void* ptr,
+      c10::IntArrayRef sizes,
+      c10::IntArrayRef strides,
+      c10::ScalarType dtype,
+      c10::Device device,
+      const std::optional<std::string>& group_name,
+      std::function<void(void*)> deleter = {});
 };
 
 C10_EXPORT bool is_finalizing();
