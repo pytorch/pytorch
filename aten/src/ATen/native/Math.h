@@ -235,11 +235,12 @@ Date:  February 1996
 template <typename scalar_t, bool is_cuda=false>
 C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_float_divide_by_zero__ {
   using acc_t = at::acc_type<scalar_t, is_cuda>;
-  const acc_t MACHEP = acc_t{1.11022302462515654042E-16};
+  constexpr acc_t MACHEP =
+      std::numeric_limits<acc_t>::epsilon() / acc_t{2};
   constexpr acc_t zero = acc_t{0.0};
   constexpr acc_t half = acc_t{0.5};
   constexpr acc_t one = acc_t{1.0};
-  static const acc_t A[] = {
+  static constexpr acc_t A[] = {
       12.0,
       -720.0,
       30240.0,
@@ -323,10 +324,10 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_floa
  * coef[0] = C  , ..., coef[N] = C  .
  *            N                   0
  */
-template <typename T>
-C10_HOST_DEVICE inline T polevl(const T x, const T A[], size_t len) {
+template <typename T, size_t size>
+C10_HOST_DEVICE constexpr T polevl(const T x, const T (&A)[size]) {
   T result = 0;
-  for (size_t i = 0; i <= len; i++) {
+  for (size_t i = 0; i < size; ++i) {
     result = result * x + A[i];
   }
   return result;
@@ -374,7 +375,7 @@ inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
  */
 inline double calc_digamma(double x) {
   // [C++ Standard Reference: Gamma Function] https://en.cppreference.com/w/cpp/numeric/math/tgamma
-  static double PSI_10 = 2.25175258906672110764;
+  static constexpr double PSI_10 = 2.25175258906672110764;
   if (x == 0) {
     // As per C++ standard for gamma related functions and SciPy,
     // If the argument is ±0, ±∞ is returned
@@ -408,7 +409,7 @@ inline double calc_digamma(double x) {
   }
 
   // Compute asymptotic digamma
-  static const double A[] = {
+  static constexpr double A[] = {
       8.33333333333333333333E-2,
       -2.10927960927960927961E-2,
       7.57575757575757575758E-3,
@@ -421,7 +422,7 @@ inline double calc_digamma(double x) {
   double y = 0;
   if (x < 1.0e17) {
     double z = 1.0 / (x * x);
-    y = z * polevl(z, A, 6);
+    y = z * polevl(z, A);
   }
   return result + log(x) - (0.5 / x) - y;
 }
@@ -432,7 +433,7 @@ inline double calc_digamma(double x) {
  */
 inline float calc_digamma(float x) {
   // See [C++ Standard Reference: Gamma Function]
-  static float PSI_10 = 2.25175258906672110764f;
+  static constexpr float PSI_10 = 2.25175258906672110764f;
   if (x == 0) {
     // As per C++ standard for gamma related functions and SciPy,
     // If the argument is ±0, ±∞ is returned
@@ -467,7 +468,7 @@ inline float calc_digamma(float x) {
   }
 
   // Compute asymptotic digamma
-  static const float A[] = {
+  static constexpr float A[] = {
       8.33333333333333333333E-2f,
       -2.10927960927960927961E-2f,
       7.57575757575757575758E-3f,
@@ -480,7 +481,7 @@ inline float calc_digamma(float x) {
   float y = 0;
   if (x < 1.0e17f) {
     float z = 1 / (x * x);
-    y = z * polevl(z, A, 6);
+    y = z * polevl(z, A);
   }
   return result + logf(x) - (0.5f / x) - y;
 }
@@ -624,10 +625,10 @@ static scalar_t _igam_helper_fac(scalar_t a, scalar_t x) {
   // exp(a - x).
 
   scalar_t ax, fac, res, num, numfac;
-  static scalar_t MAXLOG = std::is_same_v<scalar_t,double> ?
+  static constexpr scalar_t MAXLOG = std::is_same_v<scalar_t,double> ?
     7.09782712893383996843E2 : 88.72283905206835;
-  static scalar_t EXP1 = 2.718281828459045;
-  static scalar_t lanczos_g = 6.024680040776729583740234375;
+  static constexpr scalar_t EXP1 = 2.718281828459045;
+  static constexpr scalar_t lanczos_g = 6.024680040776729583740234375;
 
   if (std::fabs(a - x) > 0.4 * std::fabs(a)) {
     ax = a * std::log(x) - x - std::lgamma(a);
@@ -654,9 +655,9 @@ static scalar_t _igam_helper_fac(scalar_t a, scalar_t x) {
 template <typename scalar_t>
 static scalar_t _igam_helper_series(scalar_t a, scalar_t x) {
   // Compute igam using DLMF 8.11.4. [igam1]
-  static scalar_t MACHEP = std::is_same_v<scalar_t, double> ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
-  static int MAXITER = 2000;
+  static constexpr scalar_t MACHEP =
+      std::numeric_limits<scalar_t>::epsilon() / scalar_t{2};
+  static constexpr int MAXITER = 2000;
 
   int i;
   scalar_t ans, ax, c, r;
@@ -691,9 +692,9 @@ static scalar_t _igamc_helper_series(scalar_t a, scalar_t x) {
   scalar_t fac = 1;
   scalar_t sum = 0;
   scalar_t term, logx;
-  static scalar_t MAXITER = 2000;
-  static scalar_t MACHEP = std::is_same_v<scalar_t, double> ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
+  static constexpr int MAXITER = 2000;
+  static constexpr scalar_t MACHEP =
+      std::numeric_limits<scalar_t>::epsilon() / scalar_t{2};
 
   for (n = 1; n < MAXITER; n++) {
     fac *= -x / n;
@@ -941,8 +942,8 @@ static scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam
 
   int k, n, sgn;
   int maxpow = 0;
-  static scalar_t MACHEP = std::is_same_v<scalar_t, double> ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
+  static constexpr scalar_t MACHEP =
+      std::numeric_limits<scalar_t>::epsilon() / scalar_t{2};
   scalar_t lambda = x / a;
   scalar_t sigma = (x - a) / a;
   scalar_t eta, res, ck, ckterm, term, absterm;
@@ -1005,12 +1006,12 @@ static scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar_t x) {
   int i;
   scalar_t ans, ax, c, yc, r, t, y, z;
   scalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
-  int MAXITER = 2000;
-  static scalar_t MACHEP = std::is_same_v<scalar_t, double> ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
-  static scalar_t BIG = std::is_same_v<scalar_t,double> ?
+  constexpr int MAXITER = 2000;
+  static constexpr scalar_t MACHEP =
+      std::numeric_limits<scalar_t>::epsilon() / scalar_t{2};
+  static constexpr scalar_t BIG = std::is_same_v<scalar_t,double> ?
     4.503599627370496e15 : 16777216.;
-  static scalar_t BIGINV = std::is_same_v<scalar_t,double> ?
+  static constexpr scalar_t BIGINV = std::is_same_v<scalar_t,double> ?
     2.22044604925031308085e-16 : 5.9604644775390625E-8;
 
   ax = _igam_helper_fac(a, x);
@@ -1074,10 +1075,10 @@ inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
    */
   scalar_t absxma_a;
 
-  static scalar_t SMALL = 20.0;
-  static scalar_t LARGE = 200.0;
-  static scalar_t SMALLRATIO = 0.3;
-  static scalar_t LARGERATIO = 4.5;
+  static constexpr scalar_t SMALL = 20.0;
+  static constexpr scalar_t LARGE = 200.0;
+  static constexpr scalar_t SMALLRATIO = 0.3;
+  static constexpr scalar_t LARGERATIO = 4.5;
 
   // note that in SciPy, a and x are non-negative, with exclusive 0s (i.e.,
   // at most 1 of them can be 0), where igammac(0, x) = 0.0 iff x > 0.
@@ -1153,10 +1154,10 @@ scalar_t calc_igamma(scalar_t a, scalar_t x) {
    * - otherwise, calculate the series from [igam2] eq (4)
    */
   scalar_t absxma_a;
-  static scalar_t SMALL = 20.0;
-  static scalar_t LARGE = 200.0;
-  static scalar_t SMALLRATIO = 0.3;
-  static scalar_t LARGERATIO = 4.5;
+  static constexpr scalar_t SMALL = 20.0;
+  static constexpr scalar_t LARGE = 200.0;
+  static constexpr scalar_t SMALLRATIO = 0.3;
+  static constexpr scalar_t LARGERATIO = 4.5;
 
   // boundary values following SciPy
   // note that in SciPy, a and x are non-negative, with exclusive 0s (i.e.,
@@ -1324,7 +1325,7 @@ inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {
    *
    * lim(x->0){ exp(-x) I0(x) } = 1.
    */
-  static const T coeff[] = {
+  static constexpr T coeff[] = {
       -4.41534164647933937950E-18, 3.33079451882223809783E-17,
       -2.43127984654795469359E-16, 1.71539128555513303061E-15,
       -1.16853328779934516808E-14, 7.67618549860493561688E-14,
@@ -1350,7 +1351,7 @@ inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
    *
    * lim(x->inf){ exp(-x) sqrt(x) I0(x) } = 1/sqrt(2pi).
    */
-  static const T coeff[] = {
+  static constexpr T coeff[] = {
       -7.23318048787475395456E-18, -4.83050448594418207126E-18,
       4.46562142029675999901E-17,  3.46122286769746109310E-17,
       -2.82762398051658348494E-16, -3.42548561967721913462E-16,
@@ -1376,7 +1377,7 @@ chebyshev_coefficients_i1e_A() {
    *
    * lim(x->0){ exp(-x) I1(x) / x } = 1/2.
    */
-  static const T coeff[] = {
+  static constexpr T coeff[] = {
       2.77791411276104639959E-18, -2.11142121435816608115E-17,
       1.55363195773620046921E-16, -1.10559694773538630805E-15,
       7.60068429473540693410E-15, -5.04218550472791168711E-14,
@@ -1403,7 +1404,7 @@ chebyshev_coefficients_i1e_A() {
    *
    * lim(x->0){ exp(-x) I1(x) / x } = 1/2.
    */
-  static const T coeff[] = {
+  static constexpr T coeff[] = {
       9.38153738649577178388E-9f,
       -4.44505912879632808065E-8f,
       2.00329475355213526229E-7f,
@@ -1432,7 +1433,7 @@ chebyshev_coefficients_i1e_B() {
    *
    * lim(x->inf){ exp(-x) sqrt(x) I1(x) } = 1/sqrt(2pi).
    */
-  static const T coeff[] = {
+  static constexpr T coeff[] = {
       7.51729631084210481353E-18,  4.41434832307170791151E-18,
       -4.65030536848935832153E-17, -3.20952592199342395980E-17,
       2.96262899764595013876E-16,  3.30820231092092828324E-16,
@@ -1458,7 +1459,7 @@ chebyshev_coefficients_i1e_B() {
    *
    * lim(x->inf){ exp(-x) sqrt(x) I1(x) } = 1/sqrt(2pi).
    */
-  static const T coeff[] = {
+  static constexpr T coeff[] = {
       -3.83538038596423702205E-9f,
       -2.63146884688951950684E-8f,
       -2.51223623787020892529E-7f,
@@ -1658,7 +1659,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   if (y > T{0.13533528323661269189}) {
     y = y - T{0.5};
     const T y2 = y * y;
-    T x = y + y * (y2 * polevl(y2, P0, 4) / polevl(y2, Q0, 8));
+    T x = y + y * (y2 * polevl(y2, P0) / polevl(y2, Q0));
     return (x * s2pi);
   }
 
@@ -1669,9 +1670,9 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   T x1;
   if (x < T{8.0}) /* y > exp(-32) = 1.2664165549e-14 */
   {
-    x1 = z * polevl(z, P1, 8) / polevl(z, Q1, 8);
+    x1 = z * polevl(z, P1) / polevl(z, Q1);
   } else {
-    x1 = z * polevl(z, P2, 8) / polevl(z, Q2, 8);
+    x1 = z * polevl(z, P2) / polevl(z, Q2);
   }
   x = x0 - x1;
   if (code) {

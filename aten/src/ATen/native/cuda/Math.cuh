@@ -299,7 +299,12 @@ const auto digamma_string = jiterator_stringify(
 const auto zeta_string = jiterator_stringify(
   template <typename T>
   T zeta(T x, T q) {
-    const T MACHEP{1.11022302462515654042E-16};
+    static_assert(
+        sizeof(T) == sizeof(float) || sizeof(T) == sizeof(double),
+        "zeta supports only float or double computation");
+    constexpr T MACHEP = sizeof(T) == sizeof(float)
+        ? T{5.9604644775390625E-8}
+        : T{1.11022302462515654042E-16};
     constexpr T zero{0};
     constexpr T half{0.5};
     constexpr T one{1};
@@ -1434,7 +1439,13 @@ const auto airy_ai_string = jiterator_stringify(
         T t = 1.0;
         T z = x * x * x;
 
-        while (t > T(1.11022302462515654042e-16)) {
+        static_assert(
+            sizeof(T) == sizeof(float) || sizeof(T) == sizeof(double),
+            "airy_ai supports only float or double computation");
+        constexpr T epsilon = sizeof(T) == sizeof(float)
+            ? T{1.1920928955078125E-7}
+            : T{2.22044604925031308085E-16};
+        while (t > epsilon) {
             m *= z;
             k += T(1.0);
             m /= k;
