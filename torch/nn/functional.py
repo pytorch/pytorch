@@ -6105,6 +6105,158 @@ def triplet_margin_with_distance_loss(
         return loss
 
 
+def info_nce_loss(
+    query: Tensor,
+    positive_key: Tensor,
+    negative_keys: Tensor | None = None,
+    temperature: float = 0.07,
+    reduction: str = "mean",
+) -> Tensor:
+    r"""Compute a one-directional InfoNCE loss.
+
+    Computes a one-directional InfoNCE objective between paired query and
+    positive-key embeddings, using either cross-batch keys or an explicit shared
+    set of negative keys. Pairs are aligned by index: ``positive_key[i]`` is the
+    positive for ``query[i]``. Embeddings are L2-normalized internally along the
+    embedding dimension.
+
+    When ``negative_keys`` is given, every query is scored against its own
+    positive and against the same shared set of :math:`M` negatives, which is the
+    softmax classification form used by MoCo:
+
+    .. math::
+        \mathcal{L}_i = -\log \frac{\exp(\operatorname{sim}(q_i, k_i) / \tau)}
+            {\exp(\operatorname{sim}(q_i, k_i) / \tau)
+             + \sum_{j=1}^{M} \exp(\operatorname{sim}(q_i, n_j) / \tau)}
+
+    When ``negative_keys`` is ``None``, the remaining positive keys in the batch
+    act as in-batch negatives through the :math:`(N, N)` cross-view similarity
+    matrix, whose diagonal holds the positive pairs:
+
+    .. math::
+        \mathcal{L}_i = -\log \frac{\exp(\operatorname{sim}(q_i, k_i) / \tau)}
+            {\sum_{j=1}^{N} \exp(\operatorname{sim}(q_i, k_j) / \tau)}
+
+    where :math:`\operatorname{sim}(u, v) = u^\top v / (\|u\| \|v\|)` is cosine
+    similarity and :math:`\tau` is the temperature parameter.
+
+    See :class:`~torch.nn.InfoNCELoss` for details.
+
+    Args:
+        query: Anchor embeddings of shape :math:`(N, D)`.
+        positive_key: Positive embeddings of shape :math:`(N, D)`, paired with query.
+        negative_keys: Optional explicit negatives of shape :math:`(M, D)`, shared
+            by every query. If ``None``, the other positive keys in the batch are
+            used as negatives.
+        temperature: Temperature scaling parameter :math:`\tau`. Must be finite
+            and positive. Default: ``0.07``.
+        reduction (str, optional): Specifies the reduction to apply to the output:
+            ``'none'`` | ``'mean'`` | ``'sum'``. Default: ``'mean'``.
+
+    Returns:
+        InfoNCE loss. Scalar if reduction is ``'mean'`` or ``'sum'``,
+        tensor of shape :math:`(N,)` if ``'none'``.
+
+    .. note::
+        This objective is one-directional. A symmetric cross-view objective
+        (CLIP-style) is obtained by averaging both directions, which requires two
+        calls; see the examples below.
+
+    .. note::
+        The loss owns no state: it does not maintain a memory queue, a momentum
+        encoder, stop-gradient behavior, or data augmentation. A MoCo-style setup
+        passes its external queue as ``negative_keys`` and decides outside the
+        loss whether the keys should receive gradients.
+
+    .. note::
+        With ``negative_keys=None`` and a batch of one, no negatives exist, so the
+        loss is exactly ``0``. Gradients still flow (they are zero), so calling
+        ``backward()`` is safe.
+
+    Examples::
+
+        >>> query = torch.randn(32, 128)
+        >>> positive_key = torch.randn(32, 128)
+        >>> loss = F.info_nce_loss(query, positive_key, temperature=0.07)
+
+        >>> # With explicit negatives (e.g., from a memory bank)
+        >>> negative_keys = torch.randn(1024, 128)
+        >>> loss = F.info_nce_loss(query, positive_key, negative_keys)
+
+        >>> # Symmetric cross-view objective
+        >>> loss = 0.5 * (
+        ...     F.info_nce_loss(query, positive_key)
+        ...     + F.info_nce_loss(positive_key, query)
+        ... )
+    """
+    if has_torch_function_variadic(query, positive_key, negative_keys):
+        return handle_torch_function(
+            info_nce_loss,
+            (query, positive_key, negative_keys),
+            query,
+            positive_key,
+            negative_keys,
+            temperature=temperature,
+            reduction=reduction,
+        )
+
+    if reduction not in ("none", "mean", "sum"):
+        raise ValueError(f"{reduction} is not a valid value for reduction")
+
+    if not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError(
+            f"temperature must be finite and greater than 0, got {temperature}"
+        )
+
+    if query.dim() != 2 or positive_key.dim() != 2:
+        raise ValueError(
+            f"query and positive_key must be 2D tensors, "
+            f"got {query.dim()}D and {positive_key.dim()}D"
+        )
+
+    if query.shape != positive_key.shape:
+        raise ValueError(
+            f"query and positive_key must have same shape, "
+            f"got {query.shape} and {positive_key.shape}"
+        )
+
+    batch_size = query.shape[0]
+
+    # L2 normalize embeddings
+    query = normalize(query, p=2.0, dim=1)
+    positive_key = normalize(positive_key, p=2.0, dim=1)
+
+    if negative_keys is not None:
+        if negative_keys.dim() != 2:
+            raise ValueError(
+                f"negative_keys must be 2D tensor, got {negative_keys.dim()}D"
+            )
+        if negative_keys.shape[1] != query.shape[1]:
+            raise ValueError(
+                f"negative_keys embedding dim must match query, "
+                f"got {negative_keys.shape[1]} vs {query.shape[1]}"
+            )
+        negative_keys = normalize(negative_keys, p=2.0, dim=1)
+        # Positive similarities: (N, 1)
+        positive_sim = (
+            torch.sum(query * positive_key, dim=1, keepdim=True) / temperature
+        )
+        # Negative similarities against the shared negative set: (N, M)
+        negative_sim = torch.mm(query, negative_keys.t()) / temperature
+        # All logits: (N, 1 + M), positive in column 0
+        logits = torch.cat([positive_sim, negative_sim], dim=1)
+        targets = torch.zeros(batch_size, dtype=torch.long, device=query.device)
+        return cross_entropy(logits, targets, reduction=reduction)
+    else:
+        # In-batch negatives: the (N, N) cross-view matrix holds the positive
+        # pairs on the diagonal and negatives off-diagonal, so the target for
+        # row i is simply i. This is one-directional, not the 2N SimCLR
+        # denominator, which also treats the keys as anchors.
+        all_sim = torch.mm(query, positive_key.t()) / temperature
+        targets = torch.arange(batch_size, device=query.device)
+        return cross_entropy(all_sim, targets, reduction=reduction)
+
+
 def normalize(
     input: Tensor,
     p: float = 2.0,

@@ -355,6 +355,7 @@ Global Hooks For Module
     nn.MultiMarginLoss
     nn.TripletMarginLoss
     nn.TripletMarginWithDistanceLoss
+    nn.InfoNCELoss
 ```
 
 ## Vision Layers
