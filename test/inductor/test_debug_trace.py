@@ -11,8 +11,9 @@ from pathlib import Path
 import torch
 from torch._inductor import config, test_operators
 from torch._inductor.utils import fresh_cache
-from torch.testing._internal.common_utils import skipIfWindows
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, skipIfWindows
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 
 
@@ -34,7 +35,9 @@ def filesize(filename: Path):
 
 
 @config.patch("trace.enabled", True)
-class TestDebugTrace(test_torchinductor.TestCase):
+class TestDebugTraceGeneric(test_torchinductor.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_debug_trace(self):
         @torch.compile
         def fn(a, b):
@@ -268,8 +271,13 @@ op2.node.kernel = extern_kernels.mm""",
             example_inputs,
         )
 
-    @unittest.skipIf(not HAS_GPU, "requires GPU")
-    def test_debug_multi_tempalte(self):
+
+class TestDebugTraceAccelerator(test_torchinductor.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @config.patch("trace.enabled", True)
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    def test_debug_multi_tempalte(self, device):
         class ToyModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -287,13 +295,15 @@ op2.node.kernel = extern_kernels.mm""",
             ),
             fresh_cache(),
         ):
-            m = ToyModel().to(device=GPU_TYPE)
+            m = ToyModel().to(device=device)
             m = torch.compile(m, mode="max-autotune")
-            input_tensor = torch.randn(100).to(device=GPU_TYPE)
+            input_tensor = torch.randn(100).to(device=device)
             m(input_tensor)
 
 
 class TestLogAutotuningResultsCallSite(test_torchinductor.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_log_results_forwards_required_args_to_debug_formatter(self):
         # Regression: AlgorithmSelectorCache.log_results omitted
         # prescreening_elapse, which raised TypeError under
@@ -328,6 +338,14 @@ class TestLogAutotuningResultsCallSite(test_torchinductor.TestCase):
         # exactly like the production failure under LOG_AUTOTUNE_RESULTS=1.
         sig = inspect.signature(DebugFormatter.log_autotuning_results)
         sig.bind(_Recorder(), *captured["args"], **captured["kwargs"])
+
+
+instantiate_device_type_tests(
+    TestDebugTraceAccelerator,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
