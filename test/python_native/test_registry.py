@@ -410,7 +410,7 @@ class TestRegistryRuntime(TestCase):
         self._saved = {
             "graphs": dict(self.registry._graphs),
             "libs": dict(self.registry._libs),
-            "aten_override_libs": dict(self.registry._aten_override_libs),
+            "override_libs": dict(self.registry._override_libs),
             "def_libs": dict(self.registry._def_libs),
             "defined_native_ops": set(self.registry._defined_native_ops),
             "dsl_map": {
@@ -433,15 +433,15 @@ class TestRegistryRuntime(TestCase):
     def tearDown(self):
         # Destroy only what this test installed. On a DSL-equipped machine
         # `import torch` leaves production overrides live in
-        # `_aten_override_libs`; destroying those would strip the dispatcher
-        # of kernels the registry still lists as installed, for the rest of
-        # the process.
-        saved_override_libs = self._saved["aten_override_libs"]
-        for key, lib in list(self.registry._aten_override_libs.items()):
+        # `_override_libs`; destroying those would strip the dispatcher of
+        # kernels the registry still lists as installed, for the rest of the
+        # process.
+        saved_override_libs = self._saved["override_libs"]
+        for key, lib in list(self.registry._override_libs.items()):
             if key not in saved_override_libs:
                 lib._destroy()
-        self.registry._aten_override_libs.clear()
-        self.registry._aten_override_libs.update(saved_override_libs)
+        self.registry._override_libs.clear()
+        self.registry._override_libs.update(saved_override_libs)
 
         # _native namespace DEF libraries and the ops defined on them persist
         # for the lifetime of the process (torch.library has no "undefine"),
@@ -845,19 +845,17 @@ class TestRegistryRuntime(TestCase):
 
         # Override active.
         self.assertTrue(torch.equal(mul(a, b), torch.tensor([7.0, 7.0])))
-        self.assertIn(("aten", "mul.Tensor", "CPU"), self.registry._aten_override_libs)
+        self.assertIn(("aten", "mul.Tensor", "CPU"), self.registry._override_libs)
 
         # Deregister → native kernel returns.
         self.registry.deregister_op_overrides(disable_dsl_names="test_dsl")
         self.assertTrue(torch.equal(mul(a, b), torch.tensor([8.0, 15.0])))
-        self.assertNotIn(
-            ("aten", "mul.Tensor", "CPU"), self.registry._aten_override_libs
-        )
+        self.assertNotIn(("aten", "mul.Tensor", "CPU"), self.registry._override_libs)
 
         # Reenable → override fires again.
         self.registry.reenable_op_overrides(enable_dsl_names="test_dsl")
         self.assertTrue(torch.equal(mul(a, b), torch.tensor([7.0, 7.0])))
-        self.assertIn(("aten", "mul.Tensor", "CPU"), self.registry._aten_override_libs)
+        self.assertIn(("aten", "mul.Tensor", "CPU"), self.registry._override_libs)
 
     def test_empty_graph_tears_down_router(self):
         """An empty graph passed to _cleanup_and_reregister_graph must still
@@ -883,7 +881,7 @@ class TestRegistryRuntime(TestCase):
         b = torch.tensor([4.0, 5.0])
         mul = torch.ops.aten.mul.Tensor
         self.assertTrue(torch.equal(mul(a, b), torch.tensor([99.0, 99.0])))
-        self.assertIn(("aten", "mul.Tensor", "CPU"), self.registry._aten_override_libs)
+        self.assertIn(("aten", "mul.Tensor", "CPU"), self.registry._override_libs)
 
         # Simulate a filter-out-everything transformation.
         self.registry._graphs[("aten", "mul.Tensor", "CPU")] = []
@@ -894,9 +892,7 @@ class TestRegistryRuntime(TestCase):
             self.registry._graphs[("aten", "mul.Tensor", "CPU")],
         )
 
-        self.assertNotIn(
-            ("aten", "mul.Tensor", "CPU"), self.registry._aten_override_libs
-        )
+        self.assertNotIn(("aten", "mul.Tensor", "CPU"), self.registry._override_libs)
         self.assertTrue(torch.equal(mul(a, b), torch.tensor([8.0, 15.0])))
 
     def test_fake_tensor_shape_inference(self):
@@ -982,7 +978,7 @@ class TestRegistryNonAtenNamespace(TestCase):
         self.registry = registry_module
 
         self._saved_graphs = dict(self.registry._graphs)
-        self._saved_override_libs = dict(self.registry._aten_override_libs)
+        self._saved_override_libs = dict(self.registry._override_libs)
         self._saved_maps = {
             name: {k: list(v) for k, v in getattr(self.registry, name).items()}
             for name in (
@@ -1032,11 +1028,11 @@ class TestRegistryNonAtenNamespace(TestCase):
     def tearDown(self):
         # Only what this test installed; production overrides in the snapshot
         # stay live (see TestRegistryRuntime.tearDown).
-        for key, lib in list(self.registry._aten_override_libs.items()):
+        for key, lib in list(self.registry._override_libs.items()):
             if key not in self._saved_override_libs:
                 lib._destroy()
-        self.registry._aten_override_libs.clear()
-        self.registry._aten_override_libs.update(self._saved_override_libs)
+        self.registry._override_libs.clear()
+        self.registry._override_libs.update(self._saved_override_libs)
 
         self._stack.close()
 
@@ -1096,7 +1092,7 @@ class TestRegistryNonAtenNamespace(TestCase):
 
         self.registry._graphs[(self.NS, "twice", "CPU")] = []
         self._install(self.NS)
-        self.assertNotIn((self.NS, "twice", "CPU"), self.registry._aten_override_libs)
+        self.assertNotIn((self.NS, "twice", "CPU"), self.registry._override_libs)
         self.assertEqual(self.op(torch.tensor([1.0])), torch.tensor([2.0]))
 
     def _register_both(self):
@@ -1163,7 +1159,7 @@ class TestRegistryNonAtenNamespace(TestCase):
         ships by the drift-guard test that accompanies each such override.
         """
         self._register(lambda *a, **k: True, lambda x: x, lib_symbol=self.MISSING_NS)
-        with self.assertRaisesRegex(AttributeError, "twice op not found"):
+        with self.assertRaisesRegex(AttributeError, "not found; is the namespace"):
             self._install(self.MISSING_NS)
 
 

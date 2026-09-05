@@ -45,6 +45,9 @@ class _OverrideNode:
     active: bool = True
 
 
+# (op_symbol, dispatch_key, graph) -> graph. The namespace is deliberately not
+# an argument: adding one would break every existing user ordering function.
+# Read `node.lib_symbol` when a graph has to be distinguished by namespace.
 UserOrderingFn = Callable[[str, str, list[_OverrideNode]], list[_OverrideNode]]
 
 
@@ -142,9 +145,9 @@ _filter_state: _FilterState = _FilterState()
 # Store torch.library.Library instances
 _libs: dict[tuple[str, str], torch.library.Library] = {}
 
-# Decomposition-style routers for the compile / export path, keyed by aten
-# OpOverload. Built in `_register_overrides_from_graph` alongside the eager
-# `Library.impl` routers.
+# Decomposition-style routers for the compile / export path, keyed by the
+# overridden op's OpOverload. Built in `_register_overrides_from_graph`
+# alongside the eager `Library.impl` routers.
 #
 # This dict is *not* written into any global compile/export decomp table (in
 # particular, not into torch._inductor.decomposition.decompositions). Users
@@ -206,9 +209,9 @@ _op_symbol_to_lib_graph: _MappingType = {}
 _node_id_counter: int = 0
 
 # Dispatch keys where installing an override would break the registry's
-# assumptions. The eager router is wired at a backend key so aten's
-# higher-priority Autograd/Autocast kernels handle those layers, and the
-# fake kernel for `_native::<id>` redispatches to the aten op's meta -- if
+# assumptions. The eager router is wired at a backend key so the overridden
+# op's higher-priority Autograd/Autocast kernels handle those layers, and the
+# fake kernel for `_native::<id>` redispatches to that op's meta -- if
 # the override lived at Meta or CompositeImplicitAutograd, that
 # redispatch would loop back into the router.
 _DISALLOWED_DISPATCH_KEYS: frozenset[str] = frozenset(
@@ -293,7 +296,7 @@ _defined_native_ops: set[str] = set()
 # just that one override without affecting other ops at the same dispatch
 # key. Torch's Library has no per-kernel removal API -- `_destroy` on the
 # library is the only teardown mechanism.
-_aten_override_libs: dict[tuple[str, str, str], torch.library.Library] = {}
+_override_libs: dict[tuple[str, str, str], torch.library.Library] = {}
 
 
 def _get_def_library(namespace: str) -> torch.library.Library:
@@ -317,37 +320,37 @@ def _get_or_create_library(dispatch_key: str) -> torch.library.Library:
     return _libs[key]
 
 
-def _install_aten_override(
+def _install_override(
     lib_symbol: str, op_symbol: str, dispatch_key: str, kernel: Callable
 ) -> None:
     """
     Install (or replace) a kernel at (lib_symbol, op_symbol, dispatch_key).
 
     Creates a fresh Library per (lib, op, key) so we can tear down just this
-    one override via `_destroy_aten_override` without affecting any other
+    one override via `_destroy_override` without affecting any other
     override at the same dispatch key.
     """
     key = (lib_symbol, op_symbol, dispatch_key)
     # Destroy any existing library so its kernel is fully removed before
     # we install the new one. `_destroy` calls into the dispatcher to
     # unregister all kernels on the library.
-    existing = _aten_override_libs.pop(key, None)
+    existing = _override_libs.pop(key, None)
     if existing is not None:
         existing._destroy()
 
     lib = torch.library.Library(lib_symbol, "IMPL", dispatch_key)
     lib.impl(op_symbol, kernel, dispatch_key, with_keyset=True)
-    _aten_override_libs[key] = lib
+    _override_libs[key] = lib
 
 
-def _destroy_aten_override(lib_symbol: str, op_symbol: str, dispatch_key: str) -> None:
+def _destroy_override(lib_symbol: str, op_symbol: str, dispatch_key: str) -> None:
     """Tear down the override at (lib_symbol, op_symbol, dispatch_key), if any."""
-    lib = _aten_override_libs.pop((lib_symbol, op_symbol, dispatch_key), None)
+    lib = _override_libs.pop((lib_symbol, op_symbol, dispatch_key), None)
     if lib is not None:
         lib._destroy()
 
 
-def _resolve_aten_overload(
+def _resolve_overload(
     lib_symbol: str, op_symbol: str
 ) -> "torch._ops.OpOverload | None":
     """
@@ -367,16 +370,19 @@ def _resolve_aten_overload(
         return None
 
 
-def _aten_schema_tail(lib_symbol: str, op_symbol: str) -> str:
+def _schema_tail(lib_symbol: str, op_symbol: str) -> str:
     """Return the schema of <lib_symbol>::<op_symbol> with the
     `<lib_symbol>::<name>` prefix stripped.
 
     Accepts bare names ("bmm" → aten.bmm.default) and overload-qualified
     names ("add_.Tensor" → aten.add_.Tensor).
     """
-    overload = _resolve_aten_overload(lib_symbol, op_symbol)
+    overload = _resolve_overload(lib_symbol, op_symbol)
     if overload is None:
-        raise AttributeError(f"{lib_symbol}::{op_symbol} op not found")
+        raise AttributeError(
+            f"{lib_symbol}::{op_symbol} not found; is the namespace correct and "
+            "the module that defines the op imported?"
+        )
     s = str(overload._schema)
     # "aten::bmm(Tensor self, Tensor mat2) -> Tensor" -> "(Tensor self, Tensor mat2) -> Tensor"
     _, rest = s.split("::", 1)
@@ -387,28 +393,26 @@ def _aten_schema_tail(lib_symbol: str, op_symbol: str) -> str:
 def _define_native_op_once(name: str, lib_symbol: str, op_symbol: str) -> None:
     # Invariant: callers must only install the eager router at a real backend
     # dispatch key (CPU, CUDA, XPU, ...). The fake kernel below redispatches
-    # to the aten op, and if the router were installed at Meta /
+    # to the overridden op, and if the router were installed at Meta /
     # CompositeImplicitAutograd that redispatch would re-enter the router.
     # `register_op_override` enforces this via `_DISALLOWED_DISPATCH_KEYS`.
     if name in _defined_native_ops:
         return
-    _get_def_library("_native").define(
-        f"{name}{_aten_schema_tail(lib_symbol, op_symbol)}"
-    )
+    _get_def_library("_native").define(f"{name}{_schema_tail(lib_symbol, op_symbol)}")
     # Fake/meta kernel: required so export / dynamo / AOTAutograd can shape-infer
-    # through the opaque _native op. Reusing the aten op's meta is safe because
-    # the schema (and therefore shape rules) is cloned from it.
-    aten_overload = _resolve_aten_overload(lib_symbol, op_symbol)
+    # through the opaque _native op. Reusing the overridden op's meta is safe
+    # because the schema (and therefore shape rules) is cloned from it.
+    orig_overload = _resolve_overload(lib_symbol, op_symbol)
     torch.library.register_fake(f"_native::{name}")(
-        lambda *args, _aten_overload=aten_overload, **kwargs: _aten_overload(
+        lambda *args, _orig_overload=orig_overload, **kwargs: _orig_overload(
             *args, **kwargs
         )
     )
     # No autograd or autocast kernels are registered on _native::<id>. Because
-    # the router is registered at the backend dispatch key (e.g. CUDA), aten's
-    # own higher-priority kernels on aten::<op> handle both:
-    #   - Autograd: AutogradCUDA sees aten::<op> in the autograd graph and
-    #     uses aten's built-in derivative formula.
+    # the router is registered at the backend dispatch key (e.g. CUDA), the
+    # overridden op's own higher-priority kernels handle both:
+    #   - Autograd: AutogradCUDA sees <lib>::<op> in the autograd graph and
+    #     uses its built-in derivative formula.
     #   - Autocast: AutocastCUDA casts inputs to the autocast dtype before
     #     redispatching down to our CUDA-level router.
     _defined_native_ops.add(name)
@@ -684,7 +688,8 @@ def register_op_override(
         raise ValueError(
             f"dispatch_key={dispatch_key!r} is not supported. Overrides must be "
             f"installed at a backend key (e.g. CPU, CUDA, XPU); the router's fake "
-            f"kernel redispatches to aten and would recurse otherwise."
+            f"kernel redispatches to the overridden op and would recurse "
+            f"otherwise."
         )
 
     if cond is None:
@@ -949,13 +954,13 @@ def _register_overrides_from_graph(
         else:
             node.active = False
 
-    overload = _resolve_aten_overload(lib_symbol, op_symbol)
+    overload = _resolve_overload(lib_symbol, op_symbol)
 
-    # Tear down any existing aten override so either (a) the op cleanly
-    # reverts to native aten (empty cond_impl), or (b) the subsequent
-    # `get_kernel` call returns the native kernel rather than a stale
-    # previously-installed router.
-    _destroy_aten_override(lib_symbol, op_symbol, dispatch_key)
+    # Tear down any existing override so either (a) the op cleanly reverts to
+    # its original kernel (empty cond_impl), or (b) the subsequent `get_kernel`
+    # call returns that kernel rather than a stale previously-installed
+    # router.
+    _destroy_override(lib_symbol, op_symbol, dispatch_key)
 
     # If no active conds remain for this (op, key), leave the native op
     # behavior intact and drop any decomp table entry.
@@ -970,6 +975,10 @@ def _register_overrides_from_graph(
     # our just-registered router and avoiding the recursion that would
     # otherwise appear in aten's backward formulas (e.g. bmm's backward
     # calls bmm, which would route back to us).
+    #
+    # An op missing from the dispatcher has already failed by this point:
+    # `_register_node_impl` above needs its schema. That is what a namespace
+    # whose defining module was never imported trips on.
     fallback_kernel = torch.library.get_kernel(
         f"{lib_symbol}::{op_symbol}", dispatch_key
     )
@@ -1001,44 +1010,47 @@ def _register_overrides_from_graph(
         return _NO_MATCH
 
     def eager_router(
-        keyset, *args, _fallback=fallback_kernel, _aten_overload=overload, **kwargs
+        keyset, *args, _fallback=fallback_kernel, _orig_overload=overload, **kwargs
     ):
-        """Boxed eager kernel: divert to aten while Dynamo traces, else dispatch.
+        """Boxed eager kernel: divert to the original op while Dynamo traces,
+        else dispatch.
 
-        The aten shortcut is only safe while Dynamo is actively tracing this
+        The shortcut is only safe while Dynamo is actively tracing this
         Python router. The broader compile-session flag can be true when this
-        router executes eagerly; redispatching to aten there would re-enter us.
+        router executes eagerly; redispatching to the original op there would
+        re-enter us.
 
         `is_dynamo_compiling()` cannot tell those apart on its own: it is not a
         runtime flag but `return False`, which Dynamo folds to a True constant
         at trace time (tracing_state_functions in _dynamo/variables/torch.py).
         A frame carrying that folded constant can still execute eagerly -- then
-        `_aten_overload(...)` re-enters the dispatcher from the top, lands back
+        `_orig_overload(...)` re-enters the dispatcher from the top, lands back
         in this router, and recurses until RecursionError. Reproduced by OpInfo
         test_out_warning_scatter_add under PYTORCH_TEST_WITH_INDUCTOR once a
         native override is installed for the op.
 
         `_router_active` breaks that cycle: the outer call takes the shortcut
-        (so real tracing still records the plain aten op and avoids the graph
-        breaks of #186354), and a re-entrant call falls through to normal eager
-        dispatch below. Deliberately narrow -- the trace-time behavior the flag
-        exists for is unchanged, since under tracing the overload call does not
-        come back here.
+        (so real tracing still records the plain original op and avoids the
+        graph breaks of #186354), and a re-entrant call falls through to normal
+        eager dispatch below. Deliberately narrow -- the trace-time behavior the
+        flag exists for is unchanged, since under tracing the overload call does
+        not come back here.
 
         COW state is guarded by Dynamo's _is_cow_tensor handler but is not
         modeled in the compiled graph. If a COW input reaches this router, keep
         the existing eager path so COW-preserving fallback semantics are
-        maintained instead of compiling through aten and materializing it.
+        maintained instead of compiling through the original op and
+        materializing it.
         """
         if (
             torch.compiler.is_dynamo_compiling()
-            and _aten_overload is not None
+            and _orig_overload is not None
             and not getattr(_router_active, "on", False)
             and not _has_cow_tensor(*args, **kwargs)
         ):
             _router_active.on = True
             try:
-                return _aten_overload(*args, **kwargs)
+                return _orig_overload(*args, **kwargs)
             finally:
                 _router_active.on = False
 
@@ -1054,7 +1066,7 @@ def _register_overrides_from_graph(
         return result
 
     # Eager path: install a fresh override for this (lib, op, key).
-    _install_aten_override(lib_symbol, op_symbol, dispatch_key, eager_router)
+    _install_override(lib_symbol, op_symbol, dispatch_key, eager_router)
 
     # Compile / export path: record the router in our own decomp table.
     # Callers opt in via `native_decomp_table()` -- we deliberately do NOT
