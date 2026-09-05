@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     xfailIf,
     xfailIfS390X,
 )
+from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -154,6 +155,33 @@ class LstmModule(torch.nn.Module):
 @instantiate_parametrized_tests
 class CPUReproTests(TestCase):
     common = check_model
+
+    def test_generalized_scatter_data_dependent_index_copy(self):
+        # CPU regression for #195285: data-dependent index_copy after slice mutation.
+        def composed(field, delta, indices, gain):
+            field[1:-1].add_(delta)
+            values = torch.index_select(field, 0, indices) * gain
+            field.index_copy_(0, indices, values)
+
+        field = torch.randn(512)
+        delta = torch.randn(510)
+        indices = torch.arange(0, 64, 2, dtype=torch.int64)
+        gain = torch.randn(indices.shape[0])
+
+        expected = field.clone()
+        composed(expected, delta, indices, gain)
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        compiled = torch.compile(composed, fullgraph=True, backend="inductor")
+        with fresh_cache(), ctx():
+            actual = field.clone()
+            compiled(actual, delta, indices, gain)
+        post_grad_graphs = log_stream.getvalue()
+
+        self.assertEqual(actual, expected)
+        self.assertNotIn("aten.slice_scatter.default", post_grad_graphs)
 
     @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):

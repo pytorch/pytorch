@@ -524,6 +524,79 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
         self.assertEqual(result, expected)
 
+    def test_generalized_scatter_through_index_put_copy_back(self):
+        # Data-dependent indexed values from the updated field (#195285).
+        def composed(field, delta, indices, gain):
+            field[1:-1].add_(delta)
+            values = torch.index_select(field, 0, indices) * gain
+            field.index_put_((indices,), values)
+
+        field = torch.randn(512, device=device)
+        delta = torch.randn(510, device=device)
+        indices = torch.arange(0, 64, 2, device=device, dtype=torch.int64)
+        gain = torch.randn(indices.shape[0], device=device)
+
+        expected = field.clone()
+        composed(expected, delta, indices, gain)
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        compiled = torch.compile(composed, fullgraph=True, backend="inductor")
+        with ctx():
+            actual = field.clone()
+            compiled(actual, delta, indices, gain)
+        post_grad_graphs = "\n".join(
+            log_stream.getvalue().strip().split("\n")[3:]
+        ).strip()
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(post_grad_graphs.count("aten.clone"), 0)
+        self.assertNotIn("aten.slice_scatter.default", post_grad_graphs)
+
+    def test_should_reinplace_scatter_indexed_update_chain(self):
+        from torch._inductor.fx_passes.reinplace import (
+            ViewOp,
+            _generalized_scatter,
+            should_reinplace_scatter,
+        )
+
+        def build_graph(*, values_from_scatter: bool, copy_dst_is_inp: bool):
+            g = torch.fx.Graph()
+            inp = g.placeholder("inp")
+            other = g.placeholder("other")
+            src = g.placeholder("src")
+            indices = g.placeholder("indices")
+            values = g.placeholder("values")
+            view_ops = [ViewOp(target=aten.slice.Tensor, args=(0, 1, -1), kwargs={})]
+            scatter = g.call_function(_generalized_scatter, (inp, src, view_ops))
+            if values_from_scatter:
+                values = g.call_function(aten.index.Tensor, (scatter, [indices]))
+            put = g.call_function(
+                aten.index_put.default, (scatter, [indices], values, False)
+            )
+            copy_dst = inp if copy_dst_is_inp else other
+            g.call_function(aten.copy_.default, (copy_dst, put))
+            g.output(copy_dst)
+            return scatter
+
+        self.assertTrue(
+            should_reinplace_scatter(
+                build_graph(values_from_scatter=False, copy_dst_is_inp=True)
+            )
+        )
+        # Extra reader of the scatter result (data-dependent values) is allowed.
+        self.assertTrue(
+            should_reinplace_scatter(
+                build_graph(values_from_scatter=True, copy_dst_is_inp=True)
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(values_from_scatter=False, copy_dst_is_inp=False)
+            )
+        )
+
     @parametrize(
         "factory_op",
         [
