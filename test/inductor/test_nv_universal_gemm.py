@@ -6,6 +6,8 @@ import unittest
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
+import sympy
+
 import torch
 from torch._higher_order_ops import flex_gemm
 from torch._inductor import config
@@ -25,6 +27,7 @@ from torch._inductor.utils import (
     ensure_nvmatmul_heuristics_available,
     run_and_get_code,
 )
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     dtype_name,
     instantiate_parametrized_tests,
@@ -257,6 +260,63 @@ class TestNVUniversalGemm(TestCase):
             "get_efc_kernel_with_epilogue deadlocked (reentrant _cache_lock)",
         )
         self.assertIsNone(result[0])
+
+    def test_efc_epilogue_cache_separates_reduction_specializations(self):
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+
+        class FakeOperator:
+            def __init__(self, metadata):
+                self.metadata = metadata
+
+        base_metadata = mock.Mock(
+            operands=object(),
+            design=object(),
+            operator_name="test_efc",
+            operator_class=FakeOperator,
+            supported_targets=object(),
+        )
+        base_kernel = FakeOperator(base_metadata)
+        epilogue_args = mock.Mock(tensors={})
+        sum_specialization = (("reduction_type", "sum"),)
+        max_specialization = (("reduction_type", "max"),)
+
+        kernel_cache.clear_cache()
+        try:
+            with (
+                mock.patch.object(
+                    kernel_cache, "_meta_epilogue_metadata", return_value=object()
+                ),
+                mock.patch(
+                    "cutlass.operators.metadata.OperatorMetadata",
+                    side_effect=lambda **kwargs: mock.Mock(**kwargs),
+                ),
+            ):
+                first = kernel_cache.get_efc_kernel_with_epilogue(
+                    "test_efc",
+                    epilogue_args,
+                    epilogue_source="same_epilogue",
+                    base_kernel=base_kernel,
+                    specialization=sum_specialization,
+                )
+                same = kernel_cache.get_efc_kernel_with_epilogue(
+                    "test_efc",
+                    epilogue_args,
+                    epilogue_source="same_epilogue",
+                    base_kernel=base_kernel,
+                    specialization=sum_specialization,
+                )
+                different = kernel_cache.get_efc_kernel_with_epilogue(
+                    "test_efc",
+                    epilogue_args,
+                    epilogue_source="same_epilogue",
+                    base_kernel=base_kernel,
+                    specialization=max_specialization,
+                )
+        finally:
+            kernel_cache.clear_cache()
+
+        self.assertIs(first, same)
+        self.assertIsNot(first, different)
 
     def test_unaligned_base_pointer_rejected(self):
         """Test that matmul with unaligned base pointer is rejected.
@@ -492,6 +552,7 @@ class TestNVUniversalGemm(TestCase):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             _create_gemm_arguments,
         )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
 
         m, n, k = 128, 128, 512
         packed_k = k // 2
@@ -523,9 +584,11 @@ class TestNVUniversalGemm(TestCase):
             swizzle_mode_a=swizzle,
             scale_mode_b=mode,
             swizzle_mode_b=swizzle,
-            local_reduce_out=reduce_out,
-            local_reduce_group=group,
-            local_reduce_axis=1,
+            local_reduce=GemmReductionArguments(
+                output=reduce_out,
+                group=group,
+                axis=1,
+            ),
         )
         kernel = next(
             candidate
@@ -773,6 +836,91 @@ class TestNVUniversalGemm(TestCase):
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
 
+    def test_grouped_reduction_affine_index_rejects_offset(self):
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_lowering import (
+            _matches_affine_index,
+        )
+
+        i, j, r = sympy.symbols("i j r", integer=True)
+        strides = (32, 4, 1)
+
+        def known_equals(left, right):
+            return sympy.simplify(left - right) == 0
+
+        self.assertTrue(
+            _matches_affine_index(32 * i + 4 * j + r, (i, j, r), strides, known_equals)
+        )
+        self.assertFalse(
+            _matches_affine_index(
+                32 * i + 4 * j + r + 1, (i, j, r), strides, known_equals
+            )
+        )
+        self.assertTrue(
+            _matches_affine_index(32 * i + 4 * j + r, (), strides, known_equals)
+        )
+        self.assertFalse(
+            _matches_affine_index(32 * i + 4 * j + r + 1, (), strides, known_equals)
+        )
+
+    def test_reduction_source_rejects_different_load_indices(self):
+        from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+        )
+
+        index = sympy.Symbol("index", integer=True)
+        source = Expr(
+            "mul",
+            (
+                Expr("load", ("gemm", index, None)),
+                Expr("load", ("gemm", index + 1, None)),
+            ),
+        )
+        with self.assertRaisesRegex(NotImplementedError, "one logical element"):
+            LoopIRCuteDSLCodegen.source_from_expression("gemm", source, "source")
+
+    def test_output_scale_rejects_value_changing_cast(self):
+        from torch._inductor.kernel.loop_ir_cutedsl_codegen import LoopIRCuteDSLCodegen
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRExpression as Expr,
+        )
+
+        scale = MagicMock()
+        scale.get_dtype.return_value = torch.float32
+        scale.get_size.return_value = (1,)
+        graph = MagicMock(
+            name_to_buffer={},
+            graph_inputs={"scale": scale},
+        )
+        graph.sizevars.statically_known_equals.side_effect = lambda left, right: (
+            left == right
+        )
+        codegen = LoopIRCuteDSLCodegen("gemm", OrderedSet(("gemm",)))
+        accumulator = Expr("load", ("gemm", 0, None))
+        scale_load = Expr("load", ("scale", 0, None))
+        with V.set_graph_handler(graph):
+            self.assertEqual(
+                codegen._output_scale_name(Expr("mul", (accumulator, scale_load))),
+                "scale",
+            )
+            self.assertEqual(
+                codegen._output_scale_name(
+                    Expr(
+                        "mul",
+                        (accumulator, Expr("to_dtype", (scale_load, torch.float32))),
+                    )
+                ),
+                "scale",
+            )
+            self.assertIsNone(
+                codegen._output_scale_name(
+                    Expr(
+                        "mul",
+                        (accumulator, Expr("to_dtype", (scale_load, torch.int32))),
+                    )
+                )
+            )
+
     def test_grouped_reduction_conversion_contract(self):
         from torch._inductor.kernel.loop_ir_epilogue_lowering import (
             GemmEpilogueIRExpression as Expr,
@@ -812,7 +960,68 @@ class TestNVUniversalGemmHeuristics(TestCase):
 
         self.assertEqual(
             analysis.grouped_reduction("out", "gemm", 4, 1, torch.float32),
-            GemmReductionConfig("out", 4, 1, "sum", "identity"),
+            GemmReductionConfig(
+                output_name="out",
+                group=4,
+                axis=1,
+                reduction_type="sum",
+                source_type="identity",
+            ),
+        )
+
+    @unittest.skipUnless(
+        ensure_nv_universal_gemm_available(), "Requires cutlass.operators"
+    )
+    def test_dense_reduction_uses_generated_callback_contract(self):
+        import dataclasses
+
+        import cutlass.cute as cute
+
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
+            BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES,
+            DENSE_GEMM_REDUCTION_CAPABILITIES,
+        )
+        from torch._inductor.kernel.gemm_epilogue import GemmReductionArguments
+        from torch._inductor.kernel.gemm_epilogue_codegen import (
+            GemmReductionCompileConfig,
+        )
+
+        args = GemmReductionArguments(
+            group=8,
+            axis=1,
+            reduction_type="sum",
+            source_type="square",
+            reduction_algorithm="variance",
+            feeds_main=True,
+            finalizer_fn=("def finalize(value, group):\n    return value / group"),
+        )
+        config = GemmReductionCompileConfig.from_args(args, cute)
+
+        self.assertEqual(
+            config.constexprs()[:5],
+            (8, 1, "sum", "variance", True),
+        )
+        self.assertNotIn("square", config.constexprs())
+        self.assertEqual(config.reduction.source(3.0), 9.0)
+        self.assertEqual(config.reduction.finalize(16.0, 8), 2.0)
+        self.assertTrue(
+            DENSE_GEMM_REDUCTION_CAPABILITIES.supports("sum", "square", "variance")
+        )
+        self.assertFalse(
+            DENSE_GEMM_REDUCTION_CAPABILITIES.supports("variance_affine:1:0", "square")
+        )
+        secondary = dataclasses.replace(
+            args,
+            feeds_main=False,
+            secondary_feed_output="secondary",
+            secondary_consumer_fn=(
+                "def consume(accumulator, primary, secondary):\n"
+                "    return accumulator > 0.0"
+            ),
+        )
+        self.assertTrue(DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(secondary))
+        self.assertFalse(
+            BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES.supports_contract(secondary)
         )
 
     def test_grouped_reduction_rejects_ambiguous_composite(self):
@@ -1433,14 +1642,14 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self.assertIn("'local_reduce_out'", code)
+        self.assertIn("output=", code)
 
         if case == (1, "sum", 32):
             if not has_triton_reduction_ordering():
                 self.skipTest("requires INNER_TREE Triton")
             with config.patch({"numerics": "strict"}):
                 _, strict_code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
-            self.assertNotIn("'local_reduce_out'", strict_code)
+            self.assertNotIn("'local_reduce': GemmReductionArguments", strict_code)
             self.assertIn("ReductionOrdering.INNER_TREE", strict_code)
 
     def test_scaled_mm_grouped_reduce_source_fusion(self):
@@ -1476,8 +1685,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self.assertIn("'local_reduce_out'", code)
-        self.assertIn("'local_reduce_source': 'square'", code)
+        self.assertIn("output=", code)
+        self.assertIn("source_type='square'", code)
 
     @config.patch(emulate_precision_casts=True)
     def test_scaled_mm_grouped_reduce_rejects_intermediate_fp16(self):
@@ -1511,7 +1720,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertNotIn("'local_reduce_out'", code)
+        self.assertNotIn("'local_reduce': GemmReductionArguments", code)
 
     def test_scaled_mm_grouped_reduce_feeds_main(self):
         m, n, k, group = 128, 128, 512, 4
@@ -1545,7 +1754,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self.assertIn("'local_reduce_feeds_main': True", code)
+        self.assertIn("feeds_main=True", code)
 
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one

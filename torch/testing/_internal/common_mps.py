@@ -74,7 +74,6 @@ if torch.backends.mps.is_available():
             # Failures due to lack of op implementation on MPS backend
             "linalg.eig": None,
             "linalg.eigvals": None,
-            "frexp": None,
             "hash_tensor": None,
             "heaviside": None,
             # "kthvalue": None,

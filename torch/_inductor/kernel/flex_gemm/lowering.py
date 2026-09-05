@@ -7,7 +7,6 @@ lowering and routes QUACK requests through shared analysis and one EpiMod choice
 
 from __future__ import annotations
 
-import importlib.machinery
 import importlib.util
 from typing import Any, TYPE_CHECKING
 
@@ -87,16 +86,8 @@ class QuackScaledMmUnsupported(NotImplementedError):
 
 
 def has_flex_gemm_quack() -> bool:
-    """Whether the installed QuACK package contains the FlexGEMM EpiOps."""
-    spec = importlib.util.find_spec("quack")
-    return (
-        spec is not None
-        and spec.submodule_search_locations is not None
-        and importlib.machinery.PathFinder.find_spec(
-            "quack.grouped_reduce", spec.submodule_search_locations
-        )
-        is not None
-    )
+    """Whether the vendored QuACK backend can import its CuTeDSL dependency."""
+    return importlib.util.find_spec("cutlass") is not None
 
 
 def scaled_mm_node_tuple(value: Any, name: str) -> tuple[torch.fx.Node, ...]:
@@ -582,9 +573,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         gemm_op, outputs.aux_outputs, output_size
     )
     if not has_flex_gemm_quack():
-        raise NotImplementedError(
-            "FlexGEMM QUACK backend requires the patched external quack package"
-        )
+        raise NotImplementedError("FlexGEMM QUACK backend requires CuTeDSL")
     packed_uint8_main = main_transform is not None and output_meta.dtype is torch.uint8
     if (
         not output_meta.dtype.is_floating_point
