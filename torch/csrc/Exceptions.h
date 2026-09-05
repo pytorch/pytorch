@@ -390,17 +390,13 @@ struct PyWarningHandler {
 namespace detail {
 
 // Acquiring the GIL can throw; letting that escape a noexcept context
-// (destructors, refcount callbacks) calls std::terminate. This catches the
-// exception and reports success via the bool conversion -- check it before
-// touching any GIL-dependent Python API.
+// (destructors, refcount callbacks) calls std::terminate. Catches it and
+// reports success via the bool conversion -- check before touching any
+// GIL-dependent Python API.
 //
-// Finalization can start at any point, so no single check fully closes the
-// race; checking both ends narrows it to just the acquire call itself.
-// Checked before: skip the attempt outright rather than run acquisition
-// machinery we know is unsafe mid-shutdown. Checked after: finalization may
-// have started during the acquire, so disarm() there too, so our destructor
-// skips PyThreadState_DeleteCurrent (thread-state deletion isn't allowed
-// during shutdown; see gil_scoped_acquire::disarm()'s own comment).
+// Finalization can start at any point, so this checks Py_IsFinalizing both
+// before acquiring (skip outright) and after (disarm(), since thread-state
+// deletion isn't allowed mid-shutdown).
 class SafeGilScopedAcquire {
  public:
   SafeGilScopedAcquire() {
