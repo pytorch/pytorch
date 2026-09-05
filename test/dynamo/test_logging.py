@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     IS_WINDOWS,
     munge_exc,
+    skipIfRocmVersionAtLeast,
     skipIfTorchDynamo,
     skipIfWindows,
 )
@@ -225,13 +226,13 @@ class LoggingTests(LoggingTestCase):
         self.assertIn(
             """\
     - User stack trace:
-    -   File [file_path], line 199, in outmost_fn
+    -   File [file_path], line 200, in outmost_fn
     -     return outer_fn(x, ys, zs)
-    -   File [file_path], line 202, in outer_fn
+    -   File [file_path], line 203, in outer_fn
     -     return fn(x, ys, zs)
-    -   File [file_path], line 205, in fn
+    -   File [file_path], line 206, in fn
     -     return inner(x, ys, zs)
-    -   File [file_path], line 208, in inner
+    -   File [file_path], line 209, in inner
     -     for y, z in zip(ys, zs):""",
             record_str,
         )
@@ -1076,6 +1077,7 @@ Mutating object of type dict (source name: L['mod']._buffers)
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
 
+    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_invalid_artifact_flag_error_msg(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "not_an_existing_log_artifact_should_error"
@@ -1424,6 +1426,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             len([r for r in records if "return a + 1" in r.getMessage()]), 0
         )
 
+    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_logs_out(self):
         import tempfile
 
