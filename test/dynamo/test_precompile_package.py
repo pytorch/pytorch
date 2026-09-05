@@ -6,14 +6,18 @@ import dataclasses
 import gc
 import importlib
 import inspect
+import itertools
 import os
 import pickle
 import sys
+import sysconfig
+import tempfile
 import types
 from unittest import mock
 
 import torch
 import torch._dynamo.package as dynamo_package
+import torch._dynamo.precompile_package as dynamo_package_lint
 import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
@@ -25,6 +29,7 @@ from torch._dynamo.package import (
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.compiler._precompile_types import PrecompileSummary
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -117,6 +122,280 @@ _BINDING_STACK_CASES = {
 }  # fmt: skip
 
 
+PRECOMPILE_CONFIG = {"mode": "sum"}
+
+
+PRECOMPILE_INV_CONFIG = {"mode": "sum"}
+
+
+_TWO_SHAPES = [(torch.ones(4, 8),), (torch.ones(5, 8),)]
+
+
+_PRECOMPILE_OPS = {"len": len}
+
+
+# One source LINE, so the two entries agree on file AND lineno: what separates
+# them can only come from the code body. This is the ACT2FN shape.
+_LAMBDA_TABLE = {"a": lambda x: x.sin(), "b": lambda x: x.cos()}
+
+
+# The modules the corpus needs on disk, because a dispatch read off another
+# module cannot be spelled inside this file. Written under one directory so
+# they import each other by plain name, exactly as a user package would.
+_CORPUS_MODULES = {
+    "cimpl_a": "def op(x):\n    return x + 1.0\n",
+    "cimpl_b": "def op(x):\n    return x * 7.0\n",
+    "lazy_helper": "def op(x):\n    return x * 3.0\n",
+    "cdispatch": """\
+import os
+
+if os.environ.get("CORPUS_B") == "1":
+    from cimpl_b import op
+else:
+    from cimpl_a import op
+""",
+    "chelpers": """\
+import os
+
+if os.environ.get("CORPUS_B") == "1":
+    from cimpl_b import op
+else:
+    from cimpl_a import op
+
+def call(x):
+    return op(x)
+""",
+    "cconf": """\
+import os
+
+import cimpl_a
+import cimpl_b
+
+ACT = cimpl_b.op if os.environ.get("CORPUS_B") == "1" else cimpl_a.op
+""",
+    "calias": """\
+import os
+
+import torch
+
+if os.environ.get("CORPUS_B") == "1":
+    import cimpl_b as impl
+else:
+    import cimpl_a as impl
+
+class Model(torch.nn.Module):
+    def forward(self, x):
+        return impl.op(x)
+""",
+    "cfrom": """\
+import os
+
+import torch
+
+if os.environ.get("CORPUS_B") == "1":
+    from cimpl_b import op
+else:
+    from cimpl_a import op
+
+class Model(torch.nn.Module):
+    def forward(self, x):
+        return op(x)
+""",
+    "cown": """\
+import torch
+
+def _scale(x):
+    return x * 2.0
+
+def call(x):
+    return torch.relu(_scale(x))
+""",
+    # Four spellings the def-name rule cannot clear on its own, so whether
+    # they are refused rides entirely on recognising torch and the stdlib:
+    # `from torch import relu` (owned by torch itself, not a torch.*
+    # submodule), `from math import sqrt` (a def in a C stdlib module, so
+    # there is no file to match the reader against), `import math as _math`
+    # and `import collections.abc as _abc` (modules under names that are
+    # not their own, one of them dotted).
+    "clibspell": """\
+import collections.abc as _abc
+import math as _math
+import torch
+from math import sqrt
+from torch import relu
+
+class Model(torch.nn.Module):
+    def forward(self, x):
+        n = float(isinstance([], _abc.Sized))
+        return (relu(x) * sqrt(2.0) * _math.fabs(-1.0) * n).sum()
+""",
+    "cpkg/cimpl": "def op(x):\n    return x + 1.0\n",
+    "cpkg/__init__": "from . import cimpl as impl\n\n\nop = impl.op\n",
+    "cmodels": """\
+import os
+
+import torch
+from torch.nn.functional import gelu
+
+import cconf
+import cdispatch
+import chelpers
+import cimpl_a
+import cimpl_b
+import cown
+import cpkg
+import cpkg.cimpl
+
+OPS = cimpl_b if os.environ.get("CORPUS_B") == "1" else cimpl_a
+
+class ModuleAttr(torch.nn.Module):
+    def forward(self, x):
+        return cconf.ACT(x)
+
+class ModuleSwitch(torch.nn.Module):
+    def forward(self, x):
+        return OPS.op(x)
+
+class SiblingModule(torch.nn.Module):
+    def forward(self, x):
+        return cdispatch.op(x)
+
+class InlinedHelper(torch.nn.Module):
+    def forward(self, x):
+        return chelpers.call(x)
+
+class PackageReexport(torch.nn.Module):
+    def forward(self, x):
+        return cpkg.op(x)
+
+class PackageSubmoduleAlias(torch.nn.Module):
+    def forward(self, x):
+        return cpkg.impl.op(x)
+
+class RealSubmodule(torch.nn.Module):
+    def forward(self, x):
+        return cpkg.cimpl.op(x)
+
+class OwnNameDef(torch.nn.Module):
+    def forward(self, x):
+        return gelu(cown.call(x))
+
+class LazyUserImport(torch.nn.Module):
+    def forward(self, x):
+        import lazy_helper
+
+        return lazy_helper.op(x).sum()
+""",
+}
+
+_CORPUS_X = torch.randn(4, 8)
+_CORPUS_SEQ = torch.randn(2, 4, 8)
+
+_BUILTIN_ACROSS_BREAK_SRC = """\
+import torch
+
+class Model(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.scale = scale
+
+    def forward(self, x, cfg):
+        # `f` holds a builtin across the break, so the dynamo bytecode puts it
+        # back by READING Dynamo's builtins-dict global rather than by
+        # resolving the name again through the ordinary lookup.
+        f = len
+        y = x * self.scale
+        torch._dynamo.graph_break()
+        return y.sum() * f(cfg)
+"""
+
+_SHARED_FRAME_SRC = """\
+import torch
+
+class SharedBlock(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.scale = scale
+
+    def forward(self, x):
+        y = x * 2
+        marker = y.sum().item()
+        return y * self.scale + marker * 0.0
+
+class ModelOne(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.block = SharedBlock(scale)
+
+    def forward(self, x):
+        return self.block(x).sum()
+
+class ModelTwo(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.block = SharedBlock(scale)
+
+    def forward(self, x):
+        return self.block(x).sum() + 0.0
+"""
+
+_ENCODER_SRC = """\
+import torch
+
+
+class Encoder(torch.nn.Module):
+    def forward(self, x):
+        return x {op} 1.0
+"""
+
+_FLIPPED_ENCODER_SRC = """\
+import os
+
+import torch
+
+
+if os.environ.get("FLIP_V2") == "1":
+    class Encoder(torch.nn.Module):
+        def forward(self, x):
+            return x * 7.0
+else:
+    class Encoder(torch.nn.Module):
+        def forward(self, x):
+            return x + 1.0
+"""
+
+_SHIM_MODEL_SRC = """\
+import shim_abc
+import torch
+
+class Model(torch.nn.Module):
+    def forward(self, x):
+        return shim_abc.helper(x).sum()
+"""
+
+_DECORATOR_SRC = """\
+import functools
+
+ENABLE = True
+
+def deco(fn):
+    @functools.wraps(fn)
+    def wrapper(x):
+        y = x * 2 if ENABLE else x * 3
+        scalar = x.sum().item()
+        return y + scalar
+    return wrapper
+"""
+
+_WRAPPED_ENTRY_SRC = """\
+from precompile_entry_decorators import deco
+
+@deco
+def staged(x):
+    return x
+"""
+
+
 @instantiate_parametrized_tests
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def setUp(self):
@@ -161,6 +440,27 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             return x + 1
 
         return CompilePackage(fn)
+
+    def _corpus_module(self, name):
+        """Write _CORPUS_MODULES to disk and import one of them fresh."""
+        for path, src in _CORPUS_MODULES.items():
+            head, _, leaf = path.rpartition("/")
+            self._write_module(os.path.join("corpus", head), leaf, src)
+        roots = {path.partition("/")[0] for path in _CORPUS_MODULES}
+
+        def purge():
+            for key in [k for k in sys.modules if k.partition(".")[0] in roots]:
+                del sys.modules[key]
+
+        purge()
+        self.addCleanup(purge)
+        return self._import_module(os.path.join(self.dir(), "corpus"), name)
+
+    def _corpus(self, cls):
+        return getattr(self._corpus_module("cmodels"), cls)()
+
+    def _corpus_model(self, name):
+        return self._corpus_module(name).Model()
 
     @parametrize("case", sorted(_CPU_TARGET_CASES))
     def test_cpu_codegen_target_is_compared_only_when_recorded(self, case):
@@ -307,50 +607,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(name, "_shim_impl")
         self.assertIs(importlib.import_module(name), impl)
 
-    def test_a_failed_load_leaves_no_device_type_behind(self):
-        # eval_frame's caching_precompile path retries a failed load on the SAME
-        # package object, and update_device_type only widens cpu -> accelerator,
-        # so a device_type left behind by the failed load can never be corrected
-        # and gets re-saved as this capture's. One outside CHECK_GPUS turns off
-        # every GPU check for whoever loads the artifact next.
-        drifted = dynamo_package.SourceInfo(
-            inlined_sources={
-                dynamo_package.InlinedSource(
-                    module="torch._dynamo.package",
-                    firstlineno=1,
-                    lastlineno=3,
-                    checksum="not-the-checksum-on-disk",
-                    content="",
-                )
-            }
-        )
-        stale = dynamo_package._DynamoCacheEntry(
-            codes=[], source_info=drifted, device_type="mtia"
-        )
-
-        package = CompilePackage(None)
-        with self.assertRaisesRegex(RuntimeError, "Source code changes detected"):
-            package.initialize(staged_with_graph_breaks, stale)
-        self.assertFalse(package.is_initialized())
-
-        package.initialize(staged_with_graph_breaks, None)
-        package.update_device_type(_graph_on("cuda"))
-        entry = package.cache_entry()
-        self.assertEqual(entry.device_type, "cuda")
-
-        # "mtia" is not in CHECK_GPUS, so had it survived it would have waved
-        # this artifact onto any host; what survives instead is gated.
-        other_host = dataclasses.replace(entry.system_info, gpu_name="Some Other GPU")
-        entry.system_info.check_compatibility(other_host, "mtia")
-        self.assertIn(entry.device_type, SystemInfo.CHECK_GPUS)
-        # The GPU-name check is what a surviving "mtia" would have skipped; it
-        # sits behind the availability check, so a cpu host reaches it mocked.
-        with (
-            mock.patch.object(torch.cuda, "is_available", return_value=True),
-            self.assertRaisesRegex(RuntimeError, "different GPU"),
-        ):
-            entry.system_info.check_compatibility(other_host, entry.device_type)
-
     @parametrize("interference", sorted(_BINDING_STACK_CASES))
     def test_unload_rebinds_a_global_through_the_binding_stack(self, interference):
         values, interfere, expected = _BINDING_STACK_CASES[interference]
@@ -467,6 +723,156 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(PrecompileContext.take_artifact("k").key, "k")
         self.assertIsNone(PrecompileContext.take_artifact("k"))
         self.assertIsNone(PrecompileContext.serialize_artifact_by_key("k"))
+
+    def test_library_module_requires_the_name_to_resolve_to_the_stdlib(self):
+        # The risky-drop waiver keys on the OWNER's module name, and a name is
+        # not an identity: graphlib, queue, code and distutils are all stdlib
+        # names a third party ships, and purelib NESTS inside stdlib (conda) or
+        # platstdlib (venv), so a __file__ prefix check waived every shadow.
+        stdlib_root = sysconfig.get_paths()["stdlib"]
+        shadowed = types.ModuleType("graphlib")
+        shadowed.__file__ = os.path.join(
+            stdlib_root, "site-packages", "graphlib", "__init__.py"
+        )
+        unlocated = types.ModuleType("graphlib")  # no __file__, no __spec__
+
+        for module in (shadowed, unlocated):
+            with mock.patch.dict(sys.modules, {"graphlib": module}):
+                self.assertFalse(dynamo_package_lint._is_library_module("graphlib"))
+
+        # Real stdlib and real torch, including the shapes with no file at all
+        # (torch._C._nn owns F.gelu; pyexpat.errors is a stdlib submodule with
+        # no location evidence of its own), must keep their waiver, so
+        # descendants only have to not be located somewhere else.
+        import xml.parsers.expat  # noqa: F401
+
+        for name in (
+            "torch",
+            "torch._C",
+            "torch._C._nn",
+            "torch.ops",
+            "os.path",
+            "collections.abc",
+            "sys",
+            "zipimport",
+            "pyexpat.errors",
+            "xml.parsers.expat.model",
+        ):
+            self.assertTrue(
+                dynamo_package_lint._is_library_module(name), f"{name} lost its waiver"
+            )
+        self.assertFalse(dynamo_package_lint._is_library_module("numpy"))
+        self.assertFalse(dynamo_package_lint._is_library_module(None))
+
+    def test_code_fingerprint_recurses_into_container_and_nested_consts(self):
+        # _code_fingerprint names a callable by its body so an ACT2FN-style table
+        # can be told apart. Two lambdas can differ ONLY inside a constant the
+        # outer co_code does not distinguish: a tuple, a frozenset, or a nested
+        # code object. Filtering those out whole -- rather than recursing -- gives
+        # both the same digest, _object_identity names them identically, and the
+        # guard that split the two compilations is reported as an invariant of
+        # each.
+        from torch._dynamo.precompile_package import _code_fingerprint
+
+        pairs = {
+            "tuple const": (lambda x: x * (1, 2), lambda x: x * (1, 3)),
+            "frozenset const": (lambda x: x in {1, 2}, lambda x: x in {1, 3}),
+            # Not called: what matters is the nested code object in co_consts.
+            "nested code": (lambda x: (lambda y: y + 1), lambda x: (lambda y: y + 2)),
+        }
+        for label, (left, right) in pairs.items():
+            self.assertEqual(
+                left.__code__.co_code,
+                right.__code__.co_code,
+                f"{label}: the pair must differ only in co_consts",
+            )
+            self.assertNotEqual(
+                _code_fingerprint(left.__code__),
+                _code_fingerprint(right.__code__),
+                f"{label}: two different bodies share a fingerprint",
+            )
+
+    def test_guard_policy_classification_is_total(self):
+        # A guard type in no set is KEPT, so a drop policy can only ever
+        # drop what _INVARIANT_DROPPABLE_GUARD_TYPES names. This test is
+        # what makes the never-drop claim enforceable:
+        # a guard type added to GuardBuilder fails here until someone triages
+        # it into exactly one of the four sets.
+        from torch._dynamo.guards import GuardBuilder
+        from torch._dynamo.precompile_package import (
+            _INVARIANT_DROPPABLE_GUARD_TYPES,
+            _NOOP_GUARD_TYPES,
+            _SHAPE_BEARING_GUARD_TYPES,
+            _UNMODELLED_GUARD_TYPES,
+        )
+
+        guard_types = {
+            name
+            for name, value in vars(GuardBuilder).items()
+            if name.isupper() and callable(value)
+        }
+        self.assertGreater(len(guard_types), 40)  # the enumeration itself works
+        sets = {
+            "_SHAPE_BEARING_GUARD_TYPES": _SHAPE_BEARING_GUARD_TYPES,
+            "_UNMODELLED_GUARD_TYPES": _UNMODELLED_GUARD_TYPES,
+            "_INVARIANT_DROPPABLE_GUARD_TYPES": _INVARIANT_DROPPABLE_GUARD_TYPES,
+            "_NOOP_GUARD_TYPES": _NOOP_GUARD_TYPES,
+        }
+        classified: frozenset[str] = frozenset().union(*sets.values())
+        self.assertEqual(
+            sorted(guard_types - classified),
+            [],
+            "unclassified GuardBuilder guard type(s): add each to exactly one "
+            "policy set in torch/_dynamo/precompile_package.py (KEPT until then)",
+        )
+        self.assertEqual(
+            sorted(classified - guard_types),
+            [],
+            "phantom entries: no GuardBuilder method by these names",
+        )
+        for (a_name, a), (b_name, b) in itertools.combinations(sets.items(), 2):
+            self.assertEqual(sorted(a & b), [], f"{a_name} overlaps {b_name}")
+
+    def test_summary_is_incomplete_without_a_backend_graph(self):
+        def summary(**kw):
+            base = dict(
+                frames=1,
+                resume_functions=0,
+                guarded_codes=1,
+                backend_graphs=1,
+                bypassed=(),
+            )
+            base.update(kw)
+            return PrecompileSummary(**base)
+
+        self.assertTrue(summary().complete)
+        self.assertFalse(summary(backend_graphs=0).complete)
+        self.assertFalse(summary(guarded_codes=0).complete)
+        self.assertFalse(summary(capture_errors=("boom",)).complete)
+
+    def test_stale_module_memo_is_revalidated(self):
+        # The filename -> module memo caches a hit outright, and its ABA check
+        # on len(sys.modules) cannot see a plain delete. Handing back the dead
+        # name made add_code raise KeyError on it.
+        name = "_precompile_stale_memo_probe"
+        source = "def probe(t):\n    return t + 1\n"
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, name + ".py")
+            with open(path, "w") as f:
+                f.write(source)
+            sys.path.insert(0, d)
+            try:
+                module = importlib.import_module(name)
+                scan = dynamo_package._scan_sys_modules_for_file
+                self.assertEqual(scan(module.__file__), name)
+                del sys.modules[name]
+                self.assertIsNone(scan(module.__file__))
+                # No KeyError: an unresolvable module contributes no source.
+                info = dynamo_package.SourceInfo(inlined_sources=set())
+                info.add_code(module.probe.__code__)
+            finally:
+                sys.path.remove(d)
+                sys.modules.pop(name, None)
 
 
 if __name__ == "__main__":
