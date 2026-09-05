@@ -1204,6 +1204,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         for _ in range(n_replays):
             graph.replay()
         torch.cuda.synchronize()
+        # The last write of each replay follows the final barrier, so nothing
+        # orders a peer's copy against this rank's read below. Local
+        # synchronize only covers this device.
+        dist.barrier()
 
         buf = hdl.get_buffer(peer, (64,), torch.float32)
         expected = torch.full((64,), n_replays * 100.0 + peer, device="cuda")
