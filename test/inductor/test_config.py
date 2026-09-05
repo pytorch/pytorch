@@ -10,8 +10,9 @@ from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.inductor_utils import HAS_TRITON, requires_triton
 
 
 def dummy_fn(x):
@@ -23,7 +24,7 @@ class DummyModule(torch.nn.Module):
         return dummy_fn(x)
 
 
-class TestInductorConfig(TestCase):
+class TestInductorConfigBase(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -32,6 +33,10 @@ class TestInductorConfig(TestCase):
     def tearDown(self):
         super().tearDown()
         config.load_config(self._saved_config)
+
+
+class TestInductorConfig(TestInductorConfigBase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_set(self):
         config.max_fusion_size = 13337
@@ -117,35 +122,6 @@ class TestInductorConfig(TestCase):
             with config.patch("cpp.threads", 8999):
                 self.assertEqual(config.cpp.threads, 8999)
             self.assertEqual(config.cpp.threads, 9000)
-
-    @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
-    def test_compile_api(self):
-        # these are mostly checking config processing doesn't blow up with exceptions
-        x = torch.randn(8)
-        y = dummy_fn(x)
-        checks = [
-            {},
-            {"mode": "default"},
-            {"mode": "reduce-overhead"},
-            {"mode": "max-autotune"},
-            {
-                "options": {
-                    "max-fusion-size": 128,
-                    "unroll_reductions_threshold": 32,
-                    "triton.cudagraphs": False,
-                }
-            },
-            {"dynamic": True},
-            {"fullgraph": True, "backend": "inductor"},
-            {"disable": True},
-        ]
-
-        for kwargs in checks:
-            torch._dynamo.reset()
-            opt_fn = torch.compile(dummy_fn, **kwargs)
-            torch.testing.assert_close(
-                opt_fn(x), y, msg=f"torch.compile(..., **{kwargs!r}) failed"
-            )
 
     def test_get_compiler_config(self):
         from torch._inductor import config as inductor_default_config
@@ -460,41 +436,6 @@ class TestInductorConfig(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
 
-    @requires_gpu
-    @torch._inductor.config.patch(fx_graph_cache=False)
-    def test_config_read_in_backwards(self):
-        @torch.compile
-        def f(x, y):
-            z = x @ y
-            return z.sin().sum()
-
-        called = False
-
-        def my_pass(graph):
-            nonlocal called
-            called = True
-
-        x, y = (
-            torch.randn(3, 3, device=GPU_TYPE, requires_grad=True),
-            torch.randn(3, 3, device=GPU_TYPE),
-        )
-        z = f(x, y)
-        z.backward()
-        self.assertFalse(called)
-        torch._dynamo.reset()
-        z = f(x, y)
-        with torch._inductor.config.patch(post_grad_custom_pre_pass=my_pass):
-            z.backward()
-
-        self.assertTrue(called)
-
-        called = False
-        torch._dynamo.reset()
-        z = f(x, y)
-        with torch._inductor.config.patch(post_grad_custom_pre_pass=my_pass):
-            torch.autograd.grad(z, x)
-        self.assertTrue(called)
-
     @torch._inductor.config.patch(fx_graph_cache=False)
     def test_config_read_in_grad_fn(self):
         @torch.compile
@@ -522,6 +463,82 @@ class TestInductorConfig(TestCase):
         z.grad_fn.apply(torch.tensor(0))
         self.assertFalse(called)
 
+
+class TestInductorConfigCpu(TestInductorConfigBase):
+    hw_classification = HardwareClassification.CPU
+
+    def test_compile_api(self):
+        # these are mostly checking config processing doesn't blow up with exceptions
+        x = torch.randn(8)
+        y = dummy_fn(x)
+        checks = [
+            {},
+            {"mode": "default"},
+            {"mode": "reduce-overhead"},
+            {"mode": "max-autotune"},
+            {
+                "options": {
+                    "max-fusion-size": 128,
+                    "unroll_reductions_threshold": 32,
+                    "triton.cudagraphs": False,
+                }
+            },
+            {"dynamic": True},
+            {"fullgraph": True, "backend": "inductor"},
+            {"disable": True},
+        ]
+
+        for kwargs in checks:
+            torch._dynamo.reset()
+            opt_fn = torch.compile(dummy_fn, **kwargs)
+            torch.testing.assert_close(
+                opt_fn(x), y, msg=f"torch.compile(..., **{kwargs!r}) failed"
+            )
+
+
+class TestInductorConfigAccel(TestInductorConfigBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_triton()
+    @torch._inductor.config.patch(fx_graph_cache=False)
+    def test_config_read_in_backwards(self, device):
+        @torch.compile
+        def f(x, y):
+            z = x @ y
+            return z.sin().sum()
+
+        called = False
+
+        def my_pass(graph):
+            nonlocal called
+            called = True
+
+        x, y = (
+            torch.randn(3, 3, device=device, requires_grad=True),
+            torch.randn(3, 3, device=device),
+        )
+        z = f(x, y)
+        z.backward()
+        self.assertFalse(called)
+        torch._dynamo.reset()
+        z = f(x, y)
+        with torch._inductor.config.patch(post_grad_custom_pre_pass=my_pass):
+            z.backward()
+
+        self.assertTrue(called)
+
+        called = False
+        torch._dynamo.reset()
+        z = f(x, y)
+        with torch._inductor.config.patch(post_grad_custom_pre_pass=my_pass):
+            torch.autograd.grad(z, x)
+        self.assertTrue(called)
+
+
+instantiate_device_type_tests(TestInductorConfigCpu, globals(), only_for="cpu")
+instantiate_device_type_tests(
+    TestInductorConfigAccel, globals(), allow_xpu=True, except_for="cpu"
+)
 
 if __name__ == "__main__":
     run_tests()
