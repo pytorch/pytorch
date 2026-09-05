@@ -163,7 +163,6 @@ class TestPureFP16(FSDPTestContinuous):
                 self.assertEqual(param.grad.dtype, torch.float16)
 
 
-devices = ("cuda", "hpu", "xpu", "privateuse1")
-instantiate_device_type_tests(TestPureFP16, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(TestPureFP16, globals(), except_for=("cpu",), allow_xpu=True)
 if __name__ == "__main__":
     run_tests()

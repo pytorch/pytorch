@@ -123,7 +123,6 @@ class TestInput(FSDPTestContinuous):
             self.assertIn("added", in_data)
 
 
-devices = ("cuda", "hpu", "xpu", "privateuse1")
-instantiate_device_type_tests(TestInput, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(TestInput, globals(), except_for=("cpu",), allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
