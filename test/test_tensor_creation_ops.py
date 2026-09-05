@@ -4525,25 +4525,55 @@ class TestAsArray(TestCase):
         self.assertEqual(tensor.dtype, torch.int32)
 
     def test_default_device(self, device):
-        original = torch.arange(5)
+        # A pure Python scalar or sequence adopts the default device.
+        with torch.device(device):
+            self.assertEqual(torch.asarray(3).device, torch.device(device))
+            self.assertEqual(torch.asarray([1, 2, 3]).device, torch.device(device))
 
+        # A device-bearing input (tensor, numpy array, buffer) keeps its own
+        # device even when a default device is set.
+        # See https://github.com/pytorch/pytorch/issues/150199.
+        original = torch.arange(5)  # on CPU
         examples: list[tuple[Any, dict]] = [
-            (3, {}),
             (original, {}),
             (to_numpy(original), {}),
             (to_memview(original), {"dtype": original.dtype}),
         ]
-
         for data, kwargs in examples:
             with torch.device(device):
                 tensor = torch.asarray(data, **kwargs)
-                self.assertEqual(tensor.device, torch.device(device))
+                self.assertEqual(tensor.device.type, "cpu")
+                self.assertEqual(data, tensor)
 
-                # Check the contents of the tensor.
-                if isinstance(data, int):
-                    self.assertEqual(data, tensor.item())
-                else:
-                    self.assertEqual(data, tensor)
+    def test_asarray_set_default_device_preserves_input_device(self, device):
+        # gh-150199: with a default device set, asarray must preserve a
+        # device-bearing input's device; only pure Python scalars and sequences
+        # use the default device.
+        other = get_another_device(device)
+        if other is None:
+            self.skipTest("requires a second device")
+
+        other_tensor = torch.ones(3, device=other)
+        cpu_numpy = np.ones(3, dtype=np.float32)
+        try:
+            torch.set_default_device(device)
+            # device-bearing inputs keep their own device
+            self.assertEqual(
+                torch.asarray(other_tensor).device.type, torch.device(other).type
+            )
+            self.assertEqual(torch.asarray(cpu_numpy).device.type, "cpu")
+            # pure Python scalar/sequence uses the default device
+            self.assertEqual(torch.asarray(5.0).device.type, torch.device(device).type)
+            self.assertEqual(
+                torch.asarray([1.0, 2.0]).device.type, torch.device(device).type
+            )
+            # an explicit device always wins
+            self.assertEqual(
+                torch.asarray(other_tensor, device=device).device.type,
+                torch.device(device).type,
+            )
+        finally:
+            torch.set_default_device(None)
 
     @onlyAccelerator
     def test_device_without_index(self, device):
