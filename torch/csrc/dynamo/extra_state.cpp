@@ -68,14 +68,16 @@ class CacheLock {
 // evaluation, backend __eq__, pybind attribute stores). cache_mutex is
 // recursive, so that Python can re-enter this state on the same thread --
 // reset_code from a guard, most notably -- and clear_in_place consults the
-// depth to know it must defer node destruction. Caller must hold cache_mutex.
+// depth to know it must defer node destruction. Constructed under cache_mutex,
+// but destroyed on lookup()'s return paths after the lock is dropped, so the
+// count is an atomic cross-thread signal (see extra_state.h).
 class CachePythonDepth {
  public:
   explicit CachePythonDepth(ExtraState* state) : state_(state) {
-    ++state_->cache_python_depth;
+    state_->cache_python_depth.fetch_add(1, std::memory_order_acq_rel);
   }
   ~CachePythonDepth() {
-    --state_->cache_python_depth;
+    state_->cache_python_depth.fetch_sub(1, std::memory_order_acq_rel);
   }
 
   CachePythonDepth(const CachePythonDepth&) = delete;
@@ -638,16 +640,18 @@ void lookup(
   // Guard evaluation runs arbitrary Python (guard closures, backend __eq__,
   // guard_error_hook) that can call torch._dynamo.reset()/remove_from_cache,
   // which take convert_frame.compile_lock. Holding cache_mutex across that
-  // orders (cache_mutex, compile_lock) -- the reverse of create_cache_entry
-  // (compile_lock, then cache_mutex) and of this file's header invariant -- an
-  // ABBA deadlock across threads. So snapshot the candidates under the lock,
+  // orders (cache_mutex, compile_lock) -- the reverse of the compile path,
+  // which holds compile_lock and then reaches cache_mutex through the
+  // _get_cache_entries_for_region / _get_total_cache_entry_count callbacks --
+  // an ABBA deadlock across threads. So snapshot the candidates under the lock,
   // raise CachePythonDepth, RELEASE the lock, evaluate guards lock-free, and
   // re-lock only for the structural mutation on a hit. While depth is non-zero
-  // every destroy/relink path parks (apply_pending_evictions,
+  // every node destroy/free path parks (apply_pending_evictions,
   // drain_pending_invalidations, invalidate, clear_in_place), so the raw entry
-  // pointers snapshotted below cannot be freed or relinked; a concurrent
-  // create_cache_entry only appends (no move, no free) and its new entry is
-  // simply absent from this snapshot.
+  // pointers snapshotted below cannot be freed. A concurrent create_cache_entry
+  // inserts (front under use_lru, else back) and another thread's hit may
+  // move_to_front, but std::list splice preserves node addresses, so neither
+  // invalidates the snapshot; a newly inserted entry is simply absent from it.
   std::optional<CachePythonDepth> python_depth;
   std::vector<const PrecompileEntry*> precompile_candidates;
   struct CacheCandidate {
