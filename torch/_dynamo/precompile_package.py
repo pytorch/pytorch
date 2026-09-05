@@ -121,6 +121,7 @@ from __future__ import annotations
 import collections
 import contextlib
 import contextvars
+import copy
 import functools
 import hashlib
 import importlib.machinery
@@ -135,6 +136,7 @@ import threading
 import types
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, TYPE_CHECKING
+from typing_extensions import Self
 
 import torch
 import torch._functorch.config as functorch_config
@@ -156,6 +158,7 @@ from .package import (
     DynamoStore,
     PrecompileCacheEntry,
 )
+from .pgo import _use_code_state
 from .source import AttrSource, DictGetItemSource, GlobalSource
 
 
@@ -870,6 +873,33 @@ class _PrecompileBackend:
         self.serving = serving
         self.serve_time_compiles = 0
 
+    def __call__(self, gm: torch.fx.GraphModule, inputs: list[torch.Tensor]) -> Any:
+        if self.serving:
+            self.serve_time_compiles += 1
+            log.warning(
+                "precompile: serving compiled a NEW graph -- no captured variant "
+                "matched this call, so the artifact is serving less than it was "
+                "measured to. Recapture with an example that covers it.%s",
+                _identify_graph(gm),
+            )
+        if self._keep_graphs:
+            backend_id = gm.meta.get("backend_id")
+            if backend_id is not None and str(backend_id) not in self.graphs:
+                # Deep-copy before the inner backend runs: inductor lowering
+                # mutates the graph it is handed, and a rendered copy has to be
+                # the graph Dynamo produced, not the leftovers.
+                placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
+                # Render against the placeholders' FAKES, never the real inputs
+                # below: compile_fx re-fakifies real tensors into a fresh symbol
+                # set and dedups by value, which silently unifies a batch dim
+                # with any other dim of the same size.
+                fakes = [
+                    n.meta.get("example_value", n.meta.get("val")) for n in placeholders
+                ]
+                if all(f is not None for f in fakes):
+                    self.graphs[str(backend_id)] = (copy.deepcopy(gm), fakes)
+        return self._torchdynamo_orig_backend(gm, inputs)
+
     def get_compiler_config(self) -> Any:
         getter = getattr(self._torchdynamo_orig_backend, "get_compiler_config", None)
         return None if getter is None else getter()
@@ -1257,6 +1287,138 @@ def _wont_generalize(
 # Healing re-serializes, which can in principle prune something new. Bounded
 # rather than open: in practice one pass is always enough.
 _VALIDATION_PASSES = 4
+
+
+def _missing_backends_message(
+    total: int, missing: Sequence[object], backend: str = "inductor"
+) -> str:
+    """Why some compiled subgraphs never reached the artifact.
+
+    Reports the recorded/total split rather than asserting nothing was
+    recorded: a single missing id is fatal here, and saying so as "never
+    recorded" reads as total failure when most of the capture succeeded.
+    """
+    shown = ", ".join(str(b) for b in missing[:8])
+    if len(missing) > 8:
+        shown += f", ... ({len(missing) - 8} more)"
+    if backend not in ("inductor", "eager"):
+        # A session takes any backend Dynamo can resolve, but only these two
+        # leave something a served artifact can run: "eager" keeps the fx
+        # graphs and "inductor" bundles compiled code. Anything else captures
+        # cleanly and records nothing, so say so here rather than let it read
+        # as a defect in the model. aot_eager is the one people reach for,
+        # since it is how you isolate AOTAutograd.
+        return (
+            f"Precompilation recorded {total - len(missing)} of {total} "
+            f"compiled backend(s) because backend={backend!r} does not produce "
+            f"anything serializable; precompile can record only 'inductor' or "
+            f"'eager'. To isolate AOTAutograd without inductor, use plain "
+            f"torch.compile(backend='aot_eager') -- that needs no precompile."
+        )
+    from torch._dynamo.utils import counters
+
+    # Rendering re-enters AOTAutograd outside the pinned bypass_autograd_cache_key
+    # config and bypasses there routinely, so this is a diagnostic, not a diagnosis.
+    bypasses = counters["aot_autograd"].get("autograd_cache_bypass", 0)
+    bypass_note = (
+        f" It bypassed {bypasses} time(s) here, which rendering does for any "
+        "graph the cache cannot key, and which does not by itself explain a gap."
+        if bypasses
+        else ""
+    )
+    return (
+        f"Precompilation recorded {total - len(missing)} of {total} compiled "
+        f"backend(s), so {len(missing)} graph(s) would reach the artifact with "
+        f"no code behind them: {shown}. Capture pins functorch's "
+        "bypass_autograd_cache_key, so AOTAutograd keys every graph it lowers "
+        "and no longer declines to record one it cannot address."
+        + bypass_note
+        + " A gap therefore means a graph whose backward never compiled, which "
+        "is a forward-only capture with grad enabled. Pass training=True to "
+        "lower the backward eagerly (the joint trace synthesizes tangents, so "
+        "no loss is needed), capture under torch.no_grad() / "
+        "torch.inference_mode() for an inference artifact, or run .backward() "
+        "inside the capture block. Re-run with "
+        "TORCH_LOGS=+torch._functorch._aot_autograd to see each graph as it "
+        "lowers."
+    )
+
+
+def _identify_graph(gm: torch.fx.GraphModule) -> str:
+    """Name a graph well enough to find it, from inside a backend.
+
+    The module class alone does not: every graph a model produces reports the
+    same one, so a capture that recompiled nine graphs at serve time said
+    "GraphModule" nine times. The compile id keys tlparse, the backend id keys
+    the artifact, and the first node carrying a stack trace names the user line
+    -- including, for a continuation, the resume frame Dynamo minted for it,
+    which is the only thing that tells one break in a chain from another.
+    """
+    parts: list[str] = []
+    compile_id = torch._guards.CompileContext.current_compile_id()
+    if compile_id is not None:
+        parts.append(f"compile id {compile_id}")
+    backend_id = gm.meta.get("backend_id") or getattr(gm, "_backend_id", None)
+    if backend_id is not None:
+        parts.append(f"backend id {backend_id}")
+    for node in gm.graph.nodes:
+        if node.op not in ("placeholder", "output") and node.stack_trace:
+            first = node.stack_trace.strip().splitlines()[0].strip()
+            parts.append(f"first traced at {first}")
+            break
+    return f" Graph: {'; '.join(parts)}." if parts else ""
+
+
+def _warn_risky_drops(risky: Sequence[tuple[str, str]]) -> None:
+    """Report accepted risky drops, shape-bearing ones first.
+
+    Ordering by type only puts the candidates where they can be seen; whether a
+    guarded VALUE can differ at serve time is not something the type answers.
+    """
+    by_type: dict[str, list[str]] = {}
+    for guard_type, name in sorted(risky):
+        by_type.setdefault(guard_type, []).append(name)
+
+    # Grouped rather than a flat cut, and capped PER TYPE: a flat list is
+    # dominated by whichever type happens to be most numerous, which can bury a
+    # lone SEQUENCE_LENGTH behind a crowd of CONSTANT_MATCH and CLOSURE_MATCH.
+    def render(types: list[str], per_type: int) -> str:
+        parts = []
+        for t in types:
+            names = by_type[t]
+            shown = ", ".join(names[:per_type])
+            more = f", +{len(names) - per_type} more" if len(names) > per_type else ""
+            parts.append(f"{t} x{len(names)}: {shown}{more}")
+        return "; ".join(parts)
+
+    shape_types = [t for t in by_type if t in _SHAPE_BEARING_GUARD_TYPES]
+    other_types = [t for t in by_type if t not in _SHAPE_BEARING_GUARD_TYPES]
+    # Says "could" rather than "can", and points at the distinction that
+    # actually decides it. This is a classification by guard TYPE, and the
+    # question a reader has is whether the guarded VALUE can differ at serve
+    # time -- which the type does not answer. The first four this ordering
+    # surfaced on a real model were all reached through a class or function
+    # definition (__mro__ walks to __defaults__, __code__) and were therefore
+    # compile-time constants that no batch could change. Distinguishing those
+    # properly needs the structured source, not the name.
+    shape_report = (
+        f" COULD BEAR ON SHAPE ({sum(len(by_type[t]) for t in shape_types)}), "
+        f"unlike the rest, so check these first -- but check whether each one "
+        f"can actually differ at serve time: a guard reached through a class or "
+        f"function definition (an __mro__ walk, __defaults__, __code__) is a "
+        f"compile-time constant and cannot: {render(shape_types, 3)}."
+        if shape_types
+        else ""
+    )
+    log.warning(
+        "precompile: %d dropped guard(s) can affect dispatch, so nothing checks "
+        "them at load.%s The rest are identity slots to audit: %s. "
+        "summary().risky_dropped_guards has all of them; this warning appears "
+        "only because require_no_risky_drops=False explicitly accepted them.",
+        len(risky),
+        shape_report,
+        render(other_types, 2) or "none",
+    )
 
 
 def varying_guard_slots(
@@ -1793,6 +1955,37 @@ class PrecompileSession:
             self._dropped_guard_code,
         )
 
+    def _collect_backends(self) -> dict[str, Any]:
+        """The compiled subgraphs this capture produced, keyed by backend id."""
+        from torch._dynamo.precompile_context import (
+            EagerCacheArtifact,
+            PrecompileContext,
+        )
+
+        self._take_backend_artifacts()
+        collected = dict(self._backend_artifacts)
+        if self._backend == "eager":
+            # Eager "backends" are fx graphs with no compiled artifact of their
+            # own, so they have to be gathered explicitly.
+            for backend_id, backend in self._package.cached_backends.items():
+                collected[backend_id] = EagerCacheArtifact(
+                    key=backend_id, content=backend
+                )
+        entry = self._package.cache_entry()
+        for backend_id in entry.backend_ids:
+            if backend_id not in collected:
+                artifact = PrecompileContext.take_artifact(backend_id)
+                if artifact is not None:
+                    collected[backend_id] = artifact
+        missing = [b for b in entry.backend_ids if b not in collected]
+        if missing:
+            raise PackageError(
+                _missing_backends_message(
+                    len(entry.backend_ids), missing, self._backend
+                )
+            )
+        return {str(b): collected[b] for b in entry.backend_ids}
+
 
 class _SingleFileStore(DynamoStore):
     """
@@ -1923,6 +2116,119 @@ def precompile_capture(
         invariants=invariants,
         prune_invariant_guards=prune_invariant_guards,
     )
+
+
+class _ServedCallable:
+    """A loaded artifact. Call it, or use it as a context manager to scope it."""
+
+    def __init__(
+        self,
+        compiled: Callable[..., object],
+        package: CompilePackage,
+        isolate_recompiles_id: int,
+        backend: _PrecompileBackend | None = None,
+    ) -> None:
+        self._compiled: Callable[..., object] | None = compiled
+        self._package = package
+        self._isolate_recompiles_id = isolate_recompiles_id
+        self._backend = backend
+        from .pgo import _new_code_state
+
+        self._pgo_state = _new_code_state()
+        self._state = threading.Condition()
+        self._active_calls = 0
+        self._unloading = False
+        self._loaded = True
+        from .eval_frame import _register_explicit_compile_region
+
+        _register_explicit_compile_region(isolate_recompiles_id, self)
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        with self._state:
+            if not self._loaded or self._unloading:
+                raise PackageError("this loaded artifact has been unloaded")
+            if self._package.installed_entries_dropped():
+                raise PackageError(
+                    "torch._dynamo.reset() cleared the precompiled code this "
+                    "artifact installed. The installed globals are still in "
+                    "place, so this call would silently recompile instead of "
+                    "serving, or fail with an indistinguishable RecompileError "
+                    "under serving(). Load the artifact again after the reset."
+                )
+            compiled = self._compiled
+            if compiled is None:
+                raise AssertionError("loaded callable is missing")
+            self._active_calls += 1
+        try:
+            # Scoped to the whole served call, so an unrelated compilation
+            # triggered from inside it -- a nested torch.compile, a hook --
+            # also reads this artifact's private profile instead of the
+            # process one. Narrowing that needs the override keyed by code
+            # object, which pgo does not model; put_code_state never
+            # persists this state either way, so nothing escapes the call.
+            with _use_code_state(self._pgo_state):
+                return compiled(*args, **kwargs)
+        finally:
+            with self._state:
+                self._active_calls -= 1
+                if self._active_calls == 0:
+                    self._state.notify_all()
+
+    def serve_time_compiles(self) -> int:
+        """Graphs this artifact compiled while SERVING, rather than serving.
+
+        Zero is the number that says the artifact covered every call it saw.
+        An installed artifact answers a guard miss by compiling, so this
+        climbing means it is serving less of itself than it was measured to --
+        the right thing to gate a job on.
+        """
+        return self._backend.serve_time_compiles if self._backend else 0
+
+    def __enter__(self) -> Self:
+        with self._state:
+            if not self._loaded or self._unloading:
+                raise PackageError("this loaded artifact has been unloaded")
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.unload()
+
+    def unload(self) -> None:
+        """Remove installed globals and precompile entries from the code objects."""
+        with self._state:
+            while self._unloading:
+                self._state.wait()
+            if not self._loaded:
+                return
+            self._unloading = True
+            try:
+                while self._active_calls:
+                    self._state.wait()
+            except BaseException:
+                self._unloading = False
+                self._state.notify_all()
+                raise
+            self._loaded = False
+        # uninstall() forgets which code objects it installed onto, and a frame
+        # reached through code_source was installed onto the live code the
+        # running program resolves rather than the reconstructed twin the
+        # package holds, so the set to clear has to be taken first.
+        codes = self._package.region_codes()
+        try:
+            self._package.uninstall()
+        finally:
+            try:
+                _clear_package_region(codes, self._isolate_recompiles_id)
+            finally:
+                from .eval_frame import _unregister_explicit_compile_region
+
+                _unregister_explicit_compile_region(self._isolate_recompiles_id)
+                with self._state:
+                    self._unloading = False
+                    self._compiled = None
+                    self._package.cached_backends.clear()
+                    self._pgo_state.clear()
+                    self._state.notify_all()
 
 
 @contextlib.contextmanager
