@@ -15638,6 +15638,45 @@ def _get_device_name(idx):
 
 # Although this is written to be generic over all accelerators, non-cuda accelerators
 # are not fully tested since sleep is only supported on cuda.
+class TestAssociativeScanAutograd(TestCase):
+    def _reverse_cumsum(self, g, dim):
+        return torch.flip(torch.cumsum(torch.flip(g, [dim]), dim), [dim])
+
+    @parametrize("reverse", [False, True])
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_associative_scan_add_backward(self, device, reverse, dtype):
+        x = torch.randn(8, 4, device=device, dtype=dtype, requires_grad=True)
+        out = torch.associative_scan(x, "add", 0, reverse=reverse)
+        grad = torch.randn_like(x)
+        out.backward(grad)
+        expected = torch.cumsum(grad, 0) if reverse else self._reverse_cumsum(grad, 0)
+        self.assertEqual(x.grad, expected)
+
+    @parametrize("reverse", [False, True])
+    @dtypes(torch.float32)
+    def test_associative_scan_gradcheck(self, device, reverse, dtype):
+        def make_fn(mode):
+            def fn(t):
+                return torch.associative_scan(t, mode, 0, reverse=reverse)
+
+            return fn
+
+        for mode in ["add", "mul", "max", "min"]:
+            x = torch.randn(5, 4, device=device, dtype=dtype, requires_grad=True)
+            self.assertTrue(
+                gradcheck(make_fn(mode), (x,), eps=1e-3, atol=1e-3, rtol=1e-3)
+            )
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_associative_scan_dim_backward(self, device, dtype):
+        x = torch.randn(4, 6, 3, device=device, dtype=dtype, requires_grad=True)
+        for dim in range(x.ndim):
+            out = torch.associative_scan(x, "mul", dim)
+            out.sum().backward()
+            self.assertEqual(x.grad.shape, x.shape)
+            x.grad = None
+
+
 class TestAutogradStreamSynchronization(TestCase):
     def get_default_streams(self, num_devices=1):
         out = []
@@ -18385,6 +18424,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestAutogradStreamSynchronization, globals(), except_for=None
 )
+instantiate_device_type_tests(TestAssociativeScanAutograd, globals())
 
 instantiate_parametrized_tests(TestAutograd)
 instantiate_parametrized_tests(TestNestedCheckpoint)

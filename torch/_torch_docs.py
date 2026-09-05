@@ -3590,6 +3590,56 @@ Example::
 )
 
 add_docstr(
+    torch.associative_scan,
+    r"""
+associative_scan(input, combine_mode, dim=0, reverse=False) -> Tensor
+
+Returns an inclusive scan over :attr:`dim` of :attr:`input` with a
+compile-time-selected associative binary operation.
+
+The operation is selected by :attr:`combine_mode` and must be associative:
+
+- ``'add'``: cumulative sum (``y[i] = sum_{{j <= i}} input[j]``), equivalent to
+  :func:`torch.cumsum`.
+- ``'mul'``: cumulative product (``y[i] = prod_{{j <= i}} input[j]``),
+  equivalent to :func:`torch.cumprod`.
+- ``'max'``: running maximum (``y[i] = max_{{j <= i}} input[j]``).
+- ``'min'``: running minimum (``y[i] = min_{{j <= i}} input[j]``).
+- ``'linear_recurrence'``: requires a pair of inputs ``(a, b)`` and computes
+  the SSM-style recurrence ``h[i] = a[i] * h[i - 1] + b[i]``. Use
+  ``torch.associative_scan([a, b], 'linear_recurrence', dim)``.
+
+This operator is the native counterpart of
+``torch.func.associative_scan`` for the common built-in combine
+functions, matching the semantics of ``jax.lax.associative_scan``. For an
+arbitrary user-supplied combine function, use
+``torch.func.associative_scan`` instead.
+
+For floating point types, ``'max'`` and ``'min'`` propagate NaN like
+``jax.lax.max`` / ``jax.lax.min``.
+
+Args:
+    input (Tensor or list of Tensor): the input tensor(s). The tensor-list
+        form is only valid with ``combine_mode='linear_recurrence'``.
+    combine_mode (str): one of ``'add'``, ``'mul'``, ``'max'``, ``'min'``,
+        ``'linear_recurrence'``.
+    dim (int): the dimension to scan over.
+    reverse (bool): if ``True``, the scan is computed from the end of the
+        dimension towards the beginning.
+
+Example::
+
+    >>> a = torch.tensor([1, 2, 3, 4])
+    >>> torch.associative_scan(a, "add")
+    tensor([ 1,  3,  6, 10])
+    >>> torch.associative_scan(a, "mul")
+    tensor([ 1,  2,  6, 24])
+    >>> torch.associative_scan(a, "max")
+    tensor([1, 2, 3, 4])
+""".format(**reduceops_common_args),
+)
+
+add_docstr(
     torch.count_nonzero,
     r"""
 count_nonzero(input, dim=None) -> Tensor
