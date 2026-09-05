@@ -16,12 +16,9 @@ from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 # ``PrecompileError`` is also re-exported here as ``torch.compiler.PrecompileError`` so the
 # conventional ``except torch.compiler.PrecompileError`` works; its ``__module__`` is already
 # forced to "torch.compiler" in the impl module, matching this public location.
-from torch._precompile import (
-    precompile as precompile,
-    PrecompileError as PrecompileError,
-)
+from torch._precompile import PrecompileError as PrecompileError
 
-from . import config
+from . import config, precompile as precompile
 from ._cache import CacheInfo
 
 
