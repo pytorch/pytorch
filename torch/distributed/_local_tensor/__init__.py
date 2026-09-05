@@ -797,7 +797,8 @@ class _LocalOffsetBasedRNGTracker:
                 any_rank_state = lm._any_local_rng_state()
                 any_rank_cpu, any_rank_cuda = any_rank_state
 
-                if self._device.type in {"cuda", "xpu"}:
+                current_acc = torch.accelerator.current_accelerator()
+                if current_acc is not None and current_acc.type == self._device.type:
                     if self._device.index not in any_rank_cuda:
                         raise AssertionError
                     any_rank_device_state = any_rank_cuda[self._device.index]
