@@ -360,7 +360,7 @@ class TokenSwitchNCCL(TokenSwitch):
         return (
             tokens.new_zeros(max_recv_tokens, H),
             topk_weights.new_zeros(max_recv_tokens, K),
-            tokens.new_zeros(max_recv_tokens, K, dtype=torch.int32),
+            tokens.new_zeros(max_recv_tokens, K, dtype=torch.int64),
         )
 
     def create_routing(
