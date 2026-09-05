@@ -29,6 +29,8 @@ class IMPSAllocator : public c10::DeviceAllocator {
   virtual std::string formatSize(size_t size) const = 0;
   virtual void setLowWatermarkRatio(double ratio) const = 0;
   virtual void setHighWatermarkRatio(double ratio) const = 0;
+  virtual void setMemoryBudget(size_t budget_bytes) = 0;
+  virtual size_t getMemoryBudget() const = 0;
   virtual ssize_t getLowWatermarkValue() const = 0;
   virtual size_t getLowWatermarkLimit() const = 0;
   virtual size_t getHighWatermarkLimit() const = 0;

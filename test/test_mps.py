@@ -17846,6 +17846,72 @@ class TestMetalLibrary(TestCaseMPS):
             self.assertEqual(destination, source.permute(2, 3, 4, 1, 0))
 
 
+class TestMemoryBudget(TestCaseMPS):
+    """Tests for torch.mps.set_memory_budget / get_memory_budget."""
+
+    def setUp(self):
+        super().setUp()
+        torch.mps.set_memory_budget(0)
+
+    def tearDown(self):
+        torch.mps.set_memory_budget(0)
+        super().tearDown()
+
+    def test_set_and_get_round_trip(self):
+        budget = 2 * 1024 ** 3  # 2 GB
+        torch.mps.set_memory_budget(budget)
+        self.assertEqual(torch.mps.get_memory_budget(), budget)
+
+    def test_set_zero_means_unlimited(self):
+        torch.mps.set_memory_budget(2 * 1024 ** 3)
+        torch.mps.set_memory_budget(0)
+        self.assertEqual(torch.mps.get_memory_budget(), 0)
+
+    def test_multiple_set_calls_last_wins(self):
+        torch.mps.set_memory_budget(1 * 1024 ** 3)
+        torch.mps.set_memory_budget(3 * 1024 ** 3)
+        self.assertEqual(torch.mps.get_memory_budget(), 3 * 1024 ** 3)
+
+    def test_invalid_type_float_raises(self):
+        with self.assertRaises(TypeError):
+            torch.mps.set_memory_budget(1.5e9)
+
+    def test_invalid_type_string_raises(self):
+        with self.assertRaises(TypeError):
+            torch.mps.set_memory_budget("2gb")
+
+    def test_negative_raises(self):
+        with self.assertRaises(ValueError):
+            torch.mps.set_memory_budget(-1)
+
+    def test_ops_correct_with_budget_set(self):
+        # Basic ops must still produce correct results when a budget is active.
+        torch.mps.set_memory_budget(4 * 1024 ** 3)  # 4 GB — generous, should not OOM
+        a = torch.randn(64, 64, device="mps")
+        b = torch.randn(64, 64, device="mps")
+        result = (a @ b).cpu()
+        ref = a.cpu() @ b.cpu()
+        self.assertEqual(result, ref, atol=1e-4, rtol=1e-4)
+
+    def test_ops_correct_after_budget_reset(self):
+        torch.mps.set_memory_budget(4 * 1024 ** 3)
+        torch.mps.set_memory_budget(0)
+        a = torch.randn(32, 32, device="mps")
+        result = torch.relu(a).cpu()
+        ref = torch.relu(a.cpu())
+        self.assertEqual(result, ref)
+
+    def test_get_budget_initial_is_zero(self):
+        # After setUp() resets to 0, get must return 0.
+        self.assertEqual(torch.mps.get_memory_budget(), 0)
+
+    def test_set_very_small_budget_no_crash_on_api_call(self):
+        # Setting a very small budget is API-valid even if allocation would fail.
+        torch.mps.set_memory_budget(1024)  # 1 KB — effectively unusable but valid
+        self.assertEqual(torch.mps.get_memory_budget(), 1024)
+        torch.mps.set_memory_budget(0)
+
+
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
