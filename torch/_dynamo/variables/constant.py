@@ -51,6 +51,19 @@ class ConstantVariable(VariableTracker):
     # PyComplex_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L1099
     # _PyNone_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L2022
     _cpython_type = (int, float, str, bytes, bool, type(None), complex, type(...))
+    # Declarative named-method table (analogous to CPython's tp_methods): maps a
+    # method name to a Method describing its handler and calling convention.
+    # `call_method` consults this before the object-protocol (tp_slot) dispatch.
+    # Lookup walks the class MRO (see `_lookup_tp_table`), so a subclass table
+    # adds to (rather than replaces) the entries it inherits, with the
+    # most-derived class winning on name collisions.
+    tp_methods: dict[str, Method] = {
+        "format": Method(self._tp_format),
+        "join": Method(self._tp_join),
+        "__iter__": Method(self._tp_iter),
+        "__round__": Method(self._tp_round),
+    }
+
 
     @overload
     @staticmethod
@@ -330,27 +343,6 @@ class ConstantVariable(VariableTracker):
     ) -> VariableTracker:
         from .tensor import SymNodeVariable
 
-        if name == "format" and istype(self.value, str):
-            return variables.BuiltinVariable(str.format).call_function(
-                tx,
-                [self, *args],
-                kwargs,
-            )
-        elif name == "join" and istype(self.value, str):
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            arg_unpacked = unpack_iterable(tx, args[0])
-            try:
-                arg_const = [x.as_python_constant() for x in arg_unpacked]
-                return ConstantVariable.create(self.value.join(arg_const))
-            except NotImplementedError:
-                return super().call_method(tx, name, args, kwargs)
-
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
             return variables.SymNodeVariable.create(
@@ -362,9 +354,6 @@ class ConstantVariable(VariableTracker):
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
         except NotImplementedError:
             return super().call_method(tx, name, args, kwargs)
-
-        if name == "__iter__":
-            return self.tp_iter_impl(tx)
 
         if isinstance(self.value, str) and name in str.__dict__:
             method = getattr(self.value, name)
@@ -417,13 +406,6 @@ class ConstantVariable(VariableTracker):
             except Exception as e:
                 raise_observed_exception(type(e), tx)
 
-        if name == "__round__" and len(args) == 1 and args[0].is_python_constant():
-            try:
-                return ConstantVariable.create(
-                    round(self.value, args[0].as_python_constant())
-                )
-            except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
         return super().call_method(tx, name, args, kwargs)
 
     def call_tree_map(
@@ -895,6 +877,43 @@ class ConstantVariable(VariableTracker):
         # bool inherits nb_invert from int via slot inheritance.
         return ConstantVariable.create(~self.value)
 
+
+    def _tp_format(self, tx: InstructionTranslatorBase, args: list[VariableTracker], kwargs: dict[str, VariableTracker]) -> VariableTracker | None:
+        if istype(self.value, str):
+            return variables.BuiltinVariable(str.format).call_function(tx, [self, *args], kwargs)
+        return None
+
+    def _tp_join(self, tx: InstructionTranslatorBase, args: list[VariableTracker], kwargs: dict[str, VariableTracker]) -> VariableTracker | None:
+        if not istype(self.value, str):
+            return None
+        if kwargs or len(args) != 1:
+            raise_args_mismatch(
+                tx,
+                "join",
+                "1 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        arg_unpacked = unpack_iterable(tx, args[0])
+        try:
+            arg_const = [x.as_python_constant() for x in arg_unpacked]
+            return ConstantVariable.create(self.value.join(arg_const))
+        except NotImplementedError:
+            return None
+
+    def _tp_iter(self, tx: InstructionTranslatorBase, args: list[VariableTracker], kwargs: dict[str, VariableTracker]) -> VariableTracker | None:
+        if args or kwargs:
+            return None
+        return self.tp_iter_impl(tx)
+
+    def _tp_round(self, tx: InstructionTranslatorBase, args: list[VariableTracker], kwargs: dict[str, VariableTracker]) -> VariableTracker | None:
+        if len(args) != 1 or kwargs:
+            return None
+        if not args[0].is_python_constant():
+            return None
+        try:
+            return ConstantVariable.create(round(self.value, args[0].as_python_constant()))
+        except Exception as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
 CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
