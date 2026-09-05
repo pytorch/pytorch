@@ -571,6 +571,9 @@ endfunction()
 #
 # When USE_LLVM_BOLT is enabled, original libraries are moved to the
 # prebolt/ subdirectory and bolted libraries are written in their place.
+# Pass the target followed by profile names in priority order:
+# torch_optimize_layout_if_enabled(<target> [<profile>...])
+# Falls back to lib<target>.yaml if specified profiles don't exist.
 function(torch_optimize_layout_if_enabled tgt)
   if(USE_PRIORITIZED_TEXT_FOR_LD)
     if(CMAKE_LINKER_TYPE STREQUAL "LLD")
@@ -586,8 +589,17 @@ function(torch_optimize_layout_if_enabled tgt)
     # BOLT needs --emit-relocs. This flag increases the binary size so we
     # scope it to bolt optimized targets rather than applying globally.
     target_link_options_if_supported(${tgt} "--emit-relocs")
-    set(_profile "${LLVM_BOLT_PROFILES_DIR}/lib${tgt}.yaml")
-    set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${_profile}")
+    find_file(
+      _bolt_profile
+      NAMES ${ARGN} "lib${tgt}.yaml"
+      PATHS "${LLVM_BOLT_PROFILES_DIR}"
+      NO_DEFAULT_PATH
+      NO_CMAKE_FIND_ROOT_PATH
+      NO_CACHE
+      REQUIRED
+    )
+    message(STATUS "Using BOLT profile for ${tgt}: ${_bolt_profile}")
+    set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${_bolt_profile}")
     set(_logfile "${CMAKE_BINARY_DIR}/logs/llvm-bolt-lib${tgt}.txt")
     set(_prebolt "$<TARGET_FILE_DIR:${tgt}>/prebolt/$<TARGET_FILE_NAME:${tgt}>")
     add_custom_command(
@@ -597,9 +609,9 @@ function(torch_optimize_layout_if_enabled tgt)
       COMMAND "${CMAKE_COMMAND}" -E rename "$<TARGET_FILE:${tgt}>" "${_prebolt}"
       COMMAND "${LLVM_BOLT_EXECUTABLE}" "${_prebolt}"
               -o "$<TARGET_FILE:${tgt}>"
-              "-data=${_profile}" "-log-file=${_logfile}"
+              "-data=${_bolt_profile}" "-log-file=${_logfile}"
               -lite -infer-stale-profile
-              -reorder-blocks=ext-tsp -reorder-functions=hfsort
+              -reorder-blocks=ext-tsp -reorder-functions=cdsort
               -split-functions -split-all-cold -split-eh -dyno-stats
               --update-debug-sections
       COMMENT "Optimizing $<TARGET_FILE_NAME:${tgt}> with LLVM BOLT (original kept in prebolt/)"

@@ -7,6 +7,7 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/PeerToPeerAccess.h>
+#include <c10/cuda/impl/CUDAGraphMemory.h>
 #include <c10/util/Gauge.h>
 #include <c10/util/Logging.h>
 #include <c10/util/ScopeExit.h>
@@ -41,6 +42,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -1205,7 +1207,7 @@ bool BlockComparatorSizeCounterAddress::operator()(
     const Block* a,
     const Block* b) const {
   if (a->stream != b->stream) {
-    return (uintptr_t)a->stream < (uintptr_t)b->stream;
+    return std::less<>{}(a->stream, b->stream);
   }
   if (a->size != b->size) {
     return a->size < b->size;
@@ -1213,14 +1215,14 @@ bool BlockComparatorSizeCounterAddress::operator()(
   if (a->registration_counter != b->registration_counter) {
     return a->registration_counter < b->registration_counter;
   }
-  return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
+  return std::less<>{}(a->ptr, b->ptr);
 }
 
 bool BlockComparatorAddress::operator()(const Block* a, const Block* b) const {
   if (a->stream != b->stream) {
-    return (uintptr_t)a->stream < (uintptr_t)b->stream;
+    return std::less<>{}(a->stream, b->stream);
   }
-  return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
+  return std::less<>{}(a->ptr, b->ptr);
 }
 
 // Info about OOM rejection, used to defer observer callbacks outside of lock
@@ -1518,23 +1520,13 @@ class DeviceCachingAllocator {
   // CUDAGraph capture, torch.cuda.use_mem_pool, ProcessGroupNCCL
   // registration, inductor cudagraph_trees warmup, and the allocator's own
   // try_mempool_fallback. Note: a non-empty list does NOT imply an active
-  // CUDA stream capture; for that, see num_active_captures_ below.
+  // CUDA stream capture; for that, see capture_tracker_ below.
   // Most of the time it's empty, so malloc can short-circuit on the hot path.
   std::vector<std::pair<MempoolId_t, std::function<bool(cudaStream_t)>>>
       allocation_scopes_;
 
-  // Count of in-progress CUDA stream captures on this device. Bumped by
-  // CUDAGraph's capture_begin / capture_end (and conditional-node helpers)
-  // around cudaStreamBeginCapture / cudaStreamEndCapture. Distinct from
-  // allocation_scopes_, which tracks pool routing — the latter can be
-  // populated without an active capture (e.g. torch.cuda.use_mem_pool,
-  // NCCL registration, inductor cudagraph_trees warmup, internal
-  // try_mempool_fallback).
-  //
-  // Plain int because all access is serialized through `mutex`. Promote to
-  // std::atomic<int> (relaxed) if begin/end ever need to race or if any
-  // reader wants lock-free access.
-  int num_active_captures_ = 0;
+  // Graph-specific capture state. CCA retains ownership of allocator Blocks.
+  CUDAGraphMemory::CaptureTracker capture_tracker_;
 
   // tracks which pools we can use as a last resort before ooming
   ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
@@ -1618,6 +1610,11 @@ class DeviceCachingAllocator {
   // affects trace entries for all devices used by the calling thread. This is
   // intentional: metadata labels a region of source code, not a device.
   static thread_local std::string user_metadata;
+
+  // Tag recorded as internal_metadata_ on trace entries emitted while it is
+  // set (see malloc_with_address). Guarded by mutex, which the setter holds
+  // across the tagged region.
+  std::string internal_metadata_tag;
 
  public:
   explicit DeviceCachingAllocator(c10::DeviceIndex id)
@@ -2125,17 +2122,12 @@ class DeviceCachingAllocator {
     const size_t prefix_size = requested_addr - block_begin;
 
     // mallocWithAddress may allocate both prefix block and requested block,
-    // and free prefix block later. This adds a fake malloc/free pair for prefix
-    // block. A metadata is added for better memory visualization.
-    const auto original_user_metadata = getUserMetadata();
-    const auto malloc_with_address_metadata = original_user_metadata.empty()
-        ? std::string("mallocWithAddress")
-        : original_user_metadata + "\nmallocWithAddress";
-    setUserMetadata(malloc_with_address_metadata);
-    auto restore_user_metadata =
-        c10::make_scope_exit([this, original_user_metadata]() {
-          setUserMetadata(original_user_metadata);
-        });
+    // and free prefix block later. This adds a fake malloc/free pair for
+    // prefix block. Tag the resulting trace entries for better memory
+    // visualization, without touching the user-set metadata.
+    internal_metadata_tag = "mallocWithAddress";
+    auto clear_internal_metadata =
+        c10::make_scope_exit([this]() { internal_metadata_tag.clear(); });
 
     Block* prefix_block = nullptr;
     Block* requested_source = containing_block;
@@ -3328,16 +3320,13 @@ class DeviceCachingAllocator {
   // begin/end for one capture are not racing each other.
   void markCaptureBegin() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    num_active_captures_++;
+    capture_tracker_.captureBegin();
   }
 
   // Called by CUDAGraph after cudaStreamEndCapture.
   void markCaptureEnd() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    TORCH_INTERNAL_ASSERT(
-        num_active_captures_ > 0,
-        "markCaptureEnd called with no captures in progress");
-    num_active_captures_--;
+    capture_tracker_.captureEnd();
   }
 
   // Called by CUDAGraph::reset and MemPool::~MemPool()
@@ -3764,7 +3753,7 @@ class DeviceCachingAllocator {
   // not mistaken for a real capture.
   //
   // Two layers, from cheapest to most expensive:
-  //   1. Device-wide counter: num_active_captures_ == 0 means no capture is
+  //   1. Device-wide state: CUDAGraphMemory reports whether a capture is
   //      in progress anywhere on this device, so the answer is trivially
   //      false. This is the common case and the hot path.
   //   2. Per-stream syscall: cudaStreamGetCaptureInfo on the current stream.
@@ -3773,10 +3762,10 @@ class DeviceCachingAllocator {
   //      device that has another stream capturing (eager-eligible) from the
   //      capturing stream itself (must follow capture rules).
   //
-  // The counter read is safe because all callers hold `mutex`
-  // (see num_active_captures_).
+  // The device-wide state read is safe because all callers hold `mutex`
+  // (see CUDAGraphMemory::CaptureTracker::hasActiveCaptures()).
   bool is_capture_context() {
-    if (C10_LIKELY(num_active_captures_ == 0)) {
+    if (C10_LIKELY(!capture_tracker_.hasActiveCaptures())) {
       return false;
     }
     cudaStream_t stream = cuda::getCurrentCUDAStream(device_id).stream();
@@ -4594,6 +4583,7 @@ class DeviceCachingAllocator {
         record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
         compile_string,
         metadata_override ? std::move(*metadata_override) : user_metadata);
+    te.internal_metadata_ = internal_metadata_tag;
 
     // Callbacks should not include any Pytorch call
     for (const auto& cb : trace_trackers_) {
