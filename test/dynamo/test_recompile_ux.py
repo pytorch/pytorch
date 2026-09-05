@@ -4,6 +4,7 @@ import gc
 import operator
 import queue
 import sys
+import tempfile
 import textwrap
 import threading
 import unittest
@@ -854,6 +855,71 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         entries = _get_cache_entries_for_region(code, -1)
         self.assertTrue(any(e.trace_annotation == "Invalidated" for e in entries))
 
+    def _install_eager_package(self, fn, region):
+        # A DiskDynamoStore round trip is the only way to get a package whose
+        # install() loads precompile entries for fn.__code__.
+        from torch._dynamo.package import CompilePackage, DiskDynamoStore
+
+        store = DiskDynamoStore()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = tmp.name
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(backend="eager", package=package)(fn)(torch.randn(8))
+        for backend_id, backend in package.cached_backends.items():
+            store.record_eager_backend(backend_id, backend)
+        store.save_package(package, path)
+        torch._dynamo.reset()
+        package, backends = store.load_package(fn, path)
+        package.install(backends, isolate_recompiles_id=region)
+        return package, backends
+
+    def test_reinstall_survives_an_eviction_parked_by_uninstall(self):
+        # uninstall() from Python run BY an in-flight lookup (here a backend
+        # __eq__) cannot splice the list that lookup is walking, so its owner
+        # eviction is parked. A reinstall that reused the same owner token
+        # then lost its fresh entries to that parked eviction at the next
+        # depth-zero lock holder; each install now mints its own token.
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        region = 7
+        package, backends = self._install_eager_package(f, region)
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+        hook = []
+
+        class Backend:
+            def __call__(self, gm, example_inputs):
+                return gm.forward
+
+            def __hash__(self):
+                return 0
+
+            def __eq__(self, other):
+                if isinstance(other, Backend):
+                    if hook:
+                        hook.pop()()
+                    return True
+                return NotImplemented
+
+        x = torch.randn(8)
+        torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x)
+
+        def reinstall():
+            package.uninstall()
+            package.install(backends, isolate_recompiles_id=region)
+
+        hook.append(reinstall)
+        torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x)
+        # The parked eviction has been applied by now; the reinstall's entries
+        # must have survived it.
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+        package.uninstall()
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
+
     def test_region_clear_from_inside_a_lookup_is_parked(self):
         # _clear_cache_entries_for_region run by a backend __eq__ inside
         # lookup() used to splice and destroy the very list lookup was
@@ -910,6 +976,57 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         # the parked clear, then missed and recompiled into the region.
         self.assertEqual(len(compiles), 2)
         self.assertEqual(len(_get_cache_entries_for_region(code, region)), 1)
+
+    def test_precompile_reset_from_inside_a_lookup_is_parked(self):
+        # Same hazard for _reset_precompile_entries: run by a backend __eq__
+        # inside lookup() it now parks, and the next depth-zero holder (the
+        # precompile-entry reader here) applies it.
+        from torch._C._dynamo.eval_frame import (
+            _debug_get_precompile_entries,
+            _reset_precompile_entries,
+        )
+
+        def f(x):
+            return x.sin() + x.cos()
+
+        code = f.__code__
+        # Kept alive: a dead package's finalizer would uninstall the entries.
+        package, _ = self._install_eager_package(f, 7)
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+        hook = []
+
+        class Backend:
+            def __call__(self, gm, example_inputs):
+                return gm.forward
+
+            def __hash__(self):
+                return 0
+
+            def __eq__(self, other):
+                if isinstance(other, Backend):
+                    if hook:
+                        hook.pop()()
+                    return True
+                return NotImplemented
+
+        x = torch.randn(8)
+        torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x)
+
+        seen = []
+
+        def reset():
+            _reset_precompile_entries(code)
+            # Recorded, not asserted; see test_region_clear_from_inside_a_lookup.
+            seen.append(len(_debug_get_precompile_entries(code)))
+
+        hook.append(reset)
+        self.assertEqual(
+            torch._dynamo.optimize(backend=Backend(), dynamic=False)(f)(x), f(x)
+        )
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 0)
+        # The parked reset left the entry in place until the lookup finished.
+        self.assertEqual(seen, [1])
+        package.uninstall()
 
     @torch._dynamo.config.patch(
         recompile_limit=1,
