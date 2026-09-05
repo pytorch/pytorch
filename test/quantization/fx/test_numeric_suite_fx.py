@@ -4,7 +4,6 @@
 import copy
 import math
 import operator
-import unittest
 
 import torch
 import torch.nn as nn
@@ -22,6 +21,10 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     prepare_qat_fx,
 )
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_quantization import (
     ConvBnModel,
     ConvBnReLUModel,
@@ -37,13 +40,16 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     TwoLayerLinearModel
 )
-from torch.testing._internal.common_utils import raise_on_run_directly, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+)
 from torch.ao.quantization.quantization_mappings import (
     get_default_static_quant_module_mappings,
     get_default_dynamic_quant_module_mappings,
     get_default_float_to_quantized_operator_mappings,
 )
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns
 import torch.ao.quantization.fx.quantize_handler as qh
@@ -311,6 +317,7 @@ def get_all_quant_patterns():
     return all_quant_patterns
 
 class TestFXGraphMatcher(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfNoFBGEMM
     def test_simple_mod(self):
@@ -793,6 +800,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
 
 class TestFXGraphMatcherModels(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfTorchDynamo("too slow")
     @skipIfNoFBGEMM
@@ -990,6 +998,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
 
 
 class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfNoFBGEMM
     def test_extract_weights_mod_ptq(self):
@@ -1964,50 +1973,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         ref_shadow = mc_shadows_mp(*example_inputs)
         self.assertEqual(ref_fp32, ref_shadow)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_extract_weights_cuda(self):
-        # Note: this is not using quantization because quantized kernels do not
-        # work on cuda yet.
-        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
-        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
-        results = extract_weights('a', m1, 'b', m2)
-        extend_logger_results_with_comparison(
-            results, 'a', 'b', compute_sqnr, 'sqnr')
-        self.assert_ns_compare_dict_valid(results)
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_add_loggers_cuda(self):
-        # Note: this is not using quantization because quantized kernels do not
-        # work on cuda yet.
-        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
-        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
-        m1_ns, m2_ns = add_loggers('a', m1, 'b', m2, OutputLogger)
-        datum = torch.randn(1, 1, 1, 1)
-        datum = datum.cuda()
-
-        m1_ns(datum)
-        m2_ns(datum)
-
-        act_compare_dict = extract_logger_info(m1_ns, m2_ns, OutputLogger, 'b')
-        extend_logger_results_with_comparison(
-            act_compare_dict, 'a', 'b', compute_sqnr, 'sqnr')
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_add_shadow_loggers_cuda(self):
-        # Note: this is not using quantization because quantized kernels do not
-        # work on cuda yet.
-        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
-        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).cuda()
-        m1_shadows_m2 = add_shadow_loggers('a', m1, 'b', m2, OutputLogger)
-        datum = torch.randn(1, 1, 1, 1)
-        datum = datum.cuda()
-
-        m1_shadows_m2(datum)
-
-        act_compare_dict = extract_shadow_logger_info(m1_shadows_m2, OutputLogger, 'b')
-        extend_logger_results_with_comparison(
-            act_compare_dict, 'a', 'b', compute_sqnr, 'sqnr')
-
     def test_fp16_shadows_fp32(self):
         m = LinearReluFunctional().eval()
         example_inputs = (torch.randn(1, 4),)
@@ -2089,11 +2054,62 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             mt_shadows_mt_copy, OutputLogger, 'b')
         self.assertTrue(len(act_compare_dict) == 1)
 
+
+class TestFXNumericSuiteCoreAPIsDevice(FXNumericSuiteQuantizationTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_extract_weights_gpu(self, device):
+        # Note: this is not using quantization because quantized kernels do not
+        # work on cuda yet.
+        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
+        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
+        results = extract_weights('a', m1, 'b', m2)
+        extend_logger_results_with_comparison(
+            results, 'a', 'b', compute_sqnr, 'sqnr')
+        self.assert_ns_compare_dict_valid(results)
+
+    @onlyAccelerator
+    def test_add_loggers_gpu(self, device):
+        # Note: this is not using quantization because quantized kernels do not
+        # work on cuda yet.
+        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
+        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
+        m1_ns, m2_ns = add_loggers('a', m1, 'b', m2, OutputLogger)
+        datum = torch.randn(1, 1, 1, 1)
+        datum = datum.to(device)
+
+        m1_ns(datum)
+        m2_ns(datum)
+
+        act_compare_dict = extract_logger_info(m1_ns, m2_ns, OutputLogger, 'b')
+        extend_logger_results_with_comparison(
+            act_compare_dict, 'a', 'b', compute_sqnr, 'sqnr')
+
+    @onlyAccelerator
+    def test_add_shadow_loggers_gpu(self, device):
+        # Note: this is not using quantization because quantized kernels do not
+        # work on cuda yet.
+        m1 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
+        m2 = nn.Sequential(nn.Conv2d(1, 1, 1)).to(device)
+        m1_shadows_m2 = add_shadow_loggers('a', m1, 'b', m2, OutputLogger)
+        datum = torch.randn(1, 1, 1, 1)
+        datum = datum.to(device)
+
+        m1_shadows_m2(datum)
+
+        act_compare_dict = extract_shadow_logger_info(m1_shadows_m2, OutputLogger, 'b')
+        extend_logger_results_with_comparison(
+            act_compare_dict, 'a', 'b', compute_sqnr, 'sqnr')
+
+
 @skipIfNoQNNPACK
 class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
     """
     Tests the "n shadows" workflow.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _test_impl(self, m, example_input, qconfig_mappings):
         backend_config = get_native_backend_config()
@@ -2772,6 +2788,8 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     Tests numeric suite core APIs on non-toy models.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfNoFBGEMM
     def test_compare_weights_conv(self):
         test_cases = (
@@ -2930,6 +2948,15 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             m, (torch.randn(1, 3, 224, 224),),
             qconfig_dict=qconfig_dict,
             should_log_inputs=False)
+
+
+instantiate_device_type_tests(
+    TestFXNumericSuiteCoreAPIsDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True
+)
+
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")
