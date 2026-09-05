@@ -24,15 +24,16 @@ from torch.testing._internal.common_utils import (
 
 
 def _fa4_dependencies_available() -> bool:
-    if not torch.cuda.is_available():
+    if not (torch.cuda.is_available() or torch.xpu.is_available()):
         return False
-    major, _ = torch.cuda.get_device_capability(torch.cuda.current_device())
-    if major not in (9, 10):
-        return False
-    try:
-        importlib.import_module("flash_attn.cute.interface")
-    except ModuleNotFoundError:
-        return False
+    if torch.cuda.is_available():
+        major, _ = torch.cuda.get_device_capability(torch.cuda.current_device())
+        if major not in (9, 10):
+            return False
+        try:
+            importlib.import_module("flash_attn.cute.interface")
+        except ModuleNotFoundError:
+            return False
     return True
 
 
@@ -48,6 +49,9 @@ class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
     def setUpClass(cls):
         super().setUpClass()
         if not _fa4_dependencies_available():
+            return
+        # On XPU flash_attn package is not required; FA4 is registered via XPU-native path
+        if torch.xpu.is_available() and not torch.cuda.is_available():
             return
         # This might pollute tests.. TODO
         activate_flash_attention_impl("FA4")
@@ -86,6 +90,8 @@ class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
     @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_fa4_kernel_called(self, device, dtype):
+        if device.startswith("xpu"):
+            self.skipTest("test_fa4_kernel_called requires flash_attn package (CUDA-only)")
         self._test_kernel_called(device, dtype)
 
     @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
@@ -193,6 +199,8 @@ class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
     @parametrize("deterministic", [False, True])
     def test_deterministic_flag_passed_to_backward(self, device, deterministic):
         """Test that deterministic flag is correctly passed through to FA4 backward kernel."""
+        if device.startswith("xpu"):
+            self.skipTest("test_deterministic_flag_passed_to_backward is CUDA-specific (patches _fa4._fa4_import_module)")
         from torch.nn.attention import _fa4
 
         shape = SdpaShape(2, 4, 512, 128)
@@ -246,7 +254,7 @@ class TestFlashAttentionFA4(FlashAttentionTestMixin, TestCase):
             _fa4._fa4_import_module.cache_clear()
 
 
-instantiate_device_type_tests(TestFlashAttentionFA4, globals(), only_for="cuda")
+instantiate_device_type_tests(TestFlashAttentionFA4, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
