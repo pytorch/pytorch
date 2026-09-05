@@ -13110,22 +13110,19 @@ class <lambda>(torch.nn.Module):
 
     # https://github.com/pytorch/pytorch/issues/195970
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["direct", "aot_eager", "inductor"])
     def test_while_loop_constant_false_cond_mutation(self, device, compile_mode):
-        def f(state):
-            def cond_fn(i):
-                random.random()
-                state.add_(1)
+        def f(state, x):
+            def cond_fn(x):
+                r = random.randint(1, 10) if x.is_contiguous() else random.random()
+                state.add_(1 if torch.tensor(r).is_floating_point() else 10)
                 return False
 
-            def body_fn(i):
-                return (i + 1,)
+            def body_fn(x):
+                return (x + 1,)
 
-            return torch.while_loop(
-                cond_fn,
-                body_fn,
-                (torch.zeros((), dtype=torch.int64, device=state.device),),
-            )
+            return torch.while_loop(cond_fn, body_fn, (x,))
 
         rng_state = random.getstate()
         try:
@@ -13140,14 +13137,39 @@ class <lambda>(torch.nn.Module):
                 else torch.compile(f, backend=compile_mode, fullgraph=True)
             )
             state = torch.zeros((), device=device)
+            x = torch.arange(8.0, device=device)[::2]
             with torch.no_grad():
                 for _ in range(2):
-                    result = fn(state)
-            self.assertEqual(result[0], 0)
+                    result = fn(state, x)
+            self.assertEqual(result[0], x)
             self.assertEqual(state, 2)
             self.assertEqual(random.random(), expected_next_random)
         finally:
             random.setstate(rng_state)
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_while_loop_constant_false_replay_input_mutation(self, device):
+        def f(x):
+            def cond_fn(x):
+                if not x.is_contiguous():
+                    x.add_(1)
+                return False
+
+            def body_fn(x):
+                return (x + 1,)
+
+            return torch.while_loop(cond_fn, body_fn, (x,))
+
+        x = torch.arange(8.0, device=device)[::2]
+        with (
+            torch.enable_grad(),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Higher order ops do not support input mutation",
+            ),
+        ):
+            f(x)
 
     # https://github.com/pytorch/pytorch/issues/195327
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
