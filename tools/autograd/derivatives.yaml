@@ -769,12 +769,14 @@
 
 - name: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   input, grid: "grad.defined() ? grid_sampler_2d_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners, grad_input_mask) : std::tuple<Tensor, Tensor>()"
+  result: std::get<0>(grid_sampler_2d_double_backward(input_t, grid_t, Tensor(), input_p, grid_p, interpolation_mode, padding_mode, align_corners, {true, false, false}))
 
 - name: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners, bool[2] output_mask) -> (Tensor, Tensor)
   grad_output, input, grid: grid_sampler_2d_double_backward(grads[0], grads[1], grad_output, input, grid, interpolation_mode, padding_mode, align_corners, grad_input_mask)
 
 - name: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   input, grid: "grad.defined() ? grid_sampler_3d_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners, grad_input_mask) : std::tuple<Tensor, Tensor>()"
+  result: std::get<0>(grid_sampler_3d_double_backward(input_t, grid_t, Tensor(), input_p, grid_p, interpolation_mode, padding_mode, align_corners, {true, false, false}))
 
 - name: grid_sampler_3d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners, bool[2] output_mask) -> (Tensor, Tensor)
   grad_output, input, grid: grid_sampler_3d_double_backward(grads[0], grads[1], grad_output, input, grid, interpolation_mode, padding_mode, align_corners, grad_input_mask)
@@ -2767,6 +2769,7 @@
 
 - name: cudnn_grid_sampler(Tensor self, Tensor grid) -> Tensor output
   self, grid: "grad.defined() ? cudnn_grid_sampler_backward(self, grid, grad) : std::tuple<Tensor, Tensor>()"
+  output: std::get<0>(grid_sampler_2d_double_backward(self_t, grid_t, Tensor(), self_p, grid_p, 0, 0, true, {true, false, false}))
 
 - name: cudnn_grid_sampler_backward(Tensor self, Tensor grid, Tensor grad_output) -> (Tensor grad_self, Tensor grad_grid)
   grad_output, self, grid: grid_sampler_2d_double_backward(grads[0], grads[1], grad_output, self, grid, 0, 0, true, grad_input_mask)
