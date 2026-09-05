@@ -738,6 +738,7 @@ static void avg_pool2d_template(const Tensor& input,
   // However, for Long type, the accumulated error when multiplying the divisor
   // would produce results that mismatch CPU results.
   if (use_divisor && input.scalar_type() == ScalarType::Long) {
+    getCurrentMPSStream()->assertCapturable("avg_pool2d (int64 divisor_override CPU fallback)");
     TORCH_WARN_ONCE("MPS: passing divisor to Average Pooling op with int64 input is ",
                     "not supported on MPS backend. ",
                     "Falling back on CPU. This may have performance implications.");

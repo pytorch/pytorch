@@ -633,6 +633,9 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
 
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar) {
   scalar.buffer = getIMPSAllocator()->allocScalarBufferWithValue(&scalar.value, scalar.size);
+  // The MPSScalar is a stack local, so this buffer goes back to the scalar pool
+  // the moment the op returns, i.e. still inside the capture block.
+  mpsStream->captureNoteBuffer(scalar.getMTLBuffer());
   return [[[MPSGraphTensorData alloc] initWithMTLBuffer:scalar.getMTLBuffer()
                                                   shape:@[ @1 ]
                                                dataType:getMPSScalarType(scalar.type)] autorelease];

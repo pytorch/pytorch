@@ -570,6 +570,45 @@ void initModule(PyObject* module) {
     pybind11::gil_scoped_release no_gil;
     at::mps::getMPSProfiler().stopCapture();
   });
+  // Capture must observe the stream ops actually enqueue on. Every MPS operator
+  // dispatches through getCurrentMPSStream(), so capturing against
+  // getDefaultMPSStream() would record nothing whenever a non-default stream is
+  // current.
+  m.def("_mps_isCurrentStreamCapturing", []() {
+    // Answered without touching a stream when nothing is recording anywhere:
+    // torch.cuda.is_current_stream_capturing() promises to return False without
+    // initializing the context, and library code calls this as a cheap probe.
+    // No stream can be recording unless one already exists.
+    return at::mps::isAnyStreamCapturing() &&
+        at::mps::getCurrentMPSStream()->captureMode();
+  });
+  // Owning capture handle behind torch.mps.MetalGraph. Python object lifetime
+  // drives release, so dropping the object frees the capture the way dropping a
+  // torch.cuda.CUDAGraph does. These entry points block on the stream's serial
+  // queue, so they release the GIL rather than stall other Python threads.
+  py::class_<at::mps::MPSStream::MetalGraph>(m, "_MetalGraph")
+      .def(py::init<>())
+      .def(
+          "capture_begin",
+          &at::mps::MPSStream::MetalGraph::captureBegin,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "capture_end",
+          &at::mps::MPSStream::MetalGraph::captureEnd,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "replay",
+          &at::mps::MPSStream::MetalGraph::replay,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "reset",
+          &at::mps::MPSStream::MetalGraph::reset,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "step_count",
+          &at::mps::MPSStream::MetalGraph::stepCount,
+          py::call_guard<py::gil_scoped_release>())
+      .def("is_captured", &at::mps::MPSStream::MetalGraph::isCaptured);
   m.def("_mps_get_name", []() {
     return at::mps::MPSDevice::getInstance()->getName();
   });
