@@ -395,12 +395,10 @@ def record(
                     error_handler.dump_error_file(failure.error_file, failure.exitcode)
                 else:
                     logger.info(
-                        (
-                            "local_rank %s FAILED with no error file."
-                            " Decorate your entrypoint fn with @record for traceback info."
-                            " See: https://pytorch.org/docs/stable/elastic/errors.html",
-                            rank,
-                        )
+                        "local_rank %s FAILED with no error file."
+                        " Decorate your entrypoint fn with @record for traceback info."
+                        " See: https://pytorch.org/docs/stable/elastic/errors.html",
+                        rank,
                     )
                 raise
             except Exception as e:
