@@ -53,6 +53,21 @@ def autotune_at_compile_time_default() -> bool | None:
     return get_tristate_env("TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME")
 
 
+def lite_mode_default(lite_value: bool, default: bool) -> bool:
+    """Default for a knob that lite_mode_options overrides.
+
+    TORCHINDUCTOR_LITE_MODE=1 installs the same bundle as
+    torch.compile(mode="lite"), so an existing test list can be re-run under
+    all-fallback mode without editing the tests, and so the setting reaches
+    model-generation subprocesses (e.g. test/cpp/aoti_inference). Keep this a
+    function rather than a module-level bool: a bool would be picked up as a
+    settable config entry that silently does nothing after import.
+    """
+    if os.environ.get("TORCHINDUCTOR_LITE_MODE") == "1":
+        return lite_value
+    return default
+
+
 def static_cuda_launcher_default() -> bool:
     STATIC_CUDA_LAUNCHER_VERSION = 2
 
@@ -257,7 +272,7 @@ pick_loop_orders = True
 inplace_buffers = True
 
 # reuse a buffer for an unrelated purpose
-allow_buffer_reuse = True
+allow_buffer_reuse = lite_mode_default(False, True)
 
 # Enable pooled allocations for non-output tensors
 memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
@@ -456,7 +471,7 @@ reorder_for_compute_comm_overlap_passes: list[
 reorder_prefetch_limit: int | None = None
 
 # enable operator reordering for peak memory optimization
-reorder_for_peak_memory = True
+reorder_for_peak_memory = lite_mode_default(False, True)
 reorder_for_peak_memory_debug = False
 
 # In some cases, when all the nodes that can be scheduled are quite large,
@@ -741,21 +756,21 @@ max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 # Different from default inductor mode that fuses all nodes, this config enables an
 # opt-in mode that only fuse for user-specified nodes. The motivation is to provide
 # guaranteed numeric correctness and give full control to users.
-fallback_by_default: bool = False
+fallback_by_default: bool = lite_mode_default(True, False)
 
 
 # This config allows selective decomposition of certain operators in the graph.
 # Currently the only use case is to patch the same-name config in functorch, for
 # inductor lite mode. See more details in [Note: Selective Decomposition]
-selective_decompose: bool = False
+selective_decompose: bool = lite_mode_default(True, False)
 
 
 # Use dead code elimination
-use_dce: bool = True
+use_dce: bool = lite_mode_default(False, True)
 
 
 # Use fx graph passes
-use_pre_grad_passes: bool = True
+use_pre_grad_passes: bool = lite_mode_default(False, True)
 
 # "early": pre-grad passes run before cache lookup (every compile).
 # "late": pre-grad passes run after cache lookup (only on cache miss);
@@ -765,8 +780,8 @@ use_pre_grad_passes: bool = True
 pre_grad_pass_timing: Literal["early", "late", "default"] = "default"
 
 
-use_joint_graph_passes: bool = True
-use_post_grad_passes: bool = True
+use_joint_graph_passes: bool = lite_mode_default(False, True)
+use_post_grad_passes: bool = lite_mode_default(False, True)
 
 
 cutedsl_enable_autotuning: bool = (
@@ -2031,7 +2046,7 @@ class triton:
 
     # reorder nodes to minimize the number of graph partitions while
     # not incurring large memory overhead
-    reorder_for_reducing_graph_partitions: bool = True
+    reorder_for_reducing_graph_partitions: bool = lite_mode_default(False, True)
 
     # Memory budget multiplier for cudagraph partition reordering.
     # When reordering nodes to minimize partitions, the reordering is only
