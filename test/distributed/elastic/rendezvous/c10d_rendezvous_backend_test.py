@@ -274,6 +274,23 @@ class CreateBackendTest(TestCase):
         ):
             create_backend(self._params_filestore)
 
+    def test_create_backend_closes_mkstemp_file_descriptor(self) -> None:
+        # Set the endpoint to empty so the default path (mkstemp) is used.
+        self._params_filestore.endpoint = ""
+
+        fd, temp_path = tempfile.mkstemp()
+        # mkstemp() opens the file; we only need the path here, so close the
+        # descriptor we created before handing the path to the mocks below.
+        os.close(fd)
+        self.addCleanup(os.remove, temp_path)
+
+        with mock.patch("tempfile.mkstemp", return_value=(fd, temp_path)), mock.patch(
+            "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.os.close"
+        ) as os_close_mock:
+            create_backend(self._params_filestore)
+
+        os_close_mock.assert_called_once_with(fd)
+
     @mock.patch(
         "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"
     )
