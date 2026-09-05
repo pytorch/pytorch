@@ -56,7 +56,7 @@ class GemmReductionGeometry:
 
     @property
     def needs_physical_callbacks(self) -> bool:
-        return self.axis == 0 or self.group > GEMM_REDUCTION_FRAGMENT_WIDTH
+        return self.axis == 0 or self.group >= GEMM_REDUCTION_FRAGMENT_WIDTH
 
     @property
     def group_size(self) -> int:

@@ -39,6 +39,7 @@ class LoopIRCuteDSLCodegen:
         removed_buffers: OrderedSet[str],
         reduction_geometries: dict[str, GemmReductionGeometry] | None = None,
         suppressed_outputs: OrderedSet[str] | None = None,
+        accumulator_dtype: torch.dtype = torch.float32,
     ) -> None:
         self.accumulator = accumulator
         self.removed_buffers = removed_buffers
@@ -53,7 +54,7 @@ class LoopIRCuteDSLCodegen:
         self.input_values: dict[str, CuteDSLCSEVariable] = {}
         self.replacements: dict[int, CuteDSLCSEVariable] = {}
         self.accumulator_value = CuteDSLCSEVariable(
-            "accum", ValueRanges.unknown(), dtype=torch.float32, shape=(1,)
+            "accum", ValueRanges.unknown(), dtype=accumulator_dtype, shape=(1,)
         )
 
     def load(self, name: str, stored: Any) -> Any:
@@ -113,7 +114,11 @@ class LoopIRCuteDSLCodegen:
         self, analysis: GemmEpilogueIRAnalysis, output_name: str
     ) -> None:
         store = analysis.store(output_name)
-        if store is None or store.value.reductions:
+        if (
+            store is None
+            or store.value.reductions
+            or output_name in self.reduction_geometries
+        ):
             return
 
         pending = [store.value]
@@ -126,6 +131,9 @@ class LoopIRCuteDSLCodegen:
                 continue
             if value.op == "load":
                 name, index, stored = value.args
+                if stored is not None and name in self.reduction_geometries:
+                    pending.append(stored)
+                    continue
                 expected_index = self._direct_load_index(analysis, output_name, name)
                 if (
                     expected_index is None
@@ -379,9 +387,11 @@ class LoopIRCuteDSLCodegen:
             self._validate_load_indices(analysis, name)
             if name not in self.removed_buffers and name not in self.suppressed_outputs:
                 outputs.append((name, self.lower(store.value)))
-        if not outputs:
-            raise NotImplementedError("CuTeDSL GEMM epilogue has no outputs")
         local_reduce_outputs = tuple(self.suppressed_outputs)
+        if not outputs:
+            if not local_reduce_outputs:
+                raise NotImplementedError("CuTeDSL GEMM epilogue has no outputs")
+            outputs.append((self.accumulator, self.accumulator_value))
         if len(local_reduce_outputs) > 1:
             raise NotImplementedError(
                 "CuTeDSL GEMM epilogues support one returned local reduction"
@@ -432,6 +442,7 @@ class LoopIRCuteDSLCodegen:
             removed_buffers,
             reduction_geometries,
             suppressed_outputs,
+            accumulator_dtype=V.graph.get_dtype(accumulator),
         )
         with (
             V.set_kernel_handler(codegen.kernel),
