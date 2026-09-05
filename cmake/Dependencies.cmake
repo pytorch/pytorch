@@ -1688,7 +1688,7 @@ target_compile_definitions(fmt PUBLIC "FMT_NO_UNIQUE_ADDRESS=${_fmt_no_unique_ad
 target_compile_definitions(fmt-header-only INTERFACE "FMT_NO_UNIQUE_ADDRESS=${_fmt_no_unique_address}")
 unset(_fmt_no_unique_address)
 
-list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
+list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 
 # ---[ Kineto

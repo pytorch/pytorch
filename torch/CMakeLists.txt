@@ -83,7 +83,7 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     nlohmann
     moodycamel
     shm
-    fmt::fmt-header-only
+    fmt::fmt
     ATEN_CPU_FILES_GEN_LIB)
 
 if(USE_ASAN AND TARGET Sanitizer::address)
@@ -578,7 +578,7 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   else()
     target_link_libraries(nnapi_backend PRIVATE torch)
   endif()
-  target_link_libraries(nnapi_backend PRIVATE torch_python pybind::pybind11 fmt::fmt-header-only)
+  target_link_libraries(nnapi_backend PRIVATE torch_python pybind::pybind11 fmt::fmt)
   if(MSVC AND TORCH_PYTHON_LINK_FLAGS)
     set_target_properties(nnapi_backend PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
   endif()
