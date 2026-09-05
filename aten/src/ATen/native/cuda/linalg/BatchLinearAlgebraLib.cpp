@@ -6,7 +6,13 @@
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/irange.h>
+#include <c10/util/SmallVector.h>
+
+#include <unordered_map>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/TransposeType.h>
@@ -37,6 +43,13 @@
 #define ROCSOLVER_SYEVD_BATCHED_ENABLED 0
 #endif
 #endif // defined(USE_ROCM)
+
+namespace at::cuda {
+// Declared here rather than in the widely-included CUDAContextLight.h: this is
+// an internal helper for the looped multi-stream paths, unlike
+// getCurrentCUDASolverDnHandle, which is public API.
+cusolverDnHandle_t getCUDASolverDnHandleForStream(cudaStream_t stream);
+} // namespace at::cuda
 
 namespace at::native {
 
@@ -1663,6 +1676,80 @@ void linalg_eig_cusolver_xgeev(const Tensor& eigenvalues, const Tensor& eigenvec
 // The 'apply_' word is used for templated by dtype functions that call an API routine
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
 // apply_ to this function.
+
+namespace {
+
+// Keep storage alive until work queued on `stream` completes.
+void record_tensor_on_stream(const Tensor& t, c10::cuda::CUDAStream stream) {
+  if (t.defined() && t.numel() > 0) {
+    c10::cuda::CUDACachingAllocator::recordStream(t.storage().data_ptr(), stream);
+  }
+}
+
+void record_dataptr_on_stream(const c10::DataPtr& ptr, c10::cuda::CUDAStream stream) {
+  if (ptr.get() != nullptr) {
+    c10::cuda::CUDACachingAllocator::recordStream(ptr, stream);
+  }
+}
+
+// Run independent cuSOLVER calls round-robin over auxiliary streams and join
+// back to the original stream. `launch` receives is_first_use_of_stream so it
+// can record shared storages once per auxiliary stream without re-deriving the
+// scheduling. Falls back to serial execution during CUDA graph capture.
+template <typename launch_t>
+void looped_cusolver_multistream(
+    int64_t batch_size,
+    int64_t n_streams,
+    const launch_t& launch) {
+  auto main_stream = c10::cuda::getCurrentCUDAStream();
+  // Do not grab more pooled streams than there is work for.
+  n_streams = std::min<int64_t>(n_streams, batch_size);
+  // Avoid introducing auxiliary-stream execution while capturing CUDA graphs:
+  // fall back to serial execution during capture.
+  if (n_streams <= 1 ||
+      c10::cuda::currentStreamCaptureStatusMayInitCtx() !=
+          c10::cuda::CaptureStatus::None) {
+    auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+    for (const auto i : c10::irange(batch_size)) {
+      launch(i, /*stream_id=*/static_cast<int64_t>(0),
+             /*is_first_use_of_stream=*/false, handle, main_stream);
+    }
+    return;
+  }
+
+  at::cuda::CUDAEvent fork_event;
+  fork_event.record(main_stream);
+
+  c10::SmallVector<c10::cuda::CUDAStream, 8> streams;
+  streams.reserve(n_streams);
+  for (int64_t s = 0; s < n_streams; ++s) {
+    auto stream = c10::cuda::getStreamFromPool();
+    fork_event.block(stream);
+    streams.push_back(stream);
+  }
+
+  // Track first use of each auxiliary stream here, where the scheduling is
+  // owned, so the callback does not have to re-derive it.
+  c10::SmallVector<uint8_t, 8> used(n_streams, 0);
+  for (const auto i : c10::irange(batch_size)) {
+    const auto stream_id = i % n_streams;
+    auto stream = streams[stream_id];
+    const bool is_first_use_of_stream = used[stream_id] == 0;
+    used[stream_id] = 1;
+    c10::cuda::CUDAStreamGuard guard(stream);
+    auto handle = at::cuda::getCUDASolverDnHandleForStream(stream.stream());
+    launch(i, stream_id, is_first_use_of_stream, handle, stream);
+  }
+
+  for (auto& stream : streams) {
+    at::cuda::CUDAEvent join_event;
+    join_event.record(stream);
+    join_event.block(main_stream);
+  }
+}
+
+} // anonymous namespace
+
 void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
     self.scalar_type(),
@@ -1688,19 +1775,59 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
     at::cuda::solver::getrf_bufferSize<scalar_t>(
       handle, m, n, self_data, lda, &lwork);
     auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-    auto workspace = allocator.allocate(sizeof(scalar_t) * lwork);
-    auto workspace_ptr = static_cast<scalar_t*>(workspace.get());
 
-    for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
+    // Overlap independent factorizations across a few auxiliary streams.
+    // Larger factorizations naturally show less overlap as a single getrf occupies
+    // more of the GPU, so this path is bounded by the batch threshold, stream-count
+    // cap, and workspace budget rather than by a fixed size cutoff.
+    constexpr int64_t kMultiStreamMinBatch = 8;
+    constexpr int64_t kMaxStreams = 8;
+    int64_t n_streams = 1;
+    if (batch_size >= kMultiStreamMinBatch) {
+      n_streams = std::min<int64_t>(batch_size, kMaxStreams);
+      // Bound extra memory from per-stream workspaces; clamping to 1 falls back to
+      // serial execution.
+      const int64_t workspace_bytes =
+          static_cast<int64_t>(sizeof(scalar_t)) * static_cast<int64_t>(lwork);
+      if (workspace_bytes > 0) {
+        constexpr int64_t kMaxAuxWorkspaceBytes = 256LL << 20;
+        n_streams = std::min<int64_t>(
+            n_streams,
+            std::max<int64_t>(1, kMaxAuxWorkspaceBytes / workspace_bytes));
+      }
+    }
+
+    // Allocate before launching auxiliary work so OOM cannot bypass the join.
+    c10::SmallVector<c10::DataPtr, 8> workspaces;
+    workspaces.reserve(n_streams);
+    for (int64_t k = 0; k < n_streams; ++k) {
+      workspaces.push_back(allocator.allocate(sizeof(scalar_t) * lwork));
+    }
+
+    auto launch = [&](int64_t i,
+                      int64_t stream_id,
+                      bool is_first_use_of_stream,
+                      cusolverDnHandle_t h,
+                      c10::cuda::CUDAStream stream) {
+      if (is_first_use_of_stream) {
+        // Record shared storages once per auxiliary stream.
+        record_tensor_on_stream(self, stream);
+        if (get_pivots) {
+          record_tensor_on_stream(pivots, stream);
+        }
+        record_tensor_on_stream(infos, stream);
+        record_dataptr_on_stream(workspaces[stream_id], stream);
+      }
+      auto* workspace_ptr = static_cast<scalar_t*>(workspaces[stream_id].get());
       at::cuda::solver::getrf<scalar_t>(
-        handle, m, n,
-        self_data + batch * self_stride,
+        h, m, n,
+        self_data + i * self_stride,
         lda,
         workspace_ptr,
-        get_pivots ? pivots_data + batch * pivots_stride : nullptr,
-        infos_data + batch
-      );
-    }
+        get_pivots ? pivots_data + i * pivots_stride : nullptr,
+        infos_data + i);
+    };
+    looped_cusolver_multistream(batch_size, n_streams, launch);
   });
 
   // Necessary because cuSOLVER uses nan for outputs that correspond to 0 in MAGMA for non-pivoted LU.
