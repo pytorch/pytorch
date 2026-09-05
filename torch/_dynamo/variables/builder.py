@@ -251,6 +251,7 @@ from .iter import CountIteratorVariable, ItertoolsVariable
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    ByteArrayVariable,
     DequeVariable,
     ListIteratorVariable,
     ListVariable,
@@ -966,6 +967,7 @@ class VariableBuilder:
                 (tuple, list, odict_values, collections.deque, torch.Size),
                 cls.wrap_listlike,
             ),
+            (bytearray, cls.wrap_bytearray),
             (itertools.count, cls.wrap_itertools_count),
             (tuple_iterator, cls.wrap_tuple_iterator),
             (range_iterator, cls.wrap_range_iterator),
@@ -2426,8 +2428,14 @@ class VariableBuilder:
             return result
         return self.tx.output.side_effects.track_object_existing(value, result)
 
+    def wrap_bytearray(self, value: bytearray) -> VariableTracker:
+        self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.EQUALS_MATCH)
+        result = ByteArrayVariable(value, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
+
     def wrap_listlike(
-        self, value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple]
+        self,
+        value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple],
     ) -> VariableTracker:
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
@@ -5496,6 +5504,9 @@ class SourcelessBuilder:
         )
         handlers[tuple] = lambda tx, value: TupleVariable(
             [create(tx, x) for x in value]
+        )
+        handlers[bytearray] = lambda tx, value: ByteArrayVariable(
+            bytearray(value), mutation_type=ValueMutationNew()
         )
         handlers[torch.Size] = lambda tx, value: SizeVariable(
             [create(tx, x) for x in value]
