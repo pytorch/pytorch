@@ -20,7 +20,7 @@ c10::ScalarType toAccumulateType(c10::ScalarType type, c10::DeviceType device) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_F8NZ(DEFINE_CASE)
 #undef DEFINE_CASE
 
-    default: TORCH_INTERNAL_ASSERT(false, "Unrecognized ScalarType: ", type);
+    default: TORCH_CHECK_NOT_IMPLEMENTED(false, "toAccumulateType not implemented for '", type, "'");
   }
 }
 
