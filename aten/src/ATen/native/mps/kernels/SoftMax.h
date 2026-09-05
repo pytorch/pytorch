@@ -1,11 +1,11 @@
 #pragma once
 #include <c10/metal/common.h>
 
-C10_METAL_CONSTEXPR unsigned kLogSoftmaxThreads = 256;
-C10_METAL_CONSTEXPR unsigned kLogSoftmaxMaxThreads = 1024;
+C10_METAL_CONSTEXPR unsigned kSoftmaxThreads = 256;
+C10_METAL_CONSTEXPR unsigned kSoftmaxMaxThreads = 1024;
 
 template <typename index_t = uint64_t>
-struct LogSoftmaxParams {
+struct SoftmaxParams {
   index_t dim_size;
   index_t num_rows;
   index_t inner_size;
