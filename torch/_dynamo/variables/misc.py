@@ -250,6 +250,7 @@ class SuperVariable(VariableTracker):
             isinstance(inner_fn, types.WrapperDescriptorType)
             and inner_fn.__name__ == "__init__"
             and issubclass(inner_fn.__objclass__, BaseException)
+            and inner_fn.__objclass__.__basicsize__ == BaseException.__basicsize__
             and isinstance(self.objvar, variables.UserDefinedExceptionObjectVariable)
             and not kwargs
         ):
