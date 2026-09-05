@@ -13,7 +13,11 @@ from torch.distributed.checkpoint._experimental.checkpoint_writer import (
     WriterHook,
 )
 from torch.distributed.checkpoint._experimental.types import RankInfo
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class MockWriterHook(WriterHook):
@@ -39,6 +43,8 @@ class MockWriterHook(WriterHook):
 
 
 class TestCheckpointWriterConfig(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_default_values(self):
         """Test that CheckpointWriterConfig has the correct default values."""
         options = CheckpointWriterConfig()
@@ -51,6 +57,8 @@ class TestCheckpointWriterConfig(TestCase):
 
 
 class TestCheckpointWriter(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Create a temporary directory for test checkpoints
