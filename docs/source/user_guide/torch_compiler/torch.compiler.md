@@ -35,19 +35,23 @@ might be used interchangeably in this documentation.
 :::
 
 `torch.compiler` also includes an ahead-of-time API, `torch.compiler.precompile`. Capture
-is caller-driven: enter `precompile.artifact(fn)` as a context manager and call it exactly
-as you would `fn` -- with the model(s) passed among the arguments, e.g.
+is caller-driven: enter `precompile.capture(fn, artifact_path=..., cache_path=...)` as a
+context manager and call it exactly as you would `fn` -- with the model(s) passed among the
+arguments, e.g.
 
 ```python
-with torch.compiler.precompile.artifact(lambda model, x: model(x)) as cap:
+with torch.compiler.precompile.capture(
+    lambda model, x: model(x), artifact_path="m.py", cache_path="m.cache"
+) as cap:
     y = cap(model, x)
-python_code, cache = cap.result()
+f = torch.compiler.precompile.load("m.py", "m.cache")
 ```
 
--- and it lowers the computation to a self-contained, runnable Python source string plus an
-acceleration cache. Pass `tracer="dynamo"` to capture several calls, with the graph breaks
-and recompilations between them; use `precompile.accumulate` to capture across a training
-loop and write the artifact to disk. Reload the artifact with
+-- and it writes a self-contained, runnable Python source artifact plus an acceleration
+cache when the block exits. The default tracer captures several calls, with the graph breaks
+and recompilations between them; pass `tracer=torch.compiler.precompile.MakeFxTracer()` to
+capture a single call instead. Use `precompile.accumulate` to rewrite the on-disk artifact
+after every call across a training loop. Reload the artifact with
 `torch.compiler.precompile.load`; since no weights are baked in, you pass the model again at
 runtime. See the {ref}`API reference <torch.compiler_api>` for details.
 

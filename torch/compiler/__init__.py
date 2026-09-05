@@ -10,14 +10,14 @@ from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 
 # ``torch.compiler.precompile``: a namespace, not itself callable. Capture is
 # caller-driven -- the caller invokes a capture around their own execution.
-# ``precompile.artifact(fn)`` returns an in-memory capture whose ``result()`` is the
-# (python_code, cache) pair for either tracer -- make_fx takes a single call and
-# produces a self-contained Python source plus an acceleration cache, dynamo takes
-# several and produces a guarded multi-graph artifact spanning graph breaks and
-# recompilations -- and ``precompile.accumulate(fn, ...)`` rewrites an on-disk
-# artifact across the caller's own loop. Re-exported from the private impl, whose
-# ``_PrecompileApi.__module__`` is forced to "torch.compiler" so this is the single
-# public location. Distinct from ``torch._dynamo.config.caching_precompile``
+# ``precompile.capture(fn, artifact_path=..., cache_path=...)`` is a context manager
+# that writes a ``(python_code, cache)`` artifact when the block exits: the default
+# ``DynamoTracer`` takes several calls and produces a guarded multi-graph artifact
+# spanning graph breaks and recompilations, while ``MakeFxTracer`` takes a single
+# call and produces a self-contained Python source plus an acceleration cache.
+# ``precompile.accumulate(fn, ...)`` rewrites the on-disk artifact after every call
+# across the caller's own loop, and ``precompile.load(...)`` reloads one. Re-exported
+# from the private impl. Distinct from ``torch._dynamo.config.caching_precompile``
 # (a ``torch.compile`` guard-serialization caching mode), despite the shared word.
 # ``PrecompileError`` is also re-exported here as ``torch.compiler.PrecompileError`` so the
 # conventional ``except torch.compiler.PrecompileError`` works; its ``__module__`` is already
