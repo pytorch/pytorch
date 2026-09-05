@@ -38,6 +38,7 @@
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
@@ -1408,6 +1409,48 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // The CUDA streams used by NCCL kernels
   std::unordered_map<std::string, at::cuda::CUDAStream> ncclStreams_;
+
+  // Streams for nested CUDA graph captures. When NCCL is used inside both a
+  // parent capture and a nested capture (e.g. a conditional-node body), the
+  // default ncclStream is already bound to the parent capture graph. Reusing
+  // it in the child capture would cause cudaErrorStreamCaptureMerge. Each
+  // per-device-key pool hands out one stream per active capture id. Streams
+  // are created raw rather than via getStreamFromPool, whose round-robin
+  // could hand back a stream already bound to the parent capture (the
+  // default ncclStream itself comes from that pool). Once a capture ends,
+  // its stream is retired for reuse by later captures. The raw streams are
+  // owned by the pool and destroyed with the process group; mirrors
+  // at::cuda::CUDAGraph::OwnedCUDAStream (private to that class).
+  // Guarded by ncclCaptureStreamsMutex_.
+  struct OwnedCUDAStream {
+    cudaStream_t stream = nullptr;
+    explicit OwnedCUDAStream(cudaStream_t s) : stream(s) {}
+    ~OwnedCUDAStream() {
+      if (stream) {
+        C10_CUDA_CHECK_WARN(cudaStreamDestroy(stream));
+      }
+    }
+    OwnedCUDAStream(const OwnedCUDAStream&) = delete;
+    OwnedCUDAStream& operator=(const OwnedCUDAStream&) = delete;
+    OwnedCUDAStream(OwnedCUDAStream&& o) noexcept : stream(o.stream) {
+      o.stream = nullptr;
+    }
+    OwnedCUDAStream& operator=(OwnedCUDAStream&&) = delete;
+  };
+  struct CaptureStreamPool {
+    std::unordered_map<c10::CaptureId_t, at::cuda::CUDAStream> active;
+    std::vector<at::cuda::CUDAStream> retired;
+    std::vector<OwnedCUDAStream> owned;
+  };
+  std::unordered_map<std::string, CaptureStreamPool> ncclCaptureStreams_;
+  std::mutex ncclCaptureStreamsMutex_;
+
+  // Returns the NCCL stream for the given device key, creating a
+  // capture-specific stream when the current stream and the default NCCL
+  // stream belong to different CUDA graph captures.
+  at::cuda::CUDAStream getNCCLStream(
+      const std::string& key,
+      const at::Device& device);
 
   // The CUDA events used to sync NCCL streams
   std::unordered_map<std::string, at::cuda::CUDAEvent> ncclEvents_;
