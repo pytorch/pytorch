@@ -100,6 +100,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
 
+  setGroupUid(options_c10d_->group_name);
+
   if (options_c10d_->config.blocking == NCCL_CONFIG_UNDEF_INT) {
     auto nonblocking = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");
     options_c10d_->config.blocking = nonblocking.value_or(false) ? 0 : 1;
