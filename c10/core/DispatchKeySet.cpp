@@ -1,5 +1,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/irange.h>
+#include <c10/util/llvmMathExtras.h>
+#include <limits>
 
 namespace c10 {
 
@@ -159,7 +161,7 @@ bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {
 std::string toString(DispatchKeySet ts) {
   std::stringstream ss;
   ss << ts;
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::ostream& operator<<(std::ostream& os, DispatchKeySet ts) {

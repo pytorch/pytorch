@@ -8,6 +8,7 @@
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/TensorUtils.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -212,8 +213,6 @@ Tensor embedding_bag_backward_cuda_sum_avg(
   if (scale_grad_by_freq) {
     count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_backward_cuda_sum_avg", [&] () {
-      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
       // Compute an increasing sequence per unique item in sortedIndices:
       // sorted: 2 5 5 5 7 7 8 9 9
       //  count: 1 1 2 3 1 2 1 1 2
@@ -247,7 +246,7 @@ template <typename scalar_t, typename index_t>
 __global__ void EmbeddingBag_accGradParametersKernel_max(
     const index_t *max_indices, const scalar_t *gradOutput,
     scalar_t *gradWeight, int64_t stride, int64_t numBags,
-    index_t padding_idx, const index_t numel) {
+    index_t padding_idx, const int64_t numel) {
 
   using accscalar_t = acc_type<scalar_t, true>;
 
@@ -265,7 +264,7 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
       if (word_idx >= 0 && word_idx != padding_idx) {
         // If bag is empty, we have max_indices[idx] set to -1 in forward.
         fastAtomicAdd(
-            gradWeight, static_cast<index_t>(word_idx * stride + featureDim),
+            gradWeight, static_cast<int64_t>(word_idx) * stride + featureDim,
             numel, gradOutput[bag * stride + featureDim], true);
       }
     }
@@ -428,7 +427,11 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
     });
   });
 
-  return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, offset2bag, bag_size, max_indices);
+  return std::tuple<Tensor, Tensor, Tensor, Tensor>(
+      std::move(output),
+      std::move(offset2bag),
+      std::move(bag_size),
+      std::move(max_indices));
 }
 
 Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &indices,
@@ -482,6 +485,8 @@ __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
     const index_t* offset2bag,  // contiguous
     int64_t num_samples,
     int64_t embedding_features,
+    int64_t num_bags,
+    int64_t num_embeddings,
     scalar_t* output,
     index_t padding_idx) {
   using accscalar_t = acc_type<scalar_t, true>;
@@ -494,8 +499,12 @@ __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
   // This involves doing one dot product between grad[bag_idx] and weight[embedding_idx].
   for (int sample_idx = warp; sample_idx < num_samples; sample_idx += num_warps) {
     accscalar_t result = 0.;
-    const int bag_idx = (int)offset2bag[sample_idx];
-    const int embedding_idx = (int)indices[sample_idx];
+    const index_t bag_idx = offset2bag[sample_idx];
+    const index_t embedding_idx = indices[sample_idx];
+    CUDA_KERNEL_ASSERT(
+        (bag_idx >= 0 && bag_idx < num_bags) &&
+        "Invalid offset2bag value in EmbeddingBag: value out of range [0, numBags)");
+    CUDA_KERNEL_ASSERT((embedding_idx >= 0 && embedding_idx < num_embeddings) && "Invalid input index in EmbeddingBag: index out of range [0, numRows)");
     if (embedding_idx != padding_idx) {
       for (int feature_idx = thread_in_warp; feature_idx < embedding_features;
           feature_idx += C10_WARP_SIZE) {
@@ -548,7 +557,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
     return output;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
     grad.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
       AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
         _embedding_bag_per_sample_weights_backward_kernel<scalar_t, index_t>
@@ -559,6 +568,8 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
             offset2bag.const_data_ptr<index_t>(),
             num_samples,
             embedding_features,
+            grad.size(0),
+            weight.size(0),
             output.mutable_data_ptr<scalar_t>(),
             padding_idx);
         C10_CUDA_KERNEL_LAUNCH_CHECK();

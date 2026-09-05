@@ -13,10 +13,14 @@
 #include <nlohmann/json.hpp>
 
 #ifdef USE_KINETO
+#include <MetadataFieldCatalog.h>
+#include <TypedMetadata.h>
 #include <libkineto.h>
 #endif
 
 #include <ATen/Context.h>
+#include <ATen/core/Dict.h>
+#include <ATen/core/List.h>
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
@@ -64,6 +68,77 @@ TensorMetadata::TensorMetadata(
       sizes_{std::move(sizes)},
       strides_{std::move(strides)} {
   SOFT_ASSERT(r.weak_self_.has_value());
+}
+
+OpArgData parseArgData(
+    const std::vector<op_input_t>& input_shapes,
+    const std::vector<op_input_t>& concreteInputs) {
+  if (input_shapes.empty()) {
+    return OpArgData{.hasData = false};
+  }
+
+  std::vector<shape> shapes(input_shapes.size());
+  std::vector<shape> strides(input_shapes.size());
+  std::vector<std::vector<int64_t>> shapesForKinetoEvent(input_shapes.size());
+
+  std::vector<std::string> dtypes(input_shapes.size());
+  std::vector<c10::IValue> concrete_inputs_list;
+
+  for (const auto& i : c10::irange(input_shapes.size())) {
+    std::visit(
+        c10::overloaded(
+            [&](const TensorMetadata& t) {
+              shapes[i] = t.sizes_;
+              shapesForKinetoEvent[i] = t.sizes_;
+              dtypes[i] = std::string(scalarTypeToTypeMeta(t.dtype_).name());
+              strides[i] = t.strides_;
+            },
+            [&](const std::vector<TensorMetadata>& l) {
+              std::vector<std::vector<int64_t>> shape;
+              shape.reserve(l.size());
+              std::vector<std::vector<int64_t>> stride;
+              stride.reserve(l.size());
+              for (const auto& t : l) {
+                shape.emplace_back(t.sizes_);
+                stride.emplace_back(t.strides_);
+              }
+              shapes[i] = std::move(shape);
+              strides[i] = std::move(stride);
+              dtypes[i] = "TensorList";
+            },
+            [&](const c10::IValue&) { dtypes[i] = "Scalar"; },
+            [&](const auto&) {}),
+        input_shapes[i]);
+  }
+
+  // If we recorded concrete inputs, then parse them
+  if (input_shapes.size() == concreteInputs.size() && !concreteInputs.empty()) {
+    concrete_inputs_list.resize(input_shapes.size());
+
+    for (const auto& i : c10::irange(input_shapes.size())) {
+      std::visit(
+          c10::overloaded(
+              [&](const c10::IValue& val) { concrete_inputs_list[i] = val; },
+              [&](const auto&) {}),
+          input_shapes[i]);
+      std::visit(
+          c10::overloaded(
+              [&](const c10::IValue& val) {
+                concrete_inputs_list[i] = val;
+                dtypes[i] = "ScalarList";
+              },
+              [&](const auto&) {}),
+          concreteInputs[i]);
+    }
+  }
+
+  return OpArgData{
+      .hasData = true,
+      .shapes = std::move(shapes),
+      .dtypes = std::move(dtypes),
+      .concreteInputs = std::move(concrete_inputs_list),
+      .shapesForKinetoEvent = std::move(shapesForKinetoEvent),
+      .strides = std::move(strides)};
 }
 
 // ============================================================================
@@ -344,12 +419,14 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     torch_ops_.inputs_outputs_.push(fn.inputs());
     torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
   }
+  bool pushed_correlation_id = false;
   if (!config_.experimental_config.disable_external_correlation) {
     if (fn.scope() == at::RecordScope::USER_SCOPE) {
       torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
     } else {
       torch::profiler::impl::kineto::pushCorrelationId(corr_id);
     }
+    pushed_correlation_id = true;
   }
 
 #if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
@@ -370,16 +447,14 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   auto out = std::make_unique<KinetoObserverContext>(event);
+  out->pushed_correlation_id_ = pushed_correlation_id;
   if (fn.isNcclMeta()) {
-    // Record NCCL metadata for specific CPU ops, switch off output
-    // introspection in this begin_op callback, we will do that in exit callback
-    // if needed.
-    torch::profiler::impl::SaveNcclMetaConfig ncclMetaConfig{
+    torch::profiler::impl::SaveNcclMetaConfig nccl_meta_config{
         true, true, true, false};
-    out->event_->extra_nccl_meta_ = torch_ops_.extra_meta_.emplace_back(
-        torch::profiler::impl::saveNcclMeta(fn, ncclMetaConfig));
+    out->event_->collective_meta_ = torch_ops_.collective_meta_.emplace_back(
+        torch::profiler::impl::saveNcclMetaTyped(fn, nccl_meta_config));
   } else {
-    out->event_->extra_nccl_meta_ = torch_ops_.extra_meta_.emplace_back();
+    out->event_->collective_meta_ = torch_ops_.collective_meta_.emplace_back();
   }
 
   if (config_.state == ProfilerState::KINETO_GPU_FALLBACK) {
@@ -441,11 +516,8 @@ struct StealOrDefault {
 };
 } // namespace
 
-static constexpr std::string_view profilerStepString = "ProfilerStep#";
-
 void ThreadLocalSubqueue::TorchOpStorage::materialize(
     std::vector<std::shared_ptr<Result>>& out,
-    std::vector<ProfilerStepInfo>& step_info,
     const std::function<c10::time_t(c10::approx_time_t)>& time_converter,
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
@@ -479,14 +551,12 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   auto input_shape_getter = inputs_outputs_.getInputShapeGenerator();
   auto concrete_input_getter = inputs_outputs_.getConcreteInputGenerator();
 
-  // TODO: CTAD will take care of template args when we move to C++17
-  auto jit_stack = StealOrDefault<decltype(jit_stack_)>(jit_stack_);
-  auto jit_module = StealOrDefault<decltype(jit_modules_)>(jit_modules_);
-  auto extra_args = StealOrDefault<decltype(extra_args_)>(extra_args_);
-  auto extra_meta = StealOrDefault<decltype(extra_meta_)>(extra_meta_);
-  auto kwinputs = StealOrDefault<decltype(kwinputs_)>(kwinputs_);
-  auto gpu_fallback =
-      StealOrDefault<decltype(device_fallback_)>(device_fallback_);
+  auto jit_stack = StealOrDefault(jit_stack_);
+  auto jit_module = StealOrDefault(jit_modules_);
+  auto extra_args = StealOrDefault(extra_args_);
+  auto collective_meta = StealOrDefault(collective_meta_);
+  auto kwinputs = StealOrDefault(kwinputs_);
+  auto gpu_fallback = StealOrDefault(device_fallback_);
 
   for (auto event = op_events_.begin(); event != op_events_.end(); ++event) {
     ExtraFields<EventType::TorchOp> e{
@@ -498,18 +568,12 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         jit_stack(),
         jit_module(),
         extra_args(),
-        extra_meta(),
+        collective_meta(),
         kwinputs(),
         gpu_fallback(),
         event->allow_tf32_cublas_,
         std::move(event->counters_)};
 
-    if (e.name_.find(profilerStepString) != std::string::npos) {
-      step_info.emplace_back(
-          time_converter(event->start_time_),
-          time_converter(event->end_time_),
-          out.size());
-    }
     out.emplace_back(Result::create(
         time_converter(event->start_time_), tid, kineto_info, std::move(e)));
   }
@@ -713,7 +777,7 @@ RecordQueue::RecordQueue(
 }
 
 bool RecordQueue::tracePython() const {
-  return config_.with_stack && activities_.count(ActivityType::CPU);
+  return config_.with_stack && activities_.contains(ActivityType::CPU);
 }
 
 bool RecordQueue::getPythonGcEvents() const {
@@ -766,6 +830,111 @@ void mark_finished(std::shared_ptr<Result>& r) {
 }
 
 #ifdef USE_KINETO
+// Materializes Kineto's typed metadata into profiler-owned IValues.
+class IValueMetadataVisitor final : public libkineto::ITypedMetadataVisitor {
+ public:
+  typed_metadata_t metadata() && {
+    return std::move(metadata_);
+  }
+
+ private:
+  // Accumulates nested fields between beginDict() and endDict().
+  struct DictFrame {
+    explicit DictFrame(std::string name)
+        : name_{std::move(name)},
+          values_{c10::impl::GenericDict(
+              at::StringType::get(),
+              at::AnyType::get())} {}
+
+    std::string name_;
+    c10::Dict<c10::IValue, c10::IValue> values_;
+  };
+
+  void addValue(std::string_view name, c10::IValue value) {
+    if (dict_stack_.empty()) {
+      metadata_.insert_or_assign(std::string{name}, std::move(value));
+    } else {
+      dict_stack_.back().values_.insert_or_assign(
+          std::string{name}, std::move(value));
+    }
+  }
+
+  void visitValue(const libkineto::MetadataField<int64_t>& field, int64_t value)
+      override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(const libkineto::MetadataField<double>& field, double value)
+      override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(const libkineto::MetadataField<bool>& field, bool value)
+      override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(
+      const libkineto::MetadataField<std::string>& field,
+      std::string_view value) override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(
+      const libkineto::MetadataField<std::vector<int64_t>>& field,
+      const std::vector<int64_t>& value) override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(
+      const libkineto::MetadataField<std::vector<std::string>>& field,
+      const std::vector<std::string>& value) override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(
+      const libkineto::MetadataField<libkineto::RawJson>& /*field*/,
+      const libkineto::RawJson& /*value*/) override {}
+
+  void visitValue(
+      const libkineto::MetadataField<uint64_t>& field,
+      uint64_t value) override {
+    addValue(field.name, c10::IValue(value));
+  }
+
+  void visitValue(
+      const libkineto::MetadataField<libkineto::InputShapes>& field,
+      const libkineto::InputShapes& value) override {
+    auto inputs = c10::impl::GenericList(at::AnyType::get());
+    inputs.reserve(value.size());
+    for (const auto& input : value) {
+      std::visit(
+          [&](const auto& shapes) { inputs.emplace_back(shapes); }, input);
+    }
+    addValue(field.name, c10::IValue(inputs));
+  }
+
+  void visitUnsupported(std::string_view name) override {
+    TORCH_WARN_ONCE("Dropping unsupported Kineto metadata field: ", name);
+  }
+
+  void beginDict(std::string_view name) override {
+    dict_stack_.emplace_back(std::string{name});
+  }
+
+  void endDict() override {
+    auto dict = std::move(dict_stack_.back());
+    dict_stack_.pop_back();
+    // Intentionally omit keys for empty dictionaries.
+    if (!dict.values_.empty()) {
+      addValue(dict.name_, c10::IValue(dict.values_));
+    }
+  }
+
+  typed_metadata_t metadata_;
+  std::vector<DictFrame> dict_stack_;
+};
+
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
 // not exceed 2^48 -1.
 static uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
@@ -879,6 +1048,12 @@ void generateForwardBackwardLinks(
 
 static constexpr const char* indexKey = "Ev Idx";
 
+static std::string sanitizeNameForKinetoJSON(std::string name) {
+  // Kineto's Chrome trace writer quotes names itself but does not escape '"'.
+  std::replace(name.begin(), name.end(), '"', '\'');
+  return name;
+}
+
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,
     uint64_t start_time_ns,
@@ -900,6 +1075,7 @@ void passEventsToKineto(
     if (!e->overload_name().empty()) {
       name = fmt::format("{}.{}", e->name(), e->overload_name());
     }
+    name = sanitizeNameForKinetoJSON(std::move(name));
     auto* activity = cpu_trace.addCPUActivity(
         name,
         e->kinetoType(),
@@ -910,7 +1086,10 @@ void passEventsToKineto(
 
     TORCH_INTERNAL_ASSERT(activity || !kKinetoAvailable);
     if (activity) {
-      addMetadata(activity, indexKey, std::to_string(i));
+#ifdef USE_KINETO
+      activity->addMetadata(
+          libkineto::GenericMetadataFields::kEvIdx, static_cast<int64_t>(i));
+#endif
 
       // In the normal (synchronous) path, kineto_activity_ is set later
       // by TransferEvents::reassociate(). For global (async) profiling
@@ -1107,7 +1286,7 @@ class TransferEvents {
                   /*start=*/activity->flowStart()};
             },
             [](auto&) {}));
-        if (config_.experimental_config.expose_kineto_event_metadata) {
+        if (config_.get().experimental_config.expose_kineto_event_metadata) {
           e->visit(c10::overloaded(
               [&](ExtraFields<EventType::TorchOp>& i) {
                 i.metadata_json_ = activity->metadataJson();
@@ -1118,8 +1297,6 @@ class TransferEvents {
               [](auto&) { return; }));
           // Parse metadataJson() into extra_meta_ so events() exposes
           // Kineto metadata as typed fields without export_chrome_trace().
-          // Python schemas (profiler_util.py) are the single SOT for
-          // which keys to expose and how to type-convert them.
           e->visit(c10::overloaded(
               [&](ExtraFields<EventType::Kineto>& i) {
                 auto json_str = activity->metadataJson();
@@ -1137,6 +1314,14 @@ class TransferEvents {
                 }
               },
               [](auto&) {}));
+          // Populate the data exposed as FunctionEvent.metadata.
+          e->visit(c10::overloaded(
+              [&](ExtraFields<EventType::Kineto>& i) {
+                IValueMetadataVisitor visitor;
+                activity->visitTypedMetadata(visitor);
+                i.typed_metadata_ = std::move(visitor).metadata();
+              },
+              [](auto&) { return; }));
         }
         const auto* linked_activity = activity->linkedActivity();
         if (linked_activity) {
@@ -1169,20 +1354,30 @@ class TransferEvents {
   void setParents() {
     // First pass: Collect start events and set parent to linked event.
     ska::flat_hash_map<uint32_t, std::shared_ptr<Result>> flow_map;
+    uint64_t dropped_flow_count = 0;
     for (auto& e : results_.get()) {
       TORCH_INTERNAL_ASSERT(e != nullptr);
       e->visit(c10::overloaded(
           [&](const ExtraFields<EventType::Kineto>& i) {
             if (i.flow.type == libkineto::kLinkAsyncCpuGpu && i.flow.start) {
               auto inserted = flow_map.insert({i.flow.id, e});
-#ifdef USE_ROCM
-              if (inserted.second) {
+              if (!inserted.second) {
+                // Two flow start events arrived with the same ID, so the
+                // active backend produced a non-unique correlation ID.
+                // Nothing in the colliding pair tells us which start (if
+                // either) is the true owner of this ID, so attaching the
+                // matching flow end to the first inserter would risk
+                // linking it to an unrelated CPU op. Poison the slot so
+                // the colliding flow end skips the flow lookup and falls
+                // back to its linked_activity_ parent set in the first
+                // pass: an approximate runtime-correlation link, but never
+                // a wrong one. Any legitimate flow-based link for either
+                // start is forfeited as a result.
                 TORCH_WARN_ONCE(
-                    "ROCTracer produced duplicate flow start: ", i.flow.id);
+                    "Profiler produced duplicate flow start: ", i.flow.id);
+                ++dropped_flow_count;
+                inserted.first->second.reset();
               }
-#else // USE_ROCM
-              TORCH_INTERNAL_ASSERT(inserted.second);
-#endif // USE_ROCM
             }
             TORCH_INTERNAL_ASSERT(e->parent_.expired());
             e->parent_ = i.linked_activity_;
@@ -1194,9 +1389,10 @@ class TransferEvents {
     for (auto& e : results_.get()) {
       e->visit(c10::overloaded(
           [&](const ExtraFields<EventType::Kineto>& i) {
-            // Flow takes priority over linked event.
+            // Flow takes priority over linked event. Skip poisoned slots
+            // (set to null when a duplicate flow start ID was detected).
             const auto it = flow_map.find(i.flow.id);
-            if (it != flow_map.end() &&
+            if (it != flow_map.end() && it->second &&
                 i.flow.type == libkineto::kLinkAsyncCpuGpu && !i.flow.start) {
               e->parent_ = it->second;
             }
@@ -1211,6 +1407,15 @@ class TransferEvents {
           [](const auto&) {}));
     }
 
+    if (dropped_flow_count > 0) {
+      TORCH_WARN(
+          "Profiler observed ",
+          dropped_flow_count,
+          " duplicate flow start ID(s); affected events were linked via "
+          "runtime correlation instead. This indicates a flow ID collision "
+          "in the active backend's profiler.");
+    }
+
     // Set TIDs now that we have established lineage.
     for (auto& e : results_.get()) {
       if (e->parent_.expired()) {
@@ -1222,7 +1427,7 @@ class TransferEvents {
   static constexpr long long unmatchedIndex = -1;
   static constexpr auto noTID = std::numeric_limits<uint64_t>::max();
   std::reference_wrapper<std::vector<std::shared_ptr<Result>>> results_;
-  const ProfilerConfig& config_;
+  std::reference_wrapper<const ProfilerConfig> config_;
   std::vector<const itrace_t*> trace_activities_;
   ska::flat_hash_map<const itrace_t*, std::shared_ptr<Result>> kineto_events_;
 };
@@ -1347,7 +1552,7 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
     stacks.erase(start_tid);
     auto new_frame = event->parent_.lock();
     if (new_frame != nullptr) {
-      stacks[start_tid] = new_frame;
+      stacks[start_tid] = std::move(new_frame);
     }
   };
 
@@ -1501,17 +1706,8 @@ RecordQueue::getRecords(
         : time_converter(t);
   };
 
-  // Lambda that checks that only the right side of the base intersects with
-  // ev_start and ev_end
-  auto right_intersection_only =
-      [&](ProfilerStepInfo base, int64_t ev_start, int64_t ev_end) {
-        return (base.start_time_ns < ev_start) &&
-            (base.end_time_ns <= ev_end && base.end_time_ns > ev_start);
-      };
   std::vector<std::shared_ptr<Result>> out;
   std::vector<python_tracer::CompressedEvent> python_enters;
-  std::vector<ProfilerStepInfo> step_info;
-  long unsigned int step_idx = 0;
   for (auto& subqueue_it : sub_queues_) {
     auto& queue = *subqueue_it.second;
     auto materialize = [&](auto& events) {
@@ -1534,7 +1730,7 @@ RecordQueue::getRecords(
     };
 
     queue.torch_ops_.materialize(
-        out, step_info, converter, queue.tid(), queue.kineto_info());
+        out, converter, queue.tid(), queue.kineto_info());
     materialize(queue.backend_events_);
     materialize_vulkan(
         out, queue.vulkan_events_, converter, queue.tid(), queue.kineto_info());
@@ -1592,34 +1788,7 @@ RecordQueue::getRecords(
       torch::profiler::impl::kineto::stopTrace();
       throw;
     }
-    // Placeholder for if we run out of ProfilerStep annotations
-    ProfilerStepInfo defaultStep = {LLONG_MAX, LLONG_MAX, 0};
-    ProfilerStepInfo step =
-        step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
-    for (const auto& i : ev) {
-      // Only adjust timestamps if experimental config is enabled
-      if (config_.experimental_config.adjust_profiler_step) {
-        // If event has start time after step end time we can continue to the
-        // next step
-        while (i->start_time_ns_ > step.end_time_ns) {
-          step_idx++;
-          step =
-              step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
-        }
-        // If Step annotation starts before event and ends before event ends
-        // with intersection then we move the lefthand side of the step
-        // annotation to the event start time
-        if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
-          // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
-          auto const& currStepRes = out[step.out_idx];
-          currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
-          step_idx++;
-          step =
-              step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
-        }
-      }
-      out.push_back(i);
-    }
+    out.insert(out.end(), ev.begin(), ev.end());
     python_tracer_.reset();
   }
 
@@ -1648,7 +1817,7 @@ RecordQueue::getRecords(
   }
 
   build_tree(out);
-  return {out, std::move(trace)};
+  return {std::move(out), std::move(trace)};
 }
 
 namespace {

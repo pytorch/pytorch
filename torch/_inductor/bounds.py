@@ -9,6 +9,7 @@ from sympy import Expr
 
 import torch
 from torch.utils._sympy.value_ranges import (
+    AllIn,
     bound_sympy,
     SymPyValueRangeAnalysis,
     ValueRanges,
@@ -31,7 +32,7 @@ class BoundVars:
     It exposes the ranges of the nodes in the `bounds` variable
 
     Note. A current limitation of this analysis is that it just works on a per-loop basis.
-    We should be able to propagate the bounds between across the whole graph. This may benefit
+    We should be able to propagate the bounds across the whole graph. This may benefit
     the case a bounded variable is returned by a kernel and fed into another.
     """
 
@@ -112,7 +113,10 @@ class BoundVars:
                 indirect = partial(self.set_indirect, var)
                 result[key] = indirect
             else:
-                assert "scan" in key
+                if "scan" not in key:
+                    raise AssertionError(
+                        f"expected 'scan' in submodule key, got {key!r}"
+                    )
                 result[key] = submodules[key]
 
         return result
@@ -128,13 +132,15 @@ class BoundVars:
         interp = InterpreterShim(subblock.graph, submodules)
         interp.run(V.get_ops_handler(), initial_env=env)
         output = [node for node in subblock.graph.nodes if node.target == "output"]
-        assert len(output) == 1
+        if len(output) != 1:
+            raise AssertionError(f"expected exactly 1 output node, got {len(output)}")
         # don't bother unioning with value since the load from buffer will be
         # pessimistically assumed to be inf anyway
         return interp.env[output[0]]
 
     def set_indirect(self, old: Expr, new: ValueRanges[Expr]) -> ValueRanges[Expr]:
-        assert isinstance(new, ValueRanges)
+        if not isinstance(new, ValueRanges):
+            raise AssertionError(f"expected ValueRanges, got {type(new)}")
         self.replacement_vals[old] = new
         return new
 
@@ -163,11 +169,13 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
             setattr(self, op, self.bool_handler)
 
     @staticmethod
-    def bool_handler(*args: Any, **kwargs: Any) -> ValueRanges[Any]:
+    def bool_handler(*args: object, **kwargs: object) -> ValueRanges[Any]:
         # just assuming bools can have both values
         return ValueRanges(sympy.false, sympy.true)  # type: ignore[arg-type]
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def _default(
+        self, name: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> Any:
         # many ops are unlikely to show up in optimizable indexing compute,
         # so we don't have full coverage
         return ValueRanges.unknown()
@@ -176,7 +184,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
         return ValueRanges.unknown()
 
     def store(
-        self, name: str, index: sympy.Expr, value: Any, mode: StoreMode = None
+        self, name: str, index: sympy.Expr, value: object, mode: StoreMode = None
     ) -> None:
         return
 
@@ -185,19 +193,24 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Any,
+        value: object,
     ) -> ValueRanges[Any]:
         return ValueRanges.unknown()
 
     @classmethod
-    def index_expr(cls, index: Any, dtype: torch.dtype) -> ValueRanges[Any]:
-        assert isinstance(index, ValueRanges)
+    def index_expr(cls, index: object, dtype: torch.dtype) -> ValueRanges[Any]:
+        if not isinstance(index, ValueRanges):
+            raise AssertionError(f"expected ValueRanges, got {type(index)}")
         return cls.to_dtype(index, dtype)
+
+    @classmethod
+    def value_expr(cls, index: object, dtype: torch.dtype) -> ValueRanges[Any]:
+        return cls.index_expr(index, dtype)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def to_dtype(
-        x: Any,
+        x: AllIn | ValueRanges[Any],
         dtype: torch.dtype,
         src_dtype: torch.dtype | None = None,
         use_compute_types: bool = True,

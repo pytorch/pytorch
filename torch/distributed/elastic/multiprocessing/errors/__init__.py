@@ -240,7 +240,7 @@ class ChildFailedError(Exception):
     def __init__(self, name: str, failures: dict[GlobalRank, ProcessFailure]):
         self.name = name
         self.failures = failures
-        # does not make sense to create a ChildFaileError with no failures
+        # does not make sense to create a ChildFailedError with no failures
         if not self.failures:
             raise AssertionError
         super().__init__(self.format_msg())
@@ -294,6 +294,19 @@ class ChildFailedError(Exception):
                 .replace("\n", "\n  ")  # to properly indent the traceback
             )
 
+        # For signal failures, let the (build-swapped) handler append
+        # device-fault context (e.g. ROCm GPU faults) to the rendered message.
+        # Works on the local string, so error_file_data is never mutated, and it
+        # is a no-op in OSS (the base handler returns the message unchanged).
+        # Best-effort: never let a handler override break failure rendering.
+        if failure.exitcode < 0:
+            try:
+                msg = get_error_handler().maybe_enrich_signal_failure_message(
+                    msg, failure.error_file
+                )
+            except Exception:
+                logger.warning("Failed to enrich signal failure message", exc_info=True)
+
         signal_name = failure.signal_name()
         signal_name_str = f" ({signal_name})" if signal_name != _NOT_AVAILABLE else ""
 
@@ -327,6 +340,7 @@ def record(
     ::
 
      error_handler = get_error_handler()
+     error_handler.set_entrypoint_fn_name(foobar.__qualname__)
      error_handler.initialize()
      try:
          foobar()
@@ -362,9 +376,12 @@ def record(
         def wrapper(*args: _P.args, **kwargs: _P.kwargs):
             if error_handler is None:
                 raise AssertionError  # assertion for mypy type checker
+            # f may be a functools.partial (or other callable) without a
+            # __qualname__; attribute the error to the fn name when available.
+            error_handler.set_entrypoint_fn_name(getattr(f, "__qualname__", None))
             error_handler.initialize()
             try:
-                return f(*args, **kwargs)
+                result = f(*args, **kwargs)
             except SystemExit as se:
                 # For run_path based entrypoints, SystemExit with code = 0 will never exit.
                 # Handling it here by returning a value:
@@ -389,6 +406,11 @@ def record(
             except Exception as e:
                 error_handler.record_exception(e)
                 raise
+            # Reached only when f() returned without raising. Kept outside the
+            # try so a subclass record_success() that raises is NOT caught by the
+            # handlers above (which would misreport success as a failure).
+            error_handler.record_success()
+            return result
 
         return wrapper
 

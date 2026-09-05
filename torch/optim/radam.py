@@ -12,6 +12,7 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _functional_api_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
@@ -181,7 +182,7 @@ RAdam.__doc__ = (
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{input}      : \gamma \text{ (lr)}, \: \beta_1, \beta_2
                 \text{ (betas)}, \: \theta_0 \text{ (params)}, \:f(\theta) \text{ (objective)}, \:
-                \lambda \text{ (weightdecay)}, \:\textit{maximize}                               \\
+                \lambda \text{ (weight decay)}, \:\textit{maximize}                               \\
             &\hspace{13mm} \epsilon \text{ (epsilon)}, \textit{decoupled\_weight\_decay}         \\
             &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
                 v_0 \leftarrow 0 \text{ ( second moment)},                                       \\
@@ -585,10 +586,6 @@ def radam(
     weight_decay: float,
     eps: float,
 ) -> None:
-    r"""Functional API that performs RAdam algorithm computation.
-
-    See :class:`~torch.optim.RAdam` for details.
-    """
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
@@ -624,3 +621,6 @@ def radam(
         capturable=capturable,
         has_complex=has_complex,
     )
+
+
+radam.__doc__ = _functional_api_doc.format(optimizer="RAdam")

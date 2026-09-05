@@ -168,11 +168,8 @@ struct RNNParams {
   }
 };
 
-template<bool is_single_direction>
 static std::vector<int64_t> _output_size(const RNNParams& rnn) {
-  auto output_channels = is_single_direction ? rnn.hidden_size
-                                             : rnn.hidden_size * rnn.num_directions;
-  return {rnn.seq_length, rnn.mini_batch, output_channels};
+  return {rnn.seq_length, rnn.mini_batch, rnn.hidden_size};
 }
 
 // MKLDNN GRU gate order is different from PyTorch's which requires gates shuffle
@@ -239,7 +236,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
       batch_first,
       train);
 
-  auto output_size = _output_size</*is_single_direction*/ true>(rnn);
+  auto output_size = _output_size(rnn);
   auto output = at::empty(output_size, input.options());
 
   auto hy_ = at::empty(hx_.sizes(), hx_.options());
@@ -283,11 +280,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
         pd.workspace_desc(), workspace.template data_ptr<uint8_t>());
     ideep::lstm_forward_training::compute(
         pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
-    return std::make_tuple(output, hy_, cy_, workspace);
+    return std::make_tuple(
+        std::move(output), std::move(hy_), std::move(cy_), std::move(workspace));
   } else {
     ideep::lstm_forward_inference::compute(
         x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, ideep::prop_kind::forward_inference);
-    return std::make_tuple(output, hy_, cy_, Tensor());
+    return std::make_tuple(std::move(output), std::move(hy_), std::move(cy_), Tensor());
   }
 }
 
@@ -333,7 +331,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
       bidirectional,
       batch_first,
       train);
-  auto output_size = _output_size</*is_single_direction*/ true>(rnn);
+  auto output_size = _output_size(rnn);
 
   auto weight_ih = _shuffle_weight(weight0, rnn.mode);
   auto weight_hh = _shuffle_weight(weight1, rnn.mode);

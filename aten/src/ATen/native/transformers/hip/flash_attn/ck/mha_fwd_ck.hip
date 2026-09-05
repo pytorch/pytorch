@@ -277,7 +277,6 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     const int head_size = sizes[3];
     const int seqlen_k = k.size(1);
     const int num_heads_k = k.size(2);
-    TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size <= 256, "CK only supports head dimension at most 256");
     TORCH_CHECK(head_size % 8 == 0, "query, key, value, and out_ must have a head_size that is a multiple of 8");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
@@ -306,6 +305,11 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
 
     // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
     // H/t Daniel Haziza
+    // NOTE: when this swap is taken, the kernel args/output MUST use the swapped tensors
+    // (q_padded/k_padded/v_padded) and an output allocated with the swapped shape. The
+    // original CK port passed the un-swapped q and out=empty_like(q), so for GQA + seqlen_q==1
+    // the kernel strided out of bounds and produced garbage (~FLT_MAX) -> downstream NaN. The
+    // arg/output plumbing below is fixed to use the swapped tensors.
     const int seqlenq_ngroups_swapped = seqlen_q == 1 && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 && p_dropout == 0.f && head_size % 8 == 0 && !attn_bias_.has_value();
     const int ngroups = num_heads / num_heads_k;
     at::Tensor temp_q = q;
@@ -344,15 +348,19 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         if (head_size % 8 != 0) { out = at::empty_like(q_padded); };
     }
     else {
-        out = at::empty_like(q);
+        // When the ngroups swap is active, seqlen_q/num_heads have been reassigned to the
+        // swapped (ngroups, num_heads_k) values, so allocate the output with that shape -
+        // empty_like(q) would use the original shape and the kernel would write out of bounds.
+        out = seqlenq_ngroups_swapped
+            ? at::empty({batch_size, seqlen_q, num_heads, head_size}, q.options())
+            : at::empty_like(q);
     }
 
     auto round_multiple = [](int x, int m) { return (x + m -1) / m*m;};
     const int head_size_8x = round_multiple(head_size, 8);
 
     // Otherwise the kernel will be launched from cuda:0 device
-    // Cast to char to avoid compiler warning about narrowing
-    at::cuda::CUDAGuard device_guard{(char)q.get_device()};
+    at::cuda::CUDAGuard device_guard{q.get_device()};
 
     auto opts = q.options();
     bool has_lse = true;
@@ -403,9 +411,13 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     {
       attn_bias = attn_bias_;
     }
-    if (seqlen_k > 0) {
-        drop_seed_offset.first = rng_state[0].data_ptr<uint64_t>();
-        drop_seed_offset.second = rng_state[1].data_ptr<uint64_t>();
+    // Read below by the p_dropout > 0 epilogue, which runs whether or not the kernel does.
+    drop_seed_offset.first = rng_state[0].data_ptr<uint64_t>();
+    drop_seed_offset.second = rng_state[1].data_ptr<uint64_t>();
+
+    // An empty batch or key sequence has no work: the tensors allocated above are
+    // already the correct empty result, so skip the launch rather than reject it.
+    if (batch_size > 0 && seqlen_k > 0) {
         auto stream = at::cuda::getCurrentHIPStream().stream();
         ck_tile::stream_config stream_config{stream};
 
@@ -429,9 +441,9 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
                 num_heads,
                 num_heads_k,
                 head_size_8x,
-                q,
-                k,
-                v,
+                q_padded,
+                k_padded,
+                v_padded,
                 attn_bias,
                 out,
                 softmax_lse,
@@ -443,7 +455,8 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
     }
     else {
-        // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
+        // No kernel ran. Both are empty when batch_size == 0; when only seqlen_k is 0
+        // they are not, and attention over no keys is defined as zeros with an lse of inf.
         out.zero_();
         softmax_lse.fill_(std::numeric_limits<float>::infinity());
     }

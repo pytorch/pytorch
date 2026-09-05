@@ -202,9 +202,9 @@ namespace impl {
 inline Tensor applySlice(
     const Tensor& self,
     int64_t dim,
-    c10::SymInt start,
-    c10::SymInt stop,
-    c10::SymInt step,
+    const c10::SymInt& start,
+    const c10::SymInt& stop,
+    const c10::SymInt& step,
     bool disable_slice_optimization,
     const at::Device& self_device,
     const std::optional<SymIntArrayRef>& self_sizes) {
@@ -227,8 +227,7 @@ inline Tensor applySlice(
       return self;
     }
   }
-  return self.slice_symint(
-      dim, std::move(start), std::move(stop), std::move(step));
+  return self.slice_symint(dim, start, stop, step);
 }
 
 inline Tensor applySelect(
@@ -330,13 +329,55 @@ inline void recordTensorIndex(
 
 inline c10::List<::std::optional<Tensor>> typeConvertIndices(
     const Tensor& /*self*/,
-    std::vector<Tensor>&& indices) {
+    std::vector<Tensor> indices) {
   c10::List<::std::optional<Tensor>> converted_inds;
   converted_inds.reserve(indices.size());
   for (auto&& i : std::move(indices)) {
     converted_inds.push_back(std::move(i));
   }
   return converted_inds;
+}
+
+inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
+    const Tensor& self,
+    const torch::List<std::optional<at::Tensor>>& indices) {
+  int64_t num_ind = 0;
+  Tensor mask;
+  auto self_device = self.device();
+  for (const std::optional<Tensor> i : indices) {
+    if (!i.has_value() || !(*i).defined()) {
+      if (!mask.defined()) {
+        num_ind++;
+      }
+    } else {
+      const Tensor& index = *i;
+      if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
+          index.device() != self_device || mask.defined()) {
+        return std::make_tuple(false, Tensor());
+      } else {
+        mask = index;
+        for (const auto j : c10::irange(index.dim())) {
+          int64_t srcIdx = num_ind + j;
+          TORCH_CHECK_INDEX(
+              index.size(j) == self.size(srcIdx),
+              "The shape of the mask ",
+              index.sizes(),
+              " at index ",
+              j,
+              " does not match the shape of the indexed tensor ",
+              self.sizes(),
+              " at index ",
+              srcIdx);
+        }
+        num_ind += mask.ndimension();
+      }
+    }
+  }
+  for ([[maybe_unused]] const auto i :
+       c10::irange(num_ind, self.ndimension())) {
+    mask = mask.unsqueeze(-1);
+  }
+  return std::make_tuple(true, std::move(mask));
 }
 
 // NOTE: Why do we mirror instead of replace the `count_specified_dimensions`
@@ -398,6 +439,20 @@ inline Tensor scalarToTensor(
   }
 }
 
+inline Tensor asTensor(const Tensor& value, const Tensor& target) {
+  return value;
+}
+inline Tensor asTensor(const Scalar& value, const Tensor& target) {
+  at::AutoDispatchBelowADInplaceOrView guard;
+  // TODO: This qint special case looks very suspicious...
+  if (isQIntType(target.scalar_type())) {
+    return scalarToTensor(
+        value, at::device(kCPU).dtype(kFloat), at::Device(kCPU));
+  } else {
+    return scalarToTensor(value, target.options(), target.device());
+  }
+}
+
 // To match numpy semantics:
 // As a special case for backwards compatibility,
 // strip away unit dimensions from the left of 'src'
@@ -416,6 +471,9 @@ inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
   return sizes.slice(first_non1_src);
 }
 
+inline void copy_to(const Tensor& dst, const Scalar& src) {
+  dst.fill_(src);
+}
 inline void copy_to(const Tensor& dst, const Tensor& src) {
   // Use TORCH_GUARD_OR_FALSE with sym_eq to avoid data-dependent-expression
   // errors with unbacked symbolic sizes.  When we can't prove equality,
@@ -518,7 +576,7 @@ inline Tensor handleDimInMultiDimIndexing(
         result = impl::applySelect(
             result,
             *dim_ptr,
-            tensor.item<int64_t>(),
+            tensor.item().toSymInt(),
             real_dim,
             original_tensor_device,
             prev_dim_result_sizes);
@@ -591,9 +649,7 @@ inline Tensor applySlicing(
 }
 } // namespace impl
 
-inline Tensor dispatch_index(
-    const Tensor& self,
-    std::vector<Tensor>&& indices) {
+inline Tensor dispatch_index(const Tensor& self, std::vector<Tensor> indices) {
   // Remove trailing null elements from indices
   while (!indices.empty() && !indices.back().defined()) {
     indices.pop_back();
@@ -603,7 +659,7 @@ inline Tensor dispatch_index(
 
 inline Tensor dispatch_index_put_(
     Tensor& self,
-    std::vector<Tensor>&& indices,
+    std::vector<Tensor> indices,
     const Tensor& value) {
   // Remove trailing null elements from indices
   while (!indices.empty() && !indices.back().defined()) {
@@ -611,6 +667,23 @@ inline Tensor dispatch_index_put_(
   }
   return self.index_put_(
       impl::typeConvertIndices(self, std::move(indices)), value);
+}
+
+inline bool try_dispatch_masked_fill_(
+    Tensor& self,
+    std::vector<Tensor> indices,
+    const Scalar& value) {
+  // Remove trailing null elements from indices
+  while (!indices.empty() && !indices.back().defined()) {
+    indices.pop_back();
+  }
+  auto list_indices = impl::typeConvertIndices(self, std::move(indices));
+  auto [can_dispatch, mask] = impl::canDispatchToMaskedFill(self, list_indices);
+  if (can_dispatch) {
+    self.masked_fill_(mask, value);
+    return true;
+  }
+  return false;
 }
 
 // NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing
@@ -713,11 +786,15 @@ inline Tensor get_item(
 // torch/csrc/autograd/python_variable_indexing.cpp for "the assigned value is a
 // Tensor" case See NOTE [ Setting `disable_slice_optimization` when calling C++
 // tensor indexing functions from Python ]
+template <typename T>
 inline void set_item(
     const Tensor& self,
     const ArrayRef<TensorIndex>& indices,
-    const Tensor& value,
+    const T& value,
     bool disable_slice_optimization = false) {
+  static_assert(
+      std::is_same_v<T, Tensor> || std::is_same_v<T, Scalar>,
+      "T must be either at::Tensor or at::Scalar");
   at::Device self_device = self.device();
   SymIntArrayRef self_sizes = self.sym_sizes();
 
@@ -769,13 +846,20 @@ inline void set_item(
     return;
   }
 
-  SymIntArrayRef valueSizes = value.sym_sizes();
+  if constexpr (std::is_same_v<T, Scalar>) {
+    if (try_dispatch_masked_fill_(sliced, tensorIndices, value)) {
+      return;
+    }
+  }
+
+  Tensor valueTensor = asTensor(value, self);
+  SymIntArrayRef valueSizes = valueTensor.sym_sizes();
   SymIntArrayRef slicedValueSizes = slicePrefix1sSize(valueSizes);
   Tensor valuesSliced;
   if (!valueSizes.equals(slicedValueSizes)) {
-    valuesSliced = value.view_symint(slicedValueSizes);
+    valuesSliced = valueTensor.view_symint(slicedValueSizes);
   } else {
-    valuesSliced = value;
+    valuesSliced = std::move(valueTensor);
   }
   dispatch_index_put_(sliced, std::move(tensorIndices), valuesSliced);
   return;

@@ -10,14 +10,13 @@
 #include <ATen/native/TypeProperties.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/Resize.h>
-#include <ATen/NamedTensorUtils.h>
-#include <ATen/TensorOperators.h>
 #include <ATen/TensorIteratorInternal.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_strided.h>
 #endif
 
@@ -25,7 +24,6 @@
 #include <c10/util/SmallBuffer.h>
 
 #include <array>
-#include <algorithm>
 #include <cmath>
 
 namespace at {
@@ -185,10 +183,6 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
     (*static_shape_)[squash_dim] = 1;
   }
   return *this;
-}
-
-bool TensorIteratorConfig::is_tensor_const(size_t idx) {
-  return std::find(const_tensor_indices_.begin(), const_tensor_indices_.end(), idx) != const_tensor_indices_.end();
 }
 
 // NOTE: [Computing output strides]
@@ -532,9 +526,6 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
             at::empty_like(op.tensor(),
                            op.tensor_base().options().dtype(common_dtype_),
                            LEGACY_CONTIGUOUS_MEMORY_FORMAT)));
-        if (!names_.empty()) {
-          namedinference::propagate_names(op.tensor_base(), names_);
-        }
         op.current_dtype = common_dtype_;
         op.target_dtype = common_dtype_;
       }
@@ -591,46 +582,19 @@ void TensorIteratorBase::allocate_or_resize_outputs() {
         // can just return contiguous output
         // it is faster because it avoids allocating 0 size tensor and
         // resizing and restriding it
-        set_output_raw_strided(i, tensor_shape, {}, original_options(op), names_);
+        set_output_raw_strided(i, tensor_shape, {}, original_options(op));
       } else {
         auto tensor_stride = invert_perm(op.stride_bytes);
         for (const auto dim : c10::irange(ndim())) {
           tensor_stride[dim] /= static_cast<int64_t>(element_size);
         }
-        set_output_raw_strided(i, tensor_shape, tensor_stride, original_options(op), names_);
+        set_output_raw_strided(i, tensor_shape, tensor_stride, original_options(op));
       }
       op.current_dtype = op.target_dtype;
     } else if (op.tensor_base().defined()) {
       // Even if we don't resize, we still need to tell set_output about
-      // the output, so that we properly set guard and propagate names
-      set_output_raw_strided(i, op.tensor_base().sizes(), {}, original_options(op), names_);
-    }
-  }
-}
-
-void TensorIteratorBase::compute_names(const TensorIteratorConfig& config) {
-  bool should_infer_names = std::any_of(
-      operands_.begin(),
-      operands_.end(),
-      [](const OperandInfo& op) {
-        return op.tensor_base().defined() && op.tensor_base().has_names();
-      });
-  if (!should_infer_names) {
-    return;
-  }
-
-  for (auto& op : operands_) {
-    if (!op.tensor_base().defined()) continue;
-    // Don't include output tensors if we are resizing, since we will
-    // clobber their names in any case.  (If the output tensor was
-    // also an input tensor, we'll pick it up when it shows up again
-    // in operands).
-    if (config.resize_outputs_ && op.is_output) continue;
-    // perform name inference
-    if (names_.empty()) {
-      names_ = op.tensor_base().names();
-    } else {
-      names_ = NameVector(unify_from_right(names_, op.tensor_base().names()));
+      // the output, so that we properly set guard
+      set_output_raw_strided(i, op.tensor_base().sizes(), {}, original_options(op));
     }
   }
 }
@@ -1170,7 +1134,10 @@ void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
       is_meta_ = true;
     }
     operands_.emplace_back(std::move(tensor));
-    operands_[idx].is_const = config.is_tensor_const(idx);
+  }
+  // const_tensor_indices_ are indices into operands_.
+  for (const auto idx : config.const_tensor_indices_) {
+    operands_[idx].is_const = true;
   }
   num_outputs_ = config.num_outputs_;
 }
@@ -1371,7 +1338,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor_base().defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output_raw_strided(i, shape_, {}, original_options(op).memory_format(MemoryFormat::Contiguous), names_);
+          set_output_raw_strided(i, shape_, {}, original_options(op).memory_format(MemoryFormat::Contiguous));
         }
         break;
       }
@@ -1382,7 +1349,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor_base().defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output_raw_strided(i, shape_, {}, original_options(op).memory_format(MemoryFormat::ChannelsLast), names_);
+          set_output_raw_strided(i, shape_, {}, original_options(op).memory_format(MemoryFormat::ChannelsLast));
         }
         break;
       }
@@ -1399,7 +1366,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor_base().defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output_raw_strided(i, shape_, tensor_base(i_defined).strides(), original_options(op), names_);
+          set_output_raw_strided(i, shape_, tensor_base(i_defined).strides(), original_options(op));
         }
         break;
       }
@@ -1444,18 +1411,26 @@ FastSetupType TensorIteratorBase::compute_fast_setup_type(const TensorIteratorCo
   }
 
   bool is_contiguous = true;
-  bool is_channels_last = true;
-  bool is_non_overlapping_and_dense = true;
   for (const auto& op : operands_) {
     if (op.tensor_base().defined() && !op.will_resize) {
       is_contiguous &= op.tensor_base().is_contiguous(at::MemoryFormat::Contiguous);
-      is_channels_last &= op.tensor_base().is_contiguous(at::MemoryFormat::ChannelsLast);
-      is_non_overlapping_and_dense &= op.tensor_base().is_non_overlapping_and_dense();
+      if (!is_contiguous) {
+        break;
+      }
     }
   }
   // TODO this leads to ambiguous cases (NC11) to be always treated as contiguous
   if (is_contiguous) {
     return FastSetupType::CONTIGUOUS;
+  }
+
+  bool is_channels_last = true;
+  bool is_non_overlapping_and_dense = true;
+  for (const auto& op : operands_) {
+    if (op.tensor_base().defined() && !op.will_resize) {
+      is_channels_last &= op.tensor_base().is_contiguous(at::MemoryFormat::ChannelsLast);
+      is_non_overlapping_and_dense &= op.tensor_base().is_non_overlapping_and_dense();
+    }
   }
   if (is_channels_last) {
     return FastSetupType::CHANNELS_LAST;
@@ -1502,8 +1477,6 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // Check that the outputs have no internal overlap
   // and do not share memory with inputs.
   compute_mem_overlaps(config);
-  // Check that input dimensions are aligned correctly & compute outnames.
-  compute_names(config);
   // compute the broadcasted shape
   compute_shape(config);
   // mark outputs for resizing if necessary
@@ -1524,13 +1497,14 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   if (is_meta_) return;
 
-  auto has_storage = true;
-  for (auto& op : operands_) {
-    has_storage &= op.tensor_base().has_storage();
+  bool privateuse1_without_storage = false;
+  if (common_device_.type() == DeviceType::PrivateUse1) {
+    bool has_storage = true;
+    for (auto& op : operands_) {
+      has_storage &= op.tensor_base().has_storage();
+    }
+    privateuse1_without_storage = !has_storage;
   }
-  auto privateuse1_without_storage =
-     common_device_.type() == DeviceType::PrivateUse1 &&
-     !has_storage;
 
   // XLA and lazy tensors don't have storage, so they don't have an underlying data pointer.
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
@@ -1557,7 +1531,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // So index translations in reduction can access
   // a valid value for the offset
   int64_t ndim_offsets = (ndim() ? ndim() : 1);
-  view_offsets_ = DimVector(ndim_offsets, 0);
+  view_offsets_.assign(ndim_offsets, 0);
 }
 
 // This is the structured kernels' implementation of set_output.  It is
@@ -1567,7 +1541,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 // The precondition for this function is that maybe_get_output() now
 // unconditionally returns a real Tensor (prior to output setting,
 // this function may return an undefined tensor.)
-void TensorIteratorBase::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
+void TensorIteratorBase::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options) {
   auto& op = operands_[output_idx];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
   const auto& t = maybe_get_output(output_idx);
@@ -1637,7 +1611,7 @@ void TensorIteratorBase::set_output_raw_strided(int64_t output_idx, IntArrayRef 
 // This is the "traditional" implementation of set_output.  On TensorIterator
 // instances, it is invoked directly from various call sites in this file.  No
 // funny business.
-void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
+void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options) {
   // NB: intentionally no superclass call
   auto& op = operands_[output_idx];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
@@ -1659,10 +1633,6 @@ void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef size
           op.tensor_base().unsafeGetTensorImpl()->empty_tensor_restride(*memory_format);
         }
       }
-  }
-  if (!names.empty()) {
-    TORCH_INTERNAL_ASSERT(op.tensor_base().defined());
-    namedinference::propagate_names(op.tensor_base(), names);
   }
 }
 

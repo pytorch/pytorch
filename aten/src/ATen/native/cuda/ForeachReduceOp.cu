@@ -167,7 +167,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
 
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
-  for (const auto i : c10::irange(ntensors)) {
+  for ([[maybe_unused]] const auto i : c10::irange(ntensors)) {
     vec_res.push_back(at::native::empty_cuda(
         {},
         optTypeMetaToScalarType(options.dtype_opt()),
@@ -177,7 +177,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
         options.memory_format_opt()));
   }
 
-  auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
 
   AT_DISPATCH_ALL_TYPES_AND3(
       kHalf,
@@ -232,7 +232,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
   int i = 0;
   for (const auto& t : tensors) {
     if (t.numel() != 0) {
-      result.emplace_back(vec_res[i]);
+      result.emplace_back(std::move(vec_res[i]));
       i++;
     } else {
       result.emplace_back(at::native::empty_cuda(
@@ -245,6 +245,15 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
     }
   }
   return result;
+}
+
+template <NormType norm_type, typename T>
+__device__ T block_reduce_norm(T val, T* shared) {
+  if constexpr (norm_type == NormType::LInf) {
+    return at::native::cuda_utils::BlockReduceMax(val, shared);
+  } else {
+    return at::native::cuda_utils::BlockReduceSum(val, shared);
+  }
 }
 
 template <
@@ -325,10 +334,7 @@ struct LpNormFunctor {
         val += vals[i];
       }
     }
-    auto final_val = norm_type == NormType::L0 || norm_type == NormType::L1 ||
-            norm_type == NormType::L2
-        ? at::native::cuda_utils::BlockReduceSum(val, s_vals)
-        : at::native::cuda_utils::BlockReduceMax(val, s_vals);
+    const auto final_val = block_reduce_norm<norm_type>(val, s_vals);
 
     if (threadIdx.x == 0) {
       output_per_tensor_ptr
@@ -360,10 +366,7 @@ __global__ void lpnorm_cleanup(
       val += output_this_tensor[i];
     }
   }
-  out_opmath_t final_val = norm_type == NormType::L0 ||
-          norm_type == NormType::L1 || norm_type == NormType::L2
-      ? at::native::cuda_utils::BlockReduceSum<out_opmath_t>(val, vals)
-      : at::native::cuda_utils::BlockReduceMax(val, vals);
+  const auto final_val = block_reduce_norm<norm_type>(val, vals);
   if (threadIdx.x == 0) {
     out_opmath_t result = final_val;
     if constexpr (apply_root && norm_type == NormType::L2) {
@@ -467,7 +470,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
   const auto res_option = options.dtype(output_dtype);
-  for (const auto i : c10::irange(ntensors)) {
+  for ([[maybe_unused]] const auto i : c10::irange(ntensors)) {
     vec_res.push_back(at::native::empty_cuda(
         {},
         optTypeMetaToScalarType(res_option.dtype_opt()),
@@ -477,7 +480,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
         res_option.memory_format_opt()));
   }
 
-  auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
@@ -588,7 +591,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
   int i = 0;
   for (const auto& t : tensors) {
     if (t.numel() != 0) {
-      result.emplace_back(vec_res[i]);
+      result.emplace_back(std::move(vec_res[i]));
       i++;
     } else {
       result.emplace_back(at::zeros({}, res_option));

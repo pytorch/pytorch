@@ -72,10 +72,14 @@ def promote_types(
     dtype_prop_candidates = []
 
     for arg in args:
-        assert not isinstance(arg, str)
+        if isinstance(arg, str):
+            raise AssertionError(f"expected non-str arg, got {type(arg)}")
         if isinstance(arg, OpsValue):
             arg = arg.value
-            assert isinstance(arg, torch._prims_common.Number) or hasattr(arg, "dtype")
+            if not (
+                isinstance(arg, torch._prims_common.Number) or hasattr(arg, "dtype")
+            ):
+                raise AssertionError("expected a Number or an object with a dtype")
 
         if isinstance(arg, torch._prims_common.Number):
             dtype_prop_candidates.append((type_to_dtype(type(arg)), True))
@@ -154,13 +158,26 @@ class DtypePropagationOpsHandler:
 
     _instance: Optional["DtypePropagationOpsHandler"] = None
 
+    # The registries the rules are meta programmed from, as of the last time the
+    # singleton was populated. Python calls __init__ on every construction, so
+    # without this the meta programming reruns on each of the thousands of
+    # constructions a compile makes.
+    _rules_key: tuple[Any, ...] | None = None
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self) -> None:
-        for op, rule in torch._inductor.utils.op_dtype_propagation_rules.items():
+        # op_dtype_propagation_rules is the only registry read below that grows as
+        # inductor state comes up; the other two are module level literals.
+        rules = torch._inductor.utils.op_dtype_propagation_rules
+        key = tuple(rules.items())
+        if key == DtypePropagationOpsHandler._rules_key:
+            return
+
+        for op, rule in rules.items():
             fn = (
                 functools.partial(self.return_dtype, dtype=rule.override_return_dtype)
                 if rule.override_return_dtype
@@ -193,6 +210,7 @@ class DtypePropagationOpsHandler:
             len(unimplemented_ops) == 0,
             lambda: f"Unimplemented dtype rule for ops: {unimplemented_ops}",
         )
+        DtypePropagationOpsHandler._rules_key = key
 
     # metaprogrammed in __init__
 
@@ -226,7 +244,8 @@ class DtypePropagationOpsHandler:
     ) -> torch.dtype:
         from .loop_body import LoopBodyBlock
 
-        assert isinstance(body, LoopBodyBlock), "body must be a LoopBodyBlock"
+        if not isinstance(body, LoopBodyBlock):
+            raise AssertionError("body must be a LoopBodyBlock")
         # TODO - we avoid calling this in codegen, needs work for non codegen use cases
         loads = body.graph.find_nodes(op="call_method", target="load")
         if len(loads) <= 1:
@@ -240,14 +259,25 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> torch.dtype:
-        # TODO - TODO - rationalize index_expr. The dtype is not always used and we are inconsistent about int32 or int64
-        # in lowerings. cpp just uses the dtype
+        # `index_expr` is for indexing-style uses: the kernel's chosen
+        # indexing dtype wins over the requested int dtype. For uses that
+        # must honor `dtype` (e.g. user-typed `arange(int64)` whose result
+        # participates in tensor computation), `value_expr` is the right op
+        # - see `convert_index_expr_to_value_expr` which rewrites accordingly.
         if dtype not in (torch.int32, torch.int64) or not hasattr(
             V.kernel, "index_dtype"
         ):
             return upcast_compute_type(dtype)
 
         return V.kernel.get_index_dtype_as_torch_dtype()
+
+    @staticmethod
+    def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> torch.dtype:
+        # Unlike `index_expr`, `value_expr` always honors the requested
+        # dtype because the result feeds tensor-value computation. The
+        # sympy expression is emitted literally, so there is no
+        # bf16/fp16 -> fp32 compute-type promotion here.
+        return dtype
 
     @staticmethod
     def to_dtype(
@@ -455,6 +485,8 @@ class DtypePropagationOpsHandler:
         is_pure=True,
         pack=1,
         input_dtypes=None,
+        output_dtypes=None,
+        output_index=0,
     ):
         return dtype
 

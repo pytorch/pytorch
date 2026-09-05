@@ -11,16 +11,16 @@
 #include <sleef.h>
 #endif
 
+#if defined(CPU_CAPABILITY_SVE128)
+#include <ATen/cpu/vec/sve/vec_float.h>
+#endif
+
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
 
 // Sleef offers vectorized versions of some transcedentals
 // such as sin, cos, tan etc..
 // However for now opting for STL, since we are not building
 // with Sleef for mobile yet.
-
-namespace at::vec {
-// See Note [CPU_CAPABILITY namespace]
-inline namespace CPU_CAPABILITY {
 
 // Right now contains only aarch64 implementation.
 // Due to follow two reasons aarch32 is not currently supported.
@@ -43,9 +43,25 @@ inline namespace CPU_CAPABILITY {
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
 
-#if defined(CPU_CAPABILITY_SVE128) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#if defined(__ARM_FEATURE_SVE)
+
+#include <arm_sve.h>
+
+#if defined(__clang__) && (__clang_major__ >= 16)
+
+#include <arm_neon_sve_bridge.h>
+
+static inline svfloat32_t neon_to_sve(float32x4_t v) {
+  return svset_neonq(svundef_f32(), v);
+}
+static inline float32x4_t sve_to_neon(svfloat32_t v) {
+  return svget_neonq(v);
+}
+
+#else
+
 // With -msve-vector-bits=128, svfloat32_t and float32x4_t have identical layout
-// so these conversions compile to zero instructions.
+// so these conversions compile to zero instructions on GCC.
 static inline svfloat32_t neon_to_sve(float32x4_t v) {
   svfloat32_t r;
   __builtin_memcpy(&r, &v, sizeof(v));
@@ -57,6 +73,12 @@ static inline float32x4_t sve_to_neon(svfloat32_t v) {
   return r;
 }
 #endif
+
+#endif
+
+namespace at::vec {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 
 template <int index, bool mask_val>
 struct BlendRegs {
@@ -291,7 +313,12 @@ class Vectorized<float> {
       name, Sleef_##name##f4_u10)
 
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(acos)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(acosh)
+  // Sleef acoshf/sinhf/coshf overflow for large float inputs where the scalar
+  // C library returns finite results, because Sleef uses float-range
+  // intermediates internally while the scalar C library uses double precision.
+  Vectorized<float> acosh() const {
+    return map(std::acosh);
+  }
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(asin)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(asinh)
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(atan)
@@ -371,6 +398,24 @@ class Vectorized<float> {
 
     return vfmaq_f32(scale, poly, scale);
   }
+#if defined(CPU_CAPABILITY_SVE128)
+  // SVE128 uses the ASIMD wrapper type, but can still reuse the SVE exp
+  // helpers.
+  Vectorized<float> exp_u20() const {
+    // special case to handle special inputs that are too large or too small
+    // i.e. where there's at least one element x, s.t. |x| >= 87.3...
+    svfloat32_t sve_values = neon_to_sve(values);
+    svbool_t is_special_case =
+        svacgt(svptrue_b32(), sve_values, 0x1.5d5e2ap+6f);
+    if (svptest_any(svptrue_b32(), is_special_case)) {
+      return exp();
+    }
+    return sve_to_neon(at::vec::exp_u20_fast_path(sve_values));
+  }
+  Vectorized<float> fexp_u20() const {
+    return sve_to_neon(at::vec::fexp_u20(neon_to_sve(values)));
+  }
+#else
   Vectorized<float> exp_u20() const {
     return vexpq_f32_u20();
   }
@@ -417,6 +462,7 @@ class Vectorized<float> {
     y = vbslq_f32(gt_upper, vdupq_n_f32(INFINITY), y);
     return y;
   }
+#endif
   DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
       fmod,
       Sleef_fmodf4)
@@ -447,9 +493,16 @@ class Vectorized<float> {
       Sleef_nextafterf4)
   Vectorized<float> frac() const;
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(sin)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(sinh)
+  // Sleef sinhf/coshf overflow for large float inputs where std::sinh/cosh
+  // return finite results, because Sleef uses float-range intermediates
+  // internally while the scalar C library uses double precision.
+  Vectorized<float> sinh() const {
+    return map(std::sinh);
+  }
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(cos)
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(cosh)
+  Vectorized<float> cosh() const {
+    return map(std::cosh);
+  }
   Vectorized<float> ceil() const {
     return map(at::native::ceil_impl);
   }
@@ -644,6 +697,48 @@ inline Vectorized<float> Vectorized<float>::le(
   return (*this <= other) & Vectorized<float>(1.0f);
 }
 
+#if defined(__clang__) && defined(__ARM_FEATURE_SVE)
+
+// Clang uses FMAD and FMLA interchangeably, depending on the result register
+
+template <>
+Vectorized<float> inline fmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return sve_to_neon(svmad_f32_x(
+      svptrue_b32(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+template <>
+Vectorized<float> inline fnmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return sve_to_neon(svmsb_f32_x(
+      svptrue_b32(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+template <>
+Vectorized<float> inline fmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return sve_to_neon(svnmsb_f32_x(
+      svptrue_b32(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+template <>
+Vectorized<float> inline fnmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return sve_to_neon(svnmad_f32_x(
+      svptrue_b32(), neon_to_sve(a), neon_to_sve(b), neon_to_sve(c)));
+}
+
+#else
+
 template <>
 Vectorized<float> inline fmadd(
     const Vectorized<float>& a,
@@ -675,6 +770,8 @@ Vectorized<float> inline fnmsub(
     const Vectorized<float>& c) {
   return Vectorized<float>(vnegq_f32(vfmaq_f32(c, a, b)));
 }
+
+#endif
 
 inline Vectorized<float> Vectorized<float>::erf() const {
   // constants

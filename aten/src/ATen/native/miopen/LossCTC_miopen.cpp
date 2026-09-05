@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/Config.h>
 #include <ATen/TensorUtils.h>
 #include <c10/util/Exception.h>
 
@@ -18,6 +17,8 @@
 // TODO: Remove the condition on AT_ROCM_ENABLED entirely,
 // don't build this file as part of CPU build.
 #include <ATen/cuda/CUDAConfig.h>
+
+#include <utility>
 
 #if !AT_ROCM_ENABLED()
 
@@ -242,7 +243,7 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
   MIOPEN_CHECK(miopenDestroyTensorDescriptor(grads_desc));
   MIOPEN_CHECK(miopenDestroyCTCLossDescriptor(ctc_desc));
 
-  return std::make_tuple(costs, grad);
+  return std::make_tuple(std::move(costs), std::move(grad));
 }
 
 std::tuple<Tensor, Tensor> miopen_ctc_loss_tensor(

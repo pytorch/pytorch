@@ -10,6 +10,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/IntrusiveList.h>
 #include <c10/util/Logging.h>
+#include <c10/util/string_view.h>
 
 #include <torch/csrc/utils/generated_serialization_types.h>
 #include <torch/nativert/executor/Placement.h>
@@ -315,7 +316,7 @@ class Node : public c10::IntrusiveListHook {
   std::string toString() const {
     std::stringstream ss;
     ss << *this;
-    return ss.str();
+    return std::move(ss).str();
   }
 
   void updateInputName(std::string_view oldName, std::string_view newName) {
@@ -633,7 +634,7 @@ class Graph {
   std::string toString() const {
     std::stringstream ss;
     ss << *this;
-    return ss.str();
+    return std::move(ss).str();
   }
 
   /* Reassigns IDs to every Value in this Graph so that they are contiguous from
@@ -671,7 +672,12 @@ class Graph {
   // AKA "sink" of a graph.
   Node* outputNode_; // target: prim.Output
 
-  std::unordered_map<std::string, std::unique_ptr<Value>> values_;
+  std::unordered_map<
+      std::string,
+      std::unique_ptr<Value>,
+      c10::TransparentStringHash,
+      std::equal_to<>>
+      values_;
   // constantSymIntValues_ is a subset of values_
   std::unordered_map<ValueId, int> constantSymIntValues_;
   // Output values of the graph, which is a subset of values_.

@@ -1218,14 +1218,6 @@ op_db: list[OpInfo] = [
         "masked.log_softmax",
         method_variant=None,
         dtypes=floating_types_and(torch.half, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(
-            torch.half,
-            torch.bfloat16,
-            torch.uint8,
-            torch.int32,
-            torch.int16,
-            torch.int8,
-        ),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
             DecorateInfo(
@@ -1337,12 +1329,6 @@ op_db: list[OpInfo] = [
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"), "TestFwdGradients", "test_fn_gradgrad"
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"), "TestBwdGradients", "test_fn_gradgrad"
             ),
         ),
         sample_inputs_func=sample_inputs_masked_logaddexp,

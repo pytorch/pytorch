@@ -111,13 +111,14 @@ orphan: true
 
 - Will Constable ([wconstab](https://github.com/wconstab))
 - Howard Huang ([H-Huang](https://github.com/H-Huang))
-- (emeritus) Wanchao Liang ([wanchaol](https://github.com/wanchaol))
-- (emeritus) Ke Wen ([kwen2501](https://github.com/kwen2501))
+- Ke Wen ([kwen2501](https://github.com/kwen2501))
 - Chien-Chin Huang ([fegin](https://github.com/fegin))
 - Tristan Rice ([d4l3k](https://github.com/d4l3k))
 - Junjie Wang ([fduwjj](https://github.com/fduwjj))
 - Wei Feng ([weifengpy](https://github.com/weifengpy))
 - Pei Zhang ([zpcore](https://github.com/zpcore))
+- Kapil Sharma ([kapilsh](https://github.com/kapilsh))
+- (emeritus) Wanchao Liang ([wanchaol](https://github.com/wanchaol))
 - (emeritus) Shen Li ([mrshenli](https://github.com/mrshenli))
 - (emeritus) Pritam Damania ([pritamdamania87](https://github.com/pritamdamania87))
 - (emeritus) Yanli Zhao ([zhaojuanmao](https://github.com/zhaojuanmao))
@@ -245,11 +246,11 @@ orphan: true
 
 ### Build + CI
 
-- Nikita Shulga ([malfet](https://github.com/malfet))
-- Eli Uriegas ([seemethere](https://github.com/seemethere))
 - Alban Desmaison ([alband](https://github.com/alband))
 - Andrey Talman ([atalman](https://github.com/atalman))
-- Zain Rizvi ([ZainRizvi](https://github.com/ZainRizvi))
+- Nikita Shulga ([malfet](https://github.com/malfet))
+- (emeritus) Eli Uriegas ([seemethere](https://github.com/seemethere))
+- (emeritus) Zain Rizvi ([ZainRizvi](https://github.com/ZainRizvi))
 - (emeritus) Mikey Dagitses ([dagitses](https://github.com/dagitses))
 - (emeritus) Omkar Salpekar ([osalpekar](https://github.com/osalpekar))
 - (emeritus) Nirav Mehta ([mehtanirav](https://github.com/mehtanirav))

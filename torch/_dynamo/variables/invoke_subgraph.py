@@ -4,12 +4,13 @@ supporting helpers for subgraph reuse (auto-cache) in Dynamo's invoke_subgraph
 higher-order operator.
 """
 
+import collections
 import enum
 import logging
 import traceback
 import types
 from dataclasses import dataclass
-from typing import Any, cast, NamedTuple, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, TYPE_CHECKING, TypeGuard
 
 import torch
 import torch._higher_order_ops
@@ -23,6 +24,7 @@ from torch._dynamo.guards import (
     UnsupportedGuardCheckSpec,
 )
 from torch._dynamo.source import SyntheticLocalSource
+from torch._dynamo.utils import _make_inlined, unpack_iterable
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
@@ -30,6 +32,7 @@ from torch._dynamo.variables.higher_order_ops import WrapHigherOrderVariable
 from torch._dynamo.variables.lists import ListVariable, TupleVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
+from torch._dynamo.variables.user_defined import UserDefinedObjectVariable
 from torch._guards import (
     Guard,
     InvokeSubgraphReuseCondition,
@@ -44,7 +47,7 @@ from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.higher_order_ops import SubgraphTracingInfo
 
 log = logging.getLogger(__name__)
@@ -139,12 +142,14 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #    (e.g. the result of a prior FX op). These can reach a nested compile region
 #    only via (a) the region's explicit function arguments, or (b) closure
 #    capture. We do not support nested-function regions that close over tensors,
-#    so only (a) applies. For explicit arguments, the set of types that can
-#    appear is small and well-defined: TensorVariable, SymNodeVariable,
-#    ConstantVariable, and NNModuleVariable. Each has a cheap structural
+#    so only (a) applies. For explicit arguments, the set of types we support is
+#    small and well-defined: TensorVariable, SymNodeVariable, and
+#    ConstantVariable (enum members included). Each has a cheap structural
 #    comparison (tensor metadata, symnode identity, constant value equality).
 #    We also snapshot the pytree treespec of the argument list and verify it
 #    matches on lookup, ensuring the flattened structure is identical.
+#    A sourceless object -- an nn.Module built during tracing, say -- has
+#    neither a structural comparison nor guards, so it is not eligible at all.
 #
 # 2. Sourceful variables — values with a known originating source (e.g. a
 #    module attribute or a local variable visible in the outer frame). For these
@@ -170,7 +175,7 @@ class InputTag(enum.Enum):
     TENSOR = "tensor"
     SYMNODE = "symnode"
     CONSTANT = "constant"
-    MODULE = "module"
+    OBJECT = "object"
 
 
 class InputFingerprint(NamedTuple):
@@ -184,33 +189,51 @@ class InputFingerprint(NamedTuple):
     treespec: pytree.TreeSpec | None = None
 
 
+def is_constant_like(
+    vt: Any,
+) -> TypeGuard[ConstantVariable | UserDefinedObjectVariable]:
+    """Whether a leaf VT is compared by value, via ``vt.value``.
+
+    Enum members are UserDefinedObjectVariable (not ConstantVariable) in
+    Dynamo, but they are immutable singletons, so value comparison is as
+    sound as it is for ConstantVariable.
+    """
+    if isinstance(vt, ConstantVariable):
+        return True
+    return isinstance(vt, UserDefinedObjectVariable) and isinstance(vt.value, enum.Enum)
+
+
 def classify_vt(vt: Any) -> InputTag | None:
     """Return the tag for a leaf VT, or None if unsupported."""
     if isinstance(vt, TensorVariable):
         return InputTag.TENSOR
     elif isinstance(vt, SymNodeVariable):
         return InputTag.SYMNODE
-    elif isinstance(vt, ConstantVariable):
+    elif is_constant_like(vt):
         return InputTag.CONSTANT
-    elif isinstance(vt, UnspecializedNNModuleVariable):
-        return InputTag.MODULE
+    elif isinstance(vt, UserDefinedObjectVariable) and vt.source is not None:
+        # Covers nn.Modules too -- UnspecializedNNModuleVariable is a
+        # UserDefinedObjectVariable subclass. No metadata is recorded; reuse
+        # safety comes entirely from re-evaluating the guards installed on this
+        # object's source and on the sources derived from it. A sourceless
+        # object has no guards to re-evaluate, so it stays unsupported.
+        return InputTag.OBJECT
     return None
 
 
 def build_input_fingerprint(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fn_args_vt: Any,
     kwargs: dict[str, Any],
 ) -> InputFingerprint:
     """Build an InputFingerprint by flattening (args, kwargs) via pytree.
 
-    Uses _make_inlined(tx, pytree.tree_flatten) to recursively flatten
-    the argument structure into leaf VTs, classifying each leaf as
+    Flattens the argument structure into leaf VTs, classifying each leaf as
     tensor/symnode/constant/module. Also records the TreeSpec so that
     cache lookups can verify structural equivalence.
 
     Fast path: when kwargs is empty and all args are already leaf VTs
-    (tensor/symnode/constant/module), skip the expensive pytree flatten.
+    (tensor/symnode/constant/module), skip the pytree flatten entirely.
     """
     # Fast path: flat args, no kwargs — skip pytree machinery.
     if not kwargs:
@@ -243,36 +266,101 @@ def build_fingerprint_fast(fn_args_vt: Any) -> InputFingerprint:
 
 
 def build_fingerprint_with_pytree(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fn_args_vt: Any,
     kwargs: dict[str, Any],
 ) -> InputFingerprint:
-    """Build fingerprint via pytree flatten for nested/kwargs cases."""
-    from torch._dynamo.variables.builder import SourcelessBuilder
-    from torch._dynamo.variables.higher_order_ops import _make_inlined
+    """Build fingerprint via pytree flatten for nested/kwargs cases.
 
-    container_vt = SourcelessBuilder.create(tx, (list(fn_args_vt), kwargs))
-    flat_list_vt, treespec_vt = _make_inlined(tx, pytree.tree_flatten)(
-        container_vt
-    ).unpack_var_sequence(tx)
-    treespec = treespec_vt.as_python_constant()
+    Recurses over the pytree structure natively (untraced), inlining/tracing
+    only each container node's own ``flatten_fn`` rather than the full
+    recursive tree_flatten dispatch around it. This is safe because node-type
+    classification only depends on ``type()``, never on tensor values.
+
+    Note: skipping the traced registry dispatch also means we no longer
+    install guards on the pytree registry itself, for the plain-function
+    flatten_fn case (the non-FunctionType fallback below still traces the
+    full tree_flatten and so still installs them). That's fine either way:
+    this fingerprint is built fresh from the live registry on every
+    reuse-lookup (register_pytree_node isn't traceable, so the registry
+    can't change mid-trace), and reuse is separately gated on treespec/tag
+    equality. So a registry change between compiles can only make a cached
+    subgraph ineligible for reuse (has_unknown / treespec mismatch), never
+    silently wrong.
+    """
+    from torch._dynamo.variables.builder import SourcelessBuilder
 
     flat_vts: list[tuple[InputTag, VariableTracker]] = []
     arg_sources: list[Source | None] = []
     has_unknown = False
 
-    for vt in flat_list_vt.unpack_var_sequence(tx):
+    def add_leaf(vt: VariableTracker) -> None:
+        nonlocal has_unknown
         tag = classify_vt(vt)
-        if tag is not None:
-            flat_vts.append((tag, vt))
-        else:
+        if tag is None:
             has_unknown = True
-            continue
+        else:
+            flat_vts.append((tag, vt))
+            # Always append (even None) to keep positional alignment with flat_vts.
+            arg_sources.append(getattr(vt, "source", None))
 
-        # Always append (even None) to keep positional alignment with flat_vts.
-        arg_sources.append(getattr(vt, "source", None))
+    def flatten(node_vt: VariableTracker) -> pytree.TreeSpec:
+        nonlocal has_unknown
+        try:
+            node_type = node_vt.python_type()
+        except NotImplementedError:
+            has_unknown = True
+            return pytree.treespec_leaf()
+        # Keep in sync with pytree._get_node_type.
+        if pytree.is_namedtuple_class(node_type):
+            node_type = collections.namedtuple
+
+        if node_type not in pytree.SUPPORTED_NODES:
+            add_leaf(node_vt)
+            return pytree.treespec_leaf()
+
+        flatten_fn = pytree.SUPPORTED_NODES[node_type].flatten_fn
+        if not isinstance(flatten_fn, types.FunctionType):
+            # _make_inlined only supports plain Python functions (it always
+            # wraps its argument in a UserFunctionVariable). A flatten_fn
+            # registered as e.g. a functools.partial, bound method, or
+            # callable object can't go through it directly. Fall back to
+            # tracing the full recursive tree_flatten for this subtree, which
+            # dispatches calls generically and so handles any callable.
+            leaves_vt, treespec_vt = unpack_iterable(
+                tx, _make_inlined(tx, pytree.tree_flatten)(node_vt)
+            )
+            for leaf_vt in unpack_iterable(tx, leaves_vt):
+                add_leaf(leaf_vt)
+            return treespec_vt.as_python_constant()
+
+        children_vt, context_vt = unpack_iterable(
+            tx, _make_inlined(tx, flatten_fn)(node_vt)
+        )
+        context = context_vt.as_python_constant()
+        child_specs = [flatten(child) for child in unpack_iterable(tx, children_vt)]
+        return pytree.TreeSpec(node_type, context, child_specs)
+
+    container_vt = SourcelessBuilder.create(tx, (list(fn_args_vt), kwargs))
+    treespec = flatten(container_vt)
 
     return InputFingerprint(flat_vts, arg_sources, has_unknown, treespec)
+
+
+def sym_num_key(sym_num: Any) -> Any:
+    """Key for matching a symbolic input against a cached one.
+
+    Compares the symbolic expression rather than the SymInt object. Each tensor
+    holds its own SymInt objects, so two arguments carrying the same symbol
+    (e.g. the atom count threaded through successive layers) are distinct
+    objects. Equal expressions mean the same value, which is what reuse needs;
+    distinct symbols still have distinct expressions.
+
+    ``expr`` rather than ``_expr`` on purpose: it has the ShapeEnv's
+    replacements applied, so a symbol that was specialized keys on the value it
+    was specialized to.
+    """
+    return sym_num.node.expr
 
 
 def get_flat_proxies(fingerprint: InputFingerprint) -> list[Proxy]:
@@ -341,7 +429,7 @@ def get_fn_code(fn_var: Any) -> types.CodeType | None:
 
 
 def has_mutated_vars(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     traced_sources: OrderedSet[Source],
 ) -> bool:
     """Check if any source accessed by the subgraph has been mutated.
@@ -361,7 +449,7 @@ def has_mutated_vars(
 
 
 def is_reuse_eligible(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     body_r: Any,
     fingerprint: InputFingerprint,
     tracing_info: "SubgraphTracingInfo",
@@ -378,8 +466,9 @@ def is_reuse_eligible(
         time — if the underlying object changed since then, the cached
         guards would silently evaluate against stale values.
       - Output must be a single tensor, or a tuple/list of plain tensors.
-      - All flattened inputs must be one of: tensor, symnode, constant,
-        unspecialized NN module — for sourceless or other input types we
+      - All flattened inputs must be one of: tensor, symnode, constant
+        (including enum members), or a sourceful user-defined object
+        (nn.Modules included) — for sourceless or other input types we
         rely on the treespec and tags for structural matching, so only
         types with well-defined comparison semantics are supported.
 
@@ -432,7 +521,7 @@ def is_reuse_eligible(
 
 
 def build_reuse_condition(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fingerprint: InputFingerprint,
     traced_sources: OrderedSet[Source],
 ) -> InvokeSubgraphReuseCondition | None:
@@ -441,7 +530,7 @@ def build_reuse_condition(
     A reuse condition is a mix of two kinds of checks:
 
     1. **Input tag checks** (from flat_vts): For each flattened leaf VT,
-       we record its tag (_VtTag.TENSOR/SYMNODE/CONSTANT/MODULE) and
+       we record its tag (InputTag.TENSOR/SYMNODE/CONSTANT/OBJECT) and
        metadata (e.g. tensor shape/stride/dtype/device/requires_grad).
        At lookup time, the treespec ensures structural equivalence, and
        then we compare tags and metadata leaf-by-leaf.
@@ -477,19 +566,18 @@ def build_reuse_condition(
                 raise AssertionError(
                     f"expected SymNodeVariable for SYMNODE tag, got {type(vt).__name__}"
                 )
-            # Store the SymInt/SymFloat/SymBool object itself. Two accesses to
-            # the same symbolic dimension (e.g. x.shape[0] twice) produce the
-            # same Python object, so identity comparison in is_reusable is
-            # correct and avoids false matches between distinct symbols.
-            input_checks.append((InputTag.SYMNODE, vt.sym_num))
+            input_checks.append((InputTag.SYMNODE, sym_num_key(vt.sym_num)))
         elif tag == InputTag.CONSTANT:
-            if not isinstance(vt, ConstantVariable):
+            if not is_constant_like(vt):
                 raise AssertionError(
-                    f"expected ConstantVariable for CONSTANT tag, got {type(vt).__name__}"
+                    f"expected constant-like VT for CONSTANT tag, got {type(vt).__name__}"
                 )
-            input_checks.append((InputTag.CONSTANT, vt.value))
-        elif tag == InputTag.MODULE:
-            input_checks.append((InputTag.MODULE, None))
+            # Type is part of the key: `Mode.ADD == 1` and `True == 1` compare
+            # equal, but an isinstance() check inside the region traces
+            # differently for each, so value equality alone is not enough.
+            input_checks.append((InputTag.CONSTANT, (type(vt.value), vt.value)))
+        elif tag == InputTag.OBJECT:
+            input_checks.append((InputTag.OBJECT, None))
         else:
             raise AssertionError(
                 f"Unexpected input tag '{tag}' for {type(vt).__name__} -- "
@@ -557,7 +645,7 @@ def build_source_replacement(
 
 
 def is_reusable(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     condition: "InvokeSubgraphReuseCondition",
     fingerprint: InputFingerprint,
     cached_entry: InvokeSubgraphReuseEntry,
@@ -629,14 +717,32 @@ def is_reusable(
                 raise AssertionError(
                     f"expected SymNodeVariable for SYMNODE tag, got {type(cur_vt).__name__}"
                 )
-            if cur_vt.sym_num is not cached_val:
+            if sym_num_key(cur_vt.sym_num) != cached_val:
+                hc_log.debug(
+                    "subgraph_reuse: reuse failed -- input %d symnode mismatch: cached '%s' vs current '%s'",
+                    i,
+                    cached_val,
+                    cur_vt.sym_num,
+                )
                 return False
         elif cached_tag == InputTag.CONSTANT:
-            if not isinstance(cur_vt, ConstantVariable):
+            if not is_constant_like(cur_vt):
                 raise AssertionError(
-                    f"expected ConstantVariable for CONSTANT tag, got {type(cur_vt).__name__}"
+                    f"expected constant-like VT for CONSTANT tag, got {type(cur_vt).__name__}"
                 )
-            if cur_vt.value != cached_val:
+            cached_type, cached_value = cast(tuple[type, Any], cached_val)
+            if type(cur_vt.value) is not cached_type:
+                # Not deferred to the source check below: a value guard cannot
+                # catch a type change that alters the trace (isinstance, etc).
+                hc_log.debug(
+                    "subgraph_reuse: reuse failed -- input %d constant type "
+                    "mismatch: cached '%s' vs current '%s'",
+                    i,
+                    cached_type,
+                    type(cur_vt.value),
+                )
+                return False
+            if cur_vt.value != cached_value:
                 # If both the cached and current arg have sources, source
                 # replacement in stamp_out will resolve the correct value.
                 cached_src = (
@@ -650,6 +756,13 @@ def is_reusable(
                     else None
                 )
                 if cached_src is None or new_src is None:
+                    hc_log.debug(
+                        "subgraph_reuse: reuse failed -- input %d constant mismatch "
+                        "with no source to replace: cached '%s' vs current '%s'",
+                        i,
+                        cached_val,
+                        cur_vt.value,
+                    )
                     return False
 
     source_replacement = build_source_replacement(
@@ -736,7 +849,7 @@ def is_reusable(
 
 
 def has_reuse_entries(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fn_var: Any,
 ) -> bool:
     """Cheap check: does the cache have any entries for this function?"""
@@ -752,7 +865,7 @@ def has_reuse_entries(
 
 
 def find_reuse_match(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fn_var: Any,
     fingerprint: InputFingerprint,
 ) -> InvokeSubgraphReuseEntry | None:
@@ -779,7 +892,7 @@ def find_reuse_match(
 
 
 def save_reuse_entry(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fn_var: Any,
     fingerprint: InputFingerprint,
     body_name: str,
@@ -873,7 +986,7 @@ def save_reuse_entry(
 
 
 def trace_reuse_hash_fn(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     reuse_hash_fn: Any,
     fn_args_vt: "list[VariableTracker]",
     kwargs: dict[str, VariableTracker],
@@ -884,7 +997,6 @@ def trace_reuse_hash_fn(
     key itself is the reuse condition, not the guards.
     """
     from torch._dynamo.exc import Unsupported
-    from torch._dynamo.utils import _make_inlined
 
     with tx.output.tracing_context.guards_context.skip_guard_install():
         try:
@@ -903,7 +1015,7 @@ def trace_reuse_hash_fn(
 
 
 def find_reuse_entry_by_key(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fn_var: Any,
     hash_key: int,
 ) -> InvokeSubgraphReuseEntry | None:
@@ -921,7 +1033,7 @@ def find_reuse_entry_by_key(
 
 
 def stamp_out_subgraph(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fingerprint: InputFingerprint,
     cached: InvokeSubgraphReuseEntry,
 ) -> VariableTracker:
@@ -1041,7 +1153,7 @@ def stamp_out_subgraph(
 
 
 def build_subgraph_input_mapping(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     p_args: tuple[Any, ...],
     flat_vts: list[tuple[InputTag, VariableTracker]],
 ) -> list[LiftedArgOrigin]:
@@ -1086,7 +1198,11 @@ def build_subgraph_input_mapping(
                 else outer_proxy.node.meta.get("example_value", None)
             )
             if isinstance(example, torch.SymInt):
-                subgraph_input_mapping.append(LiftedBoundSymbol(example.node.expr))
+                # _expr rather than expr: expr applies the ShapeEnv's
+                # replacements, so a symbol the region lifted before it was
+                # specialized comes back as a constant, which bound_symbols has
+                # no entry for.
+                subgraph_input_mapping.append(LiftedBoundSymbol(example.node._expr))
                 continue
             if source is None:
                 raise AssertionError(
@@ -1120,7 +1236,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     # pyrefly: ignore[bad-override]
     def install_subgraph_in_output_graph(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         fn_vt: VariableTracker,
         fn_args_vt: "list[VariableTracker]",
         kwargs: dict[str, VariableTracker],
@@ -1201,7 +1317,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
     def _call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: "list[VariableTracker]",
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:

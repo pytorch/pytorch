@@ -118,6 +118,12 @@ using TF32 as they have with fp32.
 We recommend enabling TF32 tensor cores for matrix multiplications with
 `torch.backends.cuda.matmul.fp32_precision = "tf32"` (`torch.backends.cuda.matmul.allow_tf32 = True`
 is going to be deprecated) if your network does not need full float32 precision.
+With a CUDA 12.9 or newer build,
+`torch.backends.cuda.matmul.fp32_precision = "bfx9"` allows cuBLAS to use BF16x9
+emulation on supported NVIDIA GPUs. BF16x9 keeps FP32 inputs and outputs and
+retains all FP32 input bits through its decomposition, but its arithmetic is not
+IEEE-754 compliant and its relative accuracy is workload-dependent. On GPUs
+without a BF16x9 implementation, cuBLAS uses native FP32 instead.
 If your network needs full float32 precision for both matrix multiplications and convolutions,
 then TF32 tensor cores can also be disabled for convolutions with
 `torch.backends.cudnn.conv.fp32_precision = "ieee"` (`torch.backends.cudnn.allow_tf32 = False`
@@ -141,10 +147,16 @@ unexpected results (e.g., `inf` values when the final result should be represent
 half-precision).
 If reduced-precision reductions are problematic, they can be turned off with
 `torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False`.
+This sets `allow_splitk` to `True`. To disable both reduced-precision reductions
+and split-k reductions, use
+`torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (False, False)`.
 
 A similar flag exists for BF16 GEMM operations and is turned on by default. If BF16
 reduced-precision reductions are problematic, they can be turned off with
 `torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False`.
+This sets `allow_splitk` to `True`. To disable both reduced-precision reductions
+and split-k reductions, use
+`torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (False, False)`.
 
 For more information see {ref}`allow_fp16_reduced_precision_reduction <fp16reducedprecision>`
 and {ref}`allow_bf16_reduced_precision_reduction <bf16reducedprecision>`.

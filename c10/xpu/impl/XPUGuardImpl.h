@@ -101,6 +101,21 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   // Event-related functions
+#if SYCL_COMPILER_VERSION >= 20260200
+  void createEvent(sycl::event** xpu_event, const EventFlag flag) const {
+    namespace syclex = sycl::ext::oneapi::experimental;
+    *xpu_event = new sycl::event(syclex::make_event(
+        c10::xpu::get_device_context(),
+        syclex::properties{
+            syclex::enable_profiling{flag == EventFlag::BACKEND_DEFAULT}}));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_creation(
+          c10::kXPU, reinterpret_cast<uintptr_t>(*xpu_event));
+    }
+  }
+#endif
+
   void destroyEvent(void* event, const DeviceIndex device_index)
       const noexcept override {
     if (!event)
@@ -120,6 +135,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const Stream& stream,
       const DeviceIndex device_index,
       const EventFlag flag) const override {
+    namespace syclex = sycl::ext::oneapi::experimental;
     TORCH_CHECK(
         device_index == -1 || device_index == stream.device_index(),
         "Event device index ",
@@ -131,22 +147,32 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     auto* xpu_event = reinterpret_cast<sycl::event*>(*event);
     const XPUStream xpu_stream{stream};
 
-    // Delete the event previously recorded.
-    if (xpu_event)
-      delete xpu_event;
-#if SYCL_COMPILER_VERSION >= 20250000
-    if (flag == EventFlag::BACKEND_DEFAULT) {
-      // Use the profiling tag to record the event to enable timing feature.
-      xpu_event =
-          new sycl::event(sycl::ext::oneapi::experimental::submit_profiling_tag(
-              xpu_stream.queue()));
-    } else {
-      xpu_event =
-          new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
-    }
-#else
-    xpu_event = new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
+    bool reusable = false;
+#if SYCL_COMPILER_VERSION >= 20260200
+    reusable = c10::xpu::get_raw_device(stream.device_index())
+                   .has(sycl::aspect::ext_oneapi_per_event_profiling);
 #endif
+    if (reusable) {
+#if SYCL_COMPILER_VERSION >= 20260200
+      if (!xpu_event) {
+        createEvent(&xpu_event, flag);
+      }
+      syclex::enqueue_signal_event(xpu_stream.queue(), *xpu_event);
+#endif
+    } else {
+      // Delete the event previously recorded.
+      if (xpu_event)
+        delete xpu_event;
+
+      if (flag == EventFlag::BACKEND_DEFAULT) {
+        // Use the profiling tag to record the event to enable timing feature.
+        xpu_event =
+            new sycl::event(syclex::submit_profiling_tag(xpu_stream.queue()));
+      } else {
+        xpu_event =
+            new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
+      }
+    }
     *event = reinterpret_cast<void*>(xpu_event);
 
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
@@ -162,9 +188,23 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (!event)
       return;
     auto* xpu_event = reinterpret_cast<sycl::event*>(event);
-    std::vector<sycl::event> event_list{*xpu_event};
     const XPUStream xpu_stream(stream);
-    xpu_stream.queue().ext_oneapi_submit_barrier(event_list);
+
+    bool reusable = false;
+#if SYCL_COMPILER_VERSION >= 20260200
+    reusable = c10::xpu::get_raw_device(stream.device_index())
+                   .has(sycl::aspect::ext_oneapi_per_event_profiling);
+#endif
+    if (reusable) {
+#if SYCL_COMPILER_VERSION >= 20260200
+      sycl::ext::oneapi::experimental::enqueue_wait_event(
+          xpu_stream.queue(), *xpu_event);
+#endif
+    } else {
+      std::vector<sycl::event> event_list{*xpu_event};
+      xpu_stream.queue().ext_oneapi_submit_barrier(event_list);
+    }
+
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_wait(
@@ -187,11 +227,6 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       void* start_event,
       void* end_event,
       const DeviceIndex device_index) const override {
-#if SYCL_COMPILER_VERSION < 20250000
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        "elapsedTime requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
-#endif
     TORCH_CHECK(
         start_event && end_event,
         "Both events must be recorded before calculating elapsed time.");

@@ -172,13 +172,15 @@ size_t parseChosenWorkspaceSize() {
     // for extra convenience
     val = c10::utils::get_env("ROCBLAS_WORKSPACE_CONFIG");
   }
-  /* 32MiB default, 128MiB for gfx94x/gfx95x */
-  const bool gfx94_95 = at::detail::getCUDAHooks().isGPUArch({"gfx94", "gfx95"});
-  const size_t default_size = gfx94_95 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
+  /* 32MiB default, 128MiB for gfx942/gfx950/gfx1250 */
+  const bool gfx942_950_1250 = at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx1250"});
+  const size_t default_size = gfx942_950_1250 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
 #else
   /* :4096:2:16:8 default, 32MiB for Hopper and Blackwell */
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  const bool use32mb = properties != nullptr && (properties->major == 9 || properties->major == 10 || properties->major == 12);
+  const bool use32mb = properties != nullptr &&
+      (properties->major == 9 || properties->major == 10 ||
+       properties->major == 11 || properties->major == 12);
   const size_t default_size = use32mb ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
 #endif
 
@@ -447,7 +449,7 @@ cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
   // FP32 data type calculations based on the value of the allow_tf32 flag.
   // To enable TF32, set the math mode of the handle to CUBLAS_TF32_TENSOR_OP_MATH.
-  if (!NoTF32Guard::should_disable_tf32() &&
+  if (!NoTF32Guard::should_disable_fp32_reduced_precision() &&
       at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
   } else {

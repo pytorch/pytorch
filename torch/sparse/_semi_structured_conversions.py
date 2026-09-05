@@ -104,7 +104,7 @@ def sparse_semi_structured_from_dense_cutlass(dense):
     # Thus, lower two bits in the encoding are index of the True value
     # at the lowest index in the quadruple, and the higher two bits in
     # the encoding are index of the other True value in the quadruple.
-    # In case there are less than two True values, than False value or
+    # In case there are less than two True values, then False value or
     # values at some index or indices are considered True for the
     # encoding.  In case there are more than two True values, then the
     # excess True value(s) at some indices are considered False for
@@ -349,7 +349,7 @@ def _compute_compressed_swizzled_bitmask(dense):
     )
 
     # to convert from binary representation, we can do a matmul with powers of two
-    powers_of_two = 2 ** torch.arange(8, dtype=torch.float, device="cuda")
+    powers_of_two = 2 ** torch.arange(8, dtype=torch.float, device=dense.device)
     # To run on GPU: cast to float to do matmul and then cast back
     compressed_swizzled_bitmask = (
         bitmask_binary_representation.to(torch.float) @ powers_of_two
