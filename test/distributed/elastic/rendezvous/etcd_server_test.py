@@ -9,9 +9,11 @@ import os
 import sys
 import unittest
 
+from unittest.mock import MagicMock, patch
+
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
-from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer, find_free_port
 
 
 if os.getenv("CIRCLECI"):
@@ -58,3 +60,34 @@ class EtcdServerTest(unittest.TestCase):
             self.assertEqual(1, rdzv_info.world_size)
         finally:
             server.stop()
+
+    @patch("socket.getaddrinfo")
+    @patch("socket.socket")
+    def test_find_free_port_retries_on_socket_creation_error(
+        self, mock_socket, mock_getaddrinfo
+    ):
+        mock_getaddrinfo.return_value = [
+            (2, 1, 6, "", ("127.0.0.1", 0)),
+            (10, 1, 6, "", ("::1", 0)),
+        ]
+        mock_sock = MagicMock()
+        mock_socket.side_effect = [OSError("socket creation failed"), mock_sock]
+
+        sock = find_free_port()
+        self.assertEqual(sock, mock_sock)
+
+    @patch("socket.getaddrinfo")
+    @patch("socket.socket")
+    def test_find_free_port_raises_runtime_error_when_all_fail(
+        self, mock_socket, mock_getaddrinfo
+    ):
+        mock_getaddrinfo.return_value = [(2, 1, 6, "", ("127.0.0.1", 0))]
+        mock_socket.side_effect = OSError("socket creation failed")
+
+        with self.assertRaises(RuntimeError):
+            find_free_port()
+
+
+if __name__ == "__main__":
+    unittest.main()
+
