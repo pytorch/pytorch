@@ -363,7 +363,7 @@ def backward(
         raise RuntimeError("`inputs` argument to `backward()` cannot be empty.")
 
     if is_tensor_like(tensors) or isinstance(tensors, graph.GradientEdge):
-        tensors = cast(tuple[torch.Tensor] | tuple[graph.GradientEdge], (tensors,))
+        tensors = (tensors,)
     else:
         # pyrefly: ignore [bad-argument-type]
         tensors = tuple(tensors)
@@ -507,9 +507,7 @@ def grad(
     if allow_unused is None:
         allow_unused = materialize_grads
     if is_tensor_like(outputs) or isinstance(outputs, graph.GradientEdge):
-        outputs = cast(
-            Sequence[torch.Tensor] | Sequence[graph.GradientEdge], (outputs,)
-        )
+        outputs = (outputs,)
     else:
         # pyrefly: ignore [bad-argument-type]
         outputs = tuple(outputs)
