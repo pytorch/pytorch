@@ -1,31 +1,15 @@
 def define_targets(rules):
     rules.cc_library(
-        name = "TypeCast",
-        srcs = ["TypeCast.cpp"],
-        hdrs = ["TypeCast.h"],
-        linkstatic = True,
-        local_defines = ["C10_BUILD_MAIN_LIB"],
-        visibility = ["//visibility:public"],
-        deps = [
-            ":base",
-            "//c10/core:ScalarType",
-            "//c10/macros",
-        ],
-    )
-
-    rules.cc_library(
         name = "base",
         srcs = rules.glob(
             ["*.cpp"],
             exclude = [
-                "TypeCast.cpp",
                 "typeid.cpp",
             ],
         ),
         hdrs = rules.glob(
             ["*.h"],
             exclude = [
-                "TypeCast.h",
                 "typeid.h",
             ],
         ),
