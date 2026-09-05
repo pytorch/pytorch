@@ -277,13 +277,15 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # opt-out).
 _MISSING_SENTINEL = object()
 
-_COMPUTED_LAZY_CONSTANT_OPS: frozenset[Callable[..., Any]] = frozenset(
-    [
-        operator.add,
-        operator.sub,
-        operator.mul,
-    ]
-)
+_COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY: dict[int, frozenset[Callable[..., Any]]] = {
+    # invert is excluded: SymNodeVariable has no nb_invert_impl for symbolic realization
+    1: frozenset(
+        [operator.neg, operator.pos, operator.abs, operator.not_, len, str, bool]
+    ),
+    2: frozenset([operator.add, operator.sub, operator.mul, min, max]),
+}
+
+_BUILTIN_TO_OPERATOR: dict[Callable[..., Any], Callable[..., Any]] = {abs: operator.abs}
 
 
 def _try_computed_lazy_constant(
@@ -293,7 +295,8 @@ def _try_computed_lazy_constant(
     from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
 
     fn = IN_PLACE_DESUGARING_MAP.get(fn, fn)
-    if fn not in _COMPUTED_LAZY_CONSTANT_OPS or len(args) != 2:
+    fn = _BUILTIN_TO_OPERATOR.get(fn, fn)
+    if fn not in _COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY.get(len(args), frozenset()):
         return None
     any_unrealized = False
     for arg in args:
