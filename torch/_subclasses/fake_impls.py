@@ -2230,9 +2230,9 @@ def bincount(
     from torch._dynamo.device_interface import get_interface_for_device
 
     try:
-        supports_f64 = get_interface_for_device(
-            weights.device.type
-        ).is_dtype_supported(torch.float64)
+        supports_f64 = get_interface_for_device(weights.device.type).is_dtype_supported(
+            torch.float64
+        )
     except NotImplementedError:
         supports_f64 = True
     if not supports_f64:

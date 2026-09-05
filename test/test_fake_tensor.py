@@ -2451,7 +2451,6 @@ assert not torch.cuda.is_initialized()
             with self.assertRaisesRegex(IndexError, "index .* out of range"):
                 torch.select(x, dim=1, index=-10)
 
-
     def test_bincount_dtype_default(self):
         """Test bincount output dtype when device supports float64 (default)."""
         shape_env = ShapeEnv(allow_dynamic_output_shape_ops=True)
@@ -2517,6 +2516,7 @@ assert not torch.cuda.is_initialized()
             w = torch.randint(0, 10, (1000,), dtype=torch.int8)
             r = x.bincount(w)
             self.assertEqual(r.dtype, torch.float64)
+
 
 instantiate_parametrized_tests(FakeTensorTest)
 
