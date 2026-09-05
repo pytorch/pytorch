@@ -23,6 +23,7 @@
 #else
 #include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_assert_async_native.h>
+#include <ATen/ops/_clamp_backward_tensor_native.h>
 #include <ATen/ops/_assert_scalar_native.h>
 #include <ATen/ops/_functional_assert_async_native.h>
 #include <ATen/ops/_functional_assert_scalar_native.h>
@@ -936,6 +937,28 @@ TORCH_IMPL_FUNC(clamp_Tensor_out)
   } else if (max) {
     minimum_stub(device_type(), *this);
   }
+}
+
+static Tensor masked_fill_inplace_if_safe(
+    const Tensor& tensor,
+    const Tensor& mask,
+    const Scalar& value) {
+  return areAnyTensorSubclassLike({tensor, mask})
+      ? tensor.masked_fill(mask, value)
+      : tensor.masked_fill_(mask, value);
+}
+
+Tensor _clamp_backward_tensor_composite(
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& min,
+    const Tensor& max) {
+  const auto min_lt_max = min < max;
+  const auto tie =
+      ((self == min).logical_or(self == max)).logical_and(min_lt_max);
+  const auto inactive = (self < min).logical_or(self > max);
+  return masked_fill_inplace_if_safe(
+      at::where(tie, grad_output / 2, grad_output), inactive, 0);
 }
 
 TORCH_IMPL_FUNC(clamp_max_out)

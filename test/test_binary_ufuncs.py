@@ -2836,6 +2836,23 @@ class TestBinaryUfuncsDevice(TestCase):
             ).tangent
         self.assertEqual(tangent, [1.0, float("nan"), float("nan"), 1.0])
 
+    @onlyOn("xpu")
+    def test_tensor_clamp_subgradient_mixed_bounds_xpu(self, device):
+        # Regression test: T5 builds fp32 clamp bounds via torch.where(bool,
+        # py_float, py_float) while hidden_states are fp16. The fused XPU
+        # kernel must handle mixed-dtype bounds without changing comparison
+        # semantics (bounds must not be truncated to fp16).
+        act = torch.tensor([0.5, 0.5, 0.5], device=device, dtype=torch.float16,
+                           requires_grad=True)
+        lo = torch.tensor([-1e4, 1.0, -1e4], device=device, dtype=torch.float32)
+        hi = torch.tensor([1e4, 2.0, 1e4], device=device, dtype=torch.float32)
+        torch.clamp(act, min=lo, max=hi).sum().backward()
+        # v=0.5 with [-1e4, 1e4]: interior -> grad 1.0
+        # v=0.5 with [1.0, 2.0]: below lo=1.0 -> grad 0.0
+        self.assertEqual(act.grad, torch.tensor([1.0, 0.0, 1.0], dtype=torch.float16,
+                                                device=device))
+        self.assertEqual(act.grad.dtype, torch.float16)
+
     @dtypes(torch.float, torch.double)
     def test_min_max_nan_gradients(self, device, dtype):
         for op, a_values in (
