@@ -956,7 +956,11 @@ class SimpleElasticAgentTest(unittest.TestCase):
         agent = TestAgent(spec)
         invoke_run.side_effect = RendezvousGracefulExitError()
         with patch.object(agent, "_shutdown"):
-            agent.run()
+            result = agent.run()
+        self.assertIsNotNone(result)
+        self.assertEqual(WorkerState.SUCCEEDED, result.state)
+        self.assertEqual({}, result.return_values)
+        self.assertFalse(result.is_failed())
 
 
 if __name__ == "__main__":
