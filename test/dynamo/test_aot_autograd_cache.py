@@ -3708,6 +3708,84 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         )
         self.assertNotEqual(base, self.gen_cache_key(fn, config_with_backend))
 
+    def test_sdpa_backend_state(self):
+        def fn(x):
+            return x.sin().cos()
+
+        config = self.default_config()
+
+        with torch.nn.attention.sdpa_kernel(
+            torch.nn.attention.SDPBackend.FLASH_ATTENTION
+        ):
+            flash1 = self.gen_cache_key(fn, config)
+            flash2 = self.gen_cache_key(fn, config)
+        self.assertEqual(flash1, flash2)
+
+        with torch.nn.attention.sdpa_kernel(
+            torch.nn.attention.SDPBackend.CUDNN_ATTENTION
+        ):
+            cudnn = self.gen_cache_key(fn, config)
+        self.assertNotEqual(flash1, cudnn)
+
+        # Enabling any single backend must differ from the all-disabled baseline,
+        # otherwise a flag pair moving together leaves one of them unpinned.
+        with torch.nn.attention.sdpa_kernel([]):
+            no_backend = self.gen_cache_key(fn, config)
+        for name in torch.nn.attention._backend_names.values():
+            backend = getattr(torch.nn.attention.SDPBackend, name)
+            with torch.nn.attention.sdpa_kernel(backend):
+                self.assertNotEqual(no_backend, self.gen_cache_key(fn, config))
+
+        backends = [
+            torch.nn.attention.SDPBackend.CUDNN_ATTENTION,
+            torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+        ]
+        with torch.nn.attention.sdpa_kernel(backends, set_priority=True):
+            cudnn_first = self.gen_cache_key(fn, config)
+        with torch.nn.attention.sdpa_kernel(backends[::-1], set_priority=True):
+            flash_first = self.gen_cache_key(fn, config)
+        self.assertNotEqual(cudnn_first, flash_first)
+
+        old_fa3 = torch._C._get_fa3_sdp_enabled()
+        try:
+            torch._C._set_sdp_use_fa3(False)
+            fa3_off = self.gen_cache_key(fn, config)
+            torch._C._set_sdp_use_fa3(True)
+            fa3_on = self.gen_cache_key(fn, config)
+        finally:
+            torch._C._set_sdp_use_fa3(old_fa3)
+        self.assertNotEqual(fa3_off, fa3_on)
+
+        old_fa4 = torch._C._get_fa4_sdp_enabled()
+        try:
+            torch._C._set_sdp_use_fa4(False)
+            fa4_off = self.gen_cache_key(fn, config)
+            torch._C._set_sdp_use_fa4(True)
+            fa4_on = self.gen_cache_key(fn, config)
+        finally:
+            torch._C._set_sdp_use_fa4(old_fa4)
+        self.assertNotEqual(fa4_off, fa4_on)
+
+        old_fp16_bf16 = torch.backends.cuda.fp16_bf16_reduction_math_sdp_allowed()
+        try:
+            torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
+            fp16_bf16_off = self.gen_cache_key(fn, config)
+            torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
+            fp16_bf16_on = self.gen_cache_key(fn, config)
+        finally:
+            torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(old_fp16_bf16)
+        self.assertNotEqual(fp16_bf16_off, fp16_bf16_on)
+
+        old_library = torch.backends.cuda.preferred_rocm_fa_library()
+        try:
+            torch.backends.cuda.preferred_rocm_fa_library("default")
+            default_library = self.gen_cache_key(fn, config)
+            torch.backends.cuda.preferred_rocm_fa_library("aotriton")
+            aotriton_library = self.gen_cache_key(fn, config)
+        finally:
+            torch.backends.cuda.preferred_rocm_fa_library(old_library)
+        self.assertNotEqual(default_library, aotriton_library)
+
     def test_different_act_input_paths(self):
         def fn(x):
             return x.sin().cos()
