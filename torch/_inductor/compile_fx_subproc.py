@@ -47,8 +47,24 @@ class _SubprocessFxCompile(_OutOfProcessFxCompile):
         )
 
     @staticmethod
-    @functools.cache
     def process_pool() -> AnyPool:
+        from torch._inductor import config
+
+        if (
+            config.compile_worker_memory_limit_kb > 0
+            or config.compile_worker_per_kernel_timeout > 0
+        ):
+            raise RuntimeError(
+                "compile worker memory/time limits are not enforceable "
+                "under TORCHINDUCTOR_FX_COMPILE_MODE=subprocess (SPAWN "
+                "workers have no heartbeat); use the default subprocess "
+                "pool instead"
+            )
+        return _SubprocessFxCompile._create_pool()
+
+    @staticmethod
+    @functools.cache
+    def _create_pool() -> AnyPool:
         pool = SubprocPool(
             # TODO: Consider raising this limit if we start using async w/
             # subprocess and want to compile multiple graphs in parallel.

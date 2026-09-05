@@ -194,7 +194,7 @@ def after_fork():
     """Reset pools to initial state without shutting them down"""
     _pool_set.clear()
     AsyncCompile._ready_future = None
-    AsyncCompile.process_pool.cache_clear()
+    AsyncCompile._create_pool.cache_clear()
 
 
 try:
@@ -304,8 +304,57 @@ class AsyncCompile:
         return "ready"
 
     @staticmethod
-    @functools.lru_cache(1)
+    def _validate_limits() -> None:
+        """Check limit configuration against the current pool type.
+
+        Called on every process_pool() access so that config.patch() after
+        pool creation is caught instead of silently dropped.
+        """
+        enforcement = config.compile_worker_memory_enforcement
+        if enforcement not in ("auto", "cgroup", "poll", "off"):
+            raise ValueError(
+                f"Invalid compile_worker_memory_enforcement: {enforcement!r}; "
+                "expected one of: auto, cgroup, poll, off"
+            )
+        if enforcement == "cgroup":
+            raise RuntimeError(
+                "cgroup memory enforcement is not yet supported; "
+                "use compile_worker_memory_enforcement='poll' or 'auto'"
+            )
+
+        has_limits = (
+            config.compile_worker_memory_limit_kb > 0
+            or config.compile_worker_per_kernel_timeout > 0
+        )
+        if has_limits and config.compile_worker_watchdog_interval_seconds <= 0:
+            raise RuntimeError(
+                "compile_worker_memory_limit_kb / compile_worker_per_kernel_timeout "
+                "require a positive compile_worker_watchdog_interval_seconds; "
+                "the watchdog is the only enforcement mechanism"
+            )
+
+        if has_limits and config.worker_start_method != "subprocess":
+            raise RuntimeError(
+                "compile worker memory/time limits require "
+                "worker_start_method='subprocess' "
+                "(TORCHINDUCTOR_WORKER_START=subprocess); "
+                f"got {config.worker_start_method!r}"
+            )
+
+        if sys.platform != "linux" and config.compile_worker_memory_limit_kb > 0:
+            raise RuntimeError(
+                "compile_worker_memory_limit_kb requires Linux (/proc); "
+                f"got platform {sys.platform!r}"
+            )
+
+    @staticmethod
     def process_pool() -> AnyPool:
+        AsyncCompile._validate_limits()
+        return AsyncCompile._create_pool()
+
+    @staticmethod
+    @functools.lru_cache(1)
+    def _create_pool() -> AnyPool:
         if get_compile_threads() <= 1:
             raise AssertionError(
                 f"expected get_compile_threads() > 1, got {get_compile_threads()}"
