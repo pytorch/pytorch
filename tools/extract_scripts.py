@@ -69,7 +69,7 @@ def main() -> None:
             if "steps" not in job:
                 continue
             steps = job["steps"]
-            index_chars = len(str(len(steps) - 1))
+            index_chars = len(str(len(steps)))
             for i, step in enumerate(steps, start=1):
                 extracted = extract(step)
                 if extracted:
