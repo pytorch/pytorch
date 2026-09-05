@@ -1565,6 +1565,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     cur_tile_coord[1],
                     cur_tile_coord[2],
                 )
+                mma_tile_offset_m = (
+                    mma_tile_coord_mnl[0] * self.mma_tiler[0]
+                    + mma_tile_coord_v * self.cta_tile_shape_mnk[0]
+                )
 
                 #
                 # Slice to per mma tile index
@@ -1702,10 +1706,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             ):
                                 row_idx = coord_flt[i][0]
                                 col_idx = coord_flt[i][1]
-                                global_m = (
-                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
-                                    + row_idx
-                                )
+                                global_m = mma_tile_offset_m + row_idx
                                 global_n = (
                                     mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                     + col_idx
@@ -1797,10 +1798,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         ):
                             row_idx = coord_flt[i][0]
                             col_idx = coord_flt[i][1]
-                            global_m = (
-                                mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
-                                + row_idx
-                            )
+                            global_m = mma_tile_offset_m + row_idx
                             global_n = (
                                 mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                 + col_idx
@@ -1831,10 +1829,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             ):
                                 row_idx = coord_flt[i][0]
                                 col_idx = coord_flt[i][1]
-                                global_m = (
-                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
-                                    + row_idx
-                                )
+                                global_m = mma_tile_offset_m + row_idx
                                 global_n = (
                                     mma_tile_coord_mnl[1] * self.cta_tile_shape_mnk[1]
                                     + col_idx
@@ -1926,20 +1921,21 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                             )
                             gReduce = cute.local_tile(
                                 mReduce,
-                                (self.cta_tile_shape_mnk[0], groups_per_cta),
+                                (self.mma_tiler[0], groups_per_cta),
                                 mma_tile_coord_mnl[:2],
                             )
-                            limit_m = min(
-                                cute.size(local_reduce_tensor, mode=[1])
-                                - mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0],
-                                self.cta_tile_shape_mnk[0],
+                            row_offset = (
+                                mma_tile_coord_v * self.cta_tile_shape_mnk[0]
                             )
+                            limit_m = cute.size(local_reduce_tensor, mode=[1])
                             limit_groups = cute.size(local_reduce_tensor, mode=[2])
                             for i in cutlass.range(
                                 cute.size(reduced_flt), unroll_full=True
                             ):
                                 row_idx = coord_flt[i][0]
                                 n_idx = coord_flt[i][1]
+                                output_row = row_idx + row_offset
+                                global_row = mma_tile_offset_m + row_idx
                                 group_idx = n_idx // group
                                 global_group_idx = (
                                     mma_tile_coord_mnl[1] * groups_per_cta + group_idx
@@ -1947,10 +1943,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 if (
                                     should_store
                                     and n_idx % group == store_offset
-                                    and row_idx < limit_m
+                                    and global_row < limit_m
                                     and global_group_idx < limit_groups
                                 ):
-                                    gReduce[row_idx, group_idx] = reduced_flt[i]
+                                    gReduce[output_row, group_idx] = reduced_flt[i]
                         else:
                             tDrReduce = cute.make_rmem_tensor_like(
                                 local_reduce_vec, self.acc_dtype
@@ -2139,11 +2135,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                                 ):
                                     row_idx = coord_flt[i][0]
                                     col_idx = coord_flt[i][1]
-                                    global_m = (
-                                        mma_tile_coord_mnl[0]
-                                        * self.cta_tile_shape_mnk[0]
-                                        + row_idx
-                                    )
+                                    global_m = mma_tile_offset_m + row_idx
                                     global_n = (
                                         mma_tile_coord_mnl[1]
                                         * self.cta_tile_shape_mnk[1]
