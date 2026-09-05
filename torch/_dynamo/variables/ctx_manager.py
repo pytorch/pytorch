@@ -1129,6 +1129,12 @@ class AutocastModeVariable(ContextWrappingVariable):
         tx.output.create_node(
             "call_function", torch.amp._exit_autocast, (self.proxy,), {}
         )
+        # Enter and exit both traced successfully, so the compiled graph will
+        # contain a matched enter/exit pair for this region. Record it so the
+        # call site can restore autocast state if the compiled graph raises
+        # before reaching its own exit node. See Note [Autocast exception
+        # safety] in output_graph.py.
+        tx.output.autocast_target_values.append(tuple(self.target_values))
         return variables.ConstantVariable.create(None)
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:

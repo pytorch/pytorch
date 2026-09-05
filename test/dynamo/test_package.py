@@ -3,9 +3,11 @@
 import gc
 import importlib
 import os
+import pickle
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 import torch
 import torch._dynamo.testing
@@ -13,6 +15,7 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
+from torch._dynamo import output_graph
 from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
@@ -519,6 +522,102 @@ def add(x, y):
 
         torch._dynamo.reset()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+    def test_add_backend_id_records_autocast_safe_callable(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/195488:
+        # CompilePackage.add_backend_id (called from
+        # OutputGraph.compile_and_call_fx_graph) must record the callable
+        # AFTER autocast exception-safety wrapping is applied, not before --
+        # CompilePackage.install() later reinstalls exactly the recorded
+        # callable as the live global the compiled code calls, so a pre-wrap
+        # snapshot would silently reintroduce the exception-safety bug for
+        # any code path that goes through a package save/install round trip.
+        #
+        # This does not exercise the full save/load/install round trip:
+        # torch.compile(..., package=...) does not currently support tracing
+        # through `torch.autocast` at all (a pre-existing, unrelated
+        # limitation -- guard serialization fails with "MODULE_MATCH guard
+        # cannot be serialized" on the `torch` module reference, independent
+        # of this fix; reproduces identically on unpatched output_graph.py).
+        # Instead this verifies directly that the callable `add_backend_id`
+        # receives is the wrapped one, by capturing the call.
+        recorded: list[tuple[str, object]] = []
+        orig_add_backend_id = CompilePackage.add_backend_id
+
+        def _capturing_add_backend_id(self, backend_id, backend=None):
+            recorded.append((backend_id, backend))
+            return orig_add_backend_id(self, backend_id, backend)
+
+        def fn(x, idx):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                return x.index_select(0, idx)
+
+        x = torch.randn(4, 4)
+        idx = torch.tensor([0])
+        package = CompilePackage(fn)
+
+        with unittest.mock.patch.object(
+            CompilePackage, "add_backend_id", _capturing_add_backend_id
+        ):
+            compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+            try:
+                compiled_fn(x, idx)
+            except torch._dynamo.exc.PackageError:
+                # The unrelated MODULE_MATCH-with-package limitation above
+                # aborts compilation after add_backend_id has already run --
+                # add_backend_id is called before guard serialization is
+                # attempted, so the recording under test still happened.
+                pass
+
+        self.assertEqual(len(recorded), 1)
+        _backend_id, backend = recorded[0]
+        self.assertIsInstance(backend, output_graph._AutocastExceptionSafeWrapper)
+
+        # Confirm the wrap actually works, not just that it was applied: an
+        # exception raised through the recorded callable itself must restore
+        # autocast state, the same way test_ctx_manager.py's autocast tests
+        # verify the fix.
+        def _autocast_cpu_state():
+            n = torch.autocast_increment_nesting()
+            torch.autocast_decrement_nesting()
+            return (
+                n - 1,
+                torch.is_autocast_enabled("cpu"),
+                torch.get_autocast_dtype("cpu"),
+            )
+
+        baseline = _autocast_cpu_state()
+        bad_idx = torch.tensor([99])
+        with self.assertRaises(IndexError):
+            backend(x, bad_idx)
+        self.assertEqual(_autocast_cpu_state(), baseline)
+
+    def test_autocast_exception_safe_wrapper_pickles(self):
+        # _AutocastExceptionSafeWrapper (see
+        # OutputGraph.compile_and_call_fx_graph) is a class rather than a
+        # closure specifically so instances pickle via the default object
+        # protocol. This exercises that directly with pickle.dumps/loads,
+        # rather than only checking the wrap was applied (which
+        # test_add_backend_id_records_autocast_safe_callable above does) --
+        # a class that merely LOOKS picklable (module-level, no closure)
+        # still depends on its stored attributes being picklable too, so
+        # this has to actually round-trip through pickle to mean anything.
+        #
+        # Uses a plain module-level function as the wrapped callable, not a
+        # real compiled graph's `compiled_fn` -- whether an arbitrary
+        # backend's compiled callable (or a _LazyGraphModule-bound method)
+        # is itself picklable is a separate, pre-existing question this
+        # wrapper does not control (see its docstring); this test is only
+        # about the wrapper's own contribution.
+        wrapper = output_graph._make_autocast_exception_safe(
+            compute_loss_helper, ("cpu",)
+        )
+        restored = pickle.loads(pickle.dumps(wrapper))
+        self.assertIsInstance(restored, output_graph._AutocastExceptionSafeWrapper)
+        self.assertEqual(
+            restored(torch.tensor([1.0, 2.0])),
+            compute_loss_helper(torch.tensor([1.0, 2.0])),
+        )
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
