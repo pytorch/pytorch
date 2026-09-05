@@ -26,9 +26,7 @@ from torch._precompile import (
     PrecompileError as PrecompileError,
 )
 
-from . import precompile as precompile
-
-from . import config
+from . import config, precompile as precompile
 from ._cache import CacheInfo
 
 
