@@ -854,6 +854,7 @@ def _call_while_loop(
             for carry in operands_seq
         ]
 
+    random_calls_before_cond = len(tx.output.random_calls)
     # create cond subgrpahs
     (
         (cond_r, _cond_treespec),
@@ -927,6 +928,9 @@ def _call_while_loop(
                 ],
             )
         else:
+            # The speculative trace does not add cond_fn to the parent graph.
+            del tx.output.random_calls[random_calls_before_cond:]
+            cond_fn.call_function(tx, operands_seq + additional_inputs_seq, {})
             return operands
 
     # create body subgraph
