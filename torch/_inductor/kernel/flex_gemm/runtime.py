@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import importlib
 import inspect
 import math
 import os
@@ -53,7 +52,8 @@ def quack_blockscaled_scale_view(
     format_name: str,
 ) -> torch.Tensor:
     """View a public flat SWIZZLE_32_4_4 scale as QuACK's blocked tensor."""
-    blockscaled = importlib.import_module("quack.blockscaled.operand")
+    from torch._vendor.quack.blockscaled import operand as blockscaled
+
     format = blockscaled.BlockScaledFormat.from_name(format_name)
     logical_k = format.logical_k(storage_k)
     shape = (
@@ -209,10 +209,8 @@ def flex_gemm_epimod(
     if epimod is not None:
         return epimod
 
-    cute_dsl_utils = importlib.import_module("quack.cute_dsl_utils")
-    epi_math = importlib.import_module("quack.epi_math")
-    epi_ops = importlib.import_module("quack.epilogue.ops")
-    epilogue_module = importlib.import_module("quack.epilogue.frontend")
+    from torch._vendor.quack import cute_dsl_utils, epi_math
+    from torch._vendor.quack.epilogue import frontend as epilogue_module, ops as epi_ops
 
     # Generated callbacks reference epi_math without importing QuACK into the
     # generated source. Inject it only into the original function's globals;
@@ -261,7 +259,8 @@ def flex_gemm_epimod(
     prepass = None
     prepass_outs = ()
     if local_reduce is not None:
-        grouped_reduce = importlib.import_module("quack.grouped_reduce")
+        from torch._vendor.quack import grouped_reduce
+
         finalize = local_reduce.finalize
         store_finalize = local_reduce.store_finalize or finalize
         prepass_finalize = local_reduce.prepass_finalize
@@ -396,7 +395,7 @@ def gemm_epimod(
     config_constraints: tuple[tuple[str, Any], ...] = (),
     stream: int | None = None,
 ) -> torch.Tensor:
-    """Run a dense or block-scaled FlexGEMM call through external QuACK EpiMod."""
+    """Run a dense or block-scaled FlexGEMM call through the vendored QuACK EpiMod."""
     if (SFA is None) != (SFB is None):
         raise RuntimeError("FlexGEMM block-scaled operands require both SFA and SFB")
     if SFA is not None:
@@ -440,7 +439,8 @@ def gemm_epimod(
         operands[INDEXED_OUTPUT_STORE_ARG_NAME] = quack_epilogue_arg(indexed_output.out)
     initialize_local_reduce_out = None
     if local_reduce is not None:
-        grouped_reduce = importlib.import_module("quack.grouped_reduce")
+        from torch._vendor.quack import grouped_reduce
+
         local_reduce_out = local_reduce.out
         if local_reduce_out is not None:
             if local_reduce.output_layout is None:
@@ -476,8 +476,7 @@ def gemm_epimod(
         else:
             operands[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = local_reduce_out
 
-    # pyrefly: ignore [missing-import]  # optional external backend
-    from quack.cache import cache_dir_override
+    from torch._vendor.quack.cache import cache_dir_override
 
     output_buffers = (
         {"main": quack_epilogue_arg(out)}

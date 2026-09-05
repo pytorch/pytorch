@@ -1,14 +1,13 @@
 # Copyright (c) 2025, Wentao Guo, Ted Zadouri, Tri Dao.
 
 import math
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import cutlass
 import cutlass.cute as cute
 
 from cutlass import Float32, Int32, const_expr
-from cutlass._mlir.dialects import arith as _arith
-from cutlass._mlir.dialects import llvm, nvvm, vector
+from cutlass._mlir.dialects import llvm, vector
 from cutlass.cutlass_dsl import T, dsl_user_op
 
 
@@ -30,17 +29,8 @@ def set_block_rank(
     smem_ptr: cute.Pointer, peer_cta_rank_in_cluster: Int32, *, loc=None, ip=None
 ) -> Int32:
     """Map the given smem pointer to the address at another CTA rank in the cluster."""
-    smem_ptr_i32 = smem_ptr.toint(loc=loc, ip=ip).ir_value()
-    return Int32(
-        llvm.inline_asm(
-            T.i32(),
-            [smem_ptr_i32, peer_cta_rank_in_cluster.ir_value()],
-            "mapa.shared::cluster.u32 $0, $1, $2;",
-            "=r,r,r",
-            has_side_effects=False,
-            is_align_stack=False,
-        )
-    )
+    dsmem_ptr = cute.arch.map_dsmem_ptr(smem_ptr, peer_cta_rank_in_cluster, loc=loc, ip=ip)
+    return Int32(dsmem_ptr.toint(loc=loc, ip=ip))
 
 
 @dsl_user_op
@@ -53,24 +43,18 @@ def store_shared_remote(
     loc=None,
     ip=None,
 ) -> None:
-    remote_smem_ptr_i32 = set_block_rank(
-        smem_ptr, peer_cta_rank_in_cluster, loc=loc, ip=ip
-    ).ir_value()
-    remote_mbar_ptr_i32 = set_block_rank(
-        mbar_ptr, peer_cta_rank_in_cluster, loc=loc, ip=ip
-    ).ir_value()
+    remote_smem_ptr_i32 = set_block_rank(smem_ptr, peer_cta_rank_in_cluster, loc=loc, ip=ip)
+    remote_mbar_ptr_i32 = set_block_rank(mbar_ptr, peer_cta_rank_in_cluster, loc=loc, ip=ip)
     if const_expr(isinstance(val, float)):
         val = Float32(val)
     assert isinstance(val, (Float32, Int32, cutlass.Int64)), "val must be Float32, Int32, or Int64"
     suffix = {Float32: "f32", Int32: "s32", cutlass.Int64: "s64"}[type(val)]
-    constraint = {Float32: "f", Int32: "r", cutlass.Int64: "l"}[type(val)]
-    llvm.inline_asm(
-        None,
-        [remote_smem_ptr_i32, val.ir_value(loc=loc, ip=ip), remote_mbar_ptr_i32],
-        f"st.async.shared::cluster.mbarrier::complete_tx::bytes.{suffix} [$0], $1, [$2];",
-        f"r,{constraint},r",
-        has_side_effects=True,
-        is_align_stack=False,
+    cute.arch.inline_ptx(
+        f"st.async.shared::cluster.mbarrier::complete_tx::bytes.{suffix} "
+        "[{$r0}], {$r1}, [{$r2}];",
+        read_only_args=[remote_smem_ptr_i32, val, remote_mbar_ptr_i32],
+        loc=loc,
+        ip=ip,
     )
 
 
@@ -87,87 +71,31 @@ def store_shared_remote_x4(
     loc=None,
     ip=None,
 ) -> None:
-    remote_smem_ptr_i32 = set_block_rank(
-        smem_ptr, peer_cta_rank_in_cluster, loc=loc, ip=ip
-    ).ir_value()
-    remote_mbar_ptr_i32 = set_block_rank(
-        mbar_ptr, peer_cta_rank_in_cluster, loc=loc, ip=ip
-    ).ir_value()
+    remote_smem_ptr_i32 = set_block_rank(smem_ptr, peer_cta_rank_in_cluster, loc=loc, ip=ip)
+    remote_mbar_ptr_i32 = set_block_rank(mbar_ptr, peer_cta_rank_in_cluster, loc=loc, ip=ip)
     assert isinstance(val0, (Float32, Int32)), "val must be Float32, or Int32"
     dtype = Float32 if isinstance(val0, Float32) else Int32
     suffix = {Float32: "f32", Int32: "s32"}[dtype]
-    constraint = {Float32: "f", Int32: "r"}[dtype]
-    llvm.inline_asm(
-        None,
-        [
-            remote_smem_ptr_i32,
-            remote_mbar_ptr_i32,
-            dtype(val0).ir_value(loc=loc, ip=ip),
-            dtype(val1).ir_value(loc=loc, ip=ip),
-            dtype(val2).ir_value(loc=loc, ip=ip),
-            dtype(val3).ir_value(loc=loc, ip=ip),
-        ],
+    cute.arch.inline_ptx(
         "{\n\t"
         f".reg .v4 .{suffix} abcd;\n\t"
-        f"mov.{suffix} abcd.x, $2;\n\t"
-        f"mov.{suffix} abcd.y, $3;\n\t"
-        f"mov.{suffix} abcd.z, $4;\n\t"
-        f"mov.{suffix} abcd.w, $5;\n\t"
-        f"st.async.shared::cluster.mbarrier::complete_tx::bytes.v4.{suffix} [$0], abcd, [$1];\n\t"
+        f"mov.{suffix} abcd.x, {{$r2}};\n\t"
+        f"mov.{suffix} abcd.y, {{$r3}};\n\t"
+        f"mov.{suffix} abcd.z, {{$r4}};\n\t"
+        f"mov.{suffix} abcd.w, {{$r5}};\n\t"
+        f"st.async.shared::cluster.mbarrier::complete_tx::bytes.v4.{suffix} "
+        "[{$r0}], abcd, [{$r1}];\n\t"
         "}\n",
-        f"r,r,{constraint},{constraint},{constraint},{constraint}",
-        has_side_effects=True,
-        is_align_stack=False,
-    )
-
-
-@dsl_user_op
-def fmin(a: Union[float, Float32], b: Union[float, Float32], *, loc=None, ip=None) -> Float32:
-    if cutlass.const_expr(cutlass.CUDA_VERSION.major) == 12:
-        return Float32(
-            nvvm.fmin(
-                T.f32(),
-                Float32(a).ir_value(loc=loc, ip=ip),
-                Float32(b).ir_value(loc=loc, ip=ip),
-                loc=loc,
-                ip=ip,
-            )
-        )
-    return Float32(
-        nvvm.fmin(
-            Float32(a).ir_value(loc=loc, ip=ip),
-            Float32(b).ir_value(loc=loc, ip=ip),
-            loc=loc,
-            ip=ip,
-        )
-    )
-
-
-@dsl_user_op
-def sqrt(a: float | Float32, *, loc=None, ip=None) -> Float32:
-    return Float32(
-        llvm.inline_asm(
-            T.f32(),
-            [Float32(a).ir_value(loc=loc, ip=ip)],
-            "sqrt.approx.f32 $0, $1;",
-            "=f,f",
-            has_side_effects=False,
-            is_align_stack=False,
-        )
-    )
-
-
-@dsl_user_op
-def ceil(a: float | Float32, *, loc=None, ip=None) -> Int32:
-    return Int32(
-        llvm.inline_asm(
-            T.i32(),
-            [Float32(a).ir_value(loc=loc, ip=ip)],
-            "cvt.rpi.ftz.s32.f32 $0, $1;",
-            "=r,f",
-            has_side_effects=False,
-            is_align_stack=False,
-        )
+        read_only_args=[
+            remote_smem_ptr_i32,
+            remote_mbar_ptr_i32,
+            dtype(val0),
+            dtype(val1),
+            dtype(val2),
+            dtype(val3),
+        ],
+        loc=loc,
+        ip=ip,
     )
 
 
@@ -209,10 +137,11 @@ def make_vector(elem_type, *values, loc=None, ip=None):
     vec_ty = ir.VectorType.get([n], mlir_ty)
     vec = llvm.mlir_undef(vec_ty, loc=loc, ip=ip)
     for i, v in enumerate(values):
-        vec = vector.insertelement(
+        vec = vector.insert(
             elem_type(v).ir_value(loc=loc, ip=ip),
             vec,
-            position=_arith.constant(T.i32(), i, loc=loc, ip=ip),
+            dynamic_position=[],
+            static_position=[i],
             loc=loc,
             ip=ip,
         )
@@ -255,68 +184,6 @@ def warp_prefix_sum(val: Int32, lane: Optional[Int32] = None) -> Int32:
         if lane >= offset:
             val += partial_sum
     return val
-
-
-@dsl_user_op
-def atomic_inc_i32(a: int | Int32, gmem_ptr: cute.Pointer, *, loc=None, ip=None) -> Int32:
-    from cutlass import CUDA_VERSION
-
-    # * NVVM call based on nvvm version
-    if CUDA_VERSION.major == 12 and CUDA_VERSION.minor == 9:
-        # Old API: requires explicit result type as first positional argument
-        return nvvm.atomicrmw(
-            res=T.i32(), op=nvvm.AtomicOpKind.INC, ptr=gmem_ptr.llvm_ptr, a=Int32(a).ir_value()
-        )
-    else:
-        # New API: infers result type automatically
-        return nvvm.atomicrmw(
-            op=nvvm.AtomicOpKind.INC, ptr=gmem_ptr.llvm_ptr, a=Int32(a).ir_value()
-        )
-
-
-@dsl_user_op
-def atomic_add_i32(a: int | Int32, gmem_ptr: cute.Pointer, *, loc=None, ip=None) -> Int32:
-    from cutlass import CUDA_VERSION
-
-    # * NVVM call based on nvvm version
-    if CUDA_VERSION.major == 12 and CUDA_VERSION.minor == 9:
-        # Old API: requires explicit result type as first positional argument
-        return nvvm.atomicrmw(
-            res=T.i32(), op=nvvm.AtomicOpKind.ADD, ptr=gmem_ptr.llvm_ptr, a=Int32(a).ir_value()
-        )
-    else:
-        # New API: infers result type automatically
-        return nvvm.atomicrmw(
-            op=nvvm.AtomicOpKind.ADD, ptr=gmem_ptr.llvm_ptr, a=Int32(a).ir_value()
-        )
-
-
-@dsl_user_op
-def issue_clc_query_nomulticast(
-    mbar_ptr: cute.Pointer,
-    clc_response_ptr: cute.Pointer,
-    loc=None,
-    ip=None,
-) -> None:
-    """
-    The clusterlaunchcontrol.try_cancel instruction requests atomically cancelling the launch
-    of a cluster that has not started running yet. It asynchronously writes an opaque response
-    to shared memory indicating whether the operation succeeded or failed. On success, the
-    opaque response contains the ctaid of the first CTA of the canceled cluster.
-
-    :param mbar_ptr: A pointer to the mbarrier address in SMEM
-    :type mbar_ptr:  Pointer
-    :param clc_response_ptr: A pointer to the cluster launch control response address in SMEM
-    :type clc_response_ptr:  Pointer
-    """
-    mbar_llvm_ptr = mbar_ptr.llvm_ptr
-    clc_response_llvm_ptr = clc_response_ptr.llvm_ptr
-    nvvm.clusterlaunchcontrol_try_cancel(
-        clc_response_llvm_ptr,
-        mbar_llvm_ptr,
-        loc=loc,
-        ip=ip,
-    )
 
 
 @dsl_user_op
