@@ -62,14 +62,14 @@ def _counting_cpu_probe(toolchain=True):
         yield calls
 
 
-_MIPS_TARGET = ("mips", "DEFAULT", 128, None, "INVALID")
+_MIPS_TARGET = ("mips", "DEFAULT", 128, ("INVALID",), None, "INVALID")
 
 # recorded target, whether the host probe works, what the comparison raises
 _CPU_TARGET_CASES = {
     "no_target_recorded": (None, True, None),
     "skewed_target": (_MIPS_TARGET, True, "built for machine 'mips'"),
     "host_probe_failed": (
-        ("x86_64", "AVX512", 512, None, "avx512"),
+        ("x86_64", "AVX512", 512, ("CPU_CAPABILITY_AVX512",), None, "avx512"),
         False,
         "no usable",
     ),
