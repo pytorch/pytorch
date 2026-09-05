@@ -18,11 +18,17 @@ from common_utils import capture_codegen_source
 
 import torch
 import torch._functorch.config
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.two_tensor import TwoTensor
 
 
 class TestCodegenBackwardPrologue(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_saved_subclass_tensors_unwrapped(self):
         """
         When subclass tensors are saved for backward, the prologue should
