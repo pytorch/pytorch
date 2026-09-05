@@ -260,31 +260,6 @@ class TestBinaryUfuncs(TestCase):
                 result_nc = op(x_nc, n_nc)
                 self.assertTrue(result_nc.isnan().all())
 
-    def test_laguerre_legendre_polynomial_nan_propagation(self):
-        # Same uninitialized-memory bug as test_chebyshev_polynomial_nan_propagation
-        # above (#187761/#187762), in the two remaining recurrences that guard the
-        # loop with !isnan(q): laguerre_polynomial_l and legendre_polynomial_p. With
-        # a NaN x, q is NaN up front so the loop never runs and `T r` was returned
-        # uninitialized. hermite_polynomial_he has no isnan guard (its loop always
-        # runs once for n >= 2), so it is not affected.
-        nan = float("nan")
-        ops = [
-            torch.special.laguerre_polynomial_l,
-            torch.special.legendre_polynomial_p,
-        ]
-        for op in ops:
-            with self.subTest(op=op.__name__):
-                x = torch.tensor([nan, nan], dtype=torch.float64)
-                n = torch.tensor([5, 5], dtype=torch.float64)
-                # Contiguous input
-                result = op(x, n)
-                self.assertTrue(result.isnan().all())
-                # Non-contiguous input (non-contiguous inputs were the primary repro)
-                x_nc = x[::1].clone().as_strided((1,), (2,))
-                n_nc = n[::1].clone().as_strided((1,), (2,))
-                result_nc = op(x_nc, n_nc)
-                self.assertTrue(result_nc.isnan().all())
-
 
 class TestBinaryUfuncsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -5015,6 +4990,42 @@ class TestChebyshevNanPropagation(TestCase):
                 self.assertTrue(actual[0, 1].isnan().item())
 
 
+class TestLaguerreLegendreNanPropagation(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_laguerre_legendre_polynomial_nan_propagation(self, device):
+        # Same uninitialized-memory bug as test_chebyshev_nan_noncontiguous above
+        # (#187761/#187762), in the two remaining recurrences that guard the loop with
+        # !isnan(q): laguerre_polynomial_l and legendre_polynomial_p. With a NaN x, q is
+        # NaN up front so the loop never runs and r was returned uninitialized.
+        # hermite_polynomial_he has no isnan guard (its loop always runs once for
+        # n >= 2), so it is not affected. Device-generic because the `r = q` initializer
+        # that fixes it is reproduced in each backend's kernel, and nothing else covers
+        # the Metal ones.
+        nan = float("nan")
+        # MPS has no double precision; the bug is dtype-independent either way.
+        dtypes_to_test = (
+            [torch.float32]
+            if device.startswith("mps")
+            else [torch.float32, torch.float64]
+        )
+        ops = [
+            torch.special.laguerre_polynomial_l,
+            torch.special.legendre_polynomial_p,
+        ]
+        for op in ops:
+            for dtype in dtypes_to_test:
+                with self.subTest(op=op.__name__, dtype=dtype):
+                    x = torch.tensor([nan, nan], device=device, dtype=dtype)
+                    n = torch.tensor([5, 5], device=device, dtype=dtype)
+                    # Contiguous input
+                    self.assertTrue(op(x, n).isnan().all())
+                    # Non-contiguous input (the primary repro)
+                    x_nc = x[::1].clone().as_strided((1,), (2,))
+                    n_nc = n[::1].clone().as_strided((1,), (2,))
+                    self.assertTrue(op(x_nc, n_nc).isnan().all())
+
+
 class TestBinaryUfuncsCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -5140,6 +5151,12 @@ generate_not_implemented_tests(TestBinaryUfuncsDevice)
 
 instantiate_device_type_tests(
     TestChebyshevNanPropagation, globals(), only_for=("cpu", "cuda")
+)
+instantiate_device_type_tests(
+    TestLaguerreLegendreNanPropagation,
+    globals(),
+    allow_mps=True,
+    only_for=("cpu", "cuda", "mps"),
 )
 instantiate_device_type_tests(TestBinaryUfuncsDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestBinaryUfuncsCUDA, globals(), only_for="cuda")
