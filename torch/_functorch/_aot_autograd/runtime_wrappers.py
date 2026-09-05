@@ -3644,9 +3644,9 @@ class AOTDispatchAutograd:
     @staticmethod
     def _raise_tangent_metadata_error(
         expected_type: type | None,
-        expected_meta: Any,
+        expected_meta: object,
         runtime_type: type,
-        runtime_meta: Any,
+        runtime_meta: object,
         orig_x: torch.Tensor,
         tangent_idx: int | None,
         tangent_desc: Any | None,

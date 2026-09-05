@@ -1745,7 +1745,7 @@ class CompilationMetrics:
             return metric // 1000 if metric is not None else None
 
         def collection_to_str(metric: Any | None) -> str | None:
-            def safe_str(item: Any) -> str:
+            def safe_str(item: object) -> str:
                 try:
                     return str(item)
                 except Exception:
@@ -4459,7 +4459,7 @@ def run_node(
 
     with set_current_node(node):
 
-        def make_error_message(e: Any) -> str:
+        def make_error_message(e: object) -> str:
             return (
                 f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
                 + repr(e)
