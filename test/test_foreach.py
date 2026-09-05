@@ -1651,6 +1651,16 @@ class TestForeach(TestCase):
                 for t, ref_t in zip(out, ref_out):
                     self.assertTrue(torch.equal(t, ref_t))
 
+    def test_foreach_copy_mismatched_list_lengths(self, device):
+        # The functional variant's loop is bounded by src, so a shorter self
+        # used to be read past its end; the in-place variant already rejected it.
+        self_tensors = [torch.ones(2, device=device)]
+        src_tensors = [torch.zeros(2, device=device) for _ in range(3)]
+        with self.assertRaisesRegex(RuntimeError, "same number of tensors"):
+            torch.ops.aten._foreach_copy(self_tensors, src_tensors, False)
+        with self.assertRaisesRegex(RuntimeError, "same number of tensors"):
+            torch._foreach_copy_(self_tensors, src_tensors)
+
     @onlyAccelerator
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_mixed_dtypes_within_tensor(self, device, dtype, op):
