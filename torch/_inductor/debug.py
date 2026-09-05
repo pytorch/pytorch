@@ -840,7 +840,7 @@ def log_runtime_and_tensor_meta(node_runtimes: Sequence[tuple[Any, float]]) -> N
         def to_list(x: Sequence[Any] | None) -> list[Any]:
             return list(to_optimization_hints(x)) if x is not None else []
 
-        def dtype_to_str(dtype: Any) -> str | None:
+        def dtype_to_str(dtype: torch.dtype | None) -> str | None:
             if dtype is None:
                 return None
             s = str(dtype)
@@ -1369,7 +1369,7 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
     if not os.path.exists(folder):
         os.mkdir(folder)
 
-    def python_value(value: Any) -> int | float | bool | None:
+    def python_value(value: object) -> int | float | bool | None:
         if value is None:
             return None
         if isinstance(value, bool):
@@ -1378,11 +1378,11 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
             return value
         # SymPy numbers expose is_integer as a tri-state property.
         if getattr(value, "is_integer", None) is False:
-            return float(value)
+            return float(value)  # pyrefly: ignore[bad-argument-type]
         try:
-            return int(value)
+            return int(value)  # pyrefly: ignore[bad-argument-type]
         except (TypeError, ValueError):
-            return float(value)
+            return float(value)  # pyrefly: ignore[bad-argument-type]
 
     def handle_sym_expr(x: Any, pytype: str) -> SymExprMetadataHolder:
         node = x.node
