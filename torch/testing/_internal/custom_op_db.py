@@ -223,6 +223,9 @@ def sample_inputs_numpy_nonzero(opinfo, device, dtype, requires_grad, **kwargs):
     shape = 10
     result = make_arg(shape, low=0.9, high=2)
     mask = make_tensor(shape, low=0, high=2, device=device, dtype=torch.long)
+    # numpy_nonzero rejects inputs with fewer than two nonzero elements, which a
+    # random mask hits for roughly 1% of the seeds.
+    mask[:2] = 1
     with torch.no_grad():
         result *= mask
 
