@@ -653,10 +653,13 @@ coverage_ignore_functions = [
     "rebuild_tensor",
     "rebuild_typed_storage",
     "rebuild_typed_storage_child",
+    "reduce_cuda_tensor",
     "reduce_storage",
     "reduce_tensor",
     "reduce_typed_storage",
     "reduce_typed_storage_child",
+    "register_ipc_storage_check",
+    "register_ipc_tensor_reducer",
     "storage_from_cache",
     # torch.multiprocessing.spawn
     "start_processes",
