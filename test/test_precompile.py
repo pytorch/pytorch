@@ -87,7 +87,39 @@ _GLOBAL_TENSOR = torch.randn(3)
 _GLOBAL_SCALE = 10
 
 
+class _PrecompileTwoBreakModule(torch.nn.Module):
+    """Two breaks, so a capture yields three frames and the varying dim reaches
+    every one of them."""
+
+    def forward(self, x):
+        y = x * 2
+        torch._dynamo.graph_break()
+        z = y + 1
+        torch._dynamo.graph_break()
+        return z.sum()
+
+
+class _PrecompileLateVaryingModule(torch.nn.Module):
+    """``x`` never varies; ``z`` does, and is only read AFTER the break, so only
+    the continuation should be promoted to dynamic."""
+
+    def forward(self, x, z):
+        y = x * 2
+        torch._dynamo.graph_break()
+        return y.sum() + z.sum()
+
+
 _PRECOMPILE_FIXED_INPUT = torch.randn(4)
+
+# Rows: model, the example call for a batch size, per-frame variant counts.
+_AUTO_DYNAMIC_CASES = {
+    "every_frame": (_PrecompileTwoBreakModule, lambda n: (torch.randn(n),), [2, 2, 2]),
+    "only_the_frame_that_varied": (
+        _PrecompileLateVaryingModule,
+        lambda n: (_PRECOMPILE_FIXED_INPUT, torch.randn(n)),
+        [1, 2],
+    ),
+}
 
 
 class _PrecompileBreakingModule(torch.nn.Module):
@@ -107,6 +139,10 @@ def _precompile_unreachable_helper(y):
     z = y * 3
     torch._dynamo.graph_break()
     return z.sum()
+
+
+def _precompile_unreachable_helper_caller_with_opts(x, opts):
+    return _precompile_unreachable_helper_caller(x) * opts["scale"]
 
 
 def _compiled_subgraph_count(code: str) -> int:
@@ -277,6 +313,34 @@ def _maybe_scoped(loaded):
     return loaded if loaded.installed else contextlib.nullcontext()
 
 
+class _PrecompileUnguardedAttr(torch.nn.Module):
+    """Holds an interned value no guard reads -- the pruning-collision shape."""
+
+    def __init__(self, junk) -> None:
+        super().__init__()
+        self.l = torch.nn.Linear(8, 8)
+        self.junk = junk
+
+    def forward(self, x):
+        return self.l(x).relu().sum()
+
+
+class _PrecompilePipeline:
+    """A guarded object that is NOT an nn.Module and holds unpicklable state."""
+
+    def __init__(self, model) -> None:
+        self.model = model
+        self.it = (n for n in range(3))
+
+
+def _precompile_via_pipeline(pipeline, x):
+    return pipeline.model(x).relu().sum()
+
+
+def _precompile_scale_sum(x):
+    return torch.relu(x * 2.0).sum()
+
+
 _PRECOMPILE_PUBLIC_METHODS = [
     name
     for name in dir(torch.compiler.precompile)
@@ -444,6 +508,33 @@ _PRECOMPILE_TRAINING_CASES = {
 }
 
 
+class _PrecompileUnpicklableHolder:
+    def __init__(self, bad):
+        self.bad = bad
+
+
+def _precompile_reads_holder(obj, x):
+    return x * 2 if obj.bad is not None else x
+
+
+def _precompile_reads_holder_in_list(objs, y):
+    return y * 2 if objs[0].bad is not None else y
+
+
+class _PrecompileClassA:
+    def f(self, x):
+        return x * 2
+
+
+class _PrecompileClassB:
+    def f(self, x):
+        return x * 100
+
+
+def _precompile_calls_method(obj, x, k):
+    return obj.f(x) + k
+
+
 class _PrecompileStepCounter(torch.nn.Module):
     """Its own forward advances a value the guards will be built from."""
 
@@ -460,9 +551,83 @@ class _PrecompileStepCounter(torch.nn.Module):
 def _precompile_scaled(x, k):
     return x * k
 
+
+def _precompile_branchy(x, flag):
+    if flag:
+        return (x * 2).sum()
+    return (x + 1).sum()
+
+
+_PRECOMPILE_CLASS_A = _PrecompileClassA()
+
 _PRECOMPILE_X4 = torch.randn(4)
 
 _PRECOMPILE_X28 = torch.randn(2, 8)
+
+# A guard whose value never varied discriminates nothing and is not serialized --
+# EXCEPT the ones that pin a value, a shape or a type, which are kept regardless.
+# Rows: entry, example calls, calls the artifact serves, calls it must refuse.
+_PRECOMPILE_GUARD_POLICY_CASES = {
+    # k pins a value, so it is checked even though it never varied.
+    "value_pin": (
+        _precompile_scaled,
+        [(torch.randn(3), 2), (torch.randn(5), 2)],
+        [(torch.randn(3), 2)],
+        [(torch.randn(3), 5)],
+    ),
+    # A value that DID vary selects between the variants, and both serve.
+    "discriminating_flag": (
+        _precompile_branchy,
+        [(_PRECOMPILE_X4, False), (_PRECOMPILE_X4, True)],
+        [(_PRECOMPILE_X4, False), (_PRECOMPILE_X4, True)],
+        [],
+    ),
+    # With ONE example nothing can discriminate, so the rule would drop every
+    # input guard; shape-bearing guards are therefore never policy-dropped.
+    "shape_from_a_single_example": (
+        _precompile_scale_sum,
+        [(_PRECOMPILE_X28,)],
+        [(_PRECOMPILE_X28,)],
+        [
+            (torch.randn(3, 8),),
+            (torch.randn(2, 9),),
+            (torch.randn(16),),
+            (torch.randn(2, 8, dtype=torch.float64),),
+        ],
+    ),
+    # TYPE_MATCH used to be droppable: a graph traced for one class was served
+    # another. Two variants differing only in k, so obj's type never varies.
+    "type_match": (
+        _precompile_calls_method,
+        [
+            (_PRECOMPILE_CLASS_A, _PRECOMPILE_X4, 1.0),
+            (_PRECOMPILE_CLASS_A, _PRECOMPILE_X4, 2.0),
+        ],
+        [(_PRECOMPILE_CLASS_A, _PRECOMPILE_X4, 1.0)],
+        [(_PrecompileClassB(), _PRECOMPILE_X4, 1.0)],
+    ),
+}
+
+
+class _PrecompileOptsModule(torch.nn.Module):
+    """Branches on a module-owned dict, so the membership guard is environment-rooted."""
+
+    def __init__(self, opts):
+        super().__init__()
+        self.lin = torch.nn.Linear(2, 2)
+        self.opts = opts
+
+    def forward(self, x):
+        y = self.lin(x)
+        if "flag" in self.opts:
+            return y * 2
+        return y * 100
+
+
+def _precompile_dict_flag_branch(x, d):
+    if "flag" in d:
+        return x * 2
+    return x * 100
 
 
 def _precompile_only_disabled(x):
@@ -523,6 +688,66 @@ _pytree.register_pytree_node(
     lambda children, _ctx: _UnserializableCtxInput(children[0], children[1]),
     serialized_type_name="test_precompile._UnserializableCtxInput",
 )
+
+
+# An eager-backend graph is carried as a pickled GraphModule, and GraphModule's
+# reduction re-derives the Graph by symbolically re-tracing the generated source.
+# cond, while_loop and vmap do not survive that (their operands reject Proxies), and
+# autocast is worse: its enter/exit take no Proxy at all, so the retrace EXECUTES
+# them and leaves no node behind. checkpoint DOES survive it, and is here for the
+# other half of the fix -- its body is run through fx.Interpreter, so it is the case
+# that proves a nested body must keep a real Graph. Each is also placed behind an
+# un-inlinable helper, because the installed serving mode re-records its backends and
+# only that path copies them.
+def _eager_rt_cond(x):
+    return torch.cond(x.sum() > 0, lambda t: t.sin(), lambda t: t.cos(), (x,))
+
+
+def _eager_rt_while_loop(x):
+    return torch._higher_order_ops.while_loop(
+        lambda i, t: i < 3, lambda i, t: (i + 1, t + 1.0), (torch.tensor(0), x)
+    )[1]
+
+
+def _eager_rt_checkpoint(x):
+    return torch.utils.checkpoint.checkpoint(
+        lambda t: t.sin().cos(), x, use_reentrant=False
+    )
+
+
+def _eager_rt_vmap(x):
+    return torch.vmap(lambda t: t * 2.0)(x)
+
+
+def _eager_rt_autocast(x):
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        return x @ x
+
+
+def _eager_rt_no_grad_region(x):
+    y = x * 2.0
+    with torch.no_grad():
+        return y.sin()
+
+
+_EAGER_ROUND_TRIP = {
+    "cond": _eager_rt_cond,
+    "while_loop": _eager_rt_while_loop,
+    "checkpoint": _eager_rt_checkpoint,
+    "vmap": _eager_rt_vmap,
+    "autocast": _eager_rt_autocast,
+    "no_grad_region": _eager_rt_no_grad_region,
+}
+
+
+def _eager_rt_helper(key, x):
+    y = x * 2.0
+    torch._dynamo.graph_break()
+    return _EAGER_ROUND_TRIP[key](y)
+
+
+def _eager_rt_broken(key, x):
+    return _eager_rt_helper(key, x)
 
 
 def _strip_artifact(cache: bytes) -> bytes:
@@ -906,6 +1131,14 @@ class TestPrecompile(TestCase):
         for part in member.__qualname__.split("."):
             target = getattr(target, part)
         self.assertIs(target, getattr(member, "__func__", member))
+
+
+def _graph_devices_literal(code: str) -> str:
+    """The GRAPH_DEVICES line the artifact records, for tests that assert on it."""
+    for line in code.splitlines():
+        if line.startswith("GRAPH_DEVICES"):
+            return line
+    raise AssertionError("artifact has no GRAPH_DEVICES line")
 
 
 if __name__ == "__main__":
