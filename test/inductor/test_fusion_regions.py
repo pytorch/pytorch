@@ -5,6 +5,7 @@
 import unittest
 
 import torch
+from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -57,6 +58,50 @@ class TestFusionRegionDetection(InductorTestCase):
         region_of = build_fusion_regions(traced)
         (mm_node,) = traced.graph.find_nodes(op="call_function", target=aten.mm.default)
         self.assertNotIn(mm_node, region_of)
+
+    def test_can_fuse_cat_as_producer(self):
+        from torch._inductor.lowering import can_fuse_cat_as_producer
+
+        def find_cat(graph):
+            (cat,) = graph.graph.find_nodes(op="call_function", target=aten.cat.default)
+            return cat
+
+        def mixed_uses(a, b, weight):
+            cat = torch.cat((a, b)).view(4, 4)
+            return cat.sin(), cat @ weight
+
+        with FakeTensorMode():
+            a = torch.ones(2, 4, device=self.device)
+            b = torch.ones(2, 4, device=self.device)
+            weight = torch.ones(4, 3, device=self.device)
+            pointwise = make_fx(lambda a, b: torch.cat((a, b)).view(4, 4).sin())(a, b)
+            mm = make_fx(lambda a, b, weight: torch.cat((a, b)).view(4, 4) @ weight)(
+                a, b, weight
+            )
+            mixed = make_fx(mixed_uses)(a, b, weight)
+            multi_consumer = make_fx(lambda a, b: (torch.cat((a, b)).sin(), a.cos()))(
+                a, b
+            )
+
+            cpu_a = torch.ones(2, 4)
+            cpu_b = torch.ones(2, 4)
+            cpu_pointwise = make_fx(lambda a, b: torch.cat((a, b)).view(4, 4).sin())(
+                cpu_a, cpu_b
+            )
+
+        with self.subTest("GPU pointwise use"):
+            self.assertTrue(can_fuse_cat_as_producer(find_cat(pointwise)))
+        with self.subTest("CPU"):
+            self.assertFalse(can_fuse_cat_as_producer(find_cat(cpu_pointwise)))
+        with self.subTest("input limit"):
+            with config.patch("max_pointwise_cat_inputs", 1):
+                self.assertFalse(can_fuse_cat_as_producer(find_cat(pointwise)))
+        with self.subTest("non-fusible use"):
+            self.assertFalse(can_fuse_cat_as_producer(find_cat(mm)))
+        with self.subTest("mixed uses"):
+            self.assertFalse(can_fuse_cat_as_producer(find_cat(mixed)))
+        with self.subTest("input with another pointwise use"):
+            self.assertFalse(can_fuse_cat_as_producer(find_cat(multi_consumer)))
 
     def test_strict_local_fusion_no_cross_mm(self):
         """Test that fusion regions don't cross non-fusible (mm) boundaries.

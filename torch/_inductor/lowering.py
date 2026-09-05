@@ -2326,6 +2326,39 @@ def _cat_inputs_recombine_reduction(inputs: list[TensorBox], dim: int) -> str | 
     return reduction_name
 
 
+def can_fuse_cat_as_producer(cat: torch.fx.Node) -> bool:
+    """Conservatively identify FX cats whose uses can consume ``pointwise_cat``.
+
+    The exact lowering also depends on input IR and layouts, which are unavailable here.
+    """
+    value = cat.meta.get("val")
+    inputs = cat.args[0] if cat.args else None
+    if (
+        cat.op != "call_function"
+        or cat.target != aten.cat.default
+        or not isinstance(value, torch.Tensor)
+        or not is_gpu(value.device.type)
+        or not isinstance(inputs, (list, tuple))
+        or len(inputs) < 2
+        or len(inputs) > config.max_pointwise_cat_inputs
+        or not cat.users
+    ):
+        return False
+
+    # Match the FX-visible multi-consumer check in cat lowering below.
+    if any(
+        isinstance(inp, torch.fx.Node)
+        and any(is_pointwise_use(use) for use in inp.users if use is not cat)
+        for inp in inputs
+    ):
+        return False
+
+    def is_fusible_consumer(op: torch._ops.OpOverload) -> bool:
+        return torch.Tag.reduction in op.tags
+
+    return all(is_pointwise_use(use, is_fusible_consumer) for use in cat.users)
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     """Lower aten.cat, choosing between pointwise_cat and ConcatKernel."""
