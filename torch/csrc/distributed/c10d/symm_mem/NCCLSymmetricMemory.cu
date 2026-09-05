@@ -16,6 +16,9 @@
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#ifdef USE_ROCM
+#include <c10/cuda/CUDAGraphsC10Utils.h>
+#endif
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
 #include <mutex>
@@ -184,6 +187,16 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         "been eagerly initialized by filling `device_id` in the "
         "`init_process_group` call.");
 
+#ifdef USE_ROCM
+    comm_generation_ = mgr.get_comm_generation(group_name_, comm_);
+    TORCH_CHECK(
+        mgr.comm_has_device_api_support(group_name_, comm_),
+        "RCCL symmetric memory requires device API support. Set "
+        "NCCL_CUMEM_ENABLE=1 and NCCL_WIN_ENABLE=1 before initializing the "
+        "process group, and ensure that all participating GPUs have peer "
+        "access.");
+#endif
+
     // Register a single window over the combined signal pad + buffer region.
     // Layout inside the registration (signal pad first):
     //   [0, signal_pad_size)                          - signal pad
@@ -192,7 +205,17 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     // for the data sub-region: only the base pointer (returned by
     // ncclMemAlloc, already granularity-aligned) is registered.
     const size_t aligned_buffer_size = at::round_up(buffer_size_, 16UL);
+#ifdef USE_ROCM
+    // RCCL advertises 4096-byte window alignment. The tested requirement is a
+    // rounded backing allocation; registering an unrounded size also worked.
+    // Use one rounded extent for both allocation and registration, while
+    // preserving CUDA NCCL's existing unrounded extent.
+    const size_t total_size = at::round_up(
+        buffer_offset_ + aligned_buffer_size,
+        static_cast<size_t>(NCCL_WIN_REQUIRED_ALIGNMENT));
+#else
     const size_t total_size = buffer_offset_ + aligned_buffer_size;
+#endif
     C10D_NCCL_CHECK(
       ncclCommWindowRegister(comm_, allocation->alloc_base, total_size, &combined_win_, NCCL_WIN_COLL_SYMMETRIC),
       c10::str(
@@ -254,6 +277,64 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         ? nullptr
         : static_cast<char*>(signal_pads_[i]) + buffer_offset_;
   }
+#ifdef USE_ROCM
+  // A synchronous H2D copy returns HIP 906 and invalidates an active capture,
+  // so ROCm uploads the peer tables asynchronously. The copies go on the
+  // non-captured setup stream rather than the current stream: these tables are
+  // immutable for the lifetime of this object, so they only ever need to be
+  // written once, and writing them off the capturing stream means the handle
+  // is fully initialized when rendezvous returns instead of depending on a
+  // later graph replay. The synchronize also retires the enqueued copies
+  // before a failure can unwind this object, whose members are the copy
+  // sources. CUDA keeps its existing synchronous path.
+  //
+  // Being off the capturing stream is not by itself enough to make the
+  // synchronize legal: under a Global-mode capture any host-side wait is a
+  // prohibited action, so cudaStreamSynchronize on this stream returns HIP 900
+  // and the subsequent end-capture fails with 901 (measured on gfx950 /
+  // HIP 7.16; hipStreamWaitEvent is the only wait that survives untouched).
+  // The Relaxed guard opts this thread out of that check for the duration,
+  // which keeps the capture usable and replayable while preserving the
+  // host-side ordering above. This mirrors alloc(), which already wraps its
+  // setup-stream memset the same way.
+  if (mgr.capture_allocation_supported()) {
+    std::lock_guard<std::mutex> setup_lock(mgr.capture_setup_mutex());
+    const cudaStream_t setup_stream = mgr.capture_setup_stream();
+    c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
+        cudaStreamCaptureModeRelaxed};
+    const cudaError_t buffers_copy_status = cudaMemcpyAsync(
+        buffers_dev_,
+        buffers_.data(),
+        arr_size,
+        cudaMemcpyHostToDevice,
+        setup_stream);
+    cudaError_t signal_pads_copy_status = cudaSuccess;
+    if (buffers_copy_status == cudaSuccess) {
+      signal_pads_copy_status = cudaMemcpyAsync(
+          signal_pads_dev_,
+          signal_pads_.data(),
+          arr_size,
+          cudaMemcpyHostToDevice,
+          setup_stream);
+    }
+    const cudaError_t sync_status = cudaStreamSynchronize(setup_stream);
+    C10_CUDA_CHECK(buffers_copy_status);
+    C10_CUDA_CHECK(signal_pads_copy_status);
+    C10_CUDA_CHECK(sync_status);
+  } else {
+    // No setup stream exists, which also means this configuration cannot
+    // rendezvous under capture at all: window registration above already
+    // fails during capture on the tested older RCCL. The synchronous copies
+    // are therefore safe here and match CUDA.
+    C10_CUDA_CHECK(cudaMemcpy(
+        buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice));
+    C10_CUDA_CHECK(cudaMemcpy(
+        signal_pads_dev_,
+        signal_pads_.data(),
+        arr_size,
+        cudaMemcpyHostToDevice));
+  }
+#else
   C10_CUDA_CHECK(cudaMemcpy(
     buffers_dev_,  // dst (device)
     buffers_.data(),  // src (host)
@@ -264,6 +345,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       signal_pads_.data(),  // src (host)
       arr_size,
       cudaMemcpyHostToDevice));
+#endif
 
   // Starting from NCCL 2.29, we can use `ncclGetLsaMultimemDevicePointer`
   // to get multicast address.
@@ -293,11 +375,39 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     }
     c10::cuda::CUDAGuard guard(device_idx_);
     if (combined_win_ != nullptr) {
+#ifdef USE_ROCM
+      // Skip if this group no longer owns `comm_`. Stock ProcessGroupNCCL now
+      // removes this identity before destroying or aborting RCCL, so a retained
+      // handle cannot attempt late window deregistration through that comm.
+      // Matching on the registration generation as well as the pointer means
+      // the comparison stays correct even if a same-name successor is handed a
+      // recycled `ncclComm_t` address; that is defensive rather than an
+      // observed RCCL allocation behavior.
+      // Relaxed: destructor may run during HIP capture, and RCCL deregistration
+      // has been observed to leave the thread in Relaxed mode; the guard
+      // restores the caller's mode on exit.
+      auto& manager = NCCLDevCommManager::get(
+          c10::Device(c10::DeviceType::CUDA, device_idx_));
+      if (manager.comm_registration_is_live(
+              group_name_, comm_, comm_generation_)) {
+        ncclResult_t res;
+        {
+          c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
+              cudaStreamCaptureModeRelaxed};
+          res = ncclCommWindowDeregister(comm_, combined_win_);
+        }
+        if (res != ncclSuccess) {
+          LOG(WARNING) << "ncclCommWindowDeregister failed: "
+                       << ncclGetErrorString(res);
+        }
+      }
+#else
       auto res = ncclCommWindowDeregister(comm_, combined_win_);
       if (res != ncclSuccess) {
         LOG(WARNING) << "ncclCommWindowDeregister failed: "
                      << ncclGetErrorString(res);
       }
+#endif
     }
     if (buffers_dev_ != nullptr) {
       c10::cuda::CUDACachingAllocator::raw_delete(buffers_dev_);
@@ -306,6 +416,17 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       c10::cuda::CUDACachingAllocator::raw_delete(signal_pads_dev_);
     }
   }
+
+#ifdef USE_ROCM
+  bool is_live() const {
+    auto& manager = NCCLDevCommManager::get(
+        c10::Device(c10::DeviceType::CUDA, device_idx_));
+    auto live_comm = manager.find_comm(group_name_);
+    return live_comm.has_value() && *live_comm == comm_ &&
+        manager.comm_registration_is_live(
+               group_name_, comm_, comm_generation_);
+  }
+#endif
 
  private:
   size_t buffer_size_;
@@ -325,6 +446,9 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   // Multicast address (data buffer base within the multicast mapping)
   void* mc_addr_{nullptr};
   ncclComm_t comm_{nullptr};
+#ifdef USE_ROCM
+  uint64_t comm_generation_{0};
+#endif
   friend class NCCLSymmetricMemory;
 };
 
@@ -339,19 +463,54 @@ NCCLSymmetricMemory::NCCLSymmetricMemory(
   TORCH_INTERNAL_ASSERT(offset_ < pai_->buffer_size_, "offset out of range");
 }
 
+#ifdef USE_ROCM
+// Liveness gating is ROCm-only because the mechanism it relies on is ROCm-only:
+// stock ProcessGroupNCCL retires this group's registry identity before RCCL
+// destroy or abort, which is what makes a stale handle detectable here. The
+// use-after-destroy hazard itself is not ROCm-specific; it is fixed here first
+// because on the tested gfx950 stack it surfaced as a hard
+// HSA_STATUS_ERROR_MEMORY_FAULT from a barrier kernel launched through a
+// destroyed communicator. Extending the same gating to CUDA is left as a
+// follow-up so this change cannot alter CUDA behavior.
+bool NCCLSymmetricMemory::is_live() const {
+  return pai_->is_live();
+}
+
+void NCCLSymmetricMemory::check_liveness() const {
+  TORCH_CHECK(
+      is_live(),
+      "NCCL symmetric-memory handle for group '",
+      pai_->group_name_,
+      "' is stale because its RCCL communicator was destroyed or replaced. "
+      "Rendezvous again after initializing the successor process group.");
+}
+#endif
+
 std::vector<void*> NCCLSymmetricMemory::get_buffer_ptrs() {
+#ifdef USE_ROCM
+  check_liveness();
+#endif
   return pai_->buffers_;
 }
 
 std::vector<void*> NCCLSymmetricMemory::get_signal_pad_ptrs() {
+#ifdef USE_ROCM
+  check_liveness();
+#endif
   return pai_->signal_pads_;
 }
 
 void** NCCLSymmetricMemory::get_buffer_ptrs_dev() {
+#ifdef USE_ROCM
+  check_liveness();
+#endif
   return pai_->buffers_dev_;
 }
 
 void** NCCLSymmetricMemory::get_signal_pad_ptrs_dev() {
+#ifdef USE_ROCM
+  check_liveness();
+#endif
   return pai_->signal_pads_dev_;
 }
 
@@ -360,6 +519,9 @@ size_t NCCLSymmetricMemory::get_buffer_size() {
 }
 
 bool NCCLSymmetricMemory::has_multicast_support() {
+#ifdef USE_ROCM
+  check_liveness();
+#endif
   return pai_->mc_addr_ != nullptr;
 }
 
@@ -371,6 +533,10 @@ void* NCCLSymmetricMemory::get_multicast_ptr() {
 }
 
 void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
+#ifdef USE_ROCM
+  // Reject on the host before stale peer signal-pad pointers reach gfx950.
+  check_liveness();
+#endif
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   TORCH_CHECK(
       pai_->signal_pads_dev_ != nullptr,
@@ -396,6 +562,9 @@ void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
 }
 
 void NCCLSymmetricMemory::put_signal(int dst_rank, int channel, size_t timeout_ms) {
+#ifdef USE_ROCM
+  check_liveness();
+#endif
 #ifdef NCCL_HAS_ONE_SIDED_API
   check_rank(dst_rank, world_size_);
   TORCH_CHECK(channel == 0, "channel must be 0 (sigIdx is reserved for future use)");
@@ -422,6 +591,9 @@ void NCCLSymmetricMemory::put_signal(int dst_rank, int channel, size_t timeout_m
 }
 
 void NCCLSymmetricMemory::wait_signal(int src_rank, int channel, size_t timeout_ms) {
+#ifdef USE_ROCM
+  check_liveness();
+#endif
 #ifdef NCCL_HAS_ONE_SIDED_API
   check_rank(src_rank, world_size_);
   TORCH_CHECK(channel == 0, "channel must be 0 (sigIdx is reserved for future use)");
@@ -464,6 +636,9 @@ c10::Device NCCLSymmetricMemory::get_device() {
 }
 
 ncclWindow_t NCCLSymmetricMemory::get_window() {
+#ifdef USE_ROCM
+  check_liveness();
+#endif
   return pai_->combined_win_;
 }
 
@@ -472,6 +647,10 @@ size_t NCCLSymmetricMemory::get_offset() {
 }
 
 size_t NCCLSymmetricMemory::get_window_offset() {
+  // No liveness check: this is arithmetic over two immutable members and
+  // cannot touch a destroyed communicator. Every caller that goes on to use
+  // the offset against device state checks liveness through get_window() or
+  // the CFT handle accessors.
   // The NCCL window starts at the signal pad; this handle's data lives
   // buffer_offset_ bytes further in, plus its own offset within the buffer.
   return pai_->buffer_offset_ + offset_;
@@ -489,6 +668,9 @@ static constexpr const char* kHostCftHint =
 #endif // NCCL_HAS_HOST_CFT
 
 NCCLCftHandle NCCLSymmetricMemory::get_peer_cft_handle(int peer) {
+#ifdef USE_ROCM
+  check_liveness();
+#endif
 #ifdef NCCL_HAS_HOST_CFT
   TORCH_CHECK(
       peer >= 0 && peer < world_size_,
@@ -510,6 +692,9 @@ NCCLCftHandle NCCLSymmetricMemory::get_peer_cft_handle(int peer) {
 }
 
 NCCLCftHandle NCCLSymmetricMemory::get_multimem_cft_handle() {
+#ifdef USE_ROCM
+  check_liveness();
+#endif
 #ifdef NCCL_HAS_HOST_CFT
   // Unlike the unicast query, this one may still have to bind the multicast
   // team (and barrier over the group) if the endpoint wasn't created eagerly.
@@ -558,13 +743,77 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     const size_t buffer_offset =
         at::round_up(get_signal_pad_size(), signal_pad_alignment);
     const size_t aligned_buffer_size = at::round_up(size, 16UL);
+#ifdef USE_ROCM
+    // Round the backing allocation to RCCL's advertised 4096-byte window
+    // granularity; registration currently uses this same extent.
+    const size_t total_size = at::round_up(
+        buffer_offset + aligned_buffer_size,
+        static_cast<size_t>(NCCL_WIN_REQUIRED_ALIGNMENT));
+#else
     const size_t total_size = buffer_offset + aligned_buffer_size;
+#endif
     void* alloc_base;
+#ifdef USE_ROCM
+    // Keep CUDA's existing allocation path unchanged. On the tested HIP stack
+    // the default allocation and zeroing sequence has three separate problems
+    // under graph capture: ncclMemAlloc falls back to hipMalloc, which capture
+    // rejects; a synchronous hipMemset returns HIP 906 and invalidates the
+    // capture; and an async memset recorded on the capturing stream becomes a
+    // replayable node that can wipe a peer's signal pad on every replay.
+    //
+    // CUMEM allocation plus an async zero on a non-captured setup stream
+    // avoids all three, so it is used wherever RCCL supports it rather than
+    // only while capturing. Keying on capability instead of capture state
+    // gives the supported configuration a single code path and removes any
+    // dependence on detecting capture. Support is snapshotted at comm init
+    // from RCCL 2.30.7 / device API / CUMEM+WIN (see NCCLDevCommManager).
+    auto& mgr = NCCLDevCommManager::get(
+        c10::Device(c10::DeviceType::CUDA, device_idx));
+    if (mgr.capture_allocation_supported()) {
+      std::lock_guard<std::mutex> setup_lock(mgr.capture_setup_mutex());
+      const cudaStream_t setup_stream = mgr.capture_setup_stream();
+      c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
+          cudaStreamCaptureModeRelaxed};
+      C10D_NCCL_CHECK(ncclMemAlloc(&alloc_base, total_size), "ncclMemAlloc");
+
+      const cudaError_t memset_status =
+          cudaMemsetAsync(alloc_base, 0, buffer_offset, setup_stream);
+      if (memset_status != cudaSuccess) {
+        ncclMemFree(alloc_base);
+        C10_CUDA_CHECK(memset_status);
+      }
+      const cudaError_t sync_status = cudaStreamSynchronize(setup_stream);
+      if (sync_status != cudaSuccess) {
+        ncclMemFree(alloc_base);
+        C10_CUDA_CHECK(sync_status);
+      }
+    } else {
+      // Without RCCL capture-allocation support there is no capture-safe way
+      // to obtain and zero a fresh window, so report that directly instead of
+      // letting HIP fail inside ncclMemAlloc or hipMemset. This check is a
+      // diagnostic, not the safety mechanism: only the current stream's
+      // capture state is observable, and under a process-wide capture started
+      // on another thread the calls below fail exactly the way an ordinary
+      // torch.empty does in that situation.
+      TORCH_CHECK(
+          c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
+              c10::cuda::CaptureStatus::None,
+          "Fresh ROCm NCCL symmetric-memory allocation during HIP graph "
+          "capture requires RCCL 2.30.7 or newer, device API support, and "
+          "NCCL_CUMEM_ENABLE=1 plus NCCL_WIN_ENABLE=1 set before process-group "
+          "initialization. Preallocate, rendezvous, and retain the symmetric "
+          "tensor before capture on older RCCL, or when "
+          "TORCH_NCCL_SYMM_MEM_DISABLE_CAPTURE_ALLOC=1.");
+      C10D_NCCL_CHECK(ncclMemAlloc(&alloc_base, total_size), "ncclMemAlloc");
+      C10_CUDA_CHECK(cudaMemset(alloc_base, 0, buffer_offset));
+    }
+#else
     C10D_NCCL_CHECK(ncclMemAlloc(&alloc_base, total_size), "ncclMemAlloc");
     // ncclMemAlloc does not zero memory. Zero the signal pad (the first
     // buffer_offset bytes) so the CAS-based barrier() protocol starts from a
     // known all-zero state on first use.
     C10_CUDA_CHECK(cudaMemset(alloc_base, 0, buffer_offset));
+#endif
     // Hand back the data buffer pointer, not alloc_base; the signal pad stays
     // hidden in front. Returning the data ptr is safe for free(): the whole
     // block is owned by the NCCLAllocation keyed below, which ncclMemFree's
@@ -622,6 +871,9 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       std::lock_guard<std::mutex> lock(mutex_);
       auto it = symm_mems_.find(key);
       if (it != symm_mems_.end()) {
+#ifdef USE_ROCM
+        it->second->check_liveness();
+#endif
         return it->second;
       }
 

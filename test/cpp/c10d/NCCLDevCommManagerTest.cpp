@@ -268,6 +268,128 @@ TEST(NCCLDevCommManagerTest, ExamplePattern) {
   test_example_pattern();
 }
 
+#ifdef USE_ROCM
+TEST(NCCLDevCommManagerTest, IdentitySafeUnregisterPreservesSuccessor) {
+  if (!at::cuda::is_available()) {
+    GTEST_SKIP() << "ROCm not available, skipping test";
+  }
+
+  c10::cuda::CUDAGuard guard(0);
+  ncclUniqueId first_id;
+  ncclUniqueId successor_id;
+  ASSERT_EQ(ncclGetUniqueId(&first_id), ncclSuccess);
+  ASSERT_EQ(ncclGetUniqueId(&successor_id), ncclSuccess);
+
+  ncclComm_t first_comm = nullptr;
+  ncclComm_t successor_comm = nullptr;
+  ASSERT_EQ(ncclCommInitRank(&first_comm, 1, first_id, 0), ncclSuccess);
+  ASSERT_EQ(ncclCommInitRank(&successor_comm, 1, successor_id, 0), ncclSuccess);
+
+  const std::string group_name = "identity_safe_unregister";
+  c10::Device device(c10::DeviceType::CUDA, 0);
+  auto& manager = NCCLDevCommManager::get(device);
+  manager.register_comm(group_name, first_comm);
+  const auto first_generation =
+      manager.get_comm_generation(group_name, first_comm);
+  manager.register_comm(group_name, successor_comm);
+  const auto successor_generation =
+      manager.get_comm_generation(group_name, successor_comm);
+  EXPECT_NE(first_generation, successor_generation);
+  EXPECT_FALSE(manager.comm_registration_is_live(
+      group_name, first_comm, first_generation));
+  EXPECT_TRUE(manager.comm_registration_is_live(
+      group_name, successor_comm, successor_generation));
+
+  manager.unregister_comm(group_name, first_comm);
+  auto current = manager.find_comm(group_name);
+  ASSERT_TRUE(current.has_value());
+  EXPECT_EQ(*current, successor_comm);
+
+  manager.unregister_comm(group_name, successor_comm);
+  EXPECT_FALSE(manager.find_comm(group_name).has_value());
+
+  EXPECT_EQ(ncclCommDestroy(first_comm), ncclSuccess);
+  EXPECT_EQ(ncclCommDestroy(successor_comm), ncclSuccess);
+}
+
+// A producer may publish the same communicator more than once for one group
+// (e.g. per-device re-registration). The generation must only advance when the
+// registered pointer actually changes, otherwise re-publication would strand
+// symmetric-memory handles that are still backed by a live communicator.
+TEST(NCCLDevCommManagerTest, SamePointerReregistrationKeepsGeneration) {
+  if (!at::cuda::is_available()) {
+    GTEST_SKIP() << "ROCm not available, skipping test";
+  }
+
+  c10::cuda::CUDAGuard guard(0);
+  ncclUniqueId comm_id;
+  ASSERT_EQ(ncclGetUniqueId(&comm_id), ncclSuccess);
+
+  ncclComm_t comm = nullptr;
+  ASSERT_EQ(ncclCommInitRank(&comm, 1, comm_id, 0), ncclSuccess);
+
+  const std::string group_name = "same_pointer_reregistration";
+  c10::Device device(c10::DeviceType::CUDA, 0);
+  auto& manager = NCCLDevCommManager::get(device);
+
+  manager.register_comm(group_name, comm);
+  const auto generation = manager.get_comm_generation(group_name, comm);
+  ASSERT_TRUE(manager.comm_registration_is_live(group_name, comm, generation));
+
+  manager.register_comm(group_name, comm);
+  EXPECT_EQ(manager.get_comm_generation(group_name, comm), generation);
+  EXPECT_TRUE(manager.comm_registration_is_live(group_name, comm, generation));
+
+  // Identity-safe removal still matches the twice-registered communicator.
+  manager.unregister_comm(group_name, comm);
+  EXPECT_FALSE(manager.find_comm(group_name).has_value());
+  EXPECT_FALSE(manager.comm_registration_is_live(group_name, comm, generation));
+
+  EXPECT_EQ(ncclCommDestroy(comm), ncclSuccess);
+}
+
+// The recycled-address case. If a producer retires its registration and a
+// successor is later handed the same `ncclComm_t` value, pointer equality
+// alone would make a handle from the previous lifetime look live again. The
+// generation must therefore advance across an unregister/re-register cycle
+// even though the pointer is unchanged.
+TEST(NCCLDevCommManagerTest, ReregistrationAfterUnregisterAdvancesGeneration) {
+  if (!at::cuda::is_available()) {
+    GTEST_SKIP() << "ROCm not available, skipping test";
+  }
+
+  c10::cuda::CUDAGuard guard(0);
+  ncclUniqueId comm_id;
+  ASSERT_EQ(ncclGetUniqueId(&comm_id), ncclSuccess);
+
+  ncclComm_t comm = nullptr;
+  ASSERT_EQ(ncclCommInitRank(&comm, 1, comm_id, 0), ncclSuccess);
+
+  const std::string group_name = "reregistration_after_unregister";
+  c10::Device device(c10::DeviceType::CUDA, 0);
+  auto& manager = NCCLDevCommManager::get(device);
+
+  manager.register_comm(group_name, comm);
+  const auto stale_generation = manager.get_comm_generation(group_name, comm);
+
+  manager.unregister_comm(group_name, comm);
+  ASSERT_FALSE(manager.find_comm(group_name).has_value());
+
+  // Same pointer value, but a new registration lifetime.
+  manager.register_comm(group_name, comm);
+  const auto fresh_generation = manager.get_comm_generation(group_name, comm);
+
+  EXPECT_NE(stale_generation, fresh_generation);
+  EXPECT_FALSE(
+      manager.comm_registration_is_live(group_name, comm, stale_generation));
+  EXPECT_TRUE(
+      manager.comm_registration_is_live(group_name, comm, fresh_generation));
+
+  manager.unregister_comm(group_name, comm);
+  EXPECT_EQ(ncclCommDestroy(comm), ncclSuccess);
+}
+#endif
+
 #else // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
 TEST(NCCLDevCommManagerTest, Skipped) {
