@@ -2120,6 +2120,32 @@ class TestSparse(TestSparseBase):
             S = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
             run_tests(S.requires_grad_(True), test_dim)
 
+    @dtypes(*integral_types())
+    def test_sparse_sum_dtype_preserved(self, device, dtype):
+        # gh-65392: torch.sparse.sum's documented default output dtype is
+        # the input's dtype, but reducing over all sparse dims (with or
+        # without an explicit dim=) silently promoted integral dtypes to
+        # int64, and an explicit dtype= was ignored once dim= was also
+        # given and covered all sparse dims.
+        i = torch.tensor([[0, 1], [1, 0]], device=device)
+        v = torch.tensor([1, 2], dtype=dtype, device=device)
+        t = torch.sparse_coo_tensor(i, v, size=(2, 2))
+
+        self.assertEqual(torch.sparse.sum(t).dtype, dtype)
+        self.assertEqual(torch.sparse.sum(t).item(), 3)
+
+        self.assertEqual(torch.sparse.sum(t, dim=(0, 1)).dtype, dtype)
+        self.assertEqual(torch.sparse.sum(t, dim=(0, 1)).item(), 3)
+
+        self.assertEqual(torch.sparse.sum(t, dtype=torch.float64).dtype, torch.float64)
+        self.assertEqual(torch.sparse.sum(t, dim=(0, 1), dtype=torch.float64).dtype, torch.float64)
+
+        # Partial reduction (not all sparse dims summed) must also honor
+        # an explicit dtype=.
+        partial = torch.sparse.sum(t, dim=0, dtype=torch.float64)
+        self.assertEqual(partial.dtype, torch.float64)
+        self.assertEqual(partial.to_dense(), torch.tensor([2., 1.], dtype=torch.float64, device=device))
+
     def _test_basic_ops_shape(self, nnz_x1, nnz_x2, shape_i, shape_v, dtype, device, coalesced):
         shape = shape_i + (shape_v)
         x1, _, _ = self._gen_sparse(len(shape_i), nnz_x1, shape, dtype, device, coalesced)
