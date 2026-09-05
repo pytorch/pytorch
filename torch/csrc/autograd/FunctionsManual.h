@@ -181,7 +181,6 @@ at::Tensor nansum_backward(
     bool keepdim);
 std::vector<int64_t> reverse_list(const at::IntArrayRef list);
 std::vector<c10::SymInt> reverse_list_symint(const c10::SymIntArrayRef list);
-at::Tensor reverse_dim(const at::Tensor& t, int64_t dim);
 at::Tensor prod_safe_zeros_backward(
     const at::Tensor& grad,
     const at::Tensor& inp,
@@ -201,10 +200,6 @@ at::Tensor solve_jvp(
     const Tensor& A,
     const Tensor& dA,
     const Tensor& dB);
-at::Tensor solve_backward_self(
-    const at::Tensor& grad,
-    const at::Tensor& self,
-    const at::Tensor& A);
 at::Tensor solve_backward_A(
     const at::Tensor& grad,
     const at::Tensor& self,
@@ -389,13 +384,6 @@ at::Tensor var_backward(
     at::Tensor grad,
     const at::Tensor& self,
     at::OptionalIntArrayRef dim,
-    const std::optional<c10::Scalar>& correction,
-    bool keepdim);
-at::Tensor var_jvp(
-    const at::Tensor& self_t,
-    const at::Tensor& self_p,
-    const at::Tensor& result,
-    at::OptionalIntArrayRef dim_opt,
     const std::optional<c10::Scalar>& correction,
     bool keepdim);
 at::Tensor std_backward(
@@ -596,9 +584,6 @@ at::Tensor slogdet_backward(
     const at::Tensor& pivots);
 at::Tensor log1p_backward(const at::Tensor& grad, const at::Tensor& self);
 at::Tensor sinc_backward(const at::Tensor& grad, const at::Tensor& self);
-at::Tensor sparse_constructor_values_backward(
-    const at::Tensor& sparse_grad_out,
-    const at::Tensor& indices);
 at::Tensor embedding_dense_double_backward_symint(
     const at::Tensor& grad,
     const at::Tensor& indices,
@@ -796,17 +781,6 @@ std::tuple<Tensor, Tensor, Tensor> _pdist_backward_backward(
     double p,
     const Tensor& pdist,
     std::array<bool, 3> output_mask);
-Tensor fft_backward(
-    const Tensor& self,
-    const Tensor& grad,
-    int64_t signal_ndim,
-    bool complex_input,
-    bool complex_output,
-    bool inverse,
-    IntArrayRef checked_signal_sizes,
-    int64_t normalization,
-    bool onesided,
-    IntArrayRef output_sizes);
 Tensor fft_r2c_backward(
     const Tensor& grad,
     at::IntArrayRef dim,
