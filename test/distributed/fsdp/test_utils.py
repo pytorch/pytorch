@@ -13,14 +13,11 @@ from torch import distributed as dist
 from torch.distributed.fsdp._common_utils import _get_param_to_fqns
 from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize,
     run_tests,
-    subtest,
-    TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_XPU,
     TestCase,
 )
 
@@ -36,25 +33,21 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-if TEST_HPU:
-    list_device = "hpu"
-elif TEST_XPU:
-    list_device = "xpu"
-else:
-    list_device = "cuda"
-
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize(
-        "device_list",
-        [
-            ["cpu"],
-            [list_device],
-            subtest(["cpu", list_device], name=f"cpu_{list_device}"),
-        ],
+        "device_list_mode",
+        ["cpu", "acc", "mixed"],
     )
-    @skip_if_lt_x_gpu(1)
-    def test_apply_to_tensors(self, device_list):
+    def test_apply_to_tensors(self, device, device_list_mode):
+        device_lists = {
+            "cpu": ["cpu"],
+            "acc": [device],
+            "mixed": ["cpu", device],
+        }
+        device_list = device_lists[device_list_mode]
         expected = 0
 
         def get_a_tensor():
@@ -103,7 +96,10 @@ class TestUtils(TestCase):
         for i, v in enumerate(data):
             self.assertEqual(type(new_data[i]), type(v))
 
-    @skip_if_lt_x_gpu(1)
+
+class TestUtilsGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_replace_by_prefix(self):
         state_dict = {
             "layer.a": torch.tensor(1),
@@ -128,7 +124,6 @@ class TestUtils(TestCase):
                 f"Expected keys {set(original_state_dict.keys())}, got {set(state_dict.keys())}"
             )
 
-    @skip_if_lt_x_gpu(1)
     def test_packed_sequence(self):
         """Test to ensure RNN packed sequences are modified correctly."""
         rnn = nn.RNN(5, 5)
@@ -203,7 +198,6 @@ class TestUtils(TestCase):
         )
 
 
-devices = ("cuda", "hpu", "xpu")
-instantiate_device_type_tests(TestUtils, globals(), only_for=devices, allow_xpu=True)
+instantiate_device_type_tests(TestUtils, globals(), except_for="cpu", allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
