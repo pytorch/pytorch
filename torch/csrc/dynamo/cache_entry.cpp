@@ -69,10 +69,6 @@ PyObject* CacheEntry_to_obj(CacheEntry* e) {
   return py::cast(e, py::return_value_policy::reference).release().ptr();
 }
 
-// Returns a BORROWED reference, kept alive by the callback chain it was read
-// off. Both attributes below must therefore be plain stored attributes, not
-// properties or __getattr__ results, or the object dies with the temporary
-// py::object this returns the pointer of.
 // Set once, the first time a backend that carries a cache key is built. Until
 // then the lookup below is skipped: it is a MISS at every level of the callback
 // chain for everyone who never precompiles, and py::hasattr on a const char*
