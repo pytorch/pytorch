@@ -121,27 +121,21 @@ from __future__ import annotations
 import collections
 import contextlib
 import contextvars
-import copy
-import dataclasses
 import functools
 import hashlib
 import importlib.machinery
 import logging
 import os
-import pickle
 import re
 import site
 import sys
 import sysconfig
-import threading
 import types
-from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, TYPE_CHECKING
-from typing_extensions import Self
 
 import torch
 import torch._functorch.config as functorch_config
-from torch._guards import ChainedSource, Guard, Source
+from torch._guards import ChainedSource, Source
 from torch.compiler._precompile_types import (
     FrameInvariants,
     GuardFact as _GuardFact,
@@ -151,23 +145,16 @@ from torch.compiler._precompile_types import (
 from .convert_frame import CatchErrorsWrapper
 from .exc import PackageError
 from .guards import CheckFunctionManager
-from .package import (
-    _BackendId,
-    _defining_module_name,
-    _DynamoCacheEntry,
-    CompilePackage,
-    DynamoStore,
-    PrecompileCacheEntry,
-)
-from .pgo import _use_code_state
-from .source import AttrSource, DictGetItemSource, GlobalSource, LocalSource
+from .source import AttrSource, DictGetItemSource, GlobalSource
 
 
 if TYPE_CHECKING:
     import traceback
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from .convert_frame import ConvertFrameReturn
     from .eval_frame import OptimizeContext
+    from .package import _DynamoCacheEntry, CompilePackage
     from .types import CacheEntry, DynamoFrameType, GuardFilterEntry
     from .variables.builder import FrameStateSizeEntry
 
@@ -184,12 +171,8 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 # import *` in a debugging session pulls the entry points rather than every
 # private helper, and so linters do not flag them as unused.
 __all__ = [
-    "precompile_load",
     "FrameInvariants",
-    "PrecompileSession",
     "PrecompileSummary",
-    "precompile_capture",
-    "serving",
 ]
 
 

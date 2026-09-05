@@ -13,12 +13,14 @@ guard-serialization caching mode), despite the shared word.
 import typing
 
 from torch._precompile import (
-    PrecompileError as PrecompileError,
+    Capture,
+    MakeFxTracer,
+    PrecompileError,  # noqa: F401
 )
 from torch.compiler._precompile_types import (
-    FrameInvariants as FrameInvariants,
-    GuardFact as GuardFact,
-    PrecompileSummary as PrecompileSummary,
+    FrameInvariants,
+    GuardFact,
+    PrecompileSummary,
 )
 
 
@@ -28,6 +30,7 @@ from torch.compiler._precompile_types import (
 # (test_public_bindings, Sphinx) resolves them under torch.compiler.precompile,
 # where they are re-exported.
 for _t in (
+    MakeFxTracer,
     PrecompileSummary,
     FrameInvariants,
     GuardFact,
@@ -46,6 +49,8 @@ del typing  # not part of the public surface
 # its __module__ is "torch.compiler". It is re-exported here only so
 # ``torch.compiler.precompile.PrecompileError`` also resolves.
 __all__ = [
+    "Capture",
+    "MakeFxTracer",
     "PrecompileSummary",
     "FrameInvariants",
     "GuardFact",
