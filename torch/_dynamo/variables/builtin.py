@@ -1790,6 +1790,10 @@ class BuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # bytes() with no arguments always returns the empty bytes object.
+        if self.fn is bytes and not args and not kwargs:
+            return variables.ConstantVariable.create(b"")
+
         if self.fn is object and not args and not kwargs:
             # object() -> a fresh opaque instance, wrapped as ObjectVariable to
             # match how SourcelessBuilder wraps bare `object` instances. Falling
