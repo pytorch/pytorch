@@ -1608,7 +1608,12 @@ class _InProcessFxCompile(FxCompile):
             def _fx_graph_runnable_payload() -> str:
                 fd = io.StringIO()
                 torch._dynamo.repro.after_aot.save_graph_repro(
-                    fd, gm, example_inputs, "inductor", save_dir=None
+                    fd,
+                    gm,
+                    example_inputs,
+                    "inductor",
+                    save_dir=None,
+                    is_inference=is_inference,
                 )
                 produced.append(fd.getvalue())
                 return produced[0]
@@ -1623,7 +1628,7 @@ class _InProcessFxCompile(FxCompile):
             )
             runnable_graph_str = produced[0] if produced else ""
 
-            V.debug.fx_graph(gm, example_inputs)
+            V.debug.fx_graph(gm, example_inputs, is_inference=is_inference)
             # TODO: Should we actually dump this?  It should be redundant with the aot
             # structured logs...
             # trace_structured("inductor_input_graph", payload_fn=lambda: gm.print_readable(print_output=False))

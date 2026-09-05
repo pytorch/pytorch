@@ -11,7 +11,9 @@ import torch
 import torch._logging.structured
 import torch.distributed as dist
 from torch._inductor.codecache import WritableTempFile
+from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.test_case import TestCase
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
 from torch.utils._triton import has_triton
 
@@ -175,11 +177,15 @@ class FxGraphRunnableTest(TestCase):
         trace_log.removeHandler(self.handler)
         trace_log.setLevel(self.old_level)
 
-    def _exec_and_verify_payload(self):
-        # Write captured payload & run it in a fresh Python process
+    def _get_payload(self):
         payload = self.buffer.getvalue().strip()
         self.assertTrue(payload, "Expected fx_graph_runnable payload but got nothing")
         self.assertIn("def forward", payload)  # sanity-check for actual FX code
+        return payload
+
+    def _exec_and_verify_payload(self):
+        # Write captured payload & run it in a fresh Python process
+        payload = self._get_payload()
 
         with WritableTempFile("w", suffix=".py") as tmp:
             tmp.write(payload)
@@ -200,6 +206,19 @@ class FxGraphRunnableTest(TestCase):
             return x + 1
 
         torch.compile(f)(torch.randn(4))  # noqa: UNSPECIFIED_BACKEND
+        self._exec_and_verify_payload()
+
+    def test_inference_graph_preserves_is_inference(self):
+        args = [torch.randn(4)]
+
+        def f(x):
+            return (x + 1,)
+
+        gm = make_fx(f)(*args)
+        compiled = compile_fx_inner(gm, args, is_inference=True)
+        compiled(args)
+
+        self.assertIn("is_inference=True", self._get_payload())
         self._exec_and_verify_payload()
 
     @unittest.skipUnless(has_triton(), "Triton not available")
