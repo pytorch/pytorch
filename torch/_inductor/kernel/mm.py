@@ -254,11 +254,21 @@ def get_flydsl_mm_template_kwargs(
     mat2_stride = mat2.get_stride()
     out_stride = layout.stride
 
-    if not sizevars.statically_known_equals(mat1_stride[1], 1):
+    if sizevars.statically_known_equals(mat1_stride[1], 1):
+        a_is_transposed = False
+    elif sizevars.statically_known_equals(mat1_stride[0], 1):
+        a_is_transposed = True
+    else:
         return []
-    # FlyDSL consumes the RHS as an [N, K] view of this stride-1 K dimension.
-    if not sizevars.statically_known_equals(mat2_stride[0], 1):
+
+    # FlyDSL consumes aten.mm's logical [K, N] RHS view directly.
+    if sizevars.statically_known_equals(mat2_stride[0], 1):
+        b_is_transposed = True
+    elif sizevars.statically_known_equals(mat2_stride[1], 1):
+        b_is_transposed = False
+    else:
         return []
+
     if not sizevars.statically_known_equals(out_stride[1], 1):
         return []
 
@@ -269,13 +279,16 @@ def get_flydsl_mm_template_kwargs(
     if dtype not in (torch.float16, torch.bfloat16):
         return []
 
+    a_leading_stride = mat1_stride[1] if a_is_transposed else mat1_stride[0]
+    b_leading_stride = mat2_stride[1] if b_is_transposed else mat2_stride[0]
+
     # Require vectorized tensor origins and row increments to stay GPU-aligned.
     itemsize = dtype.itemsize
     aligned_byte_expressions = (
         mat1.get_layout().offset * itemsize,
-        mat1_stride[0] * itemsize,
+        a_leading_stride * itemsize,
         mat2.get_layout().offset * itemsize,
-        mat2_stride[1] * itemsize,
+        b_leading_stride * itemsize,
     )
     if (
         is_unaligned(mat1)
@@ -295,12 +308,20 @@ def get_flydsl_mm_template_kwargs(
     k_static = PythonWrapperCodegen.statically_known_int_or_none(k)
     if m_static is None or n_static is None or k_static is None:
         return []
-    if n_static % 32 != 0 or k_static % 32 != 0:
+    if k_static % 32 != 0:
         return []
 
     tensor_spans = (
-        (m_static, mat1_stride[0], k_static),
-        (n_static, mat2_stride[1], k_static),
+        (
+            k_static if a_is_transposed else m_static,
+            a_leading_stride,
+            m_static if a_is_transposed else k_static,
+        ),
+        (
+            n_static if b_is_transposed else k_static,
+            b_leading_stride,
+            k_static if b_is_transposed else n_static,
+        ),
         (m_static, out_stride[0], n_static),
     )
     if any(
@@ -314,7 +335,6 @@ def get_flydsl_mm_template_kwargs(
     ):
         return []
 
-    # The wrapper transposes aten.mm's [K, N] RHS view to FlyDSL's [N, K].
     from .vendored_templates.flydsl.kernels import GEMM_DTYPE_BF16, GEMM_DTYPE_FP16
 
     gemm_dtype_id = GEMM_DTYPE_FP16 if dtype == torch.float16 else GEMM_DTYPE_BF16
@@ -326,6 +346,8 @@ def get_flydsl_mm_template_kwargs(
             "GEMM_M": m_static,
             "GEMM_N": n_static,
             "GEMM_K": k_static,
+            "A_IS_TRANSPOSED": a_is_transposed,
+            "B_IS_TRANSPOSED": b_is_transposed,
         }
         for gemm_config in get_gemm_configs()
         if is_gemm_config_valid_for_shape(
@@ -334,6 +356,8 @@ def get_flydsl_mm_template_kwargs(
             k_static,
             gemm_dtype_id,
             gemm_config,
+            a_is_transposed=a_is_transposed,
+            b_is_transposed=b_is_transposed,
         )
     ]
 
