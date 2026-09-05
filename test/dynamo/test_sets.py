@@ -970,6 +970,47 @@ class OrderedSetTests(_SetBase, _BaseSetTests):
         self.assertEqual(list(s), [0, 1, 2, 3])
 
 
+class OrderedSetHierarchyTests(_BaseSetTests):
+    """OrderedSet is a MutableSet ABC, not a built-in set."""
+
+    def test_ordered_set_is_not_a_set_variable(self):
+        from torch._dynamo.variables.sets import (
+            BaseSetVariable,
+            OrderedSetVariable,
+            SetVariable,
+        )
+
+        self.assertFalse(issubclass(OrderedSetVariable, SetVariable))
+        self.assertTrue(issubclass(OrderedSetVariable, BaseSetVariable))
+        self.assertTrue(issubclass(SetVariable, BaseSetVariable))
+
+        from torch.utils._ordered_set import OrderedSet
+
+        self.assertFalse(issubclass(OrderedSet, set))
+
+    @make_dynamo_test
+    def test_inplace_operators_preserve_identity(self):
+        from torch.utils._ordered_set import OrderedSet
+
+        s = OrderedSet([1, 2, 3])
+        alias = s
+        s |= OrderedSet([3, 4])
+        self.assertIs(s, alias)
+        self.assertEqual(list(s), [1, 2, 3, 4])
+
+        s &= OrderedSet([2, 4])
+        self.assertIs(s, alias)
+        self.assertEqual(list(s), [2, 4])
+
+        s ^= OrderedSet([4, 5])
+        self.assertIs(s, alias)
+        self.assertEqual(list(s), [2, 5])
+
+        s -= OrderedSet([5])
+        self.assertIs(s, alias)
+        self.assertEqual(list(s), [2])
+
+
 class FrozensetHierarchyTests(_BaseSetTests):
     """frozenset must not be a subclass of set (CPython parity). Part of #192874."""
 
