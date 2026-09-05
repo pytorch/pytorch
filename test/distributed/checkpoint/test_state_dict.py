@@ -750,53 +750,16 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
         model_state_dict1 = get_model_state_dict(model)
         model_state_dict1 = copy.deepcopy(model_state_dict1)
-        with self.assertWarnsRegex(
-            FutureWarning,
-            "Getting submodules only model/optim state_dict is deprecated",
-        ):
-            model_state_dict2 = get_model_state_dict(model, submodules={model.l})
-        model_state_dict2 = copy.deepcopy(model_state_dict2)
-        with self.assertWarnsRegex(
-            FutureWarning,
-            "Getting submodules only model/optim state_dict is deprecated",
-        ):
-            model_state_dict3 = get_model_state_dict(
-                model,
-                submodules={model.l},
-                options=StateDictOptions(keep_submodule_prefixes=False),
-            )
-        model_state_dict3 = copy.deepcopy(model_state_dict3)
-        self.assertEqual(len(model_state_dict2), 2)
-        self.assertEqual(len(model_state_dict3), 2)
-        for key in model_state_dict3:
-            full_fqn = f"l.{key}"
-            value1 = model_state_dict1[full_fqn]
-            value2 = model_state_dict2[full_fqn]
-            value3 = model_state_dict3[key]
-            self.assertEqual(value1, value2)
-            self.assertEqual(value2, value3)
 
-        zeros_state_dict = {
-            k: torch.zeros_like(v) for k, v in model_state_dict1.items()
-        }
-        model.load_state_dict(zeros_state_dict)
-        set_model_state_dict(
-            model,
-            model_state_dict=model_state_dict2,
-            options=StateDictOptions(strict=False),
-        )
-        self.assertEqual(model.l.weight, model_state_dict1["l.weight"])
-        self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
+        with self.assertRaises(TypeError):
+            get_model_state_dict(model, submodules={model.l})
 
-        model.load_state_dict(zeros_state_dict)
-        with self.assertWarnsRegex(FutureWarning, "Passing model_state_dict as a "):
+        with self.assertRaisesRegex(ValueError, "Passing model_state_dict as a"):
             set_model_state_dict(
                 model,
-                model_state_dict={model.l: model_state_dict3},
+                model_state_dict={model.l: {"weight": torch.zeros(1)}},
                 options=StateDictOptions(strict=False),
             )
-        self.assertEqual(model.l.weight, model_state_dict1["l.weight"])
-        self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
 
     def _test_deprecate_fsdp_api(self) -> None:
         device_mesh = init_device_mesh(device_type, (self.world_size,))
