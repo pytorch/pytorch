@@ -22,6 +22,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_utils import gradcheck, TEST_XPU
 from torch.utils.cpp_extension import (
     _get_cuda_arch_flags,
+    _ninja_build_directory,
     _TORCH_PATH,
     check_compiler_is_gcc,
     CUDA_HOME,
@@ -462,6 +463,31 @@ class TestCppExtensionJIT(common.TestCase):
         empty_flags = _get_cuda_arch_flags([])
         self.assertGreater(
             len(empty_flags), 0, "Empty list should generate default flags"
+        )
+
+    def test_ninja_build_directory_is_unique_per_object_set(self):
+        # setuptools passes the same output_dir to every extension of a project, so
+        # each set of objects needs its own directory to build in; otherwise parallel
+        # builds overwrite each other's build.ninja. See issue #177265.
+        build_directory = os.path.join("build", "temp.linux-x86_64-cpython-312")
+
+        first = _ninja_build_directory(build_directory, ["/proj/a.o", "/proj/b.o"])
+        second = _ninja_build_directory(build_directory, ["/proj/c.o"])
+
+        self.assertNotEqual(first, second)
+        for directory in (first, second):
+            self.assertEqual(os.path.dirname(directory), build_directory)
+
+    def test_ninja_build_directory_is_stable(self):
+        # The directory has to be the same on every run, or ninja could never do an
+        # incremental rebuild, and the order setuptools lists the objects in is not
+        # meaningful.
+        build_directory = os.path.join("build", "temp.linux-x86_64-cpython-312")
+        objects = ["/proj/a.o", "/proj/b.o"]
+
+        self.assertEqual(
+            _ninja_build_directory(build_directory, objects),
+            _ninja_build_directory(build_directory, list(reversed(objects))),
         )
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
