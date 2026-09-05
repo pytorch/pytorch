@@ -2,6 +2,8 @@
 
 #include <torch/nn/init.h>
 
+#include <fmt/ostream.h>
+
 #include <ostream>
 #include <utility>
 
@@ -44,6 +46,46 @@ void LayerNormImpl::pretty_print(std::ostream& stream) const {
 torch::Tensor LayerNormImpl::forward(const Tensor& input) {
   return F::detail::layer_norm(
       input, options.normalized_shape(), weight, bias, options.eps());
+}
+
+// ============================================================================
+
+RMSNormImpl::RMSNormImpl(RMSNormOptions options_)
+    : options(std::move(options_)) {
+  RMSNormImpl::reset();
+}
+
+void RMSNormImpl::reset() {
+  if (options.elementwise_affine()) {
+    weight =
+        register_parameter("weight", torch::empty(options.normalized_shape()));
+  } else {
+    weight =
+        register_parameter("weight", torch::Tensor(), /*requires_grad=*/false);
+  }
+  reset_parameters();
+}
+
+void RMSNormImpl::reset_parameters() {
+  if (options.elementwise_affine()) {
+    torch::nn::init::ones_(weight);
+  }
+}
+
+void RMSNormImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::RMSNorm("
+         << torch::IntArrayRef(options.normalized_shape()) << ", eps=";
+  if (options.eps().has_value()) {
+    stream << options.eps().value();
+  } else {
+    stream << "None";
+  }
+  fmt::print(stream, ", elementwise_affine={})", options.elementwise_affine());
+}
+
+torch::Tensor RMSNormImpl::forward(const Tensor& input) {
+  return F::detail::rms_norm(
+      input, options.normalized_shape(), weight, options.eps());
 }
 
 // ============================================================================

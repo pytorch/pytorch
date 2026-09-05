@@ -85,6 +85,7 @@ torch::nn::InstanceNorm1d|Yes|No
 torch::nn::InstanceNorm2d|Yes|No
 torch::nn::InstanceNorm3d|Yes|No
 torch::nn::LayerNorm|Yes|No
+torch::nn::RMSNorm|Yes|No
 torch::nn::LocalResponseNorm|Yes|No
 torch::nn::CrossMapLRN2d|Yes|No
 torch::nn::RNN|Yes|No

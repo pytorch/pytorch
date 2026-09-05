@@ -29,6 +29,30 @@ struct TORCH_API LayerNormOptions {
 
 // ============================================================================
 
+/// Options for the `RMSNorm` module.
+///
+/// Example:
+/// ```
+/// RMSNorm model(RMSNormOptions({2,
+/// 2}).elementwise_affine(false).eps(2e-5));
+/// ```
+struct TORCH_API RMSNormOptions {
+  /* implicit */ RMSNormOptions(std::vector<int64_t> normalized_shape);
+  /// input shape from an expected input.
+  TORCH_ARG(std::vector<int64_t>, normalized_shape);
+  /// a value added to the denominator for numerical stability. If unset, the
+  /// machine epsilon of the computation (opmath) type is used: fp16, bf16 and
+  /// fp32 inputs use the float epsilon, fp64 inputs the double one.
+  /// ``Default: std::nullopt``.
+  TORCH_ARG(std::optional<double>, eps) = std::nullopt;
+  /// a boolean value that when set to ``true``, this module
+  /// has a learnable per-element affine parameter initialized to ones.
+  /// ``Default: true``.
+  TORCH_ARG(bool, elementwise_affine) = true;
+};
+
+// ============================================================================
+
 namespace functional {
 
 /// Options for `torch::nn::functional::layer_norm`.
@@ -50,6 +74,29 @@ struct TORCH_API LayerNormFuncOptions {
   /// a value added to the denominator for numerical stability. ``Default:
   /// 1e-5``.
   TORCH_ARG(double, eps) = 1e-5;
+};
+
+// ============================================================================
+
+/// Options for `torch::nn::functional::rms_norm`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::rms_norm(input, F::RMSNormFuncOptions({2, 2}).eps(2e-5));
+/// ```
+struct TORCH_API RMSNormFuncOptions {
+  /* implicit */ RMSNormFuncOptions(std::vector<int64_t> normalized_shape);
+  /// input shape from an expected input.
+  TORCH_ARG(std::vector<int64_t>, normalized_shape);
+
+  TORCH_ARG(Tensor, weight);
+
+  /// a value added to the denominator for numerical stability. If unset, the
+  /// machine epsilon of the computation (opmath) type is used: fp16, bf16 and
+  /// fp32 inputs use the float epsilon, fp64 inputs the double one.
+  /// ``Default: std::nullopt``.
+  TORCH_ARG(std::optional<double>, eps) = std::nullopt;
 };
 
 } // namespace functional
