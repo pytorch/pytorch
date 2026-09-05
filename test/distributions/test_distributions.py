@@ -119,6 +119,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
+    HardwareClassification,
     load_tests,
     run_tests,
     set_default_dtype,
@@ -4812,6 +4813,8 @@ class TestDistributionsGPU(DistributionsTestCase):
 # the reparameterization trick and do not need to be tested for accuracy.
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestRsample(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma(self):
         num_samples = 100
@@ -5098,6 +5101,7 @@ class TestRsample(DistributionsTestCase):
 
 
 class TestDistributionShapes(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
     def setUp(self):
         super().setUp()
         self.scalar_sample = 1
@@ -5723,6 +5727,8 @@ class TestDistributionShapes(DistributionsTestCase):
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestKL(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
 
@@ -6271,6 +6277,8 @@ class TestKL(DistributionsTestCase):
 
 
 class TestConstraints(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_params_constraints(self):
         normalize_probs_dists = (
             Categorical,
@@ -6328,6 +6336,8 @@ class TestConstraints(DistributionsTestCase):
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestNumericalStability(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_pdf_score(
         self,
         dist_class,
@@ -6609,6 +6619,8 @@ class TestNumericalStability(DistributionsTestCase):
 
 # TODO: make this a pytest parameterized test
 class TestLazyLogitsInitialization(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # ContinuousBernoulli is not tested because log_prob is not computed simply
@@ -6661,6 +6673,8 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 @skipIfTorchDynamo("FIXME: Tries to trace through SciPy and fails")
 class TestAgainstScipy(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         positive_var = torch.randn(20, dtype=torch.double).exp()
@@ -6870,6 +6884,8 @@ class TestAgainstScipy(DistributionsTestCase):
 
 
 class TestFunctors(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+    
     def test_cat_transform(self):
         x1 = -1 * torch.arange(1, 101, dtype=torch.float).view(-1, 100)
         x2 = (torch.arange(1, 101, dtype=torch.float).view(-1, 100) - 1) / 100
@@ -7013,6 +7029,8 @@ class TestFunctors(DistributionsTestCase):
 
 
 class TestValidation(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_valid(self):
         for Dist, params in _get_examples():
             for param in params:
@@ -7103,6 +7121,8 @@ class TestValidation(DistributionsTestCase):
 
 
 class TestJit(DistributionsTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _examples(self):
         for Dist, params in _get_examples():
             for param in params:
