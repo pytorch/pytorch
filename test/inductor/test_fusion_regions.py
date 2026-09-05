@@ -10,9 +10,10 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
 from torch.testing._internal.common_utils import xfailIfNoAcceleratorTriton
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
-HAS_GPU = torch.cuda.is_available()
+HAS_GPU = torch.cuda.is_available() or torch.xpu.is_available()
 
 
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -21,7 +22,7 @@ class TestFusionRegionDetection(InductorTestCase):
 
     def setUp(self):
         super().setUp()
-        self.device = "cuda"
+        self.device = GPU_TYPE
 
     def test_fusion_region_grouping(self):
         """Test that connected fusible ops are grouped into regions."""
