@@ -203,6 +203,17 @@ template <typename T>
 inline
 std::enable_if_t<std::is_floating_point_v<T>, int> lapack_work_to_int(const T val) {
     const auto next_after = std::nextafter(val, std::numeric_limits<T>::infinity());
+    // The LAPACK interface used here indexes workspace with a 32-bit int, so a
+    // required workspace above INT_MAX cannot be represented and would overflow
+    // when cast below. This happens for large matrices (e.g. eigh/svd on inputs
+    // with a dimension in the tens of thousands). Fail with an actionable error
+    // rather than silently overflowing into a bogus (often negative) size.
+    TORCH_CHECK(next_after <= static_cast<T>(std::numeric_limits<int>::max()),
+        "The matrix is too large for the current LAPACK backend: it requires a ",
+        "workspace of size ", next_after, ", which exceeds the maximum ",
+        std::numeric_limits<int>::max(), " supported by the 32-bit LAPACK ",
+        "interface. Consider processing the input in smaller chunks or building ",
+        "PyTorch against a 64-bit integer (ILP64) LAPACK.");
     return std::max<int>(1, std::ceil(next_after));
 }
 template <typename T>
