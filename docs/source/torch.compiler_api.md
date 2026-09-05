@@ -217,10 +217,74 @@ releases without a deprecation cycle.
 ```
 
 ```{eval-rst}
-.. py:method:: precompile.load(python_code, cache, *, fn=None)
+.. py:method:: precompile.accumulate(fn, *, artifact_path, cache_path, backend="inductor", guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False)
 
-   Reconstruct a runnable from the ``(python_code, cache)`` pair returned by
-   ``precompile``. The calling convention is read from ``python_code`` (the single
+   Capture ``fn`` across calls that YOUR loop makes, rewriting the artifact each time.
+
+   :func:`torch.compiler.precompile` makes its example calls itself, back to back, which is
+   wrong whenever the calls are not independent -- a training step whose inputs come off a
+   queue that the enclosing loop advances cannot be called twice in a row, because the second
+   call finds the state the first one consumed. ``accumulate`` inverts that: the caller keeps
+   their loop and precompile stops and resumes around each call.
+
+   Each call runs ``fn`` for real, folds whatever graphs and variants it newly exercised into
+   the capture, rewrites both files, and returns what ``fn`` returned. A call that exercises
+   nothing new adds nothing. There is no finalize step: the two files are a complete, loadable
+   artifact for everything captured so far from the first call onwards, so a job that dies
+   partway through leaves a working artifact for the batches it did reach.
+
+   Gradients pass straight through -- precompile makes no call of its own here, so there is
+   nothing to snapshot and ``keep_example_grads`` does not apply.
+
+   The returned object holds a LIVE compiled region, because that is the only way a later call
+   can reuse an earlier one's variants: they are filed under an id that nothing can hand back
+   to ``torch._dynamo.optimize``. Use it as a context manager, or call ``close()``, to release
+   it; a capture left open holds it, and every variant compiled into it, for the life of the
+   process.
+
+   A call whose ``fn`` raises propagates that error and leaves the capture open for the next
+   call. A refusal from the artifact gates (``require_*``) is different and final: the step has
+   already run by then, so the ``PrecompileError`` carries what it returned as ``result``, the
+   capture closes -- the files keep the last artifact that passed -- and every later call
+   raises without running. Calls are serialized: a second thread calling the capture waits for
+   the first call to finish, artifact rewrite included.
+
+   :param fn: The whole computation to capture, taking the model(s) and runtime inputs
+       positionally, exactly as :func:`torch.compiler.precompile` does.
+   :param artifact_path: File to write ``python_code`` to, rewritten on every call. Required.
+   :param cache_path: File to write the acceleration cache to. Required.
+   :returns: A ``precompile.AccumulatingCapture``. Call it like ``fn``; it also exposes
+       ``summary()`` (coverage, recompilation, failure and guard information for everything
+       captured so far), ``invariants()`` (the guards that held across every captured variant
+       of each frame), ``calls()`` (how many calls have been folded in) and ``close()`` (give
+       back the compiled region; the files are unaffected, and closing twice is a no-op).
+   :raises PrecompileError: as :func:`torch.compiler.precompile` does, on the call that
+       violates the contract.
+
+   Example::
+
+       with torch.compiler.precompile.accumulate(
+           train_step, artifact_path="m.py", cache_path="m.cache",
+           training=True, require_no_risky_drops=False,
+       ) as capture:
+           for batch in loader:
+               losses = capture(model, batch)   # runs for real, returns its result
+               optimizer.step()
+
+   .. note::
+
+      Rewriting is proportional to everything captured so far, not to the call, so a long loop
+      over a large model pays it every time. Capture the batches that add variants rather than
+      all of them.
+```
+
+```{eval-rst}
+.. py:method:: precompile.load(python_code=None, cache=None, *, artifact_path=None, cache_path=None, fn=None)
+
+   Reconstruct a runnable from the ``(python_code, cache)`` pair produced by
+   ``precompile.artifact`` -- passed in memory -- or named as the two files ``precompile``
+   wrote, with ``load(artifact_path=..., cache_path=...)``. The two forms are exclusive and each needs
+   both halves. The calling convention is read from ``python_code`` (the single
    source of truth); ``cache`` only accelerates loading -- it carries only the compiled
    backend artifact (the Inductor bundle for ``backend="inductor"``; empty for
    ``backend="eager"``) and no weights. You pass the model(s) again at runtime.
@@ -237,8 +301,11 @@ releases without a deprecation cycle.
       run (see Note [precompile programming model], invariant 7). ``load`` also emits a
       per-call warning before it runs.
 
-   :param python_code: The self-contained Python source string returned by ``precompile``.
-   :param cache: The binary acceleration cache returned by ``precompile``.
+   :param python_code: The self-contained Python source string produced by ``precompile``.
+   :param cache: The binary acceleration cache produced by ``precompile``.
+   :param artifact_path: File holding ``python_code``, as written by ``precompile``'s
+       ``artifact_path``. Pass it together with ``cache_path``.
+   :param cache_path: File holding ``cache``; see ``artifact_path``.
    :param fn: For a dynamo artifact that serves by installing onto live code objects,
        the function object to install onto, when it is not importable from where it was
        captured (e.g. defined in ``__main__`` or a notebook); pass it before the first
@@ -281,6 +348,7 @@ releases without a deprecation cycle.
        loaded(x, scale=2)
 
 .. autoexception:: torch.compiler.PrecompileError
+   :members: result
 
 .. autoclass:: torch.compiler.PrecompiledRunnable
    :members: unload
@@ -294,6 +362,30 @@ releases without a deprecation cycle.
 
    Returned by :func:`precompile.load` for an artifact that serves by installing,
    and used as a callable or context manager; it is not constructed directly.
+
+.. py:class:: precompile.AccumulatingCapture
+
+   The object :meth:`precompile.accumulate` returns. Call it like ``fn`` to fold one
+   call into the artifact (see :meth:`precompile.accumulate` for the semantics); it is
+   not constructed directly. Also exposes:
+
+   .. py:method:: summary()
+
+      A :class:`precompile.PrecompileSummary` for everything captured so far.
+
+   .. py:method:: invariants()
+
+      A tuple of :class:`precompile.FrameInvariants`, one per captured frame -- the guards that held
+      across every captured variant of each frame.
+
+   .. py:method:: calls()
+
+      How many calls have been folded into the capture.
+
+   .. py:method:: close()
+
+      Give back the live compiled region; the two files are unaffected, and closing twice
+      is a no-op. Entering the object as a context manager closes it on exit.
 
 
 ```
