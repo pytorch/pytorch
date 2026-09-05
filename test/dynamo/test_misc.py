@@ -9228,6 +9228,41 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x, o), fn(x, o))
 
+    def test_isinstance_tuple_short_circuits_before_invalid_member(self):
+        # CPython validates tuple members lazily, left to right, so a match
+        # before an invalid member returns True instead of raising.
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        class Obj:
+            ports = (1, 2)
+
+        class Other:
+            pass
+
+        class MyError(Exception):
+            pass
+
+        def fn(x, o):
+            try:
+                hit = isinstance(o, (HasPorts, 1))
+            except TypeError:
+                return x - 1
+            return x + 1 if hit else x
+
+        def fn_exc_class(x):
+            return x + 1 if isinstance(MyError, (type, 1)) else x - 1
+
+        x = torch.ones(3)
+        for o in (Obj(), Other(), 3):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x, o), fn(x, o), msg=repr(o))
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn_exc_class, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn_exc_class(x))
+
     def test_tensor_isinstance_custom_instancecheck_graph_break(self):
         shape_context = threading.local()
 
