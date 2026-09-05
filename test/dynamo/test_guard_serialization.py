@@ -1350,6 +1350,31 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         again = pickle.loads(buf2.getvalue())
         self.assertIsInstance(again, TwoTensor)
 
+    def test_live_guard_leaf_recording_is_thread_scoped(self):
+        # A torch.compile on another thread must neither record into a
+        # capture's set nor, on exit, clobber what a second session installed.
+        # The worker runs in a fresh context on purpose: a thread that inherits
+        # its parent's context (free-threaded 3.14, under
+        # sys.flags.thread_inherit_context) sees the capture's set by design;
+        # keeping it out is the caller's job, not record_live_guard_leaves's.
+        import contextvars
+
+        from torch._dynamo.guards import _LIVE_LEAF_GUARDS, record_live_guard_leaves
+
+        seen: dict[str, object] = {}
+
+        def worker():
+            seen.update(other=_LIVE_LEAF_GUARDS.get())
+
+        with record_live_guard_leaves() as leaves:
+            ctx = contextvars.Context()
+            other = threading.Thread(target=lambda: ctx.run(worker))
+            other.start()
+            other.join()
+            self.assertIs(_LIVE_LEAF_GUARDS.get(), leaves)
+        self.assertIsNone(seen["other"])
+        self.assertIsNone(_LIVE_LEAF_GUARDS.get())
+
 
 # NB config.patch subclasses the class it decorates, so it has to go outermost:
 # instantiate_parametrized_tests deletes the template method it expands, which

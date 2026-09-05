@@ -408,6 +408,7 @@ def load_guard_manager(
         shape_code_parts=guards_state.shape_code_parts,
         runtime_global_scope=runtime_global_scope,
         guard_build_local_state=getattr(guards_state, "local_state", None),
+        explicit_capture=True,
     ).guard_manager
 
 

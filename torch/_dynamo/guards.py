@@ -20,9 +20,11 @@ from __future__ import annotations
 import ast
 import builtins
 import collections
+import contextlib
 import dataclasses
 import enum
 import functools
+import hashlib
 import importlib
 import inspect
 import io
@@ -32,11 +34,13 @@ import math
 import re
 import sys
 import textwrap
+import threading
 import traceback
 import types
 import warnings
 import weakref
 from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 from inspect import currentframe
 from typing import Any, cast, NamedTuple, NoReturn, TYPE_CHECKING
@@ -66,6 +70,7 @@ from torch._C._dynamo.guards import (
     install_object_aliasing_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
+    LAMBDA_GUARD,
     LeafGuard,
     profile_guard_manager,
     RelationalGuard,
@@ -222,7 +227,7 @@ except ModuleNotFoundError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, KeysView, Sequence, Sized
+    from collections.abc import Generator, Iterator, KeysView, Sequence, Sized
 
     from sympy import Symbol
 
@@ -760,6 +765,57 @@ class GuardManagerWrapper:
                     self.get_manager_line(child_mgr, f"accessed_by={accessor.repr()}")
                 )
                 self.construct_manager_string(child_mgr, body)
+
+    def leaf_fingerprint(self) -> set[tuple[str, str]]:
+        """The C++ leaf guards this tree checks, as comparable (class, payload).
+
+        Used to tell a tree rebuilt from a pickle apart from the tree the live
+        capture built. Only LEAVES: a node line carries the type of the guarded
+        value, which is a Tensor live and a FakeTensor reconstructed, so it
+        differs on every artifact. Depth is excluded for the same reason -- the
+        same guard can sit at a different depth without meaning anything
+        different. Lambda and relational guards are left out: a lambda's
+        identity is its generated name, not stable across a rebuild, and a
+        relational guard is installed on the runtime side only. So drift over
+        this fingerprint is drift in the C++ leaf checks, never in a lambda.
+        """
+        found: set[tuple[str, str]] = set()
+
+        def payload(guard: LeafGuard) -> Iterator[str]:
+            for part in guard.verbose_code_parts():
+                # Drop the provenance comment and mask the two things that carry
+                # a per-process id(): the subclass-metadata helper names and the
+                # ___check_obj_id argument. Everything else, including a large
+                # guarded constant, stays visible so its drift is caught.
+                text = part.split("  # ", 1)[0]
+                text = re.sub(r"___check_metadata\S*", "___check_metadata", text)
+                yield re.sub(r"(___check_obj_id\([^,]+, )\d+", r"\1N", text)
+
+        def walk(mgr: GuardManager) -> None:
+            for guard in mgr.get_leaf_guards():
+                # Relational guards are installed by compile_check_fn, which
+                # runs for the runtime builder only, so they appear on one side
+                # of the comparison and not the other.
+                if isinstance(guard, RelationalGuard):
+                    continue
+                # A lambda's identity is its generated name, not stable across
+                # a rebuild -- a tensor subclass installs a metadata lambda on
+                # one side and not the other for no reason the comparison sees.
+                if isinstance(guard, LAMBDA_GUARD):
+                    continue
+                found.update((type(guard).__name__, p) for p in payload(guard))
+            if isinstance(mgr, DictGuardManager):
+                for key_mgr, val_mgr in mgr.get_key_value_managers().values():
+                    for sub in (key_mgr, val_mgr):
+                        if sub is not None:
+                            walk(sub)
+            for child in mgr.get_child_managers():
+                walk(child)
+
+        walk(self.root)
+        # A capture under FakeTensorMode records the pytype it will run with, so
+        # the live tree says FakeTensor where the rebuilt one says Tensor.
+        return {(cls, p.replace(", FakeTensor,", ", Tensor,")) for cls, p in found}
 
     def __str__(self) -> str:
         with self._preserve_printed_relational_guards():
@@ -2318,6 +2374,13 @@ class GuardBuilder(GuardBuilderBase):
             attr_source = AttrSource(source, attr)
             example_value = self.get(attr_source)
             base_example_value = self.get(guard)
+            # Unregistered, serialization prunes a tensor attribute nothing else
+            # references and the rebuilt HASATTR inverts. Tensor bases only: the
+            # nn.Module and user-object pruners leave a _Missing that keeps
+            # hasattr true, and registering there would pull a possibly
+            # unpicklable value into the pickle.
+            if isinstance(base_example_value, torch.Tensor):
+                self.guard_tree_values[id(example_value)] = example_value
             guard_manager_enum = self.get_guard_manager_type(attr_source, example_value)
 
             # if the base value is nn.Module, check if we can speedup the
@@ -4247,6 +4310,98 @@ def _get_unsupported_types() -> tuple[type, ...]:
     return ret
 
 
+# Set while a precompile capture call is running, to the leaves every LIVE guard
+# build produced. A rebuild from the artifact is compared against it, and a leaf
+# the live build never made means reconstruction lost something the guard reads.
+# A ContextVar rather than a module global: a torch.compile on another thread
+# must neither record into a capture's set nor clobber a second session's.
+_LIVE_LEAF_GUARDS: ContextVar[dict[bytes, set[tuple[str, str]]] | None] = ContextVar(
+    "precompile_live_leaf_guards", default=None
+)
+
+
+def _attribute_link(source: Any) -> tuple[str, str] | None:
+    """``(base, attribute)`` for a source that reads an attribute, else None."""
+    if not isinstance(source, AttrSource):
+        return None
+    return (source.base.name, source.member)
+
+
+def _companion_attribute_guards(
+    all_guards: Sequence[Guard], failures: Sequence[tuple[Guard, Exception]]
+) -> list[tuple[Guard, Exception]]:
+    """The guards that must go with one that could not be rebuilt.
+
+    A guard on ``base.attr`` does not travel alone: Dynamo also emits a HASATTR
+    on ``base`` for ``attr``, whose truth value is RECOMPUTED at rebuild by
+    reading the reconstructed object. Drop only the first and the second comes
+    back as its own inverse -- ``not hasattr(base, attr)`` -- so the artifact
+    rejects the very call it was captured on. Anything else keyed on the same
+    link goes too, for the same reason.
+    """
+    links = {
+        link
+        for guard, _ in failures
+        if (link := _attribute_link(guard.originating_source)) is not None
+    }
+    if not links:
+        return []
+    already = {id(guard) for guard, _ in failures}
+    companions: list[tuple[Guard, Exception]] = []
+    for guard in all_guards:
+        if id(guard) in already:
+            continue
+        keywords = getattr(guard.create_fn, "keywords", None) or {}
+        link = _attribute_link(guard.originating_source)
+        if link in links or (guard.name, keywords.get("attr")) in links:
+            companions.append(
+                (
+                    guard,
+                    RuntimeError(
+                        "its subject was dropped as unrebuildable, and this "
+                        "guard is recomputed from that subject at load"
+                    ),
+                )
+            )
+    return companions
+
+
+@contextlib.contextmanager
+def record_live_guard_leaves(
+    leaves: dict[bytes, set[tuple[str, str]]] | None = None,
+) -> Generator[dict[bytes, set[tuple[str, str]]], None, None]:
+    """Record each live guard build's leaves into ``leaves``, keyed by pickle.
+
+    A session installs its own dict around each capture call, so calls made
+    from several threads all record into the one dict the drift check reads.
+    The key is the sha256 of the guards_state the build produced, so a rebuild
+    is later compared against the SAME variant's live leaves.
+    """
+    if leaves is None:
+        leaves = {}
+    token = _LIVE_LEAF_GUARDS.set(leaves)
+    try:
+        yield leaves
+    finally:
+        _LIVE_LEAF_GUARDS.reset(token)
+
+
+@contextlib.contextmanager
+def _quiet(logger: logging.Logger) -> Generator[None, None, None]:
+    # Per thread, not logger.disabled: that flag is process-wide, and would
+    # take a concurrent torch.compile's guard-failure log down with it.
+    thread = threading.get_ident()
+
+    def other_threads_only(record: logging.LogRecord) -> bool:
+        return record.thread != thread
+
+    logger.addFilter(other_threads_only)
+    try:
+        yield
+    finally:
+        logger.removeFilter(other_threads_only)
+
+
 def _is_interned_singleton(value: Any) -> bool:
     """Whether pruning ``value`` would poison unrelated references to it.
 
@@ -5260,6 +5415,7 @@ class CheckFunctionManager:
         strict_error: bool = False,
         guard_build_local_state: Any | None = None,
         *,
+        collect_guard_failures: list[tuple[Guard, Exception]] | None = None,
         serialization_guard_filter_fn: Callable[
             [Sequence[GuardFilterEntry]], Sequence[bool]
         ]
@@ -5328,6 +5484,11 @@ class CheckFunctionManager:
                 return ret
 
         all_guards = sorted(guards or (), key=Guard.sort_key)
+        # Building a guard EVALUATES its source, which can fail when the values
+        # were reconstructed from a pickle rather than captured live. A caller
+        # probing rebuildability wants to know WHICH guards those are, not just
+        # that one of them exists, so it can drop exactly those.
+        self._collect_guard_failures = collect_guard_failures
 
         # Runtime and serialized guards are intentionally separate. A package
         # may need to omit a non-portable identity guard, but dropping it from
@@ -5344,6 +5505,7 @@ class CheckFunctionManager:
                 nonlocal filter_entries
                 if filter_entries is not None:
                     return
+                nonlocal all_guards
                 inspection_builder, _ = self.build_guards(
                     all_guards,
                     existing_diff_guard_sources,
@@ -5351,10 +5513,27 @@ class CheckFunctionManager:
                     output_graph,
                     False,
                 )
+                drop_failed_guards()
                 filter_entries = [
                     make_guard_filter_entry(guard, inspection_builder)
                     for guard in all_guards
                 ]
+
+            def drop_failed_guards() -> None:
+                # A guard the caller could not rebuild must leave the SERIALIZED
+                # set, not merely be reported: the pickle is what the serving
+                # machine rebuilds from, so a guard left in it fails there
+                # exactly as it failed here. Runs after every build that can
+                # collect, because which build that is depends on whether there
+                # is a runtime filter.
+                nonlocal all_guards
+                if not collect_guard_failures:
+                    return
+                collect_guard_failures.extend(
+                    _companion_attribute_guards(all_guards, collect_guard_failures)
+                )
+                failed = {id(g) for g, _ in collect_guard_failures}
+                all_guards = [g for g in all_guards if id(g) not in failed]
 
             def apply_filter(
                 filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
@@ -5405,6 +5584,11 @@ class CheckFunctionManager:
                 runtime_save_guards,
                 guard_filter_fn=guard_filter_fn,
             )
+            if filter_entries is None and save_guards and explicit_capture:
+                drop_failed_guards()
+                filter_entries = [
+                    make_guard_filter_entry(guard, builder) for guard in all_guards
+                ]
 
             serialized_guards = runtime_guards
             serialization_builder = builder
@@ -5431,7 +5615,6 @@ class CheckFunctionManager:
                     **builder.guard_tree_values,
                     **serialization_builder.guard_tree_values,
                 }
-
             self.guard_manager = guard_manager
             self.compile_check_fn(builder, runtime_guards, guard_fail_fn)
 
@@ -5519,6 +5702,22 @@ class CheckFunctionManager:
                     f"Guard evaluation failed: {str(e)}",
                     traceback=traceback.format_exc().split("\n"),
                 )
+
+        # Key this LIVE build's leaves by the pickle it wrote, so a rebuild is
+        # compared against the leaves of the SAME variant rather than the union
+        # of every variant's -- which would hide a rebuild drifting into a
+        # check another variant made live. Only a live build: recording a
+        # reconstruction's leaves would let a reconstruction bug whitelist
+        # itself.
+        live_leaves = _LIVE_LEAF_GUARDS.get()
+        if (
+            live_leaves is not None
+            and self.guards_state is not None
+            and not output_graph.skip_guards_check
+        ):
+            live_leaves[hashlib.sha256(self.guards_state).digest()] = (
+                serialization_builder.guard_manager.leaf_fingerprint()
+            )
 
         # TODO: don't do the string rep, do something more structured here
         torch._logging.trace_structured(
@@ -5775,7 +5974,17 @@ class CheckFunctionManager:
             ):
                 continue
 
-            guard.create(builder)
+            if self._collect_guard_failures is None:
+                guard.create(builder)
+            else:
+                # Guard.create logs the traceback before re-raising, which is
+                # right when the failure is fatal and pure noise when the
+                # caller is probing and will report the guard itself.
+                try:
+                    with _quiet(torch._guards.log):
+                        guard.create(builder)
+                except Exception as e:
+                    self._collect_guard_failures.append((guard, e))
         return builder, guard_manager
 
     def compile_check_fn(
