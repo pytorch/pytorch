@@ -54,9 +54,13 @@ class CallbackArgs:
 class CompilationCallbackHandler:
     start_callbacks: list[Callable[[CallbackArgs], None]] = field(default_factory=list)
     end_callbacks: list[Callable[[CallbackArgs], None]] = field(default_factory=list)
+    reset_callbacks: list[Callable[[], None]] = field(default_factory=list)
 
     __pending_callbacks_counter: int = field(default=0, init=False, repr=False)
     __pending_callbacks_counter_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
+    __reset_callbacks_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
     )
 
@@ -102,6 +106,17 @@ class CompilationCallbackHandler:
         """
         self.end_callbacks.remove(callback)
 
+    def register_reset_callback(
+        self, callback: Callable[[], None]
+    ) -> Callable[[], None]:
+        with self.__reset_callbacks_lock:
+            self.reset_callbacks.append(callback)
+        return callback
+
+    def remove_reset_callback(self, callback: Callable[[], None]) -> None:
+        with self.__reset_callbacks_lock:
+            self.reset_callbacks.remove(callback)
+
     def run_start_callbacks(self, args: CallbackArgs) -> None:
         """
         Execute all registered start callbacks.
@@ -115,6 +130,12 @@ class CompilationCallbackHandler:
         """
         for callback in self.end_callbacks:
             callback(args)
+
+    def run_reset_callbacks(self) -> None:
+        with self.__reset_callbacks_lock:
+            callbacks = self.reset_callbacks.copy()
+        for callback in callbacks:
+            callback()
 
     @contextmanager
     def install_callbacks(
@@ -142,7 +163,7 @@ class CompilationCallbackHandler:
 
     def clear(self) -> None:
         """
-        Clear all registered callbacks.
+        Clear all registered compilation callbacks.
         """
         self.start_callbacks.clear()
         self.end_callbacks.clear()
@@ -173,3 +194,10 @@ def on_compile_end(
     """
     callback_handler.register_end_callback(callback)
     return callback
+
+
+def on_reset(callback: Callable[[], None]) -> Callable[[], None]:
+    """
+    Decorator to register a callback function to run after each Dynamo reset.
+    """
+    return callback_handler.register_reset_callback(callback)
