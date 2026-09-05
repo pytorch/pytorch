@@ -12385,6 +12385,18 @@ class TestLinalgMPS(TestCaseMPS):
         # solution is sensitive to conditioning of individual batch members.
         self.assertEqual(A @ xm, A @ xc, atol=1e-4, rtol=1e-4)
 
+    def test_linalg_svd_large_batch_conj(self, device="mps"):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196113:
+        # for m<n the native SVD runs the kernel on A.mH(); .contiguous() leaves
+        # the conjugate bit unresolved when that view is already contiguous (a
+        # column-major or conjugated input), and the Jacobi kernel reads the raw
+        # buffer, so it silently returned SVD(conj(A)). 12288 elements is over
+        # the gate. Row-major inputs stay correct, so this needs the other layouts.
+        A = torch.randn(8, 32, 48, dtype=torch.complex64, device=device)  # m < n
+        for Am in (A, A.mT.contiguous().mT, A.conj()):  # row-major, column-major, conj
+            U, S, Vh = torch.linalg.svd(Am, full_matrices=False)
+            self.assertEqual(((U * S.unsqueeze(-2)) @ Vh).cpu(), Am.cpu(), atol=1e-4, rtol=1e-4)
+
     @dtypes(torch.float32, torch.complex64, torch.float16, torch.bfloat16)
     @parametrize("out", ["none", "zeros", "ones"])
     @parametrize("m, n, data, noncontig", [
