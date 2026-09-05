@@ -2945,11 +2945,13 @@ class BenchmarkRunner:
         tag=None,
         batch_size=None,
     ):
-        niters = 5
+        measure_iters = 5
+        stabilization_iters = 0
         if getattr(self, "hf_llm", False):
             # If we're benchmarking an llm, we want to use the generate function
             self.model_iter_fn = self.generate
-            niters = 1
+            measure_iters = 1
+            stabilization_iters = 4
 
         if self.args.xla:
             with self.pick_grad(name, self.args.training):
@@ -2957,7 +2959,9 @@ class BenchmarkRunner:
                     self.model_iter_fn, *self.maybe_cast(model, example_inputs)
                 )
 
-        def warmup(fn, model, example_inputs, mode, niters=5):
+        def warmup(
+            fn, model, example_inputs, mode, measure_iters=5, stabilization_iters=0
+        ):
             gc.collect()
             peak_mem = 0
             start_stats = get_dynamo_stats()
@@ -2968,10 +2972,12 @@ class BenchmarkRunner:
                 elif current_device == "hpu":
                     torch.hpu.reset_peak_memory_stats()
                 t0 = time.perf_counter()
-                for _ in range(niters):
+                for _ in range(measure_iters):
                     fn(model, example_inputs)
                 t1 = time.perf_counter()
                 latency = t1 - t0
+                for _ in range(stabilization_iters):
+                    fn(model, example_inputs)
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
                 elif current_device == "hpu":
@@ -3026,7 +3032,7 @@ class BenchmarkRunner:
                         copy.deepcopy(model),
                         example_inputs,
                         "eager",
-                        niters=niters,
+                        measure_iters=measure_iters,
                     )
                     if self.args.use_warm_peak_memory:
                         _, eager_peak_mem, _ = warmup(
@@ -3034,7 +3040,7 @@ class BenchmarkRunner:
                             copy.deepcopy(model),
                             example_inputs,
                             "eager",
-                            niters=1,
+                            measure_iters=1,
                         )
 
             if (
@@ -3057,7 +3063,12 @@ class BenchmarkRunner:
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
-                    optimized_model_iter_fn, model, example_inputs, "dynamo"
+                    optimized_model_iter_fn,
+                    model,
+                    example_inputs,
+                    "dynamo",
+                    measure_iters=measure_iters,
+                    stabilization_iters=stabilization_iters,
                 )
                 if self.args.use_warm_peak_memory:
                     _, dynamo_peak_mem, _ = warmup(
@@ -3065,7 +3076,7 @@ class BenchmarkRunner:
                         model,
                         example_inputs,
                         "dynamo",
-                        niters=1,
+                        measure_iters=1,
                     )
                 # If we use warm peak memory, the AOT model loading transient memory
                 # won't be present on the warm measurement.  We only have to account for
