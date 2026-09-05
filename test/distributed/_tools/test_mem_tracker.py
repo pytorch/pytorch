@@ -44,7 +44,11 @@ class TestMemTracker(TestCase):
         mod = torch.get_device_module(dev)
         mem_stats = mod.memory_stats(dev)
         pre_acc_active = mem_stats["active_bytes.all.current"]
-        bsz, n_layers, dim, dtype = 16, 4, 512, torch.bfloat16
+        # Keep tensor memory large enough that allocator-visible library workspaces
+        # do not dominate this tensor-tracking accuracy test.
+        # TODO(eqy): Account for operation-scoped BLAS workspaces directly once
+        # workspace caching is disabled by default on all backends.
+        bsz, n_layers, dim, dtype = 16, 4, 3072, torch.bfloat16
 
         class DummyModel(nn.Module):
             def __init__(self, n_layers: int, dim: int, dtype: torch.dtype):

@@ -1672,6 +1672,8 @@ PyObject* THCPModule_getCurrentBlasHandle_wrap(
     PyObject* self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
+  // Internal ATen operations restore this public handle to cuBLAS's default
+  // workspace before releasing their eager workspace allocations.
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   return PyLong_FromVoidPtr(handle);
   END_HANDLE_TH_ERRORS
