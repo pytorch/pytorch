@@ -1432,27 +1432,26 @@ class TestFSDPTrainEval(FSDPTest):
         self.assertNotEqual(eval_out_sums[0], eval_out_sums[-1])
 
 
-devices = ("cuda", "hpu", "xpu", "privateuse1")
 instantiate_device_type_tests(
-    TestFSDPMixedPrecisionSharded, globals(), only_for=devices, allow_xpu=True
+    TestFSDPMixedPrecisionSharded, globals(), except_for=("cpu",), allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestFSDPMixedPrecisionUnsharded, globals(), only_for=devices, allow_xpu=True
+    TestFSDPMixedPrecisionUnsharded, globals(), except_for=("cpu",), allow_xpu=True
 )
 instantiate_device_type_tests(
     TestFSDPMixedPrecisionIgnoredModules,
     globals(),
-    only_for=devices,
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestFSDPDifferentSubmodulePrecision,
     globals(),
-    only_for=devices,
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestFSDPTrainEval, globals(), only_for=devices, allow_xpu=True
+    TestFSDPTrainEval, globals(), except_for=("cpu",), allow_xpu=True
 )
 
 if __name__ == "__main__":
