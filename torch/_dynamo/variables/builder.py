@@ -1755,16 +1755,16 @@ class VariableBuilder:
                     new_symint = self.tx.output.shape_env.create_unbacked_symint()
                 else:
                     shape_env = self.tx.output.shape_env
-                    if not torch.compiler._is_non_strict_tracing():
-                        # TODO: Need to enable this for Dynamo after broader
-                        # verification. See
-                        # test_raw_unbacked_symint_input_graph_breaks_outside_non_strict.
-                        unimplemented(
-                            gb_type="Attempted to wrap unbacked SymInt",
-                            context="",
-                            explanation="Unbacked SymInt input is not supported yet.",
-                            hints=[*graph_break_hints.SUPPORTABLE],
-                        )
+                    # A raw unbacked SymInt may reach Dynamo from a foreign
+                    # ShapeEnv (e.g. BlockMask.seq_lengths sharing the
+                    # unbacked token dimension with q/k/v in FlexAttention,
+                    # see GH#187547).  Transfer it into the local ShapeEnv so
+                    # that provenance with tensor dims is preserved via the
+                    # foreign-symbol cache.  Skip the same-frame guard
+                    # sanity check (same as non-strict tracing): raw
+                    # unbacked SymInts have no concrete value to evaluate
+                    # guards against at compile time.
+                    self.tx.output.skip_guards_check = True
                     if value.node.shape_env is shape_env:
                         # SymInt already belongs to this ShapeEnv; no
                         # transfer needed, reuse it directly.
