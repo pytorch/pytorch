@@ -3,6 +3,7 @@
 import dataclasses
 import gc
 import importlib
+import inspect
 import os
 import sys
 import tempfile
@@ -21,11 +22,15 @@ from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.exc import PackageError
 from torch._dynamo.package import (
     _current_cpu_codegen_target,
+    _defining_module_name,
+    _MODULE_KEY_BY_FILE,
     _rename_globals,
+    _scan_sys_modules_for_file,
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
     load_guards_state,
+    SourceInfo,
     SystemInfo,
 )
 from torch._dynamo.precompile_context import PrecompileContext
@@ -1046,6 +1051,67 @@ def add(x, y):
         self.assertTrue(
             any("Not recording compile package: drifted" in m for m in logs.output)
         )
+
+    def test_defining_module_name_prefers_the_file_over_a_reexporting_shim(self):
+        # The _collections_abc idiom: the implementation file sets __name__ to
+        # the public name, so inspect.getmodule(code) lands on the shim whose
+        # file does not contain the code.
+        with tempfile.TemporaryDirectory() as tmp:
+            impl_path = os.path.join(tmp, "_package_shim_impl.py")
+            with open(impl_path, "w") as f:
+                f.write('__name__ = "package_shim"\n\n\ndef f(x):\n    return x + 1\n')
+            shim_path = os.path.join(tmp, "package_shim.py")
+            with open(shim_path, "w") as f:
+                f.write("from _package_shim_impl import *\n")
+            spec = importlib.util.spec_from_file_location(
+                "_package_shim_impl", impl_path
+            )
+            impl = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(impl)
+            shim = types.ModuleType("package_shim")
+            shim.__file__ = shim_path
+            shim.f = impl.f
+            sys.modules["_package_shim_impl"] = impl
+            sys.modules["package_shim"] = shim
+            try:
+                code = impl.f.__code__
+                self.assertIs(inspect.getmodule(code), shim)
+                self.assertEqual(_defining_module_name(code), "_package_shim_impl")
+                info = SourceInfo(inlined_sources=set())
+                info.add_code(code)
+                self.assertEqual(
+                    {s.module for s in info.inlined_sources}, {"_package_shim_impl"}
+                )
+            finally:
+                sys.modules.pop("_package_shim_impl", None)
+                sys.modules.pop("package_shim", None)
+                _MODULE_KEY_BY_FILE.pop(impl_path, None)
+
+    def test_scan_sys_modules_revalidates_a_stale_hit(self):
+        # Renaming a module's sys.modules key keeps len(sys.modules) equal, so
+        # the ABA check alone would keep returning the dead key.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "_package_stale_hit.py")
+            with open(path, "w") as f:
+                f.write("def f(x):\n    return x + 1\n")
+            spec = importlib.util.spec_from_file_location("_package_stale_hit", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            sys.modules["_package_stale_hit"] = module
+            try:
+                self.assertEqual(_scan_sys_modules_for_file(path), "_package_stale_hit")
+                sys.modules["_package_stale_hit_renamed"] = sys.modules.pop(
+                    "_package_stale_hit"
+                )
+                self.assertEqual(
+                    _scan_sys_modules_for_file(path), "_package_stale_hit_renamed"
+                )
+                del sys.modules["_package_stale_hit_renamed"]
+                self.assertIsNone(_scan_sys_modules_for_file(path))
+            finally:
+                sys.modules.pop("_package_stale_hit", None)
+                sys.modules.pop("_package_stale_hit_renamed", None)
+                _MODULE_KEY_BY_FILE.pop(path, None)
 
     def test_explicit_capture_is_not_inferred_from_the_serialization_filter(self):
         # The serialization filter and the capture mode are independent: a
