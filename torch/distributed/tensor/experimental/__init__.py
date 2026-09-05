@@ -1,11 +1,13 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import functools
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 from torch.distributed.tensor._api import DTensor
-from torch.distributed.tensor.experimental._attention import context_parallel
-from torch.distributed.tensor.experimental._func_map import local_map
-from torch.distributed.tensor.experimental._register_sharding import register_sharding
+from torch.distributed.tensor.experimental import _attention
+from torch.distributed.tensor.experimental import _func_map
+from torch.distributed.tensor.experimental import _register_sharding
 
 
 __all__ = ["context_parallel", "implicit_replication", "local_map", "register_sharding"]
@@ -27,8 +29,16 @@ def implicit_replication() -> Iterator[None]:
         DTensor._op_dispatcher._allow_implicit_replication = False
 
 
-# Set namespace for exposed private names
-context_parallel.__module__ = "torch.distributed.tensor.experimental"
-implicit_replication.__module__ = "torch.distributed.tensor.experimental"
-local_map.__module__ = "torch.distributed.tensor.experimental"
-register_sharding.__module__ = "torch.distributed.tensor.experimental"
+_ASSIGNMENTS = tuple(a for a in functools.WRAPPER_ASSIGNMENTS if a != "__module__")
+
+@functools.wraps(_attention.context_parallel, assigned=_ASSIGNMENTS)
+def context_parallel(*args: Any, **kwargs: Any) -> Any:
+    return _attention.context_parallel(*args, **kwargs)
+
+@functools.wraps(_func_map.local_map, assigned=_ASSIGNMENTS)
+def local_map(*args: Any, **kwargs: Any) -> Any:
+    return _func_map.local_map(*args, **kwargs)
+
+@functools.wraps(_register_sharding.register_sharding, assigned=_ASSIGNMENTS)
+def register_sharding(*args: Any, **kwargs: Any) -> Any:
+    return _register_sharding.register_sharding(*args, **kwargs)
