@@ -13,6 +13,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <bit>
+#include <functional>
 #include <limits>
 #include <type_traits>
 #include <unordered_map>
@@ -1125,9 +1126,10 @@ struct TORCH_API IValue final {
         // Opaque tensors such as the ones constructed by the MKL-DNN backend
         // don't have storage so we just use their TensorImpls.
         // TODO: Find way to expose alias info for opaque tensors.
-        return reinterpret_cast<size_t>(ten.unsafeGetTensorImpl());
+        return std::hash<const void*>()(ten.unsafeGetTensorImpl());
       } else {
-        return reinterpret_cast<size_t>(ten.storage().unsafeGetStorageImpl());
+        return std::hash<const void*>()(
+            ten.storage().unsafeGetStorageImpl());
       }
     }
     size_t operator()(const IValue& val) const {
