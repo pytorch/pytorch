@@ -632,8 +632,6 @@ static c10::ArrayRef<T> get_set_cached_attr(
   // We do the smallvector optimization here: any time the new_size is <=5,
   // we always allocate our buffer to size 5, so that if the next resize
   // is also to <=5 elements, we don't need to reallocate.
-  // Note: removing this optimization previously tripped ASAN in a batchnorm
-  // kernel (the CI log link that used to be here has long since expired).
   // We need to resize if:
   // (1) we haven't allocated our buffer at all yet
   // (2) Our buffer size is different from the new size
