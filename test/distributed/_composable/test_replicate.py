@@ -10,21 +10,20 @@ from torch import nn
 from torch.distributed._composable.replicate import replicate
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor import DTensor
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiThreadedTestCase,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     run_tests,
     TEST_WITH_ROCM,
-    TEST_XPU,
 )
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-device_module = torch.get_device_module(device_type)
 
 
 class Net(nn.Module):
@@ -39,6 +38,8 @@ class Net(nn.Module):
 
 
 class ReplicateStateDictTest(MultiThreadedTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self):
         return 4
@@ -82,15 +83,13 @@ class ReplicateStateDictTest(MultiThreadedTestCase):
 
 
 class ReplicateTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     world_size = 2
 
     @classmethod
     def backend_str(cls) -> str:
-        return "gloo"
-
-    @classmethod
-    def device_type(cls) -> str:
-        return "cpu"
+        return dist.get_default_backend_for_device(cls.device_type())
 
     def _compare_module(self, mod, replicate_mod):
         local_batch_size = 1
@@ -132,17 +131,53 @@ class ReplicateTest(MultiProcContinuousTest):
             input = input[torch.randperm(global_batch_size)]
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180205")
-    def test_replicate_single_module(self):
-        model = Net()
+    def test_replicate_single_module(self, device):
+        model = Net().to(device)
         replicate_model = replicate(deepcopy(model))
         self._compare_module(model, replicate_model)
+
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180127"
+    )
+    def test_replicate_multi_module(self, device):
+        model = Net().to(device)
+        replicate_model = deepcopy(model)
+        replicate(replicate_model.fc1)
+        replicate(replicate_model.fc2)
+        replicate(replicate_model.fc3)
+        self._compare_module(model, replicate_model)
+
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180265")
+    def test_replicate_with_kwargs(self, device):
+        model = Net().to(device)
+        replicate_model = replicate(
+            deepcopy(model), bucket_cap_mb=1, gradient_as_bucket_view=True
+        )
+        self._compare_module(model, replicate_model)
+
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176155")
+    def test_replicate_wrong_device_id_type(self, device):
+        model = Net().to(device)
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected device_id to be int or torch.device"
+        ):
+            replicate(model, device_id=[torch.device(device)])
+
+
+class ReplicateTestNoXPU(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    world_size = 2
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return dist.get_default_backend_for_device(cls.device_type())
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/179948"
     )
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
-    def test_replicate_move_args_kwargs_to_device(self):
+    def test_replicate_move_args_kwargs_to_device(self, device):
         class MyNet(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -153,25 +188,20 @@ class ReplicateTest(MultiProcContinuousTest):
                     inp = inp @ kwarg
                 return self.a(inp)
 
-        torch.accelerator.set_device_index(self.rank)
-        model = MyNet().to(device_type)
+        model = MyNet().to(device)
         replicate(model, device_id=torch.accelerator.current_device_index())
-        # CPU input ensures replicate can move arg and kwargs to device.
         a, b = torch.randn(2, 2), torch.randn(2, 2)
         model(a, kwarg=b).sum().backward()
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179854")
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
-    def test_replicate_ignore_module(self):
-        torch.accelerator.set_device_index(self.rank)
+    def test_replicate_ignore_module(self, device):
         # Seed ensures diff input and thus different local grads across ranks.
         torch.manual_seed(self.rank)
-        device_module.manual_seed(self.rank)
-        model = Net().to(device_type)
+        model = Net().to(device)
         replicate(model, ignored_modules=[model.fc1])
         # CPU input ensures that replicate can move input to GPU as DDP does.
-        inp = torch.randn(5, 2, device=device_type) * (self.rank + 1)
+        inp = torch.randn(5, 2) * (self.rank + 1)
         out = model(inp) * 10
         out.sum().backward()
         # FC1 grads should not be synchronized, FC2 and 3 should be.
@@ -191,67 +221,39 @@ class ReplicateTest(MultiProcContinuousTest):
             for g in rest:
                 self.assertEqual(grad, g)
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180127"
-    )
-    def test_replicate_multi_module(self):
-        model = Net()
-        replicate_model = deepcopy(model)
-        replicate(replicate_model.fc1)
-        replicate(replicate_model.fc2)
-        replicate(replicate_model.fc3)
-        self._compare_module(model, replicate_model)
-
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180265")
-    def test_replicate_with_kwargs(self):
-        model = Net()
-        replicate_model = replicate(
-            deepcopy(model), bucket_cap_mb=1, gradient_as_bucket_view=True
-        )
-        self._compare_module(model, replicate_model)
-
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179746")
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
-    def test_replicate_device_id(self):
-        model = Net()
-        model_cuda = deepcopy(model).to(device_type)
+    def test_replicate_device_id(self, device):
+        model = Net().to(device)
+        model_cuda = deepcopy(model)
         model_cuda2 = deepcopy(model_cuda)
-        replicate(model, device_id=torch.device("cpu"))
+        replicate(model, device_id=torch.accelerator.current_device_index())
         # DDP instance is attached in first pre forward
-        model(torch.randn(2, 2))
+        model(torch.randn(2, 2, device=device))
         replicate_ddp_weakref = replicate.state(model)._ddp_weakref()
-        # Should be None for CPU training
+        # Should be None for device training when device_id matches
         self.assertEqual(None, replicate_ddp_weakref.device_ids)
 
         replicate(
             model_cuda, device_id=torch.device(torch.accelerator.current_device_index())
         )
         # DDP instance is attached in first pre forward
-        model_cuda(torch.randn(2, 2))
+        model_cuda(torch.randn(2, 2, device=device))
         replicate_ddp_weakref = replicate.state(model_cuda)._ddp_weakref()
         self.assertEqual([0], replicate_ddp_weakref.device_ids)
         # Pass in int as device_id
         replicate(model_cuda2, device_id=int(torch.accelerator.current_device_index()))
         # DDP instance is attached in first pre forward
-        model_cuda2(torch.randn(2, 2))
+        model_cuda2(torch.randn(2, 2, device=device))
         replicate_ddp_weakref = replicate.state(model_cuda2)._ddp_weakref()
         self.assertEqual([0], replicate_ddp_weakref.device_ids)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176155")
-    def test_replicate_wrong_device_id_type(self):
-        model = Net()
-        with self.assertRaisesRegex(
-            RuntimeError, "Expected device_id to be int or torch.device"
-        ):
-            replicate(model, device_id=[torch.device("cpu")])
-
-
 class ReplicateFullyShardInit(ReplicateTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179810")
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
-    def test_replicate_fully_shard_init(self):
+    def test_replicate_fully_shard_init(self, device):
         class ToyModel(nn.Module):
             def __init__(self, dim: int):
                 super().__init__()
@@ -267,22 +269,25 @@ class ReplicateFullyShardInit(ReplicateTest):
                 y = self.proj(y)
                 return y
 
-        torch.accelerator.set_device_index(self.rank)
         dim = 3
         bz = 2
-        model = ToyModel(dim).to(device_type)
+        model = ToyModel(dim).to(device)
         for linear in model.linears:
             fully_shard(linear)
         fully_shard(model.linears)
         replicate(model, device_id=torch.accelerator.current_device_index())
         for linear in model.linears:
             self.assertTrue(isinstance(linear.weight, DTensor))
-        inp = torch.rand(bz, dim)
+        inp = torch.rand(bz, dim, device=device)
         # trigger lazy init
         model(inp).sum()
         for linear in model.linears:
             self.assertTrue(isinstance(linear.weight, DTensor))
 
+
+instantiate_device_type_tests(ReplicateTest, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(ReplicateTestNoXPU, globals(), except_for="cpu")
+instantiate_device_type_tests(ReplicateFullyShardInit, globals(), except_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
