@@ -318,7 +318,7 @@ class TestGradAcc(FSDPTestContinuous):
 instantiate_device_type_tests(
     TestGradAcc,
     globals(),
-    only_for=("cuda", "hpu", "xpu", "privateuse1"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
