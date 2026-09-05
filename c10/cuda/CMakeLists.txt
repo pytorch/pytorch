@@ -64,10 +64,6 @@ if(NOT BUILD_LIBTORCHLESS)
   torch_optimize_layout_if_enabled(c10_cuda)
   # If building shared library, set dllimport/dllexport proper.
   target_compile_options(c10_cuda PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
-  # Enable hidden visibility if compiler supports it.
-  if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
-    target_compile_options(c10_cuda PRIVATE "-fvisibility=hidden")
-  endif()
 
   # ---[ Dependency of c10_cuda
   target_link_libraries(c10_cuda PUBLIC ${C10_LIB} torch::cudart)
