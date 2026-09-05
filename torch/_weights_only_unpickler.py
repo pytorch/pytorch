@@ -67,7 +67,7 @@ from pickle import (
     TUPLE3,
     UnpicklingError,
 )
-from struct import unpack
+from struct import error as _struct_error, unpack
 from sys import maxsize
 from typing import Any
 
@@ -321,7 +321,28 @@ class Unpickler:
         """Read a pickled object representation from the open file.
 
         Return the reconstituted object hierarchy specified in the file.
+
+        Structural corruption in the byte stream (stack underflow, truncated
+        fields, dangling memo references, or undecodable strings) is surfaced
+        as ``UnpicklingError`` instead of a bare ``IndexError`` /
+        ``struct.error`` / ``KeyError`` / ``UnicodeDecodeError``, so callers
+        loading untrusted checkpoints see a single, catchable error type.
+        Note that these exception types can also be raised by genuine errors
+        during object reconstruction (e.g. from a ``__setstate__`` method), in
+        which case the original exception is preserved as ``__cause__``.
         """
+        try:
+            return self._load()
+        except (IndexError, _struct_error, KeyError, UnicodeDecodeError) as e:
+            raise UnpicklingError(
+                f"Failed to load pickle data ({type(e).__name__}: {e}); "
+                "this usually means the input is corrupted or truncated, "
+                "but it can also be a genuine error raised while "
+                "reconstructing an object. See the exception's __cause__ "
+                "for the original traceback."
+            ) from e
+
+    def _load(self):
         self.metastack = []
         self.stack: list[Any] = []
         pending_newobjs: set[_PendingNewobj] = set()
