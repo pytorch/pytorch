@@ -343,7 +343,17 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
     if (query.is_nested()) {
       return std::make_tuple(Tensor(), Tensor());
     }
-    return std::make_tuple(at::empty_like(query), Tensor());
+    Tensor attention_weights;
+    if (need_weights) {
+      attention_weights = average_attn_weights
+          ? at::empty(
+                {query.size(0), query.size(1), query.size(1)}, query.options())
+          : at::empty(
+                {query.size(0), num_head, query.size(1), query.size(1)},
+                query.options());
+    }
+    return std::make_tuple(
+        at::empty_like(query), std::move(attention_weights));
   }
 
 #ifndef NDEBUG

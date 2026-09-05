@@ -788,7 +788,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
 
 #endif
   const auto dim_per_head = D / num_head;
-  if ((query.is_same(key) && key.is_same(value)) && !need_weights) {
+  if (!need_weights && query.numel() != 0 && query.is_same(key) &&
+      key.is_same(value)) {
 
     // We have not done linear projection yet but the input for SDP
     // Is expected to be 4 dimensional. We "cheaply" create view tensors
@@ -836,7 +837,17 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     if (query.is_nested()) {
       return std::make_tuple(Tensor(), Tensor());
     }
-    return std::make_tuple(at::empty_like(query), Tensor());
+    Tensor attention_weights;
+    if (need_weights) {
+      attention_weights = average_attn_weights
+          ? at::empty(
+                {query.size(0), query.size(1), query.size(1)}, query.options())
+          : at::empty(
+                {query.size(0), num_head, query.size(1), query.size(1)},
+                query.options());
+    }
+    return std::make_tuple(
+        at::empty_like(query), std::move(attention_weights));
   }
 
 #ifndef NDEBUG
