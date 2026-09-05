@@ -1,6 +1,8 @@
 #pragma once
 #ifdef USE_XPU
 #include <c10/xpu/XPUFunctions.h>
+#include <torch/csrc/inductor/aoti_runtime/utils.h>
+
 #include <level_zero/ze_api.h>
 #include <sycl/sycl.hpp>
 #include <fstream>
@@ -15,7 +17,7 @@ inline void _zeCheck(ze_result_t status, const char* file, int line) {
     std::stringstream ss;
     ss << "L0 runtime error: " << std::hex << std::uppercase << status
        << std::dec << " at " << file << ":" << line;
-    throw std::runtime_error(std::move(ss).str());
+    AOTI_RUNTIME_CHECK(false, std::move(ss).str());
   }
 }
 

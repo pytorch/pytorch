@@ -280,12 +280,9 @@ PLATFORM_SUPPORTS_WORKQUEUE_CONFIG: bool = LazyVal(lambda: evaluate_platform_sup
 def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
         if torch.version.hip:
-            archs = ['gfx94']
-            if ROCM_VERSION >= (6, 5):
-                # OCP fp8 (e4m3fn/e5m2) in scaled_mm requires ROCm 6.5+; see
-                # the ROCM_VERSION checks in aten/src/ATen/native/cuda/ScaledBlas.cpp.
-                # gfx120 and gfx95 only support OCP, so gate them on 6.5.
-                archs.extend(['gfx95', 'gfx120'])
+            # gfx120 and gfx95 only support OCP fp8 (e4m3fn/e5m2), which every
+            # supported ROCm provides.
+            archs = ['gfx94', 'gfx95', 'gfx120']
             if ROCM_VERSION >= (7, 14):
                 archs.append('gfx1250')
             for arch in archs:

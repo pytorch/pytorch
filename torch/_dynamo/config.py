@@ -878,6 +878,30 @@ _unsafe_skip_fsdp_module_guards = (
 # Common prefix to append to the id of each compile run to filter out data
 pt2_compile_id_prefix: str | None = os.environ.get("PT2_COMPILE_ID_PREFIX", None)
 
+# Generation-2 threshold to install while compiling, or None to leave CPython's
+# thresholds alone. A full collection walks every tracked object, and compiling
+# creates on the order of a million of them (FX nodes, SymNodes, sympy
+# expressions), so with the default threshold of 10 the collector repeatedly
+# rescans a heap that is still growing; on one model that was 16 full
+# collections costing 4.2s. They are deferred, not skipped: gen0 and gen1 keep
+# collecting, and once the threshold is restored the gen2 counter is already
+# past the default, so a full collection follows shortly after the compile. The
+# cost is peak memory - cyclic garbage promoted to gen2 waits longer to be
+# reclaimed, measured at +45MB (+1.3%) on that model. Note gc.set_threshold is
+# process-wide, so non-compiling threads also stop seeing full collections for
+# the duration of a compile.
+#
+# Inert on free-threaded builds, which never read threshold2 and whose
+# collector is not generational, so the default is None there. Also ignored by
+# CPython 3.14.0 through 3.14.4, a closed window restored in 3.14.5.
+# 0 means "off" rather than "collect constantly", since 0 is not a useful gen2
+# threshold.
+gc_gen2_threshold_during_compile: int | None = (
+    int(os.environ.get("TORCH_DYNAMO_GC_GEN2_THRESHOLD_DURING_COMPILE", 1000)) or None
+    if sysconfig.get_config_var("Py_GIL_DISABLED") != 1
+    else None
+)
+
 # Run GC at the end of compilation
 run_gc_after_compile = Config(  # type: ignore[var-annotated]
     # Disable by default on free-threaded builds since they always do a full collection, which can be slow
