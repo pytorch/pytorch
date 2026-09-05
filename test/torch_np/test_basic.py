@@ -692,6 +692,46 @@ class TestCtorNested(TestCase):
         assert_equal(w.asarray(lst), [[1, 2], [3, 4]])
 
 
+class TestGeomspace(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_geomspace_num_one_and_zero(self):
+        res1 = w.geomspace(1, 1000, num=1)
+        assert_equal(res1, w.array([1.0]))
+        assert_equal(res1.dtype, w.float64)
+
+        res0 = w.geomspace(1, 1000, num=0)
+        assert_equal(res0.shape, (0,))
+        assert_equal(res0.dtype, w.float64)
+
+    def test_geomspace_dtype(self):
+        res32 = w.geomspace(1, 1000, num=4, dtype=w.float32)
+        assert_equal(res32.dtype, w.float32)
+
+        res64 = w.geomspace(1, 1000, num=4, dtype=w.float64)
+        assert_equal(res64.dtype, w.float64)
+
+        res_int = w.geomspace(1, 1000, num=4, dtype=w.int64)
+        assert_equal(res_int.dtype, w.int64)
+        assert_equal(res_int, w.array([1, 10, 100, 1000]))
+
+    def test_geomspace_negative(self):
+        res_neg = w.geomspace(-1, -1000, num=4)
+        assert_allclose(res_neg, w.array([-1.0, -10.0, -100.0, -1000.0]))
+        assert_equal(w.geomspace(-1, -1000, num=1), w.array([-1.0]))
+
+    def test_geomspace_zero_raises(self):
+        with self.assertRaises(ValueError):
+            w.geomspace(0, 1000, num=4)
+        with self.assertRaises(ValueError):
+            w.geomspace(1, 0, num=4)
+
+    def test_geomspace_complex(self):
+        res = w.geomspace(1j, 1000j, num=4)
+        assert_allclose(res, w.array([1j, 10j, 100j, 1000j]))
+        assert_equal(res.dtype, w.complex128)
+
+
 class TestMisc(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
