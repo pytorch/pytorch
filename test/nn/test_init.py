@@ -59,7 +59,7 @@ class TestNNInit(TestCase):
     @torch._dynamo.disable
     def _is_normal(self, tensor, mean, std):
         samples = tensor.view(-1).tolist()
-        p_value = stats.kstest(samples, "norm", args=(mean, std))[1]
+        p_value = stats.kstest(samples, stats.norm(mean, std).cdf)[1]
         return p_value > 0.0001
 
     @torch._dynamo.disable
