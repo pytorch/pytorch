@@ -1671,45 +1671,36 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
 
-    def call_method(
+    def queue_callback(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "queue_callback":
-            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                if not (tx.one_graph or tx.error_on_graph_break):
-                    raise AssertionError(
-                        "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
-                    )
-                # queue_callback is a method-wrapper, no need to insert a guard.
-                fn_vt = VariableTracker.build(
-                    tx,
-                    torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            if not (tx.one_graph or tx.error_on_graph_break):
+                raise AssertionError(
+                    "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
                 )
-                return fn_vt.call_function(
-                    tx,
-                    (tx.output.side_effects.get_ca_final_callbacks_var(), *args),
-                    kwargs,
-                )
-            else:
-                unimplemented(
-                    gb_type="Unsupported torch._C._ImperativeEngine.queue_callback()",
-                    context=f"call_method {self} {name}",
-                    explanation="queue_callback() is only supported when "
-                    "Compiled Autograd is enabled with fullgraph=True.",
-                    hints=[],
-                )
-        else:
-            unimplemented(
-                gb_type="Unsupported torch._C._ImperativeEngine method",
-                context=f"call_method {self} {name}",
-                explanation="Dynamo only supports the `queue_callback` method "
-                f"on a torch._C._ImperativeEngine instance, but found: `{name}`.",
-                hints=[],
+            # queue_callback is a method-wrapper, no need to insert a guard.
+            fn_vt = VariableTracker.build(
+                tx,
+                torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
             )
+            return fn_vt.call_function(
+                tx,
+                (tx.output.side_effects.get_ca_final_callbacks_var(), *args),
+                kwargs,
+            )
+        unimplemented(
+            gb_type="Unsupported torch._C._ImperativeEngine.queue_callback()",
+            context=f"call_method {self} queue_callback",
+            explanation="queue_callback() is only supported when "
+            "Compiled Autograd is enabled with fullgraph=True.",
+            hints=[],
+        )
+
+    tp_methods = {"queue_callback": Method(queue_callback)}
 
 
 class LambdaVariable(VariableTracker):
