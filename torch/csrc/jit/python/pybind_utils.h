@@ -9,6 +9,7 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/QScheme.h>
@@ -84,10 +85,14 @@ struct VISIBILITY_HIDDEN PythonFunctionGuard {
   PythonFunctionGuard& operator=(PythonFunctionGuard&&) = delete;
 
   ~PythonFunctionGuard() {
-    pybind11::gil_scoped_acquire ag;
-    func_.dec_ref();
+    torch::detail::SafeGilScopedAcquire ag;
+    if (ag) {
+      func_.dec_ref();
+    }
     // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
-    // decref on the PyObject again.
+    // decref on the PyObject again. If the GIL could not be acquired above,
+    // this deliberately leaks the reference rather than touching the
+    // refcount without the GIL held.
     // See Note [Destructing py::object] in python_ivalue.h
     func_.ptr() = nullptr;
   }

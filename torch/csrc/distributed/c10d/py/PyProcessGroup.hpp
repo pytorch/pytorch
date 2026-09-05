@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
@@ -71,8 +72,15 @@ class PyProcessGroup : public ProcessGroup {
 
     ~PyWorkHolder() override {
       // GIL must be held when freeing python objects.
-      py::gil_scoped_acquire gil;
-      pyWork_ = py::object();
+      torch::detail::SafeGilScopedAcquire gil;
+      if (gil) {
+        pyWork_ = py::object();
+      } else {
+        // Leak rather than touch the refcount without the GIL: release()
+        // nulls the pointer without a decref, so pyWork_'s own destructor
+        // becomes a no-op.
+        pyWork_.release();
+      }
     }
 
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
@@ -462,12 +470,15 @@ class TORCH_PYTHON_API PythonOnCompletionHook {
   PythonOnCompletionHook(py::object hook) : hook_(std::move(hook)) {}
   PythonOnCompletionHook(const PythonOnCompletionHook&) = default;
 
-  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~PythonOnCompletionHook() {
-    py::gil_scoped_acquire ag;
-    hook_.dec_ref();
+    torch::detail::SafeGilScopedAcquire ag;
+    if (ag) {
+      hook_.dec_ref();
+    }
     // Explicitly set hook_ to nullptr to prevent py::object's dtor
-    // to decref on the PyObject again.
+    // to decref on the PyObject again. If the GIL could not be acquired
+    // above, this deliberately leaks the reference rather than touching
+    // the refcount without the GIL held.
     // See Note [Destructing py::object] in python_ivalue.h
     hook_.ptr() = nullptr;
   }
