@@ -85,7 +85,8 @@ _COMPILE_LOCK = threading.RLock()
 #
 # The objects a wrapper closes over come in a few kinds:
 #   - public runtime helpers the codegen'd source references (e.g. increment_version,
-#     gen_alias_from_base, _unwrap_tensoralias, mark_dynamo_propagated_dynamic_indices,
+#     gen_alias_from_base, _unwrap_tensoralias, _dealias_marked_returns,
+#     mark_dynamo_propagated_dynamic_indices,
 #     the CUDARngStateHelper staticmethods) -- ordinary importable objects;
 #   - the inner Inductor ``call`` that the chain ultimately invokes;
 #   - sibling captured wrappers -- the next link of the runtime chain (an inner subclass /
@@ -201,6 +202,10 @@ def _known_helper_table() -> dict[int, tuple[str, str]]:
         id(rt._unwrap_tensoralias): (
             f"{_RT} _unwrap_tensoralias",
             "_unwrap_tensoralias",
+        ),
+        id(rt._dealias_marked_returns): (
+            f"{_RT} _dealias_marked_returns",
+            "_dealias_marked_returns",
         ),
         id(rt.CUDARngStateHelper.get_torch_state_as_tuple): (
             f"{_RT} CUDARngStateHelper",
