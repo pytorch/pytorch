@@ -7927,6 +7927,19 @@
     MPS: lstm_mps_backward
   autogen: lstm_mps_backward.out
 
+# MPS GRU implementation
+
+- func: _gru_mps(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    MPS: _gru_mps
+  autogen: _gru_mps.out
+  tags: nondeterministic_seeded
+
+- func: gru_mps_backward(Tensor? grad_y, Tensor? grad_hy, Tensor z_state, Tensor output_fwd, Tensor input, Tensor layer_inputs, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor[])
+  dispatch:
+    MPS: gru_mps_backward
+  autogen: gru_mps_backward.out
+
 # Fused RNN kernels
 - func: _thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor, Tensor)
   dispatch:

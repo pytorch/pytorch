@@ -2807,6 +2807,13 @@
 
 - name: lstm_mps_backward(Tensor? grad_y, Tensor? grad_hy, Tensor? grad_cy, Tensor z_state, Tensor cell_state_fwd, Tensor input, Tensor layersOutputs, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor[], Tensor[])
 
+# GRU MPS
+- name: _gru_mps(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  output_differentiability: [True, True, False, False, False]
+  input, hx, params: "gru_mps_backward(grads[0], grads[1], result2, result3, input, result4, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first)"
+
+- name: gru_mps_backward(Tensor? grad_y, Tensor? grad_hy, Tensor z_state, Tensor output_fwd, Tensor input, Tensor layer_inputs, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor[])
+
 
 
 # Only frst three of _cudnn_rnn outputs can have gradients.
