@@ -292,7 +292,6 @@ S390X_BLOCKLIST = [
 
 XPU_BLOCKLIST = [
     "test_autograd",
-    "profiler/test_memory_profiler",
 ]
 
 XPU_TEST = [
