@@ -1,12 +1,17 @@
 #pragma once
 
 #include <ATen/native/DispatchStub.h>
+#include <c10/core/MemoryFormat.h>
 #include <cstdint>
 
 namespace at {
 class Tensor;
 
 namespace native {
+
+// The memory format group_norm computes in: channels_last is only
+// preserved on backends that have channels_last group norm kernels.
+TORCH_API c10::MemoryFormat group_norm_memory_format(const Tensor& input);
 
 using forward_fn = void (*)(
     const Tensor& /* X */,
