@@ -844,6 +844,16 @@
       "Hints": []
     }
   ],
+  "GB9552": [
+    {
+      "Gb_type": "Unsupported TMA descriptor factory call",
+      "Context": "from_tensor() requires tensor and block_shape",
+      "Explanation": "Dynamo supports stable TMA descriptor factories only with tensor and block_shape.",
+      "Hints": [
+        "Call from_tensor(tensor, block_shape) without extra arguments."
+      ]
+    }
+  ],
   "GB0056": [
     {
       "Gb_type": "Failed to mutate tensor data attribute",
@@ -2464,6 +2474,16 @@
       "Context": "call_method {self} {name} {args} {kwargs}",
       "Explanation": "Dynamo does not know how to trace method `{name}` of class `{self.python_type_name()}`",
       "Hints": []
+    }
+  ],
+  "GB8294": [
+    {
+      "Gb_type": "TMA descriptor class is not importable",
+      "Context": "descriptor_type={descriptor_type}, path={descriptor_path}",
+      "Explanation": "Triton tensor descriptor class {descriptor_type.__qualname__} must be importable as {descriptor_path} so compiled code can reconstruct it.",
+      "Hints": [
+        "Define the descriptor class at module scope and export it under its class name."
+      ]
     }
   ],
   "GB0157": [

@@ -734,6 +734,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
         source: Source | None,
     ) -> VariableTracker:
         """Handle descriptors found in cls.__mro__."""
+        if name == "from_tensor":
+            from torch.utils._triton import has_triton_tensor_descriptor_host_tma
+
+            if has_triton_tensor_descriptor_host_tma():
+                from triton.tools.tensor_descriptor import TensorDescriptor
+
+                # Backend subclasses must preserve the stable two-argument contract.
+                if issubclass(self.value, TensorDescriptor):
+                    return variables.CreateTMADescriptorStableVariable(
+                        descriptor_type=self.value,
+                    )
+
         if isinstance(cls_attr, staticmethod):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the

@@ -3,6 +3,7 @@ import collections
 import copy
 import dataclasses
 import functools
+import importlib
 import inspect
 import itertools
 import logging
@@ -86,10 +87,11 @@ TMAExperimentalMetadata = tuple[
 ]
 
 # e.g. for host-side Triton TMA API call ``TensorDescriptor.from_tensor(ptr, [32, 64])``
-# the metadata will look like ``("stable", ([32, 64],))``
+# the metadata will look like
+# ``("stable", ([32, 64], "triton.tools.tensor_descriptor", "TensorDescriptor"))``
 TMAStableMetadata = tuple[
     str,  # type of TMA ("experimental" or "stable")
-    tuple[list[IntLikeType],],  # block_shape
+    tuple[list[IntLikeType], str, str],  # block_shape, module, class
 ]
 
 
@@ -113,13 +115,15 @@ def maybe_unpack_tma_experimental_metadata(
 
 def create_tma_stable_metadata(
     block_shape: list[IntLikeType],
+    descriptor_module: str,
+    descriptor_class: str,
 ) -> TMAStableMetadata:
-    return ("stable", (block_shape,))
+    return ("stable", (block_shape, descriptor_module, descriptor_class))
 
 
 def maybe_unpack_tma_stable_metadata(
     tma_meta: TMAExperimentalMetadata | TMAStableMetadata,
-) -> tuple[list[IntLikeType]] | None:
+) -> tuple[list[IntLikeType], str, str] | None:
     if not tma_meta or len(tma_meta) != 2:
         return None
     if tma_meta[0] == "stable":
@@ -167,7 +171,12 @@ def maybe_unpack_host_tma_descriptor(arg: Any) -> tuple[Any, TMAStableMetadata] 
             "carried through the graph."
         )
 
-    return base, create_tma_stable_metadata(list(arg.block_shape))
+    descriptor_type = type(arg)
+    return base, create_tma_stable_metadata(
+        list(arg.block_shape),
+        descriptor_type.__module__,
+        descriptor_type.__name__,
+    )
 
 
 # TMADescriptorMetadata maps kernel parameter names to the metadata that allows
@@ -355,9 +364,10 @@ def generate_ttir(
                 tma_descriptor_metadata.get(name, None)
             )
         ) is not None:
-            from triton.tools.tensor_descriptor import TensorDescriptor
-
-            block_shape = stable_meta[0]
+            block_shape, descriptor_module, descriptor_class = stable_meta
+            descriptor_type = getattr(
+                importlib.import_module(descriptor_module), descriptor_class
+            )
             with torch._C._DisableTorchDispatch():
                 # need 16-byte aligned strides
                 elements_per_dim = max(1, 16 // a.dtype.itemsize)
@@ -365,7 +375,7 @@ def generate_ttir(
                     [elements_per_dim] * len(block_shape), dtype=a.dtype
                 )
 
-            ordered_args[name] = TensorDescriptor.from_tensor(base_tensor, block_shape)
+            ordered_args[name] = descriptor_type.from_tensor(base_tensor, block_shape)
         elif is_fake_tensor(a) or isinstance(a, torch._inductor.ir.TensorBox):
             with torch._C._DisableTorchDispatch():
                 ordered_args[name] = torch.empty(2, dtype=a.dtype)
@@ -402,10 +412,11 @@ def generate_ttir(
             return []
 
         if is_stable_tensor_descriptor_arg(arg):
-            stable_meta = maybe_unpack_tma_stable_metadata(
-                tma_descriptor_metadata[name]
-            )
-            if stable_meta is None:
+            if (
+                stable_meta := maybe_unpack_tma_stable_metadata(
+                    tma_descriptor_metadata[name]
+                )
+            ) is None:
                 raise AssertionError(f"Failed to unpack stable TMA metadata for {name}")
             block_shape = stable_meta[0]
             tensor_rank = len(block_shape)
@@ -1598,11 +1609,12 @@ def triton_kernel_wrapper_mutation_dense(
                     raise AssertionError(
                         f"Failed to unpack stable TMA metadata for key {k}"
                     )
-                from triton.tools.tensor_descriptor import TensorDescriptor
+                block_shape, descriptor_module, descriptor_class = stable_meta
+                descriptor_type = getattr(
+                    importlib.import_module(descriptor_module), descriptor_class
+                )
 
-                block_shape = stable_meta[0]
-
-                kwargs[k] = TensorDescriptor.from_tensor(tensor, block_shape)
+                kwargs[k] = descriptor_type.from_tensor(tensor, block_shape)
 
     # move as many positional arguments from dicts to args as we
     # can to circumvent the bug with the kwargs and pre_/post_hook:

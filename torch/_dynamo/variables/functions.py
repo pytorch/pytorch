@@ -25,6 +25,7 @@ import _collections  # type: ignore[import-not-found]
 import builtins
 import collections
 import functools
+import importlib
 import importlib.metadata
 import importlib.util
 import inspect
@@ -3937,6 +3938,8 @@ class TMADescriptorStableVariable(VariableTracker):
         self,
         tensor: "TensorVariable",
         block_shape: "ListVariable",
+        descriptor_module: str,
+        descriptor_class: str,
         **kwargs: Any,
     ) -> None:
         if not tensor.is_tensor():
@@ -3944,16 +3947,20 @@ class TMADescriptorStableVariable(VariableTracker):
         super().__init__(**kwargs)
         self.tensor = tensor
         self.block_shape = block_shape
+        self.descriptor_module = descriptor_module
+        self.descriptor_class = descriptor_class
 
     def to_metadata(self) -> Any:
         return create_tma_stable_metadata(
             self.block_shape.as_proxy(),
+            self.descriptor_module,
+            self.descriptor_class,
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.load_import_from(
-            "triton.tools.tensor_descriptor",
-            "TensorDescriptor",
+            self.descriptor_module,
+            self.descriptor_class,
         )
         codegen.load_method("from_tensor")
         codegen(self.tensor)
@@ -4040,7 +4047,47 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
         )
 
 
+def _get_tma_descriptor_import_path(
+    descriptor_type: type[Any],
+) -> tuple[str, str]:
+    descriptor_module = descriptor_type.__module__
+    descriptor_class = descriptor_type.__name__
+    descriptor_path = f"{descriptor_module}.{descriptor_class}"
+
+    try:
+        imported_descriptor_type = (
+            None
+            if descriptor_module == "__main__"
+            else getattr(importlib.import_module(descriptor_module), descriptor_class)
+        )
+    except (AttributeError, ImportError):
+        imported_descriptor_type = None
+
+    if imported_descriptor_type is not descriptor_type:
+        unimplemented(
+            gb_type="TMA descriptor class is not importable",
+            context=f"descriptor_type={descriptor_type!r}, path={descriptor_path}",
+            explanation=(
+                f"Triton tensor descriptor class {descriptor_type.__qualname__} must "
+                f"be importable as {descriptor_path} so compiled code can reconstruct it."
+            ),
+            hints=[
+                "Define the descriptor class at module scope and export it under its class name."
+            ],
+        )
+
+    return descriptor_module, descriptor_class
+
+
 class CreateTMADescriptorStableVariable(VariableTracker):
+    def __init__(
+        self,
+        descriptor_type: type[Any],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.descriptor_type = descriptor_type
+
     def python_type(self) -> type:
         return types.FunctionType
 
@@ -4050,12 +4097,38 @@ class CreateTMADescriptorStableVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        arg_names = ("tensor", "block_shape")
+        positional_names = set(arg_names[: len(args)])
+        keyword_names = set(kwargs)
+        if (
+            len(args) > len(arg_names)
+            or not keyword_names <= set(arg_names)
+            or positional_names & keyword_names
+            or positional_names | keyword_names != set(arg_names)
+        ):
+            unimplemented(
+                gb_type="Unsupported TMA descriptor factory call",
+                context="from_tensor() requires tensor and block_shape",
+                explanation=(
+                    "Dynamo supports stable TMA descriptor factories only with "
+                    "tensor and block_shape."
+                ),
+                hints=[
+                    "Call from_tensor(tensor, block_shape) without extra arguments."
+                ],
+            )
+
+        descriptor_module, descriptor_class = _get_tma_descriptor_import_path(
+            self.descriptor_type
+        )
         tensor = kwargs["tensor"] if "tensor" in kwargs else args[0]
         block_shape = kwargs["block_shape"] if "block_shape" in kwargs else args[1]
 
         return TMADescriptorStableVariable(
             tensor=tensor,  # type: ignore[arg-type]
             block_shape=block_shape,  # type: ignore[arg-type]
+            descriptor_module=descriptor_module,
+            descriptor_class=descriptor_class,
         )
 
 

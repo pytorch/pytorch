@@ -654,6 +654,43 @@ def bound_builtin_method_descriptor(value: Any) -> Any | None:
     return inspect.getattr_static(owner, value.__name__, None)
 
 
+def _get_tensor_descriptor_class(
+    factory: Any, tensor_descriptor_class: type[Any]
+) -> type[Any] | None:
+    if not (is_function(factory) or isinstance(factory, types.MethodType)):
+        return None
+    if getattr(factory, "__name__", None) != "from_tensor":
+        return None
+
+    owner = getattr(factory, "__self__", None)
+    if inspect.isclass(owner) and issubclass(owner, tensor_descriptor_class):
+        return owner
+
+    module = sys.modules.get(getattr(factory, "__module__", ""))
+    if module is None:
+        return None
+
+    # A staticmethod alias does not retain its owner. Only recover it when the
+    # defining module contains exactly one matching descriptor class.
+    matches = set()
+    for candidate in vars(module).values():
+        if not inspect.isclass(candidate):
+            continue
+        try:
+            is_descriptor_class = issubclass(candidate, tensor_descriptor_class)
+        except TypeError:
+            continue
+        candidate_factory = inspect.getattr_static(candidate, "from_tensor", None)
+        if isinstance(candidate_factory, (classmethod, staticmethod)):
+            candidate_factory = candidate_factory.__func__
+        if is_descriptor_class and candidate_factory is factory:
+            matches.add(candidate)
+
+    if len(matches) == 1:
+        return matches.pop()
+    return None
+
+
 class _missing:
     pass
 
@@ -1819,7 +1856,11 @@ class VariableBuilder:
         elif value is create_2d_tma_descriptor:
             return CreateTMADescriptorExperimentalVariable(rank=2)
         elif value is TensorDescriptor.from_tensor:
-            return CreateTMADescriptorStableVariable()
+            return CreateTMADescriptorStableVariable(descriptor_type=TensorDescriptor)
+        elif descriptor_class := _get_tensor_descriptor_class(value, TensorDescriptor):
+            return CreateTMADescriptorStableVariable(
+                descriptor_type=descriptor_class,
+            )
         elif value is set_allocator:
             return TritonSetAllocatorVariable(value)
         elif isinstance(value, torch.amp.autocast_mode.autocast):
