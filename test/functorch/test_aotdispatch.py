@@ -5416,6 +5416,81 @@ def forward(self, tangents_1):
         self.assertIs(raw[4], w)
         self.assertEqual(raw[5], 7)
 
+    def test_none_tangent_in_kept_slot_names_the_forward_output(self):
+        # Disabling the marking dedup puts a None back in the kept
+        # intermediate-base slot (tangent 1; tangent 0 is x * 3).
+        import torch._functorch._aot_autograd.runtime_wrappers as rw
+
+        def f(x):
+            y = torch.sin(x)
+            return y[0:4], y[4:8], y.detach(), x * 3
+
+        torch._dynamo.reset()
+        x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
+        with patch.object(rw, "_dealias_marked_returns", lambda raw, marked: None):
+            outs = torch.compile(f, backend="inductor")(x)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"handed None instead of a Tensor for tangent 1, the gradient of the intermediate base behind forward output 0",
+            ):
+                outs[3].sum().backward()
+
+    def test_none_tangent_in_kept_slot_with_subclass_tangents(self):
+        # Same check through the prologue's has_subclass branch, whose codegen
+        # calls process_runtime_tangent independently of the plain loop. A
+        # subclass output forbids output aliasing, so the None comes from the
+        # sibling-output dedup case instead: inductor returns one object for
+        # h * 1.0 and h.detach(), so marking the detach slot marks the kept one.
+        import torch._functorch._aot_autograd.runtime_wrappers as rw
+
+        def f(x, z):
+            h = torch.sin(z)
+            return x * 2, h * 1.0, h.detach()
+
+        torch._dynamo.reset()
+        x = TwoTensor(torch.ones(4), torch.ones(4)).requires_grad_(True)
+        z = torch.arange(6, dtype=torch.float32).requires_grad_(True)
+        with patch.object(rw, "_dealias_marked_returns", lambda raw, marked: None):
+            outs = torch.compile(f, backend="inductor")(x, z)
+            self.assertIsInstance(outs[0], TwoTensor)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"handed None instead of a Tensor for tangent 1, the gradient of forward output 1",
+            ) as cm:
+                outs[0].sum().backward()
+        self.assertIn("return x * 2, h * 1.0, h.detach()", str(cm.exception))
+
+    def test_none_tangent_for_a_dropped_slot_still_passes_through(self):
+        # Autograd hands back None for every non-differentiable returned slot
+        # (integer/bool outputs, a detached output, aliases of an input or an
+        # intermediate). Six of the eight slots here arrive None and the
+        # prologue must drop them before the kept-slot check sees them.
+        def f(x, lengths):
+            y = torch.sin(x)
+            return (
+                y[0:4],
+                y[4:8],
+                lengths * 2,
+                lengths > 1,
+                (x * 2).detach(),
+                x[0:2],
+                x * 3,
+            )
+
+        def run(fn, x, lengths):
+            outs = fn(x, lengths)
+            (outs[0].sum() + outs[1].sum() + outs[6].sum()).backward()
+            return x.grad
+
+        torch._dynamo.reset()
+        lengths = torch.arange(4)
+        x_ref = torch.randn(8, requires_grad=True)
+        grad_ref = run(f, x_ref, lengths)
+
+        x = x_ref.detach().clone().requires_grad_(True)
+        grad = run(torch.compile(f, backend="inductor"), x, lengths)
+        self.assertEqual(grad, grad_ref)
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g

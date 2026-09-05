@@ -3762,7 +3762,34 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         tangent_stack_trace: str | None = None,
     ) -> tuple[Any, list[Any]]:
         if not isinstance(x, torch.Tensor):
-            return x, [x]
+            # The prologue only routes kept slots here (with a tangent_idx), so a
+            # None is a tangent the backward graph requires. Without this check it
+            # surfaces inside the backend against a codegen'd name like tangents_3.
+            if tangent_idx is None:
+                return x, [x]
+            from .descriptors import (
+                IntermediateBaseAOTOutput,
+                PlainAOTOutput,
+                TangentAOTInput,
+            )
+
+            which = tangent_desc.expr() if tangent_desc else "an unknown output"
+            if isinstance(tangent_desc, TangentAOTInput):
+                out, via = tangent_desc.output, ""
+                if isinstance(out, IntermediateBaseAOTOutput):
+                    out, via = out.base_of, "the intermediate base behind "
+                if isinstance(out, PlainAOTOutput):
+                    which = f"{via}forward output {out.idx}"
+            graph = f" in compiled graph [{compile_id_str}]" if compile_id_str else ""
+            trace = ""
+            if tangent_stack_trace:
+                trace = f"\nThe forward output was created here:\n{tangent_stack_trace}"
+            raise RuntimeError(
+                f"The compiled backward{graph} was handed {x!r} instead of a Tensor "
+                f"for tangent {tangent_idx}, the gradient of {which}. The backward "
+                "requires this tangent, so this is a bug in AOTAutograd or the backend "
+                f"(materialize_grads / mark_non_differentiable mismatch); please report it.{trace}"
+            )
 
         if is_fake_tensor(x):
             if not meta.memory_format:
