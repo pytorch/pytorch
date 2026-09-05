@@ -1,5 +1,6 @@
 # Owner(s): ["module: cuda"]
 
+import sys
 import unittest
 
 import torch
@@ -20,6 +21,47 @@ if TEST_NUMBA_CUDA:
 
 
 class TestNumbaIntegration(common.TestCase):
+    @unittest.skipIf(not TEST_NUMPY, "No numpy")
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_from_cuda_array_interface_does_not_leak_references(self):
+        class TrackedString(str):
+            __slots__ = ()
+
+        class Wrapper:
+            def __init__(self, tensor):
+                self.shape = list(tensor.shape)
+                element_size = tensor.element_size()
+                self.strides = [stride * element_size for stride in tensor.stride()]
+                self.typestr = TrackedString("<f4")
+                self.data = (tensor.data_ptr(), False)
+                self.interface = {
+                    "shape": self.shape,
+                    "strides": self.strides,
+                    "typestr": self.typestr,
+                    "data": self.data,
+                    "version": 3,
+                }
+
+            @property
+            def __cuda_array_interface__(self):
+                return self.interface
+
+        source = torch.ones(1, device="cuda")
+        wrapper = Wrapper(source)
+        tracked = (
+            wrapper.shape,
+            wrapper.strides,
+            wrapper.typestr,
+            wrapper.data,
+        )
+        refcounts = tuple(sys.getrefcount(item) for item in tracked)
+        for _ in range(10):
+            converted = torch.as_tensor(wrapper)
+            self.assertEqual(converted, source)
+            del converted
+
+        self.assertEqual(tuple(sys.getrefcount(item) for item in tracked), refcounts)
+
     @unittest.skipIf(not TEST_NUMPY, "No numpy")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_cuda_array_interface(self):
