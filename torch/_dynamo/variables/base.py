@@ -1815,6 +1815,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         value: Any,
         cache: dict[int, Any] | None = None,
         side_effects: SideEffects | None = None,
+        visit_keys: bool = False,
     ) -> None:
         """
         Walk value and call fn on all the VariableTracker instances.
@@ -1822,6 +1823,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         When side_effects is provided, also walks attributes stored in
         store_attr_mutations (e.g. dataclass fields set during tracing
         that aren't in the VT's __dict__).
+
+        When visit_keys is True, also unwraps HashableTracker
+        dict keys and visits their underlying VariableTracker.
 
         Implemented with an explicit worklist rather than recursion so that
         deeply chained structures (e.g. the ~N-node buffer built by
@@ -1863,6 +1867,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 children = list(cur)
             elif istype(cur, (dict, collections.OrderedDict)):
                 children = list(cur.values())
+                if visit_keys:
+                    # Deferred: visit() is a hot path (every stack value,
+                    # local, and mutated var), but visit_keys=True has a
+                    # single caller, so avoid paying this import otherwise.
+                    from .hashable import HashableTracker
+
+                    children.extend(k.vt for k in cur if isinstance(k, HashableTracker))
             else:
                 continue
             worklist.extend(reversed(children))

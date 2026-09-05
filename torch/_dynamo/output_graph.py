@@ -877,6 +877,13 @@ class OutputGraph(OutputGraphCommon):
         # torch.Stream so we can peek lazy variables without realizing them.
         self._input_mutation_streams: dict[int, traceback.StackSummary] = {}
         self._last_checked_input_versions: dict[int, int] | None = None
+        # Record-after-input-mutation violations for events constructed
+        # during tracing.  Such an event is only observable outside the
+        # compiled region if it escapes (is returned, survives a graph
+        # break, or is stored to reachable state), so the error is
+        # deferred until compile_subgraph can run that escape analysis.
+        # Each entry keeps a strong ref to the event so id()s stay valid.
+        self._pending_event_record_violations: list[tuple[Any, str]] = []
 
         # A list of register_finalizer_fns to apply to the output graph module
         self.register_finalizer_fns: list[Callable[[fx.GraphModule], None]] = []
@@ -1354,10 +1361,28 @@ class OutputGraph(OutputGraphCommon):
         "  4. Record the event on a stream that has no input mutations."
     )
 
-    def check_event_record_after_input_mutation(self, stream_index: int) -> None:
+    def check_event_record_after_input_mutation(
+        self,
+        stream_index: int,
+        *,
+        event_value: Any,
+        event_has_source: bool,
+    ) -> None:
         """Error if an event is being recorded on a stream that already has
         an input mutation. Called at record time so ordering is naturally
-        respected — records before mutations won't trigger this."""
+        respected — records before mutations won't trigger this.
+
+        The hazard needs an observer outside the compiled region: a waiter
+        that syncs on the event and then reads the mutated input's real
+        storage, which the epilogue copy_() has not yet updated (in-graph
+        waits only see the functionalized dataflow, which is correct
+        regardless).  An event constructed during tracing can only gain
+        such an observer by escaping the region, so for those
+        (``event_has_source=False``) the error is deferred and only raised
+        by :meth:`raise_pending_event_record_violations_if_escaping` when
+        the event actually escapes.  Pre-existing events (reachable from
+        outside by construction) error immediately.
+        """
         if stream_index not in self._input_mutation_streams:
             return
 
@@ -1375,7 +1400,82 @@ class OutputGraph(OutputGraphCommon):
             "Event record occurred here:\n"
             f"{''.join(record_stack.format())}\n" + self._EVENT_INPUT_MUTATION_FIX
         )
+        if not event_has_source:
+            self._pending_event_record_violations.append((event_value, msg))
+            return
         raise RuntimeError(msg)
+
+    def raise_pending_event_record_violations_if_escaping(
+        self, all_stack_values: list[list[VariableTracker]]
+    ) -> None:
+        """Escape analysis for deferred record-after-input-mutation
+        violations (see :meth:`check_event_record_after_input_mutation`).
+
+        An event escapes if its VariableTracker is reachable from the
+        values reconstructed at subgraph exit (return values and locals
+        live across a graph break, via ``all_stack_values``) or from
+        surviving side effects (attribute stores etc.; dead sourceless
+        objects have already been pruned by the caller).
+        """
+        if not self._pending_event_record_violations:
+            return
+        from .variables.streams import EventVariable
+
+        pending_ids = {id(value) for value, _ in self._pending_event_record_violations}
+        escaped: set[int] = set()
+
+        def _check(var: VariableTracker) -> None:
+            # type.__instancecheck__ avoids realizing lazy
+            # VariableTrackers, which would install guards inside
+            # compile_subgraph.
+            if not type.__instancecheck__(EventVariable, var):
+                return
+            value = cast(EventVariable, var).value
+            if id(value) in pending_ids:
+                escaped.add(id(value))
+
+        roots: list[Any] = [all_stack_values]
+        # Attribute stores AND value mutations on tracked objects (list
+        # appends, dict inserts, ...) both replay at subgraph exit, so a
+        # pending event reachable from either is observable outside.
+        roots.extend(self.side_effects.store_attr_mutations.keys())
+        roots.extend(self.side_effects._get_modified_vars())
+        # backward_state and tensor_hooks can also keep objects alive
+        # across the subgraph boundary; include them so the escape
+        # scan sees any event reachable from them.  local_generators is
+        # deliberately excluded: a paused generator's own stack/locals
+        # are not themselves externally visible, and every SideEffects
+        # entry point that makes a value externally visible (store_attr,
+        # store_cell, store_global, container mutations) already routes
+        # through store_attr_mutations or _get_modified_vars() above.
+        roots.append(self.backward_state)
+        roots.append(self.side_effects.tensor_hooks)
+        # visit_keys=True so events stored as set elements or dict
+        # keys (wrapped in HashableTracker) are reached; the default
+        # visit walks dicts via .values() only.
+        VariableTracker.visit(
+            _check, roots, side_effects=self.side_effects, visit_keys=True
+        )
+
+        escaped_violations = [
+            msg
+            for value, msg in self._pending_event_record_violations
+            if id(value) in escaped
+        ]
+        # Only drop the entries resolved as escaped here; a violation that
+        # is still pending-but-not-yet-escaped is left in place so a later
+        # scan within this same compile_subgraph call can still catch it --
+        # close_local_generators and codegen_suffix run between the two
+        # scans and can make a pending event escape through a mutation this
+        # scan can't see yet. Anything left pending after the final scan
+        # never escaped and is correctly never raised.
+        self._pending_event_record_violations = [
+            (value, msg)
+            for value, msg in self._pending_event_record_violations
+            if id(value) not in escaped
+        ]
+        if escaped_violations:
+            raise RuntimeError("\n\n".join(escaped_violations))
 
     @property
     def graph(self) -> torch.fx.Graph:
@@ -2101,6 +2201,11 @@ class OutputGraph(OutputGraphCommon):
         # "Garbage collect the heap".
         self.side_effects.prune_dead_object_new(tx)
 
+        # Deferred record-after-input-mutation errors: raise only if the
+        # recorded event escapes the compiled region (must run after the
+        # prune so dead sourceless stores don't count as escapes).
+        self.raise_pending_event_record_violations_if_escaping(all_stack_values)
+
         self.add_output_instructions(prefix_insts)
 
         if self._emit_debugger_breakpoint:
@@ -2476,6 +2581,13 @@ class OutputGraph(OutputGraphCommon):
                         f"While compiling, we found certain side effects happened in the model.forward. "
                         f"Here are the list of potential sources you can double check: {side_effect_refs}"
                     )
+
+        # close_local_generators and generator reconstruction during
+        # codegen_suffix trace generator finally bytecode after the
+        # scan above and can append new violations.  Re-run the escape
+        # scan (rather than raising unconditionally) so a non-escaping
+        # event recorded in a finally block still compiles.
+        self.raise_pending_event_record_violations_if_escaping(all_stack_values)
 
         return all_stack_locals_metas
 
