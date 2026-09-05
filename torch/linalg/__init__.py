@@ -1,8 +1,4 @@
-from torch._C import (
-    _add_docstr,
-    _linalg,  # pyrefly: ignore [missing-module-attribute]
-    _LinAlgError as LinAlgError,  # pyrefly: ignore  # missing-module-attribute
-)
+from torch._C import _add_docstr, _linalg, _LinAlgError as LinAlgError
 
 
 common_notes = {

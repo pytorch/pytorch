@@ -86,6 +86,9 @@ TYPE_STUBS = [
             "aten/src/ATen/native/native_functions.yaml",
             "aten/src/ATen/native/tags.yaml",
             "tools/autograd/deprecated.yaml",
+            "tools/pyi/gen_pyi.py",
+            "torchgen/api/python.py",
+            "torch/_C/_native_functions.pyi.in",
         ],
         [
             sys.executable,

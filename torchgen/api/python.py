@@ -258,15 +258,24 @@ class PythonArgument:
             return f"{type_str} {name}"
 
     def argument_str_pyi(
-        self, *, method: bool = False, deprecated: bool = False
+        self,
+        *,
+        method: bool = False,
+        deprecated: bool = False,
+        use_sequence: bool = False,
     ) -> str:
-        type_str = argument_type_str_pyi(self.type)
+        type_str = argument_type_str_pyi(self.type, use_sequence=use_sequence)
 
         name = self.name
         # s/self/input/ outside method bindings
         # [old codegen] TODO: remove this? doesn't rename in codegen, it's just
         # for the parse string
-        if name == "self" and type_str == "Tensor" and not method and not deprecated:
+        if (
+            name == "self"
+            and str(self.type) in ("Tensor", "Scalar")
+            and not method
+            and not deprecated
+        ):
             name = "input"
 
         if name == "from":  # from is a Python keyword...
@@ -416,10 +425,13 @@ class PythonSignature:
 
         return f"{self.name}({', '.join(schema_formals)})"
 
-    def signature_str_pyi(self, *, skip_outputs: bool = False) -> str:
+    def signature_str_pyi(
+        self, *, skip_outputs: bool = False, use_sequence: bool = False
+    ) -> str:
         args = self.arguments(skip_outputs=skip_outputs)
         schema_formals: list[str] = [
-            a.argument_str_pyi(method=self.method) for a in args
+            a.argument_str_pyi(method=self.method, use_sequence=use_sequence)
+            for a in args
         ]
         positional_argc = len(self.input_args)
         if len(schema_formals) > positional_argc:
@@ -494,10 +506,15 @@ class PythonSignatureDeprecated(PythonSignature):
             + "|deprecated"
         )
 
-    def signature_str_pyi(self, *, skip_outputs: bool = False) -> str:
+    def signature_str_pyi(
+        self, *, skip_outputs: bool = False, use_sequence: bool = False
+    ) -> str:
         args = self.arguments(skip_outputs=skip_outputs)
         schema_formals: list[str] = [
-            a.argument_str_pyi(method=self.method, deprecated=True) for a in args
+            a.argument_str_pyi(
+                method=self.method, deprecated=True, use_sequence=use_sequence
+            )
+            for a in args
         ]
         positional_argc = len(self.input_args)
         if len(schema_formals) > positional_argc:
@@ -918,7 +935,7 @@ def _append_optional_pyi(type_str: str) -> str:
     return f"{type_str} | None".replace(" | None | None", " | None")
 
 
-def argument_type_str_pyi(t: Type) -> str:
+def argument_type_str_pyi(t: Type, *, use_sequence: bool = False) -> str:
     add_optional = False
     if isinstance(t, OptionalType):
         t = t.elem
@@ -956,7 +973,8 @@ def argument_type_str_pyi(t: Type) -> str:
 
     elif isinstance(t, ListType):
         if str(t.elem) == "int":
-            ret = "_int | _size" if t.size is not None else "_size"
+            size = "Sequence[_int]" if use_sequence else "_size"
+            ret = f"_int | {size}" if t.size is not None else size
         elif t.is_tensor_like():
             # Tensor?[] translates to tuple[Tensor | None, ...] | list[Tensor | None] | None
             # Tensor[] translates to tuple[Tensor, ...] | list[Tensor]
@@ -965,11 +983,14 @@ def argument_type_str_pyi(t: Type) -> str:
                 elem_str = "Tensor | None"
             else:
                 elem_str = "Tensor"
-            ret = (
-                f"Tensor | tuple[{elem_str}, ...] | list[{elem_str}]"
-                if t.size is not None
-                else f"tuple[{elem_str}, ...] | list[{elem_str}]"
-            )
+            if use_sequence:
+                ret = f"Sequence[{elem_str}]"
+            else:
+                ret = (
+                    f"Tensor | tuple[{elem_str}, ...] | list[{elem_str}]"
+                    if t.size is not None
+                    else f"tuple[{elem_str}, ...] | list[{elem_str}]"
+                )
         elif str(t.elem) == "float":
             ret = "Sequence[_float]"
         elif str(t.elem) == "SymInt" and t.size is not None:
