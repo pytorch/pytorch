@@ -8,7 +8,7 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
 from torch.distributed._local_tensor import LocalTensor, maybe_run_for_local_tensor
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -1080,6 +1080,55 @@ DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(
 DistTensorRandomOpsTest3DWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomOpsTest3D,
 )
+
+class DTensorCPUOffloadRandomOpsTest(DTensorTestBase):
+    """random._rng_tracker is a single, lazily-constructed, process-wide
+    singleton, installed for whichever device the first DTensor random op
+    happens to use and never rebuilt for a different device afterward.
+
+    fully_shard(module, mesh=cuda_mesh, offload_policy=CPUOffloadPolicy())
+    keeps the DTensor's mesh CUDA-typed, so the tracker gets installed as
+    CUDA-flavored. But if a parameter is then materialized directly on CPU
+    (module.to_empty(device="cpu")), its local storage is CPU-resident
+    while the mesh stays CUDA. The dispatcher still routes random ops
+    through the (mismatched) tracker, whose _distribute_region() wraps the
+    call in torch.random.fork_rng(devices=[cuda_device]). fork_rng
+    unconditionally restores the CPU default generator's state on exit
+    regardless of which accelerator devices are listed, silently rolling
+    back the CPU op's genuine draw -- so repeated calls kept reproducing
+    the exact same values.
+    """
+
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_repeated_random_ops_differ_on_cpu_offloaded_param(self):
+        dp_mesh = self.build_device_mesh()
+        self.assertEqual(dp_mesh.device_type, self.device_type)
+        self.assertIsNone(random._rng_tracker)
+
+        lin = torch.nn.Linear(4, 4, bias=False)
+        fully_shard(lin, mesh=dp_mesh, offload_policy=CPUOffloadPolicy())
+
+        # Local storage on CPU, mesh still CUDA-typed.
+        lin.to_empty(device="cpu")
+        self.assertEqual(lin.weight.device_mesh.device_type, self.device_type)
+        self.assertEqual(lin.weight.to_local().device.type, "cpu")
+
+        with torch.no_grad():
+            samples = [lin.weight.normal_().to_local().clone() for _ in range(3)]
+
+        # The tracker is now installed and matches the mesh, not the local
+        # tensor's actual device.
+        self.assertIsNotNone(random._rng_tracker)
+        self.assertEqual(random._rng_tracker._device.type, self.device_type)
+
+        for s in samples[1:]:
+            self.assertNotEqual(samples[0], s)
+
 
 if __name__ == "__main__":
     run_tests()
