@@ -2131,7 +2131,7 @@ class TestFSDPOptimState(FSDPTest):
 instantiate_device_type_tests(
     TestFSDPOptimState,
     globals(),
-    only_for=("cuda", "hpu", "xpu", "privateuse1"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
