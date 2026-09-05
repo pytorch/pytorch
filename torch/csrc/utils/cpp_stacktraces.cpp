@@ -10,7 +10,7 @@ bool compute_cpp_stack_traces_enabled() {
 }
 
 bool compute_disable_addr2line() {
-  return c10::utils::check_env("TORCH_DISABLE_ADDR2LINE") == true;
+  return c10::utils::check_env("TORCH_DISABLE_ADDR2LINE").value_or(true);
 }
 } // namespace
 

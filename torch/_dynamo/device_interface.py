@@ -154,6 +154,19 @@ class DeviceInterface:
     def get_device_properties(cls, device: torch.types.Device = None) -> Any:
         return cls.Worker.get_device_properties(device)
 
+    @classmethod
+    def get_cache_system_info(cls) -> dict[str, object] | None:
+        """Return stable, JSON-serializable metadata for the code cache key.
+
+        Returning None opts out. An empty dict still contributes metadata.
+        Implementations should return only metadata that invalidates generated
+        or autotuned code when changed, without unnecessarily initializing hardware.
+        Only called when is_available() returns True. This hook is sampled through
+        the cached CacheBase.get_system() path, so interfaces must be registered
+        and available before its first use.
+        """
+        return None
+
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> Any:
         raise NotImplementedError
