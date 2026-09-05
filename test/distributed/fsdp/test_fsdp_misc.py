@@ -1280,15 +1280,14 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         self.assertTrue(called_setattr_override)
 
 
-devices = ("cuda", "hpu", "xpu", "privateuse1")
 instantiate_device_type_tests(
-    TestFSDPMiscMultiThread, globals(), only_for=devices, allow_xpu=True
+    TestFSDPMiscMultiThread, globals(), except_for=("cpu",), allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestFSDPMiscMultiProcess, globals(), only_for=devices, allow_xpu=True
+    TestFSDPMiscMultiProcess, globals(), except_for=("cpu",), allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestFSDPMiscWorldSize1, globals(), only_for=devices, allow_xpu=True
+    TestFSDPMiscWorldSize1, globals(), except_for=("cpu",), allow_xpu=True
 )
 
 if __name__ == "__main__":
