@@ -12956,6 +12956,26 @@ if __name__ == '__main__':
         self.assertEqual(a_bf16.grad, expected_bf16)
 
     @onlyCPU
+    def test_rrelu_with_noise_out_smaller_than_input(self, device):
+        # A short out used to be written past its end and corrupt the heap.
+        x = torch.randn(64, device=device)
+        noise = torch.empty_like(x)
+        out = torch.empty(2, device=device)
+        torch._C._nn.rrelu_with_noise(x, noise, 0.1, 0.3, True, None, out=out)
+        self.assertEqual(out.shape, x.shape)
+
+    @onlyCPU
+    def test_rrelu_with_noise_expanded_noise_rejected(self, device):
+        # An expanded noise's storage holds one element; the same defect as
+        # an undersized out.
+        x = torch.randn(64, device=device)
+        expanded_noise = torch.zeros(1, device=device).expand(64)
+        out = torch.empty(64, device=device)
+        with self.assertRaisesRegex(RuntimeError, "noise tensor must be contiguous"):
+            torch._C._nn.rrelu_with_noise(
+                x, expanded_noise, 0.1, 0.3, True, None, out=out)
+
+    @onlyCPU
     def test_rrelu_bounds_validation(self, device):
         """Test RReLU bounds validation for finite and infinite values."""
         x = torch.randn(5, 5, device=device)
