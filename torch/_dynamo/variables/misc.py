@@ -250,6 +250,7 @@ class SuperVariable(VariableTracker):
             isinstance(inner_fn, types.WrapperDescriptorType)
             and inner_fn.__name__ == "__init__"
             and issubclass(inner_fn.__objclass__, BaseException)
+            and inner_fn.__objclass__.__basicsize__ == BaseException.__basicsize__
             and isinstance(self.objvar, variables.UserDefinedExceptionObjectVariable)
             and not kwargs
         ):
@@ -1478,6 +1479,17 @@ class AutogradFunctionVariable(VariableTracker):
                 resolved = self._resolve_patched_apply(tx, apply_attr)
                 if resolved is not None:
                     return resolved
+                unimplemented(
+                    gb_type="Unsupported monkey-patched autograd.Function.apply",
+                    context=f"{self.fn_cls.__qualname__}.apply",
+                    explanation="Dynamo cannot trace this monkey-patched "
+                    "`torch.autograd.Function.apply` because its descriptor's "
+                    "`__get__` is not a Python function.",
+                    hints=[
+                        "Use a Python descriptor whose `__get__` is implemented "
+                        "in Python."
+                    ],
+                )
             return GetAttrVariable(self, name, py_type=types.MethodType, source=source)
         if source is None:
             return GetAttrVariable(self, name)

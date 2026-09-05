@@ -337,15 +337,22 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         torch.set_default_device(None)
 
     def test_pop_torch_function_mode(self):
-        m = BaseTorchFunctionMode()
+        class AddHundred(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                out = super().__torch_function__(func, types, args, kwargs or {})
+                if func is torch.add:
+                    out = out + 100
+                return out
+
+        m = AddHundred()
         with m:
 
             @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
             def fn(x):
                 _pop_torch_function_stack()
-                return x + 1
+                return torch.add(x, 1)
 
-            fn(torch.ones(2, 2))
+            self.assertEqual(fn(torch.ones(2, 2)), torch.full((2, 2), 2.0))
 
             self.assertEqual(_len_torch_function_stack(), 0)
             # reset stack so __exit__ doesn't crash
@@ -1013,6 +1020,52 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(opt_fn(x), fn(x))
 
+    def test_handle_torch_function_respects_disable(self):
+        from torch.overrides import handle_torch_function
+
+        def fn(x):
+            return handle_torch_function(fn, (x,), x)
+
+        class AddTen(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                if func is fn:
+                    return args[0] + 10
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with AddTen(), torch._C.DisableTorchFunction():
+            self.assertRaisesRegex(TypeError, "no implementation found", fn, x)
+            self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "All __torch_function__ overrides returned NotImplemented",
+                opt_fn,
+                x,
+            )
+
+    def test_handle_torch_function_does_not_flatten_relevant_args(self):
+        from torch.overrides import handle_torch_function
+
+        class AddTenTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func is fn:
+                    return args[0] + 10
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        def fn(x):
+            return handle_torch_function(fn, ([x],), x)
+
+        x = torch.ones(1).as_subclass(AddTenTensor)
+        self.assertRaisesRegex(TypeError, "no implementation found", fn, x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "All __torch_function__ overrides returned NotImplemented",
+            opt_fn,
+            x,
+        )
+
     def test_inlined_mode_not_reapplied_at_runtime(self):
         class AddHundred(BaseTorchFunctionMode):
             def __torch_function__(self, func, types, args, kwargs=None):
@@ -1033,6 +1086,38 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), expected)
             self.assertEqual(opt_fn(x), expected)
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_inlined_mode_preserves_backend_modes(self):
+        seen = []
+
+        class AddHundred(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                kwargs = kwargs or {}
+                out = super().__torch_function__(func, types, args, kwargs)
+                if func is torch.add:
+                    out = out + 100
+                return out
+
+        class RecordingMode(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                seen.append(func)
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        def backend(gm, _):
+            def run(*args):
+                with RecordingMode():
+                    return gm(*args)
+
+            return run
+
+        def fn(x):
+            return torch.add(x, 1)
+
+        x = torch.zeros(2)
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        with AddHundred():
+            self.assertEqual(opt_fn(x), fn(x))
+        self.assertTrue(seen)
 
     def test_monkey_patched_autograd_function_apply(self):
         from torch.overrides import handle_torch_function, has_torch_function
@@ -1098,6 +1183,33 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
         self.assertEqual(cnt.frame_count, 2)
         self.assertFalse(hasattr(res[0], "apply_cls"))
+
+    def test_unsupported_monkey_patched_autograd_function_apply(self):
+        class Double(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+        def patched_apply(x):
+            return x + 3
+
+        def fn(x):
+            return Double.apply(x)
+
+        x = torch.ones(1)
+        orig_apply = torch.autograd.Function.__dict__["apply"]
+        torch.autograd.Function.apply = patched_apply
+        try:
+            self.assertEqual(fn(x), torch.full((1,), 4.0))
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Dynamo cannot trace this monkey-patched",
+                opt_fn,
+                x,
+            )
+        finally:
+            torch.autograd.Function.apply = orig_apply
 
 
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
