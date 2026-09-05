@@ -4430,8 +4430,11 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.utils.checkpoint.checkpoint"
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, *args: Any, from_utils_checkpoint: bool = False, **kwargs: Any
+    ) -> None:
         super().__init__(*args, **kwargs)
+        self.from_utils_checkpoint = from_utils_checkpoint
         self.allow_side_effects = (
             torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
         )
