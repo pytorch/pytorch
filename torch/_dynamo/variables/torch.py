@@ -1701,6 +1701,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if tf_state.skip_next:
                 tf_state.skip_next = False
                 return VariableTracker.build(tx, False)
+            # Mirrors check_has_torch_function in C++: an active torch
+            # function mode makes every argument "have" a torch function.
+            if (
+                tf_state.torch_function_mode_enabled
+                and tf_state.in_torch_function_mode()
+            ):
+                return VariableTracker.build(tx, True)
             elems = (
                 unpack_iterable(tx, args[0])
                 if len(args) == 1 and isinstance(args[0], TupleVariable)
