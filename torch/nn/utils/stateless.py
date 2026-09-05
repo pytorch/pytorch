@@ -111,6 +111,23 @@ def _reparametrize_module(
         untied_parameters_and_buffers = parameters_and_buffers
 
     accessor = NamedMemberAccessor(module)
+
+    # When tied weights map multiple names to the same module parameter slot
+    # (same submodule instance + attribute name), swap_tensors_dict would
+    # process them sequentially, corrupting the saved originals on the second
+    # swap and then restoring the wrong value. Deduplicate to one key per slot.
+    if tie_weights:
+        seen_slots: set[tuple[int, str]] = set()
+        deduped: dict[str, Tensor] = {}
+        for name, tensor in untied_parameters_and_buffers.items():
+            prefix, _, attr = name.rpartition(".")
+            submod = accessor.get_submodule(prefix)
+            slot = (id(submod), attr)
+            if slot not in seen_slots:
+                seen_slots.add(slot)
+                deduped[name] = tensor
+        untied_parameters_and_buffers = deduped
+
     if strict:
         missing_keys, unexpected_keys = accessor.check_keys(
             untied_parameters_and_buffers
