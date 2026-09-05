@@ -11,6 +11,7 @@ import unittest
 import torch
 import torch.nn as nn
 from torch.distributed.optim import _NamedOptimizer
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def _run_model_training(model_optim_lists):
@@ -39,6 +40,8 @@ class TestDummyModel(torch.nn.Module):
 
 
 class NamedOptimizerTest(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _compare_state_dict_group(self, group, named_group, assert_equal=True):
         for key, val in group.items():
             if key != "params":
