@@ -5,7 +5,9 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import importlib
 import itertools
+import keyword
 import logging
 import math
 import operator
@@ -13,7 +15,9 @@ import os
 import re
 import tempfile
 import threading
+import unicodedata
 from abc import ABC, abstractmethod
+from contextvars import ContextVar
 from enum import auto, Enum
 from itertools import chain
 from textwrap import dedent
@@ -313,6 +317,10 @@ class DeviceCodegen:
     wrapper_codegen: WrapperConstructor
     cpp_wrapper_codegen: WrapperConstructor | None = None
     fx_wrapper_codegen: WrapperConstructor | None = None
+    compile_options: dict[str, str] = dataclasses.field(default_factory=dict)
+
+    def get_compile_option(self, name: str) -> str | None:
+        return self.compile_options.get(name.replace("-", "_"))
 
 
 KernelArgType = WorkspaceArg | TensorArg | SizeArg | TMADescriptorArg | ConstexprArg
@@ -480,14 +488,8 @@ def register_backend_for_device(
     device_fx_wrapper_codegen: WrapperConstructor | None = None,
     device_custom_pass: CustomGraphModulePass | None = None,
     device_custom_config: ConfigModule | None = None,
+    device_compile_options: dict[str, str] | None = None,
 ) -> None:
-    device_codegens[device] = DeviceCodegen(
-        device_scheduling,
-        device_wrapper_codegen,
-        device_cpp_wrapper_codegen,
-        device_fx_wrapper_codegen,
-    )
-    custom_backend_passes[device] = device_custom_pass
     if device_custom_config:
         if not (
             isinstance(device_custom_config, ConfigModule)
@@ -496,6 +498,46 @@ def register_backend_for_device(
             raise AssertionError(
                 f"{device_custom_config=} cannot be the same as the default inductor config {config=}"
             )
+    compile_options: dict[str, str] = {}
+    if device_compile_options:
+        if device_custom_config is None:
+            raise AssertionError(
+                f"compile options for {device=} require a device_custom_config"
+            )
+        for name, key in device_compile_options.items():
+            normalized = name.replace("-", "_")
+            if (
+                unicodedata.normalize("NFKC", normalized) != normalized
+                or not normalized.isidentifier()
+                or keyword.iskeyword(normalized)
+            ):
+                raise AssertionError(
+                    f"compile option name {name!r} is not a valid identifier"
+                )
+            if normalized in config.get_config_copy():
+                raise AssertionError(
+                    f"compile option {normalized!r} shadows torch._inductor.config"
+                )
+            if key not in device_custom_config._config:
+                raise RuntimeError(
+                    f"compile option target {device_custom_config.__name__}.{key}"
+                    " does not exist"
+                )
+            for other_device, other in device_codegens.items():
+                if other_device != device and normalized in other.compile_options:
+                    raise RuntimeError(
+                        f"compile option {normalized!r} is already claimed by"
+                        f" device {other_device!r}"
+                    )
+            compile_options[normalized] = key
+    device_codegens[device] = DeviceCodegen(
+        device_scheduling,
+        device_wrapper_codegen,
+        device_cpp_wrapper_codegen,
+        device_fx_wrapper_codegen,
+        compile_options,
+    )
+    custom_backend_passes[device] = device_custom_pass
     custom_backend_codegen_configs[device] = device_custom_config
 
 
@@ -579,6 +621,162 @@ def get_custom_backend_config_for_device(device: str) -> ConfigModule | None:
 
 # Prevents a hook that re-enters init_backend_registration from firing itself again.
 _privateuse1_backend_init_in_progress = False
+
+
+# Compile options declared through register_backend_for_device(...,
+# device_compile_options=...): a user-facing torch.compile(options=...) name
+# resolves to a key on that device's registered device_custom_config, so
+# `_TorchCompileInductorWrapper.apply_options` (which runs before any device
+# is known) accepts it, and `patch_compile_options` patches the owning module
+# instead of torch._inductor.config.  Since the owner is necessarily a
+# device_custom_config, it is already folded into the FX graph cache key (with
+# any patched values, as the key is computed inside the patch).  Subprocess
+# workers receive exactly the routed options the parent's compile passed
+# through `snapshot_routed_options` / `patch_routed_options` in the wire
+# protocol -- the worker applies the parent's values rather than reading the
+# backend's config.
+
+
+@dataclasses.dataclass(frozen=True)
+class CompileOptionRoute:
+    # Dotted path of the ConfigModule owning the option: the device's
+    # registered device_custom_config.
+    module: str
+    key: str
+
+
+# Routed options applied by this thread's current compile, one
+# {module name: {key: value}} dict per _CompileOptionsPatch entry; read by
+# snapshot_routed_options() to carry the compile options to workers.
+_active_routed: ContextVar[tuple[dict[str, dict[str, Any]], ...]] = ContextVar(
+    "codegen.common.active_routed", default=()
+)
+
+
+def get_compile_option_route(name: str) -> CompileOptionRoute | None:
+    for device, codegen in list(device_codegens.items()):
+        key = codegen.get_compile_option(name)
+        owner = custom_backend_codegen_configs.get(device)
+        if key is not None and owner is not None:
+            return CompileOptionRoute(module=owner.__name__, key=key)
+    return None
+
+
+def import_config_module(module_name: str) -> ConfigModule:
+    module = importlib.import_module(module_name)
+    if not isinstance(module, ConfigModule):
+        raise RuntimeError(
+            f"compile option owner {module_name!r} is not a ConfigModule"
+        )
+    return module
+
+
+def resolve_config_module(route: CompileOptionRoute) -> ConfigModule:
+    config_module = import_config_module(route.module)
+    # flat _config membership; get_config_copy() would deepcopy every value
+    if route.key not in config_module._config:
+        raise RuntimeError(
+            f"compile option target {route.module}.{route.key} does not exist"
+        )
+    return config_module
+
+
+class _CompileOptionsPatch(contextlib.ContextDecorator):
+    # Prior stacks live in ContextVars (like ConfigPatch's) so the same
+    # instance is safe to re-enter while already active -- e.g. the decorated
+    # inner_compile compiling a nested graph, or backward compiling on another
+    # thread.
+    def __init__(
+        self,
+        patches: list[Any],
+        routed_options: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        self._patches = patches
+        self._routed_options = routed_options or {}
+        self._stacks: ContextVar[tuple[contextlib.ExitStack, ...]] = ContextVar(
+            f"_CompileOptionsPatch[{id(self)}].stacks", default=()
+        )
+
+    def __enter__(self) -> None:
+        stack = contextlib.ExitStack()
+        try:
+            for patch in self._patches:
+                stack.enter_context(patch)
+        except BaseException:
+            # match ConfigPatch's rollback of a partially-applied patch set
+            stack.close()
+            raise
+        self._stacks.set((*self._stacks.get(), stack))
+        _active_routed.set((*_active_routed.get(), self._routed_options))
+
+    def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
+        stacks = self._stacks.get()
+        if not stacks:
+            raise AssertionError("__exit__ called without matching __enter__")
+        self._stacks.set(stacks[:-1])
+        _active_routed.set(_active_routed.get()[:-1])
+        return stacks[-1].__exit__(exc_type, exc_val, exc_tb)
+
+
+def patch_compile_options(
+    config_patches: dict[str, Any] | None,
+) -> _CompileOptionsPatch:
+    """
+    Patch ``torch._inductor.config`` and every routed owner ConfigModule with
+    the matching entries of ``config_patches``, resolving routes by name from
+    the backend registrations; unregistered entries are patched onto the core
+    config.
+
+    Usable as a context manager or a decorator; like ``config.patch``, the
+    decorator form re-enters the patches on each call, which is how backward
+    compilation (out of scope of the forward compile) keeps seeing them.
+    """
+    core_patches: dict[str, Any] = {}
+    module_patches: dict[str, dict[str, Any]] = {}
+    for name, value in (config_patches or {}).items():
+        route = get_compile_option_route(name)
+        if route is None:
+            core_patches[name] = value
+        else:
+            module_patches.setdefault(route.module, {})[route.key] = value
+    patches = []
+    if core_patches:
+        patches.append(config.patch(core_patches))
+    for module_name, owner_patches in module_patches.items():
+        patches.append(import_config_module(module_name).patch(owner_patches))
+    return _CompileOptionsPatch(patches, module_patches)
+
+
+def snapshot_routed_options() -> dict[str, dict[str, Any]]:
+    """
+    The routed options this thread's compile passed, as
+    ``{module name: {key: value}}``.  ``compile_fx_ext`` serializes this
+    alongside the core config so subprocess workers apply exactly the options
+    the parent's compile set, rather than reading the backend's config in the
+    worker.  Options that cannot be pickled make the serialization fail,
+    which falls back to in-process compilation.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    for entry in _active_routed.get():
+        for module_name, options in entry.items():
+            merged.setdefault(module_name, {}).update(options)
+    return merged
+
+
+def patch_routed_options(
+    snapshots: dict[str, dict[str, Any]],
+) -> _CompileOptionsPatch:
+    """
+    Apply a :func:`snapshot_routed_options` result; imports the owner modules,
+    so a worker that has not loaded the backend yet picks up both its
+    registration side effects and the parent's values.
+    """
+    return _CompileOptionsPatch(
+        [
+            import_config_module(module_name).patch(values)
+            for module_name, values in snapshots.items()
+        ]
+    )
 
 
 @functools.cache
