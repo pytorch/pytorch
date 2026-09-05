@@ -18,6 +18,8 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 
+#include <ranges>
+
 namespace torch::autograd::utils {
 
 inline PyObject* wrap(bool value) {
@@ -86,8 +88,8 @@ inline PyObject* wrap(at::QScheme qscheme) {
 inline PyObject* wrap(at::TensorList tl) {
   auto r = THPObjectPtr{PyTuple_New(static_cast<Py_ssize_t>(tl.size()))};
   TORCH_CHECK_PYTHON(r);
-  for (const auto i : c10::irange(tl.size())) {
-    PyTuple_SET_ITEM(r.get(), i, wrap(tl[i]));
+  for (auto&& [i, tl_elem] : std::views::enumerate(tl)) {
+    PyTuple_SET_ITEM(r.get(), i, wrap(tl_elem));
   }
   return r.release();
 }
@@ -95,8 +97,8 @@ inline PyObject* wrap(at::TensorList tl) {
 inline PyObject* wrap(at::IntArrayRef list) {
   auto r = THPObjectPtr{PyTuple_New(static_cast<Py_ssize_t>(list.size()))};
   TORCH_CHECK_PYTHON(r);
-  for (const auto i : c10::irange(list.size())) {
-    PyTuple_SET_ITEM(r.get(), i, wrap(list[i]));
+  for (auto&& [i, list_elem] : std::views::enumerate(list)) {
+    PyTuple_SET_ITEM(r.get(), i, wrap(list_elem));
   }
   return r.release();
 }

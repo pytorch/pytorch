@@ -185,6 +185,8 @@
 #include <utility>
 #include <vector>
 
+#include <ranges>
+
 namespace at::meta {
 
 static inline c10::MemoryFormat cat_compute_output_memory_format(
@@ -220,8 +222,8 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
 
   // Look for the first valid tensor.
   size_t valid = materialized.size();
-  for (const auto i : c10::irange(materialized.size())) {
-    if (!at::native::cat_should_skip_tensor(materialized[i].get())) {
+  for (auto&& [i, materialized_elem] : std::views::enumerate(materialized)) {
+    if (!at::native::cat_should_skip_tensor(materialized_elem.get())) {
       valid = i;
       break;
     }
@@ -270,8 +272,8 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
     // It should have the same shape as any other valid tensor,
     // except in the dimension 'dim'.
     size_t size_at_dim = 0;
-    for (const auto i : c10::irange(materialized.size())) {
-      const Tensor& t = materialized[i];
+    for (auto&& [i, materialized_elem] : std::views::enumerate(materialized)) {
+      const Tensor& t = materialized_elem;
       all_same_dtype = all_same_dtype && out_dtype == t.scalar_type();
       if (!at::native::cat_should_skip_tensor(t)) {
         at::native::check_cat_shape_except_dim(materialized[valid], t, dim, i);
@@ -815,8 +817,8 @@ static Tensor cat_sparse_impl(
   if (wrapped < sparse_dim) {
     indices.reserve(tensors.size());
     values.reserve(tensors.size());
-    for (const auto i : c10::irange(tensors.size())) {
-      const Tensor& t = tensors[i];
+    for (auto&& [i, tensor] : std::views::enumerate(tensors)) {
+      const Tensor& t = tensor;
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
       indices.push_back(t._indices());
       values.push_back(t._values());
@@ -834,8 +836,8 @@ static Tensor cat_sparse_impl(
     // and idxs[1][6:9] by 14.
     int64_t col = 0;
     int64_t cumulative_offset = 0;
-    for (const auto i : c10::irange(tensors.size())) {
-      const Tensor& t = tensors[i];
+    for (auto&& [i, tensor] : std::views::enumerate(tensors)) {
+      const Tensor& t = tensor;
       int64_t this_piece_size = t._nnz();
       // cumulative_offset is zero for the first piece, so
       // don't waste time doing this operation unless i > 0.
@@ -891,8 +893,8 @@ static Tensor cat_sparse_impl(
     std::vector<Tensor> idxs_pieces;
     vals_pieces.reserve(tensors.size());
     idxs_pieces.reserve(tensors.size());
-    for (const auto i : c10::irange(tensors.size())) {
-      const Tensor& t = tensors[i];
+    for (auto&& [i, tensors_elem] : std::views::enumerate(tensors)) {
+      const Tensor& t = tensors_elem;
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
       // dimension 0 of values corresponds to the number of values,
       // rather than to any logical dimension of the sparse tensor.

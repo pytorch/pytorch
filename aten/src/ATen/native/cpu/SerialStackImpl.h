@@ -10,6 +10,8 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
+#include <ranges>
+
 namespace at::native::detail {
 
 struct InputMeta {
@@ -124,8 +126,8 @@ template <typename TensorListType>
 struct CanUseNativeSerialStack<TensorListType, false> {
   static bool call(Tensor& result, TensorListType tensors, int64_t dim) {
     // Inputs cannot alias the output tensor
-    for (const auto i : c10::irange(tensors.size())) {
-      auto lap = at::get_overlap_status(result, tensors[i]);
+    for (auto&& [i, tensors_elem] : std::views::enumerate(tensors)) {
+      auto lap = at::get_overlap_status(result, tensors_elem);
       TORCH_CHECK(lap != at::MemOverlapStatus::Partial &&
           lap != at::MemOverlapStatus::Full, 0,
           "unsupported operation: the input tensors cannot refer to any of the "

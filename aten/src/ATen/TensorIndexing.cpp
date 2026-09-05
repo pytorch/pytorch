@@ -3,6 +3,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
+#include <ranges>
+
 namespace at {
 namespace indexing {
 
@@ -32,9 +34,9 @@ std::ostream& operator<<(std::ostream& stream, const TensorIndex& tensor_index) 
 
 std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& tensor_indices) {
   stream << '(';
-  for (const auto i : c10::irange(tensor_indices.size())) {
-    stream << tensor_indices[i];
-    if (i < tensor_indices.size() - 1) stream << ", ";
+  for (auto&& [i, tensor_indice] : std::views::enumerate(tensor_indices)) {
+    stream << tensor_indice;
+    if (i < std::ssize(tensor_indices) - 1) stream << ", ";
   }
   stream << ')';
   return stream;

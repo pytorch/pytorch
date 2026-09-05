@@ -29,6 +29,8 @@
 #include <torch/csrc/profiler/data_flow.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 
+#include <ranges>
+
 namespace torch::profiler::impl {
 using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
@@ -1064,8 +1066,8 @@ void passEventsToKineto(
       static_cast<int64_t>(start_time_ns), "PyTorch Profiler");
 
   // Generate Kineto events for each event recorded by the PyTorch profiler.
-  for (const auto i : c10::irange(results.size())) {
-    const auto& e = results[i];
+  for (auto&& [i, result] : std::views::enumerate(results)) {
+    const auto& e = result;
     // Here we are essentially setting the duration to -1 if the event never
     // ends. This way Kineto will extend the event to the end of the trace. This
     // is useful so that we can still have 0 duration events if necessary

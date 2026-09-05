@@ -143,6 +143,8 @@
 #include <utility>
 #include <vector>
 
+#include <ranges>
+
 namespace at::meta {
 
 TORCH_META_FUNC(gather)
@@ -637,8 +639,8 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list) {
   int64_t element_size_bytes = src.element_size();
   int64_t dims_before = 0, dims_after = 0, dims_indexed = 0;
   IntArrayRef replacement_shape;
-  for (const auto dim : c10::irange(indices_list.size())) {
-    if (!indices_list[dim].defined()) {
+  for (auto&& [dim, indices_list_elem] : std::views::enumerate(indices_list)) {
+    if (!indices_list_elem.defined()) {
       if (dims_indexed == 0) {
         dims_before++;
       } else {
@@ -646,7 +648,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list) {
       }
     } else {
       dims_indexed++;
-      replacement_shape = indices_list[dim].sizes();
+      replacement_shape = indices_list_elem.sizes();
       indexed_sizes.push_back(src.size(dim));
       indexed_strides.push_back(src.stride(dim) * element_size_bytes);
     }

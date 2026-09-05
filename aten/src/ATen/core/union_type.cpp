@@ -6,6 +6,8 @@
 #include <sstream>
 #include <utility>
 
+#include <ranges>
+
 namespace c10 {
 
 OptionalTypePtr OptionalType::create(const TypePtr& contained) {
@@ -198,8 +200,8 @@ UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : SharedType
     std::stringstream msg;
     msg << "After type unification was performed, the Union with the "
         << "original types {";
-    for (const auto i : c10::irange(reference.size())) {
-      msg << reference[i]->repr_str();
+    for (auto&& [i, reference_elem] : std::views::enumerate(reference)) {
+      msg << reference_elem->repr_str();
       if (i > 0) {
         msg << ',';
       }

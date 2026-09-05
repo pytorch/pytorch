@@ -7,6 +7,8 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
 
+#include <ranges>
+
 namespace at::functorch {
 
 static bool is_empty_tensor(const Tensor& tensor) {
@@ -448,13 +450,13 @@ static bool has_same_shape(
     return false;
   }
   const auto tensor_shape = tensor.sizes();
-  for (const auto i : c10::irange(normalized_shape.size())) {
+  for (auto&& [i, normalized_shape_elem] : std::views::enumerate(normalized_shape)) {
     auto j = i;
     // (0, 1, 2), 1 -> (0, 2, 3)
     if (tensor_bdim.has_value() && static_cast<int64_t>(i) >= tensor_bdim.value()) {
       j = j + 1;
     }
-    if (normalized_shape[i] != tensor_shape[j]) {
+    if (normalized_shape_elem != tensor_shape[j]) {
       return false;
     }
   }

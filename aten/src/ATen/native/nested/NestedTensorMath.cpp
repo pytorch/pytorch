@@ -19,6 +19,8 @@
 #include <utility>
 
 
+#include <ranges>
+
 namespace at::native {
 namespace {
 
@@ -1021,8 +1023,8 @@ static Tensor cat_nested_as_jagged(
   const auto first_item_batch_size = first_item.size(0);
   std::vector<Tensor> jagged_views;
   jagged_views.reserve(tensors.size());
-  for (auto i : c10::irange(tensors.size())) {
-    auto t = tensors[i].get();
+  for (auto&& [i, tensors_elem] : std::views::enumerate(tensors)) {
+    auto t = tensors_elem.get();
     TORCH_CHECK(t.is_nested(),
         "cat(): expected each tensor in given list to be nested");
     TORCH_CHECK(t.is_contiguous(),

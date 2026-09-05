@@ -7,6 +7,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
+#include <ranges>
+
 /*
  * `cudaEventExternal` is a torch-specific flag that is used to
  * indicate that the CUDAEvent will be used only for synchronization
@@ -346,10 +348,10 @@ class CUDAEventPool {
   // Pre-initialize each device pool with N events. This prevents
   // cudaEventCreate() from invoking during steady-state execution.
   void reserve_events_on_pools(size_t num_events) {
-    for (const auto device : c10::irange(pools_.size())) {
+    for (auto&& [device, pools_elem] : std::views::enumerate(pools_)) {
       std::vector<Event> temp_events;
       temp_events.reserve(num_events);
-      pools_[device].event_pool_.reserve(num_events);
+      pools_elem.event_pool_.reserve(num_events);
       for ([[maybe_unused]] const auto _ : c10::irange(num_events)) {
         auto event = get(device);
         event->create(device);

@@ -13,6 +13,8 @@
 #else
 #endif
 
+#include <ranges>
+
 namespace torch::nativert {
 namespace {
 
@@ -76,8 +78,8 @@ bool isKernelParamName(const KernelInputParams& params, std::string_view name) {
 std::optional<size_t> findInputIndex(
     const std::vector<NamedArgument>& inputs,
     std::string_view name) {
-  for (const auto i : c10::irange(inputs.size())) {
-    if (inputs[i].name == name) {
+  for (auto&& [i, input] : std::views::enumerate(inputs)) {
+    if (input.name == name) {
       return i;
     }
   }
@@ -281,8 +283,8 @@ void TritonKernel::computeInternal(ExecutionFrame& executionFrame) const {
     std::vector<std::optional<size_t>> kernel_arg_input_indices(
         num_kernel_args);
 
-    for (const auto i : c10::irange(node_inputs.size())) {
-      const auto input_name = std::string_view(node_inputs[i].name);
+    for (auto&& [i, node_input] : std::views::enumerate(node_inputs)) {
+      const auto input_name = std::string_view(node_input.name);
       if (isLaunchMetadataInput(input_name)) {
         launch_params->grid_dims = gridDimsFromIValue(input(i, executionFrame));
       } else {
@@ -382,8 +384,8 @@ void TritonKernel::computeInternal(ExecutionFrame& executionFrame) const {
       num_runtime_kernel_args, num_attrs, kernel_input_params_);
 
   size_t kernel_arg_idx = 0;
-  for (const auto i : c10::irange(node_inputs.size())) {
-    const auto input_name = std::string_view(node_inputs[i].name);
+  for (auto&& [i, node_input] : std::views::enumerate(node_inputs)) {
+    const auto input_name = std::string_view(node_input.name);
     const auto& value = input(i, executionFrame);
     if (isLaunchMetadataInput(input_name)) {
       launch_params->grid_dims = gridDimsFromIValue(value);

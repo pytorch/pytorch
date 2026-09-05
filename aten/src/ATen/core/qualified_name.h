@@ -6,6 +6,8 @@
 #include <c10/util/irange.h>
 #include <string>
 
+#include <ranges>
+
 namespace c10 {
 
 // Represents a name of the form "foo.bar.baz"
@@ -117,11 +119,11 @@ struct QualifiedName {
       reserve += e.size() + 1;
     }
     out.reserve(reserve);
-    for (const auto i : c10::irange(v.size())) {
+    for (auto&& [i, v_elem] : std::views::enumerate(v)) {
       if (i != 0) {
         out.push_back(delimiter);
       }
-      out.append(v[i]);
+      out.append(v_elem);
     }
     return out;
   }

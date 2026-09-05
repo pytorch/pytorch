@@ -16,6 +16,8 @@
 #include <cstddef>
 #include <vector>
 
+#include <ranges>
+
 namespace torch::cuda {
 using namespace at;
 using namespace torch::autograd;
@@ -71,22 +73,22 @@ static std::vector<Tensor>& _broadcast_out_impl(
 std::vector<Tensor>& broadcast_out(
     const Tensor& tensor,
     std::vector<Tensor>& out_tensors) {
-  for (const auto i : c10::irange(out_tensors.size())) {
+  for (auto&& [i, out_tensor] : std::views::enumerate(out_tensors)) {
     TORCH_CHECK(
-        out_tensors[i].is_cuda(),
+        out_tensor.is_cuda(),
         "Expected all output tensors to be CUDA tensors, but output tensor at index ",
         i,
         " has device '",
-        out_tensors[i].device(),
+        out_tensor.device(),
         "'");
     TORCH_CHECK(
-        out_tensors[i].sizes() == tensor.sizes(),
+        out_tensor.sizes() == tensor.sizes(),
         "Expected all output tensors to have same shape as the source tensor ",
         tensor.sizes(),
         ", but output tensor at index ",
         i,
         " has shape ",
-        out_tensors[i].sizes());
+        out_tensor.sizes());
   }
   return _broadcast_out_impl(tensor, out_tensors);
 }
@@ -236,15 +238,15 @@ std::vector<at::Tensor>& scatter_out(
   int64_t total_size = 0;
   std::vector<int64_t> chunk_sizes;
   chunk_sizes.reserve(out_tensors.size());
-  for (const auto i : c10::irange(out_tensors.size())) {
+  for (auto&& [i, out_tensor] : std::views::enumerate(out_tensors)) {
     TORCH_CHECK(
-        out_tensors[i].is_cuda(),
+        out_tensor.is_cuda(),
         "Expected all output tensors to be CUDA tensors, but output tensor at index ",
         i,
         " has device '",
-        out_tensors[i].device(),
+        out_tensor.device(),
         "'");
-    auto out_sizes = out_tensors[i].sizes().vec();
+    auto out_sizes = out_tensor.sizes().vec();
     bool same_ndim = out_sizes.size() == static_cast<size_t>(tensor.dim());
     if (same_ndim) {
       total_size += out_sizes[dim];
@@ -256,7 +258,7 @@ std::vector<at::Tensor>& scatter_out(
         "Output tensor at index ",
         i,
         " has incorrect shape: ",
-        out_tensors[i].sizes(),
+        out_tensor.sizes(),
         ". Expected same "
         "shape except for scatter dim ",
         dim,
@@ -411,9 +413,9 @@ at::Tensor& gather_out(
         expected_size.size(),
         ")");
     expected_size[dim] = tensor.size(dim);
-    for (const auto dimension : c10::irange(expected_size.size())) {
+    for (auto&& [dimension, expected_size_elem] : std::views::enumerate(expected_size)) {
       TORCH_CHECK(
-          expected_size[dimension] == tensor.size(dimension),
+          expected_size_elem == tensor.size(dimension),
           "Input tensor at index ",
           i,
           " has invalid shape ",
@@ -465,9 +467,9 @@ at::Tensor gather(
         expected_size.size(),
         ")");
     expected_size[dim] = tensor.size(dim);
-    for (const auto dimension : c10::irange(expected_size.size())) {
+    for (auto&& [dimension, expected_size_elem] : std::views::enumerate(expected_size)) {
       TORCH_CHECK(
-          expected_size[dimension] == tensor.size(dimension),
+          expected_size_elem == tensor.size(dimension),
           "Input tensor at index ",
           i,
           " has invalid shape ",

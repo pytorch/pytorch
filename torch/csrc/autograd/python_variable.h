@@ -11,6 +11,8 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/pybind.h>
 
+#include <ranges>
+
 namespace py = pybind11;
 
 // Python object that backs torch.autograd.Variable
@@ -101,8 +103,8 @@ py::object dispatchDTensorOp(
 inline PyObject* THPVariable_WrapList(
     const torch::autograd::variable_list& inputs) {
   PyObject* pyinput = PyList_New(static_cast<Py_ssize_t>(inputs.size()));
-  for (const auto i : c10::irange(inputs.size())) {
-    PyList_SET_ITEM(pyinput, i, THPVariable_Wrap(inputs[i]));
+  for (auto&& [i, input] : std::views::enumerate(inputs)) {
+    PyList_SET_ITEM(pyinput, i, THPVariable_Wrap(input));
   }
   return pyinput;
 }

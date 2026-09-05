@@ -11,6 +11,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#include <ranges>
+
 using torch::autograd::Variable;
 using torch::autograd::variable_list;
 
@@ -275,12 +277,12 @@ static PyObject* wrap_variables(const variable_list& c_variables) {
 
 static variable_list unwrap_variables(PyObject* py_variables) {
   variable_list results(PyTuple_GET_SIZE(py_variables));
-  for (const auto i : c10::irange(results.size())) {
+  for (auto&& [i, result] : std::views::enumerate(results)) {
     PyObject* item = PyTuple_GET_ITEM(py_variables, i);
     if (Py_IsNone(item)) {
       continue;
     } else if (THPVariable_Check(item)) {
-      results[i] = THPVariable_Unpack(item);
+      result = THPVariable_Unpack(item);
     } else {
       // this should never happen, but just in case...
       TORCH_CHECK(false, "expected variable but got ", Py_TYPE(item)->tp_name);

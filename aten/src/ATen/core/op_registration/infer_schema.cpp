@@ -2,6 +2,8 @@
 #include <c10/util/irange.h>
 #include <fmt/format.h>
 
+#include <ranges>
+
 namespace c10 {
 
 namespace detail::infer_schema {
@@ -10,12 +12,12 @@ namespace {
 std::vector<Argument> createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
   std::vector<Argument> result;
   result.reserve(args.size());
-  for (const auto i : c10::irange(args.size())) {
+  for (auto&& [i, arg] : std::views::enumerate(args)) {
     // Arguments are named "_<index>"
     result.emplace_back(
         fmt::format("_{}", i),
-        (*args[i].getFakeTypeFn)(),
-        (*args[i].getTypeFn)());
+        (*arg.getFakeTypeFn)(),
+        (*arg.getTypeFn)());
   }
   return result;
 }

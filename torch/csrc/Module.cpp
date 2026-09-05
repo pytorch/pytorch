@@ -150,6 +150,8 @@
 
 #include <torch/nativert/python/Bindings.h>
 
+#include <ranges>
+
 namespace py = pybind11;
 
 static PyObject* module;
@@ -208,7 +210,7 @@ static PyObject* THPModule_initExtension(
       std::stringstream oss;
       oss << "C++ CapturedTraceback:" << '\n';
       const auto& s_tb = s_tbs.tracebacks.at(0);
-      for (auto idx : c10::irange(s_tb.size())) {
+      for (auto&& [idx, s_tb_elem] : std::views::enumerate(s_tb)) {
         // Skip the first few frames:
         //  #1 torch::CapturedTraceback::gather(bool, bool, bool)
         //  #2 THPModule_initExtension
@@ -216,7 +218,7 @@ static PyObject* THPModule_initExtension(
         if (idx <= 3) {
           continue;
         }
-        auto frame_id = s_tb[idx];
+        auto frame_id = s_tb_elem;
         const auto& frame = s_tbs.all_frames.at(frame_id);
         oss << '#' << idx << ' ' << frame.funcname << " from " << frame.filename
             << ':' << frame.lineno << '\n';
@@ -993,8 +995,8 @@ static PyObject* THPModule_sDPPriorityOrder(
   auto ordervec = at::globalContext().sDPPriorityOrder();
   auto order =
       THPObjectPtr(PyList_New(static_cast<Py_ssize_t>(ordervec.size())));
-  for (const auto i : c10::irange(ordervec.size())) {
-    PyObject* i64 = THPUtils_packInt64(static_cast<int64_t>(ordervec[i]));
+  for (auto&& [i, ordervec_elem] : std::views::enumerate(ordervec)) {
+    PyObject* i64 = THPUtils_packInt64(static_cast<int64_t>(ordervec_elem));
     if (!i64)
       return nullptr;
     PyList_SET_ITEM(order.get(), i, i64);
@@ -1848,10 +1850,10 @@ static PyObject* THPModule_getCurrentGraphTaskExecutionOrder(
   auto list = THPObjectPtr(PyList_New(static_cast<Py_ssize_t>(nodes.size())));
   if (!list)
     return nullptr;
-  for (const auto i : c10::irange(nodes.size())) {
+  for (auto&& [i, nodes_elem] : std::views::enumerate(nodes)) {
     // This node is guaranteed to be alive since the backward is still running
     PyObject* pyobj_node =
-        torch::autograd::functionToPyObject(nodes[i]->getptr());
+        torch::autograd::functionToPyObject(nodes_elem->getptr());
     PyList_SET_ITEM(list.get(), i, pyobj_node);
   }
   return list.release();

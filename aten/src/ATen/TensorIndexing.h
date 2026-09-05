@@ -22,6 +22,8 @@
 
 #include <utility>
 
+#include <ranges>
+
 namespace at::indexing {
 
 constexpr int64_t INDEX_MIN = c10::SymInt::min_representable_int();
@@ -458,11 +460,11 @@ inline Tensor asTensor(const Scalar& value, const Tensor& target) {
 // strip away unit dimensions from the left of 'src'
 inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
   size_t first_non1_src = sizes.size();
-  for (const auto i : c10::irange(sizes.size())) {
+  for (auto&& [i, size] : std::views::enumerate(sizes)) {
     // Unbacked SymInt has different behavior, but this is sound because
     // failing to slice will only ever cause an error, not divergent
     // behavior
-    if (!sizes[i].has_hint() || sizes[i] != 1) {
+    if (!size.has_hint() || size != 1) {
       first_non1_src = i;
       break;
     }
@@ -627,8 +629,8 @@ inline Tensor applySlicing(
   }
 
   Tensor result = self;
-  for (const auto i : c10::irange(indices.size())) {
-    auto& obj = indices[i];
+  for (auto&& [i, indice] : std::views::enumerate(indices)) {
+    auto& obj = indice;
     // See NOTE [nested tensor size for indexing]
     std::optional<SymIntArrayRef> result_sizes = result.is_nested()
         ? std::optional<SymIntArrayRef>(std::nullopt)

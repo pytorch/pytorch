@@ -34,6 +34,8 @@
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
 
+#include <ranges>
+
 namespace c10d {
 
 namespace {
@@ -615,8 +617,8 @@ ProcessGroupGloo::ProcessGroupGloo(
   workInProgress_.resize(options_->threads);
 
   threads_.resize(options_->threads);
-  for (const auto i : c10::irange(threads_.size())) {
-    threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
+  for (auto&& [i, threads_elem] : std::views::enumerate(threads_)) {
+    threads_elem = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
   this->setGroupUid(options_->group_name);
 
@@ -674,7 +676,7 @@ void ProcessGroupGloo::connectContexts(
   // option is needed if you have a fast NIC that cannot be saturated
   // by a single I/O thread.
   contexts.reserve(options_->devices.size());
-  for (const auto i : c10::irange(options_->devices.size())) {
+  for (auto&& [i, device] : std::views::enumerate(options_->devices)) {
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank, size);
 
 #ifdef GLOO_SHARED_STORE
@@ -694,7 +696,7 @@ void ProcessGroupGloo::connectContexts(
 
     context->setTimeout(options_->timeout);
     try {
-      context->connectFullMesh(connectStore, options_->devices[i]);
+      context->connectFullMesh(connectStore, device);
     } catch (const std::runtime_error& e) {
       auto err = e.what();
       // TORCH_CHECK to print the cpp stacktrace.
@@ -912,11 +914,11 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
     broadcast(inputs[rootTensor]);
 
     // Copy to non-root tensors
-    for (const auto i : c10::irange(inputs.size())) {
-      if (i == static_cast<size_t>(rootTensor)) {
+    for (auto&& [i, input] : std::views::enumerate(inputs)) {
+      if (i == rootTensor) {
         continue;
       }
-      inputs[i].copy_(inputs[rootTensor]);
+      input.copy_(inputs[rootTensor]);
     }
   }
 };
@@ -1444,8 +1446,8 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
 
     // Unflatten into output tensors.
     for (auto& outputgroup : outputs) {
-      for (const auto j : c10::irange(outputgroup.size())) {
-        outputgroup[j].copy_(flatOutputTensor[static_cast<int64_t>(j)]);
+      for (auto&& [j, outputgroup_elem] : std::views::enumerate(outputgroup)) {
+        outputgroup_elem.copy_(flatOutputTensor[static_cast<int64_t>(j)]);
       }
     }
   }
@@ -1631,9 +1633,9 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather(
         "requires input/output tensor lists to have the same length");
   }
 
-  for (const auto i : c10::irange(outputs.size())) {
+  for (auto&& [i, outputs_elem] : std::views::enumerate(outputs)) {
     const auto expected = inputs.size() * getSize();
-    const auto actual = outputs[i].size();
+    const auto actual = outputs_elem.size();
     if (actual != expected) {
       invalidArgument(
           "invalid output tensor list at index " + std::to_string(i) +
@@ -2528,8 +2530,8 @@ class AsyncAlltoallListWork : public ProcessGroupGloo::AsyncWork {
     gloo::alltoall(opts);
 
     // Unflatten output into individual tensors
-    for (const auto i : c10::irange(outputTensors.size())) {
-      outputTensors[i].copy_(flatOutputTensor[static_cast<int64_t>(i)]);
+    for (auto&& [i, outputTensor] : std::views::enumerate(outputTensors)) {
+      outputTensor.copy_(flatOutputTensor[static_cast<int64_t>(i)]);
     }
   }
 

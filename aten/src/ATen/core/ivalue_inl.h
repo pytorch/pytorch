@@ -46,6 +46,8 @@
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
 
+#include <ranges>
+
 namespace torch {
 namespace jit {
 struct Function;
@@ -1321,17 +1323,17 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       devices.begin(), devices.end(),
       [](const c10::Device& a, const c10::Device& b) { return a.index() < b.index(); });
     // Deduplicate by compacting.
-    size_t targetIdx = 0;
-    for (const auto sourceIdx : c10::irange(devices.size())) {
+    std::ptrdiff_t targetIdx = 0;
+    for (auto&& [sourceIdx, device] : std::views::enumerate(devices)) {
       TORCH_CHECK_VALUE(
-          devices[sourceIdx].has_index(),
-          "Expected devices to have indices, got ", devices[sourceIdx]);
-      if (targetIdx > 0 && devices[targetIdx - 1].index() == devices[sourceIdx].index()) {
+          device.has_index(),
+          "Expected devices to have indices, got ", device);
+      if (targetIdx > 0 && devices[targetIdx - 1].index() == device.index()) {
         // It's a duplicate, skip it.
         continue;
       }
       if (sourceIdx != targetIdx) {
-        devices[targetIdx] = devices[sourceIdx];
+        devices[targetIdx] = device;
       }
       targetIdx++;
     }

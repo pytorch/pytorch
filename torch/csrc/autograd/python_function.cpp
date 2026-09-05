@@ -48,6 +48,8 @@
 #include <utility>
 #include <vector>
 
+#include <ranges>
+
 using namespace torch;
 using namespace torch::autograd;
 using at::Tensor;
@@ -95,11 +97,11 @@ PyObject* materialize_needs_input_grad(THPFunction* self) {
   if (!result) {
     return nullptr;
   }
-  for (const auto i : c10::irange(needs_input_grad_bits.size())) {
+  for (auto&& [i, needs_input_grad_bit] : std::views::enumerate(needs_input_grad_bits)) {
     PyTuple_SET_ITEM(
         result.get(),
         static_cast<Py_ssize_t>(i),
-        Py_NewRef(needs_input_grad_bits[i] ? Py_True : Py_False));
+        Py_NewRef(needs_input_grad_bit ? Py_True : Py_False));
   }
   self->needs_input_grad = result.release();
   self->needs_input_grad_bits.reset();

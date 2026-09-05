@@ -12,6 +12,8 @@
 #include <string_view>
 #include <vector>
 
+#include <ranges>
+
 /*
 [Note: Compiled Autograd]
 
@@ -302,8 +304,8 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
 
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   PyObject* pyinput = PyList_New(static_cast<Py_ssize_t>(inputs.size()));
-  for (const auto i : c10::irange(inputs.size())) {
-    PyList_SET_ITEM(pyinput, i, PyLong_FromSsize_t(inputs[i]));
+  for (auto&& [i, input] : std::views::enumerate(inputs)) {
+    PyList_SET_ITEM(pyinput, i, PyLong_FromSsize_t(input));
   }
   return pyinput;
 }
@@ -311,8 +313,8 @@ static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
 static PyObject* convert_pyobj_list(std::vector<c10::SafePyObject>& inputs) {
   // inplace, consumes the input hooks
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
-  for (const auto i : c10::irange(inputs.size())) {
-    PyTuple_SET_ITEM(pyinput, i, inputs[i].release());
+  for (auto&& [i, input] : std::views::enumerate(inputs)) {
+    PyTuple_SET_ITEM(pyinput, i, input.release());
   }
   return pyinput;
 }
@@ -709,8 +711,8 @@ static PyObject* wrap_node_origins(
         compiler.size_input_origins,
         compiler.lifted_ivalue_args.args_origins}) {
     PyObject* pyorigins = PyList_New(static_cast<Py_ssize_t>(vec.size()));
-    for (const auto i : c10::irange(vec.size())) {
-      uint32_t node_id = vec[i];
+    for (auto&& [i, vec_elem] : std::views::enumerate(vec)) {
+      uint32_t node_id = vec_elem;
       PyObject* pyorigin = PyTuple_Pack(
           2,
           THPUtils_packUInt32(node_id),
@@ -725,8 +727,8 @@ static PyObject* wrap_node_origins(
 
 static PyObject* wrap_string_list(const std::vector<std::string>& strs) {
   PyObject* pystrs = PyList_New(static_cast<Py_ssize_t>(strs.size()));
-  for (const auto i : c10::irange(strs.size())) {
-    PyObject* pystr = PyUnicode_FromString(strs[i].c_str());
+  for (auto&& [i, str] : std::views::enumerate(strs)) {
+    PyObject* pystr = PyUnicode_FromString(str.c_str());
     PyList_SET_ITEM(pystrs, i, pystr);
   }
   return pystrs;
@@ -888,11 +890,11 @@ static CacheNode* _compiled_autograd_impl(
   std::vector<c10::intrusive_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call(get_default_dyn_type());
 
-  for (const auto i : c10::irange(output_edges.size())) {
+  for (auto&& [i, output_edge] : std::views::enumerate(output_edges)) {
     compiler_call.node_calls
-        .lookup(output_edges[i].function)
+        .lookup(output_edge.function)
         // NOLINTNEXTLINE(*-narrowing-conversions)
-        .mark_output(output_edges[i].input_nr, i);
+        .mark_output(output_edge.input_nr, i);
   }
   const bool check_exec_info = !graph_task.exec_info_.empty();
   CacheNode* cache = CacheNode::root();
@@ -1116,8 +1118,8 @@ static CacheNode* _compiled_autograd_impl(
         }
         outputs = THPVariable_UnpackList(pyoutputs);
       }
-      for (const auto i : c10::irange(outputs.size())) {
-        auto& output = outputs[i];
+      for (auto&& [i, outputs_elem] : std::views::enumerate(outputs)) {
+        auto& output = outputs_elem;
         const auto& next = call.node->next_edge(i);
         if (next.is_valid() && output.defined()) {
           auto& buffer = input_buffers.lookup(next.function.get());

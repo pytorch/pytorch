@@ -59,8 +59,8 @@ std::vector<AllocationSpecWithIndex> prepare_allocation_specs(
   std::vector<AllocationSpecWithIndex> specs;
   specs.reserve(allocation_specs.size());
 
-  for (const auto i : c10::irange(allocation_specs.size())) {
-    specs.push_back({&allocation_specs[i], i});
+  for (auto&& [i, allocation_spec] : std::views::enumerate(allocation_specs)) {
+    specs.push_back({&allocation_spec, i});
   }
 
   std::sort(specs.begin(), specs.end(), [](auto& lhs, auto& rhs) {

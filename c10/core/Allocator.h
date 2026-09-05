@@ -17,6 +17,8 @@
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/irange.h>
 
+#include <ranges>
+
 namespace c10 {
 
 using CaptureId_t = unsigned long long;
@@ -391,8 +393,8 @@ using StatTypes = std::array<bool, static_cast<size_t>(StatType::NUM_TYPES)>;
 
 template <typename Func>
 void for_each_selected_stat_type(const StatTypes& stat_types, Func f) {
-  for (const auto stat_type : c10::irange(stat_types.size())) {
-    if (stat_types[stat_type]) {
+  for (auto&& [stat_type, stat_types_elem] : std::views::enumerate(stat_types)) {
+    if (stat_types_elem) {
       f(stat_type);
     }
   }

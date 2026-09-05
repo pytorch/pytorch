@@ -13,6 +13,8 @@
 #ifdef USE_DISTRIBUTED
 #include <c10/util/hash.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#include <ranges>
+
 #endif // USE_DISTRIBUTED
 
 namespace torch::profiler::impl {
@@ -223,11 +225,11 @@ std::vector<std::vector<int64_t>> inputSizes(
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
   std::string str("[");
-  for (const auto t_idx : c10::irange(shapes.size())) {
+  for (auto&& [t_idx, shape] : std::views::enumerate(shapes)) {
     if (t_idx > 0) {
       str = fmt::format("{}, ", str);
     }
-    str = fmt::format("{}{}", str, shapeToStr(shapes[t_idx]));
+    str = fmt::format("{}{}", str, shapeToStr(shape));
   }
   str = fmt::format("{}]", str);
   return str;
@@ -235,17 +237,17 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
 
 std::string variantShapesToStr(const std::vector<shape>& shapes) {
   std::string str("[");
-  for (const auto t_idx : c10::irange(shapes.size())) {
+  for (auto&& [t_idx, shapes_elem] : std::views::enumerate(shapes)) {
     if (t_idx > 0) {
       str = fmt::format("{}, ", str);
     }
-    if (std::holds_alternative<std::vector<int64_t>>(shapes[t_idx])) {
-      const auto& shape = std::get<std::vector<int64_t>>(shapes[t_idx]);
+    if (std::holds_alternative<std::vector<int64_t>>(shapes_elem)) {
+      const auto& shape = std::get<std::vector<int64_t>>(shapes_elem);
       str = fmt::format("{}{}", str, shapeToStr(shape));
     } else if (std::holds_alternative<std::vector<std::vector<int64_t>>>(
-                   shapes[t_idx])) {
+                   shapes_elem)) {
       const auto& tensor_shape =
-          std::get<std::vector<std::vector<int64_t>>>(shapes[t_idx]);
+          std::get<std::vector<std::vector<int64_t>>>(shapes_elem);
       if (tensor_shape.size() > TENSOR_LIST_DISPLAY_LENGTH_LIMIT) {
         // skip if the tensor list is too long
         str = fmt::format("{}[]", str);
@@ -295,11 +297,11 @@ std::vector<shape> shapesToInputShapes(
 
 std::string shapeToStr(const std::vector<int64_t>& shape) {
   std::string str("[");
-  for (const auto s_idx : c10::irange(shape.size())) {
+  for (auto&& [s_idx, shape_elem] : std::views::enumerate(shape)) {
     if (s_idx > 0) {
       str = fmt::format("{}, ", str);
     }
-    str = fmt::format("{}{}", str, shape[s_idx]);
+    str = fmt::format("{}{}", str, shape_elem);
   }
   str = fmt::format("{}]", str);
   return str;

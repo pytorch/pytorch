@@ -71,6 +71,8 @@
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
+#include <ranges>
+
 namespace at::native {
 
 DEFINE_DISPATCH(_fused_sdp_choice_stub);
@@ -170,16 +172,16 @@ void debug_assert_shape(int line, const Tensor& t, c10::IntArrayRef shape) {
   if (t.is_nested()) {
     return;
   }
-  for (auto idx : c10::irange(shape.size())) {
+  for (auto&& [idx, shape_elem] : std::views::enumerate(shape)) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        shape[idx] == 0 || t.sizes()[idx] == shape[idx],
+        shape_elem == 0 || t.sizes()[idx] == shape_elem,
         "(called from line ",
         line,
         ") ",
         "expected dim ",
         idx,
         " to be ",
-        shape[idx],
+        shape_elem,
         " but got ",
         t.sizes()[idx]);
   }

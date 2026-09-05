@@ -9,6 +9,8 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/irange.h>
 
+#include <ranges>
+
 template <class... Inputs>
 inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
   return {std::forward<Inputs>(inputs)...};
@@ -120,8 +122,8 @@ void expectListEquals(c10::ArrayRef<T> expected, c10::ArrayRef<T> actual) {
 template <class T>
 void expectListEquals(c10::ArrayRef<T> expected, c10::List<T> actual) {
   EXPECT_EQ(expected.size(), actual.size());
-  for (const auto i : c10::irange(expected.size())) {
-    EXPECT_EQ(expected[i], actual.get(i));
+  for (auto&& [i, expected_elem] : std::views::enumerate(expected)) {
+    EXPECT_EQ(expected_elem, actual.get(i));
   }
 }
 

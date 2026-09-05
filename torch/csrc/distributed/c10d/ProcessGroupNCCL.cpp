@@ -35,6 +35,8 @@
 #include <torch/torch.h>
 #include <optional>
 
+#include <ranges>
+
 namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
@@ -4954,9 +4956,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
           }
           // Copy the flattened output tensors to the outputs.
           at::cuda::CUDAStreamGuard guard(ncclStream);
-          for (const auto j : c10::irange(outputTensors_.size())) {
+          for (auto&& [j, outputTensor] : std::views::enumerate(outputTensors_)) {
             // See [We actually don't need to stash anything here].
-            outputTensors_[j].copy_(
+            outputTensor.copy_(
                 outputFlattened[static_cast<int64_t>(j)], true);
           }
         },
@@ -5108,9 +5110,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
           }
           // Copy the input tensors to the flattened inputs.
           at::cuda::CUDAStreamGuard guard(ncclStream);
-          for (const auto j : c10::irange(inputTensors_.size())) {
+          for (auto&& [j, inputTensor] : std::views::enumerate(inputTensors_)) {
             inputFlattened[static_cast<int64_t>(j)].copy_(
-                inputTensors_[j], true);
+                inputTensor, true);
           }
         },
         [&](at::cuda::CUDAStream&,

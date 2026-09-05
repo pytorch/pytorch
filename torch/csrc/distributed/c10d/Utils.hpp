@@ -29,6 +29,8 @@ typedef SSIZE_T ssize_t;
 #include <string>
 #include <vector>
 
+#include <ranges>
+
 namespace c10d {
 
 TORCH_API size_t getTensorsNumel(const std::vector<at::Tensor>& tensors);
@@ -49,11 +51,11 @@ TORCH_API std::vector<at::Tensor> getTensorShapes(
 inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
   ss << '(';
-  for (const auto i : c10::irange(l.size())) {
+  for (auto&& [i, l_elem] : std::views::enumerate(l)) {
     if (i > 0) {
       ss << ", ";
     }
-    ss << l[i];
+    ss << l_elem;
   }
   ss << ')';
   return std::move(ss).str();

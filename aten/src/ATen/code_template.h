@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <ranges>
+
 namespace at::jit {
 
 // A template environment is a mapping from template variable names, e.g.,
@@ -194,10 +196,10 @@ struct CodeTemplate {
       bool comma_after) const {
     if (comma_before && !strings.empty())
       out << ", ";
-    for (const auto i : c10::irange(strings.size())) {
+    for (auto&& [i, string] : std::views::enumerate(strings)) {
       if (i > 0)
         out << ", ";
-      out << strings[i];
+      out << string;
     }
     if (comma_after && !strings.empty())
       out << ", ";
@@ -226,11 +228,11 @@ struct CodeTemplate {
       std::stringstream& out,
       size_t indent,
       const string_list& strings) const {
-    for (const auto i : c10::irange(strings.size())) {
+    for (auto&& [i, string] : std::views::enumerate(strings)) {
       if (i > 0)
         emitIndent(out, indent);
-      emitStringWithIndents(out, indent, strings[i]);
-      if (i + 1 != strings.size())
+      emitStringWithIndents(out, indent, string);
+      if (i + 1 != std::ssize(strings))
         out << '\n';
     }
   }

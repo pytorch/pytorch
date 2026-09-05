@@ -15,6 +15,8 @@
 #include <iostream>
 #include <utility>
 
+#include <ranges>
+
 namespace c10 {
 bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
   if (lhs.is(rhs)) {
@@ -1015,8 +1017,8 @@ void ivalue::Object::resizeObject(size_t slot) {
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy() const {
   auto object = ivalue::Object::create(type_, type()->numAttributes());
-  for (const auto i : c10::irange(slots_.size())) {
-    object->setSlot(i, slots_[i]);
+  for (auto&& [i, slot] : std::views::enumerate(slots_)) {
+    object->setSlot(i, slot);
   }
   return object;
 }
@@ -1024,8 +1026,8 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy() const {
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy_to_weak_compilation_ref() const {
   auto object = ivalue::Object::create(
       WeakOrStrongTypePtr(type_.asWeakTypePtr()), type()->numAttributes());
-  for (const auto i : c10::irange(slots_.size())) {
-    object->setSlot(i, slots_[i]);
+  for (auto&& [i, slot] : std::views::enumerate(slots_)) {
+    object->setSlot(i, slot);
   }
   return object;
 }
@@ -1041,8 +1043,8 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
     std::optional<at::Device> device) const {
   auto cu = type_.cu_;
   auto object = ivalue::Object::create(WeakOrStrongTypePtr(type_.cu_, type_.type_), type()->numAttributes());
-  for (const auto i : c10::irange(slots_.size())) {
-    if (*slots_[i].type() == *c10::TypeFactory::get<CapsuleType>()) {
+  for (auto&& [i, slot] : std::views::enumerate(slots_)) {
+    if (*slot.type() == *c10::TypeFactory::get<CapsuleType>()) {
       // If we've gotten here, it means that we have *not* copied this
       // class via __getstate__ and __setstate__. That fact and the
       // fact that we have a Capsule attribute mean that this is a
@@ -1056,7 +1058,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
             "this class.";
       TORCH_CHECK(false, std::move(err).str());
     }
-    object->setSlot(i, slots_[i].deepcopy(memo, device));
+    object->setSlot(i, slot.deepcopy(memo, device));
   }
   return object;
 }

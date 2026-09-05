@@ -20,6 +20,8 @@
 #include <string>
 #include <vector>
 
+#include <ranges>
+
 namespace c10d {
 
 inline std::string getTraceStartKey(const std::string& pgName, int rank) {
@@ -293,8 +295,8 @@ inline std::string get_python_cpp_trace() {
   constexpr auto TB_FMT_CSTR = FMT_COMPILE("#{} {} from {}:{}\n");
   fmt::memory_buffer buf;
   auto buf_iter = std::back_inserter(buf);
-  for (auto idx : c10::irange(s_tb.size())) {
-    auto frame_id = s_tb[idx];
+  for (auto&& [idx, s_tb_elem] : std::views::enumerate(s_tb)) {
+    auto frame_id = s_tb_elem;
     const auto& frame = s_tbs.all_frames.at(frame_id);
     fmt::format_to(
         buf_iter,
