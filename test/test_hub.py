@@ -1,6 +1,8 @@
 # Owner(s): ["module: hub"]
 
+import hashlib
 import os
+import shutil
 import tempfile
 import unittest
 import warnings
@@ -157,6 +159,41 @@ class TestHub(TestCase):
             TORCHHUB_EXAMPLE_RELEASE_URL, weights_only=True
         )
         self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
+
+    def test_load_state_dict_from_url_check_hash_prefix(self):
+        # filenames without a >= 8 hex digit prefix must not slip past check_hash
+        for filename in ("weights.pth", "weights-.pth", "weights-0123456.pth"):
+            with self.subTest(filename=filename), tempfile.TemporaryDirectory() as tmpdir:
+                with self.assertRaisesRegex(RuntimeError, "check_hash"):
+                    hub.load_state_dict_from_url(
+                        f"https://example.com/{filename}",
+                        model_dir=tmpdir,
+                        check_hash=True,
+                    )
+
+        # a conforming prefix verifies fine, and check_hash=False stays untouched
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payload = os.path.join(tmpdir, "payload")
+            torch.save({"w": torch.ones(3)}, payload)
+            with open(payload, "rb") as f:
+                prefix = hashlib.sha256(f.read()).hexdigest()[:8]
+
+            def fake_download(url, dst, hash_prefix=None, progress=True):
+                shutil.copy(payload, dst)
+
+            with patch("torch.hub.download_url_to_file", side_effect=fake_download):
+                loaded_state = hub.load_state_dict_from_url(
+                    f"https://example.com/weights-{prefix}.pth",
+                    model_dir=tmpdir,
+                    check_hash=True,
+                )
+                self.assertEqual(sum_of_state_dict(loaded_state), 3)
+                loaded_state = hub.load_state_dict_from_url(
+                    "https://example.com/weights-nohash.pth",
+                    model_dir=tmpdir,
+                    check_hash=False,
+                )
+                self.assertEqual(sum_of_state_dict(loaded_state), 3)
 
     @retry(Exception, tries=3)
     def test_load_legacy_zip_checkpoint(self):
