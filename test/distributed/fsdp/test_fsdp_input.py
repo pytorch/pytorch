@@ -126,7 +126,7 @@ class TestInput(FSDPTestContinuous):
 instantiate_device_type_tests(
     TestInput,
     globals(),
-    only_for=("cuda", "hpu", "xpu", "privateuse1"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 if __name__ == "__main__":
