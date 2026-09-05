@@ -1607,6 +1607,34 @@ if(NOT INTERN_BUILD_MOBILE)
     set(KLEIDIAI_BUILD_TESTS OFF) # Disable building KLEIDIAI tests
     set(KLEIDIAI_SRC "${PROJECT_SOURCE_DIR}/third_party/kleidiai")
     add_subdirectory(${KLEIDIAI_SRC})
+    if(NOT USE_KLEIDIAI_SME)
+      # CPUs without SME (e.g. GB10's Cortex-X925/A725) don't need these kernels;
+      # drop them from the target rather than patching the kleidiai submodule.
+      # All kleidiai SME source files carry a "_sme" or "_sme2" token bounded by
+      # "_"/"." (e.g. "..._sme_asm.S", "..._sme2_mopa.c"), and nothing outside
+      # those files references SME symbols. Match that bounded token rather than
+      # a bare "sme" substring, so an unrelated future filename that merely
+      # contains "sme" isn't accidentally dropped too.
+      get_target_property(__kleidiai_srcs kleidiai SOURCES)
+      list(LENGTH __kleidiai_srcs __kleidiai_srcs_before)
+      list(FILTER __kleidiai_srcs EXCLUDE REGEX "_sme[0-9]*[_.]")
+      list(LENGTH __kleidiai_srcs __kleidiai_srcs_after)
+      math(EXPR __kleidiai_srcs_removed "${__kleidiai_srcs_before} - ${__kleidiai_srcs_after}")
+      if(__kleidiai_srcs_removed EQUAL 0)
+        message(WARNING "USE_KLEIDIAI_SME is OFF, but no KleidiAI SME/SME2 source "
+                         "files matched the exclusion filter -- kleidiai may have "
+                         "renamed its SME files upstream, so SME kernels are still "
+                         "being built.")
+      else()
+        message(STATUS "  Excluded ${__kleidiai_srcs_removed} KleidiAI SME/SME2 "
+                        "source file(s) from the build (USE_KLEIDIAI_SME=OFF)")
+      endif()
+      set_target_properties(kleidiai PROPERTIES SOURCES "${__kleidiai_srcs}")
+      unset(__kleidiai_srcs)
+      unset(__kleidiai_srcs_before)
+      unset(__kleidiai_srcs_after)
+      unset(__kleidiai_srcs_removed)
+    endif()
     list(APPEND Caffe2_DEPENDENCY_LIBS kleidiai)
     # Recover build options.
     set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
