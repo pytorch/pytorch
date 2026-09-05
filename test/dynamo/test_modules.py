@@ -27,7 +27,11 @@ from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfHpu
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    skipIfHpu,
+)
 
 
 try:
@@ -3901,6 +3905,57 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(model, backend="eager", fullgraph=True)(x)
         self.assertEqual(eager, compiled)
 
+    @parametrize(
+        "bn_cls,input_shape,error_prefix",
+        [
+            (torch.nn.BatchNorm1d, (3, 4), "BatchNorm"),
+            (torch.nn.BatchNorm2d, (2, 4, 8, 8), "BatchNorm"),
+            (torch.nn.BatchNorm3d, (2, 4, 4, 8, 8), "BatchNorm"),
+            (torch.nn.SyncBatchNorm, (2, 4, 8, 8), "SyncBatchNorm"),
+        ],
+        name_fn=lambda bn_cls, input_shape, error_prefix: bn_cls.__name__,
+    )
+    def test_batchnorm_momentum_none(self, bn_cls, input_shape, error_prefix):
+        x = torch.randn(*input_shape)
+        module = bn_cls(4, momentum=None).train()
+        compiled = torch.compile(module, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            rf"{error_prefix}\(momentum=None\).*fullgraph=False",
+        ):
+            compiled(x)
+
+        torch._dynamo.reset()
+        m_eager = bn_cls(4, momentum=None).train()
+        m_compiled = bn_cls(4, momentum=None).train()
+        ref = m_eager(x)
+        out = torch.compile(m_compiled, backend="eager", fullgraph=False)(x)
+        self.assertEqual(ref, out)
+        self.assertEqual(m_eager.running_mean, m_compiled.running_mean)
+        self.assertEqual(m_eager.running_var, m_compiled.running_var)
+        self.assertEqual(m_eager.num_batches_tracked, m_compiled.num_batches_tracked)
+
+    def test_batchnorm_momentum_none_error_on_graph_break(self):
+        module = torch.nn.BatchNorm2d(4, momentum=None).train()
+        x = torch.randn(2, 4, 8, 8)
+        compiled = torch._dynamo.optimize("eager", error_on_graph_break=True)(module)
+        with self.assertRaisesRegex(
+            RuntimeError, r"BatchNorm\(momentum=None\).*fullgraph=False"
+        ):
+            compiled(x)
+
+    @parametrize("training,track_running_stats", [(False, True), (True, False)])
+    def test_batchnorm_momentum_none_allowed(self, training, track_running_stats):
+        module = torch.nn.BatchNorm2d(
+            4, momentum=None, track_running_stats=track_running_stats
+        )
+        module.train(training)
+        x = torch.randn(2, 4, 8, 8)
+        compiled = torch.compile(module, backend="eager", fullgraph=True)
+        self.assertEqual(module(x), compiled(x))
+
+
+instantiate_parametrized_tests(OptimizedModuleTest)
 
 instantiate_device_type_tests(
     NNModuleTestsDevice, globals(), except_for="cpu", allow_xpu=True
