@@ -12413,6 +12413,32 @@ class TestLinalgMPS(TestCaseMPS):
         # solution is sensitive to conditioning of individual batch members.
         self.assertEqual(A @ xm, A @ xc, atol=1e-4, rtol=1e-4)
 
+    def test_linalg_lstsq_complex_underdetermined_large_batch(self, device="mps"):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196113.
+        # The lstsq dispatcher hands the backend a Fortran-ordered working copy,
+        # and for a complex underdetermined batch `A.mH()` over it is already
+        # physically contiguous, so contiguous() used to no-op and the
+        # conjugate bit rode into the Jacobi kernel's raw reads: the kernel
+        # computed the SVD of conj(A) instead of A.
+        torch.manual_seed(0)
+        A = torch.randn(8, 32, 48, dtype=torch.complex64)  # underdetermined, over the gate
+        B = torch.randn(8, 32, 3, dtype=torch.complex64)
+        sol_m = torch.linalg.lstsq(A.to(device), B.to(device), driver="gelsd", rcond=1e-4).solution.cpu()
+        sol_c = torch.linalg.lstsq(A, B, driver="gelsd", rcond=1e-4).solution
+        # The minimum-norm solution is unique, so compare the raw solutions,
+        # not just fitted values.
+        self.assertEqual(sol_m, sol_c, atol=1e-4, rtol=1e-4)
+
+    def test_linalg_svd_complex_fortran_input(self, device="mps"):
+        # Same root cause as above, one level down: a Fortran-ordered complex
+        # input used to come back as the factorization of conj(A).
+        torch.manual_seed(0)
+        A = torch.randn(8, 32, 48, dtype=torch.complex64)
+        Af = torch.empty(8, 48, 32, dtype=torch.complex64).transpose(-2, -1).copy_(A)
+        U, S, Vh = torch.linalg.svd(Af.to(device), full_matrices=False)
+        recon = (U * S.unsqueeze(-2)) @ Vh
+        self.assertEqual(recon.cpu(), Af, atol=1e-4, rtol=1e-4)
+
     @dtypes(torch.float32, torch.complex64, torch.float16, torch.bfloat16)
     @parametrize("out", ["none", "zeros", "ones"])
     @parametrize("m, n, data, noncontig", [

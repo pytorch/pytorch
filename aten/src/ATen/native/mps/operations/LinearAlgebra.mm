@@ -2072,7 +2072,15 @@ static void svd_kernel_mps(const Tensor& A,
   // Kernel needs rows >= cols. For m<n run it on A^H: SVD(A^H)=(V,S,U^H), and
   // params.transposed tells the kernel to swap left/right into the right outputs.
   const int64_t wm = transposed ? n : m;
-  Tensor in = (transposed ? A.mH() : A).contiguous().reshape({batch, wm, k});
+  Tensor in = (transposed ? A.mH() : A).contiguous();
+  if (in.is_conj()) {
+    // A physically contiguous conj view (A^H over a Fortran-ordered input,
+    // which is what the lstsq dispatcher feeds in) makes contiguous() a
+    // no-op, so the conjugate bit survives into the kernel's raw pointer
+    // reads and the conjugation silently never happens.
+    in = in.resolve_conj();
+  }
+  in = in.reshape({batch, wm, k});
 
   auto opts = A.options();
   const bool S_direct = S.is_contiguous() && S.scalar_type() == c10::toRealValueType(A.scalar_type());
@@ -2131,6 +2139,7 @@ static void svd_kernel_mps(const Tensor& A,
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
+
 
   if (!S_direct) {
     const_cast<Tensor&>(S).copy_(S_k.reshape(S.sizes()));
