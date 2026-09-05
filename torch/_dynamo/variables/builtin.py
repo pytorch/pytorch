@@ -2654,25 +2654,26 @@ class BuiltinVariable(BaseBuiltinVariable):
             # pyrefly: ignore [unbound-name]
             return VariableTracker.build(tx, isinstance(arg_type, isinstance_type))
 
-        isinstance_type_tuple: tuple[Any, ...]
-        if isinstance(isinstance_type, types.UnionType):
-            isinstance_type_tuple = typing.get_args(isinstance_type)
-        elif isinstance(isinstance_type, tuple):
-            isinstance_type_tuple = isinstance_type
-        else:
-            isinstance_type_tuple = (isinstance_type,)
-
-        # Mirror CPython's object_recursive_isinstance: members are validated
-        # and checked left to right, stopping at the first match. A member
-        # whose metaclass defines __instancecheck__ (Protocols, ABCs, ...) is
-        # evaluated with the real isinstance() on the wrapped Python object;
-        # plain classes go through issubclass(), which keeps lazy constants
-        # unrealized.
-        for tp in isinstance_type_tuple:
+        # Mirror CPython's object_recursive_isinstance: nested tuples and
+        # unions are flattened, and members are validated and checked left to
+        # right, stopping at the first match. A member whose metaclass defines
+        # __instancecheck__ (Protocols, ABCs, ...) is evaluated with the real
+        # isinstance() on the wrapped Python object. Only that branch reads
+        # arg.value, so a lazy constant stays unrealized -- and keeps its
+        # weaker type-only guard -- until such a member is actually reached.
+        pending: list[Any] = [isinstance_type]
+        while pending:
+            member = pending.pop()
+            if isinstance(member, tuple):
+                pending.extend(reversed(member))
+                continue
+            if isinstance(member, types.UnionType):
+                pending.extend(reversed(typing.get_args(member)))
+                continue
             if not (
-                isinstance(tp, type)
+                isinstance(member, type)
                 # E.g. isinstance(obj, typing.Sequence)
-                or callable(getattr(tp, "__instancecheck__", None))
+                or callable(getattr(member, "__instancecheck__", None))
             ):
                 raise_observed_exception(
                     TypeError,
@@ -2681,12 +2682,15 @@ class BuiltinVariable(BaseBuiltinVariable):
                         "isinstance() arg 2 must be a type, a tuple of types, or a union"
                     ],
                 )
-            hooked = type(tp) is not type and "__instancecheck__" in type(tp).__dict__
+            # type.__dict__ holds __instancecheck__ itself, so plain classes
+            # must be excluded: their answer comes from issubclass() below.
+            metaclass = type(member)
+            hooked = metaclass is not type and "__instancecheck__" in metaclass.__dict__
             if hooked and isinstance(
                 arg, (variables.UserDefinedObjectVariable, variables.ConstantVariable)
             ):
                 try:
-                    val = isinstance(arg.value, tp)
+                    val = isinstance(arg.value, member)
                 except TypeError as e:
                     raise_observed_exception(TypeError, tx, args=list(e.args))
             else:
@@ -2698,7 +2702,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     # through it. This is a limitation of the current implementation.
                     # Usually `__subclasscheck__` and `__instancecheck__` can be constant fold through, it
                     # might not be a big issue and we trade off it for performance.
-                    val = issubclass(arg_type, tp)
+                    val = issubclass(arg_type, member)
                 except TypeError as e:
                     # issubclass() rejecting the classinfo (e.g. a runtime_checkable
                     # Protocol with data members) says nothing about isinstance();
@@ -2706,9 +2710,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                     unimplemented(
                         gb_type="builtin isinstance() with classinfo that does not support issubclass()",
                         context=f"isinstance({arg}, {isinstance_type})",
-                        explanation=f"issubclass({arg_type}, {tp}) raised TypeError: "
-                        f"{e}. Dynamo emulates isinstance() with issubclass() for "
-                        "this argument and cannot determine the result.",
+                        explanation=f"issubclass({arg_type}, {member}) raised "
+                        f"TypeError: {e}. Dynamo emulates isinstance() with "
+                        "issubclass() for this argument and cannot determine the result.",
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
             if val:

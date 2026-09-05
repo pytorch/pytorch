@@ -9141,7 +9141,22 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
 
-    def test_isinstance_runtime_checkable_protocol_union_and_tuple(self):
+    @parametrize(
+        "spelling",
+        [
+            "single",
+            "union",
+            "tuple",
+            "union_rev",
+            "optional",
+            "mixed",
+            "nested",
+            "separate",
+            "abc_union",
+            "const_proto",
+        ],
+    )
+    def test_isinstance_runtime_checkable_protocol_classinfo(self, spelling):
         # https://github.com/pytorch/pytorch/issues/195969
         @typing.runtime_checkable
         class HasPorts(typing.Protocol):
@@ -9150,6 +9165,13 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         @typing.runtime_checkable
         class HasFoo(typing.Protocol):
             def foo(self) -> int: ...
+
+        @typing.runtime_checkable
+        class HasReal(typing.Protocol):
+            real: int
+
+        class Registered(abc.ABC):
+            pass
 
         class Obj:
             ports = (1, 2)
@@ -9160,34 +9182,67 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         class Other:
             pass
 
-        def single(x, o):
-            return x + 1 if isinstance(o, HasPorts) else x - 1
+        Registered.register(Other)
 
-        def union(x, o):
-            return x + 1 if isinstance(o, HasPorts | HasFoo) else x - 1
+        checks = {
+            "single": lambda o: isinstance(o, HasPorts),
+            "union": lambda o: isinstance(o, HasPorts | HasFoo),
+            "tuple": lambda o: isinstance(o, (HasPorts, HasFoo)),
+            "union_rev": lambda o: isinstance(o, HasFoo | HasPorts),
+            "optional": lambda o: isinstance(o, HasPorts | None),
+            "mixed": lambda o: isinstance(o, (int, HasPorts)),
+            "nested": lambda o: isinstance(o, ((HasPorts,), HasFoo)),
+            "separate": lambda o: isinstance(o, HasPorts) or isinstance(o, HasFoo),
+            "abc_union": lambda o: isinstance(o, Registered | HasPorts),
+            "const_proto": lambda o: isinstance(o, HasReal | HasFoo),
+        }
+        check = checks[spelling]
 
-        def tup(x, o):
-            return x + 1 if isinstance(o, (HasPorts, HasFoo)) else x - 1
-
-        def union_rev(x, o):
-            return x + 1 if isinstance(o, HasFoo | HasPorts) else x - 1
-
-        def optional(x, o):
-            return x + 1 if isinstance(o, HasPorts | None) else x - 1
-
-        def mixed(x, o):
-            return x + 1 if isinstance(o, (int, HasPorts)) else x - 1
-
-        def separate(x, o):
-            hit = isinstance(o, HasPorts) or isinstance(o, HasFoo)
-            return x + 1 if hit else x - 1
+        def fn(x, o):
+            return x + 1 if check(o) else x - 1
 
         x = torch.ones(3)
-        for fn in (single, union, tup, union_rev, optional, mixed, separate):
-            for o in (Obj(), Other(), None, 3):
-                torch._dynamo.reset()
-                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-                self.assertEqual(opt_fn(x, o), fn(x, o), msg=f"{fn.__name__}({o!r})")
+        for o in (Obj(), Other(), None, 3):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x, o), fn(x, o), msg=repr(o))
+
+    def test_isinstance_protocol_member_order_effects(self):
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        @typing.runtime_checkable
+        class HasReal(typing.Protocol):
+            real: int
+
+        # A plain member matching first answers without the wrapped object, so
+        # the Protocol member is never reached and there is no graph break.
+        def plain_member_matches_first(x):
+            return x + 1 if isinstance([x], (list, HasPorts)) else x - 1
+
+        x = torch.ones(3)
+        opt_fn = torch.compile(
+            plain_member_matches_first, backend="eager", fullgraph=True
+        )
+        self.assertEqual(opt_fn(x), plain_member_matches_first(x))
+
+        # Reaching a member with an __instancecheck__ hook realizes a lazy
+        # constant and guards its value, so it recompiles once per value. A
+        # plain member matching first keeps the weaker type-only guard.
+        def plain_first(x, v):
+            return x + 1 if isinstance(v, (str, HasReal)) else x - 1
+
+        def hooked_first(x, v):
+            return x + 1 if isinstance(v, (HasReal, str)) else x - 1
+
+        for fn, expected_frames in ((plain_first, 1), (hooked_first, 2)):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt)
+            for value in ("hello", "world"):
+                self.assertEqual(opt_fn(x, value), fn(x, value))
+            self.assertEqual(cnt.frame_count, expected_frames)
 
     def test_isinstance_protocol_without_issubclass_graph_breaks(self):
         @typing.runtime_checkable
