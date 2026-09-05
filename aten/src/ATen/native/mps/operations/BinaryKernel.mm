@@ -363,6 +363,18 @@ static void ge_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "ge", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
 }
 
+static void logical_and_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_and", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void logical_or_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_or", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
+static void logical_xor_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "logical_xor", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
 REGISTER_DISPATCH(atan2_stub, &atan2_mps_kernel)
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
@@ -412,4 +424,7 @@ REGISTER_DISPATCH(lt_stub, &lt_mps_kernel)
 REGISTER_DISPATCH(le_stub, &le_mps_kernel)
 REGISTER_DISPATCH(gt_stub, &gt_mps_kernel)
 REGISTER_DISPATCH(ge_stub, &ge_mps_kernel)
+REGISTER_DISPATCH(logical_and_stub, &logical_and_mps_kernel)
+REGISTER_DISPATCH(logical_or_stub, &logical_or_mps_kernel)
+REGISTER_DISPATCH(logical_xor_stub, &logical_xor_mps_kernel)
 } // namespace at::native
