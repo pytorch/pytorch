@@ -44,6 +44,8 @@
 #include <ATen/ops/hardtanh_backward_native.h>
 #include <ATen/ops/hardtanh_native.h>
 #include <ATen/ops/infinitely_differentiable_gelu_backward_native.h>
+#include <ATen/ops/aminmax.h>
+#include <ATen/ops/isinf.h>
 #include <ATen/ops/leaky_relu.h>
 #include <ATen/ops/leaky_relu_backward.h>
 #include <ATen/ops/leaky_relu_backward_native.h>
@@ -77,6 +79,7 @@
 #include <ATen/ops/tanh.h>
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/threshold_native.h>
+#include <ATen/ops/where.h>
 
 #include <utility>
 #endif
@@ -388,6 +391,21 @@ static bool use_mkldnn(const Tensor& input) {
     ((input.scalar_type() == kHalf) && mkldnn_fp16_device_check()) ||
     (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float16/float32
 }
+
+// oneDNN gelu returns NaN for infinite inputs; overwrite them with the limits
+// (gelu(-inf) = 0, gelu(inf) = inf) so the result matches GeluKernel. The
+// aminmax detection is a single read-only pass; NaN inputs need no fixup since
+// oneDNN already propagates them.
+static void gelu_mkldnn_inf_fixup(const Tensor& self, const Tensor& result) {
+  auto [min, max] = at::aminmax(self);
+  constexpr auto kInfinity = std::numeric_limits<double>::infinity();
+  const auto mn = min.item<double>();
+  const auto mx = max.item<double>();
+  // NaN inputs poison aminmax, so a NaN min/max cannot rule out infs
+  if (mn == -kInfinity || mx == kInfinity || mn != mn || mx != mx) {
+    const_cast<Tensor&>(result).copy_(at::where(self.isinf(), at::clamp_min(self, 0), result));
+  }
+}
 #endif
 
 TORCH_IMPL_FUNC(gelu_out_cpu) (
@@ -400,12 +418,14 @@ auto approximate_type = get_gelutype_enum(approximate);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
+    gelu_mkldnn_inf_fixup(self, result);
 #ifdef __aarch64__
   } else if (use_mkldnn(self) && (approximate_type == GeluType::Tanh)) {
     const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_gelu_tanh, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
+    gelu_mkldnn_inf_fixup(self, result);
 #endif  // ifdef __aarch64__
   } else {
     GeluKernel(kCPU, *this, approximate_type);
