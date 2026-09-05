@@ -2081,8 +2081,9 @@ class GraphModule(torch.nn.Module):
                 f"sum consumer {inp} does not route through synchronize_event barrier",
             )
 
+    @onlyAccelerator
     @xfailIfNoAcceleratorTriton
-    def test_barrier_deps_exclude_nodes_defined_after_sync(self):
+    def test_barrier_deps_exclude_nodes_defined_after_sync(self, device):
         """A get_attr constant first used after the barrier is not a barrier dep.
 
         The constant is materialized at its first user, which is below the
@@ -2091,14 +2092,14 @@ class GraphModule(torch.nn.Module):
         """
 
         def fn(x, w):
-            s = torch.cuda.Stream()
-            with torch.cuda.stream(s):
+            s = torch.Stream(device=device)
+            with s:
                 a = x @ w
             s.synchronize()
-            return a.sum() + torch.tensor([1.0, 2.0, 3.0], device="cuda").sum()
+            return a.sum() + torch.tensor([1.0, 2.0, 3.0], device=device).sum()
 
-        x = torch.randn(32, 32, device="cuda")
-        w = torch.randn(32, 32, device="cuda")
+        x = torch.randn(32, 32, device=device)
+        w = torch.randn(32, 32, device=device)
         expected = fn(x, w)
         result, _, fw_graphs, _ = extract_graph(fn, x, w)
         self.assertEqual(result, expected)
@@ -2180,8 +2181,7 @@ class TestStreamOrderingStress(InductorTestCase):
             for e, a in zip(expected, actual):
                 self.assertEqual(a, e)
 
-    @staticmethod
-    def _heavy_matmul_chain(x, w, depth=8):
+    def _heavy_matmul_chain(self, x, w, depth=8):
         """Chain of matmuls to create substantial GPU work (~ms).
         Used to widen the race window between streams so that missing
         synchronization is observable."""
@@ -2205,7 +2205,7 @@ class TestStreamOrderingStress(InductorTestCase):
             e = torch.Event(device=device)
 
             # Heavy producer on default stream — takes real GPU time
-            a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
+            a = self._heavy_matmul_chain(x, w)
             e.record()
 
             with s:
@@ -2235,12 +2235,12 @@ class TestStreamOrderingStress(InductorTestCase):
             e2 = torch.Event(device=device)
 
             with s1:
-                a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
+                a = self._heavy_matmul_chain(x, w)
                 e1.record(s1)
 
             with s2:
                 e1.wait(s2)
-                b = TestStreamOrderingStress._heavy_matmul_chain(a, w)
+                b = self._heavy_matmul_chain(a, w)
                 e2.record(s2)
 
             with s1:
@@ -2274,7 +2274,7 @@ class TestStreamOrderingStress(InductorTestCase):
             e3 = torch.Event(device=device)
 
             # Slow producer
-            a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
+            a = self._heavy_matmul_chain(x, w)
             e.record()
 
             with s1:
@@ -2327,16 +2327,12 @@ class TestStreamOrderingStress(InductorTestCase):
 
             with s1:
                 e_fork.wait()
-                branch1 = TestStreamOrderingStress._heavy_matmul_chain(
-                    torch.relu(base), w
-                )
+                branch1 = self._heavy_matmul_chain(torch.relu(base), w)
                 e1.record(s1)
 
             with s2:
                 e_fork.wait()
-                branch2 = TestStreamOrderingStress._heavy_matmul_chain(
-                    torch.sigmoid(base), w
-                )
+                branch2 = self._heavy_matmul_chain(torch.sigmoid(base), w)
                 e2.record(s2)
 
             e1.wait()
@@ -2404,12 +2400,12 @@ class TestStreamOrderingStress(InductorTestCase):
             e1 = torch.Event(device=device)
             e2 = torch.Event(device=device)
 
-            a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
+            a = self._heavy_matmul_chain(x, w)
             e1.record()
 
             with s:
                 e1.wait()
-                b = TestStreamOrderingStress._heavy_matmul_chain(a, w)
+                b = self._heavy_matmul_chain(a, w)
                 e2.record(s)
 
             e2.wait()
@@ -2438,7 +2434,7 @@ class TestStreamOrderingStress(InductorTestCase):
 
             with s:
                 # Heavy matmul chain produces data on user stream
-                a = TestStreamOrderingStress._heavy_matmul_chain(x, w)
+                a = self._heavy_matmul_chain(x, w)
                 # Triton pointwise on the same user stream — without fix
                 # this launches on the default stream
                 b = torch.relu(a)
@@ -3006,8 +3002,7 @@ class TestPDLWithMultiStream(InductorTestCase):
 class TestAOTIUserStreams(InductorTestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @staticmethod
-    def _runtime_name(cuda_name):
+    def _runtime_name(self, cuda_name):
         if TEST_WITH_ROCM:
             return cuda_name.replace("cuda", "hip", 1)
         return cuda_name
