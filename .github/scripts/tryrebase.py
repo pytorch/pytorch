@@ -55,7 +55,14 @@ def rebase_onto(
     pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = False
 ) -> bool:
     branch = f"pull/{pr.pr_num}/head"
-    remote_url = f"https://github.com/{pr.info['headRepository']['nameWithOwner']}.git"
+    head_repo = pr.info["headRepository"]
+    if head_repo is None:
+        raise RuntimeError(
+            f"Can't determine the head repository of PR #{pr.pr_num}; its org likely "
+            "forbids access via mergebot's token (classic PAT), so the rebased branch "
+            "can't be pushed back. Please rebase locally and push."
+        )
+    remote_url = f"https://github.com/{head_repo['nameWithOwner']}.git"
     refspec = f"{branch}:{pr.head_ref()}"
 
     repo.fetch(branch, branch)
