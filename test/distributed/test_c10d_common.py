@@ -1952,6 +1952,28 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
             ):
                 dist.set_debug_level_from_env()
 
+    def test_debug_detail_enables_cpp_stacktraces(self):
+        original_debug = os.environ.get("TORCH_DISTRIBUTED_DEBUG")
+        original_stacktraces = os.environ.get("TORCH_SHOW_CPP_STACKTRACES")
+        try:
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = "detail"
+            os.environ.pop("TORCH_SHOW_CPP_STACKTRACES", None)
+            dist.set_debug_level_from_env()
+            self.assertEqual(os.environ["TORCH_SHOW_CPP_STACKTRACES"], "1")
+
+            os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "0"
+            dist.set_debug_level_from_env()
+            self.assertEqual(os.environ["TORCH_SHOW_CPP_STACKTRACES"], "0")
+        finally:
+            if original_debug is None:
+                os.environ.pop("TORCH_DISTRIBUTED_DEBUG", None)
+            else:
+                os.environ["TORCH_DISTRIBUTED_DEBUG"] = original_debug
+            if original_stacktraces is None:
+                os.environ.pop("TORCH_SHOW_CPP_STACKTRACES", None)
+            else:
+                os.environ["TORCH_SHOW_CPP_STACKTRACES"] = original_stacktraces
+
 
 class DummyWork(dist._Work):
     def wait(self, timeout=5.0):
