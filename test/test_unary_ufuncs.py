@@ -1528,6 +1528,35 @@ class TestUnaryUfuncs(TestCase):
         for v in inp:
             self.assertGreater(math.copysign(1.0, v), 0.0)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/195075:
+    # cpu_kernel_vec's vectorized and scalar-remainder lambdas disagreed on
+    # NaN, so logit_backward returned a different gradient at a NaN element
+    # depending only on unrelated tensor length/alignment.
+    @onlyCPU
+    @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
+    def test_logit_backward_nan_length_invariant(self, device, dtype):
+        size = 128 + 1  # exceed AVX512 width so a scalar remainder tail runs
+        for eps in (None, 1e-6):
+            for nan_pos in (0, size // 2, size - 1):
+                x = torch.full((size,), 0.3, device=device, dtype=dtype)
+                x[nan_pos] = float("nan")
+                x.requires_grad_(True)
+                (long_grad,) = torch.autograd.grad(
+                    torch.logit(x, eps=eps), x, torch.ones(size, device=device, dtype=dtype)
+                )
+
+                x1 = torch.tensor(
+                    [float("nan")], device=device, dtype=dtype, requires_grad=True
+                )
+                (short_grad,) = torch.autograd.grad(
+                    torch.logit(x1, eps=eps), x1, torch.ones(1, device=device, dtype=dtype)
+                )
+
+                self.assertEqual(
+                    long_grad[nan_pos], short_grad[0], equal_nan=True,
+                    msg=f"logit_backward(eps={eps}) depends on tensor length at NaN (pos {nan_pos}/{size})",
+                )
+
     # TODO: update to compare against NumPy by rationalizing with OpInfo
     @onlyAccelerator
     @dtypes(torch.float, torch.double)
