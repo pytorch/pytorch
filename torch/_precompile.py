@@ -622,6 +622,24 @@ class _InstalledArtifact:
                     raise PrecompileError(str(e)) from e
             self._fn = fn
 
+    def _prepare(self, package_blob: str) -> None:
+        """Build what serving needs, at load rather than at the first call."""
+        import base64
+
+        from torch._dynamo.precompile_package import prepare_cache_entry
+
+        # Exactly the resolution _ensure performs, or this prepares a different
+        # entry frame than the install will use.
+        fn = self._entry_factory() if self._fn is None else self._fn
+        try:
+            self._prepared = prepare_cache_entry(
+                fn, pickle.loads(base64.b64decode(package_blob))
+            )
+        except PrecompileError:
+            raise
+        except Exception as e:
+            raise PrecompileError(str(e)) from e
+
     def _ensure(self) -> Any:
         inner = self._inner
         if inner is None:
