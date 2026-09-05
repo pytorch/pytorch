@@ -2226,6 +2226,27 @@ class PrecompiledModule(PrecompiledRunnable):
         return buf.getvalue()
 
 
+def _capture_session(fn, **kwargs):
+    """Start an internal multi-graph capture, mapping package errors to ours.
+
+    precompile.capture() and precompile.accumulate() drive the capture through
+    the caller-driven capture objects, so this exists to keep the error
+    translation of starting the underlying session in one place.
+    """
+    from torch._dynamo.exc import PackageError
+    from torch._dynamo.precompile_package import precompile_capture
+
+    if isinstance(fn, functools.partial):
+        raise PrecompileError(
+            "precompile cannot capture a partial. Pass the underlying function "
+            "and give its bound arguments as call arguments."
+        )
+    try:
+        return precompile_capture(fn, **kwargs)
+    except PackageError as e:
+        raise PrecompileError(str(e)) from e
+
+
 def _make_inlined_forward(
     python_code: str, *, warn: bool = True
 ) -> Callable[..., object]:
