@@ -564,9 +564,13 @@ class node_creation_hook:
 
 def region_activation_memory_budget(
     budget: float,
+    *,
+    require_full_coverage: bool = True,
 ) -> contextlib.AbstractContextManager[None]:
-    r"""Context-manager that sets the activation memory budget for the region of
-    a compiled forward traced under it.
+    r"""region_activation_memory_budget(budget, *, require_full_coverage=True)
+
+    Set the activation memory budget for the region of a compiled forward traced
+    under this context manager.
 
     .. warning::
         This is a prototype feature and is subject to change.
@@ -583,19 +587,26 @@ def region_activation_memory_budget(
     for the annotated region.
 
     .. note::
-        Today the partitioner only supports a single budget per compiled graph,
-        so the annotation must cover every forward op in the graph (a partial
-        annotation is rejected rather than silently applied graph-wide), and all
-        annotated nodes must agree on the budget. To use different budgets for
-        different parts of a model, separate them with a graph break (e.g.
-        ``torch._dynamo.graph_break()``) so each part becomes its own graph. The
-        context remains active across graph breaks within the region.
+        Today the partitioner only supports a single budget per compiled region,
+        so all budget contexts within that region must agree. By default, the
+        context must cover every forward operation compiled with it. Set
+        ``require_full_coverage=False`` to permit operations outside the context;
+        the budget then applies to the entire compiled region. To use different
+        budgets for different parts of a model, separate them with a graph break
+        (e.g. ``torch._dynamo.graph_break()``). The context remains active across
+        graph breaks within the region. If multiple contexts select the same
+        budget, any context that requires full coverage makes the compiled region
+        require full coverage.
 
     This only has an effect under :func:`torch.compile`; using it outside of a
     compiled region raises a ``RuntimeError``.
 
     Args:
         budget (float): Activation memory budget ratio in ``[0, 1]``.
+        require_full_coverage (bool, optional): If ``True``, require the context
+          to cover every forward operation compiled with it. If ``False``, permit
+          operations outside the context and apply the budget to the entire
+          compiled region. Default: ``True``.
 
     Example::
 
@@ -615,6 +626,12 @@ def region_activation_memory_budget(
             f"torch.autograd.graph.region_activation_memory_budget: must be in "
             f"[0, 1], got {budget}"
         )
+    if not isinstance(require_full_coverage, bool):
+        raise TypeError(
+            "torch.autograd.graph.region_activation_memory_budget: expects "
+            f"require_full_coverage to be a bool, got "
+            f"{type(require_full_coverage).__name__}"
+        )
     # The budget only takes effect when read back by the partitioner during
     # compilation. Dynamo folds torch.compiler.is_compiling() to True while
     # tracing this (inlined) call, so this guard only fires in eager mode.
@@ -623,7 +640,9 @@ def region_activation_memory_budget(
             "torch.autograd.graph.region_activation_memory_budget can only be "
             "used inside a torch.compile region; it has no effect in eager mode."
         )
-    return fx_traceback._dynamo_region_activation_memory_budget(float(budget))
+    return fx_traceback._dynamo_region_activation_memory_budget(
+        float(budget), require_full_coverage
+    )
 
 
 def set_warn_on_accumulate_grad_stream_mismatch(enabled: bool) -> None:
