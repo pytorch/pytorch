@@ -1878,6 +1878,39 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(got.__cause__)
         self.assertIsNone(got.__context__)
 
+    def test_exception_subclass_super_init_with_kwargs(self):
+        class MyError(RuntimeError):
+            def __init__(self, msg, *, context=None):
+                super().__init__(msg)
+                self.context = context
+
+        def fn(x):
+            try:
+                raise MyError("bad", context="ctx")
+            except MyError as e:
+                return x + 1, e.args, e.context, str(e)
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_exception_subclass_specialized_super_init_unsupported(self):
+        class MyError(OSError):
+            def __init__(self, *args):
+                super().__init__(*args)
+
+        def fn(x):
+            try:
+                raise MyError(2, "nope", "/tmp/x")
+            except MyError as e:
+                return x + 1, e.args, e.errno, e.filename
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Attempted to call a super\\(\\) attribute that is not a function or method",
+        ):
+            opt_fn(torch.ones(2))
 
 instantiate_parametrized_tests(ExceptionTests)
 
