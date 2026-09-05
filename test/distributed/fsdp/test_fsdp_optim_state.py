@@ -37,6 +37,7 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -322,6 +323,8 @@ class TestDummyModel(torch.nn.Module):
 
 
 class TestFSDPOptimState(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._model_class = {
