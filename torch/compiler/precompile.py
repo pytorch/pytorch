@@ -13,6 +13,8 @@ guard-serialization caching mode), despite the shared word.
 import typing
 
 from torch._precompile import (
+    accumulate,
+    AccumulatingCapture,
     Capture,
     capture,
     DynamoTracer,
@@ -54,8 +56,10 @@ del typing  # not part of the public surface
 # ``torch.compiler.precompile.PrecompileError`` also resolves.
 __all__ = [
     "capture",
+    "accumulate",
     "load",
     "Capture",
+    "AccumulatingCapture",
     "MakeFxTracer",
     "DynamoTracer",
     "PrecompileSummary",
