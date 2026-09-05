@@ -14,14 +14,20 @@ from torch.ao.quantization._correct_bias import (
     get_param,
     parent_child_names,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skipIfNoFBGEMM,
 )
-from torch.testing._internal.common_utils import raise_on_run_directly
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+)
 
 
 class TestBiasCorrectionEager(QuantizationTestCase):
+    hw_classification = HardwareClassification.CPU
+
     def compute_sqnr(self, x, y):
         Ps = torch.norm(x)
         Pn = torch.norm(x - y)
@@ -68,11 +74,12 @@ class TestBiasCorrectionEager(QuantizationTestCase):
 
                 self.assertTrue(
                     self.compute_sqnr(float_bias, artificial_bias) > 30,
-                    "Correcting quantized bias produced too much noise, sqnr score too low",
+                    "Correcting quantized bias produced too much noise, "
+                    "sqnr score too low",
                 )
 
     @skipIfNoFBGEMM
-    def test_linear_chain(self):
+    def test_linear_chain(self, device):
         class LinearChain(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -86,18 +93,18 @@ class TestBiasCorrectionEager(QuantizationTestCase):
                 x = self.linear3(x)
                 return x
 
-        float_model = QuantWrapper(LinearChain())
+        float_model = QuantWrapper(LinearChain()).to(device)
         img_data = [
             (
-                torch.rand(10, 3, dtype=torch.float),
-                torch.randint(0, 1, (2,), dtype=torch.long),
+                torch.rand(10, 3, dtype=torch.float, device=device),
+                torch.randint(0, 1, (2,), dtype=torch.long, device=device),
             )
             for _ in range(50)
         ]
         self.correct_artificial_bias_quantize(float_model, img_data)
 
     @skipIfNoFBGEMM
-    def test_conv_chain(self):
+    def test_conv_chain(self, device):
         class ConvChain(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -111,16 +118,18 @@ class TestBiasCorrectionEager(QuantizationTestCase):
                 x = self.conv2d3(x)
                 return x
 
-        float_model = QuantWrapper(ConvChain())
+        float_model = QuantWrapper(ConvChain()).to(device)
         img_data = [
             (
-                torch.rand(10, 3, 125, 125, dtype=torch.float),
-                torch.randint(0, 1, (2,), dtype=torch.long),
+                torch.rand(10, 3, 125, 125, dtype=torch.float, device=device),
+                torch.randint(0, 1, (2,), dtype=torch.long, device=device),
             )
             for _ in range(50)
         ]
         self.correct_artificial_bias_quantize(float_model, img_data)
 
+
+instantiate_device_type_tests(TestBiasCorrectionEager, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")
