@@ -257,8 +257,16 @@ void* mmap(
   return pData;
 }
 
+// length is ignored: this shim only supports unmapping a whole view.
 int munmap(void* addr, size_t length) {
-  if (!UnmapViewOfFile(addr)) {
+  // mmap rounds the file offset down to dwAllocationGranularity and returns
+  // lpMapAddress + iViewDelta, so addr can point into the middle of the view
+  // while UnmapViewOfFile requires the allocation base. VirtualQuery also
+  // succeeds for freed and heap addresses, so check that this really is a
+  // mapped view before unmapping it.
+  MEMORY_BASIC_INFORMATION mbi{};
+  if (VirtualQuery(addr, &mbi, sizeof(mbi)) == 0 || mbi.State == MEM_FREE ||
+      mbi.Type != MEM_MAPPED || !UnmapViewOfFile(mbi.AllocationBase)) {
     errno = EINVAL;
     return -1;
   }
@@ -276,8 +284,10 @@ int munmap(void* addr, size_t length) {
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <mutex>
 #include <optional>
@@ -884,6 +894,16 @@ class AOTInductorModelBase {
 
   // NOLINTNEXTLINE(modernize-use-equals-default)
   ~AOTInductorModelBase() {
+#ifdef USE_MMAP_SELF
+    if (self_mmap) {
+      if (munmap(self_mmap, self_mmap_size) != 0) {
+        std::cerr << "Failed to unmap AOTInductor model constants: "
+                  << std::strerror(errno) << '\n';
+      }
+      self_mmap = nullptr;
+      self_mmap_size = 0;
+    }
+#endif // USE_MMAP_SELF
 #ifdef USE_CUDA
     if (run_finished_) {
       auto code = cudaEventDestroy(*run_finished_);
@@ -1547,6 +1567,7 @@ class AOTInductorModelBase {
     close(fd);
     AOTI_RUNTIME_CHECK(ptr != MAP_FAILED, "mmap() failed");
     self_mmap = static_cast<uint8_t*>(ptr);
+    self_mmap_size = static_cast<size_t>(weights_size);
     AOTI_RUNTIME_CHECK(
         reinterpret_cast<uint64_t*>(
             self_mmap + weights_size - sizeof(uint64_t))[0] == magic_number,
@@ -1592,6 +1613,8 @@ class AOTInductorModelBase {
 #if defined(USE_MMAP_SELF)
   // Mapped memory for weights
   uint8_t* self_mmap = NULL;
+  // Length passed to mmap, so the destructor unmaps exactly what was mapped.
+  size_t self_mmap_size = 0;
 #endif
 
 #if defined(USE_MMAP_EXTERNAL)
