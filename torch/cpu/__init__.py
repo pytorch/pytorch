@@ -29,7 +29,23 @@ __all__ = [
     "StreamContext",
     "Event",
     "get_capabilities",
+    "release_unused_memory",
 ]
+
+
+def release_unused_memory() -> bool:
+    r"""Request that the built-in CPU allocator release unused memory.
+
+    The operation can be expensive. It does not release memory occupied by live
+    tensors. The amount of memory released, if any, depends on the allocator and
+    the thread that owns the unused memory.
+
+    Returns:
+        ``True`` if the active built-in allocator supports an explicit release
+        request and the request was issued; ``False`` otherwise. A ``True``
+        result does not imply that any memory was released.
+    """
+    return torch._C._cpu._release_unused_memory()
 
 
 @lru_cache(None)

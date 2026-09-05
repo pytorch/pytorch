@@ -7,6 +7,7 @@ import types
 import unittest
 import warnings
 from typing import Any
+from unittest import mock
 
 import torch
 import torch._dynamo.config as config
@@ -358,6 +359,25 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.trace_rules.lookup(load_object(name)),
                 SkipFunctionVariable,
             )
+
+    def test_cpu_release_unused_memory_graph_break(self):
+        self.assertIs(
+            torch._dynamo.trace_rules.lookup(torch.cpu.release_unused_memory),
+            SkipFunctionVariable,
+        )
+
+        def fn(x):
+            torch.cpu.release_unused_memory()
+            return x + 1
+
+        with mock.patch.object(
+            torch._C._cpu, "_release_unused_memory", return_value=False
+        ) as release:
+            compiled_fn = torch.compile(fn, backend="eager")
+            x = torch.ones(2)
+            self.assertEqual(compiled_fn(x), x + 1)
+            self.assertEqual(compiled_fn(x), x + 1)
+            self.assertEqual(release.call_count, 2)
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/114831")
     @unittest.skip(

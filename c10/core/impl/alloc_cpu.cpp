@@ -173,6 +173,17 @@ void free_cpu(void* data) {
 #endif
 }
 
+bool release_unused_cpu_memory() {
+#if defined(USE_MIMALLOC) && !defined(__ANDROID__)
+  mi_collect(true);
+  return true;
+#else
+  // On Android, alloc_cpu uses the platform allocation branch even if
+  // USE_MIMALLOC is defined.
+  return false;
+#endif
+}
+
 #ifdef USE_MIMALLOC_ON_MKL
 namespace mi_malloc_wrapper {
 void* c10_mi_malloc(size_t size) {

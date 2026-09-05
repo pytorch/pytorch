@@ -419,6 +419,7 @@ manual_torch_name_rule_map: dict[
     "torch.sparse_csr_tensor": SparseTensorCreationSkipVariable,
     "torch.sparse_compressed_tensor": SparseTensorCreationSkipVariable,
     "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
+    "torch.cpu.release_unused_memory": SkipFunctionVariable,
     "torch.xpu.get_rng_state": SkipFunctionVariable,
     "torch.xpu.set_rng_state": SkipFunctionVariable,
     "torch.library.wrap_triton": TorchInGraphFunctionVariable,
