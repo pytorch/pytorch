@@ -11,6 +11,7 @@ import torch.utils
 
 from ...utils._ordered_set import OrderedSet
 from .. import ir
+from ..cpu_vec_isa import pick_vec_isa, VecAMX
 from ..ir import TensorBox
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import parallel_num_threads
@@ -139,38 +140,102 @@ inline void {{kernel_name}}_mul_scale_kernel(
   }
 }
 
+// One row of flash-attention online softmax, shared by the AMX and non-AMX paths.
+// This only tracks the running max/sum.
+//   qk_row     -> this kv block's raw scores (overwritten in place)
+//   p_row      -> output probabilities, the A operand of the following P@V gemm
+//   row_max/row_sum -> running softmax statistics carried across kv blocks
+//   dst_row    -> running P@V accumulator that must be rescaled when row_max grows
+template <typename scalar_t, typename accum_t>
+inline void {{kernel_name}}_online_softmax_row(
+    accum_t* qk_row,
+    scalar_t* p_row,
+    int64_t cur_kvSplitSize,
+    accum_t& row_max,
+    accum_t& row_sum,
+    accum_t* dst_row,
+    int64_t headSize_v,
+    bool first_block,
+    bool need_pack) {
+  using Vec = at::vec::Vectorized<accum_t>;
+  accum_t block_max = -std::numeric_limits<accum_t>::infinity();
+  {{kernel_name}}_mul_reduce_max_fusion_kernel(
+      qk_row, static_cast<accum_t>(1), cur_kvSplitSize, qk_row, block_max);
+  accum_t new_max = row_max > block_max ? row_max : block_max;
+  if (new_max == -std::numeric_limits<accum_t>::infinity()) {
+    // Whole row masked out: emit zero probabilities and leave the stats
+    // untouched, which also avoids `nan = exp2f(-inf - (-inf))`.
+    {{kernel_name}}_fill_stub(p_row, static_cast<scalar_t>(0), cur_kvSplitSize);
+  } else {
+    // exp_reduce_sum seeds val with new_max, so it computes exp(qk - new_max)
+    // and returns sum() in block_sum.
+    accum_t block_sum = new_max;
+    {{kernel_name}}_exp_reduce_sum_fusion_kernel(
+        qk_row, cur_kvSplitSize, p_row, block_sum);
+    // Rescale the previous running sum/accumulator from row_max to new_max.
+    accum_t exp_tmp = std::exp(row_max - new_max);
+    row_sum = block_sum + exp_tmp * row_sum;
+    if (!first_block) {
+      at::vec::map<accum_t>(
+          [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
+          dst_row, dst_row, headSize_v);
+    }
+  }
+  row_max = new_max;
+  // P is the VNNI2 A operand of P@V; VNNI2 packs K in pairs, so an odd
+  // cur_kvSplitSize needs one zero-padded column to complete the last pair.
+  if (need_pack && cur_kvSplitSize % 2 != 0) {
+    p_row[cur_kvSplitSize] = static_cast<scalar_t>(0);
+  }
+}
+
 """
 
 BRGEMM_PACK_FUNCTIONS = r"""
-template <typename scalar_t>
+// Copy [rows, cols] -> [prows, pcols], zero-filling the row/column padding.
+// With do_scale, `scale` is folded into the copy. The AMX path uses that to pre-scale Q.
+// Non AMX paths pass do_scale = false and only pad.
+template <bool do_scale, typename scalar_t, typename accum_t>
 inline void {{kernel_name}}_copy_value_with_pad(
     const scalar_t* value_ptr,
     scalar_t* dst_ptr,
+    accum_t scale,
     int64_t rows,
     int64_t cols,
     int64_t prows,
     int64_t pcols,
     int64_t ldi) {
-  auto vec_size = at::vec::Vectorized<scalar_t>::size();
+  using Vec = at::vec::Vectorized<scalar_t>;
+  auto vec_size = Vec::size();
+  // accum_t == scalar_t off the reduced-dtype path, so this serves both branches.
+  auto vec_scale = at::vec::Vectorized<accum_t>(scale);
+  auto maybe_scale = [vec_scale](Vec v) {
+    if constexpr (!do_scale) {
+      return v;
+    } else if constexpr (c10::is_reduced_floating_point_v<scalar_t>) {
+      auto [v0, v1] = at::vec::convert_to_float<scalar_t>(v);
+      return at::vec::convert_from_float<scalar_t>(v0 * vec_scale, v1 * vec_scale);
+    } else {
+      return v * vec_scale;
+    }
+  };
   int64_t i = 0;
   for (; i < rows; i++) {
     int64_t j = 0;
     for (; j < cols - (cols % vec_size); j += vec_size) {
-      auto vec_v =
-          at::vec::Vectorized<scalar_t>::loadu(value_ptr + i * ldi + j);
-      vec_v.store(dst_ptr + i * pcols + j);
+      auto vec_v = Vec::loadu(value_ptr + i * ldi + j);
+      maybe_scale(vec_v).store(dst_ptr + i * pcols + j);
     }
 
     if (j < cols) {
-      auto vec_v = at::vec::Vectorized<scalar_t>::loadu(
-          value_ptr + i * ldi + j, cols - j);
-      vec_v.store(dst_ptr + i * pcols + j, cols - j);
+      auto vec_v = Vec::loadu(value_ptr + i * ldi + j, cols - j);
+      maybe_scale(vec_v).store(dst_ptr + i * pcols + j, cols - j);
     }
 
     // col padding
     auto psize = pcols - cols;
     if (psize > 0) {
-      auto zero_vec = at::vec::Vectorized<scalar_t>(0);
+      auto zero_vec = Vec(0);
       int64_t pj = 0;
       for (; pj < psize - (psize % vec_size); pj += vec_size) {
         zero_vec.store(dst_ptr + i * pcols + cols + pj);
@@ -182,7 +247,7 @@ inline void {{kernel_name}}_copy_value_with_pad(
   }
   // row padding
   for (; i < prows; i++) {
-    auto zero_vec = at::vec::Vectorized<scalar_t>(0);
+    auto zero_vec = Vec(0);
     int64_t j = 0;
     for (; j < pcols - (pcols % vec_size); j += vec_size) {
       zero_vec.store(dst_ptr + i * pcols + j);
@@ -212,9 +277,11 @@ INIT_PARAMS = r"""
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/Context.h>
+#include <ATen/cpu/Utils.h>
 {{template.codegen_micro_gemm(kernel.kernel_name)}}
 {{template.codegen_softmax_fusion(kernel.kernel_name)}}
 {{template.codegen_brgemm_pack_function(kernel.kernel_name)}}
+{{template.codegen_amx_helpers(kernel.kernel_name)}}
 {%- set kernel_args = {"query": query, "key": key, "value": value,
                        "kv_num_blocks": kv_num_blocks, "kv_indices": kv_indices,
                        "full_kv_num_blocks": full_kv_num_blocks, "full_kv_indices": full_kv_indices } %}
@@ -337,20 +404,42 @@ FLEX_ATTENTION_TEMPLATE = r"""
   int64_t ekvTail = need_pack && (kvTail % 2 != 0) ? kvTail + 1 : kvTail;
   int64_t kv_padding_size = (kvSize - 1) / kvSplitSize * ekvSplitSize + ekvTail;
 
+  // Check criteria for enabling AMX + AVX512 interleave in QK and Softmax
+{%- if amx_supported %}
+  static const bool amx_ok = at::cpu::init_amx();
+  bool use_amx_overlap = amx_ok
+      && need_pack
+      && std::is_same_v<scalar_t, at::BFloat16>
+      && (headSize % 32 == 0)
+      && (headSize_v % 32 == 0)
+      && (kvSplitSize % 32 == 0);
+{%- else %}
+  // Not compiled with -mamx-*, so no AMX code was emitted below.
+  constexpr bool use_amx_overlap = false;
+{%- endif %}
+
+  // AMX tiles always store in 16-row units, so a round up is applied
+  int64_t eqSplitSize = use_amx_overlap ? (qSplitSize + 15) / 16 * 16 : qSplitSize;
+
   // Allocate per thread temp buf (accumulate type)
   int64_t _size_per_thread =
-      /* qk     */ qSplitSize * kvSplitSize +
+      /* qk     */ eqSplitSize * kvSplitSize +
       /* qk_max */ qSplitSize +
       /* qk_sum */ qSplitSize +
-      /* dst    */ qSplitSize * headSize_v;
+      /* dst    */ eqSplitSize * headSize_v;
 
   // Buffers to store accum results, padding query and transpose/packing key/value
   {{template.codegen_allocate_buffer("buf_data", "accum_t", "num_thread*_size_per_thread")}}
-  {{template.codegen_allocate_buffer("buf_reduced_data", "scalar_t", "num_thread*qSplitSize*ekvSplitSize")}}
+  {{template.codegen_allocate_buffer("buf_reduced_data", "scalar_t", "num_thread*eqSplitSize*ekvSplitSize")}}
+{%- if amx_supported %}
+  // Double-buffers of the qk scores for overlapping; only the AMX path ping-pongs
+  int64_t qk_data2_size = use_amx_overlap ? num_thread*eqSplitSize*kvSplitSize : 0;
+  {{template.codegen_allocate_buffer("qk_data2_data", "accum_t", "qk_data2_size")}}
+{%- endif %}
   {{template.codegen_allocate_buffer("key_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*eheadSize*kvSize")}}
   {{template.codegen_allocate_buffer("value_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*kv_padding_size*headSize_v")}}
   {{template.codegen_allocate_buffer("transpose_buffer_ptr", "scalar_t", "num_thread*kvSplitSize*headSize")}}
-  {{template.codegen_allocate_buffer("query_padding_ptr", "scalar_t", "num_thread*qSplitSize*eheadSize")}}
+  {{template.codegen_allocate_buffer("query_padding_ptr", "scalar_t", "num_thread*eqSplitSize*eheadSize")}}
   if (need_pack) {
     // Pack K, V
     at::parallel_for(0, batchSize_k * num_head_k * kvSlice, 1, [&](int64_t begin, int64_t end) {
@@ -404,17 +493,29 @@ FLEX_ATTENTION_TEMPLATE = r"""
     at::native::data_index_init(begin, i, batchSize, j, num_head, k, qSlice);
     int ompIdx = at::get_thread_num();
     accum_t* buf_ptr = buf_data + ompIdx * _size_per_thread;
-    accum_t* qk_data = buf_ptr;
-    accum_t* qk_max_data = qk_data + qSplitSize * kvSplitSize;
+    accum_t* qk_data_buf = buf_ptr;
+    accum_t* qk_max_data = qk_data_buf + eqSplitSize * kvSplitSize;
     accum_t* qk_sum_data = qk_max_data + qSplitSize;
     accum_t* dst_data = qk_sum_data + qSplitSize;
     scalar_t *qk_reduced_data =
         is_reduced_type
-            ? buf_reduced_data + ompIdx * qSplitSize * ekvSplitSize
+            ? buf_reduced_data + ompIdx * eqSplitSize * ekvSplitSize
             : nullptr;
     scalar_t* query_t_padding_ptr = (!headSize_even && need_pack)
-            ? query_padding_ptr + ompIdx * qSplitSize * eheadSize
+            ? query_padding_ptr + ompIdx * eqSplitSize * eheadSize
             : nullptr;
+{%- if amx_supported %}
+    // amx_state is released at the end of each q-block so it never carries a stale tile config across a
+    // brgemm fallback (tail case).
+    AMXState amx_state;
+    // Ping-pong score buffers; qk_data2_data is unallocated off the AMX path
+    accum_t* amx_score_buf[2] = {
+        qk_data_buf,
+        use_amx_overlap ? qk_data2_data + ompIdx * eqSplitSize * kvSplitSize : nullptr};
+    scalar_t* scaled_q_ptr = use_amx_overlap
+            ? query_padding_ptr + ompIdx * eqSplitSize * eheadSize
+            : nullptr;
+{%- endif %}
 
     for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
       auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
@@ -450,19 +551,74 @@ FLEX_ATTENTION_TEMPLATE = r"""
         {{kernel.kernel_name}}_fill_stub(qk_sum_data,
             static_cast<accum_t>(0), cur_qSplitSize);
 
-        if (!headSize_even && need_pack) {
+        auto q_block_ptr = q_data + i * qStrideB + j * qStrideH + m * qStrideM;
+        if (use_amx_overlap) {
+{%- if amx_supported %}
+          // Pre-scale Q and round the rows up to a multiple of 16 so the AMX
+          // Q@K^T reads whole A tiles.
+          {{kernel.kernel_name}}_copy_value_with_pad<true>(
+            q_block_ptr,
+            scaled_q_ptr,
+            scaling_factor,
+            cur_qSplitSize,
+            headSize,
+            (cur_qSplitSize + 15) / 16 * 16,
+            eheadSize,
+            qStrideM);
+{%- endif %}
+        } else if (!headSize_even && need_pack) {
           // Pad query if headSize is not even
-          {{kernel.kernel_name}}_copy_value_with_pad<scalar_t>(
-            q_data + i * qStrideB + j * qStrideH + m * qStrideM,
+          {{kernel.kernel_name}}_copy_value_with_pad<false>(
+            q_block_ptr,
             query_t_padding_ptr,
+            static_cast<accum_t>(1),
             cur_qSplitSize,
             headSize,
             cur_qSplitSize,
             eheadSize,
-            qStrideM
-          );
+            qStrideM);
         }
       }
+
+{%- if amx_supported %}
+      // init variables for QK GEMM and Softmax overlapping
+      int amx_buf_sel = 0; // index for the ping-pong buffer
+      bool amx_pend = false; // a flag to indicate if there is any pending scoren[t - 1]
+      int64_t amx_pend_n = 0, amx_pend_n_idx = 0;
+      int64_t amx_pend_kvSplitSize = 0, amx_pend_ekvSplitSize = 0;
+      accum_t* amx_pend_buf = nullptr;
+      auto i_kv_qblk = is_broadcast_bs_kv ? i/bs_shards : i;
+      auto j_kv_qblk = is_broadcast_head_kv ? j/gqa_shards : j;
+
+
+      // Finishes the pending block's remaining softmax rows and PV
+      // Handle the tail cases and end-of-kv-loop
+      auto amx_drain_pending = [&](int64_t start_row) {
+        for (int64_t row = start_row; row < cur_qSplitSize; ++row) {
+          {{kernel.kernel_name}}_online_softmax_row<scalar_t>(
+              amx_pend_buf + row * amx_pend_kvSplitSize,
+              {{kernel.kernel_name}}_conditional_data_ptr(amx_pend_buf, qk_reduced_data) + row * amx_pend_ekvSplitSize,
+              amx_pend_kvSplitSize,
+              qk_max_data[row], qk_sum_data[row],
+              dst_data + row * headSize_v, headSize_v,
+              amx_pend_n_idx == 0, need_pack);
+        }
+        int64_t amx_pv_psize = amx_pend_n / kvSplitSize * ekvSplitSize;
+        const uint16_t* amx_p_ptr = reinterpret_cast<const uint16_t*>(
+            {{kernel.kernel_name}}_conditional_data_ptr(amx_pend_buf, qk_reduced_data));
+        const uint16_t* amx_v_ptr = reinterpret_cast<const uint16_t*>(
+            value_reorder_ptr + i_kv_qblk * num_head_k * kv_padding_size * headSize_v +
+            j_kv_qblk * kv_padding_size * headSize_v + amx_pv_psize * headSize_v);
+        if (amx_pend_n_idx > 0) {
+          {{kernel.kernel_name}}_amx_gemm<true>(amx_state, amx_p_ptr, amx_v_ptr, dst_data,
+              cur_qSplitSize, headSize_v, amx_pend_ekvSplitSize, amx_pend_ekvSplitSize, headSize_v, headSize_v);
+        } else {
+          {{kernel.kernel_name}}_amx_gemm<false>(amx_state, amx_p_ptr, amx_v_ptr, dst_data,
+              cur_qSplitSize, headSize_v, amx_pend_ekvSplitSize, amx_pend_ekvSplitSize, headSize_v, headSize_v);
+        }
+        amx_pend = false;
+      };
+{%- endif %}
 
 {%- if has_full_kv_block %}
       for (int64_t n_idx = 0; n_idx < kv_indice_num + full_kv_indice_num ; n_idx += 1) {
@@ -480,7 +636,65 @@ FLEX_ATTENTION_TEMPLATE = r"""
         auto i_kv = is_broadcast_bs_kv ? i/bs_shards : i;
         auto j_kv = is_broadcast_head_kv ? j/gqa_shards : j;
 
-        if (!need_pack) {
+        // AMX overlap
+        bool amx_this_block = use_amx_overlap && (cur_kvSplitSize % 32 == 0);
+{%- if amx_supported %}
+        accum_t* qk_data = amx_this_block ? amx_score_buf[amx_buf_sel] : qk_data_buf;
+{%- else %}
+        accum_t* qk_data = qk_data_buf;
+{%- endif %}
+
+{%- if amx_supported %}
+        // Remove resources if fall back to brgemm is required
+        if (use_amx_overlap && !amx_this_block && amx_pend) {
+          amx_drain_pending(0);
+          amx_state.release([]() { _tile_release(); });
+        }
+{%- endif %}
+
+        // Interleave the QK[t] and Softmax(score[t - 1]) within this KV loop
+        if (amx_this_block) {
+{%- if amx_supported %}
+          int64_t amx_soft_row = 0;
+          int64_t amx_nsteps = (cur_qSplitSize + 31) / 32 * (cur_kvSplitSize / 32) * (headSize / 32);
+          int64_t amx_rows_per_step = amx_nsteps > 0 ? (cur_qSplitSize + amx_nsteps - 1) / amx_nsteps : cur_qSplitSize;
+          if (amx_rows_per_step < 1) amx_rows_per_step = 1;
+          // Define the callback function to overlap QK[t] and Softmax(score[t - 1])
+          auto amx_softmax_cb = [&]() {
+            if (!amx_pend) return;
+            int64_t rend = amx_soft_row + amx_rows_per_step;
+            for (; amx_soft_row < rend && amx_soft_row < cur_qSplitSize; ++amx_soft_row) {
+              {{kernel.kernel_name}}_online_softmax_row<scalar_t>(
+                  amx_pend_buf + amx_soft_row * amx_pend_kvSplitSize,
+                  {{kernel.kernel_name}}_conditional_data_ptr(amx_pend_buf, qk_reduced_data) + amx_soft_row * amx_pend_ekvSplitSize,
+                  amx_pend_kvSplitSize,
+                  qk_max_data[amx_soft_row], qk_sum_data[amx_soft_row],
+                  dst_data + amx_soft_row * headSize_v, headSize_v,
+                  amx_pend_n_idx == 0, need_pack);
+            }
+          };
+          // Execute the GEMM and Softmax
+          {{kernel.kernel_name}}_amx_gemm_cb<false>(
+              amx_state,
+              reinterpret_cast<const uint16_t*>(scaled_q_ptr),
+              reinterpret_cast<const uint16_t*>(
+                  key_reorder_ptr + i_kv * num_head_k * eheadSize * kvSize +
+                  j_kv * eheadSize * kvSize + n * eheadSize),
+              qk_data,
+              cur_qSplitSize,
+              cur_kvSplitSize,
+              headSize,
+              eheadSize,
+              cur_kvSplitSize,
+              cur_kvSplitSize,
+              amx_softmax_cb);
+          // Finish the previous block: any softmax rows the callback did not
+          // reach, then its deferred P@V (now that its P is complete).
+          if (amx_pend) {
+            amx_drain_pending(amx_soft_row);
+          }
+{%- endif %}
+        } else if (!need_pack) {
           auto k_addr =
               k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
 
@@ -514,7 +728,11 @@ FLEX_ATTENTION_TEMPLATE = r"""
               need_pack);
         }
 
-        {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(qk_data, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
+        // scale already folded into Q for the AMX path; only the brgemm/micro-gemm
+        // paths still need the explicit score scaling here.
+        if (!amx_this_block) {
+          {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(qk_data, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
+        }
 
 {%- if score_mod and mask_mod %}
         // TODO: reduce the number of calls of q_idx and kv_idx initialization
@@ -555,110 +773,106 @@ FLEX_ATTENTION_TEMPLATE = r"""
         }
 
 {%- endif %}
-        // Update coefficients with Softmax
-        accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
-        for (int64_t row = 0; row < cur_qSplitSize; ++row) {
-          // apply scaling factor and max per row in fusion
-          {{kernel.kernel_name}}_mul_reduce_max_fusion_kernel(
-              qk_data + row * cur_kvSplitSize,
-              static_cast<accum_t>(1),
-              cur_kvSplitSize,
-              qk_data + row * cur_kvSplitSize,
-              tmp_max);
-          tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
-          if (tmp_max == -std::numeric_limits<accum_t>::infinity()) {
-            // to avoid `nan = exp2f(-inf - (-inf))`
-            {{kernel.kernel_name}}_fill_stub(
-              {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data) + row * cur_ekvSplitSize,
-              static_cast<scalar_t>(0), cur_kvSplitSize);
-          } else {
-            tmp_sum = tmp_max;
-            // qk <- exp(qk - max) and sum per row
-            {{kernel.kernel_name}}_exp_reduce_sum_fusion_kernel(
-              qk_data + row * cur_kvSplitSize, cur_kvSplitSize,
-              {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data) + row * cur_ekvSplitSize,
-              tmp_sum);
-            // exp_tmp <- exp(max[row] - max)
-            exp_tmp = std::exp(qk_max_data[row] - tmp_max);
-            // sum[row] <- sum + exp_tmp * sum[row]
-            qk_sum_data[row] = tmp_sum + exp_tmp * qk_sum_data[row];
-            // max[row] <- max
-            qk_max_data[row] = tmp_max;
-            // dst <- dst * exp_tmp
-            if (n_idx > 0) {
-              at::vec::map<accum_t>(
-              [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
-              dst_data + row * headSize_v,
-              dst_data + row * headSize_v,
-              headSize_v);
-            }
+        if (amx_this_block) {
+{%- if amx_supported %}
+          // Overlap path: scores + mods for this block are done; defer its online
+          // softmax and P@V to the next block's QK GEMM (interleaved above). Just
+          // record it as pending and flip to the other score buffer.
+          amx_pend = true;
+          amx_pend_n = n;
+          amx_pend_n_idx = n_idx;
+          amx_pend_kvSplitSize = cur_kvSplitSize;
+          amx_pend_ekvSplitSize = cur_ekvSplitSize;
+          amx_pend_buf = qk_data;
+          amx_buf_sel ^= 1;
+{%- endif %}
+        } else {
+          // Update coefficients with Softmax
+          for (int64_t row = 0; row < cur_qSplitSize; ++row) {
+            {{kernel.kernel_name}}_online_softmax_row<scalar_t>(
+                qk_data + row * cur_kvSplitSize,
+                {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data) + row * cur_ekvSplitSize,
+                cur_kvSplitSize,
+                qk_max_data[row], qk_sum_data[row],
+                dst_data + row * headSize_v, headSize_v,
+                n_idx == 0, need_pack);
           }
-          if (need_pack && cur_kvSplitSize % 2 != 0) {
-            // Pad: [qSplitSize, cur_kvSplitSize] -> [qSplitSize, cur_kvSplitSize + 1]
-            *(qk_reduced_data + row * (1 + cur_kvSplitSize) + cur_kvSplitSize) = scalar_t(0);
-          }
-        }
-        // Calculate Softmax(q @ k.T) @ v
-        if (!need_pack) {
-          auto v_addr =
-              v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
-          // Fallback Half brgemm is slower than micro gemm
-          if (!std::is_same_v<scalar_t, at::Half>) {
-            at::native::cpublas::brgemm(
+          // Calculate Softmax(q @ k.T) @ v (non-AMX paths; the AMX path defers P@V)
+          if (!need_pack) {
+            auto v_addr =
+                v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
+            // Fallback Half brgemm is slower than micro gemm
+            if (!std::is_same_v<scalar_t, at::Half>) {
+              at::native::cpublas::brgemm(
+                    cur_qSplitSize,
+                    headSize_v,
+                    cur_ekvSplitSize,
+                    cur_ekvSplitSize,
+                    vStrideN,
+                    headSize_v,
+                    n_idx > 0,
+                    {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
+                    v_addr,
+                    dst_data,
+                    need_pack);
+            } else {
+              if (n_idx > 0) {
+                {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(true)>(
+                  {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
+                  v_addr,
+                  dst_data,
                   cur_qSplitSize,
                   headSize_v,
                   cur_ekvSplitSize,
                   cur_ekvSplitSize,
                   vStrideN,
-                  headSize_v,
-                  n_idx > 0,
+                  headSize_v);
+              } else {
+                {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(false)>(
                   {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
                   v_addr,
                   dst_data,
-                  need_pack);
-          } else {
-            if (n_idx > 0) {
-              {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(true)>(
-                {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
-                v_addr,
-                dst_data,
-                cur_qSplitSize,
-                headSize_v,
-                cur_ekvSplitSize,
-                cur_ekvSplitSize,
-                vStrideN,
-                headSize_v);
-            } else {
-              {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(false)>(
-                {{kernel.kernel_name}}_conditional_data_ptr(qk_data, qk_reduced_data),
-                v_addr,
-                dst_data,
-                cur_qSplitSize,
-                headSize_v,
-                cur_ekvSplitSize,
-                cur_ekvSplitSize,
-                vStrideN,
-                headSize_v);
+                  cur_qSplitSize,
+                  headSize_v,
+                  cur_ekvSplitSize,
+                  cur_ekvSplitSize,
+                  vStrideN,
+                  headSize_v);
+              }
             }
+          } else {
+            int64_t psize = n / kvSplitSize * ekvSplitSize;
+            at::native::cpublas::brgemm(
+                cur_qSplitSize,
+                headSize_v,
+                cur_ekvSplitSize,
+                cur_ekvSplitSize,
+                headSize_v,
+                headSize_v,
+                n_idx > 0,
+                qk_reduced_data,
+                value_reorder_ptr +
+                    i_kv * num_head_k * kv_padding_size * headSize_v +
+                    j_kv * kv_padding_size * headSize_v + psize * headSize_v,
+                dst_data,
+                need_pack);
           }
-        } else {
-          int64_t psize = n / kvSplitSize * ekvSplitSize;
-          at::native::cpublas::brgemm(
-              cur_qSplitSize,
-              headSize_v,
-              cur_ekvSplitSize,
-              cur_ekvSplitSize,
-              headSize_v,
-              headSize_v,
-              n_idx > 0,
-              qk_reduced_data,
-              value_reorder_ptr +
-                  i_kv * num_head_k * kv_padding_size * headSize_v +
-                  j_kv * kv_padding_size * headSize_v + psize * headSize_v,
-              dst_data,
-              need_pack);
-        }
+        }  // end else (non-AMX softmax + P@V)
+      }  // end for n_idx (KV blocks)
+
+{%- if amx_supported %}
+      // Drain the last pending AMX block: its softmax + P@V were deferred waiting
+      // for a next-block QK to interleave with, but it is the final block.
+      if (amx_pend) {
+        amx_drain_pending(0);
       }
+
+      // Release AMX tiles held by this q-block's GEMMs so a subsequent brgemm
+      // fallback (or the next q-block) starts from a clean tile configuration.
+      if (use_amx_overlap) {
+        amx_state.release([]() { _tile_release(); });
+      }
+{%- endif %}
 
       // dst <- dst / sum[row]
       // reorder MHA output with strides
@@ -1150,7 +1364,9 @@ class CppFlexAttentionTemplate(CppTemplate):
             if self.has_other_buffer
             else None
         )
-        self.other_ptr_data = {}  # type: ignore[var-annotated]
+        self.other_ptr_data = {}
+        # Gate every AMX region on the ISA inductor will compile with.
+        self.amx_supported = isinstance(pick_vec_isa(), VecAMX)
 
     def update_kernel_args(self, kernel_args):
         kernel_args.update(
@@ -1439,6 +1655,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             score_buf_idx=self.score_buf_idx,
             mask_buf_idx=self.mask_buf_idx,
             partition_size=self.partition_size,
+            amx_supported=self.amx_supported,
         )
         with contextlib.ExitStack() as stack:
             for buf in self.fake_buffers:
@@ -1461,6 +1678,14 @@ class CppFlexAttentionTemplate(CppTemplate):
         return self._template_from_string(BRGEMM_PACK_FUNCTIONS).render(
             dict(kernel_name=kernel_name)
         )
+
+    def codegen_amx_helpers(self, kernel_name: str):
+        # AMX/AVX-512 interleaving GEMM helpers
+        if not self.amx_supported:
+            return ""
+        from .cpp_flex_attention_amx import codegen_flex_attention_amx_helpers
+
+        return codegen_flex_attention_amx_helpers(kernel_name)
 
     def codegen_allocate_buffer(self, buffer_name: str, buffer_dtype, buffer_size):
         return self._template_from_string(ALLOCATE_BUFFER).render(
