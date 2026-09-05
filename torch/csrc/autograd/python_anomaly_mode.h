@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pybind11/pybind11.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
@@ -16,12 +17,13 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
     // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
     dict_ = PyDict_New();
   }
-  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~PyAnomalyMetadata() override {
     // If python is already dead, leak the wrapped python objects
     if (Py_IsInitialized()) {
-      pybind11::gil_scoped_acquire gil;
-      Py_DECREF(dict_);
+      torch::detail::SafeGilScopedAcquire gil;
+      if (gil) {
+        Py_DECREF(dict_);
+      }
     }
   }
   void store_stack() override;
