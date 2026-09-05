@@ -1,37 +1,16 @@
 # Owner(s): ["oncall: pt2"]
-import ast
-import base64
-import contextlib
-import copy
-import functools
-import gc
-import hashlib
 import importlib
-import inspect
 import io
 import linecache
-import os
 import pickle
-import subprocess
 import sys
-import tempfile
-import textwrap
-import threading
 import types
 import typing
-import unittest
-import warnings
-import weakref
 from unittest import mock
 
 import torch
 import torch.utils._pytree as _pytree
-from torch._dynamo.decorators import mark_dynamic, mark_unbacked
-from torch._dynamo.precompile_context import PrecompileContext
 from torch._precompile import PrecompileError
-from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -39,7 +18,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 # A module-level (global) model + a function referencing it, to exercise the
@@ -172,7 +150,6 @@ def _multigraph_step(m, x, scale=2.0):
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompile(TestCase):
-
     def test_summary_types_pickle(self):
         # A capture summary or invariants report is the kind of value users
         # stash next to an artifact (torch.save of a diagnostics record, a
