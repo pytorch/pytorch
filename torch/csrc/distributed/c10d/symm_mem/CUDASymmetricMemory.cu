@@ -49,28 +49,44 @@ AllocationRef::~AllocationRef() {
   if (is_finalizing()) {
     return;
   }
-  c10::cuda::CUDAGuard guard(device_idx);
-  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  // Destructors are implicitly noexcept, so a throwing CHECK here would call
+  // std::terminate() and mask the error that made the process exit in the
+  // first place (see #195824). The CUDA context may already be unusable at
+  // this point, so warn and leak instead of throwing.
+  try {
+    c10::cuda::CUDAGuard guard(device_idx);
+    C10_CUDA_CHECK_WARN(cudaDeviceSynchronize());
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  // Leak the cuda allocations during static deinitialization
-  auto driver_api = c10::cuda::DriverAPI::get();
-  C10_CUDA_DRIVER_CHECK(
-      driver_api->cuMemUnmap_(reinterpret_cast<CUdeviceptr>(ptr), block_size));
+    auto driver_api = c10::cuda::DriverAPI::get();
+    C10_CUDA_DRIVER_CHECK_WARN(
+        driver_api->cuMemUnmap_(reinterpret_cast<CUdeviceptr>(ptr), block_size),
+        "SymmetricMemory: failed to unmap allocation during teardown");
 #if defined(CUDART_SUPPORTS_MULTICAST)
-  if (is_multicast) {
-    C10_CUDA_DRIVER_CHECK(
-        driver_api->cuMulticastUnbind_(handle, device_idx, 0, block_size));
-  }
+    if (is_multicast) {
+      C10_CUDA_DRIVER_CHECK_WARN(
+          driver_api->cuMulticastUnbind_(handle, device_idx, 0, block_size),
+          "SymmetricMemory: failed to unbind multicast during teardown");
+    }
 #endif
-  C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(handle));
+    C10_CUDA_DRIVER_CHECK_WARN(
+        driver_api->cuMemRelease_(handle),
+        "SymmetricMemory: failed to release allocation during teardown");
 #elif defined(USE_ROCM)
-  C10_CUDA_CHECK(
-      hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
-  C10_CUDA_CHECK(hipMemRelease(handle));
+    C10_CUDA_CHECK_WARN(
+        hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
+    C10_CUDA_CHECK_WARN(hipMemRelease(handle));
 #else
-  TORCH_CHECK(
-      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
+    TORCH_CHECK(
+        false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
+  } catch (const std::exception& e) {
+    TORCH_WARN(
+        "AllocationRef::~AllocationRef() ignoring error during teardown: ",
+        e.what());
+  } catch (...) {
+    TORCH_WARN(
+        "AllocationRef::~AllocationRef() ignoring unknown error during teardown");
+  }
 }
 
 CUDAPeerAllocInfo::CUDAPeerAllocInfo(
