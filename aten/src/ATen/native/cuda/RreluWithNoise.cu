@@ -78,7 +78,7 @@ inline void _rrelu_with_noise_cuda_train(
   Tensor tmp_output = output.contiguous();
 
   int64_t numel = input.numel();
-  const int unroll_factor = std::is_same_v<scalar_t, double> ? 2 : 4;
+  constexpr int unroll_factor = std::is_same_v<scalar_t, double> ? 2 : 4;
   auto [counter_offset, grid, block] = calc_execution_policy(numel, unroll_factor);
 
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(
@@ -99,8 +99,8 @@ inline void _rrelu_with_noise_cuda_train(
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  if (std::is_same_v<scalar_t, double>) {
-    rrelu_with_noise_cuda_kernel<scalar_t, 2><<<grid, block, 0, stream>>>(
+  if constexpr (std::is_same_v<scalar_t, double>) {
+    rrelu_with_noise_cuda_kernel<scalar_t, unroll_factor><<<grid, block, 0, stream>>>(
         numel,
         rng_engine_inputs,
         output_data,
@@ -114,7 +114,7 @@ inline void _rrelu_with_noise_cuda_train(
         C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     // half and float
-    rrelu_with_noise_cuda_kernel<scalar_t, 4><<<grid, block, 0, stream>>>(
+    rrelu_with_noise_cuda_kernel<scalar_t, unroll_factor><<<grid, block, 0, stream>>>(
         numel,
         rng_engine_inputs,
         output_data,
