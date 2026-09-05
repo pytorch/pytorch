@@ -984,11 +984,6 @@ endif()
 
 
 
-# ---[ Android specific ones
-if(ANDROID)
-  list(APPEND Caffe2_DEPENDENCY_LIBS log)
-endif()
-
 # ---[ LLVM
 if(USE_LLVM)
   message(STATUS "Looking for LLVM in ${USE_LLVM}")
