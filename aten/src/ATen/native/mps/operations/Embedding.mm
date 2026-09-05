@@ -30,6 +30,10 @@ Tensor embedding_dense_backward_mps(const Tensor& grad_,
                                     bool scale_grad_by_freq) {
   using namespace at::native::mps;
 
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic due to atomic_add
+  at::globalContext().alertNotDeterministic("embedding_dense_backward_mps");
+
   auto indices_arg = TensorArg(indices, "indices", 2);
   checkScalarTypes("embedding_backward", indices_arg, {kLong, kInt});
   auto grad_arg = TensorArg(grad_, "grad", 1);
