@@ -127,7 +127,7 @@ def _try_except_tf_mode_template(dummy: Any) -> None:
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
     stack_index: int
-    target_values: tuple[Any, ...] | None = None
+    target_values: tuple[object, ...] | None = None
 
     def try_except_torch_function_mode(
         self, code_options: CodeOptions, cleanup: list[Instruction]
@@ -163,8 +163,7 @@ class ReenterWith:
             exit context
         """
         # NOTE: we assume that TOS is a context manager CLASS!
-        # pyrefly: ignore [implicit-any]
-        load_args = []
+        load_args: list[Instruction] = []
         if self.target_values:
             load_args = [create_load_const(val) for val in self.target_values]
         ctx_name = unique_id(f"___context_manager_{self.stack_index}")
@@ -206,8 +205,7 @@ class ReenterWith:
             (rest)
         """
         # NOTE: we assume that TOS is a context manager CLASS!
-        # pyrefly: ignore [implicit-any]
-        load_args = []
+        load_args: list[Instruction] = []
         if self.target_values:
             load_args = [create_load_const(val) for val in self.target_values]
 
@@ -298,7 +296,7 @@ def _filter_iter(
     return res
 
 
-def _load_tuple_and_call(tup: tuple[Any, ...]) -> list[Instruction]:
+def _load_tuple_and_call(tup: tuple[object, ...]) -> list[Instruction]:
     insts: list[Instruction] = []
     _initial_push_null(insts)
     insts.extend(create_load_const(val) for val in tup)
@@ -334,8 +332,8 @@ class ContinueExecutionCache:
         argnames_null: tuple[str, ...],
         setup_fns: tuple[ReenterWith, ...],
         handle_inactive_ctx: bool,
-        stack_ctx_vars: tuple[tuple[int, tuple[Any, ...]], ...],
-        argnames_ctx_vars: tuple[tuple[str, tuple[Any, ...]], ...],
+        stack_ctx_vars: tuple[tuple[int, tuple[object, ...]], ...],
+        argnames_ctx_vars: tuple[tuple[str, tuple[object, ...]], ...],
         null_idxes: tuple[int, ...],
         # mainly used to ensure distinct code objects per stack trace,
         # which prevents excessive recompilation of inner frames

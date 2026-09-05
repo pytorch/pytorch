@@ -11,6 +11,7 @@ from collections import defaultdict, namedtuple, OrderedDict, UserDict
 from collections.abc import Callable
 from functools import partial
 from typing import Any, NamedTuple
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
@@ -22,6 +23,7 @@ import torch.utils.checkpoint
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
+from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     make_dynamo_test,
@@ -985,6 +987,93 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_weakkeydict_attr_proxy_key(self):
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+        root = Root()
+        tracer = _ModuleStackTracer(root)
+        proxy = tracer.proxy_type(root.child, "child")
+        states = weakref.WeakKeyDictionary({proxy: 1})
+
+        def fn(d, key, x):
+            offset = d[key]
+            return key(x) + offset
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(states, proxy, x), opt_fn(states, proxy, x))
+
+        sin_node = next(
+            node for node in backend.graphs[0].graph.nodes if node.name == "sin"
+        )
+        module_paths = [path for path, _ in sin_node.meta["nn_module_stack"].values()]
+        key_source = (
+            "L['args'][1]"
+            if torch._dynamo.config.debug_force_nested_calls
+            else "L['key']"
+        )
+        self.assertEqual(module_paths, [f"{key_source}.get_base()"])
+
+    def test_attr_proxy_cross_scope_reuse_guard(self):
+        class Cell(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.value = torch.tensor(-1.0)
+
+        first = Cell()
+        second = Cell()
+        tracer = _ModuleStackTracer(torch.nn.Module())
+        local_proxy = tracer.proxy_type(first, "local")
+        global_proxy = tracer.proxy_type(first, "global")
+        other_global_proxy = tracer.proxy_type(second, "other")
+
+        def local_proxy_first(proxy, x):
+            proxy.value = x
+            return _attr_proxy_global.value + 1  # noqa: F821
+
+        counter = torch._dynamo.testing.CompileCounter()
+        with patch.dict(
+            local_proxy_first.__globals__, {"_attr_proxy_global": global_proxy}
+        ):
+            opt_fn = torch.compile(local_proxy_first, backend=counter, fullgraph=True)
+
+            self.assertEqual(opt_fn(local_proxy, torch.tensor(2.0)), torch.tensor(3.0))
+            self.assertEqual(counter.frame_count, 1)
+
+            local_proxy_first.__globals__["_attr_proxy_global"] = other_global_proxy
+            first.value = torch.tensor(-1.0)
+            second.value = torch.tensor(-1.0)
+
+            self.assertEqual(opt_fn(local_proxy, torch.tensor(5.0)), torch.tensor(0.0))
+            self.assertEqual(counter.frame_count, 2)
+
+        def global_proxy_first(module, x):
+            _attr_proxy_global.value = x  # noqa: F821
+            return module.value + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        with patch.dict(
+            global_proxy_first.__globals__, {"_attr_proxy_global": global_proxy}
+        ):
+            opt_fn = torch.compile(global_proxy_first, backend=counter, fullgraph=True)
+
+            self.assertEqual(opt_fn(first, torch.tensor(2.0)), torch.tensor(3.0))
+            self.assertEqual(counter.frame_count, 1)
+
+            first.value = torch.tensor(-1.0)
+            second.value = torch.tensor(-1.0)
+
+            self.assertEqual(opt_fn(second, torch.tensor(5.0)), torch.tensor(0.0))
+            self.assertEqual(counter.frame_count, 2)
 
     def test_construct_user_dict_and_return(self):
         def fn(x):
@@ -2484,7 +2573,13 @@ class DictTests(torch._dynamo.test_case.TestCase):
         graph = fx.Graph()
         x = graph.placeholder("x")
 
-        pure_call = graph.call_function(torch.relu, (x,))
+        # Reorderable call_function nodes must carry a tensor or symbolic
+        # example_value/val, as Dynamo attaches to every data-producing node.
+        def pure(node):
+            node.meta["example_value"] = torch.empty(0)
+            return node
+
+        pure_call = pure(graph.call_function(torch.relu, (x,)))
         self.assertTrue(_is_safe_to_reorder(pure_call))
 
         inplace_method = graph.call_method("add_", (x, x))
@@ -2497,10 +2592,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(_is_safe_to_reorder(iadd_node))
 
         # operator.invert is pure despite starting with "i"
-        invert_node = graph.call_function(operator.invert, (x,))
+        invert_node = pure(graph.call_function(operator.invert, (x,)))
         self.assertTrue(_is_safe_to_reorder(invert_node))
 
-        index_node = graph.call_function(operator.index, (x,))
+        index_node = pure(graph.call_function(operator.index, (x,)))
         self.assertTrue(_is_safe_to_reorder(index_node))
 
         # out= kwarg makes a node unsafe
@@ -2515,11 +2610,38 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(_is_safe_to_reorder(no_input_node))
 
         # _add_batch_dim / _remove_batch_dim are barriers
-        add_batch = graph.call_function(torch._add_batch_dim, (x, x, x))
+        add_batch = pure(graph.call_function(torch._add_batch_dim, (x, x, x)))
         self.assertFalse(_is_safe_to_reorder(add_batch))
 
-        remove_batch = graph.call_function(torch._remove_batch_dim, (x, x, x, x))
+        remove_batch = pure(graph.call_function(torch._remove_batch_dim, (x, x, x, x)))
         self.assertFalse(_is_safe_to_reorder(remove_batch))
+
+        # State functions that consume the token produced by their enter node
+        # (so the no-node-arguments heuristic misses them) are barriers:
+        # inference_mode via _side_effectful_functions, arbitrary ones (e.g.
+        # _sdpa_kernel, _maybe_exchange_device) via the lack of a tensor or
+        # symbolic example_value/val.
+        enter_node = graph.call_function(
+            torch.autograd.grad_mode._enter_inference_mode, (True,)
+        )
+        self.assertFalse(_is_safe_to_reorder(enter_node))
+        exit_node = graph.call_function(
+            torch.autograd.grad_mode._exit_inference_mode, (enter_node,)
+        )
+        self.assertFalse(_is_safe_to_reorder(exit_node))
+
+        def _fake_exit_fn(token):
+            pass
+
+        token_consumer = graph.call_function(_fake_exit_fn, (no_input_node,))
+        self.assertFalse(_is_safe_to_reorder(token_consumer))
+        self.assertTrue(_is_safe_to_reorder(pure(token_consumer)))
+
+        # HOPs are exempt from the value heuristic: graph passes (e.g. graph
+        # deduplication) create invoke_subgraph nodes without example_value/val.
+        hop = torch.ops.higher_order.invoke_subgraph
+        hop_node = graph.call_function(hop, (x, "subgraph_0", x))
+        self.assertTrue(_is_safe_to_reorder(hop_node))
 
 
 instantiate_parametrized_tests(DictTests)

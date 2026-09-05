@@ -834,6 +834,24 @@ def optim_error_inputs_func_asgd(device, dtype):
                 error_type=ValueError,
                 error_regex="Invalid weight_decay value: -0.5",
             ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, lambd=-0.5),
+                    desc="lambd should > 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid lambd value: -0.5",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, alpha=-0.5),
+                    desc="alpha should > 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid alpha value: -0.5",
+            ),
         ]
     return error_inputs
 

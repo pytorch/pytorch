@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
-from torch._inductor.utils import get_current_backend, sympy_product
+from torch._inductor.utils import get_current_backend, is_bf16x9_matmul, sympy_product
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
@@ -136,7 +136,10 @@ def scale_mm_epilogue():
 
 
 def use_native_matmul(mat1, mat2):
-    if not config.triton.native_matmul:
+    if (
+        is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
+        or not config.triton.native_matmul
+    ):
         return False
 
     # If tma matmul is on, don't do native matmul
@@ -177,7 +180,7 @@ def use_native_matmul(mat1, mat2):
     # If the shape has unbacked symbols, don't do native matmul.
     # This is related to the behavior of statically_known_multiple_of on unbacked symints.
     # Since statically_known_multiple_of just returns False for unbacked symbols
-    # due to the expensive cost, codegen fails when there is a unbacked symbol.
+    # due to the expensive cost, codegen fails when there is an unbacked symbol.
     # In particular, it fails at _split_iteration_ranges in codegen/simd.py.
     # See this : https://github.com/pytorch/pytorch/pull/131649
     if any(map(has_free_unbacked_symbols, [m, k, n])):

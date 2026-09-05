@@ -20,9 +20,12 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    _descriptor_shape_fits_in_int32,
+    _tma_descriptor_max_offset_fits_in_int32,
     get_gpu_shared_memory,
     get_num_sms,
     has_free_symbols,
+    is_bf16x9_matmul,
     use_aten_gemm_kernels,
     use_blackwell_cutedsl_grouped_mm,
     use_nv_universal_gemm_template,
@@ -53,7 +56,6 @@ _NV_CONFIGS = [
             "BLOCK_M": block_size_m,
             "BLOCK_N": block_size_n,
             "BLOCK_K": block_size_k,
-            "NUM_CONSUMER_GROUPS": 1,
         },
         num_stages=num_stages,
         num_warps=num_warps,
@@ -74,13 +76,11 @@ def early_config_prune(g, m, dtsize, configs, named_args):
     pruned_configs = []
     for config in configs:
         kw = config.kwargs
-        BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, num_consumer_groups = (
+        BLOCK_M, BLOCK_N, BLOCK_K, num_stages = (
             kw["BLOCK_M"],
             kw["BLOCK_N"],
             kw["BLOCK_K"],
             config.num_stages,
-            config.num_warps,
-            getattr(config, "num_consumer_groups", 0),
         )
 
         # 1. Prune NV configs depending on g and m.
@@ -106,19 +106,6 @@ def early_config_prune(g, m, dtsize, configs, named_args):
         required_shared_memory = (BLOCK_M + BLOCK_N) * BLOCK_K * num_stages * dtsize
         if required_shared_memory > max_shared_memory:
             continue
-
-        use_warp_specialization = num_consumer_groups >= 1
-
-        # 3. make sure we can partition for ws
-        if use_warp_specialization:
-            if num_warps != 4:
-                continue
-
-            # "tritongpu-warp-spec-data-partition"
-            m_slice = BLOCK_M // num_consumer_groups
-            n_slice = BLOCK_N // num_consumer_groups
-            if m_slice < 64 and n_slice < 256:
-                continue
 
         pruned_configs.append(config)
 
@@ -387,6 +374,15 @@ def _tuned_grouped_mm_common(
         use_fast_accum = False
 
     choices: list[ChoiceCaller] = []
+    # Native _grouped_mm accepts FP32 even though its current meta function is
+    # narrower. Keep that path safe when the meta contract is corrected.
+    if is_bf16x9_matmul(mat_a.get_device().type, mat_a.get_dtype()):
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        choices.append(aten_choice)
+        node, _ = autotune_select_algorithm(
+            algorithm_name, choices, input_nodes, layout
+        )
+        return node
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 
@@ -441,8 +437,14 @@ def _tuned_grouped_mm_common(
             tl, "_experimental_make_tensor_descriptor"
         )
         use_tma_load = (
-            triton_has_make_tensor_descriptor
-            or triton_has_experimental_make_tensor_descriptor
+            (
+                triton_has_make_tensor_descriptor
+                or triton_has_experimental_make_tensor_descriptor
+            )
+            and _descriptor_shape_fits_in_int32(mat_a.get_size(), add_guards=True)
+            and _descriptor_shape_fits_in_int32(mat_b.get_size(), add_guards=True)
+            and _tma_descriptor_max_offset_fits_in_int32(mat_a, add_guards=True)
+            and _tma_descriptor_max_offset_fits_in_int32(mat_b, add_guards=True)
         )
         kwargs = {
             "SCALED": scaled,

@@ -104,6 +104,44 @@ inline const char* BLASTypeName(c10::complex<float> v) {
   return "f32_r";
 }
 
+inline std::string MaybeWildcardInt(int64_t value, bool wildcard) {
+  return wildcard ? "*" : c10::str(value);
+}
+
+inline bool UsesMForLda(char transa) {
+  // lda is the leading dim of A. For non-transposed A (transa == 'N'), A is
+  // laid out with lda >= m, so lda tracks M; for transposed A (transa == 'T'),
+  // lda >= k, so lda tracks K. This mirrors GetSizeA's stride computation.
+  return transa == 'N' || transa == 'n';
+}
+
+inline bool UsesKForLdb(char transb) {
+  return transb == 'N' || transb == 'n';
+}
+
+// A leading dim is "tight" (equals its logical extent, no independent padding)
+// only when lda==m/k, ldb==k/n, ldc==m. Wildcard a leading dim only when it is
+// tight AND tracks a dynamic logical dim. A padded leading dim is not a
+// function of m/n/k, so replacing it with '*' would let the entry match shapes
+// with different padding/alignment -- exactly the input that decides hipBLASLt
+// algo validity and workspace size. See the sub-matrix check in
+// torch/cuda/tunable.py and ROCm/TheRock#5553.
+inline bool ShouldWildcardLda(char transa, bool dynamic_m, bool dynamic_k,
+                              int64_t lda, int64_t m, int64_t k) {
+  return UsesMForLda(transa) ? (dynamic_m && lda == m)
+                             : (dynamic_k && lda == k);
+}
+
+inline bool ShouldWildcardLdb(char transb, bool dynamic_n, bool dynamic_k,
+                              int64_t ldb, int64_t n, int64_t k) {
+  return UsesKForLdb(transb) ? (dynamic_k && ldb == k)
+                             : (dynamic_n && ldb == n);
+}
+
+inline bool ShouldWildcardLdc(bool dynamic_m, int64_t ldc, int64_t m) {
+  return dynamic_m && ldc == m;
+}
+
 inline std::string ScalarTypeToBLASType(c10::ScalarType scalar_type) {
   std::string BLASType;
   switch (scalar_type) {
@@ -164,11 +202,15 @@ inline std::string ComputeTypeFor() {
 // ROCBLAS and hipBLASLt.
 template <>
 inline std::string ComputeTypeFor<float>() {
-  if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) != at::Float32Precision::TF32) {
-    return "f32_r";
-  } else {
+  const auto precision = at::globalContext().float32Precision(
+      at::Float32Backend::CUDA, at::Float32Op::MATMUL);
+  if (precision == at::Float32Precision::TF32) {
     return "xf32_r";
   }
+  if (at::cuda::blas::useBF16x9()) {
+    return "bf16x9_r";
+  }
+  return "f32_r";
 }
 
 template <>
@@ -214,6 +256,17 @@ inline std::string ComputeTypeFor<Float8_e4m3fnuz>() {
 template <>
 inline std::string ComputeTypeFor<Float8_e5m2fnuz>() {
   return "f32_r";
+}
+
+// CublasltMatmulTunableOp caches candidate names by Params::Signature(),
+// independently of the precision-aware TunableOp signature. Preserve existing
+// IEEE/TF32 keys while giving BF16x9 its own candidate set.
+template <typename T>
+inline std::string ComputeTypeSignature() {
+  if constexpr (std::is_same_v<T, float>) {
+    return at::cuda::blas::useBF16x9() ? "_compute_bf16x9_r" : "";
+  }
+  return "";
 }
 
 // Convert opmath_type<T> to string
@@ -291,7 +344,25 @@ struct GemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
+    return fmt::sprintf(
+        "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld%s",
+        transa, transb, m, n, k, lda, ldb, ldc, ComputeTypeSignature<T>());
+  }
+
+  std::string DynamicSignature() const override {
+    const bool dynamic_m = this->IsDynamicM();
+    const bool dynamic_n = this->IsDynamicN();
+    const bool dynamic_k = this->IsDynamicK();
+    return fmt::sprintf(
+        "%c%c_%s_%s_%s_ld_%s_%s_%s%s",
+        transa, transb,
+        MaybeWildcardInt(m, dynamic_m),
+        MaybeWildcardInt(n, dynamic_n),
+        MaybeWildcardInt(k, dynamic_k),
+        MaybeWildcardInt(lda, ShouldWildcardLda(transa, dynamic_m, dynamic_k, lda, m, k)),
+        MaybeWildcardInt(ldb, ShouldWildcardLdb(transb, dynamic_n, dynamic_k, ldb, n, k)),
+        MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)),
+        ComputeTypeSignature<T>());
   }
 
   size_t GetSizeA() const {
@@ -393,7 +464,25 @@ struct GemmAndBiasParams : OpParams {
   }
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, lda, ldb, ldc);
+    return fmt::sprintf(
+        "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld%s",
+        transa, transb, m, n, k, lda, ldb, ldc, ComputeTypeSignature<T>());
+  }
+
+  std::string DynamicSignature() const override {
+    const bool dynamic_m = this->IsDynamicM();
+    const bool dynamic_n = this->IsDynamicN();
+    const bool dynamic_k = this->IsDynamicK();
+    return fmt::sprintf(
+        "%c%c_%s_%s_%s_ld_%s_%s_%s%s",
+        transa, transb,
+        MaybeWildcardInt(m, dynamic_m),
+        MaybeWildcardInt(n, dynamic_n),
+        MaybeWildcardInt(k, dynamic_k),
+        MaybeWildcardInt(lda, ShouldWildcardLda(transa, dynamic_m, dynamic_k, lda, m, k)),
+        MaybeWildcardInt(ldb, ShouldWildcardLdb(transb, dynamic_n, dynamic_k, ldb, n, k)),
+        MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)),
+        ComputeTypeSignature<T>());
   }
 
   size_t GetSizeA() const {
@@ -496,7 +585,27 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld_ld_%ld_%ld_%ld", transa, transb, m, n, k, batch, lda, ldb, ldc);
+    return fmt::sprintf(
+        "%c%c_%ld_%ld_%ld_B_%ld_ld_%ld_%ld_%ld%s",
+        transa, transb, m, n, k, batch, lda, ldb, ldc, ComputeTypeSignature<T>());
+  }
+
+  std::string DynamicSignature() const override {
+    const bool dynamic_m = this->IsDynamicM();
+    const bool dynamic_n = this->IsDynamicN();
+    const bool dynamic_k = this->IsDynamicK();
+    const bool dynamic_batch = this->IsDynamicBatch();
+    return fmt::sprintf(
+        "%c%c_%s_%s_%s_B_%s_ld_%s_%s_%s%s",
+        transa, transb,
+        MaybeWildcardInt(m, dynamic_m),
+        MaybeWildcardInt(n, dynamic_n),
+        MaybeWildcardInt(k, dynamic_k),
+        MaybeWildcardInt(batch, dynamic_batch),
+        MaybeWildcardInt(lda, ShouldWildcardLda(transa, dynamic_m, dynamic_k, lda, m, k)),
+        MaybeWildcardInt(ldb, ShouldWildcardLdb(transb, dynamic_n, dynamic_k, ldb, n, k)),
+        MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)),
+        ComputeTypeSignature<T>());
   }
 
   size_t GetSizeA() const {
@@ -618,8 +727,26 @@ struct ScaledGemmParams : OpParams {
     // params.bias_dtype = bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_;
     //
     // In TunableOp, we must distinguish in param signature these two cases: with and without a bias vector.
-    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_rw_%d_bias_%s",
+    return fmt::sprintf(
+      "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_rw_%d_bias_%s",
       transa, transb, m, n, k, lda, ldb, ldc,
+      a_scaling_type == ScalingType::RowWise && b_scaling_type == ScalingType::RowWise,
+      bias_ptr == nullptr ? "None" : at::toString(bias_dtype));
+  }
+
+  std::string DynamicSignature() const override {
+    const bool dynamic_m = this->IsDynamicM();
+    const bool dynamic_n = this->IsDynamicN();
+    const bool dynamic_k = this->IsDynamicK();
+    return fmt::sprintf(
+      "%c%c_%s_%s_%s_ld_%s_%s_%s_rw_%d_bias_%s",
+      transa, transb,
+      MaybeWildcardInt(m, dynamic_m),
+      MaybeWildcardInt(n, dynamic_n),
+      MaybeWildcardInt(k, dynamic_k),
+      MaybeWildcardInt(lda, ShouldWildcardLda(transa, dynamic_m, dynamic_k, lda, m, k)),
+      MaybeWildcardInt(ldb, ShouldWildcardLdb(transb, dynamic_n, dynamic_k, ldb, n, k)),
+      MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)),
       a_scaling_type == ScalingType::RowWise && b_scaling_type == ScalingType::RowWise,
       bias_ptr == nullptr ? "None" : at::toString(bias_dtype));
   }

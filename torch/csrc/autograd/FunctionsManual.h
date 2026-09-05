@@ -382,7 +382,7 @@ at::Tensor evenly_distribute_backward(
 Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn);
 Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask);
 Tensor masked_fill_inplace_if_safe(
-    Tensor tensor,
+    const Tensor& tensor,
     const Tensor& mask,
     const Scalar& value);
 at::Tensor var_backward(
@@ -933,6 +933,14 @@ std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
     const Tensor& result);
 Tensor i1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
+Tensor bessel_j1_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& result);
+Tensor bessel_y1_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result);

@@ -4,6 +4,7 @@ import binascii
 import functools
 import os
 import re
+import sys
 import unittest
 import unittest.mock as mock
 from unittest.mock import patch
@@ -346,6 +347,46 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         ref = fn(x, y)
         res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_none_inputs(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, maybe_y, payload):
+            torch._dynamo.graph_break()
+            if maybe_y is None and payload["bias"] is None:
+                return x + 1
+            if payload["bias"] is None:
+                return x + maybe_y
+            return x + maybe_y + payload["bias"]
+
+        def fn(x, maybe_y):
+            return trace_me(x, maybe_y, {"bias": None}) * 2
+
+        x = torch.randn(3)
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, fullgraph=True, backend=cnts)
+
+        for maybe_y in (None, torch.randn(3)):
+            self.assertEqual(fn(x, maybe_y), opt_fn(x, maybe_y))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_nonstrict_trace_none_outputs(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return x + 1, None, {"bias": None}
+
+        def fn(x):
+            y, maybe_y, payload = trace_me(x)
+            if maybe_y is None and payload["bias"] is None:
+                return y * 2
+            return y
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
         self.assertEqual(ref, res)
 
     def test_nonstrict_trace_pre_existing_dict(self):
@@ -1243,7 +1284,6 @@ class DecoratorTests(PytreeRegisteringTestCase):
             def _(x, /, *, newline=True):
                 return b""
 
-        @torch._dynamo.substitute_in_graph(binascii.b2a_base64)
         def polyfill(data, /, *, newline=True):
             buffer = []
             cipher = []
@@ -1280,8 +1320,25 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 cipher.append("\n")
             return "".join(cipher).encode()
 
+        if sys.version_info < (3, 15):
+            wrapper = polyfill
+        else:
+
+            def wrapper(
+                data,
+                /,
+                *,
+                padded=True,
+                alphabet=binascii.BASE64_ALPHABET,
+                wrapcol=0,
+                newline=True,
+            ):
+                return polyfill(data, newline=newline)
+
+        wrapped = torch._dynamo.substitute_in_graph(binascii.b2a_base64)(wrapper)
+
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = polyfill
+        fn = binascii.b2a_base64
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         out = fn(b"abc")
         opt_out = opt_fn(b"abc")
@@ -1293,7 +1350,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         counters.clear()
 
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = polyfill
+        fn = wrapped
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         out = fn(b"abc")
         opt_out = opt_fn(b"abc")

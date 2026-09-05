@@ -1,9 +1,53 @@
 #include <ATen/native/mps/kernels/LossOps.h>
+#include <c10/metal/atomic.h>
+#include <c10/metal/error.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
 
 using namespace metal;
 using namespace c10::metal;
+
+template <typename T>
+kernel void nllnd_loss_backward(
+    device T* grad_input [[buffer(0)]],
+    constant T* grad_output [[buffer(1)]],
+    constant long* target [[buffer(2)]],
+    constant T* weight [[buffer(3)]],
+    constant T* total_weight [[buffer(4)]],
+    constant NLLLossBackwardParams<>& params [[buffer(5)]],
+    device ErrorMessages* error_buf [[buffer(6)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  const long index = static_cast<long>(thread_index) + params.tid_offset;
+  const long target_index = target[params.target_offset + index];
+  if (target_index == params.ignore_index) {
+    return;
+  }
+  if (target_index < 0 || target_index >= params.n_classes) {
+    TORCH_REPORT_ERROR(
+        error_buf, "Target ", target_index, " is out of bounds.");
+    return;
+  }
+
+  const long grad_output_index =
+      params.grad_output_offset + (params.is_reduction ? 0 : index);
+  T grad = -grad_output[grad_output_index];
+  if (params.is_mean) {
+    const T total = total_weight[params.total_weight_offset];
+    if (total == T(0)) {
+      return;
+    }
+    grad = static_cast<T>(grad / total);
+  }
+  if (params.has_weight) {
+    grad = static_cast<T>(grad * weight[params.weight_offset + target_index]);
+  }
+
+  const long batch = index / params.map_size;
+  const long spatial = index % params.map_size;
+  const long output_index = batch * params.batch_stride +
+      target_index * params.class_stride + spatial;
+  grad_input[params.grad_input_offset + output_index] = grad;
+}
 
 // Augmented target lookup: l'[idx] is BLANK for even idx, l[idx/2] for odd.
 template <typename T_target, typename T_index>
@@ -395,3 +439,19 @@ kernel void ctc_loss_backward_collect(
 INSTANTIATE_CTC_LOSS_TARGET_TYPES(float);
 INSTANTIATE_CTC_LOSS_TARGET_TYPES(bfloat);
 INSTANTIATE_CTC_LOSS_TARGET_TYPES(half);
+
+#define INSTANTIATE_NLLND_LOSS_BACKWARD(T)                      \
+  template [[host_name("nllnd_loss_backward_" #T)]] kernel void \
+  nllnd_loss_backward<T>(                                       \
+      device T*,                                                \
+      constant T*,                                              \
+      constant long*,                                           \
+      constant T*,                                              \
+      constant T*,                                              \
+      constant NLLLossBackwardParams<>&,                        \
+      device ErrorMessages*,                                    \
+      uint);
+
+INSTANTIATE_NLLND_LOSS_BACKWARD(float);
+INSTANTIATE_NLLND_LOSS_BACKWARD(bfloat);
+INSTANTIATE_NLLND_LOSS_BACKWARD(half);

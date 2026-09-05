@@ -459,7 +459,7 @@ class AsyncCompile:
           cases, like coordesc tuning and dynamic_scale_rblock, require us to reload the function
           in the parent lazily when we require it.
         - The AutotuneCache, if enabled, is constructed on each worker per triton config
-          and pickled by to us via `CachingAutotuner.save_cache_hook`.
+          and pickled to us via `CachingAutotuner.save_cache_hook`.
         """
         load_kernel = functools.partial(
             _load_triton_kernel_from_source, kernel_name, source_code

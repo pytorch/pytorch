@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import re
+from typing import overload
 
 import torch
 import torch.utils._pytree as pytree
@@ -11,6 +12,13 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 
 
 __all__ = ["inline_asm_elementwise"]
+
+
+def _parse_constraints(constraints: str) -> tuple[int, int]:
+    parts = [p.strip() for p in constraints.split(",")]
+    n_outputs = sum(1 for p in parts if p.startswith("="))
+    n_inputs = len(parts) - n_outputs
+    return n_outputs, n_inputs
 
 
 class InlineAsmElementwiseOp(HigherOrderOperator):
@@ -28,7 +36,8 @@ class InlineAsmElementwiseOp(HigherOrderOperator):
     In eager mode, the assembly is executed via the CUDA Jiterator.  Under
     ``torch.compile`` the assembly is lowered to Triton's
     ``tl.inline_asm_elementwise`` via Inductor, which allows fusion with
-    surrounding operators.
+    surrounding operators. Multiple outputs share one assembly invocation when
+    their consumers are fused; consumers in separate kernels may re-execute it.
 
     Args:
         *inputs: Input tensors whose values are passed to the asm block.
@@ -37,15 +46,19 @@ class InlineAsmElementwiseOp(HigherOrderOperator):
         constraints: Inline-asm constraints in LLVM format. Output constraints
             are prefixed with ``=`` (e.g. ``"=f,f,f"`` for one float output
             and two float inputs).
-        dtype: Element type of the returned tensor.
+        dtype: Element type of the returned tensor, or a tuple of element types
+            for multiple output tensors. Multiple outputs require
+            ``torch.compile``.
         is_pure: Must be ``True``. If true, the compiler may assume the asm
             block has no side-effects.
         pack: Number of elements processed per asm invocation.  When
-            ``pack > 1``, the constraint string must list ``pack`` outputs
-            and ``pack`` copies of each input.  Requires ``torch.compile``.
+            ``pack > 1``, the constraint string must describe the packed
+            register layout expected by Triton. Sub-32-bit values may share a
+            register. Requires ``torch.compile``.
 
     Returns:
-        A tensor with the broadcast shape of the inputs and the given dtype.
+        A tensor, or tuple of tensors, with the broadcast shape of the inputs
+        and the given dtype or dtypes.
 
     Example::
 
@@ -67,11 +80,20 @@ class InlineAsmElementwiseOp(HigherOrderOperator):
         ...     dtype=torch.float32,
         ...     pack=2,
         ... )
+
+        >>> # xdoctest: +SKIP(requires CUDA and torch.compile)
+        >>> first, second = inline_asm_elementwise(
+        ...     x,
+        ...     asm_str="mov.b32 $0, $2; add.s32 $1, $2, 1;",
+        ...     constraints="=r,=r,r",
+        ...     dtype=(torch.int32, torch.int32),
+        ... )
     """
 
     def __init__(self):
         super().__init__("inline_asm_elementwise")
 
+    @overload
     def __call__(
         self,
         *inputs: torch.Tensor,
@@ -80,9 +102,59 @@ class InlineAsmElementwiseOp(HigherOrderOperator):
         dtype: torch.dtype,
         is_pure: bool = True,
         pack: int = 1,
-    ) -> torch.Tensor:
+    ) -> torch.Tensor: ...
+
+    @overload
+    def __call__(
+        self,
+        *inputs: torch.Tensor,
+        asm_str: str,
+        constraints: str,
+        dtype: tuple[torch.dtype, ...],
+        is_pure: bool = True,
+        pack: int = 1,
+    ) -> tuple[torch.Tensor, ...]: ...
+
+    def __call__(
+        self,
+        *inputs: torch.Tensor,
+        asm_str: str,
+        constraints: str,
+        dtype: torch.dtype | tuple[torch.dtype, ...],
+        is_pure: bool = True,
+        pack: int = 1,
+    ) -> torch.Tensor | tuple[torch.Tensor, ...]:
         if not is_pure:
             raise ValueError("inline_asm_elementwise only supports is_pure=True")
+        if isinstance(dtype, tuple) and not dtype:
+            raise ValueError("inline_asm_elementwise requires at least one output")
+        output_dtypes = dtype if isinstance(dtype, tuple) else (dtype,)
+        n_outputs, n_inputs = _parse_constraints(constraints)
+        if pack == 1:
+            if n_outputs != len(output_dtypes):
+                raise ValueError(
+                    f"Expected {len(output_dtypes)} output constraint(s), "
+                    f"got {n_outputs}"
+                )
+            if n_inputs != len(inputs):
+                raise ValueError(
+                    f"Constraint string specifies {n_inputs} inputs but got "
+                    f"{len(inputs)} tensor(s)"
+                )
+        else:
+            # Sub-32-bit values may be packed into one register, so the exact
+            # constraint count is backend- and dtype-dependent. Each logical
+            # input and output must still have at least one constraint.
+            if n_outputs < len(output_dtypes):
+                raise ValueError(
+                    f"Expected at least {len(output_dtypes)} output constraint(s) "
+                    f"for pack={pack}, got {n_outputs}"
+                )
+            if n_inputs < len(inputs):
+                raise ValueError(
+                    f"Expected at least {len(inputs)} input constraint(s) "
+                    f"for pack={pack}, got {n_inputs}"
+                )
         # pyrefly: ignore [missing-attribute]
         return super().__call__(
             *inputs,
@@ -95,13 +167,6 @@ class InlineAsmElementwiseOp(HigherOrderOperator):
 
 
 inline_asm_elementwise = InlineAsmElementwiseOp()
-
-
-def _parse_constraints(constraints: str) -> tuple[int, int]:
-    parts = [p.strip() for p in constraints.split(",")]
-    n_outputs = sum(1 for p in parts if p.startswith("="))
-    n_inputs = len(parts) - n_outputs
-    return n_outputs, n_inputs
 
 
 _DTYPE_TO_CUDA_TYPE = {
@@ -185,9 +250,9 @@ def _inline_asm_dense(*inputs, asm_str, constraints, dtype, is_pure, pack):
     if not inputs[0].is_cuda:
         raise RuntimeError("inline_asm_elementwise only supports CUDA tensors")
 
-    if pack > 1:
+    if pack > 1 or isinstance(dtype, tuple):
         raise RuntimeError(
-            "inline_asm_elementwise with pack > 1 requires torch.compile"
+            "inline_asm_elementwise requires torch.compile for pack > 1 or multiple outputs"
         )
 
     n_outputs, n_inputs = _parse_constraints(constraints)
@@ -285,6 +350,8 @@ def _elementwise_output_like(*inputs, dtype):
 
 @register_fake(inline_asm_elementwise, skip_cache=True)
 def _(*inputs, asm_str, constraints, dtype, is_pure=True, pack=1):
+    if isinstance(dtype, tuple):
+        return tuple(_elementwise_output_like(*inputs, dtype=dt) for dt in dtype)
     return _elementwise_output_like(*inputs, dtype=dtype)
 
 

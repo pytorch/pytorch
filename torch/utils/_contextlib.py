@@ -18,7 +18,38 @@ FuncType = Callable[..., Any]
 F = TypeVar("F", bound=FuncType)
 
 
-def _wrap_generator(ctx_factory, func):
+def _context_manager_name(ctx) -> str:
+    if isinstance(ctx, functools.partial):
+        return _context_manager_name(ctx.func)
+
+    if not callable(ctx):
+        return type(ctx).__name__
+
+    context_manager = getattr(ctx, "__self__", None)
+    if (
+        context_manager is not None
+        and hasattr(context_manager, "__enter__")
+        and hasattr(context_manager, "__exit__")
+    ):
+        return type(context_manager).__name__
+
+    for attr in ("__qualname__", "__name__"):
+        name = getattr(ctx, attr, None)
+        if isinstance(name, str):
+            return name
+
+    return type(ctx).__name__
+
+
+def _set_stack_frame_name(func, name: str) -> None:
+    code = func.__code__
+    code_attrs = {"co_name": name}
+    if hasattr(code, "co_qualname"):
+        code_attrs["co_qualname"] = name
+    func.__code__ = code.replace(**code_attrs)
+
+
+def _wrap_generator(ctx_factory, func, ctx_name):
     """
     Wrap each generator invocation with the context manager factory.
 
@@ -68,6 +99,7 @@ def _wrap_generator(ctx_factory, func):
             # by returning it (see docs for python's return-statement).
             return e.value
 
+    _set_stack_frame_name(generator_context, ctx_name)
     return generator_context
 
 
@@ -114,8 +146,10 @@ def context_decorator(ctx, func):
             "individually."
         )
 
+    ctx_name = _context_manager_name(ctx)
+
     if inspect.isgeneratorfunction(func):
-        return _wrap_generator(ctx_factory, func)
+        return _wrap_generator(ctx_factory, func, ctx_name)
 
     @functools.wraps(func)
     def decorate_context(*args, **kwargs):
@@ -123,6 +157,7 @@ def context_decorator(ctx, func):
         with ctx_factory():
             return func(*args, **kwargs)
 
+    _set_stack_frame_name(decorate_context, ctx_name)
     return decorate_context
 
 
