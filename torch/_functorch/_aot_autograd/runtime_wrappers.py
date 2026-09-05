@@ -238,6 +238,61 @@ def _identity(x: Any) -> Any:
     return x
 
 
+def _replay_input_mutation(
+    orig: torch.Tensor,
+    updated: torch.Tensor,
+    idx: int,
+    compile_id: str | None,
+    warned: set[int],
+    hidden: bool,
+    under_no_grad: bool,
+) -> None:
+    """Write functionalized input mutation ``idx`` back onto the caller's tensor.
+
+    A tracked ``copy_``, except under grad mode onto a requires-grad view stamped
+    IN_CUSTOM_FUNCTION (an input a custom autograd.Function returned as-is),
+    which autograd then refuses to modify in place: that write is replayed under
+    no_grad. With grad mode off eager itself writes such a view tracked, version
+    bump included, so the plain copy_ stands. Decided per call: nothing guards
+    the view's provenance. The invisible replay deliberately diverges from eager,
+    which raises on a visible write, and warns once per input (``warned`` is the
+    owning epilogue's set). ``hidden`` (the traced write bypassed autograd, e.g.
+    through ``.data``) replays with the version counter preserved and does not
+    warn; ``under_no_grad`` (the traced write ran under no_grad or inference
+    mode) replays as a plain no_grad ``copy_``, which bumps the version counter
+    as eager's write did so a stale saved tensor is still caught, and does not
+    warn either.
+    """
+    # pybind11 hands back a fresh enum object each call, so this cannot be `is`.
+    if (
+        torch.is_grad_enabled()
+        and orig.requires_grad
+        and orig._is_view()
+        and torch._C._autograd._get_creation_meta(orig)
+        == torch._C._autograd.CreationMeta.IN_CUSTOM_FUNCTION
+    ):
+        if not (hidden or under_no_grad) and idx not in warned:
+            warned.add(idx)
+            graph = f" of compiled graph [{compile_id}]" if compile_id else ""
+            warnings.warn(
+                f"torch.compile is writing mutated input {idx}{graph} back onto a "
+                "view created inside a custom autograd.Function (or an input it "
+                "returned as-is) without autograd tracking. Eager rejects an "
+                "autograd-visible in-place op on such a view; compile cannot tell "
+                "that apart from a write that bypasses autograd (e.g. through "
+                ".data), so it replays the mutation invisibly and gradients that "
+                "later flow through this input see its pre-mutation history only."
+            )
+        with torch.no_grad():
+            if under_no_grad and not hidden:
+                orig.copy_(updated)
+            else:
+                with torch.autograd._unsafe_preserve_version_counter(orig):
+                    orig.copy_(updated)
+    else:
+        orig.copy_(updated)
+
+
 class AliasOfInputHandler:
     def __init__(
         self,
@@ -622,6 +677,7 @@ class _RuntimeForwardEpilogue:
     trace_joint: bool
     keep_input_mutations: bool
     epilogue_args_idx: tuple[int, ...] = field(init=False)
+    warned_inputs: set[int] = field(default_factory=set, init=False)
     output_handlers: tuple[
         NoopAliasHandler
         | AliasOfInputHandler
@@ -766,6 +822,8 @@ class _RuntimeForwardEpilogue:
                 )
             else:
                 if meta.mutates_data and meta.mutates_metadata:
+                    # Tracked, so a metadata mutation on an IN_CUSTOM_FUNCTION
+                    # view is still refused here, matching eager.
                     original_inpt.as_strided_(
                         updated_inpt.size(),
                         updated_inpt.stride(),
@@ -800,7 +858,15 @@ class _RuntimeForwardEpilogue:
                             "Mutations on inputs with user-specified streams are not yet supported. "
                             "See: https://github.com/pytorch/pytorch/issues/172522"
                         )
-                    original_inpt.copy_(updated_inpt)
+                    _replay_input_mutation(
+                        original_inpt,
+                        updated_inpt,
+                        inpt_idx,
+                        self.runtime_metadata.compile_id_str,
+                        self.warned_inputs,
+                        meta.mutations_hidden_from_autograd,
+                        meta.mutations_under_no_grad_or_inference_mode,
+                    )
 
     def _replay_output_aliases(
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any]
@@ -979,6 +1045,10 @@ def _create_runtime_wrapper(
     keep_input_mutations: bool,
     disable_amp: bool,
 ) -> Callable[..., Any]:
+    if runtime_metadata.compile_id_str is None:
+        compile_id = CompileContext.current_compile_id()
+        if compile_id is not None:
+            runtime_metadata.compile_id_str = str(compile_id)
     compiled_invoker = _RuntimeCompiledFnInvoker(
         compiled_fn=compiled_fn,
         indices_of_inps_to_detach=indices_of_inps_to_detach,
@@ -1089,7 +1159,12 @@ def _create_runtime_wrapper(
             args="orig_inputs, updated_inputs",
             artifact_name="mutation_epilogue",
         )
-        buf.bind(torch=torch, _unwrap_tensoralias=_unwrap_tensoralias)
+        buf.bind(
+            torch=torch,
+            _unwrap_tensoralias=_unwrap_tensoralias,
+            _replay_input_mutation=_replay_input_mutation,
+            _warned_inputs=runtime_epilogue.warned_inputs,
+        )
         wrote_body = False
         with buf.indent():
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
@@ -1117,6 +1192,8 @@ def _create_runtime_wrapper(
                     )
                 else:
                     if meta.mutates_data and meta.mutates_metadata:
+                        # Tracked, so a metadata mutation on an IN_CUSTOM_FUNCTION
+                        # view is still refused here, matching eager.
                         buf.writeline(
                             f"{oi}.as_strided_({ui}.size(), {ui}.stride(), {ui}.storage_offset())"
                         )
@@ -1125,27 +1202,34 @@ def _create_runtime_wrapper(
                             raise AssertionError(
                                 f"expected mutates_data for input {inpt_idx}"
                             )
+                    has_stream = (
+                        runtime_metadata.mutated_inp_stream_indices is not None
+                        and i < len(runtime_metadata.mutated_inp_stream_indices)
+                        and runtime_metadata.mutated_inp_stream_indices[i] is not None
+                    )
+                    if has_stream:
+                        msg_name = buf.bind_value(
+                            "_stream_err",
+                            "Mutations on inputs with user-specified streams are not yet supported. "
+                            "See: https://github.com/pytorch/pytorch/issues/172522",
+                        )
+                        write_back = f"raise RuntimeError({msg_name})"
+                    else:
+                        hidden = meta.mutations_hidden_from_autograd
+                        no_grad = meta.mutations_under_no_grad_or_inference_mode
+                        cid = runtime_metadata.compile_id_str
+                        args = (
+                            f"{oi}, {ui}, {inpt_idx}, {cid!r}, _warned_inputs, "
+                            f"{hidden}, {no_grad}"
+                        )
+                        write_back = f"_replay_input_mutation({args})"
                     if meta.is_leaf:
                         buf.writeline(
                             f"if {oi}.requires_grad: {oi}.detach().copy_({ui})"
                         )
-                        buf.writeline(f"else: {oi}.copy_({ui})")
+                        buf.writeline(f"else: {write_back}")
                     else:
-                        has_stream = (
-                            runtime_metadata.mutated_inp_stream_indices is not None
-                            and i < len(runtime_metadata.mutated_inp_stream_indices)
-                            and runtime_metadata.mutated_inp_stream_indices[i]
-                            is not None
-                        )
-                        if has_stream:
-                            msg_name = buf.bind_value(
-                                "_stream_err",
-                                "Mutations on inputs with user-specified streams are not yet supported. "
-                                "See: https://github.com/pytorch/pytorch/issues/172522",
-                            )
-                            buf.writeline(f"raise RuntimeError({msg_name})")
-                        else:
-                            buf.writeline(f"{oi}.copy_({ui})")
+                        buf.writeline(write_back)
             if not wrote_body:
                 buf.writeline("pass")
 
