@@ -793,6 +793,106 @@ _VARYING_CORPUS = {
     "grad_mode": (PrecompileInvariantModel, {"dynamic": False}, [(torch.ones(4, 8),)], ("grad_enabled=True", "grad_enabled=False"), (), (), True),
 }  # fmt: skip
 
+
+# A pair that differs only after the break, so a resume function borrowed from
+# the wrong artifact still runs and still returns a number.
+def staged_break_then_add_one(x):
+    y = x * 2
+    torch._dynamo.graph_break()
+    return (y + 1).sum()
+
+
+def staged_break_then_add_thousand(x):
+    y = x * 2
+    torch._dynamo.graph_break()
+    return (y + 1000).sum()
+
+
+def _resume_names_in(path):
+    with open(path, "rb") as f:
+        entry = pickle.load(f)
+    return [
+        name
+        for code in entry.dynamo.codes
+        if code.install_to_global
+        for name in code.function_names
+    ]
+
+
+def _rename_resume_function(path, old, new):
+    """
+    Give a saved artifact the resume-function name a SEPARATE capture process
+    would have minted for it. The name comes from a counter that restarts per
+    process, so two captures in one process cannot collide, but two capture
+    processes routinely do.
+    """
+    with open(path, "rb") as f:
+        entry = pickle.load(f)
+    for code in entry.dynamo.codes:
+        code.function_names = [new if n == old else n for n in code.function_names]
+        for guarded in code.guarded_codes:
+            guarded.dynamo_code = dataclasses.replace(
+                guarded.dynamo_code,
+                co_names=tuple(
+                    new if n == old else n for n in guarded.dynamo_code.co_names
+                ),
+            )
+    with open(path, "wb") as f:
+        pickle.dump(entry, f)
+
+
+# Content-addressing the resume code tells the first pair apart, but not two
+# instances of ONE model class: the same script captured in two processes
+# mints the same __resume_at_<offset>_<n> AND byte-identical resume code.
+_COLLIDING_RESUME_PAIRS = {
+    "separate_captures": (lambda: (staged_break_then_add_one, staged_break_then_add_thousand), {}),
+    "identical_captures": (lambda: (PrecompileSelfAct(torch.relu), PrecompileSelfAct(torch.sigmoid)), {"require_no_risky_drops": False}),
+}  # fmt: skip
+
+
+def staged_with_nested_dict_conditional(x, cfg):
+    # membership, nested lookup, and iteration over the key set, which produce
+    # DICT_CONTAINS / DICT_NOT_CONTAINS / DICT_KEYS_MATCH rather than a plain
+    # value comparison.
+    if "alpha" in cfg and cfg["alpha"]["kind"] == "wide":
+        x = x * len(cfg["alpha"]["dims"])
+    else:
+        x = x + 1
+    torch._dynamo.graph_break()
+    total = 0
+    for k in sorted(cfg):
+        total += cfg[k]["weight"]
+    return x.sum() * total
+
+
+def staged_with_local_dict_conditional(x, cfg):
+    if cfg["op"] == "sin":
+        x = x.sin()
+    else:
+        x = x.cos()
+    torch._dynamo.graph_break()
+    return x.sum() * cfg["scale"]
+
+
+@contextlib.contextmanager
+def _precompile_mode(mode):
+    old = PRECOMPILE_CONFIG["mode"]
+    PRECOMPILE_CONFIG["mode"] = mode
+    try:
+        yield
+    finally:
+        PRECOMPILE_CONFIG["mode"] = old
+
+
+# Rows: fn, the captured variants as (PRECOMPILE_CONFIG mode, extra args), one
+# uncaptured variant, guard types that must be emitted AND kept, and whether
+# save() has to be told the drops it reports are acknowledged risky ones.
+_DICT_GUARD_CORPUS = {
+    "global_dict": (staged_with_global_dict_conditional, [("sum", ()), ("mean", ())], ("uncaptured", ()), (), False),
+    "local_dict": (staged_with_local_dict_conditional, [(None, ({"op": "sin", "scale": 2},)), (None, ({"op": "cos", "scale": 5},))], (None, ({"op": "tan", "scale": 1},)), (), False),
+    "nested_dict": (staged_with_nested_dict_conditional, [(None, ({"alpha": {"kind": "wide", "dims": [1, 2], "weight": 3}},)), (None, ({"beta": {"kind": "narrow", "dims": [1], "weight": 7}},))], (None, ({"gamma": {"kind": "wide", "dims": [1], "weight": 2}},)), ("DICT_KEYS_MATCH", "DICT_CONTAINS"), True),
+}  # fmt: skip
+
 _BUILTIN_ACROSS_BREAK_SRC = """\
 import torch
 
@@ -840,6 +940,68 @@ class ModelTwo(torch.nn.Module):
     def forward(self, x):
         return self.block(x).sum() + 0.0
 """
+
+
+class PrecompileBreakOnlyWhenFalse(torch.nn.Module):
+    """The uncovered branch breaks AGAIN, so a fallback compile mints new globals."""
+
+    def forward(self, x, flag):
+        y = x * 2
+        torch._dynamo.graph_break()
+        if flag:
+            return y + 1
+        z = y - 1
+        torch._dynamo.graph_break()
+        return z * 3
+
+
+class _PrecompileForwardsCode:
+    """A wrapper forwarding __code__ with a safe default -- the usual decorator
+    spelling -- around a builtin, so the attribute is present and None."""
+
+    def __init__(self, fn):
+        self.__code__ = getattr(fn, "__code__", None)
+        self._fn = fn
+
+    def __call__(self, *args, **kwargs):
+        return self._fn(*args, **kwargs)
+
+
+# functools.wraps copies __qualname__, so an instrumented wrapper around a
+# different callable passes the qualname check while being a different code
+# object.
+@functools.wraps(staged_with_graph_breaks)
+def _instrumented_staged_with_graph_breaks(x):
+    return staged_with_local_dict_conditional(x, {"op": "sin", "scale": 2})
+
+
+# CompilePackage rebinds the stored guards onto whatever callable it is given,
+# so load has to refuse anything but the captured callable itself; a __code__
+# that is present and None gets past the capture-side hasattr check.
+_FOREIGN_CALLABLES = {
+    "different_function": (staged_with_local_dict_conditional, "captured from"),
+    "wrapper_sharing_the_qualname": (_instrumented_staged_with_graph_breaks, "captured from code object"),
+    "code_attribute_is_none": (_PrecompileForwardsCode(len), "no __code__"),
+}  # fmt: skip
+
+
+def _forget_torch_version(entry):
+    entry.dynamo.system_info = dataclasses.replace(
+        entry.dynamo.system_info, torch_version="0.0.0"
+    )
+
+
+def _forget_codes(entry):
+    entry.dynamo.codes = []
+
+
+# How the saved artifact is damaged (None: the path is a directory, the
+# pre-single-file layout) and the error precompile_load must name it with.
+_DAMAGED_ARTIFACTS = {
+    "different_torch": (_forget_torch_version, RuntimeError, "different PyTorch version"),
+    "no_code_entries": (_forget_codes, PackageError, "no code entries"),
+    "directory": (None, PackageError, "is a directory"),
+}  # fmt: skip
 
 _ENCODER_SRC = """\
 import torch
@@ -896,6 +1058,39 @@ from precompile_entry_decorators import deco
 def staged(x):
     return x
 """
+
+
+def _run_only(code):
+    strategy = FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.RUN_ONLY)
+    torch._dynamo.eval_frame.set_code_exec_strategy(code, strategy)
+
+
+# A legacy package's empty frame installs a skip only in its region; whatever
+# global strategy the frame had before the load, or gained while loaded, has
+# to be what unload leaves. Rows: applied before the load, applied after it,
+# the (cur, recursive) strategy expected after unload.
+_SKIP_INTERFERENCE = {
+    "none": (None, None, (FrameAction.DEFAULT, FrameAction.DEFAULT)),
+    "skip_before_load": (torch._dynamo.eval_frame.skip_code, None, (FrameAction.SKIP, FrameAction.DEFAULT)),
+    "skip_after_load": (None, torch._dynamo.eval_frame.skip_code, (FrameAction.SKIP, FrameAction.DEFAULT)),
+    "run_only_after_load": (None, _run_only, (FrameAction.RUN_ONLY, FrameAction.RUN_ONLY)),
+}  # fmt: skip
+
+
+def _names(scope, *prefixes):
+    return sorted(name for name in scope if name.startswith(prefixes))
+
+
+def _precompile_unreachable_helper(y):
+    z = y * 3
+    torch._dynamo.graph_break()
+    return z.sum()
+
+
+def _precompile_unreachable_entry(x, scale=2.0):
+    # Without nested_graph_breaks the helper's break stops its inlining: its
+    # frame is entered by an ordinary call no name in the entry reaches.
+    return _precompile_unreachable_helper(x * 2) * scale
 
 
 @instantiate_parametrized_tests

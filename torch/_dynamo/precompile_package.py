@@ -1930,6 +1930,119 @@ def precompile_capture(
     )
 
 
+class _ServedCallable:
+    """A loaded artifact. Call it, or use it as a context manager to scope it."""
+
+    def __init__(
+        self,
+        compiled: Callable[..., object],
+        package: CompilePackage,
+        isolate_recompiles_id: int,
+        backend: _PrecompileBackend | None = None,
+    ) -> None:
+        self._compiled: Callable[..., object] | None = compiled
+        self._package = package
+        self._isolate_recompiles_id = isolate_recompiles_id
+        self._backend = backend
+        from .pgo import _new_code_state
+
+        self._pgo_state = _new_code_state()
+        self._state = threading.Condition()
+        self._active_calls = 0
+        self._unloading = False
+        self._loaded = True
+        from .eval_frame import _register_explicit_compile_region
+
+        _register_explicit_compile_region(isolate_recompiles_id, self)
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        with self._state:
+            if not self._loaded or self._unloading:
+                raise PackageError("this loaded artifact has been unloaded")
+            if self._package.installed_entries_dropped():
+                raise PackageError(
+                    "torch._dynamo.reset() cleared the precompiled code this "
+                    "artifact installed. The installed globals are still in "
+                    "place, so this call would silently recompile instead of "
+                    "serving, or fail with an indistinguishable RecompileError "
+                    "under serving(). Load the artifact again after the reset."
+                )
+            compiled = self._compiled
+            if compiled is None:
+                raise AssertionError("loaded callable is missing")
+            self._active_calls += 1
+        try:
+            # Scoped to the whole served call, so an unrelated compilation
+            # triggered from inside it -- a nested torch.compile, a hook --
+            # also reads this artifact's private profile instead of the
+            # process one. Narrowing that needs the override keyed by code
+            # object, which pgo does not model; put_code_state never
+            # persists this state either way, so nothing escapes the call.
+            with _use_code_state(self._pgo_state):
+                return compiled(*args, **kwargs)
+        finally:
+            with self._state:
+                self._active_calls -= 1
+                if self._active_calls == 0:
+                    self._state.notify_all()
+
+    def serve_time_compiles(self) -> int:
+        """Graphs this artifact compiled while SERVING, rather than serving.
+
+        Zero is the number that says the artifact covered every call it saw.
+        An installed artifact answers a guard miss by compiling, so this
+        climbing means it is serving less of itself than it was measured to --
+        the right thing to gate a job on.
+        """
+        return self._backend.serve_time_compiles if self._backend else 0
+
+    def __enter__(self) -> Self:
+        with self._state:
+            if not self._loaded or self._unloading:
+                raise PackageError("this loaded artifact has been unloaded")
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.unload()
+
+    def unload(self) -> None:
+        """Remove installed globals and precompile entries from the code objects."""
+        with self._state:
+            while self._unloading:
+                self._state.wait()
+            if not self._loaded:
+                return
+            self._unloading = True
+            try:
+                while self._active_calls:
+                    self._state.wait()
+            except BaseException:
+                self._unloading = False
+                self._state.notify_all()
+                raise
+            self._loaded = False
+        # uninstall() forgets which code objects it installed onto, and a frame
+        # reached through code_source was installed onto the live code the
+        # running program resolves rather than the reconstructed twin the
+        # package holds, so the set to clear has to be taken first.
+        codes = self._package.region_codes()
+        try:
+            self._package.uninstall()
+        finally:
+            try:
+                _clear_package_region(codes, self._isolate_recompiles_id)
+            finally:
+                from .eval_frame import _unregister_explicit_compile_region
+
+                _unregister_explicit_compile_region(self._isolate_recompiles_id)
+                with self._state:
+                    self._unloading = False
+                    self._compiled = None
+                    self._package.cached_backends.clear()
+                    self._pgo_state.clear()
+                    self._state.notify_all()
+
+
 @contextlib.contextmanager
 def serving() -> Iterator[None]:
     """

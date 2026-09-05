@@ -483,6 +483,196 @@ class PrecompiledRunnable:
         """Remove whatever this loaded artifact installed; a no-op when it installed nothing."""
 
 
+class PrecompiledCallable(PrecompiledRunnable):
+    """Callable handle for one loaded multi-graph precompile artifact.
+
+    Returned by :func:`torch.compiler.precompile.load` for an artifact that
+    serves by installing; it is not constructed directly. Part of the prototype
+    ``torch.compiler.precompile`` API, so it may change without a deprecation
+    cycle.
+    """
+
+    __module__ = "torch.compiler"
+
+    def __init__(self, compiled: Any) -> None:
+        self._compiled = compiled
+
+    def _call(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
+        from torch._dynamo.exc import PackageError, RecompileError
+
+        try:
+            return method(*args, **kwargs)
+        except (PackageError, RecompileError) as e:
+            raise PrecompileError(str(e)) from e
+
+    installed: bool = True
+    """Serves by installing onto the captured code objects; see :meth:`unload`."""
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        return self._call(self._compiled, *args, **kwargs)
+
+    def __enter__(self) -> Self:
+        self._call(self._compiled.__enter__)
+        return self
+
+    def unload(self) -> None:
+        """Remove everything this loaded artifact installed.
+
+        The precompiled entries come off the code objects and the globals the
+        artifact wrote come out of their modules, so the model recompiles
+        normally afterwards. Exiting this object as a context manager does the
+        same thing; call it directly when the artifact's lifetime is not
+        lexically scoped. Unloading twice is harmless, and a call already in
+        flight on another thread is allowed to finish first.
+        """
+        self._call(self._compiled.unload)
+
+    def serve_time_compiles(self) -> int:
+        """Graphs this artifact compiled while SERVING, rather than serving.
+
+        An installed artifact answers a guard miss by compiling, so a climbing
+        count means it is covering less of the workload than the capture
+        measured. Zero is the number to gate a job on.
+        """
+        return self._compiled.serve_time_compiles()
+
+
+class _InstalledArtifact:
+    """Handle for a multi-graph artifact that serves by installing.
+
+    ``load`` builds this without touching any code object; entering it or the
+    first call installs the captured frames, and ``unload``/exit takes them back
+    out. After an unload a bare call raises rather than silently re-installing;
+    re-entering as a context manager is the explicit way to install again.
+    """
+
+    def __init__(
+        self,
+        serve: Callable[..., Any],
+        entry_factory: Callable[[], Callable[..., object]],
+        *,
+        check_fn: Callable[[Callable[..., object]], None] | None = None,
+        backend_keys: Sequence[str] = (),
+    ) -> None:
+        self._serve = serve
+        self._entry_factory = entry_factory
+        # Refuses a load(fn=...) target the artifact was not captured from.
+        self._check_fn = check_fn
+        # PrecompileContext keys serve() records; unload() takes back the ones
+        # this install added, by identity (see _ensure).
+        self._backend_keys = backend_keys
+        self._recorded: dict[str, Any] = {}
+        self._fn: Callable[..., object] | None = None
+        self._inner: Any = None
+        self._prepared: Any = None
+        # Serve-time compiles survive unload/exit: a job reads this after the
+        # scope, when the live inner is already gone.
+        self._serve_time_compiles = 0
+        # unload() retires the handle for good. Without this flag a call after
+        # unload would silently re-run _serve() -- re-mutating process-global
+        # code objects with no paired unload, exactly the attributable-install
+        # contract this class exists to keep -- and a call racing unload()
+        # could reinstall before unload() returned.
+        self._unloaded = False
+        # Installing mutates process-global code objects, so racing first calls
+        # must not both install.
+        self._install_lock = threading.Lock()
+
+    def _rebind(self, fn: Callable[..., object]) -> None:
+        from torch._dynamo.exc import PackageError
+
+        with self._install_lock:
+            if self._inner is not None:
+                raise PrecompileError(
+                    "precompile: this artifact is already installed; pass fn= to load() "
+                    "before the first call."
+                )
+            if self._check_fn is not None:
+                try:
+                    self._check_fn(fn)
+                except (PackageError, TypeError) as e:
+                    raise PrecompileError(str(e)) from e
+            self._fn = fn
+
+    def _ensure(self) -> Any:
+        inner = self._inner
+        if inner is None:
+            with self._install_lock:
+                if self._unloaded:
+                    raise PrecompileError(
+                        "precompile: this artifact has been unloaded; enter it "
+                        "as a context manager to install it again, or load() a "
+                        "new handle."
+                    )
+                if self._inner is None:
+                    from torch._dynamo.precompile_context import PrecompileContext
+
+                    fn = self._entry_factory() if self._fn is None else self._fn
+                    # Backend keys are per-capture uuids, so only another handle
+                    # on this very artifact (or the same entry loaded through
+                    # DynamoStore) can already hold them, with identical content.
+                    # _serve records only absent keys; remember which those were
+                    # so unload takes back exactly what this install added.
+                    # Consume the prepared entry first, so a failed serve
+                    # does not reuse it on a later call.
+                    prepared, self._prepared = self._prepared, None
+                    with _RECORD_LOCK:
+                        present = {
+                            k
+                            for k in self._backend_keys
+                            if PrecompileContext.serialize_artifact_by_key(k)
+                            is not None
+                        }
+                        self._inner = self._serve(fn, prepared=prepared)
+                        self._recorded = {
+                            k: PrecompileContext.serialize_artifact_by_key(k)
+                            for k in self._backend_keys
+                            if k not in present
+                        }
+                inner = self._inner
+        return inner
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        return self._ensure()(*args, **kwargs)
+
+    def __enter__(self) -> Self:
+        # Entering IS a point in the caller's control flow, so it explicitly
+        # re-arms a handle a prior unload() retired for bare calls.
+        with self._install_lock:
+            self._unloaded = False
+        self._ensure()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.unload()
+
+    def serve_time_compiles(self) -> int:
+        inner = self._inner
+        live = inner.serve_time_compiles() if inner is not None else 0
+        return self._serve_time_compiles + live
+
+    def unload(self) -> None:
+        with self._install_lock:
+            self._unloaded = True
+            inner, self._inner = self._inner, None
+            self._prepared = None
+        if inner is not None:
+            # Fold the retired install's serve-time count into the running
+            # total so serve_time_compiles() survives unload/exit.
+            self._serve_time_compiles += inner.serve_time_compiles()
+            inner.unload()
+            from torch._dynamo.precompile_context import PrecompileContext
+
+            with _RECORD_LOCK:
+                recorded, self._recorded = self._recorded, {}
+                for key, artifact in recorded.items():
+                    # Only the object this install filed: a same-key artifact
+                    # filed since (an ambient run on the same graph) is not ours
+                    # to take.
+                    if PrecompileContext.serialize_artifact_by_key(key) is artifact:
+                        PrecompileContext.take_artifact(key)
+
+
 class Capture:
     r"""The caller-driven capture :func:`torch.compiler.precompile.capture` returns.
 
@@ -543,6 +733,34 @@ class _MakeFxCapture(Capture):
 
     def __enter__(self) -> Self:
         return self
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        if kwargs:
+            raise ValueError(
+                "MakeFxTracer takes positional arguments only; pass "
+                "tracer=DynamoTracer() to capture calls with keyword arguments."
+            )
+        if self._traced:
+            raise PrecompileError(
+                "MakeFxTracer captures a single call and one has already been "
+                "traced. Use tracer=DynamoTracer() to capture several calls, with "
+                "the graph breaks and recompilations between them."
+            )
+        self._traced = True
+        # make_fx traces one execution of fn and lowers it to the artifact; we then
+        # serve that artifact on the real args through the SAME load() path a caller
+        # would take, so the value handed back is exactly what serving produces
+        # (invariants checked, grads scattered onto the model) rather than a bare
+        # trace with no result. Single-shot: a make_fx trace records one path, so a
+        # second call has nothing new to add. Build python_code ONCE and thread it
+        # into to_cache_bytes (the metadata + embedded kernel source is not rebuilt,
+        # and code_hash is sha256 over exactly the bytes written on exit). The
+        # caller drives the grad mode, for both the trace and the serve.
+        with torch.enable_grad() if self._training else torch.no_grad():
+            self._module._compile(args)
+            python_code = self._module.to_python_code()
+            self._rendered = (python_code, self._module.to_cache_bytes(python_code))
+            return _runnable_from_pair(*self._rendered, _trusted=True)(*args)
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:
@@ -1750,6 +1968,244 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
     return frames
 
 
+def _build_multigraph_python_source(
+    entry: Any,
+    backends: Mapping[str, Any],
+    summary: Any,
+    backend: str,
+    serving_mode: str = "standalone",
+    package_entry: object = None,
+    entry_binding: dict[str, Any] | None = None,
+    rendered: Mapping[str, str] | None = None,
+    refused: Mapping[str, str] | None = None,
+) -> str:
+    """Render a multi-graph capture as ``python_code``.
+
+    The readable half -- what was captured, which frames, how many variants, what
+    guards were dropped -- is emitted as literals so a reviewer can diff it, and
+    the compiled subgraphs are rendered as source beside them. Only the guard
+    trees and the transformed bytecode, which have no source form, go into the
+    clearly banners' opaque blobs.
+    """
+    from torch._dynamo.package import SerializedCode
+    from torch._functorch._aot_autograd.codegen import PySourceBuilder
+
+    frames = _multigraph_frames(entry)
+    buf = PySourceBuilder()
+    buf.writeline(_MULTIGRAPH_GENERATED_HEADER)
+    buf.writeline(_SERVING_NOTES[serving_mode])
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 1. What was captured (readable)")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(f"BACKEND = {backend!r}")
+    buf.writeline('TRACER = "dynamo"')
+    buf.writeline(f"FN_NAME = {entry.fn_name!r}")
+    buf.writeline(f"FN_FIRST_LINENO = {entry.fn_first_lineno!r}")
+    buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
+    buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
+    buf.writeline("")
+    buf.writeline(
+        "# frame name -> number of captured variants. A frame with one variant"
+    )
+    buf.writeline("# serves one specialization; the artifact covers no other.")
+    buf.writeline("FRAMES = [")
+    for frame, code in zip(frames, [c for c in entry.codes if not c.bypassed]):
+        name = SerializedCode.to_code_object(code.python_code).co_name
+        buf.writeline(f"    ({name!r}, {len(frame['variants'])}),")
+    buf.writeline("]")
+    buf.writeline("")
+    buf.writeline(
+        "# Guards that could NOT be serialized and are therefore not checked at"
+    )
+    buf.writeline("# serve time. Rebinding any of these between capture and load can")
+    buf.writeline(
+        "# silently select the wrong graph -- audit them against your deployment."
+    )
+    buf.writeline(f"DROPPED_GUARDS = {[list(g) for g in summary.dropped_guards]!r}")
+    buf.writeline(
+        f"RISKY_DROPPED_GUARDS = {[list(g) for g in summary.risky_dropped_guards]!r}"
+    )
+    buf.writeline("")
+    buf.writeline("# Guards that COULD be serialized and were not, because they held")
+    buf.writeline("# identically in every captured variant so they discriminated")
+    buf.writeline("# nothing. Not checked at serve time either: a call outside the")
+    buf.writeline("# captured domain along one of these is served, not refused.")
+    buf.writeline(
+        f"POLICY_DROPPED_GUARDS = {[list(g) for g in summary.policy_dropped_guards]!r}"
+    )
+    buf.writeline("")
+    buf.writeline("# What a dropped slot above actually checked, where it renders one.")
+    buf.writeline("# A slot is named by")
+    buf.writeline("# its type and SOURCE, which for some types does not say enough to")
+    buf.writeline("# judge the drop: a dropped HASATTR on a source may be the benign")
+    buf.writeline("# companion of a kept TENSOR_MATCH on the same source, or the only")
+    buf.writeline("# thing pinning an optional attribute. The rendered check names the")
+    buf.writeline("# attribute and tells the two apart.")
+    buf.writeline(
+        f"DROPPED_GUARD_CODE = "
+        f"{[list(g) for g in getattr(summary, 'dropped_guard_code', ())]!r}"
+    )
+    buf.writeline("")
+    buf.writeline(
+        "# Values pinned to exactly what capture saw; any other value misses."
+    )
+    buf.writeline(f"WONT_GENERALIZE = {tuple(summary.wont_generalize)!r}")
+    buf.writeline("")
+    if serving_mode == "installed":
+        reachable = _reachable_frames(frames)
+        dead = sorted(
+            SerializedCode.to_code_object(frame["code"]).co_name
+            for i, frame in enumerate(frames)
+            if frame["variants"] and i not in reachable
+        )
+        buf.writeline("# " + "=" * 70)
+        buf.writeline("# 2. How this artifact serves: INSTALLED (readable)")
+        buf.writeline("#")
+        buf.writeline("# A source artifact dispatches only the entry frame and the")
+        buf.writeline(
+            "# continuations its bytecode names. These frames are entered by an"
+        )
+        buf.writeline(
+            "# ordinary call, so nothing in the entry reaches them and they would"
+        )
+        buf.writeline(
+            "# run eager. This artifact therefore installs onto the live code"
+        )
+        buf.writeline("# objects instead, which reaches every frame.")
+        buf.writeline("#")
+        buf.writeline("# load() installs NOTHING; entering the result -- or calling")
+        buf.writeline("# it -- installs, and unload()/exit removes it again.")
+        buf.writeline("# " + "=" * 70)
+        buf.writeline('SERVING_MODE = "installed"')
+        buf.writeline(f"UNREACHABLE_WITHOUT_INSTALL = {tuple(dead)!r}")
+        buf.writeline("")
+        buf.writeline("# " + "=" * 70)
+        buf.writeline("# 3. The captured package -- OPAQUE")
+        buf.writeline("#")
+        buf.writeline(
+            "# base64(pickle) of the serialized Dynamo state (per-frame guard"
+        )
+        buf.writeline(
+            "# trees and transformed bytecode) plus the compiled subgraphs. Guard"
+        )
+        buf.writeline(
+            "# trees are a spec for a C++ GuardManager and have no readable form;"
+        )
+        buf.writeline("# the counts and names above describe what is in here.")
+        buf.writeline("# " + "=" * 70)
+        buf.writeline(f"_PACKAGE = {_b64(package_entry)!r}")
+        buf.writeline("")
+        buf.writeline("# The entry's default arguments; see the standalone note")
+        buf.writeline("# above -- the installed driver rebuilds an entry too.")
+        buf.writeline(f"_ENTRY_BINDING = {_b64(entry_binding or {})!r}")
+        buf.writeline("")
+        buf.writeline("# " + "=" * 70)
+        buf.writeline("# 4. Driver: rebuild the package, install, dispatch (readable)")
+        buf.writeline("# " + "=" * 70)
+        buf.writeline(_emit_installed_driver_source())
+        return buf.getvalue()
+
+    buf.writeline('SERVING_MODE = "standalone"')
+    buf.writeline("")
+    buf.writeline(
+        "# Every function Dynamo INLINED into a captured graph, so the driver"
+    )
+    buf.writeline("# can tell that the source it is about to trust still says what it")
+    buf.writeline(
+        "# said at capture. The installed mode gets this from CompilePackage;"
+    )
+    buf.writeline(
+        "# a standalone artifact builds no package, so it carries the records."
+    )
+    buf.writeline("# __main__ is skipped: it names the LOADER's script on another")
+    buf.writeline("# machine, which is exactly what a portable artifact is for.")
+    buf.writeline(
+        f"INLINED_SOURCES = "
+        f"{sorted((s.module, s.firstlineno, s.lastlineno, s.checksum) for s in entry.source_info.inlined_sources if s.module != '__main__')!r}"
+    )
+    buf.writeline("")
+    buf.writeline("# The entry's defaults and closure values: a code object carries")
+    buf.writeline("# neither, and the driver rebuilds the entry from one.")
+    try:
+        binding_blob = _b64(entry_binding or {})
+    except Exception as e:
+        raise PrecompileError(
+            f"precompile cannot carry {entry.fn_name!r}'s default arguments in the "
+            f"artifact; defaults must be picklable ({type(e).__name__}: {e})."
+        ) from e
+    buf.writeline(f"_ENTRY_BINDING = {binding_blob!r}")
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 2. Guard trees and transformed bytecode -- OPAQUE")
+    buf.writeline("#")
+    buf.writeline(
+        "# base64(pickle) of one record per frame: the frame's code object, its"
+    )
+    buf.writeline(
+        "# variants' serialized guard state and Dynamo bytecode, and the globals"
+    )
+    buf.writeline(
+        "# it reads. Guard trees are a spec for a C++ GuardManager and have no"
+    )
+    buf.writeline(
+        "# readable form; the counts and names above describe what is in here."
+    )
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(f"_FRAMES = {_b64(frames)!r}")
+    buf.writeline("")
+    # A compiled subgraph is Inductor output, which HAS a source form -- unlike
+    # the guard trees and bytecode above. Emit that source where the backend can
+    # produce it, and fall back to the pickle only for the rest (eager graphs,
+    # anything the lowering refused). rendered_backends already suffixed every
+    # top-level name each block defines per slot (namespace_module_names), so the
+    # blocks splice sequentially into ONE namespace and resolve siblings late
+    # without a variant silently running another variant's code.
+    rendered = dict(rendered or {})
+    buf.writeline("# " + "=" * 70)
+    if rendered:
+        buf.writeline(f"# 3. Compiled subgraphs -- {len(rendered)} READABLE below")
+        if len(rendered) < len(backends):
+            buf.writeline(
+                f"#    ({len(backends) - len(rendered)} could not be rendered and "
+                f"stay in _BACKENDS)"
+            )
+    else:
+        buf.writeline("# 3. Compiled subgraphs -- OPAQUE")
+    # Why a subgraph stayed pickled, so the fallback is visible in the artifact
+    # itself and not only in a warning at capture time.
+    for backend_id, reason in (refused or {}).items():
+        buf.writeline(f"#    {backend_id} stays pickled: {reason}")
+    buf.writeline("#")
+    buf.writeline("# base64(pickle) of the backend artifacts the frames call by name.")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(
+        f"_BACKENDS = {_b64({k: v for k, v in backends.items() if k not in rendered})!r}"
+    )
+    if rendered:
+        buf.writeline("")
+        buf.writeline("_SUBGRAPHS = {}")
+        _seen_slots: list[str] = []
+        for backend_id, source in rendered.items():
+            buf.writeline("")
+            buf.writeline("# " + "-" * 70)
+            buf.writeline(f"# subgraph {backend_id}")
+            buf.writeline("# " + "-" * 70)
+            buf.writeline(source)
+            # the block's entry was renamed along with everything else it defines
+            entry_name = f"call_s{len(_seen_slots)}"
+            _seen_slots.append(backend_id)
+            buf.writeline(f"_SUBGRAPHS[{backend_id!r}] = {entry_name}")
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(
+        "# 4. Driver: rebuild the guards, wire the names, dispatch (readable)"
+    )
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(_emit_multigraph_driver_source())
+    return buf.getvalue()
+
+
 def _reachable_frames(frames: list[dict[str, Any]]) -> set[int]:
     """Indices of the frames a standalone driver can actually dispatch.
 
@@ -1932,6 +2388,73 @@ def _entry_binding(fn: object) -> dict[str, Any]:
     }
 
 
+def _build_multigraph_artifact(
+    entry: Any,
+    backends: Mapping[str, Any],
+    summary: Any,
+    backend: str,
+    entry_fn: object = None,
+    rendered: Mapping[str, str] | None = None,
+    refused: Mapping[str, str] | None = None,
+) -> tuple[str, bytes]:
+    """``(python_code, cache)`` for a multi-graph capture.
+
+    python_code is self-contained -- it carries the frames, the guard trees and
+    the compiled subgraphs -- so cache is the same acceleration it is for the
+    single-graph forms: the inductor bundle that primes the kernel caches, and
+    the tag binding it to this python_code (invariant 7).
+    """
+    frames = _multigraph_frames(entry)
+    serving_mode = _serving_mode(frames)
+    package_entry = None
+    if serving_mode == "installed":
+        # Frames a source artifact cannot reach would run eager, so serve this
+        # capture by installing instead. That needs the package itself, not the
+        # per-frame records the standalone driver rebuilds from.
+        from torch._dynamo.package import PrecompileCacheEntry
+
+        package_entry = PrecompileCacheEntry(entry, cast("dict[Any, Any]", backends))
+    else:
+        _reject_unreachable_frames(frames, entry)
+    # Defaults the artifact can carry; closure cells it cannot. Dynamo guards a
+    # cell by identity, and a rebuilt cell holding the same value is a different
+    # object, so a closure entry would load and then miss every variant.
+    _reject_uninstallable_entry(frames, entry)
+
+    python_code = _build_multigraph_python_source(
+        entry,
+        backends,
+        summary,
+        backend,
+        serving_mode,
+        package_entry,
+        _entry_binding(entry_fn),
+        dict(rendered or {}),
+        refused,
+    )
+    inductor_bundle = None
+    if backend != "eager":
+        # The dynamo capture runs under with_fresh_cache(), so this is
+        # exactly what the capture's compiles recorded.
+        from torch.compiler._cache import CacheArtifactManager
+
+        saved = CacheArtifactManager.serialize()
+        inductor_bundle = None if saved is None else saved[0]
+    buf = io.BytesIO()
+    torch.save(
+        {
+            "format": _CACHE_FORMAT,
+            "version": _CACHE_VERSION,
+            "backend": backend,
+            "tracer": "dynamo",
+            "code_hash": hashlib.sha256(python_code.encode()).hexdigest(),
+            "artifact": inductor_bundle,
+        },
+        buf,
+    )
+    return python_code, buf.getvalue()
+
+
 def _emit_multigraph_driver_source() -> str:
     """Emit the multi-graph driver as text, the same getsource path the others use."""
 
@@ -1939,6 +2462,15 @@ def _emit_multigraph_driver_source() -> str:
 
     body = inspect.getsource(driver._build_multigraph_forward).rstrip()
     return "\n" + body + "\n\n\nforward = _build_multigraph_forward()\n"
+
+
+def _emit_installed_driver_source() -> str:
+    """Emit the installing driver as text, the same getsource path the others use."""
+
+    from torch import _precompile_driver as driver
+
+    body = inspect.getsource(driver._build_installed_forward).rstrip()
+    return "\n" + body + "\n\n\nforward = _build_installed_forward()\n"
 
 
 def _assert_supported(gm: torch.fx.GraphModule) -> None:
@@ -2273,3 +2805,140 @@ def _make_inlined_forward(
     module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
     exec(compile(python_code, "<precompile>", "exec"), module_ns)
     return cast("Callable[..., object]", module_ns["forward"])
+
+
+def _runnable_from_pair(
+    python_code: str,
+    cache: bytes,
+    *,
+    fn: Callable[..., object] | None = None,
+    _trusted: bool = False,
+) -> PrecompiledRunnable:
+    """Reconstruct a runnable from an in-memory ``(python_code, cache)`` pair.
+
+    The shared core of :func:`load` (which reads the pair off disk first) and the
+    capture-time self-load in :class:`_MakeFxCapture`. ``_trusted`` is set only for
+    that self-load, where the source was just produced in-process, to suppress the
+    exec warning.
+    """
+    # Unpickling the cache references classes in AOTAutograd's runtime; import
+    # dynamo first so that import completes in a non-circular order (otherwise
+    # a cold load can hit a runtime_wrappers <-> _dynamo circular import).
+    import torch._dynamo
+
+    # The whole calling convention (MODULE_POSITIONS, OUT_SPEC, USER_INPUT_*, PARAM_*,
+    # BUFFER_*, IN_SPEC, ...) is consumed by the driver INLINED in python_code
+    # (emitted from torch._precompile_driver), so the loaded object needs none of it.
+    # _parse_artifact_metadata still runs to validate python_code is a precompile
+    # artifact and to read BACKEND for the cache-pairing check below.
+    meta = _parse_artifact_metadata(python_code)
+    backend = cast(str, meta["BACKEND"])
+    # TRACER is absent on artifacts predating the dynamo tracer, so treat its absence
+    # as make_fx (matching _parse_artifact_metadata and the cache-envelope default);
+    # this keeps the pairing check below correct for older make_fx python_code.
+    tracer = cast(str, meta.get("TRACER", "make_fx"))
+
+    # weights_only=True is safe (plain str/int/bytes dict). The inner artifact bytes
+    # are the inductor save_cache_artifacts bundle, used below to prime the kernel
+    # caches. The cache is acceleration only, so an unreadable envelope or a FORMAT /
+    # VERSION mismatch degrades to JIT'ing from python_code rather than crashing. A
+    # BACKEND or CODE_HASH mismatch is different -- it signals a wrong (python_code,
+    # cache) pairing -- so it hard-fails rather than running under foreign metadata.
+    artifact = None
+    try:
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        if blob.get("format") != _CACHE_FORMAT or blob.get("version") != (
+            _CACHE_VERSION
+        ):
+            log.warning(
+                "torch.compiler.precompile.load got a cache with format=%r "
+                "version=%r, expected %r / %r; it is likely from a different torch "
+                "build. Falling back to JIT from python_code.",
+                blob.get("format"),
+                blob.get("version"),
+                _CACHE_FORMAT,
+                _CACHE_VERSION,
+            )
+            blob = None
+        if blob is not None:
+            if blob.get("backend") != backend:
+                raise PrecompileError(
+                    f"cache backend {blob.get('backend')!r} does not match the "
+                    f"python_code backend {backend!r}; the cache and python_code "
+                    "came from different precompile captures."
+                )
+            # A tracer tag was added alongside the dynamo tracer; treat its absence as
+            # make_fx so an older make_fx cache still pairs with its python_code. A
+            # differing tag means a wrong (code, cache) pairing, so hard-fail.
+            if blob.get("tracer", "make_fx") != tracer:
+                raise PrecompileError(
+                    f"cache tracer {blob.get('tracer', 'make_fx')!r} does not match "
+                    f"the python_code tracer {tracer!r}; the cache and python_code "
+                    "came from different precompile captures."
+                )
+            # Reject a cache whose code_hash does not match this python_code (a
+            # mismatched pairing); see Note [precompile programming model], invariant 7.
+            expected_code_hash = hashlib.sha256(python_code.encode()).hexdigest()
+            if blob.get("code_hash") != expected_code_hash:
+                raise PrecompileError(
+                    "cache does not match python_code (its code_hash "
+                    f"{blob.get('code_hash')!r} != sha256(python_code) "
+                    f"{expected_code_hash!r}); the cache and python_code came from "
+                    "different precompile captures. Pair each cache with the "
+                    "python_code from the same precompile capture."
+                )
+            artifact = blob.get("artifact")
+    except PrecompileError:
+        raise
+    except Exception as e:
+        log.warning(
+            "torch.compiler.precompile.load could not read the cache envelope (%s: %s); the "
+            "cache is likely corrupt or from a different torch build. Falling back "
+            "to JIT from python_code.",
+            type(e).__name__,
+            e,
+        )
+    if artifact is not None:
+        # Prime the inductor kernel caches from the bundle so the exec of python_code
+        # below loads the precompiled kernels (Triton binaries / autotune results)
+        # instead of recompiling them. The composed python_code runs its inlined
+        # kernels directly (no compile_fx re-entry, so no FxGraphCache lookup); the
+        # acceleration is the warm kernel cache. This is a pure acceleration: a stale /
+        # cross-torch-version / corrupt bundle that fails to load just leaves the caches
+        # cold, and python_code JITs -- same result, no crash.
+        try:
+            torch.compiler.load_cache_artifacts(artifact)
+        except Exception as e:
+            log.warning(
+                "torch.compiler.precompile.load could not prime the cache from the "
+                "artifact bundle (%s: %s); it is likely stale or from a different "
+                "torch build. Falling back to JIT from python_code.",
+                type(e).__name__,
+                e,
+            )
+    # Run the driver inlined in python_code. It carries the full calling convention and
+    # runtime safety checks (subclass wrap/unwrap, param/buffer lifting, grad harvest,
+    # input/model validation) and JITs the kernels -- which hit the primed cache when
+    # the bundle above loaded, so the "cache" path is exec-with-warm-kernels rather than
+    # a separate runtime.
+    forward = _make_inlined_forward(python_code, warn=not _trusted)
+
+    if meta.get("SERVING_MODE") == "installed":
+        # The exec above only built the handle; entering or calling it installs.
+        if not isinstance(forward, _InstalledArtifact):
+            raise PrecompileError(
+                "python_code declares SERVING_MODE='installed' but its driver "
+                "did not produce an installable handle; the artifact is "
+                "malformed."
+            )
+        if fn is not None:
+            forward._rebind(fn)
+        forward._prepare(cast(str, meta["_PACKAGE"]))
+        return PrecompiledCallable(forward)
+    if fn is not None:
+        raise PrecompileError(
+            "fn= applies only to an artifact with SERVING_MODE='installed'; a "
+            "standalone artifact carries its own entry and takes the captured "
+            "arguments directly."
+        )
+    return PrecompiledModule._from_loaded(forward, backend=backend)
