@@ -59,6 +59,7 @@ from torch._dynamo.utils import (
     dynamo_timed,
     get_metrics_context,
 )
+from torch._higher_order_ops.effects import is_cacheable_effectful_op
 from torch._inductor import config, config_comms, exc, metrics
 from torch._inductor.codegen.common import (
     custom_backend_codegen_configs,
@@ -1107,23 +1108,32 @@ class CacheabilityValidator:
             if not isinstance(module, torch.fx.GraphModule):
                 continue
             for node in module.graph.nodes:
-                if (
-                    isinstance(node.target, torch._ops.HigherOrderOperator)
-                    and not node.target.cacheable()
-                ):
-                    self.bypass(
-                        f"Can't cache HigherOrderOperator: {node.target.name()}"
+                if isinstance(node.target, torch._ops.HigherOrderOperator):
+                    is_cacheable_hop = node.target.cacheable() or (
+                        node.target is torch.ops.higher_order.with_effects
+                        and len(node.args) >= 2
+                        and is_cacheable_effectful_op(node.args[1])
                     )
+                    if not is_cacheable_hop:
+                        self.bypass(
+                            f"Can't cache HigherOrderOperator: {node.target.name()}"
+                        )
                 # TODO: this check is broken in two ways:
                 # 1. FX uses "get_attr" (with underscore), not "getattr"
                 # 2. It only checks for ScriptObject, not FakeScriptObject
                 # Fixing it would also bypass AOTAutogradCache (which calls
                 # _check_can_cache), so we'd need to decouple the two first.
-                if node.op == "getattr" and isinstance(
-                    getattr(self.gm, node.target), torch._C.ScriptObject
+                if (
+                    node.op == "getattr"
+                    and isinstance(node.target, str)
+                    and isinstance(getattr(self.gm, node.target), torch._C.ScriptObject)
                 ):
                     self.bypass("Can't cache torchbind objects")
-                if include_constants and node.op == "get_attr":
+                if (
+                    include_constants
+                    and node.op == "get_attr"
+                    and isinstance(node.target, str)
+                ):
                     try:
                         attr = self._get_attr(module, node.target)
                     except AttributeError:
