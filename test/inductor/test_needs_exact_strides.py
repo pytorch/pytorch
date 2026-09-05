@@ -8,15 +8,16 @@ from torch._inductor.pattern_matcher import (
     register_graph_pattern,
 )
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     IS_LINUX,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
+from torch.utils._triton import has_triton
 
 
-if HAS_GPU_AND_TRITON:
+if has_triton():
     import triton
     import triton.language as tl
 
@@ -36,13 +37,13 @@ if HAS_GPU_AND_TRITON:
 
 
 class TestNeedsExactStrides(InductorTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @parametrize("dtype", [torch.float, torch.float8_e8m0fnu])
-    def test_custom_op(self, dtype):
-        device = (
-            torch.accelerator.current_accelerator()
-        )  # float8_e8m0fnu errors on "cpu"
-        x = torch.ones(4, 4, 2, 2, device=device, dtype=torch.float8_e8m0fnu)
-        other = torch.ones(4, 4, 2, 2, device=device, dtype=torch.float8_e8m0fnu)
+    def test_custom_op(self, device, dtype):
+        # float8_e8m0fnu errors on "cpu"
+        x = torch.ones(4, 4, 2, 2, device=device, dtype=dtype)
+        other = torch.ones(4, 4, 2, 2, device=device, dtype=dtype)
 
         class _CustomPass(PatternMatcherPass):
             def __init__(self) -> None:
@@ -120,9 +121,8 @@ class TestNeedsExactStrides(InductorTestCase):
 
     @parametrize("n", [64, 128, 256])
     def test_dynamic_size_one_leading_dim_view_triton_kernel_wrapper_functional(
-        self, n
+        self, device, n
     ):
-        device = torch.accelerator.current_accelerator()
         inner = 8
 
         def fn(x):
@@ -152,8 +152,11 @@ class TestNeedsExactStrides(InductorTestCase):
         self.assertEqual(compiled(x.clone()), fn(x.clone()))
 
 
-instantiate_parametrized_tests(TestNeedsExactStrides)
+instantiate_device_type_tests(
+    TestNeedsExactStrides, globals(), except_for="cpu", allow_xpu=True
+)
+
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU_AND_TRITON:
+    if IS_LINUX and has_triton():
         run_tests(needs="filelock")
