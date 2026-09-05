@@ -1531,7 +1531,7 @@ class TestFlexAttentionEstimation(TestCase):
 
 
 instantiate_device_type_tests(
-    TestFlopCounterDeviceType, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    TestFlopCounterDeviceType, globals(), except_for=("cpu",), allow_xpu=True
 )
 
 
