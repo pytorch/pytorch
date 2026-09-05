@@ -1158,8 +1158,22 @@ def get_desired_device_type_test_bases(
         os.getenv(PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY, "")
     )
     if env_custom_only_for:
+        # Replace privateuse1 backend name with 'privateuse1' to ensure
+        # consistent device type filtering
+        if _is_privateuse1_backend_available():
+            privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+
+            def func_replace(x: str) -> str:
+                return x.replace(privateuse1_backend_name, "privateuse1")
+        else:
+
+            def func_replace(x: str) -> str:
+                return x
+
+        normalized_custom = [func_replace(x) for x in env_custom_only_for]
         desired_device_type_test_bases += filter(
-            lambda x: x.device_type in env_custom_only_for, test_bases
+            lambda x: func_replace(x.device_type) in normalized_custom,
+            test_bases,
         )
         desired_device_type_test_bases = list(set(desired_device_type_test_bases))
 
