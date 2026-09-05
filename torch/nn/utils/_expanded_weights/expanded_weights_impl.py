@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
 
@@ -9,6 +10,42 @@ from torch.utils._pytree import tree_map_only
 
 
 HANDLED_FUNCTIONS: dict[Callable, torch.autograd.Function] = {}
+
+
+@functools.lru_cache
+def _is_device_predicate(name: str) -> bool:
+    """Whether ``name`` is one of ``Tensor``'s ``is_<device type>`` properties.
+
+    Ask the device-type parser instead of listing backends: this has to cover
+    ``is_cuda``, ``is_xpu``, ``is_mps``, ``is_mtia`` and whatever a PrivateUse1
+    backend registers, and the answer must not need editing when one is added.
+    Cached because it sits on attribute access and the answer never changes.
+    """
+    if not name.startswith("is_"):
+        return False
+    try:
+        # Deliberately probing, so a name that parses only with a deprecation
+        # warning (``mkldnn``) must not surface one to the caller. Runs at most
+        # once per name thanks to the cache.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            torch.device(name[3:])
+    except RuntimeError:
+        return False
+    return True
+
+
+def _property_name(func) -> str | None:
+    """Name of the property ``func`` gets, or None if ``func`` is not a getter."""
+    if getattr(func, "__name__", None) != "__get__":
+        return None
+    prop = getattr(func, "__self__", None)
+    # C getsets carry the name directly; a Python property carries it on fget,
+    # which is how a PrivateUse1 backend's generated is_<name> arrives.
+    return getattr(prop, "__name__", None) or getattr(
+        getattr(prop, "fget", None), "__name__", None
+    )
+
 
 aten = torch._ops.ops.aten
 # __torch_function__ runs before the pydispatcher so we need to manually use the same
@@ -127,6 +164,13 @@ class ExpandedWeight(torch.Tensor):
     def __torch_function__(cls, func, _, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+        # Property access on a tensor subclass is routed here, so every
+        # Tensor.is_<device> predicate lands in this method and hits the raise at
+        # the bottom unless it is answered. Answer them from the wrapped weight,
+        # which is where the explicit property overrides below already point.
+        prop_name = _property_name(func)
+        if prop_name is not None and _is_device_predicate(prop_name):
+            return getattr(args[0].orig_weight, prop_name)
         if func in expanded_weights_rnn_decomps:
             # in aten, choosing the input or data variants is done by parsing logic. This mimics some of that
             decomp_opts = expanded_weights_rnn_decomps[func]
@@ -168,10 +212,6 @@ class ExpandedWeight(torch.Tensor):
     @property
     def device(self):  # type: ignore[override]
         return self.orig_weight.device
-
-    @property
-    def is_cuda(self):  # type: ignore[override]
-        return self.orig_weight.is_cuda
 
     def data_ptr(self):
         return self.orig_weight.data_ptr()
