@@ -60,7 +60,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
-    skipIfRocm,
     skipIfWindows,
     skipIfXpu,
     subtest,
@@ -3681,11 +3680,14 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             cudnn = self.gen_cache_key(fn, config)
         self.assertNotEqual(flash1, cudnn)
 
+        # Enabling any single backend must differ from the all-disabled baseline,
+        # otherwise a flag pair moving together leaves one of them unpinned.
         with torch.nn.attention.sdpa_kernel([]):
             no_backend = self.gen_cache_key(fn, config)
-        with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.OVERRIDEABLE):
-            overrideable = self.gen_cache_key(fn, config)
-        self.assertNotEqual(no_backend, overrideable)
+        for name in torch.nn.attention._backend_names.values():
+            backend = getattr(torch.nn.attention.SDPBackend, name)
+            with torch.nn.attention.sdpa_kernel(backend):
+                self.assertNotEqual(no_backend, self.gen_cache_key(fn, config))
 
         backends = [
             torch.nn.attention.SDPBackend.CUDNN_ATTENTION,
@@ -3727,23 +3729,15 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(old_fp16_bf16)
         self.assertNotEqual(fp16_bf16_off, fp16_bf16_on)
 
-    # preferred_rocm_fa_library("ck") TORCH_CHECKs on CK availability, which the
-    # gfx90a/gfx1100 shards this class runs on do not have.
-    @skipIfRocm
-    def test_sdpa_rocm_fa_library(self):
-        def fn(x):
-            return x.sin().cos()
-
-        config = self.default_config()
         old_library = torch.backends.cuda.preferred_rocm_fa_library()
         try:
             torch.backends.cuda.preferred_rocm_fa_library("default")
             default_library = self.gen_cache_key(fn, config)
-            torch.backends.cuda.preferred_rocm_fa_library("ck")
-            ck_library = self.gen_cache_key(fn, config)
+            torch.backends.cuda.preferred_rocm_fa_library("aotriton")
+            aotriton_library = self.gen_cache_key(fn, config)
         finally:
             torch.backends.cuda.preferred_rocm_fa_library(old_library)
-        self.assertNotEqual(default_library, ck_library)
+        self.assertNotEqual(default_library, aotriton_library)
 
     def test_different_act_input_paths(self):
         def fn(x):
