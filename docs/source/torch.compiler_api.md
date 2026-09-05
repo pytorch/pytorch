@@ -57,7 +57,7 @@ releases without a deprecation cycle.
 % intentionally omitted from the autosummary block above.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *, backend="inductor", tracer="make_fx", decompositions=None, example_inputs, guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False)
+.. py:function:: precompile(fn, *, backend="inductor", tracer="make_fx", decompositions=None, example_inputs, guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False, training=False, keep_example_grads=False)
 
    .. deprecated:: 2.15
 
@@ -173,6 +173,14 @@ releases without a deprecation cycle.
    :param training: Run the example calls with grad enabled and lower a backward into the
        artifact; defaults to ``False`` (calls run under ``torch.no_grad()``, for either
        ``tracer``). Required for a ``fn`` that runs a backward.
+   :param keep_example_grads: Leave ``.grad`` exactly as the example calls left it.
+       By default precompile snapshots and clears the example model's gradients before
+       the calls and restores them afterwards, so capturing cannot double the gradients
+       of the documented warmup-step-then-capture flow. Pass ``True`` when the example
+       call IS your live training step and its gradients are the point -- otherwise the
+       backward you just paid for is discarded, and the artifact is produced either way
+       so nothing tells you a batch went missing. With it set, a gradient already present
+       accumulates exactly as it would in eager. Applies only to ``tracer="dynamo"``.
    :returns: ``(python_code, cache)`` -- a self-contained Python source string and a
        binary acceleration cache.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
