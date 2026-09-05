@@ -1221,6 +1221,9 @@ std::tuple<io_type, Tensor, Tensor> _lstm_impl(
       const io_type& input,
       const std::vector<cell_params>& params, const Tensor& hx, const Tensor& cx,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
+  TORCH_CHECK(hx.size(0) == cx.size(0),
+      "Expected hidden state h_0 and cell state c_0 to have the same size at dim 0, but got ",
+      hx.size(0), " and ", cx.size(0));
   // It's much more useful for us to work on lists of pairs of hx and cx for each layer, so we need
   // to transpose a pair of those tensors.
   auto layer_hx = hx.unbind(0);
