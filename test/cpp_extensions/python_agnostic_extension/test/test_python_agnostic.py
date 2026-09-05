@@ -10,6 +10,7 @@ from pathlib import Path
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     run_tests,
     shell,
@@ -19,6 +20,8 @@ from torch.testing._internal.common_utils import (
 
 
 class TestPythonAgnostic(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @classmethod
     def setUpClass(cls):
         # Wipe the dist dir if it exists
