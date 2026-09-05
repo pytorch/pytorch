@@ -148,13 +148,27 @@ class _InductorTraceProcessor:
 
     def add_to_chrome_trace(self, origin_trace):
         """Add Inductor kernel stack information to a Chrome trace."""
-        from torch._inductor.debug import get_kernel_information_jsons
+        from torch._inductor.debug import (
+            _INDUCTOR_TIMELINE_ARTIFACTS_KEY,
+            get_kernel_information_jsons,
+        )
 
         compile_linenos = get_kernel_information_jsons()
         if not compile_linenos:
             return origin_trace
 
         trace = origin_trace
+        fusion_enabled = inductor_config.trace.provenance_tracking_fusion
+        artifacts_by_graph = {}
+        for graph_key, graph_info in compile_linenos.items():
+            if not isinstance(graph_info, dict):
+                continue
+            artifacts = graph_info.get(_INDUCTOR_TIMELINE_ARTIFACTS_KEY)
+            if isinstance(artifacts, dict):
+                artifacts_by_graph[graph_key] = artifacts
+        if fusion_enabled and artifacts_by_graph:
+            trace["pytorch_inductor_artifacts"] = artifacts_by_graph
+
         uid_2_events = self._assign_uniq_id_to_event(trace)
 
         real_events = []
@@ -246,58 +260,79 @@ class _InductorTraceProcessor:
                     keys.append(key)
             return keys
 
+        def _kernel_info_for_kernel(compile_info, graph_key, kernel_name):
+            graph_info = compile_info.get(graph_key, {})
+            kernel_info = graph_info.get(kernel_name)
+            matched_key = kernel_name
+            if kernel_info is None:
+                kernel_prefix = kernel_name + ":"
+                for name, info in graph_info.items():
+                    if name.startswith(kernel_prefix):
+                        matched_key = name
+                        kernel_info = info
+                        break
+            return matched_key, kernel_info
+
         def _stack_from_kernel_info(kernel_info):
             if isinstance(kernel_info, dict):
                 return kernel_info.get("stack_traces")
             return kernel_info
 
-        def _stack_for_kernel(compile_info, graph_key, kernel_name):
-            graph_info = compile_info.get(graph_key, {})
-            kernel_info = graph_info.get(kernel_name)
-            if kernel_info is None:
-                kernel_prefix = kernel_name + ":"
-                for name, info in graph_info.items():
-                    if name.startswith(kernel_prefix):
-                        kernel_info = info
-                        break
-            return _stack_from_kernel_info(kernel_info)
+        def _single_kernel_info_for_graph(compile_info, graph_key):
+            kernel_infos = []
+            for name, kernel_info in compile_info.get(graph_key, {}).items():
+                if name == _INDUCTOR_TIMELINE_ARTIFACTS_KEY:
+                    continue
+                if _stack_from_kernel_info(kernel_info) is not None:
+                    kernel_infos.append((name, kernel_info))
+            if len(kernel_infos) == 1:
+                return kernel_infos[0]
+            return None, None
 
-        def _single_stack_for_graph(compile_info, graph_key):
-            stacks = [
-                stack
-                for stack in (
-                    _stack_from_kernel_info(kernel_info)
-                    for kernel_info in compile_info.get(graph_key, {}).values()
+        def _assign_kernel_metadata(event, graph_key, kernel_key, kernel_info):
+            stack = _stack_from_kernel_info(kernel_info)
+            if stack is None:
+                return False
+
+            event_args = event.setdefault("args", {})
+            event_args["stack"] = stack
+            if not fusion_enabled:
+                return True
+
+            event_args["inductor_graph_key"] = graph_key
+            event_args["inductor_kernel_provenance_key"] = kernel_key
+            if isinstance(kernel_info, dict):
+                event_args["inductor_pre_grad_nodes"] = kernel_info.get(
+                    "pre_grad_nodes", []
                 )
-                if stack is not None
-            ]
-            if len(stacks) == 1:
-                return stacks[0]
-            return None
+                event_args["inductor_post_grad_nodes"] = kernel_info.get(
+                    "post_grad_nodes", []
+                )
+            return True
 
         def _assign_stack(event, compile_info, fwd_key, bw_keys, kernel_name):
             for bw_key in bw_keys:
-                stack = _stack_for_kernel(compile_info, bw_key, kernel_name)
-                if stack is not None:
-                    event.setdefault("args", {})["stack"] = stack
+                kernel_key, kernel_info = _kernel_info_for_kernel(
+                    compile_info, bw_key, kernel_name
+                )
+                if _assign_kernel_metadata(event, bw_key, kernel_key, kernel_info):
                     return True
-            stack = _stack_for_kernel(compile_info, fwd_key, kernel_name)
-            if stack is not None:
-                event.setdefault("args", {})["stack"] = stack
-                return True
-            return False
+            kernel_key, kernel_info = _kernel_info_for_kernel(
+                compile_info, fwd_key, kernel_name
+            )
+            return _assign_kernel_metadata(event, fwd_key, kernel_key, kernel_info)
 
         def _assign_single_stack(event, compile_info, fwd_key, bw_keys):
             for bw_key in bw_keys:
-                stack = _single_stack_for_graph(compile_info, bw_key)
-                if stack is not None:
-                    event.setdefault("args", {})["stack"] = stack
+                kernel_key, kernel_info = _single_kernel_info_for_graph(
+                    compile_info, bw_key
+                )
+                if _assign_kernel_metadata(event, bw_key, kernel_key, kernel_info):
                     return True
-            stack = _single_stack_for_graph(compile_info, fwd_key)
-            if stack is not None:
-                event.setdefault("args", {})["stack"] = stack
-                return True
-            return False
+            kernel_key, kernel_info = _single_kernel_info_for_graph(
+                compile_info, fwd_key
+            )
+            return _assign_kernel_metadata(event, fwd_key, kernel_key, kernel_info)
 
         def _kernel_events_for_op(op_id):
             if op_id in src2dst:
@@ -471,7 +506,8 @@ def inductor_trace_handler(
             file_name = file_name + ".gz"
         path = os.path.join(dir_name, file_name)
         provenance_enabled = (
-            kineto_available() and inductor_config.trace.provenance_tracking_to_timeline
+            kineto_available()
+            and inductor_config.provenance_tracking_to_profiler_timeline()
         )
 
         if getattr(prof, "_use_cuspy", False):
