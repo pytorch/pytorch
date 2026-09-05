@@ -66,7 +66,7 @@
  *
  *   #define TORCH_ILISTREF_FORALL_TAGS(_, ...) \
  *     ...
- *     _(Chest, ##__VA_ARGS__)
+ *     _(Chest __VA_OPT__(,) __VA_ARGS__)
  *
  * 2. Add type aliases, union members, and constructors.
  *
@@ -161,9 +161,9 @@ class IListRef;
  * Applies arbitrary macros to each `IListRefTag`.
  */
 #define TORCH_ILISTREF_FORALL_TAGS(_, ...) \
-  _(Unboxed, ##__VA_ARGS__)                \
-  _(Boxed, ##__VA_ARGS__)                  \
-  _(Materialized, ##__VA_ARGS__)
+  _(Unboxed __VA_OPT__(,) __VA_ARGS__)                \
+  _(Boxed __VA_OPT__(,) __VA_ARGS__)                  \
+  _(Materialized __VA_OPT__(,) __VA_ARGS__)
 
 /*
  * Defines a "switch-case" for `TAG`. Inside, it executes `BODY`,

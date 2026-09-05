@@ -231,7 +231,7 @@ void enforceThatImpl(
       nullptr,                                            \
       [&](const auto& arg1, const auto& arg2) {           \
         return ::c10::enforce_detail::enforceFailMsgImpl( \
-            arg1, arg2, ##__VA_ARGS__);                   \
+            arg1, arg2 __VA_OPT__(, ) __VA_ARGS__);       \
       })
 
 #define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(op, lhs, rhs, expr, ...) \
@@ -245,49 +245,57 @@ void enforceThatImpl(
       this,                                                          \
       [&](const auto& arg1, const auto& arg2) {                      \
         return ::c10::enforce_detail::enforceFailMsgImpl(            \
-            arg1, arg2, ##__VA_ARGS__);                              \
+            arg1, arg2 __VA_OPT__(, ) __VA_ARGS__);                  \
       })
 
 } // namespace enforce_detail
 
 #define CAFFE_ENFORCE_THAT(cmp, op, lhs, rhs, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(cmp, lhs, rhs, #lhs " " #op " " #rhs, ##__VA_ARGS__)
+  CAFFE_ENFORCE_THAT_IMPL(                         \
+      cmp, lhs, rhs, #lhs " " #op " " #rhs __VA_OPT__(, ) __VA_ARGS__)
 
 #define CAFFE_ENFORCE_BINARY_OP(cmp, op, x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(cmp, x, y, #x " " #op " " #y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_THAT_IMPL(                          \
+      cmp, x, y, #x " " #op " " #y __VA_OPT__(, ) __VA_ARGS__)
 #define CAFFE_ENFORCE_EQ(x, y, ...) \
-  CAFFE_ENFORCE_BINARY_OP(std::equal_to<void>(), ==, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(          \
+      std::equal_to<void>(), ==, x, y __VA_OPT__(, ) __VA_ARGS__)
 #define CAFFE_ENFORCE_NE(x, y, ...) \
-  CAFFE_ENFORCE_BINARY_OP(std::not_equal_to<void>(), !=, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(          \
+      std::not_equal_to<void>(), !=, x, y __VA_OPT__(, ) __VA_ARGS__)
 #define CAFFE_ENFORCE_LE(x, y, ...) \
-  CAFFE_ENFORCE_BINARY_OP(std::less_equal<void>(), <=, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(          \
+      std::less_equal<void>(), <=, x, y __VA_OPT__(, ) __VA_ARGS__)
 #define CAFFE_ENFORCE_LT(x, y, ...) \
-  CAFFE_ENFORCE_BINARY_OP(std::less<void>(), <, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(std::less<void>(), <, x, y __VA_OPT__(, ) __VA_ARGS__)
 #define CAFFE_ENFORCE_GE(x, y, ...) \
-  CAFFE_ENFORCE_BINARY_OP(std::greater_equal<void>(), >=, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(          \
+      std::greater_equal<void>(), >=, x, y __VA_OPT__(, ) __VA_ARGS__)
 #define CAFFE_ENFORCE_GT(x, y, ...) \
-  CAFFE_ENFORCE_BINARY_OP(std::greater<void>(), >, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(          \
+      std::greater<void>(), >, x, y __VA_OPT__(, ) __VA_ARGS__)
 
 #define CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(cmp, op, x, y, ...) \
   CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(                          \
-      cmp, x, y, #x " " #op " " #y, ##__VA_ARGS__)
+      cmp, x, y, #x " " #op " " #y __VA_OPT__(, ) __VA_ARGS__)
 #define CAFFE_ENFORCE_EQ_WITH_CALLER(x, y, ...) \
   CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
-      std::equal_to<void>(), ==, x, y, ##__VA_ARGS__)
+      std::equal_to<void>(), ==, x, y __VA_OPT__(, ) __VA_ARGS__)
 #define CAFFE_ENFORCE_NE_WITH_CALLER(x, y, ...) \
   CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
-      std::not_equal_to<void>(), !=, x, y, ##__VA_ARGS__)
+      std::not_equal_to<void>(), !=, x, y __VA_OPT__(, ) __VA_ARGS__)
 #define CAFFE_ENFORCE_LE_WITH_CALLER(x, y, ...) \
   CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
-      std::less_equal<void>(), <=, x, y, ##__VA_ARGS__)
+      std::less_equal<void>(), <=, x, y __VA_OPT__(, ) __VA_ARGS__)
 #define CAFFE_ENFORCE_LT_WITH_CALLER(x, y, ...) \
-  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::less<void>(), <, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
+      std::less<void>(), <, x, y __VA_OPT__(, ) __VA_ARGS__)
 #define CAFFE_ENFORCE_GE_WITH_CALLER(x, y, ...) \
   CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
-      std::greater_equal<void>(), >=, x, y, ##__VA_ARGS__)
+      std::greater_equal<void>(), >=, x, y __VA_OPT__(, ) __VA_ARGS__)
 #define CAFFE_ENFORCE_GT_WITH_CALLER(x, y, ...) \
   CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
-      std::greater<void>(), >, x, y, ##__VA_ARGS__)
+      std::greater<void>(), >, x, y __VA_OPT__(, ) __VA_ARGS__)
 
 struct IValue;
 class C10_API EventSampledHandler {

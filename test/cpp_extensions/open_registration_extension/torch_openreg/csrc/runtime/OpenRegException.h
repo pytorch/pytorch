@@ -10,6 +10,6 @@ void orCheckFail(const char* func, const char* file, uint32_t line, const char* 
   do {                                                                                 \
     const orError_t __err = EXPR;                                                      \
     if (C10_UNLIKELY(__err != orSuccess)) {                                            \
-      orCheckFail(__func__, __FILE__, static_cast<uint32_t>(__LINE__), ##__VA_ARGS__); \
+      orCheckFail(__func__, __FILE__, static_cast<uint32_t>(__LINE__) __VA_OPT__(,) __VA_ARGS__); \
     }                                                                                  \
   } while (0)
