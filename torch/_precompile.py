@@ -719,6 +719,186 @@ class _InstalledArtifact:
                         PrecompileContext.take_artifact(key)
 
 
+class AccumulatingCapture:
+    r"""A capture the caller drives, one call at a time.
+
+    Returned by :func:`torch.compiler.precompile.accumulate`; not constructed
+    directly, and part of the prototype ``torch.compiler.precompile`` API, so it
+    may change without a deprecation cycle.
+
+    Call it exactly as
+    you would call ``fn``; each call runs for real, folds whatever graphs and
+    variants it newly exercised into the capture, rewrites the artifact, and
+    returns what ``fn`` returned.
+
+    There is no finalize step. The files named at construction are a complete,
+    loadable artifact for everything captured so far, from the first call
+    onwards, so a job that dies partway through leaves a working artifact for
+    the batches it did reach.
+
+    The capture holds a live compiled region, because that is the only way a
+    later call can reuse an earlier one's variants -- they are filed under an
+    id that nothing can hand back to ``torch._dynamo.optimize``. Use it as a
+    context manager, or call :meth:`close`, to give that region back; a capture
+    left open holds it, and every variant compiled into it, for the life of
+    the process.
+
+    A call whose ``fn`` raises propagates that error and leaves the capture
+    open for the next call. A refusal from the artifact gates (``require_*``)
+    is different and final: the step has already run by then, so the
+    ``PrecompileError`` carries what it returned as ``result``, the capture
+    closes -- the files keep the last artifact that passed -- and every later
+    call raises without running. Calls are serialized: a second thread calling
+    the capture waits for the first call to finish, artifact rewrite included.
+    """
+
+    __module__ = "torch.compiler.precompile"
+
+    def __init__(
+        self,
+        session: Any,
+        artifact_path: str | os.PathLike[str],
+        cache_path: str | os.PathLike[str],
+        *,
+        require_complete: bool,
+        require_no_risky_drops: bool,
+        require_no_dropped_guards: bool,
+    ) -> None:
+        self._session = session
+        self._artifact_path = artifact_path
+        self._cache_path = cache_path
+        self._require_complete = require_complete
+        self._require_no_risky_drops = require_no_risky_drops
+        self._require_no_dropped_guards = require_no_dropped_guards
+        self._closed = False
+        self._calls = 0
+        self._in_call = False
+        # Reentrant: a gate refusal inside __call__ closes the capture.
+        self._lock = threading.RLock()
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        r"""Run one call of ``fn``, fold it into the capture, rewrite the artifact."""
+        from torch._dynamo.exc import PackageError, RecompileError
+
+        with self._lock:
+            if self._closed:
+                raise PrecompileError(
+                    "this capture is closed; accumulate() again to start a new one."
+                )
+            # The lock is held, so only a call made from inside fn gets here
+            # while another call is running.
+            if self._in_call:
+                raise PrecompileError(
+                    "this capture is being re-entered recursively: fn called the "
+                    "capture it is being captured through. Call fn itself from "
+                    "inside fn."
+                )
+            self._in_call = True
+            try:
+                with self._session as call:
+                    result = call(*args, **kwargs)
+            except (PackageError, RecompileError) as e:
+                raise PrecompileError(str(e)) from e
+            finally:
+                self._in_call = False
+            # The step ran and folded into the capture; count it before the gate
+            # and the write. calls() counts folded calls, not artifacts on disk:
+            # a gate refusal writes nothing yet the step still ran (see below).
+            self._calls += 1
+            try:
+                python_code, cache = self._session.snapshot_artifact(
+                    require_complete=self._require_complete,
+                    require_no_risky_drops=self._require_no_risky_drops,
+                    require_no_dropped_guards=self._require_no_dropped_guards,
+                )
+            except (PackageError, RecompileError) as e:
+                # The refusal is about the accumulated capture, which every
+                # later render would repeat; close so the next call fails fast
+                # instead of training and raising again. The step itself ran,
+                # so its result goes back on the error.
+                self.close()
+                error = PrecompileError(str(e))
+                error.result = result
+                raise error from e
+            try:
+                _write_artifact(
+                    self._artifact_path, self._cache_path, python_code, cache
+                )
+            except OSError as e:
+                # The step ran and folded into the capture; only the on-disk
+                # rewrite failed (full disk, permissions). Surface it with the
+                # result attached, like a gate refusal, but leave the capture
+                # open so a transient failure can be retried on the next call.
+                error = PrecompileError(
+                    f"precompile.accumulate ran the call but could not write the "
+                    f"artifact: {e}"
+                )
+                error.result = result
+                raise error from e
+            return result
+
+    def _call_session(self, method: Callable[[], Any]) -> Any:
+        from torch._dynamo.exc import PackageError, RecompileError
+
+        with self._lock:
+            try:
+                return method()
+            except (PackageError, RecompileError) as e:
+                raise PrecompileError(str(e)) from e
+
+    def summary(self) -> PrecompileSummary:
+        r"""summary() -> PrecompileSummary
+
+        Coverage, recompilation, failure and guard information for everything
+        captured so far.
+        """
+        return self._call_session(self._session.summary)
+
+    def invariants(self) -> tuple[FrameInvariants, ...]:
+        r"""invariants() -> tuple
+
+        The guards that held across every captured variant of each frame.
+        """
+        return self._call_session(self._session.invariants)
+
+    def calls(self) -> int:
+        r"""calls() -> int
+
+        How many calls have been folded into this capture.
+        """
+        return self._calls
+
+    def close(self) -> None:
+        r"""close() -> None
+
+        Give back the compiled region. The artifact on disk is unaffected.
+        Closing twice is a no-op.
+        """
+        with self._lock:
+            if self._closed:
+                return
+            # Under the lock, _in_call can only be set by THIS thread's own
+            # in-flight __call__: retire() would wait for a call that is
+            # waiting on it.
+            if self._in_call:
+                raise PrecompileError(
+                    "close() was called from inside fn while this capture is "
+                    "running it; close the capture after the call returns."
+                )
+            self._closed = True
+            # The session owns the teardown: retire() drains in-flight calls on
+            # other threads before clearing the region, the same handshake
+            # __exit__ uses, so a concurrent capture call is never left
+            # compiling against a destroyed cache entry.
+            self._session.retire()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+
 class Capture:
     r"""The caller-driven capture :func:`torch.compiler.precompile.capture` returns.
 
@@ -3614,6 +3794,117 @@ def capture(
     )
 
 
+def accumulate(
+    fn: Callable[..., object],
+    /,
+    *,
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+    tracer: DynamoTracer = DynamoTracer(),
+    backend: str = "inductor",
+    training: bool = False,
+) -> AccumulatingCapture:
+    """Capture ``fn`` across calls YOUR loop makes, rewriting the artifact each time.
+
+    .. warning::
+
+        This is a prototype API. Its signature, error types and artifact
+        format may change between releases without a deprecation cycle.
+
+    This is the per-call-rewrite counterpart of :func:`capture`: same
+    caller-driven model, but each call rewrites the artifact on disk rather than
+    writing it once when the block exits. Use it when the capture spans a real
+    training loop whose artifact should survive a job dying partway. The caller
+    keeps their loop and precompile stops and resumes around each call::
+
+        with torch.compiler.precompile.accumulate(
+            train_step,
+            artifact_path="m.py",
+            cache_path="m.cache",
+            training=True,
+            tracer=DynamoTracer(require_no_risky_drops=False),
+        ) as capture:
+            for batch in loader:
+                losses = capture(model, batch)  # runs for real, returns its result
+                optimizer.step()
+
+    Each call folds whatever it newly exercised into the capture and rewrites
+    both files, so they are a loadable artifact for everything captured so far
+    from the first call onwards -- there is no finalize step, and a job that dies
+    partway leaves a working artifact. A call that exercises nothing new adds
+    nothing.
+
+    ``accumulate`` is dynamo-only: it captures across many calls, whereas
+    :class:`MakeFxTracer` records a single call, so pass a :class:`DynamoTracer`
+    (the default) and use :func:`capture` for a make_fx trace. ``backend`` and
+    ``training`` are shared; the guard/variant knobs live on the tracer.
+
+    Gradients and return values keep their normal eager/``torch.compile``
+    semantics: the caller makes the calls, so they run in whatever grad mode the
+    caller sets and precompile snapshots nothing.
+
+    The configuration lives on the capture rather than on each call, so a later
+    call cannot disagree with the artifact it is accumulating into.
+
+    Rewriting is proportional to what has been captured, not to the call, so a
+    long loop over a large model pays it every time; capture the batches that add
+    variants rather than all of them.
+    """
+    torch._C._log_api_usage_once("torch.compiler.precompile.accumulate")
+    if backend not in ("inductor", "eager"):
+        raise ValueError(
+            f"precompile backend must be 'inductor' or 'eager', got {backend!r}."
+        )
+    if isinstance(tracer, MakeFxTracer):
+        raise TypeError(
+            "precompile.accumulate captures across many calls and requires "
+            "tracer=DynamoTracer(); MakeFxTracer records a single call, so use "
+            "precompile.capture for it."
+        )
+    if not isinstance(tracer, DynamoTracer):
+        raise TypeError(
+            "precompile.accumulate tracer must be a DynamoTracer, "
+            f"got {type(tracer).__name__}."
+        )
+    if (
+        _artifact_paths(
+            artifact_path,
+            cache_path,
+            who="precompile.accumulate",
+            neither="Pass both; the capture rewrites them on every call.",
+        )
+        is None
+    ):
+        raise ValueError(
+            "precompile.accumulate rewrites the artifact on every call; pass "
+            "both artifact_path and cache_path."
+        )
+    _reject_uninstallable_entry_defaults(fn)
+    from torch._dynamo.exc import PackageError
+    from torch._dynamo.precompile_package import precompile_accumulate
+
+    try:
+        session = precompile_accumulate(
+            fn,
+            backend=backend,
+            guard_filter_fn=tracer.guard_filter_fn,
+            recompile_limit=tracer.recompile_limit,
+            dynamic=tracer.dynamic,
+            invariants=tracer.invariants,
+            training=bool(training),
+        )
+    except PackageError as e:
+        raise PrecompileError(str(e)) from e
+    return AccumulatingCapture(
+        session,
+        artifact_path,
+        cache_path,
+        require_complete=tracer.require_complete,
+        require_no_risky_drops=tracer.require_no_risky_drops,
+        require_no_dropped_guards=tracer.require_no_dropped_guards,
+    )
+
+
 def load(
     artifact_path: str | os.PathLike[str],
     cache_path: str | os.PathLike[str],
@@ -3675,3 +3966,11 @@ def load(
     torch._C._log_api_usage_once("torch.compiler.precompile.load")
     python_code, cache = _read_artifact(artifact_path, cache_path)
     return _runnable_from_pair(python_code, cache, fn=fn)
+
+
+# The capture/load surface is a module (torch.compiler.precompile); these functions
+# are defined here but reported and re-exported under that path, so introspection
+# (test_public_bindings, Sphinx, help()) resolves them there.
+for _f in (capture, accumulate, load):
+    _f.__module__ = "torch.compiler.precompile"
+del _f
