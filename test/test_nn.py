@@ -12735,6 +12735,16 @@ if __name__ == '__main__':
         noncontig_out = torch.randn(2, 3, device=device).t()
         self.assertEqual(F.logsigmoid(x), F.logsigmoid(x, out=noncontig_out))
 
+    def test_logsigmoid_double_backward_saturation(self, device):
+        # The z*(z-1) form annihilates the curvature once sigmoid saturates;
+        # the finite value must survive on the positive side too (#195530).
+        x = torch.tensor([40.0, -40.0], dtype=torch.float64, device=device, requires_grad=True)
+        first = torch.autograd.grad(F.logsigmoid(x).sum(), x, create_graph=True)[0]
+        second = torch.autograd.grad(first.sum(), x)[0]
+        expected = -math.exp(-40.0) / (1.0 + math.exp(-40.0)) ** 2
+        self.assertEqual(second[0].item(), expected, atol=1e-24, rtol=1e-6)
+        self.assertEqual(second[1].item(), expected, atol=1e-24, rtol=1e-6)
+
     # Check that clip_grad_norm_ raises an error if the total norm of the
     # parameters' gradients is non-finite
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
