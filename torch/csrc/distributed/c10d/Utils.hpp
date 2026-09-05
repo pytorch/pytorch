@@ -190,10 +190,10 @@ inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
 inline void assertSameSizes(
     const at::IntArrayRef& sizes,
     const std::vector<at::Tensor>& tensors) {
-  for (const auto i : c10::irange(tensors.size())) {
-    if (!tensors[i].sizes().equals(sizes)) {
+  for (const auto& tensor : tensors) {
+    if (!tensor.sizes().equals(sizes)) {
       const auto expected = toString(sizes);
-      const auto actual = toString(tensors[i].sizes());
+      const auto actual = toString(tensor.sizes());
       throw std::invalid_argument(
           // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
           "mixed sizes (" + expected + " and " + actual + ")");
@@ -414,8 +414,8 @@ inline void assertAllgatherCoalescedOutputTensorLists(
   if (outputTensorLists.size() != static_cast<size_t>(worldSize)) {
     fn("output lists should be equal to world size");
   }
-  for (const auto i : c10::irange(outputTensorLists.size())) {
-    const auto actual = outputTensorLists[i].size();
+  for (const auto& outputTensorList : outputTensorLists) {
+    const auto actual = outputTensorList.size();
     if (actual != inputTensorListSize) {
       fn("invalid output size: (expected length " +
          std::to_string(inputTensorListSize) + ", got " +

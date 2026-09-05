@@ -1896,8 +1896,8 @@ Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
   const int64_t size_diff = self.dim() - static_cast<int64_t>(reps.size());
   if (size_diff > 0) {
     std::vector<c10::SymInt> new_reps(size_diff, 1);
-    for (const auto i : c10::irange(reps.size())) {
-      new_reps.emplace_back(reps[i]);
+    for (const auto& rep : reps) {
+      new_reps.emplace_back(rep);
     }
     return self.repeat_symint(SymIntArrayRef(new_reps));
   }
@@ -4825,9 +4825,9 @@ void unbind_copy_int_out(
     int64_t dim,
     at::TensorList out) {
   if (at::GradMode::is_enabled()) {
-    for (const auto i : c10::irange(out.size())) {
+    for (const auto& out_elem : out) {
       TORCH_CHECK(
-          !out[i].requires_grad(),
+          !out_elem.requires_grad(),
           "unbind_copy(): functions with out=... arguments don't support automatic differentiation, "
           "but one of the arguments requires grad.");
     }

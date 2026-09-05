@@ -1025,8 +1025,8 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
     if (output_mask[3]) {
         dw = at::native::miopen_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, ws);
         if (mode > 1) {
-            for (const auto i : c10::irange(dw.size())) {
-                dw[i] = permute_wei_for_miopen(dw[i], mode);
+            for (auto& dw_elem : dw) {
+                dw_elem = permute_wei_for_miopen(dw_elem, mode);
             }
         }
     }

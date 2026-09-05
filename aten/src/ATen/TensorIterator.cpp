@@ -43,8 +43,8 @@ inline void get_base_ptrs(char** ptrs, ArrayRef<OperandInfo> operands) {
 
 inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_t ndim) {
   for (const auto dim : c10::irange(ndim)) {
-    for (const auto arg : c10::irange(operands.size())) {
-      *strides++ = operands[arg].stride_bytes[dim];
+    for (const auto& operand : operands) {
+      *strides++ = operand.stride_bytes[dim];
     }
   }
   // Always at least 2d strides to support 2d for_each loops
@@ -1124,8 +1124,8 @@ TensorIterator TensorIterator::reduce_op(TensorBase& out1, TensorBase& out2, con
 }
 
 void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
-  for (const auto idx : c10::irange(config.tensors_.size())) {
-    auto& tensor = config.tensors_[idx];
+  for (auto& tensors_elem : config.tensors_) {
+    auto& tensor = tensors_elem;
     // If *any* of the arguments is a meta tensor, the overall
     // computation is a meta computation (don't do any work,
     // just compute output information).  This aligns with
