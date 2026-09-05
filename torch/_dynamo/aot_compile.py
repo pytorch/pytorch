@@ -122,6 +122,8 @@ class AOTCompilePickler(FunctionPicklerBase):
                 kwdefaults=obj.__kwdefaults__,
                 closure=obj.__closure__,
                 attributes=obj.__dict__,
+                annotations=obj.__annotations__,
+                type_params=getattr(obj, "__type_params__", None),
             )
 
         return NotImplemented
@@ -585,10 +587,10 @@ class AOTCompiledModel:
             guard_globals = traced_fn.__globals__
         except (RuntimeError, AttributeError):
             log.warning(
-                "%s.forward is %r, not a function or bound method, so no live "
-                "guard scope could be resolved; global guards on this artifact "
-                "resolve against the scope reconstructed from the serialized "
-                "bytecode instead",
+                "%s.forward is %r, which has no resolvable __globals__, so no "
+                "live guard scope could be resolved; global guards on this "
+                "artifact resolve against the scope reconstructed from the "
+                "serialized bytecode instead",
                 type(model).__name__,
                 forward,
             )
