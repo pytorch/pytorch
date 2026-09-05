@@ -21000,11 +21000,17 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
            )),
     BinaryUfuncInfo('xlogy',
                     aliases=('special.xlogy',),
+                    ref=scipy.special.xlogy if TEST_SCIPY else None,
                     dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                     promotes_int_to_float=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_one_python_scalar=True,
+                    decorators=(
+                        DecorateInfo(
+                            toleranceOverride({torch.float16: tol(atol=1e-5, rtol=1.2e-3)}),
+                            'TestBinaryUfuncsDevice', 'test_reference_numerics'),
+                    ),
                     # We don't test 0 as the gradient will be NaN and it'll break
                     rhs_make_tensor_kwargs=dict(low=0.01)),
     OpInfo('zero_',
