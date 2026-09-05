@@ -118,7 +118,8 @@ inline int64_t preprocess_chunk_cat_inputs(
   auto expected_dtype = tensors[0].dtype();
   auto expected_device = tensors[0].device();
   for (const auto& tensors_elem : tensors) {
-    TORCH_CHECK(tensors_elem.numel() > 0, "_chunk_cat expects non-empty tensor");
+    TORCH_CHECK(
+        tensors_elem.numel() > 0, "_chunk_cat expects non-empty tensor");
     TORCH_CHECK(
         tensors_elem.dtype() == expected_dtype,
         "_chunk_cat expects all input tensors with the same dtype");
