@@ -2521,7 +2521,7 @@ class PersistentDenseGemmEFCKernel:
         gC_mnl: cute.Tensor,
         epi_tile: cute.Tile,
         sC: cute.Tensor,
-        dtype: type[cutlass.Numeric],
+        dtype: type[cutlass.Numeric] | None = None,
     ) -> tuple[cute.CopyAtom, cute.Tensor, cute.Tensor]:
         """Make tiledCopy for global memory store, then use it to:
         - partition register array (source) and global memory (destination) for non-TMA store version;
