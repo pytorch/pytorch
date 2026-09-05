@@ -57,6 +57,16 @@ void AdagradParamState::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, sum);
 }
 
+std::unique_ptr<AdagradParamState> Adagrad::make_param_state(
+    const Tensor& param,
+    double initial_accumulator_value) {
+  auto state = std::make_unique<AdagradParamState>();
+  state->step(0);
+  state->sum(torch::full_like(
+      param, initial_accumulator_value, MemoryFormat::Preserve));
+  return state;
+}
+
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
 Tensor Adagrad::step(LossClosure closure) {
@@ -72,12 +82,17 @@ Tensor Adagrad::step(LossClosure closure) {
         continue;
       }
       auto grad = p.grad();
-      TORCH_INTERNAL_ASSERT(
-          state_[p.unsafeGetTensorImpl()] != nullptr,
-          "state found NULL for the Tensor ",
-          p);
-      auto& state =
-          static_cast<AdagradParamState&>(*state_[p.unsafeGetTensorImpl()]);
+      auto param_state = state_.find(p.unsafeGetTensorImpl());
+
+      // State initialization
+      if (param_state == state_.end()) {
+        auto& defaults = static_cast<AdagradOptions&>(*defaults_);
+        auto new_state =
+            make_param_state(p, defaults.initial_accumulator_value());
+        param_state =
+            state_.emplace(p.unsafeGetTensorImpl(), std::move(new_state)).first;
+      }
+      auto& state = static_cast<AdagradParamState&>(*param_state->second);
       auto& options = static_cast<AdagradOptions&>(group.options());
 
       state.step(state.step() + 1);
