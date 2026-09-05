@@ -19838,6 +19838,61 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.zeros(10, 256, device=self.device),))
 
+    def test_resize_on_view_after_graph_break(self):
+        # https://github.com/pytorch/pytorch/issues/191449
+        # resize_() graph-breaks, so base and alias escape the compiled
+        # graph into eager code; they must be distinct tensor objects as
+        # in eager mode, or the resize_ corrupts base as well.
+        def fn(x):
+            base = x + 1
+            alias = base.view(-1)
+            alias.resize_(12)
+            return base + 1
+
+        expected = fn(torch.zeros(1, device=self.device))
+        actual = torch.compile(fn)(torch.zeros(1, device=self.device))
+        self.assertEqual(expected, actual)
+
+    def test_no_op_view_output_identity(self):
+        # https://github.com/pytorch/pytorch/issues/191449
+        # A no-op view returned alongside its base must stay a distinct
+        # tensor object sharing storage, as in eager. A tensor returned
+        # twice must stay the same object in both slots, as in eager.
+        def fn_view(x):
+            base = x + 1
+            return base, base.view(-1)
+
+        base, alias = torch.compile(fn_view)(torch.zeros(1, device=self.device))
+        self.assertIsNot(base, alias)
+        self.assertEqual(base.data_ptr(), alias.data_ptr())
+
+        def fn_dup(x):
+            t = x + 1
+            return t, t
+
+        a, b = torch.compile(fn_dup)(torch.zeros(1, device=self.device))
+        self.assertIs(a, b)
+
+    def test_no_op_view_output_identity_joint(self):
+        # https://github.com/pytorch/pytorch/issues/191449
+        # Same as test_no_op_view_output_identity, but with a differentiable
+        # output alongside, so the aliased no-grad pair flows through the
+        # autograd (joint) runtime path.
+        def fn(x):
+            y = x * 2
+            with torch.no_grad():
+                base = x + 1
+                alias = base.view(-1)
+            return y, base, alias
+
+        x = torch.zeros(1, device=self.device, requires_grad=True)
+        ey, ebase, ealias = fn(x)
+        y, base, alias = torch.compile(fn)(x)
+        self.assertIsNot(base, alias)
+        self.assertEqual(base.data_ptr(), alias.data_ptr())
+        self.assertEqual(y, ey)
+        self.assertEqual(base, ebase)
+
     # end of class CommonTemplate - add new tests here
 
 
