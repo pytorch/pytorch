@@ -120,39 +120,21 @@ def nvfp4_e4m3_scale(amax: torch.Tensor, max_value: float = 6.0) -> torch.Tensor
 
 
 class TestFlexGemmRuntimeImport(TestCase):
-    def test_import_does_not_load_external_quack(self):
+    def test_import_does_not_load_vendored_quack(self):
         for name in list(sys.modules):
-            if name == "quack" or name.startswith("quack."):
+            if name == "torch._vendor.quack" or name.startswith("torch._vendor.quack."):
                 del sys.modules[name]
         sys.modules.pop("torch._inductor.kernel.flex_gemm.runtime", None)
         importlib.import_module("torch._inductor.kernel.flex_gemm.runtime")
-        self.assertNotIn("quack", sys.modules)
+        self.assertNotIn("torch._vendor.quack", sys.modules)
 
-    def test_quack_support_probe_requires_grouped_reduce(self):
+    def test_quack_support_probe_requires_cutlass(self):
         from torch._inductor.kernel.flex_gemm import lowering
 
-        package_spec = SimpleNamespace(submodule_search_locations=("/tmp/quack",))
-        with (
-            mock.patch.object(
-                lowering.importlib.util, "find_spec", return_value=package_spec
-            ),
-            mock.patch.object(
-                lowering.importlib.machinery.PathFinder,
-                "find_spec",
-                return_value=None,
-            ),
-        ):
+        with mock.patch.object(lowering.importlib.util, "find_spec", return_value=None):
             self.assertFalse(lowering.has_flex_gemm_quack())
-
-        with (
-            mock.patch.object(
-                lowering.importlib.util, "find_spec", return_value=package_spec
-            ),
-            mock.patch.object(
-                lowering.importlib.machinery.PathFinder,
-                "find_spec",
-                return_value=SimpleNamespace(),
-            ),
+        with mock.patch.object(
+            lowering.importlib.util, "find_spec", return_value=SimpleNamespace()
         ):
             self.assertTrue(lowering.has_flex_gemm_quack())
 
@@ -348,6 +330,51 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
 
     @parametrize(
+        "reduction_type,op_name,init_val",
+        (
+            ("sum", "ADD", 0.0),
+            ("prod", "MUL", 1.0),
+            ("max", "MAX", float("-inf")),
+            ("min", "MIN", float("inf")),
+        ),
+    )
+    def test_materialize_tensorssa_reduction_reuses_descriptor(
+        self, reduction_type, op_name, init_val
+    ):
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            tensorssa_reduction,
+        )
+        from torch._inductor.kernel import gemm_epilogue_codegen
+
+        descriptor = tensorssa_reduction(reduction_type)
+        reduction_ops = SimpleNamespace(
+            ADD=object(), MUL=object(), MAX=object(), MIN=object()
+        )
+        cute = SimpleNamespace(ReductionOp=reduction_ops)
+        combine = object()
+        with mock.patch.object(
+            gemm_epilogue_codegen,
+            "materialize_epilogue_function",
+            side_effect=(combine, lambda: init_val),
+        ) as materialize:
+            reduction = gemm_epilogue_codegen.materialize_tensorssa_reduction(
+                reduction_type, cute
+            )
+
+        self.assertIs(reduction.reduce_op, getattr(reduction_ops, op_name))
+        self.assertEqual(reduction.init_val, init_val)
+        self.assertIs(reduction.combine, combine)
+        self.assertEqual(
+            [call.args[0] for call in materialize.call_args_list],
+            [
+                f"def combine(lhs, rhs):\n    return {descriptor.combine_expr}",
+                f"def init():\n    return {descriptor.init_val}",
+            ],
+        )
+        for call in materialize.call_args_list:
+            self.assertIs(call.args[1], cute)
+
+    @parametrize(
         "case",
         (
             (
@@ -493,13 +520,12 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         with self.assertRaisesRegex(ValueError, "expects a 2-D tensor"):
             to_blocked(torch.ones(4))
 
-    @unittest.skipUnless(importlib.util.find_spec("quack"), "requires external QuACK")
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_quack_feed_main_host_guards_match_runtime_contract(self):
-        from quack.grouped_reduce import feed_main_capable
-
         from torch._inductor.kernel.flex_gemm.constraints import (
             validate_local_reduce_feed_main_capability,
         )
+        from torch._vendor.quack.grouped_reduce import feed_main_capable
 
         for axis in (0, 1):
             for group in (2, 8, 16, 32, 64, 128):
@@ -1389,12 +1415,12 @@ class FlexGemmTestCase(TestCase):
             from torch._inductor.kernel.flex_gemm import lowering
 
             if not lowering.has_flex_gemm_quack():
-                raise unittest.SkipTest("requires patched external QuACK")
+                raise unittest.SkipTest("requires CuTeDSL")
 
     @contextlib.contextmanager
     def limitEpiModAutotune(self, device):
         """Limit tests after production legality pruning has selected candidates."""
-        import quack.gemm_runtime.autotune as epi_autotune
+        import torch._vendor.quack.gemm_runtime.autotune as epi_autotune
 
         prune = epi_autotune._prune_for_mod
 
@@ -1410,9 +1436,9 @@ class FlexGemmTestCase(TestCase):
             yield
 
     def quackGemmConfigs(self, device):
-        """Return external QuACK configs eligible for dense EpiMod calls."""
-        from quack.cute_dsl_utils import get_device_capacity
-        from quack.gemm_config import get_all_configs
+        """Return vendored QuACK configs eligible for dense EpiMod calls."""
+        from torch._vendor.quack.cute_dsl_utils import get_device_capacity
+        from torch._vendor.quack.gemm_config import get_all_configs
 
         capacity = get_device_capacity(device)[0]
         configs = tuple(
@@ -1427,7 +1453,7 @@ class FlexGemmTestCase(TestCase):
 
     @staticmethod
     def quackConfigKey(config):
-        """Return canonical external QuACK config constraints."""
+        """Return canonical vendored QuACK config constraints."""
         return tuple(sorted(dataclasses.asdict(config).items()))
 
     def makeTensor(self, *shape, device="cuda", dtype=torch.bfloat16):
@@ -1445,8 +1471,8 @@ class FlexGemmTestCase(TestCase):
             .check("stream=stream")
             .check_not("config_key=")
             .check_not("epilogue_source=")
-            .check_not("from quack")
-            .check_not("import quack")
+            .check_not("from torch._vendor.quack")
+            .check_not("import torch._vendor.quack")
             .run(code)
         )
         self.assertNotIn("quack_cache_dir", code)
@@ -2098,7 +2124,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b, scale)
 
-    @unittest.skipUnless(importlib.util.find_spec("quack"), "requires external QuACK")
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_generated_captured_arg_rejects_addmm_scope(self):
         def fn(bias, a, b, scale):
             return flex_gemm(
@@ -2197,9 +2223,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         name_fn=lambda case: f"{case[0]}_tuned_{case[1]}",
     )
     def test_scaled_mm_compiled_matches_reference(self, case):
-        from quack.blockscaled.operand import BlockScaledOperand
-
         import torch.nn.functional as F
+        from torch._vendor.quack.blockscaled.operand import BlockScaledOperand
 
         format_name, tuned = case
         m = n = k = 256
@@ -2286,9 +2311,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
     @parametrize("shared_global_scale", (False, True))
     def test_nvfp4_scaled_mm_global_scales(self, shared_global_scale):
-        from quack.blockscaled.operand import BlockScaledOperand
-
         import torch.nn.functional as F
+        from torch._vendor.quack.blockscaled.operand import BlockScaledOperand
 
         m = n = k = 256
         global_a = torch.tensor([0.5], device="cuda", dtype=torch.float32)
@@ -2370,10 +2394,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
     def test_scaled_mm_grouped_main_and_local_reduce(self):
-        from quack.blockscaled.operand import BlockScaledOperand
-        from quack.gemm_config import GemmConfig
-
         import torch.nn.functional as F
+        from torch._vendor.quack.blockscaled.operand import BlockScaledOperand
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         m = n = k = 256
         group = 16
@@ -2470,12 +2493,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
     def test_scaled_mm_quantized_output(self):
-        from quack.blockscaled.operand import BlockScaledOperand
-        from quack.blockscaled.utils import unpack_scale_blocked_to_2d
-        from quack.gemm_config import GemmConfig
-
         import torch.nn.functional as F
         from torch._higher_order_ops.flex_gemm import to_blocked
+        from torch._vendor.quack.blockscaled.operand import BlockScaledOperand
+        from torch._vendor.quack.blockscaled.utils import unpack_scale_blocked_to_2d
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         m = n = k = 256
         group = 32
@@ -2578,9 +2600,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
     def test_scaled_mm_dynamic_m(self):
-        from quack.blockscaled.operand import BlockScaledOperand
-
         import torch.nn.functional as F
+        from torch._vendor.quack.blockscaled.operand import BlockScaledOperand
 
         n = k = 256
         b = BlockScaledOperand.quantize(
@@ -2697,9 +2718,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @unittest.skipIf(SM120OrLater, "QuACK block-scaled GEMM requires SM100/SM110")
     def test_scaled_mm_fast_accum_falls_back(self):
-        from quack.blockscaled.operand import BlockScaledOperand
-
         import torch.nn.functional as F
+        from torch._vendor.quack.blockscaled.operand import BlockScaledOperand
 
         m = n = k = 64
         a = BlockScaledOperand.quantize(
@@ -2777,9 +2797,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     )
     def test_scaled_mm_indexed_output_falls_back(self, case):
         _, terminal_view, strided_indices = case
-        from quack.blockscaled.operand import BlockScaledOperand
-
         import torch.nn.functional as F
+        from torch._vendor.quack.blockscaled.operand import BlockScaledOperand
 
         m = n = k = 256
         a = BlockScaledOperand.quantize(
@@ -7251,7 +7270,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         "case", (("tile_n64", 64), ("tile_n256", 256)), name_fn=lambda case: case[0]
     )
     def test_mm_fragment_group32_forced_config_extremes_match_reference(self, case):
-        from quack.gemm_config import GemmConfig
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         torch._dynamo.reset()
         _, tile_n = case
@@ -7305,7 +7324,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         name_fn=lambda case: case[0],
     )
     def test_mm_physical_feed_main_forced_config_extremes_match_reference(self, case):
-        from quack.gemm_config import GemmConfig
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         torch._dynamo.reset()
         _, tile_m, tile_n, cluster_m, cluster_n = case
@@ -9045,9 +9064,8 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     def test_mm_tuple_aux_blocked_128x4_local_n_reduce(self, device):
-        from quack.gemm_config import GemmConfig
-
         from torch._higher_order_ops.flex_gemm import to_blocked
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         m = n = k = 256
         group = 32
@@ -9093,9 +9111,8 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     @parametrize("case", (("mx", 32), ("nvfp4", 16)), name_fn=lambda case: case[0])
     def test_mm_tuple_aux_quant_blocked_128x4_local_n_reduce(self, device, case):
-        from quack.gemm_config import GemmConfig
-
         from torch._higher_order_ops.flex_gemm import to_blocked
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         case_name, group = case
         scale_fn = mx_e8m0_scale if case_name == "mx" else nvfp4_e4m3_scale
@@ -9155,15 +9172,14 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         ),
     )
     def test_mm_nested_tensorssa_quant_scale_matches_gated_codec(self, device, case):
-        from quack.blockscaled.quantize import (
+        import torch.nn.functional as F
+        from torch._higher_order_ops.flex_gemm import nvfp4_pack, to_blocked
+        from torch._vendor.quack.blockscaled.quantize import (
             dequant_operand,
             unpack_scale_blocked_to_2d,
         )
-        from quack.epilogue.library import gated_quant_mod
-        from quack.gemm_config import GemmConfig
-
-        import torch.nn.functional as F
-        from torch._higher_order_ops.flex_gemm import nvfp4_pack, to_blocked
+        from torch._vendor.quack.epilogue.library import gated_quant_mod
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         format_name, chunked = case
         m, hidden, k = 129, 160, 128
@@ -9311,13 +9327,12 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     def test_mm_nested_tensorssa_quant_dynamic_m(self, device):
-        from quack.gemm_config import GemmConfig
-
         import torch.nn.functional as F
         from torch._higher_order_ops.flex_gemm import to_blocked
         from torch._higher_order_ops.inline_asm_elementwise import (
             inline_asm_elementwise,
         )
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         hidden, k, group = 160, 128, 32
 
@@ -9440,10 +9455,9 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     @parametrize("format_name", ("mx", "nvfp4"))
     def test_mm_nested_tensorssa_quant_feeds_scaled_mm(self, device, format_name):
-        from quack.gemm_config import GemmConfig
-
         import torch.nn.functional as F
         from torch._higher_order_ops.flex_gemm import nvfp4_pack, to_blocked
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         m = output = 256
         hidden = k = 128
@@ -9544,10 +9558,9 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     def test_mm_mx_quant_blocked_output_feeds_scaled_mm(self, device):
-        from quack.gemm_config import GemmConfig
-
         import torch.nn.functional as F
         from torch._higher_order_ops.flex_gemm import to_blocked
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         m = hidden = output = k = 256
         group = 32
@@ -9629,10 +9642,9 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     def test_mm_nvfp4_quant_blocked_output_feeds_scaled_mm(self, device):
-        from quack.gemm_config import GemmConfig
-
         import torch.nn.functional as F
         from torch._higher_order_ops.flex_gemm import nvfp4_pack, to_blocked
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         m = hidden = output = k = 256
         group = 16
@@ -9715,9 +9727,8 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     def test_mm_tuple_aux_blocked_128x4_zero_fills_padding(self, device):
-        from quack.gemm_config import GemmConfig
-
         from torch._higher_order_ops.flex_gemm import to_blocked
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         m, n, k, group = 129, 80, 256, 16
 
@@ -9762,9 +9773,8 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     @parametrize("blocked", (False, True))
     def test_mm_grouped_main_with_local_reduce_output(self, device, blocked):
-        from quack.gemm_config import GemmConfig
-
         from torch._higher_order_ops.flex_gemm import to_blocked
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         m = n = k = 256
         reduce_group = 16
@@ -9851,9 +9861,8 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     def test_mm_tuple_aux_blocked_128x4_dynamic_shapes(self, device):
-        from quack.gemm_config import GemmConfig
-
         from torch._higher_order_ops.flex_gemm import to_blocked
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         k, group = 256, 16
 
@@ -9906,9 +9915,8 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     @parametrize("quantized", (False, True))
     def test_mm_tuple_aux_blocked_128x4_supports_swap_ab(self, device, quantized):
-        from quack.gemm_config import GemmConfig
-
         from torch._higher_order_ops.flex_gemm import to_blocked
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         m, n, k = 257, 288, 64
         group = 16 if quantized else 32
@@ -10051,7 +10059,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         name_fn=lambda case: case[0],
     )
     def test_mm_tuple_aux_local_n_reduce_supports_swap_ab(self, device, case):
-        from quack.gemm_config import GemmConfig
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         _, group, dynamic = case
         m, n = 512, 256
@@ -10113,7 +10121,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     def test_mm_tuned_swap_candidate_captured_args_matches_reference(self, device):
-        import quack.gemm_runtime.autotune as epi_autotune
+        import torch._vendor.quack.gemm_runtime.autotune as epi_autotune
 
         m = n = 256
         swap_config = next(
@@ -10218,7 +10226,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
     def test_mm_tuple_aux_local_n_reduce_supports_clustered_tile_m256(
         self, device, group
     ):
-        from quack.gemm_config import GemmConfig
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         m = n = 256
 
@@ -10305,7 +10313,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
     @unittest.skipIf(SM120OrLater, "SM100 config required")
     def test_mm_full_tile_local_reduce_checks_actual_n_warp_layout(self, device):
         """Reject a host-approved full-N group when the kernel layout splits N."""
-        from quack.gemm_config import GemmConfig
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         m = n = group = 256
 
@@ -10361,7 +10369,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         name_fn=lambda case: case[0],
     )
     def test_mm_tuple_aux_local_reduce_supports_expanded_configs(self, device, case):
-        from quack.gemm_config import GemmConfig
+        from torch._vendor.quack.gemm_config import GemmConfig
 
         _, axis, group, tile_m, tile_n, cluster_m, cluster_n = case
         m = max(tile_m, group, 256)

@@ -605,8 +605,9 @@ exclude_patterns = [
     'c10/util/SmallVector.cpp',  # length_error -> ValueError, bad_alloc -> MemoryError
     'c10/util/StringUtil.cpp',  # range_error -> ValueError
     # Burned down later in this stack. Nothing may be added here.
-    'torch/csrc/distributed/**',
-    'torch/csrc/inductor/**',
+    # nccl2 is all that is left of torch/csrc/distributed/**: its NCCLException
+    # needs a decision that does not belong in a mechanical PR.
+    'torch/csrc/distributed/c10d/nccl2/**',
     'torch/csrc/jit/**',
 ]
 command = [

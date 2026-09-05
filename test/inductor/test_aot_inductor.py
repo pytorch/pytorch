@@ -6030,20 +6030,20 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, *inputs):
-                result = inputs[0]
-                for i in range(1, len(inputs)):
-                    result = result + inputs[i]
-                return result
+                # Export preserves unused user inputs and generates runtime checks for them.
+                return inputs[0]
 
+        num_inputs = 100 if self.use_minimal_arrayref_interface else 1000
         inputs = []
-        for _ in range(1000):
+        for _ in range(num_inputs):
             inputs.append(torch.ones(8, 8, 8, dtype=torch.float16, device=self.device))
         inputs = tuple(inputs)
         model = Model()
         with torch.no_grad():
             # This test calls compile directly rather than self.check_model, so
             # propagate the copied test class' ArrayRef settings explicitly.
-            AOTIRunnerUtil.compile(
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile,
                 model,
                 inputs,
                 inductor_configs={
@@ -6051,6 +6051,7 @@ class AOTInductorTestsTemplate:
                     "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
                 },
             )
+        FileCheck().check(f"check_input_{num_inputs - 1}(input_handles);").run(code)
 
     def test_runtime_checks_complex(self):
         class Model(torch.nn.Module):

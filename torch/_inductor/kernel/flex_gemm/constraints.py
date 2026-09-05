@@ -142,14 +142,14 @@ class FlexGemmPackedTransport:
 
     @property
     def quack_mode(self) -> str:
-        """Return the external QuACK transport mode for this descriptor."""
+        """Return the QuACK transport mode for this descriptor."""
         return PACKED_TRANSPORT_MODES[(self.dtype, self.group)]
 
 
 def flex_gemm_packed_transport(
     dtype: torch.dtype, group: int
 ) -> FlexGemmPackedTransport | None:
-    """Return the physical transport descriptor supported by external QuACK."""
+    """Return the physical transport descriptor supported by QuACK."""
     return (
         FlexGemmPackedTransport(dtype, group)
         if (dtype, group) in PACKED_TRANSPORT_MODES
