@@ -498,6 +498,36 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # Make sure it is NOT modified
         self.assertEqual(output, torch.zeros_like(t1))
 
+    @requires_cuda_and_triton
+    def test_triton_kernel_functional_e8m0_arg(self):
+        def copy_e8m0(scale, output):
+            n_elements = output.numel()
+            add_kernel_with_optional_param[(1,)](
+                scale,
+                scale,
+                output,
+                n_elements,
+                ARGS_PASSED="one",
+                BLOCK_SIZE=16,
+            )
+            return output
+
+        raw_scale = torch.arange(16, dtype=torch.uint8, device=GPU_TYPE)
+        scale_e8m0 = raw_scale.view(torch.float8_e8m0fnu)
+        compiled_output = torch.zeros_like(raw_scale)
+
+        with self.assertLogs("torch._dynamo", level="WARNING") as ctx:
+            torch.compile(copy_e8m0, backend="inductor", fullgraph=True)(
+                scale_e8m0, compiled_output
+            )
+        log_text = "\n".join(ctx.output)
+        for needle in (
+            "Encountered an exception in identify_accessed_tensors",
+            "canonicalize_dtype",
+            "KeyError: 'float8_e8m0fnu'",
+        ):
+            self.assertIn(needle, log_text)
+
     @requires_gpu
     def test_triton_kernel_functionalize(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
