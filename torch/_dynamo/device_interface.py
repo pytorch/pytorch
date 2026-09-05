@@ -193,6 +193,30 @@ class DeviceInterface:
         """
         return False
 
+    @staticmethod
+    def is_gpu() -> bool:
+        """
+        Returns True if Inductor should treat this device as a GPU-class
+        accelerator (device guards, GPU codegen/fusion, cudagraph eligibility).
+        Defaults to False so unknown backends stay conservative until they opt in.
+        """
+        return False
+
+    @classmethod
+    def exposes_streams(cls) -> bool:
+        """
+        True when a subclass provides its own Stream. The base Stream is a
+        raising sentinel, so compare against it rather than None.
+
+        Overriding the Stream slot is the contract for stream support: it is
+        what opts a GPU-class device into stream guards (device_need_guard),
+        so stream-capable backends must override it. The override must be a
+        real, instantiable torch.Stream subclass: a placeholder that raises on
+        construction is still reported as stream-capable here and fails later,
+        at guard time.
+        """
+        return cls.Stream is not DeviceInterface.Stream
+
     @classmethod
     def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
         """Return the number of compute units, used for occupancy /
@@ -266,6 +290,10 @@ class CudaInterface(DeviceInterface):
     # make sure Event and Stream are implemented and inherited from the torch.Event and torch.Stream
     Event = torch.cuda.Event  # type: ignore[assignment]
     Stream = torch.cuda.Stream  # type: ignore[assignment]
+
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -371,6 +399,10 @@ class MtiaInterface(DeviceInterface):
     Event = torch.mtia.Event  # type: ignore[assignment]
     Stream = torch.mtia.Stream  # type: ignore[assignment]
 
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
+
     # pyrefly: ignore [bad-override]
     class Worker:
         @staticmethod
@@ -408,7 +440,19 @@ class MtiaInterface(DeviceInterface):
 
     current_device = staticmethod(torch.mtia.current_device)
     set_device = staticmethod(torch.mtia.set_device)  # type: ignore[assignment]
-    device_count = staticmethod(torch.mtia.device_count)
+
+    # Unlike torch.cuda/torch.xpu, torch.mtia.device_count() has no
+    # _is_compiled() guard: it goes straight to at::detail::getMTIAHooks(),
+    # which latches a process-lifetime static on first call and would
+    # permanently shadow an MTIAHooks impl that registers later (e.g. a
+    # JIT-built extension loaded in a test's setUpClass). Report 0 until the
+    # registry has one, so no registry-driven consumer can latch the fallback.
+    @staticmethod
+    def device_count() -> int:
+        if not torch.mtia._is_compiled():
+            return 0
+        return torch.mtia.device_count()
+
     stream = staticmethod(torch.mtia.stream)  # type: ignore[assignment]
     current_stream = staticmethod(torch.mtia.current_stream)
     set_stream = staticmethod(torch.mtia.set_stream)  # type: ignore[assignment]
@@ -465,6 +509,10 @@ class XpuInterface(DeviceInterface):
     device = torch.xpu.device  # type: ignore[assignment]
     Event = torch.xpu.Event  # type: ignore[assignment]
     Stream = torch.xpu.Stream  # type: ignore[assignment]
+
+    @staticmethod
+    def is_gpu() -> bool:
+        return True
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -616,6 +664,10 @@ class CpuInterface(DeviceInterface):
 
 class MpsInterface(DeviceInterface):
     @staticmethod
+    def is_gpu() -> bool:
+        return True
+
+    @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
         return True
 
@@ -705,6 +757,18 @@ _device_initialized = False
 def register_interface_for_device(
     device: str | torch.device, device_interface: type[DeviceInterface]
 ) -> None:
+    """Register a DeviceInterface for a device type.
+
+    Registration must happen before ``torch._inductor.utils`` is imported:
+    the registry-derived GPU classification (GPU_TYPES / is_gpu() /
+    get_gpu_type()) is scanned exactly once, at that import. In-tree backends
+    satisfy this by construction (init_device_reg() runs inside the scan
+    itself). Out-of-tree backends register at package import, either
+    autoloaded during ``import torch`` (TORCH_DEVICE_BACKEND_AUTOLOAD) or via
+    an explicit ``import torch_npu``-style import, both of which precede any
+    import of inductor. Registering later is not supported and will not be
+    reflected in the snapshot.
+    """
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
@@ -740,7 +804,9 @@ def init_device_reg() -> None:
         register_interface_for_device(f"xpu:{i}", XpuInterface)
 
     register_interface_for_device("mtia", MtiaInterface)
-    for i in range(torch.mtia.device_count()):
+    # MtiaInterface.device_count() reports 0 until an MTIAHooks impl is
+    # registered, so this enumeration cannot latch the fallback hooks.
+    for i in range(MtiaInterface.device_count()):
         register_interface_for_device(f"mtia:{i}", MtiaInterface)
 
     register_interface_for_device("cpu", CpuInterface)
