@@ -1,7 +1,7 @@
 # Owner(s): ["module: sdpa"]
 
 import torch.nn.attention as attention
-from torch.nn.attention import _registry
+from torch.nn.attention import _cudnn, _registry
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -50,6 +50,30 @@ class TestFlashAttentionRegistry(TestCase):
             ValueError, "Unknown flash attention impl 'missing'"
         ):
             attention.activate_flash_attention_impl("missing")
+
+    def test_cudnn_impl_is_registered(self):
+        """Importing torch.nn.attention registers CUDNN -- the point of the
+        in-tree shim. _saved_impls is the snapshot setUp took before clearing
+        the registry, so this asserts what import time actually produced."""
+        self.assertIn("CUDNN", self._saved_impls)
+
+    def test_cudnn_missing_package_raises_and_keeps_default(self):
+        """Without nvidia-cudnn-frontend installed, activation reports the
+        missing module rather than leaving a half-registered state."""
+        with self.assertRaises(ModuleNotFoundError):
+            _cudnn.register_flash_attention_cudnn("cudnn_frontend_not_installed_xyz")
+        self.assertIsNone(attention.current_flash_attention_impl())
+
+    def test_cudnn_package_without_registry_support_raises(self):
+        """A provider too old to register itself must produce a clear error
+        instead of recursing back into this shim: the registered callable is
+        still the shim after the import, so calling it again would loop."""
+        attention.register_flash_attention_impl(
+            "CUDNN", register_fn=_cudnn.register_flash_attention_cudnn
+        )
+        # types is always importable and registers nothing.
+        with self.assertRaisesRegex(RuntimeError, "did not register"):
+            _cudnn.register_flash_attention_cudnn("types")
 
 
 if __name__ == "__main__":
