@@ -44,7 +44,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     bytes_to_scalar, parametrize, noncontiguous_like,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
     xfailIfS390X, set_warn_always_context, decorateIf, isRocmArchAnyOf,
-    IS_MACOS,
+    IS_MACOS, NATIVE_DEVICES,
 )
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
@@ -324,10 +324,38 @@ class TestTorchDeviceType(TestCase):
     def test_tensor_storage_type(self, device, dtype):
         a = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
 
-        module = torch.cuda if (torch.device(device).type == 'cuda') else torch
+        device_type = torch.device(device).type
+        module = torch if device_type == 'cpu' else getattr(torch, device_type)
         expected_storage_type = getattr(module, torch.storage._dtype_to_storage_type_map()[dtype])
 
         self.assertEqual(a.storage_type(), expected_storage_type)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float, torch.uint8)
+    def test_legacy_storage_class_from_device_module(self, device, dtype):
+        # A backend owns its legacy storage classes by defining them on its own
+        # device module, so the lookup must follow the module rather than a
+        # whitelist of device types.
+        device_type = torch.device(device).type
+        storage_name = torch.storage._dtype_to_storage_type_map()[dtype]
+        module = torch if device_type == 'cpu' else getattr(torch, device_type, None)
+        expected = getattr(module, storage_name, None)
+
+        storage = torch.empty(4, dtype=dtype, device=device)._typed_storage()
+        self.assertIs(storage._get_legacy_storage_class(), expected)
+
+        if expected is None:
+            # no legacy class for this device/dtype: fall back to TypedStorage
+            self.assertEqual(storage.type(), 'torch.storage.TypedStorage')
+        else:
+            # the class round-trips -- its module resolves back to this device,
+            # which is what makes isinstance() and type() agree with the storage
+            self.assertEqual(
+                torch.storage._get_device_from_module(expected.__module__),
+                device_type)
+            self.assertIsInstance(storage, expected)
+            self.assertEqual(
+                storage.type(), f'{expected.__module__}.{expected.__name__}')
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64))
@@ -8103,6 +8131,27 @@ class TestTorch(TestCase):
 
             with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
                 storage_class._new_shared_filename(0, 0, 0)
+
+    def test_get_device_from_module(self):
+        # Legacy storage classes live on the device's own module, so the trailing
+        # component of the module name has to resolve to a device type. Anything
+        # that does not is CPU, whose classes live in ``torch`` itself.
+        get_device = torch.storage._get_device_from_module
+        self.assertEqual(get_device('torch'), 'cpu')
+        self.assertEqual(get_device('torch.cuda'), 'cuda')
+        self.assertEqual(get_device('torch.storage'), 'cpu')
+        self.assertEqual(get_device('not_a_module'), 'cpu')
+        self.assertEqual(get_device(''), 'cpu')
+
+        # A device type needs no entry here to be recognised. Derived from
+        # NATIVE_DEVICES so this widens on its own when a native device is added,
+        # and it already ends with the PrivateUse1 name an out-of-tree
+        # accelerator registers. 'hpu' is added back because NATIVE_DEVICES does
+        # not carry it and it was one of the three entries in the whitelist this
+        # replaces, so deriving alone would drop that regression.
+        for device_type in sorted((set(NATIVE_DEVICES) | {'hpu'}) - {'cpu'}):
+            self.assertEqual(get_device(f'torch.{device_type}'), device_type)
+            self.assertEqual(get_device(f'some_package.{device_type}'), device_type)
 
     def test_storage_casts(self):
         storage = torch.IntStorage([-1, 0, 1, 2, 3, 4])
