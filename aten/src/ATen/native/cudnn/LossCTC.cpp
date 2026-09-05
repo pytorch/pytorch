@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Config.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -21,6 +20,8 @@
 #include <ATen/ops/le.h>
 #include <ATen/ops/lt.h>
 #endif
+
+#include <utility>
 
 #if (!AT_CUDNN_ENABLED())
 
@@ -75,9 +76,6 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
 } // namespace at
 
 #else // AT_CUDNN_ENABLED
-
-#include <ATen/cudnn/Types.h>
-#include <ATen/cudnn/Utils.h>
 
 #include <ATen/TensorUtils.h>
 #include <c10/util/irange.h>
@@ -246,7 +244,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
       ctc_loss_desc.desc(),
       workspace.data_ptr(),
       workspace_size));
-  return std::make_tuple(costs, grad);
+  return std::make_tuple(std::move(costs), std::move(grad));
 }
 
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
@@ -342,7 +340,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
       workspace.data_ptr()
 
           ));
-  return std::make_tuple(costs, grad);
+  return std::make_tuple(std::move(costs), std::move(grad));
 }
 
 } // namespace at::native

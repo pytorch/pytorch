@@ -1,6 +1,7 @@
 # Owner(s): ["module: codegen"]
 # ruff: noqa: F841
 
+import pickle
 import unittest
 from contextlib import nullcontext
 
@@ -807,15 +808,11 @@ def forward(self, arg0_1):
     getitem_1 = split_copy[1];  split_copy = None
     diagonal_copy = torch.ops.aten.diagonal_copy.default(getitem_1);  getitem_1 = None
     add = torch.ops.aten.add.Tensor(diagonal_copy, ones);  diagonal_copy = ones = None
-    split_copy_1 = torch.ops.aten.split_copy.Tensor(arg0_1, 2)
-    getitem_2 = split_copy_1[0];  getitem_2 = None
-    getitem_3 = split_copy_1[1];  split_copy_1 = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_3, add);  getitem_3 = add = None
+    slice_copy = torch.ops.aten.slice_copy.Tensor(arg0_1, 0, 2, 4)
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(slice_copy, add);  slice_copy = add = None
     slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 2, 4);  diagonal_scatter = None
-    split_copy_2 = torch.ops.aten.split_copy.Tensor(slice_scatter, 2)
-    getitem_4 = split_copy_2[0];  getitem_4 = None
-    getitem_5 = split_copy_2[1];  split_copy_2 = None
-    diagonal_copy_1 = torch.ops.aten.diagonal_copy.default(getitem_5);  getitem_5 = None
+    slice_copy_1 = torch.ops.aten.slice_copy.Tensor(slice_scatter, 0, 2, 4)
+    diagonal_copy_1 = torch.ops.aten.diagonal_copy.default(slice_copy_1);  slice_copy_1 = None
     mul = torch.ops.aten.mul.Tensor(slice_scatter, slice_scatter);  mul = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_copy_1
@@ -839,15 +836,11 @@ def forward(self, arg0_1):
     getitem_1 = split[1];  split = None
     diagonal = torch.ops.aten.diagonal.default(getitem_1);  getitem_1 = None
     add = torch.ops.aten.add.Tensor(diagonal, ones);  diagonal = ones = None
-    split_1 = torch.ops.aten.split.Tensor(arg0_1, 2)
-    getitem_2 = split_1[0];  getitem_2 = None
-    getitem_3 = split_1[1];  split_1 = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_3, add);  getitem_3 = add = None
+    slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 0, 2, 4)
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(slice_1, add);  slice_1 = add = None
     slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 2, 4);  diagonal_scatter = None
-    split_2 = torch.ops.aten.split.Tensor(slice_scatter, 2)
-    getitem_4 = split_2[0];  getitem_4 = None
-    getitem_5 = split_2[1];  split_2 = None
-    diagonal_1 = torch.ops.aten.diagonal.default(getitem_5);  getitem_5 = None
+    slice_2 = torch.ops.aten.slice.Tensor(slice_scatter, 0, 2, 4)
+    diagonal_1 = torch.ops.aten.diagonal.default(slice_2);  slice_2 = None
     mul = torch.ops.aten.mul.Tensor(slice_scatter, slice_scatter);  mul = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_1
@@ -879,15 +872,11 @@ def forward(self, arg0_1):
     getitem_1 = split_with_sizes_copy[1];  split_with_sizes_copy = getitem_1 = None
     diagonal_copy = torch.ops.aten.diagonal_copy.default(getitem);  getitem = None
     add = torch.ops.aten.add.Tensor(diagonal_copy, ones);  diagonal_copy = ones = None
-    split_with_sizes_copy_1 = torch.ops.aten.split_with_sizes_copy.default(arg0_1, [2, 2])
-    getitem_2 = split_with_sizes_copy_1[0]
-    getitem_3 = split_with_sizes_copy_1[1];  split_with_sizes_copy_1 = getitem_3 = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_2, add);  getitem_2 = add = None
+    slice_copy = torch.ops.aten.slice_copy.Tensor(arg0_1, 0, 0, 2)
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(slice_copy, add);  slice_copy = add = None
     slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 0, 2);  diagonal_scatter = None
-    split_with_sizes_copy_2 = torch.ops.aten.split_with_sizes_copy.default(slice_scatter, [2, 2])
-    getitem_4 = split_with_sizes_copy_2[0]
-    getitem_5 = split_with_sizes_copy_2[1];  split_with_sizes_copy_2 = getitem_5 = None
-    diagonal_copy_1 = torch.ops.aten.diagonal_copy.default(getitem_4);  getitem_4 = None
+    slice_copy_1 = torch.ops.aten.slice_copy.Tensor(slice_scatter, 0, 0, 2)
+    diagonal_copy_1 = torch.ops.aten.diagonal_copy.default(slice_copy_1);  slice_copy_1 = None
     mul = torch.ops.aten.mul.Tensor(slice_scatter, slice_scatter);  mul = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_copy_1
@@ -911,15 +900,11 @@ def forward(self, arg0_1):
     getitem_1 = split_with_sizes[1];  split_with_sizes = getitem_1 = None
     diagonal = torch.ops.aten.diagonal.default(getitem);  getitem = None
     add = torch.ops.aten.add.Tensor(diagonal, ones);  diagonal = ones = None
-    split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(arg0_1, [2, 2])
-    getitem_2 = split_with_sizes_1[0]
-    getitem_3 = split_with_sizes_1[1];  split_with_sizes_1 = getitem_3 = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(getitem_2, add);  getitem_2 = add = None
+    slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, 2)
+    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(slice_1, add);  slice_1 = add = None
     slice_scatter = torch.ops.aten.slice_scatter.default(arg0_1, diagonal_scatter, 0, 0, 2);  diagonal_scatter = None
-    split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(slice_scatter, [2, 2])
-    getitem_4 = split_with_sizes_2[0]
-    getitem_5 = split_with_sizes_2[1];  split_with_sizes_2 = getitem_5 = None
-    diagonal_1 = torch.ops.aten.diagonal.default(getitem_4);  getitem_4 = None
+    slice_2 = torch.ops.aten.slice.Tensor(slice_scatter, 0, 0, 2)
+    diagonal_1 = torch.ops.aten.diagonal.default(slice_2);  slice_2 = None
     mul = torch.ops.aten.mul.Tensor(slice_scatter, slice_scatter);  mul = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, slice_scatter);  arg0_1 = slice_scatter = copy_ = None
     return diagonal_1
@@ -1067,9 +1052,7 @@ def forward(self, arg0_1):
     select_scatter = torch.ops.aten.select_scatter.default(transpose_copy_1, add, 0, 0);  transpose_copy_1 = add = None
     transpose_copy_2 = torch.ops.aten.transpose_copy.int(select_scatter, 1, 0);  select_scatter = None
     transpose_copy_3 = torch.ops.aten.transpose_copy.int(transpose_copy_2, 1, 0)
-    unbind_copy_1 = torch.ops.aten.unbind_copy.int(transpose_copy_3);  transpose_copy_3 = None
-    getitem_2 = unbind_copy_1[0];  getitem_2 = None
-    getitem_3 = unbind_copy_1[1];  unbind_copy_1 = getitem_3 = None
+    select_copy = torch.ops.aten.select_copy.int(transpose_copy_3, 0, 0);  transpose_copy_3 = select_copy = None
     transpose_copy_4 = torch.ops.aten.transpose_copy.int(transpose_copy_2, 1, 0);  transpose_copy_2 = None
     return transpose_copy_4
     """,
@@ -1096,9 +1079,7 @@ def forward(self, arg0_1):
     select_scatter = torch.ops.aten.select_scatter.default(transpose_1, add, 0, 0);  transpose_1 = add = None
     transpose_2 = torch.ops.aten.transpose.int(select_scatter, 1, 0);  select_scatter = None
     transpose_3 = torch.ops.aten.transpose.int(transpose_2, 1, 0)
-    unbind_1 = torch.ops.aten.unbind.int(transpose_3);  transpose_3 = None
-    getitem_2 = unbind_1[0];  getitem_2 = None
-    getitem_3 = unbind_1[1];  unbind_1 = getitem_3 = None
+    select = torch.ops.aten.select.int(transpose_3, 0, 0);  transpose_3 = select = None
     transpose_4 = torch.ops.aten.transpose.int(transpose_2, 1, 0);  transpose_2 = None
     return transpose_4
     """,
@@ -1298,11 +1279,9 @@ def forward(self, arg0_1):
     transpose_copy_3 = torch.ops.aten.transpose_copy.int(view_copy_7, 1, 0);  view_copy_7 = None
     unsqueeze_copy_3 = torch.ops.aten.unsqueeze_copy.default(transpose_copy_3, 0);  transpose_copy_3 = None
     squeeze_copy_3 = torch.ops.aten.squeeze_copy.default(unsqueeze_copy_3);  unsqueeze_copy_3 = None
-    split_copy_1 = torch.ops.aten.split_copy.Tensor(squeeze_copy_3, 2);  squeeze_copy_3 = None
-    getitem_2 = split_copy_1[0]
-    getitem_3 = split_copy_1[1];  split_copy_1 = getitem_3 = None
+    slice_copy = torch.ops.aten.slice_copy.Tensor(squeeze_copy_3, 0, 0, 2);  squeeze_copy_3 = None
     select_copy = torch.ops.aten.select_copy.int(view_copy_1, 0, 0);  view_copy_1 = select_copy = None
-    view_copy_8 = torch.ops.aten.view_copy.default(getitem_2, [4]);  view_copy_8 = None
+    view_copy_8 = torch.ops.aten.view_copy.default(slice_copy, [4]);  view_copy_8 = None
     view_copy_9 = torch.ops.aten.view_copy.default(view_copy_5, [8])
     view_copy_10 = torch.ops.aten.view_copy.default(view_copy_9, [2, 4]);  view_copy_9 = None
     select_copy_1 = torch.ops.aten.select_copy.int(view_copy_10, 0, 0);  view_copy_10 = None
@@ -1311,12 +1290,10 @@ def forward(self, arg0_1):
     transpose_copy_4 = torch.ops.aten.transpose_copy.int(view_copy_12, 1, 0);  view_copy_12 = None
     unsqueeze_copy_4 = torch.ops.aten.unsqueeze_copy.default(transpose_copy_4, 0);  transpose_copy_4 = None
     squeeze_copy_4 = torch.ops.aten.squeeze_copy.default(unsqueeze_copy_4);  unsqueeze_copy_4 = None
-    split_copy_2 = torch.ops.aten.split_copy.Tensor(squeeze_copy_4, 2);  squeeze_copy_4 = None
-    getitem_4 = split_copy_2[0]
-    getitem_5 = split_copy_2[1];  split_copy_2 = getitem_5 = None
-    view_copy_13 = torch.ops.aten.view_copy.default(getitem_4, [4]);  getitem_4 = None
+    slice_copy_1 = torch.ops.aten.slice_copy.Tensor(squeeze_copy_4, 0, 0, 2);  squeeze_copy_4 = None
+    view_copy_13 = torch.ops.aten.view_copy.default(slice_copy_1, [4]);  slice_copy_1 = None
     add_2 = torch.ops.aten.add.Tensor(select_copy_1, view_copy_13);  select_copy_1 = view_copy_13 = add_2 = None
-    return getitem_2
+    return slice_copy
     """,
         )
 
@@ -1356,17 +1333,15 @@ def forward(self, arg0_1):
     transpose_3 = torch.ops.aten.transpose.int(view_7, 1, 0);  view_7 = None
     unsqueeze_3 = torch.ops.aten.unsqueeze.default(transpose_3, 0);  transpose_3 = None
     squeeze_3 = torch.ops.aten.squeeze.default(unsqueeze_3);  unsqueeze_3 = None
-    split_1 = torch.ops.aten.split.Tensor(squeeze_3, 2);  squeeze_3 = None
-    getitem_2 = split_1[0]
-    getitem_3 = split_1[1];  split_1 = getitem_3 = None
+    slice_1 = torch.ops.aten.slice.Tensor(squeeze_3, 0, 0, 2);  squeeze_3 = None
     select = torch.ops.aten.select.int(view_1, 0, 0);  view_1 = select = None
-    clone = torch.ops.aten.clone.default(getitem_2, memory_format = torch.contiguous_format)
+    clone = torch.ops.aten.clone.default(slice_1, memory_format = torch.contiguous_format)
     _unsafe_view = torch.ops.aten._unsafe_view.default(clone, [4]);  clone = None
     view_8 = torch.ops.aten.view.default(view_5, [8]);  view_5 = None
     view_9 = torch.ops.aten.view.default(view_8, [2, 4]);  view_8 = None
     select_1 = torch.ops.aten.select.int(view_9, 0, 0);  view_9 = None
     add_2 = torch.ops.aten.add.Tensor(select_1, _unsafe_view);  select_1 = _unsafe_view = add_2 = None
-    return getitem_2
+    return slice_1
     """,
         )
 
@@ -2162,6 +2137,29 @@ def forward(self, x_1):
         )(x)
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
+    def test_python_functionalization_to_dense(self):
+        maybe_disable = torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+        inputs = [torch.randn(2, 3).to_sparse()]
+        if torch.backends.mkldnn.is_available():
+            inputs.append(torch.randn(2, 3).to_mkldnn())
+
+        for x in inputs:
+            for use_op in (False, True):
+                with maybe_disable, FunctionalTensorMode():
+                    x_wrapped = FunctionalTensor.to_functional(x)
+                    if use_op:
+                        out_wrapped = torch.ops.aten.to_dense.default(x_wrapped)
+                    else:
+                        out_wrapped = x_wrapped.to_dense()
+
+                out_unwrapped = out_wrapped.elem
+                torch._sync(out_unwrapped)
+                out = torch._from_functional_tensor(out_unwrapped)
+                self.assertEqual(out.layout, torch.strided)
+                self.assertEqual(out, x.to_dense())
+
     def test_python_functionalization_is_conj(self):
         def f(x):
             out = x.conj()
@@ -2270,6 +2268,20 @@ def forward(self, arg0_1):
 
         self.assertNotEqual(unlifted.untyped_storage(), lifted.untyped_storage())
 
+    def test_python_functionalization_lift_functional_tensor(self):
+        def f(x):
+            tmp = x + 1
+            return torch.ops.aten.lift.default(tmp)
+
+        x = torch.randn(4)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(
+            f, reapply_views=True, crossref=False, skip_input_mutations=True
+        )(x)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref, out_test_cpp)
+
     def test_python_functionalization_lift_fresh(self):
         def f(x):
             tmp = torch.tensor([0.0])
@@ -2322,6 +2334,94 @@ def forward(self, arg0_1):
 )
 class TestCrossRefFunctionalization(TestFunctionalization):
     crossref = True
+
+
+class TestViewMetaSerialization(TestCase):
+    # Exercise to_serializable_tuple() via as_tuple() and pickle, covering each
+    # element kind that used to be a dangling reference: std::vector (resize_/
+    # _unsafe_view_), const at::Tensor& (_make_dual), and const
+    # std::optional<at::Tensor>& (_nested_view_from_jagged). Deterministic UAF
+    # under ASAN before the fix; the tensor cases segfault even without ASAN.
+
+    def _make_dual_view_meta(self, tangent, level=0):
+        # _make_dual_ViewMeta's SerializableTuple is (has_symbolic_inputs,
+        # reapply_views, inverse_return_mode, tangent, level); the tangent
+        # element is the `const at::Tensor&` reference that used to dangle.
+        return torch._C._functionalization._make_dual_ViewMeta(
+            (
+                False,
+                True,
+                torch._C._functionalization.InverseReturnMode.AlwaysView,
+                tangent,
+                level,
+            )
+        )
+
+    def _nested_jagged_view_meta(self, offsets, lengths):
+        # _nested_view_from_jagged_ViewMeta's SerializableTuple is
+        # (has_symbolic_inputs, reapply_views, inverse_return_mode, offsets,
+        # dummy, lengths, ragged_idx, min_seqlen, max_seqlen). lengths/min_seqlen/
+        # max_seqlen are `const std::optional<at::Tensor>&` elements; this covers
+        # the optional<Tensor> decay path (min_seqlen/max_seqlen left as None).
+        return torch._C._functionalization._nested_view_from_jagged_ViewMeta(
+            (
+                False,
+                True,
+                torch._C._functionalization.InverseReturnMode.AlwaysView,
+                offsets,
+                torch.zeros(offsets.shape[0] - 1),
+                lengths,
+                1,
+                None,
+                None,
+            )
+        )
+
+    def test_resize_view_meta_as_tuple(self):
+        view_meta = torch._C._functionalization.resize__ViewMeta((True, [3, 4, 5]))
+        reapply_views, size = view_meta.as_tuple()
+        self.assertEqual(reapply_views, True)
+        self.assertEqual(size, [3, 4, 5])
+
+    def test_unsafe_view_meta_as_tuple(self):
+        view_meta = torch._C._functionalization._unsafe_view_ViewMeta((False, [2, 6]))
+        has_symbolic_inputs, size = view_meta.as_tuple()
+        self.assertEqual(has_symbolic_inputs, False)
+        self.assertEqual(size, [2, 6])
+
+    def test_make_dual_view_meta_tensor_element_as_tuple(self):
+        tangent = torch.arange(6.0).reshape(2, 3)
+        view_meta = self._make_dual_view_meta(tangent, level=0)
+        has_symbolic_inputs, reapply_views, _, restored_tangent, level = (
+            view_meta.as_tuple()
+        )
+        self.assertEqual(has_symbolic_inputs, False)
+        self.assertEqual(reapply_views, True)
+        self.assertEqual(level, 0)
+        self.assertEqual(restored_tangent, tangent)
+
+    def test_nested_jagged_view_meta_optional_tensor_elements_as_tuple(self):
+        offsets = torch.tensor([0, 2, 4])
+        lengths = torch.tensor([2, 2])
+        view_meta = self._nested_jagged_view_meta(offsets, lengths)
+        restored = view_meta.as_tuple()
+        self.assertEqual(restored[3], offsets)
+        # present optional<Tensor> round-trips, absent ones stay None
+        self.assertEqual(restored[5], lengths)
+        self.assertEqual(restored[7], None)
+        self.assertEqual(restored[8], None)
+
+    def test_view_meta_pickle_roundtrip(self):
+        for view_meta in (
+            torch._C._functionalization.resize__ViewMeta((True, [3, 4, 5])),
+            torch._C._functionalization._unsafe_view_ViewMeta((False, [2, 6])),
+            self._make_dual_view_meta(torch.arange(6.0).reshape(2, 3)),
+            self._nested_jagged_view_meta(
+                torch.tensor([0, 2, 4]), torch.tensor([2, 2])
+            ),
+        ):
+            restored = pickle.loads(pickle.dumps(view_meta))
+            self.assertEqual(restored.as_tuple(), view_meta.as_tuple())
 
 
 if __name__ == "__main__":

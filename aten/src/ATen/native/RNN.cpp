@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/List.h>
+#include <ATen/Config.h>
 #include <ATen/Context.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/mps/MPSDevice.h>
@@ -12,10 +13,12 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <c10/core/GradMode.h>
 #include <c10/macros/Macros.h>
+
+#include <array>
+#include <atomic>
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
-#include <ATen/Config.h>
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/Utils.h>
 #endif
@@ -67,6 +70,46 @@ namespace at::native {
 
 namespace {
 
+// MIOpen RNN kernels are JIT-compiled at first use. A broken runtime compile
+// environment (e.g. device-libs bitcode the bundled comgr cannot read,
+// pytorch/pytorch#189618) surfaces as miopenStatusUnknownError from the first
+// forward on any architecture, so probe per device instead of hard-coding
+// arch lists: the first MIOpen RNN failure on a device marks it broken and
+// RNNs fall back to the native implementation for the rest of the process. A
+// failure after a prior success on the same device is rethrown so real
+// errors (e.g. OOM) are not masked. NB: MIOpen wrappers throw
+// at::native::miopen_exception (a std::runtime_error), not c10::Error, so
+// the dispatch sites below catch std::exception.
+enum miopen_rnn_probe_result : int {
+  miopen_rnn_untried = 0,
+  miopen_rnn_ok = 1,
+  miopen_rnn_broken = 2,
+};
+
+std::atomic<int>& miopen_rnn_probe(at::DeviceIndex device_index) {
+  static std::array<std::atomic<int>, 64> state{};
+  static std::atomic<int> overflow{miopen_rnn_untried};
+  auto idx = static_cast<size_t>(device_index);
+  return idx < state.size() ? state[idx] : overflow;
+}
+
+// Returns true if the failure was absorbed (fall through to native); false
+// means the caller must rethrow.
+bool miopen_rnn_handle_failure(at::DeviceIndex device_index, const char* what) {
+  auto& probe = miopen_rnn_probe(device_index);
+  if (probe.load(std::memory_order_relaxed) == miopen_rnn_ok) {
+    return false;
+  }
+  probe.store(miopen_rnn_broken, std::memory_order_relaxed);
+  TORCH_WARN(
+      "MIOpen RNN failed on device ", static_cast<int>(device_index),
+      "; falling back to the native RNN implementation on this device for the "
+      "rest of the process. This usually indicates a broken MIOpen runtime "
+      "kernel compilation environment "
+      "(https://github.com/pytorch/pytorch/issues/189618). Error: ", what);
+  return true;
+}
+
 // Check if pytorch is compiled with MIOpen.
 bool use_miopen(const at::Tensor& input, const double dropout_state) {
     bool is_miopen_acceptable = ((input.scalar_type() == at::kFloat)|| (input.scalar_type() == at::kHalf)) &&
@@ -79,6 +122,14 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
     // likely empty.
     if (input.sym_numel() == 0) return false;
 
+    // Devices where MIOpen RNN already failed fall back to the native
+    // implementation; see miopen_rnn_probe above.
+    if (is_miopen_acceptable &&
+        miopen_rnn_probe(input.device().index()).load(std::memory_order_relaxed) ==
+            miopen_rnn_broken) {
+        return false;
+    }
+
     return is_miopen_acceptable;
 }
 
@@ -86,6 +137,12 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
+  }
+  // XPU: oneDNN LSTM for inference (GPU primitive supports f32 and f16)
+  if (input.is_xpu()) {
+    return !at::GradMode::is_enabled() &&
+        (input.scalar_type() == kFloat || input.scalar_type() == kHalf) &&
+        input.numel() != 0;
   }
   auto is_cpu_backend = [&](const TensorList tensors) {
     bool backend_cpu = true;
@@ -105,6 +162,8 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
         mkldnn_fp16_device_check())) &&
       input.numel() != 0;
 #else
+  (void)params;
+  (void)hx;
   return false;
 #endif
 }
@@ -302,9 +361,9 @@ struct QuantizedCellParams : public CellParamsBase {
                                                zero_point_hh.toLong()};
     return CellParamsSerializationType(
         "quantized",
-        tensors_to_serialize,
-        doubles_to_serialize,
-        longs_to_serialize,
+        std::move(tensors_to_serialize),
+        std::move(doubles_to_serialize),
+        std::move(longs_to_serialize),
         {});
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
@@ -444,10 +503,10 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     // reduce_range parameter is serialized along with the int field values.
     return CellParamsSerializationType(
         "quantized_dynamic",
-        tensors_to_serialize,
+        std::move(tensors_to_serialize),
         {},
         {reduce_range_},
-        packed_params_to_serialize);
+        std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
@@ -520,7 +579,7 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
         packed_params_to_serialize{packed_ih, packed_hh};
 
     return CellParamsSerializationType(
-        "quantized_fp16", {}, {}, {}, packed_params_to_serialize);
+        "quantized_fp16", {}, {}, {}, std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
@@ -608,11 +667,13 @@ std::vector<CellParams> gather_params(TensorList params, bool has_biases, bool h
   if (has_biases) {
     if (has_projections) {
       TORCH_CHECK(params.size() % 5 == 0, "got an incorrect number of RNN parameters");
+      result.reserve(params.size() / 5);
       for (size_t i = 0; i < params.size(); i += 5) {
         result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3], params[i + 4]);
       }
     } else {
       TORCH_CHECK(params.size() % 4 == 0, "got an incorrect number of RNN parameters");
+      result.reserve(params.size() / 4);
       for (size_t i = 0; i < params.size(); i += 4) {
         result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3], undefined);
       }
@@ -620,11 +681,13 @@ std::vector<CellParams> gather_params(TensorList params, bool has_biases, bool h
   } else {
     if (has_projections) {
       TORCH_CHECK(params.size() % 3 == 0, "got an incorrect number of RNN parameters");
+      result.reserve(params.size() / 3);
       for (size_t i = 0; i < params.size(); i += 3) {
         result.emplace_back(params[i], params[i + 1], undefined, undefined, params[i + 2]);
       }
     } else {
       TORCH_CHECK(params.size() % 2 == 0, "got an incorrect number of RNN parameters");
+      result.reserve(params.size() / 2);
       for (size_t i = 0; i < params.size(); i += 2) {
         result.emplace_back(params[i], params[i + 1], undefined, undefined, undefined);
       }
@@ -866,12 +929,12 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
           (*this)(inputs_w.unbind(0), input_hidden, params, true);
       TORCH_CHECK(unstacked_output.outputs.size()>0, "Expected sequence length to be larger than 0 in RNN");
       return {at::stack(unstacked_output.outputs, 0),
-              unstacked_output.final_hidden};
+              std::move(unstacked_output.final_hidden)};
     }
     auto unstacked_output = (*this)(inputs.unbind(0), input_hidden, params);
     TORCH_CHECK(unstacked_output.outputs.size()>0, "Expected sequence length to be larger than 0 in RNN");
     return {at::stack(unstacked_output.outputs, 0),
-            unstacked_output.final_hidden};
+            std::move(unstacked_output.final_hidden)};
   }
 
   Cell<hidden_type, cell_params>& cell_;
@@ -907,7 +970,9 @@ struct FullBidirectionalLayer
       std::reverse(rev_result.outputs.begin(), rev_result.outputs.end());
       auto rev_output = at::stack(rev_result.outputs, 0);
       return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
-              std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
+              std::make_pair(
+                  std::move(fw_result.final_hidden),
+                  std::move(rev_result.final_hidden))};
     }
 
     step_inputs = input.unbind(0);
@@ -920,7 +985,9 @@ struct FullBidirectionalLayer
     std::reverse(rev_result.outputs.begin(), rev_result.outputs.end());
     auto rev_output = at::stack(rev_result.outputs, 0);
     return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
-            std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
+            std::make_pair(
+                std::move(fw_result.final_hidden),
+                std::move(rev_result.final_hidden))};
   }
 
   std::vector<Tensor> reverse(std::vector<Tensor>&& x) const {
@@ -1040,7 +1107,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     }
     std::reverse(step_outputs.begin(), step_outputs.end());
     return {PackedSequence{at::cat(step_outputs, 0), input.batch_sizes},
-            hidden};
+            std::move(hidden)};
   }
 
   Cell<hidden_type, cell_params>& cell_;
@@ -1066,8 +1133,10 @@ struct PackedBidirectionalLayer
     PackedSequence output{
         at::cat({fw_result.outputs.data, rev_result.outputs.data}, -1),
         input.batch_sizes};
-    return {output,
-            std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
+    return {std::move(output),
+            std::make_pair(
+                std::move(fw_result.final_hidden),
+                std::move(rev_result.final_hidden))};
   }
 
   PackedLayer<dir_hidden_type, cell_params> layer_;
@@ -1102,10 +1171,11 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
   auto hidden_it = hiddens.begin();
   auto weight_it = weights.begin();
   std::vector<hidden_type> final_hiddens;
+  final_hiddens.reserve(num_layers);
   for (const auto l : c10::irange(num_layers)) {
     auto layer_output = layer(layer_input, *(hidden_it++), *(weight_it++));
-    final_hiddens.push_back(layer_output.final_hidden);
-    layer_input = layer_output.outputs;
+    final_hiddens.push_back(std::move(layer_output.final_hidden));
+    layer_input = std::move(layer_output.outputs);
 
     if (dropout_p != 0 && train && l < num_layers - 1) {
       layer_input = dropout(layer_input, dropout_p);
@@ -1130,7 +1200,7 @@ LayerOutput<io_type, std::vector<typename CellType::hidden_type>> _rnn_impl(
   if (bidirectional) {
     using BidirLayer = BidirLayerT<hidden_type, cell_params>;
     auto bidir_result = apply_layer_stack(BidirLayer{cell}, input, pair_vec(hiddens), pair_vec(params), num_layers, dropout_p, train);
-    return {bidir_result.outputs, unpair_vec(std::move(bidir_result.final_hidden))};
+    return {std::move(bidir_result.outputs), unpair_vec(std::move(bidir_result.final_hidden))};
   } else {
     return apply_layer_stack(LayerT<hidden_type,cell_params>{cell}, input, hiddens, params, num_layers, dropout_p, train);
   }
@@ -1235,21 +1305,28 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       return std::make_tuple(std::move(output), std::move(hy));             \
     }                                                                       \
     if (use_miopen(_input, dropout_p)) {                                    \
-      Tensor output, hy;                                                    \
-      NAME##_miopen_stub(                                                   \
-          _input.device().type(),                                           \
-          output,                                                           \
-          hy,                                                               \
-          _input,                                                           \
-          hx,                                                               \
-          _params,                                                          \
-          has_biases,                                                       \
-          num_layers,                                                       \
-          dropout_p,                                                        \
-          train,                                                            \
-          bidirectional,                                                    \
-          batch_first);                                                     \
-      return std::make_tuple(std::move(output), std::move(hy));             \
+      try {                                                                 \
+        Tensor output, hy;                                                  \
+        NAME##_miopen_stub(                                                 \
+            _input.device().type(),                                         \
+            output,                                                         \
+            hy,                                                             \
+            _input,                                                         \
+            hx,                                                             \
+            _params,                                                        \
+            has_biases,                                                     \
+            num_layers,                                                     \
+            dropout_p,                                                      \
+            train,                                                          \
+            bidirectional,                                                  \
+            batch_first);                                                   \
+        miopen_rnn_probe(_input.device().index())                           \
+            .store(miopen_rnn_ok, std::memory_order_relaxed);               \
+        return std::make_tuple(std::move(output), std::move(hy));           \
+      } catch (const std::exception& e) {                                   \
+        if (!miopen_rnn_handle_failure(_input.device().index(), e.what()))  \
+          throw;                                                            \
+      }                                                                     \
     }                                                                       \
     check_attributes(_input, _params, hx);                                  \
     auto input = batch_first ? _input.transpose(0, 1) : _input;             \
@@ -1297,21 +1374,28 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       return std::make_tuple(std::move(output), std::move(hy));             \
     }                                                                       \
     if (use_miopen(data, dropout_p)) {                                      \
-      Tensor output, hy;                                                    \
-      NAME##_packed_miopen_stub(                                            \
-          data.device().type(),                                             \
-          output,                                                           \
-          hy,                                                               \
-          data,                                                             \
-          batch_sizes,                                                      \
-          hx,                                                               \
-          _params,                                                          \
-          has_biases,                                                       \
-          num_layers,                                                       \
-          dropout_p,                                                        \
-          train,                                                            \
-          bidirectional);                                                   \
-      return std::make_tuple(std::move(output), std::move(hy));             \
+      try {                                                                 \
+        Tensor output, hy;                                                  \
+        NAME##_packed_miopen_stub(                                          \
+            data.device().type(),                                           \
+            output,                                                         \
+            hy,                                                             \
+            data,                                                           \
+            batch_sizes,                                                    \
+            hx,                                                             \
+            _params,                                                        \
+            has_biases,                                                     \
+            num_layers,                                                     \
+            dropout_p,                                                      \
+            train,                                                          \
+            bidirectional);                                                 \
+        miopen_rnn_probe(data.device().index())                             \
+            .store(miopen_rnn_ok, std::memory_order_relaxed);               \
+        return std::make_tuple(std::move(output), std::move(hy));           \
+      } catch (const std::exception& e) {                                   \
+        if (!miopen_rnn_handle_failure(data.device().index(), e.what()))    \
+          throw;                                                            \
+      }                                                                     \
     }                                                                       \
     PackedSequence input{data, batch_sizes};                                \
     auto params = gather_params(_params, has_biases);                       \
@@ -1457,7 +1541,10 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   if (_input.is_mps()) {
     std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(_input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
-    std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(std::get<0>(output), std::get<1>(output), std::get<2>(output));
+    std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(
+        std::move(std::get<0>(output)),
+        std::move(std::get<1>(output)),
+        std::move(std::get<2>(output)));
     return return_values;
   }
 #endif
@@ -1465,10 +1552,17 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   bool has_projections = (hx[0].sym_size(2) != hx[1].sym_size(2));
   if (use_miopen(_input, dropout_p)) {
     if (!has_projections) {
-      Tensor output, hy, cy;
-      lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-                num_layers, dropout_p, train, bidirectional, batch_first);
-      return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+      try {
+        Tensor output, hy, cy;
+        lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
+                  num_layers, dropout_p, train, bidirectional, batch_first);
+        miopen_rnn_probe(_input.device().index()).store(miopen_rnn_ok, std::memory_order_relaxed);
+        return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+      } catch (const std::exception& e) {
+        if (!miopen_rnn_handle_failure(_input.device().index(), e.what())) {
+          throw;
+        }
+      }
     } else {
       TORCH_WARN_ONCE(
           "LSTM with projections is not supported with MIOpen. Using default implementation.");
@@ -1518,13 +1612,43 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   bool has_projections = (hx[0].size(2) != hx[1].size(2));
   if (use_miopen(data, dropout_p)) {
     if (!has_projections) {
-      Tensor output, hy, cy;
-      lstm_packed_miopen_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
-              _params, has_biases, num_layers, dropout_p, train, bidirectional);
-      return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+      try {
+        Tensor output, hy, cy;
+        lstm_packed_miopen_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
+                _params, has_biases, num_layers, dropout_p, train, bidirectional);
+        miopen_rnn_probe(data.device().index()).store(miopen_rnn_ok, std::memory_order_relaxed);
+        return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+      } catch (const std::exception& e) {
+        if (!miopen_rnn_handle_failure(data.device().index(), e.what())) {
+          throw;
+        }
+      }
     } else {
       TORCH_WARN_ONCE(
           "LSTM with projections is not supported with MIOpen. Using default implementation.");
+    }
+  }
+
+  // If packed sequence has uniform batch size, unwrap to regular tensor
+  // and dispatch to the standard lstm (enables oneDNN path for CPU/XPU)
+  if (!has_projections && use_mkldnn(data, _params, hx) && batch_sizes.size(0) > 0) {
+    const int64_t* bs_ptr = batch_sizes.const_data_ptr<int64_t>();
+    int64_t first_batch = bs_ptr[0];
+    bool uniform = true;
+    for (int64_t i = 1; i < batch_sizes.size(0); i++) {
+      if (bs_ptr[i] != first_batch) {
+        uniform = false;
+        break;
+      }
+    }
+    if (uniform) {
+      int64_t seq_len = batch_sizes.size(0);
+      auto input_3d = data.reshape({seq_len, first_batch, data.size(-1)});
+      auto result = at::native::lstm(input_3d, hx, _params, has_biases,
+          num_layers, dropout_p, train, bidirectional, /*batch_first=*/false);
+      std::get<0>(result) = std::get<0>(result).reshape(
+          {seq_len * first_batch, std::get<0>(result).size(-1)});
+      return result;
     }
   }
 
@@ -1919,7 +2043,7 @@ auto cell_params_base_registry =
             [](CellParamsSerializationType state)
                 -> c10::intrusive_ptr<CellParamsBase> {
               std::string type = std::get<0>(state);
-              TORCH_INTERNAL_ASSERT(cell_params_deserializers.count(type));
+              TORCH_INTERNAL_ASSERT(cell_params_deserializers.contains(type));
               return cell_params_deserializers[type](std::move(state));
             });
 

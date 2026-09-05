@@ -6,7 +6,9 @@ import contextlib
 import functools
 import logging
 import os
+import subprocess
 import sys
+import unittest
 from unittest import mock
 
 import torch
@@ -26,17 +28,30 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
-from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_dict
+from torch._inductor.utils import (
+    fresh_cache,
+    run_and_get_code,
+    triton_version_uses_attrs_dict,
+)
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
+from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_utils import (
+    parametrize,
+    skipIfRocm,
+    skipIfWindows,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     GPU_TYPE,
+    HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
     HAS_XPU_AND_TRITON,
+    requires_block_ptr,
+    TRITON_HAS_CPU,
 )
 from torch.testing._internal.logging_utils import log_settings, logs_to_string
 
@@ -133,12 +148,119 @@ if HAS_GPU:
         output = x + y
         tl.store(out_ptr + offsets, output, mask=mask)
 
+    @triton.jit
+    def _add_kernel_with_interleaved_tma_args(
+        in_desc_ptr0,
+        scale_ptr,
+        in_desc_ptr1,
+        bias_ptr,
+        out_desc_ptr,
+        BLOCK_SIZE_X: "tl.constexpr",
+        BLOCK_SIZE_Y: "tl.constexpr",
+    ):
+        pid_x = tl.program_id(axis=0)
+        pid_y = tl.program_id(axis=1)
+        offsets = [pid_x * BLOCK_SIZE_X, pid_y * BLOCK_SIZE_Y]
+        x = tl.load_tensor_descriptor(in_desc_ptr0, offsets)
+        scale = tl.load(scale_ptr)
+        y = tl.load_tensor_descriptor(in_desc_ptr1, offsets)
+        bias = tl.load(bias_ptr)
+        tl.store_tensor_descriptor(out_desc_ptr, offsets, x * scale + y + bias)
+
+    def _get_backend_options_kernel(*, with_enable_fp_fusion):
+        # These kernels are intentionally illustrative. `enable_fp_fusion` is a
+        # real backend option name, but the branch below only makes the kwarg's
+        # kernel-argument binding observable; it is not modeling the compiler
+        # option's normal optimization behavior.
+        if with_enable_fp_fusion:
+
+            @triton.jit
+            def add_kernel(
+                in_ptr0,
+                in_ptr1,
+                out_ptr,
+                n_elements,
+                BLOCK_SIZE: "tl.constexpr",
+                enable_fp_fusion: "tl.constexpr",
+            ):
+                pid = tl.program_id(axis=0)
+                block_start = pid * BLOCK_SIZE
+                offsets = block_start + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < n_elements
+                x = tl.load(in_ptr0 + offsets, mask=mask)
+                y = tl.load(in_ptr1 + offsets, mask=mask)
+                if enable_fp_fusion:
+                    result = x + y
+                else:
+                    result = x * y
+                tl.store(out_ptr + offsets, result, mask=mask)
+
+        else:
+
+            @triton.jit
+            def add_kernel(
+                in_ptr0,
+                in_ptr1,
+                out_ptr,
+                n_elements,
+                BLOCK_SIZE: "tl.constexpr",
+            ):
+                pid = tl.program_id(axis=0)
+                block_start = pid * BLOCK_SIZE
+                offsets = block_start + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < n_elements
+                x = tl.load(in_ptr0 + offsets, mask=mask)
+                y = tl.load(in_ptr1 + offsets, mask=mask)
+                tl.store(out_ptr + offsets, x + y, mask=mask)
+
+        return add_kernel
+
+    def _get_backend_options_fn(add_kernel, **launch_kwargs):
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](
+                x,
+                y,
+                output,
+                n_elements,
+                **launch_kwargs,
+            )
+            return output
+
+        return f
+
 
 class KernelTests(torch._inductor.test_case.TestCase):
     def _kernel_launched_in_code(self, kernel_name: str, code: str) -> bool:
         if inductor_config.cpp_wrapper:
             return f"launchKernel({kernel_name}" in code
         return f"{kernel_name}.run(" in code
+
+    def _run_and_get_triton_compile_options(self, fn, *args):
+        # TestCase already gives each test a fresh compile cache. This patch
+        # only keeps compilation in-process while the triton.compile mock is
+        # installed, so we can assert on the actual options passed to Triton.
+        with (
+            inductor_config.patch("compile_threads", 1),
+            mock.patch.object(triton, "compile", wraps=triton.compile) as compile_mock,
+        ):
+            out, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        compile_options = [
+            dict(call.kwargs["options"])
+            for call in compile_mock.call_args_list
+            if "options" in call.kwargs
+        ]
+        self.assertTrue(compile_options)
+        return out, codes, compile_options
+
+    def _assert_triton_compile_option(self, options, name, expected_value):
+        self.assertTrue(
+            any(option.get(name) == expected_value for option in options),
+            f"expected triton.compile options to include "
+            f"{name}={expected_value!r}, got {options!r}",
+        )
 
     @requires_gpu
     def test_triton_kernel_with_kernel_param(self):
@@ -183,6 +305,105 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         self.assertIsNone(_re.search(r"\b__dunder_add_kernel_0\b", code))
         self.assertIsNotNone(_re.search(r"\b_dunder_add_kernel_0\b", code))
+
+    @inductor_config.patch(strict_signed_zero=True)
+    @requires_cuda_and_triton
+    def test_dim_max_min_reuse_argreduce_value(self):
+        dtypes = [torch.float32, torch.float16]
+        if torch.cuda.is_bf16_supported(including_emulation=False):
+            dtypes.append(torch.bfloat16)
+
+        for op, indexed_helper, value_helper, selected_value in (
+            (torch.max, "max_with_index", "max2", 100.0),
+            (torch.min, "min_with_index", "min2", -100.0),
+        ):
+            torch._dynamo.reset()
+
+            def fn(x):
+                return op(x, -1)
+
+            for dtype in dtypes:
+                x = torch.randn(8, 4097, dtype=dtype, device=GPU_TYPE)
+                x[:, 4095] = selected_value
+                expected_values, expected_indices = fn(x)
+                with fresh_cache():
+                    actual, codes = run_and_get_code(torch.compile(fn, dynamic=True), x)
+                actual_values, actual_indices = actual
+
+                self.assertEqual(actual_values, expected_values)
+                self.assertEqual(actual_indices, expected_indices)
+
+                source = "\n".join(codes)
+                self.assertEqual(source.count(f"triton_helpers.{indexed_helper}"), 1)
+                self.assertNotIn(f"triton_helpers.{value_helper}", source)
+
+                torch._dynamo.reset()
+
+                def value_only(x):
+                    return op(x, -1).values
+
+                with fresh_cache():
+                    actual_values, value_codes = run_and_get_code(
+                        torch.compile(value_only, dynamic=True), x
+                    )
+
+                self.assertEqual(actual_values, expected_values)
+
+                value_source = "\n".join(value_codes)
+                self.assertEqual(
+                    value_source.count(f"triton_helpers.{indexed_helper}"), 1
+                )
+                self.assertNotIn(f"triton_helpers.{value_helper}", value_source)
+                self.assertEqual(value_source.count("tl.store("), 1)
+
+        x = torch.tensor([[0.0, -0.0], [-0.0, 0.0]], device=GPU_TYPE)
+        for op in (torch.max, torch.min):
+            torch._dynamo.reset()
+
+            def fn(x):
+                return op(x, -1)
+
+            expected_values, expected_indices = fn(x)
+            with fresh_cache():
+                actual_values, actual_indices = torch.compile(fn, dynamic=True)(x)
+
+            self.assertEqual(
+                torch.signbit(actual_values), torch.signbit(expected_values)
+            )
+            self.assertEqual(actual_indices, expected_indices)
+
+            torch._dynamo.reset()
+
+            def value_only(x):
+                return op(x, -1).values
+
+            expected_values = value_only(x)
+            with fresh_cache():
+                actual_values = torch.compile(value_only, dynamic=True)(x)
+
+            self.assertEqual(
+                torch.signbit(actual_values), torch.signbit(expected_values)
+            )
+
+        for value_op, index_op in (
+            (torch.amax, torch.argmax),
+            (torch.amin, torch.argmin),
+        ):
+            torch._dynamo.reset()
+
+            def separate_value_and_index(x):
+                return value_op(x, -1), index_op(x, -1)
+
+            expected_values, expected_indices = separate_value_and_index(x)
+            with fresh_cache():
+                actual_values, actual_indices = torch.compile(
+                    separate_value_and_index, dynamic=True
+                )(x)
+
+            self.assertEqual(
+                torch.signbit(actual_values), torch.signbit(expected_values)
+            )
+            self.assertEqual(actual_indices, expected_indices)
 
     @requires_gpu
     def test_triton_kernel_ill_formed(self):
@@ -1457,6 +1678,234 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
+    @common_utils.parametrize("gap", [1, 2])
+    def test_triton_kernel_mutated_offset_view_not_miscompiled(self, gap):
+        # Functionalizing a mutated pointer arg used to clone the view itself, via an
+        # as_strided spanning storage_offset + span elements of the *base* storage.
+        # Once Inductor realized the view as its own buffer that extent was past the
+        # end, and the copy kernel read out of bounds with no mask -- returning freed
+        # memory for the elements the kernel chose not to write.
+        # gap=1 gives a dense row; gap=2 makes the view non-dense, so its clone has
+        # to materialize the gaps between elements as well.
+        @triton.jit
+        def maybe_fill_kernel(
+            out_ptr, do_write, n_cols, GAP: tl.constexpr, BLOCK: tl.constexpr
+        ):
+            # do_write has to stay a runtime arg: as a tl.constexpr Triton folds
+            # the store away and the pointer is no longer seen as mutated.
+            if do_write != 0:
+                offs = tl.arange(0, BLOCK)
+                tl.store(out_ptr + offs * GAP, 1.0, mask=offs < n_cols)
+
+        # The skipped row is the detector, and two things decide whether it detects
+        # anything. Its contents must be something stale memory cannot return by luck:
+        # a zeros base caught nothing at gap=1 because the over-extent read came back
+        # zeroed as well, and a uniform fill is matched whenever the read lands in
+        # another copy of that fill, so use one distinct value per element. And the
+        # row has to sit far enough from offset 0 that the read overshoots by several
+        # rows -- at skipped_row=1 it lands one row short and finds the same values it
+        # was supposed to read, which is a pass for the wrong reason.
+        n_cols, n_rows, skipped_row = 256, 8, 7
+        width = n_cols * gap
+
+        def make_base():
+            return torch.arange(
+                1, n_rows * width + 1, dtype=torch.float32, device=GPU_TYPE
+            ).reshape(n_rows, width)
+
+        def f():
+            base = make_base()
+            for i in range(n_rows):
+                row = base[i : i + 1, ::gap]  # storage_offset = i * width
+                maybe_fill_kernel[(1,)](
+                    row, 0 if i == skipped_row else 1, n_cols, GAP=gap, BLOCK=n_cols
+                )
+                # The write-back is what forces the view to be realized as its own
+                # buffer, which is what used to put the as_strided out of bounds.
+                base[i : i + 1, ::gap] = row
+            return base
+
+        expected = make_base()
+        for i in range(n_rows):
+            if i != skipped_row:
+                expected[i, ::gap] = 1.0
+        self.assertEqual(f(), expected)
+        self.assertEqual(torch.compile(f, fullgraph=True)(), expected)
+
+    @requires_gpu
+    @common_utils.parametrize("bind", ["slice", "set_"])
+    def test_triton_kernel_mutated_no_base_arg(self, bind):
+        # The other test's views are built inside the graph, so they always have a
+        # _base. A mutated arg reaches _clone_mutated_arg's base=None fallback when
+        # it is a graph input instead: a placeholder is rebuilt from metadata, which
+        # drops whatever _base the caller's tensor had. Tensor.set_() gets there too,
+        # but only from the caller -- inside a compiled region it graph breaks.
+        # base=None is right here, because such an arg lowers to an InputBuffer,
+        # whose storage-relative offset Inductor rebases onto the incoming pointer.
+        @triton.jit
+        def half_fill_kernel(out_ptr, n_cols, GAP: tl.constexpr, BLOCK: tl.constexpr):
+            # Skips the upper half, so a clone that read outside the arg shows up as
+            # garbage in elements the kernel never wrote.
+            offs = tl.arange(0, BLOCK)
+            tl.store(out_ptr + offs * GAP, 1.0, mask=offs < n_cols // 2)
+
+        n_cols, gap = 256, 2
+        width = n_cols * gap
+
+        def make_arg():
+            base = torch.arange(
+                2 * width, device=GPU_TYPE, dtype=torch.float32
+            ).reshape(2, width)
+            if bind == "slice":
+                return base[1:2, ::gap]
+            return torch.empty(0, device=GPU_TYPE).set_(
+                base.untyped_storage(), width, (n_cols,), (gap,)
+            )
+
+        def f(x):
+            half_fill_kernel[(1,)](x, n_cols, GAP=gap, BLOCK=n_cols)
+            return x.clone()
+
+        expected = make_arg().clone()
+        expected[..., : n_cols // 2] = 1.0
+        self.assertEqual(f(make_arg()), expected)
+
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+        from torch._prims_common import is_non_overlapping_and_dense_or_false
+
+        with mock.patch.object(
+            tkw, "_clone_mutated_arg", wraps=tkw._clone_mutated_arg
+        ) as clone_mock:
+            self.assertEqual(torch.compile(f, fullgraph=True)(make_arg()), expected)
+        # A dense arg, or one at offset 0, would take a different branch and leave
+        # this test covering nothing, so pin all three at the call site.
+        self.assertTrue(clone_mock.call_args_list)
+        for call in clone_mock.call_args_list:
+            _, val, tensor_bases = call.args
+            self.assertFalse(is_non_overlapping_and_dense_or_false(val))
+            self.assertNotEqual(val.storage_offset(), 0)
+            self.assertFalse(tensor_bases)
+
+    @requires_gpu
+    def test_triton_kernel_mutated_offset_view_inference_mode(self):
+        # The gapped regression above traces with view tracking on, so the mutated
+        # arg always carries a _base. inference_mode disables ADInplaceOrView;
+        # FunctionalTensor records ancestry in _inference_mode_base instead, but only
+        # under the export configs that populate it. If the base is lost here the
+        # clone goes back to spanning storage_offset + span of a buffer sized to the
+        # view alone -- either the original silent miscompile, or the InductorError
+        # the as_strided extent check now raises for it. Both fail this test.
+        @triton.jit
+        def maybe_fill_kernel(
+            out_ptr, do_write, n_cols, GAP: tl.constexpr, BLOCK: tl.constexpr
+        ):
+            if do_write != 0:
+                offs = tl.arange(0, BLOCK)
+                tl.store(out_ptr + offs * GAP, 1.0, mask=offs < n_cols)
+
+        n_cols, n_rows, skipped_row, gap = 256, 8, 7, 2
+        width = n_cols * gap
+
+        def make_base():
+            return torch.arange(
+                1, n_rows * width + 1, dtype=torch.float32, device=GPU_TYPE
+            ).reshape(n_rows, width)
+
+        def f():
+            base = make_base()
+            for i in range(n_rows):
+                row = base[i : i + 1, ::gap]
+                maybe_fill_kernel[(1,)](
+                    row, 0 if i == skipped_row else 1, n_cols, GAP=gap, BLOCK=n_cols
+                )
+                base[i : i + 1, ::gap] = row
+            return base
+
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+
+        with torch.inference_mode():
+            expected = make_base()
+            for i in range(n_rows):
+                if i != skipped_row:
+                    expected[i, ::gap] = 1.0
+            with mock.patch.object(
+                tkw, "_clone_mutated_arg", wraps=tkw._clone_mutated_arg
+            ) as clone_mock:
+                self.assertEqual(torch.compile(f, fullgraph=True)(), expected)
+        # Numerics are the contract; this pins the mechanism, so a change that stops
+        # threading the base fails here instead of passing on whatever memory holds.
+        self.assertTrue(clone_mock.call_args_list)
+        self.assertTrue(any(call.args[2] for call in clone_mock.call_args_list))
+
+    @requires_gpu
+    def test_triton_kernel_mutated_column_slice_of_intermediate(self):
+        # Regression for the minimal repro in #161115, the shape that reaches this
+        # from real workloads: the mutated arg is a contiguous column prefix of an
+        # intermediate, so it is non-dense with a large row stride but a zero
+        # storage_offset. Cloning it through as_strided spans
+        # row_stride * (rows - 1) + cols elements of a buffer allocated for
+        # rows * cols, so the clone is filled from past the end of that buffer and
+        # every value the kernel reads back is whatever the memory held.
+        # n_rows matters: below about 64 Inductor keeps the view inside the
+        # workspace buffer and there is nothing out of bounds to catch, and far
+        # above it the read runs off the allocation into a hard CUDA fault that
+        # would take the rest of the suite with it.
+        @triton.jit
+        def scale_inplace_kernel(x_ptr, row_stride, n_cols, BLOCK: tl.constexpr):
+            row = tl.program_id(0)
+            offs = tl.arange(0, BLOCK)
+            mask = offs < n_cols
+            vals = tl.load(x_ptr + row * row_stride + offs, mask=mask)
+            tl.store(x_ptr + row * row_stride + offs, vals * 2.0, mask=mask)
+
+        n_rows, width, n_cols = 64, 4096, 512
+
+        def f(base):
+            workspace = torch.tanh(base)
+            x = workspace[:, :n_cols]
+            scale_inplace_kernel[(n_rows,)](x, x.stride(0), n_cols, BLOCK=n_cols)
+            return x
+
+        base = torch.randn(n_rows, width, device=GPU_TYPE)
+        expected = torch.tanh(base)[:, :n_cols] * 2.0
+        self.assertEqual(torch.compile(f, fullgraph=True)(base), expected)
+
+    @requires_gpu
+    @largeTensorTest("6GB", device=GPU_TYPE)
+    def test_triton_kernel_mutated_offset_view_large_tensor(self):
+        # The bug itself is shape-independent -- the same over-extent read is emitted
+        # at any size. What only a base past 2**31 elements covers is index width:
+        # Inductor has to promote its own generated kernels to int64, and an int32
+        # index would wrap and corrupt the row the kernel leaves alone.
+        @triton.jit
+        def maybe_fill_kernel(out_ptr, do_write, n_elements, BLOCK: tl.constexpr):
+            if do_write != 0:
+                offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+                tl.store(out_ptr + offs, 1, mask=offs < n_elements)
+
+        n_cols, n_rows, skipped_row, block = 2**30 + 1024, 2, 1, 1024
+        fill = 7  # not zero, so stale memory reading back zeroed is still a failure
+        self.assertGreater(n_rows * n_cols, torch.iinfo(torch.int32).max)
+
+        def f():
+            base = torch.full((n_rows, n_cols), fill, device=GPU_TYPE, dtype=torch.int8)
+            for i in range(n_rows):
+                row = base[i : i + 1]
+                maybe_fill_kernel[(triton.cdiv(n_cols, block),)](
+                    row, 0 if i == skipped_row else 1, n_cols, BLOCK=block
+                )
+                base[i : i + 1] = row
+            return base
+
+        out = torch.compile(f, fullgraph=True)()
+        # min/max per row rather than a full compare, which would need another copy
+        # of a multi-gigabyte tensor.
+        for i in range(n_rows):
+            want = fill if i == skipped_row else 1
+            self.assertEqual(out[i].min().item(), want)
+            self.assertEqual(out[i].max().item(), want)
+
+    @requires_gpu
     def test_triton_kernel_fallback(self):
         def f(x, y):
             out = torch.zeros_like(x)
@@ -2562,6 +3011,365 @@ def forward(self, arg0_1, arg1_1):
         f(x, x)
 
     @requires_gpu
+    def test_triton_kernel_backend_options_without_signature(self):
+        # A launch kwarg that is not in the kernel signature should be kept as
+        # a backend option and emitted in the generated Triton metadata.
+        add_kernel = _get_backend_options_kernel(with_enable_fp_fusion=False)
+        f = _get_backend_options_fn(add_kernel, BLOCK_SIZE=128, enable_fp_fusion=False)
+
+        x = torch.randn(4, device=GPU_TYPE)
+        out, _, options = self._run_and_get_triton_compile_options(f, x, x)
+        self.assertEqual(out, x + x)
+        self._assert_triton_compile_option(options, "enable_fp_fusion", False)
+
+    @requires_gpu
+    def test_triton_kernel_invalid_backend_options_error(self):
+        # Dynamo leaves the determination of the target triton backend to
+        # inductor, so it will accept constant non-kernel arguments provided
+        # to a user defined triton kernels launch. Inductor will then validate
+        # backend compiler options once the target is known:
+        # every launch kwarg must be either a kernel parameter or a
+        # backend option accepted by backend.parse_options(), matching direct
+        # Triton's _pack_args check.
+        add_kernel = _get_backend_options_kernel(with_enable_fp_fusion=False)
+        f = _get_backend_options_fn(
+            add_kernel, BLOCK_SIZE=128, not_a_backend_option=False
+        )
+
+        x = torch.randn(4, device=GPU_TYPE)
+        msg = "Triton launch kwargs must be kernel parameters or valid backend options"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(f, fullgraph=True)(x, x)
+
+    @requires_gpu
+    def test_triton_kernel_backend_options_also_used_as_kernel_kwarg(self):
+        # For `def kernel(..., enable_fp_fusion: tl.constexpr)`, the call
+        # `kernel[grid](..., enable_fp_fusion=False)` has two meanings in
+        # direct Triton: the binder uses it as a kernel parameter, and
+        # _pack_args still exposes it to backend.parse_options(), so Triton
+        # also parses it as a compiler option. Preserve both meanings without
+        # replaying it as the illegal form
+        # `kernel[grid](..., False, enable_fp_fusion=False)`, which passes the
+        # same kernel parameter both positionally and by keyword.
+        add_kernel = _get_backend_options_kernel(with_enable_fp_fusion=True)
+        f = _get_backend_options_fn(add_kernel, BLOCK_SIZE=128, enable_fp_fusion=False)
+
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
+        eager_backend_out = torch.compile(f, backend="eager", fullgraph=True)(x, y)
+        self.assertEqual(eager_backend_out, x * y)
+
+        out, _, options = self._run_and_get_triton_compile_options(f, x, y)
+        self.assertEqual(out, x * y)
+        self._assert_triton_compile_option(options, "enable_fp_fusion", False)
+
+    @requires_gpu
+    def test_triton_kernel_backend_options_also_kernel_kwarg_with_autotune(self):
+        # Same dual-meaning kwarg case as above, but through a user-provided
+        # triton.Config. The launch kwarg should remain both a kernel
+        # parameter and a backend option after the autotune wrapper is applied.
+        add_kernel = triton.autotune(
+            configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
+            key=[],
+        )(_get_backend_options_kernel(with_enable_fp_fusion=True))
+        f = _get_backend_options_fn(add_kernel, enable_fp_fusion=False)
+
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
+        eager_backend_out = torch.compile(f, backend="eager", fullgraph=True)(x, y)
+        self.assertEqual(eager_backend_out, x * y)
+
+        out, (code,), options = self._run_and_get_triton_compile_options(f, x, y)
+        self.assertEqual(out, x * y)
+        self.assertIn("@triton_heuristics.user_autotune", code)
+        self._assert_triton_compile_option(options, "enable_fp_fusion", False)
+
+    @requires_gpu
+    def test_triton_kernel_autotune_config_conflicts_with_launch_kwarg(self):
+        # Direct Triton errors when a generic autotune config kwarg is also
+        # passed as a launch kwarg. The config does not override the launch
+        # kwarg; it would create duplicate keyword arguments at launch.
+        add_kernel = triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 128}, num_warps=4),
+                triton.Config(
+                    {"BLOCK_SIZE": 128, "enable_fp_fusion": True}, num_warps=4
+                ),
+            ],
+            key=[],
+        )(_get_backend_options_kernel(with_enable_fp_fusion=True))
+        f = _get_backend_options_fn(add_kernel, enable_fp_fusion=False)
+
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
+        msg = "Triton launch kwargs conflict with autotune config kwargs"
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            torch.compile(f, backend="eager", fullgraph=True)(x, y)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            torch.compile(f, fullgraph=True)(x, y)
+
+    @requires_gpu
+    def test_triton_kernel_backend_options_with_autotune(self):
+        # Backend options passed at launch should survive through the
+        # user-defined Triton autotune wrapper as compile metadata.
+        add_kernel = triton.autotune(
+            configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
+            key=[],
+        )(_get_backend_options_kernel(with_enable_fp_fusion=False))
+        f = _get_backend_options_fn(add_kernel, enable_fp_fusion=False)
+
+        x = torch.randn(4, device=GPU_TYPE)
+        out, (code,), options = self._run_and_get_triton_compile_options(f, x, x)
+        self.assertEqual(out, x + x)
+        self.assertIn("@triton_heuristics.user_autotune", code)
+        self._assert_triton_compile_option(options, "enable_fp_fusion", False)
+
+    @requires_gpu
+    def test_triton_kernel_backend_options_preserved_in_fx_wrapper_hop(self):
+        add_kernel = _get_backend_options_kernel(with_enable_fp_fusion=False)
+        f = _get_backend_options_fn(add_kernel, BLOCK_SIZE=128, enable_fp_fusion=False)
+
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._inductor.codegen.wrapper_fxir import FxConverter
+
+        captured_gms = []
+        orig_generate = FxConverter.generate
+
+        def record_generate(self):
+            gm = orig_generate(self)
+            captured_gms.append(gm)
+            return gm
+
+        x = torch.randn(4, device=GPU_TYPE)
+        with (
+            inductor_config.patch({"fx_wrapper": True, "compile_threads": 1}),
+            mock.patch.object(FxConverter, "generate", record_generate),
+        ):
+            out = torch.compile(f, fullgraph=True)(x, x)
+
+        self.assertEqual(out, x + x)
+        self.assertTrue(captured_gms)
+        hop_node = next(
+            node
+            for node in captured_gms[0].graph.nodes
+            if node.op == "call_function"
+            and node.target is triton_kernel_wrapper_mutation
+            and "enable_fp_fusion" in node.kwargs.get("launch_kwargs", ())
+        )
+        constant_args = kernel_side_table.get_constant_args(
+            hop_node.kwargs["constant_args_idx"]
+        )
+        hop_kwargs = {**hop_node.kwargs["kwargs"], **constant_args}
+
+        # The FX wrapper runs the HOP directly, so names alone are not enough:
+        # non-signature backend options also need their values in the HOP
+        # payload. Otherwise the direct FXIR run re-enters Triton JIT with
+        # default compiler options and may compile a different kernel.
+        self.assertEqual(hop_node.kwargs["launch_kwargs"], ("enable_fp_fusion",))
+        self.assertEqual(hop_kwargs["enable_fp_fusion"], False)
+
+    @requires_gpu
+    def test_triton_kernel_special_kwargs_with_autotune_use_configs(self):
+        # SPECIAL_CONFIG_NAMES keep the existing behavior: they update Triton
+        # configs instead of being preserved as generic backend options.
+        add_kernel = triton.autotune(
+            configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4)],
+            key=[],
+        )(_get_backend_options_kernel(with_enable_fp_fusion=False))
+        f = _get_backend_options_fn(add_kernel, num_warps=8)
+
+        x = torch.randn(4, device=GPU_TYPE)
+        out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, x)
+        self.assertEqual(out, x + x)
+        self.assertIn("'num_warps': 8", code)
+        self.assertNotIn("backend_options", code)
+
+    @requires_gpu
+    def test_capture_triton_backend_options_preserve_launch_kwarg_names(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pass
+
+        def f(x, y):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            capture_triton(add_kernel)[grid](
+                x,
+                y,
+                output,
+                n_elements=n_elements,
+                BLOCK_SIZE=16,
+                enable_fp_fusion=False,
+            )
+            return output
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
+        gm = make_fx(f, tracing_mode="symbolic")(x, y)
+        hop_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function"
+            and node.target is triton_kernel_wrapper_mutation
+        )
+
+        # capture_triton preserves the original launch kwarg names separately
+        # from the normalized argument values. Kernel args are present here too
+        # because names such as enable_fp_fusion may have direct Triton dual
+        # meaning as both a kernel parameter and a compiler option. Inductor
+        # later recovers values by name and filters them with the target
+        # backend before serializing triton_meta.
+        self.assertEqual(
+            set(hop_node.kwargs["launch_kwargs"]),
+            {
+                "n_elements",
+                "BLOCK_SIZE",
+                "enable_fp_fusion",
+            },
+        )
+
+    @requires_gpu
+    def test_capture_triton_backend_options_also_kernel_kwarg(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            enable_fp_fusion: "tl.constexpr",
+        ):
+            pass
+
+        def f(x):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            capture_triton(add_kernel)[grid](
+                x,
+                output,
+                n_elements,
+                BLOCK_SIZE=16,
+                enable_fp_fusion=False,
+            )
+            return output
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        gm = make_fx(f)(torch.randn(4, device=GPU_TYPE))
+        hop_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function"
+            and node.target is triton_kernel_wrapper_mutation
+        )
+
+        # Direct Triton gives a kwarg such as enable_fp_fusion two meanings
+        # when the kernel also has a parameter with that name: it binds the
+        # tl.constexpr parameter and backend.parse_options() still sees it as
+        # a backend option. The tracing path should preserve the launch-site
+        # name instead of dropping it just because it is also a kernel arg.
+        self.assertEqual(
+            hop_node.kwargs["launch_kwargs"],
+            ("BLOCK_SIZE", "enable_fp_fusion"),
+        )
+
+    @requires_gpu
+    def test_capture_triton_autotune_config_does_not_materialize_default_args(self):
+        @triton.autotune(
+            configs=[triton.Config({"BLOCK_SIZE": 16}, num_warps=4)],
+            key=[],
+        )
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr" = 2,
+        ):
+            pass
+
+        def f(x):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            capture_triton(add_kernel)[grid](
+                x,
+                output,
+                n_elements,
+            )
+            return output
+
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        gm = make_fx(f)(torch.randn(4, device=GPU_TYPE))
+        hop_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function"
+            and node.target is triton_kernel_wrapper_mutation
+        )
+
+        # Omitted Python defaults should stay omitted from the HOP payload.
+        # The autotune config still provides BLOCK_SIZE to grid(meta), giving a
+        # single-program grid for four elements. This prevents the default
+        # BLOCK_SIZE=2 from being recorded as an explicit constant argument and
+        # competing with the config's BLOCK_SIZE=16 downstream.
+        constant_args = kernel_side_table.get_constant_args(
+            hop_node.kwargs["constant_args_idx"]
+        )
+        self.assertEqual(
+            set(hop_node.kwargs["kwargs"]), {"in_ptr0", "out_ptr", "n_elements"}
+        )
+        self.assertNotIn("BLOCK_SIZE", hop_node.kwargs["kwargs"])
+        self.assertNotIn("BLOCK_SIZE", constant_args)
+        self.assertEqual(hop_node.kwargs["grid"], [(1, 1, 1)])
+        self.assertNotIn("launch_kwargs", hop_node.kwargs)
+
+    @requires_gpu
+    def test_capture_triton_dynamic_backend_options_error(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pass
+
+        def f(x):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            capture_triton(add_kernel)[grid](
+                in_ptr0=x,
+                out_ptr=output,
+                n_elements=n_elements,
+                BLOCK_SIZE=16,
+                maxnreg=n_elements,
+            )
+            return output
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        # Unlike n_elements above, maxnreg is not a kernel parameter. If it
+        # contains a symbolic value, it cannot be represented as a concrete
+        # compile-time backend option.
+        with self.assertRaisesRegex(
+            RuntimeError, "Triton backend options must be concrete values"
+        ):
+            make_fx(f, tracing_mode="symbolic")(torch.randn(4, device=GPU_TYPE))
+
+    @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("autotune_at_compile_time", [True, False])
     def test_triton_kernel_restore_value(self, backend, autotune_at_compile_time):
@@ -2621,6 +3429,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(compiled_out, eager_out)
 
     # TODO enable this test case on XPU.
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180126")
     @requires_gpu_and_triton
     @parametrize("cfg", ["normal", "cpp_wrapper"])
     def test_triton_kernel_dtype_view(self, cfg):
@@ -2839,9 +3648,9 @@ def forward(self, arg0_1, arg1_1):
             return y
 
         # make sure FLOAT_CONSTANT_C is NOT annotated
-        self.assertFalse("FLOAT_CONSTANT_C" in globals().get("__annotations__", {}))
+        self.assertFalse("FLOAT_CONSTANT_C" in sys.modules[__name__].__annotations__)
         # sanity check: STRING_CONSTANT_C _should_ be annotated
-        self.assertTrue("STRING_CONSTANT_C" in globals().get("__annotations__", {}))
+        self.assertTrue("STRING_CONSTANT_C" in sys.modules[__name__].__annotations__)
 
         x = torch.randn(512, device=GPU_TYPE)
         expected = x + 3.14
@@ -3728,7 +4537,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["O_ptr"],
         )
 
-    @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
+    @requires_block_ptr
     @make_mutation_test
     def test_for_loop_arg_2():
         @triton.jit
@@ -3789,7 +4598,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["o_ptr"],
         )
 
-    @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
+    @requires_block_ptr
     @make_mutation_test
     def test_while_loop():
         @triton.jit
@@ -3947,6 +4756,125 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
         self.assertEqual(get_tma_stores(functions, "main"), {Param(idx=0)})
 
+    def test_tensormap_create_marks_descriptor_write(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            analyze_kernel_access,
+            Intermediate,
+            Op,
+            Param,
+        )
+
+        functions = {
+            "main": {
+                Intermediate(idx=-1): [
+                    Op(
+                        "tt.experimental_tensormap_create",
+                        None,
+                        [Param(idx=0), Param(idx=1)],
+                        Intermediate(idx=-1),
+                    )
+                ],
+            },
+        }
+
+        analyze_kernel_access.reset()
+        tensor_accesses = analyze_kernel_access(
+            functions,
+            "main",
+            2,
+            ("workspace", "global_ptr"),
+            frozenset({0, 1}),
+        )
+
+        write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+        self.assertListEqual(write_names, ["workspace"])
+
+    def test_register_kernel_access_op_updates_direct_analysis_after_reset(self):
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            analyze_kernel_access,
+            get_tma_stores,
+            Intermediate,
+            Op,
+            Param,
+        )
+
+        custom_store = "custom_tma.cache_test_store"
+        functions = {
+            "main": {
+                Intermediate(idx=-1): [
+                    Op(custom_store, None, [Param(idx=0)], Intermediate(idx=-1))
+                ],
+            },
+        }
+
+        try:
+            analyze_kernel_access.reset()
+            tensor_accesses = analyze_kernel_access(
+                functions,
+                "main",
+                1,
+                ("out_ptr",),
+                frozenset({0}),
+            )
+            self.assertEqual(len(tensor_accesses.read_writes.writes), 0)
+
+            tkw.register_kernel_access_op(custom_store, write_indexes=[0])
+            # identify_accessed_tensors resets production caches per invocation.
+            # Direct analyze_kernel_access callers must reset before re-analysis.
+            analyze_kernel_access.reset()
+            tensor_accesses = analyze_kernel_access(
+                functions,
+                "main",
+                1,
+                ("out_ptr",),
+                frozenset({0}),
+            )
+            write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+            self.assertListEqual(write_names, ["out_ptr"])
+        finally:
+            tkw.unregister_kernel_access_op(custom_store)
+            analyze_kernel_access.reset()
+            get_tma_stores.reset()
+
+    def test_register_kernel_access_op_rejects_ignore_with_indexes(self):
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+
+        msg = "custom_tma.invalid: ignore_if cannot be combined with read/write indexes"
+        with self.assertRaisesRegex(AssertionError, msg):
+            tkw.register_kernel_access_op(
+                "custom_tma.invalid", write_indexes=[0], ignore_if=lambda op: True
+            )
+
+    def test_kernel_access_op_can_read_and_write(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            analyze_kernel_access,
+            Intermediate,
+            Op,
+            Param,
+        )
+
+        functions = {
+            "main": {
+                Intermediate(idx=-1): [
+                    Op("tt.atomic_rmw", None, [Param(idx=0)], Intermediate(idx=-1))
+                ],
+            },
+        }
+
+        analyze_kernel_access.reset()
+        tensor_accesses = analyze_kernel_access(
+            functions,
+            "main",
+            1,
+            ("in_out_ptr",),
+            frozenset({0}),
+        )
+        read_names = [dep.name for dep in tensor_accesses.read_writes.reads]
+        write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+        self.assertListEqual(read_names, ["in_out_ptr"])
+        self.assertListEqual(write_names, ["in_out_ptr"])
+
     @unittest.skipIf(
         not has_triton_experimental_host_tma(),
         "requires experimental TMA descriptor API",
@@ -4067,6 +4995,115 @@ class MutationTests(torch._inductor.test_case.TestCase):
         write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
         self.assertListEqual(read_names, ["in_ptr0", "in_ptr1"])
         self.assertListEqual(write_names, ["out_ptr"])
+
+    @unittest.skipUnless(
+        HAS_GPU or (HAS_CPU and TRITON_HAS_CPU),
+        "requires gpu or triton cpu",
+    )
+    def test_custom_tma_descriptor_ops_keep_triton_launcher(self):
+        import triton
+
+        from torch._higher_order_ops import triton_kernel_wrap as tkw
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            analyze_kernel_access,
+            get_tma_stores,
+            identify_accessed_tensors,
+            Intermediate,
+            Op,
+            Param,
+        )
+
+        custom_store = "custom_tma.descriptor_store"
+        custom_load = "custom_tma.descriptor_load"
+        device = GPU_TYPE if HAS_GPU else "cpu"
+
+        functions = {
+            "mul2_kernel": {
+                Intermediate(idx=0): [
+                    Op(
+                        "tt.make_tensor_descriptor",
+                        None,
+                        [Param(idx=0)],
+                        Intermediate(idx=0),
+                    )
+                ],
+                Intermediate(idx=1): [
+                    Op(
+                        "tt.make_tensor_descriptor",
+                        None,
+                        [Param(idx=1)],
+                        Intermediate(idx=1),
+                    )
+                ],
+                Intermediate(idx=2): [
+                    Op(custom_load, None, [Intermediate(idx=0)], Intermediate(idx=2))
+                ],
+                Intermediate(idx=-1): [
+                    Op(
+                        custom_store,
+                        None,
+                        [Intermediate(idx=1), Intermediate(idx=2)],
+                        Intermediate(idx=-1),
+                    )
+                ],
+            }
+        }
+
+        try:
+            tkw.register_kernel_access_op(
+                custom_store, write_indexes=[0], is_tma_store=True
+            )
+            tkw.register_kernel_access_op(custom_load, read_indexes=[0])
+            with (
+                mock.patch.object(
+                    tkw,
+                    "generate_ttir",
+                    return_value=(
+                        object(),
+                        ["in_ptr0", "out_ptr", "n_elements", "BLOCK_SIZE"],
+                    ),
+                ),
+                mock.patch.object(tkw, "ttir_to_functions", return_value=functions),
+            ):
+                x = torch.rand(16, device=device)
+                tensor_accesses = identify_accessed_tensors(
+                    mul2_kernel,
+                    {
+                        "in_ptr0": x,
+                        "out_ptr": x,
+                        "n_elements": x.numel(),
+                        "BLOCK_SIZE": 16,
+                    },
+                    {},
+                )
+                read_names = [dep.name for dep in tensor_accesses.read_writes.reads]
+                write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+                self.assertListEqual(read_names, ["in_ptr0"])
+                self.assertListEqual(write_names, ["out_ptr"])
+
+                def f(x):
+                    output = torch.zeros_like(x)
+                    grid = (triton.cdiv(x.numel(), 16),)
+                    mul2_kernel[grid](x, output, x.numel(), BLOCK_SIZE=16)
+                    return output
+
+                config_patch = (
+                    inductor_config.patch("cpu_backend", "triton")
+                    if device == "cpu"
+                    else contextlib.nullcontext()
+                )
+                with config_patch:
+                    actual, (code,) = run_and_get_code(torch.compile(f), x)
+                self.assertEqual(actual, 2 * x)
+                if inductor_config.cpp_wrapper:
+                    self.assertIn("launchKernel(mul2_kernel_0", code)
+                else:
+                    self.assertIn("mul2_kernel_0.run(", code)
+        finally:
+            tkw.unregister_kernel_access_op(custom_store)
+            tkw.unregister_kernel_access_op(custom_load)
+            analyze_kernel_access.reset()
+            get_tma_stores.reset()
 
 
 if HAS_GPU:
@@ -4232,6 +5269,11 @@ if HAS_GPU:
 
         if kernel.fn.__name__ == "add_kernel_2d_autotuned":
             fn = unittest.skip("Fails with Triton update")(fn)
+        elif kernel.fn.__name__ in {
+            "add_kernel_with_block_ptr",
+            "kernel_with_block_ptr_2d",
+        }:
+            fn = requires_block_ptr(fn)
 
         setattr(MutationTests, name, fn)
 
@@ -4279,6 +5321,187 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         code = "\n".join(codes[0])
         self.assertNotIn(libname, code)
         self.assertNotIn(opname, code)
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["aot_eager", "inductor", "aoti"])
+    def test_host_tma_descriptor_in_triton_op(self, backend):
+        # Host-side TMA descriptors built inside a triton_op body are captured by
+        # the non-Dynamo tracing path, which must turn them into TMA descriptor
+        # metadata instead of leaving them as opaque constant args.
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+
+        from triton.tools.tensor_descriptor import TensorDescriptor
+
+        libname = "my_cool_namespace"
+        opname = "my_tma_operator"
+        BLOCK_SIZE_X, BLOCK_SIZE_Y = 16, 32
+
+        @torch.library.triton_op(f"{libname}::{opname}", mutates_args={})
+        def tma_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            out = torch.zeros_like(x)
+            x_size, y_size = out.size()
+
+            def grid(meta):
+                return (
+                    triton.cdiv(x_size, meta["BLOCK_SIZE_X"]),
+                    triton.cdiv(y_size, meta["BLOCK_SIZE_Y"]),
+                )
+
+            descs = [
+                TensorDescriptor.from_tensor(t, [BLOCK_SIZE_X, BLOCK_SIZE_Y])
+                for t in (x, y, out)
+            ]
+            capture_triton(add_kernel_with_tma_2d_new_api)[grid](
+                *descs,
+                BLOCK_SIZE_X=BLOCK_SIZE_X,
+                BLOCK_SIZE_Y=BLOCK_SIZE_Y,
+            )
+            return out
+
+        def f(x, y):
+            return tma_add(x, y)
+
+        x = torch.randn((25, 16), device=GPU_TYPE)
+        y = torch.randn((25, 16), device=GPU_TYPE)
+        expected = x + y
+
+        self.assertEqual(f(x, y), expected)
+
+        if backend == "aoti":
+            try:
+                from .test_aot_inductor_utils import AOTIRunnerUtil
+            except ImportError:
+                from test_aot_inductor_utils import AOTIRunnerUtil
+
+            empty_x = torch.empty((0, 16), device=GPU_TYPE)
+            empty_y = torch.empty((0, 16), device=GPU_TYPE)
+            batch = torch.export.Dim("tma_batch")
+            with inductor_config.patch("triton.autotune_at_compile_time", False):
+                outputs = AOTIRunnerUtil.run_multiple(
+                    f,
+                    [(x, y), (empty_x, empty_y)],
+                    dynamic_shapes=(({0: batch}, {0: batch}),),
+                )
+            self.assertEqual(outputs[0], expected)
+            self.assertEqual(outputs[1], empty_x + empty_y)
+            return
+
+        compiled = torch.compile(f, fullgraph=True, backend=backend)
+        if backend == "inductor":
+            from torch._inductor.utils import run_and_get_code
+
+            compiled_out, codes = run_and_get_code(compiled, x, y)
+            # The descriptors must be codegen'd as TMA descriptor args rather
+            # than passed through as opaque constant args.
+            self.assertIn("TensorDescriptor.from_tensor(", codes[0])
+            self.assertIn(f"tensordesc<fp32[{BLOCK_SIZE_X}, {BLOCK_SIZE_Y}]>", codes[0])
+        else:
+            compiled_out = compiled(x, y)
+        self.assertEqual(compiled_out, expected)
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["inductor", "aoti"])
+    def test_host_tma_descriptor_wide_block_interleaved_args(self, backend):
+        # A descriptor whose innermost block spans more than 128 bytes
+        # (fp16 x 128 = 256B). The compiler chooses the swizzle and final box
+        # shape; AOTI must use that metadata rather than re-derive either value.
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+
+        from triton.tools.tensor_descriptor import TensorDescriptor
+
+        BLOCK_SIZE_X, BLOCK_SIZE_Y = 64, 128
+        TENSOR_SIZE_X, TENSOR_SIZE_Y = 128, 256
+
+        @torch.library.triton_op("my_cool_namespace::my_wide_tma_op", mutates_args={})
+        def tma_add_wide(
+            x: torch.Tensor,
+            y: torch.Tensor,
+            scale: torch.Tensor,
+            bias: torch.Tensor,
+        ) -> torch.Tensor:
+            out = torch.zeros_like(x)
+            x_view = x.view(TENSOR_SIZE_X, TENSOR_SIZE_Y)
+            y_view = y.view(TENSOR_SIZE_X, TENSOR_SIZE_Y)
+            out_view = out.view(TENSOR_SIZE_X, TENSOR_SIZE_Y)
+
+            def grid(meta):
+                return (
+                    triton.cdiv(TENSOR_SIZE_X, meta["BLOCK_SIZE_X"]),
+                    triton.cdiv(TENSOR_SIZE_Y, meta["BLOCK_SIZE_Y"]),
+                )
+
+            descs = [
+                TensorDescriptor.from_tensor(t, [BLOCK_SIZE_X, BLOCK_SIZE_Y])
+                for t in (x_view, y_view, out_view)
+            ]
+            capture_triton(_add_kernel_with_interleaved_tma_args)[grid](
+                descs[0],
+                scale,
+                descs[1],
+                bias,
+                descs[2],
+                BLOCK_SIZE_X=BLOCK_SIZE_X,
+                BLOCK_SIZE_Y=BLOCK_SIZE_Y,
+            )
+            return out
+
+        def f(x, y, scale, bias):
+            return tma_add_wide(x, y, scale, bias)
+
+        input_shape = (128, 2, 128)
+        x = torch.randn(input_shape, device=GPU_TYPE, dtype=torch.float16)
+        y = torch.randn(input_shape, device=GPU_TYPE, dtype=torch.float16)
+        scale = torch.tensor([2.0], device=GPU_TYPE, dtype=torch.float16)
+        bias = torch.tensor([3.0], device=GPU_TYPE, dtype=torch.float16)
+        x2 = torch.randn(input_shape, device=GPU_TYPE, dtype=torch.float16)
+        y2 = torch.randn(input_shape, device=GPU_TYPE, dtype=torch.float16)
+        scale2 = torch.tensor([-1.0], device=GPU_TYPE, dtype=torch.float16)
+        bias2 = torch.tensor([0.5], device=GPU_TYPE, dtype=torch.float16)
+        expected = x * scale + y + bias
+        expected2 = x2 * scale2 + y2 + bias2
+
+        self.assertEqual(f(x, y, scale, bias), expected)
+
+        if backend == "aoti":
+            try:
+                from .test_aot_inductor_utils import AOTIRunnerUtil
+            except ImportError:
+                from test_aot_inductor_utils import AOTIRunnerUtil
+
+            for autotune_at_compile_time in (True, False):
+                with (
+                    self.subTest(autotune_at_compile_time=autotune_at_compile_time),
+                    inductor_config.patch(
+                        "triton.autotune_at_compile_time", autotune_at_compile_time
+                    ),
+                ):
+                    outputs = AOTIRunnerUtil.run_multiple(
+                        f,
+                        [
+                            (x, y, scale, bias),
+                            (x2, y2, scale2, bias2),
+                        ],
+                    )
+                    self.assertEqual(outputs[0], expected)
+                    self.assertEqual(outputs[1], expected2)
+        else:
+            configs = (
+                ("default", {}),
+                (
+                    "cpp_wrapper_lazy",
+                    {
+                        "cpp_wrapper": True,
+                        "triton.autotune_at_compile_time": False,
+                    },
+                ),
+            )
+            for name, config in configs:
+                with self.subTest(config=name), inductor_config.patch(config):
+                    compiled = torch.compile(f, fullgraph=True, backend=backend)
+                    self.assertEqual(compiled(x, y, scale, bias), expected)
+                    self.assertEqual(compiled(x2, y2, scale2, bias2), expected2)
 
     @requires_gpu
     def test_subclass(self):
@@ -4432,6 +5655,96 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         z = add(x, y)
         self.assertEqual(status[-1], False)
         self.assertEqual(z, (x + y) * 2)
+
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    def test_wrap_triton_triton_interpret_eager(self):
+        script = """
+import os
+os.environ["TRITON_INTERPRET"] = "1"
+
+import torch
+import triton
+import triton.language as tl
+from torch.library import wrap_triton
+
+
+@triton.jit
+def add_kernel(
+    in_ptr0,
+    in_ptr1,
+    out_ptr,
+    n_elements,
+    BLOCK_SIZE: "tl.constexpr",
+):
+    pid = tl.program_id(axis=0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    x = tl.load(in_ptr0 + offsets, mask=mask)
+    y = tl.load(in_ptr1 + offsets, mask=mask)
+    output = x + y
+    tl.store(out_ptr + offsets, output, mask=mask)
+
+
+@triton.autotune(configs=[triton.Config({"BLOCK_SIZE": 16})], key=[])
+@triton.jit
+def autotuned_add_kernel(
+    in_ptr0,
+    in_ptr1,
+    out_ptr,
+    n_elements,
+    BLOCK_SIZE: "tl.constexpr",
+):
+    pid = tl.program_id(axis=0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    x = tl.load(in_ptr0 + offsets, mask=mask)
+    y = tl.load(in_ptr1 + offsets, mask=mask)
+    output = x + y
+    tl.store(out_ptr + offsets, output, mask=mask)
+
+
+def add(x, y):
+    output = torch.empty_like(x)
+    n_elements = output.numel()
+
+    def grid(meta):
+        return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+    wrap_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+    return output
+
+
+def autotuned_add(x, y):
+    output = torch.empty_like(x)
+    n_elements = output.numel()
+
+    def grid(meta):
+        return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+    wrap_triton(autotuned_add_kernel)[grid](x, y, output, n_elements)
+    return output
+
+
+x = torch.randn(1024, device="cuda")
+torch.testing.assert_close(add(x, x), x + x)
+torch.testing.assert_close(autotuned_add(x, x), x + x)
+
+
+class Wrapper:
+    fn = add_kernel
+
+
+try:
+    wrap_triton(Wrapper())
+except RuntimeError as exc:
+    assert "wrap_triton only works" in str(exc)
+else:
+    raise AssertionError("wrap_triton accepted an arbitrary .fn wrapper")
+"""
+
+        subprocess.run([sys.executable, "-c", script], check=True)
 
     @requires_gpu
     @common_utils.parametrize(
@@ -5772,6 +7085,53 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         out, code = run_and_get_code(torch.compile(fn), a, b, c)
         self.assertEqual(out, fn(a, b, c))
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
+
+    @requires_cuda_and_triton
+    def test_fusion_cast_epilogue(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.to(torch.float16)
+
+        a = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        b = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+    @requires_cuda_and_triton
+    def test_no_fusion_for_out_of_place_epilogue(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.T.contiguous().relu()
+
+        a = torch.randn(32, 32, device="cuda")
+        b = torch.randn(32, 32, device="cuda")
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b))
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
 
 if HAS_CUDA_AND_TRITON:

@@ -543,7 +543,8 @@ class GELUOperator(Operator):
             raise ValueError("GELU requires exactly 1 input")
 
         input_name = input_names[0]
-        return f"{output_name} = torch.nn.functional.gelu({input_name})"
+        approx = random.choice(["none", "tanh"])
+        return f"{output_name} = torch.nn.functional.gelu({input_name}, approximate={approx!r})"
 
 
 class SigmoidOperator(Operator):
@@ -719,8 +720,11 @@ class BatchNormOperator(Operator):
 
         target_dtype = str(output_spec.dtype)
         input_name = input_names[0]
-        running_mean_name = input_names[1]
-        running_var_name = input_names[2]
+        # running_mean/running_var must not require grad (batch_norm is not
+        # differentiable w.r.t. them). Args are marked requires_grad by the
+        # template, so detach these two here.
+        running_mean_name = f"{input_names[1]}.detach()"
+        running_var_name = f"{input_names[2]}.detach()"
 
         # Use training=False for deterministic behavior
         if len(input_names) == 3:
@@ -877,7 +881,8 @@ class LeakyReLUOperator(Operator):
             raise ValueError("LeakyReLU requires exactly 1 input")
 
         input_name = input_names[0]
-        return f"{output_name} = torch.nn.functional.leaky_relu({input_name}, negative_slope=0.01)"
+        slope = round(random.uniform(0.001, 0.5), 4)
+        return f"{output_name} = torch.nn.functional.leaky_relu({input_name}, negative_slope={slope!r})"
 
 
 class ELUOperator(Operator):
@@ -919,7 +924,8 @@ class ELUOperator(Operator):
             raise ValueError("ELU requires exactly 1 input")
 
         input_name = input_names[0]
-        return f"{output_name} = torch.nn.functional.elu({input_name})"
+        alpha = round(random.uniform(0.1, 3.0), 4)
+        return f"{output_name} = torch.nn.functional.elu({input_name}, alpha={alpha!r})"
 
 
 class SiLUOperator(Operator):

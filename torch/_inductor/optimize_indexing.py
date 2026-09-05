@@ -1,21 +1,77 @@
 import math
-from typing import Any
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, cast
 
 import sympy
 
 import torch
+from torch.fx.node import Argument, map_arg
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .loop_body import LoopBody
-from .utils import dominated_nodes
+from .utils import dominated_nodes, flatten_index
+from .virtualized import V
 
 
-def val_expressable_in_32_bits(val: Any) -> bool:
+_ARG_REDUCTION_TYPES = (
+    "argmax",
+    "argmin",
+    "argmax_value",
+    "argmin_value",
+    "argmax_with_value",
+    "argmin_with_value",
+)
+
+
+def remove_redundant_argreduce_indices(
+    loop_bodies: Sequence[LoopBody],
+) -> None:
+    """Drop explicit arg-reduction indices that match the final loop order."""
+    reductions: dict[torch.fx.Node, Any] = {}
+    non_native: OrderedSet[torch.fx.Node] = OrderedSet()
+    for loop_body in loop_bodies:
+        if not loop_body.reduce_vars:
+            continue
+        native_index = flatten_index(loop_body.reduce_vars, loop_body.sizes[1])
+        for block in (loop_body.root_block, *loop_body.subblocks.values()):
+            for node in block.graph.find_nodes(op="call_method", target="reduction"):
+                if node.args[-2] not in _ARG_REDUCTION_TYPES:
+                    continue
+                value = node.args[-1]
+                if not (isinstance(value, tuple) and len(value) == 2):
+                    continue
+                reduction_value, logical_index = value
+                if not (
+                    isinstance(logical_index, torch.fx.Node)
+                    and logical_index.target in ("index_expr", "value_expr")
+                ):
+                    continue
+                index_node = logical_index.args[1]
+                if not isinstance(index_node, torch.fx.Node):
+                    continue
+                index_name = index_node.args[0]
+                if not isinstance(index_name, str):
+                    continue
+                reductions[node] = reduction_value
+                if not V.graph.sizevars.statically_known_equals(
+                    loop_body.indexing_exprs[index_name], native_index
+                ):
+                    non_native.add(node)
+
+    for node, reduction_value in reductions.items():
+        if node not in non_native:
+            node.args = (*node.args[:-1], reduction_value)
+
+
+def val_expressable_in_32_bits(val: object) -> bool:
     if getattr(val, "is_Boolean", False):
         return True
 
     if isinstance(val, sympy.Expr):
-        assert val.is_number
+        if not val.is_number:
+            raise AssertionError(f"expected a number, got {val}")
         if val.is_Integer or val.is_Boolean:
             val = int(val)
         else:
@@ -46,7 +102,7 @@ def try_to_reduce_precision(
     replacement_vals: dict[Any, ValueRanges[sympy.Expr]],
 ) -> None:
     # if a downstream use of a node explicitly converts to int32, or float16/float32/float64,
-    # then it's precision is set for that chain of uses, and we don't need to consider those
+    # then its precision is set for that chain of uses, and we don't need to consider those
     # dominated values
     def skip_filter(node: Any) -> bool:
         return node.target == "to_dtype" and node.args[2] in (
@@ -124,3 +180,294 @@ def indexing_dtype_strength_reduction(loop_body: LoopBody) -> None:
             loop_body.indexing_exprs,
             bv.replacement_vals,
         )
+
+
+@dataclass(frozen=True)
+class _ValueUseRule:
+    # These fields are op arguments, so object covers FX nodes, SymPy exprs,
+    # scalars, and nested tuples/lists. value_sinks seed the backward walk
+    # unconditionally. value_inputs propagate value demand only when the op's
+    # result is already value-reachable. indexing_inputs block propagation
+    # because they only affect addresses, bounds, masks, or other indexing-only
+    # state.
+    value_inputs: tuple[object, ...] = ()
+    value_sinks: tuple[object, ...] = ()
+    indexing_inputs: tuple[object, ...] = ()
+
+
+def _collect_fx_nodes(arg: object) -> OrderedSet[torch.fx.Node]:
+    nodes: OrderedSet[torch.fx.Node] = OrderedSet()
+
+    def add_node(node: torch.fx.Node) -> torch.fx.Node:
+        nodes.add(node)
+        return node
+
+    map_arg(cast(Argument, arg), add_node)
+    return nodes
+
+
+def _collect_input_nodes(node: torch.fx.Node) -> OrderedSet[torch.fx.Node]:
+    inputs = OrderedSet(node.all_input_nodes)
+    if (
+        node.op == "call_method"
+        and node.args
+        and isinstance(node.args[0], torch.fx.Node)
+    ):
+        inputs.discard(node.args[0])
+    return inputs
+
+
+class _ValueUseRules:
+    @staticmethod
+    def default_rule(*args: object, **kwargs: object) -> _ValueUseRule | None:
+        return None
+
+    def load(self, name: str, index: sympy.Expr) -> _ValueUseRule:
+        return _ValueUseRule(indexing_inputs=(index,))
+
+    def load_seed(self, name: str, offset: int) -> _ValueUseRule:
+        return _ValueUseRule(indexing_inputs=(offset,))
+
+    def store(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: object,
+        mode: object = None,
+    ) -> _ValueUseRule:
+        return _ValueUseRule(
+            value_sinks=(value,),
+            indexing_inputs=(index,),
+        )
+
+    def store_reduction(
+        self, name: str, index: sympy.Expr, value: object
+    ) -> _ValueUseRule:
+        return _ValueUseRule(
+            value_sinks=(value,),
+            indexing_inputs=(index,),
+        )
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: str,
+        value: object,
+    ) -> _ValueUseRule:
+        return _ValueUseRule(value_sinks=(value,))
+
+    def partial_accumulate(
+        self,
+        name: str,
+        reduction_type: str,
+        value: object,
+        extra_meta: dict[str, object],
+    ) -> _ValueUseRule:
+        return _ValueUseRule(value_sinks=(value,))
+
+    def sort(
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        values: tuple[object, ...],
+        stable: bool,
+        descending: bool,
+    ) -> _ValueUseRule:
+        return _ValueUseRule(value_sinks=(values,))
+
+    def scan(
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        combine_fn_or_values: object,
+        values: tuple[object, ...] | None = None,
+    ) -> _ValueUseRule:
+        if values is None:
+            values = cast(tuple[object, ...], combine_fn_or_values)
+        return _ValueUseRule(value_sinks=(values,))
+
+    def bucketize(
+        self,
+        values: object,
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: object,
+        indexing_dtype: torch.dtype,
+        right: bool,
+        sorter: tuple[str, sympy.Expr] | None = None,
+        sorter_indices: object | None = None,
+    ) -> _ValueUseRule:
+        return _ValueUseRule(
+            value_inputs=(values,),
+            indexing_inputs=(boundaries, boundary_indices, sorter, sorter_indices),
+        )
+
+    def indirect_indexing(
+        self, x: object, size: sympy.Expr, check: bool = True, wrap_neg: bool = True
+    ) -> _ValueUseRule:
+        return _ValueUseRule(indexing_inputs=(x, size))
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> _ValueUseRule:
+        return _ValueUseRule(indexing_inputs=(expr, size))
+
+    def masked(self, mask: object, body: object, other: object) -> _ValueUseRule:
+        return _ValueUseRule(value_inputs=(other,), indexing_inputs=(mask,))
+
+    def masked_subblock(self, mask: object, other: object) -> _ValueUseRule:
+        return _ValueUseRule(value_inputs=(other,), indexing_inputs=(mask,))
+
+    def set_indirect(self, new_var: object) -> _ValueUseRule:
+        return _ValueUseRule(indexing_inputs=(new_var,))
+
+    def device_assert_async(self, cond: object, msg: str) -> _ValueUseRule:
+        return _ValueUseRule(indexing_inputs=(cond,))
+
+
+class _ValueUseAnalysis:
+    def __init__(self, loop_body: LoopBody) -> None:
+        self.loop_body = loop_body
+        self.rules = _ValueUseRules()
+        self.root_graph = loop_body.root_block.graph
+        self.subblocks = getattr(loop_body, "subblocks", {})
+        self.indirect_vars = getattr(loop_body, "indirect_vars", ())
+        self.graphs = [
+            self.root_graph,
+            *(block.graph for block in self.subblocks.values()),
+        ]
+        self.install_call_module_rules()
+
+        self.value_reachable: OrderedSet[torch.fx.Node] = OrderedSet()
+        self.worklist: list[tuple[torch.fx.Graph, torch.fx.Node]] = []
+        self.indirect_inputs: dict[sympy.Symbol, tuple[torch.fx.Graph, Argument]] = {}
+
+    def run(self) -> bool:
+        if not self.has_index_expr():
+            return False
+
+        self.seed_value_reachable_nodes()
+        return self.propagate_value_reachability()
+
+    def has_index_expr(self) -> bool:
+        return any(
+            graph.find_nodes(op="call_method", target="index_expr", sort=False)
+            for graph in self.graphs
+        )
+
+    def install_call_module_rules(self) -> None:
+        for graph in self.graphs:
+            for node in graph.find_nodes(op="call_module", sort=False):
+                if not isinstance(node.target, str):
+                    continue
+                if node.target in self.subblocks:
+                    setattr(self.rules, node.target, self.rules.masked_subblock)
+                elif node.target.startswith("scan"):
+                    setattr(self.rules, node.target, self.rules.scan)
+                elif node.target.startswith("set_indirect"):
+                    setattr(self.rules, node.target, self.rules.set_indirect)
+
+    def seed_value_reachable_nodes(self) -> None:
+        self._enqueue_graph_output(self.root_graph)
+        for graph in self.graphs:
+            for node in graph.nodes:
+                if node.op == "output":
+                    continue
+                if (
+                    node.op == "call_module"
+                    and isinstance(node.target, str)
+                    and node.target.startswith("set_indirect")
+                ):
+                    idx = int(node.target[len("set_indirect") :])
+                    self.indirect_inputs[self.indirect_vars[idx]] = (graph, node.args)
+                for sink_node in self.value_sink_nodes(node):
+                    self.worklist.append((graph, sink_node))
+
+    def propagate_value_reachability(self) -> bool:
+        changed = False
+        while self.worklist:
+            graph, node = self.worklist.pop()
+            if node in self.value_reachable:
+                continue
+            self.value_reachable.add(node)
+
+            if node.target == "index_expr":
+                node.target = "value_expr"
+                changed = True
+
+            if (
+                node.op == "call_module"
+                and isinstance(node.target, str)
+                and node.target in self.subblocks
+            ):
+                self._enqueue_graph_output(self.subblocks[node.target].graph)
+
+            if node.op == "call_module" and node.target == "get_index":
+                index_name = node.args[0]
+                if not isinstance(index_name, str):
+                    raise AssertionError(f"expected str index name, got {index_name!r}")
+                expr = self.loop_body.indexing_exprs[index_name]
+                if isinstance(expr, sympy.Expr):
+                    for symbol in expr.free_symbols:
+                        indirect_input = self.indirect_inputs.get(symbol)
+                        if indirect_input is not None:
+                            ig, ia = indirect_input
+                            map_arg(ia, lambda n: self.worklist.append((ig, n)))
+
+            for input_node in self.value_input_nodes(node):
+                self.worklist.append((graph, input_node))
+
+        return changed
+
+    def rule_for_node(self, node: torch.fx.Node) -> _ValueUseRule | None:
+        if node.op == "call_method" and isinstance(node.target, str):
+            rule_fn = getattr(self.rules, node.target, self.rules.default_rule)
+            return rule_fn(*node.args[1:], **node.kwargs)
+        if node.op == "call_module" and isinstance(node.target, str):
+            rule_fn = getattr(self.rules, node.target, self.rules.default_rule)
+            return rule_fn(*node.args, **node.kwargs)
+        return None
+
+    def value_input_nodes(self, node: torch.fx.Node) -> OrderedSet[torch.fx.Node]:
+        rule = self.rule_for_node(node)
+        if rule is None:
+            return _collect_input_nodes(node)
+        return _collect_fx_nodes(rule.value_inputs) | _collect_fx_nodes(
+            rule.value_sinks
+        )
+
+    def value_sink_nodes(self, node: torch.fx.Node) -> OrderedSet[torch.fx.Node]:
+        rule = self.rule_for_node(node)
+        return _collect_fx_nodes(rule.value_sinks) if rule else OrderedSet()
+
+    def _enqueue_graph_output(self, graph: torch.fx.Graph) -> None:
+        output_nodes = graph.find_nodes(op="output", sort=False)
+        if len(output_nodes) != 1:
+            raise AssertionError(
+                f"expected exactly 1 output node, got {len(output_nodes)}"
+            )
+        map_arg(output_nodes[0].args, lambda n: self.worklist.append((graph, n)))
+
+
+def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
+    """
+    Rewrite ``index_expr`` nodes that participate in value computation to
+    ``value_expr``, so codegen can honor the requested dtype instead of
+    narrowing to the kernel's indexing dtype.
+
+    Classification: walk backward from value sinks (store value, reduction,
+    output). Indexing inputs to ops such as ``load``, ``store``,
+    ``check_bounds``, and ``set_indirect`` do not receive value demand. Any
+    ``index_expr`` reachable from a value sink is converted in-place to
+    ``value_expr``. Indirect indexing is handled by following value-reachable
+    ``get_index`` expressions through any referenced ``indirect*`` symbols back
+    to the corresponding ``set_indirect*`` input.
+
+    Mixed-use policy: if the same ``index_expr`` feeds both an indexing use and
+    a value use, rewrite it in-place to ``value_expr``. This is conservative and
+    correct because the indexing path may compute at a wider dtype than needed,
+    but the value path cannot lose precision. Cloning would preserve the
+    narrower indexing path, but the mixed-use case is rare and the simpler
+    in-place rewrite avoids extra CSE/register pressure.
+    """
+    if _ValueUseAnalysis(loop_body).run():
+        LoopBody.get_nodes.clear_cache(loop_body)
+        LoopBody.bounds.clear_cache(loop_body)

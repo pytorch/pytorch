@@ -10,6 +10,7 @@ from torch.sparse._semi_structured_conversions import (
     sparse_semi_structured_to_dense_cutlass,
 )
 from torch.sparse._semi_structured_ops import (
+    _FP8_E4M3_DTYPES,
     fallback_dispatcher,
     semi_sparse_addmm,
     semi_sparse_clone,
@@ -47,7 +48,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     depending on the datatype. It is also referred to as 2:4 sparsity or fine-grained
     structured sparsity.
 
-    There are two backends available for semi_structred sparsity, either cuSPARSELt or CUTLASS.
+    There are two backends available for semi_structured sparsity, either cuSPARSELt or CUTLASS.
     This class is meant to serve as a base class for both implementations. SparseSemiStructuredCUTLASS
     and SparseSemiStructuredCUSPARSELT both inherit from this class and define three backend-specific items.
     Note that as such, this class cannot be instantiated directly.
@@ -107,7 +108,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                                          participate in the computation. Used for pointwise ops.
             fuse_transpose_cusparselt: When running with cuSPARSELt, we have the option to fuse a transposition
                                        with a matmul, which is useful in the case of 2:4 sparse training.
-            alg_id_cusparselt: The algorithm id to use when using cuSPARSELT, will have effect on performance
+            alg_id_cusparselt: The algorithm id to use when using cuSPARSELT, will have an effect on performance
 
         Returns:
             torch.Tensor: A torch.Tensor wrapper subclass.
@@ -281,7 +282,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             # TODO in the future we can add in padding to support sparse dimensions that aren't perfect multiples
             raise RuntimeError(
                 f"Error original_tensor.shape {original_tensor.shape} is not supported! "
-                f"Both dimensions must be larger or equal than and a multiple of ({min_rows}, {min_cols})"
+                f"Both dimensions must be larger than or equal to and a multiple of ({min_rows}, {min_cols})"
             )
 
     def to_dense(self):  # type:ignore[override]
@@ -560,6 +561,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
     BACKEND = "cusparselt"
     _DTYPE_SHAPE_CONSTRAINTS = {
         torch.float8_e4m3fn: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
+        torch.float8_e4m3fnuz: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
         torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
         torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
         torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
@@ -679,11 +681,11 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
                 "This operation is only supported when A, B and C have the same data type."
             )
         # Force fp8 mm to error to be consistent with torch
-        if self.dtype == torch.float8_e4m3fn:
+        if self.dtype in _FP8_E4M3_DTYPES:
             raise NotImplementedError(
                 f"`{self.__class__.__name__}` matmul: trying to do `A={tuple(self.shape)} @ B={tuple(B.shape)}`, "
                 f"with A.dtype=B.dtype={self.dtype}. "
-                "mm is not supported for float8_e4m3fn, please use `torch._scaled_mm` instead."
+                "mm is not supported for float8_e4m3fn/float8_e4m3fnuz, please use `torch._scaled_mm` instead."
             )
         if self.packed is None:
             raise NotImplementedError(
@@ -699,7 +701,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
                 self.shape[0],
                 constraints.dense_min_rows,
                 constraints.dense_min_cols,
-                self.fuse_transpose_cusparselt,
+                should_transpose_dense,
                 self.alg_id_cusparselt,
                 should_transpose_dense,
             )
@@ -721,8 +723,7 @@ def _ensure_cutlass_mm_registered():
 
     from torch.library import custom_op
 
-    @custom_op("semi_structured::cutlass_mm", mutates_args=())
-    def cutlass_mm(
+    def _cutlass_mm_impl(
         dense: torch.Tensor,
         packed: torch.Tensor,
         meta: torch.Tensor,
@@ -746,12 +747,13 @@ def _ensure_cutlass_mm_registered():
             res = torch._sparse_semi_structured_addmm(bias, packed, meta, mm_input)
         if need_pad:
             out_cols = m if should_transpose_dense else n
-            return (
-                res[:out_features]
-                .narrow(1, 0, out_cols)
-                .clone(memory_format=torch.contiguous_format)
-            )
-        return res.contiguous()
+            res = res[:out_features].narrow(1, 0, out_cols)
+            return res.t().contiguous() if should_transpose_dense else res.contiguous()
+        return res.t().contiguous() if should_transpose_dense else res
+
+    cutlass_mm = custom_op("semi_structured::cutlass_mm", mutates_args=())(
+        _cutlass_mm_impl
+    )
 
     @cutlass_mm.register_fake
     def _cutlass_mm_fake(
@@ -765,12 +767,32 @@ def _ensure_cutlass_mm_registered():
         transpose_dense: bool,
     ) -> torch.Tensor:
         out_cols = dense.shape[0] if transpose_dense else dense.shape[1]
+        output_shape = (
+            (out_cols, out_features) if transpose_dense else (out_features, out_cols)
+        )
         return torch.empty(
-            out_features,
-            out_cols,
+            output_shape,
             dtype=dense.dtype,
             device=dense.device,
         )
+
+    from torch._subclasses.functional_tensor import (
+        _has_unrecognized_tensor_types,
+        FunctionalTensorMode,
+    )
+
+    # Unlike triton custom ops (which guard with custom_triton_ops_decomposition_disabled
+    # to keep the opaque op in exported programs), we decompose unconditionally here.
+    # The decomposition targets (aten._sparse_semi_structured_mm, pad, narrow) are real
+    # ATen ops with proper meta registrations and are fully serializable, so export
+    # consumers benefit from seeing the underlying ops rather than an opaque custom op.
+    def _cutlass_mm_decomp(mode, _op, types, args, kwargs):
+        if _has_unrecognized_tensor_types(types):
+            return NotImplemented
+        with mode:
+            return _cutlass_mm_impl(*args, **kwargs)
+
+    cutlass_mm.register_torch_dispatch(FunctionalTensorMode, _cutlass_mm_decomp)
 
 
 _cusparselt_mm_registered = False
@@ -812,14 +834,13 @@ def _ensure_cusparselt_mm_registered():
             transpose_result=fuse_transpose,
             alg_id=alg_id,
         )
-        if fuse_transpose:
-            res = res.t()
         if need_pad:
             out_cols = m if should_transpose_dense else n
-            return res.narrow(1, 0, out_cols).clone(
-                memory_format=torch.contiguous_format
-            )
-        return res.contiguous()
+            if fuse_transpose:
+                return res.narrow(0, 0, out_cols).contiguous()
+            else:
+                return res.narrow(1, 0, out_cols).contiguous()
+        return res
 
     @cusparselt_mm.register_fake
     def _cusparselt_mm_fake(
@@ -834,9 +855,11 @@ def _ensure_cusparselt_mm_registered():
         should_transpose_dense: bool,
     ) -> torch.Tensor:
         out_cols = dense.shape[0] if should_transpose_dense else dense.shape[1]
+        output_shape = (
+            (out_cols, out_features) if fuse_transpose else (out_features, out_cols)
+        )
         return torch.empty(
-            out_features,
-            out_cols,
+            output_shape,
             dtype=dense.dtype,
             device=dense.device,
         )

@@ -76,8 +76,8 @@ elif [[ "$image" == *cuda*linter* ]]; then
 elif [[ "$image" == *linter* ]]; then
   # Use a separate Dockerfile for linter to keep a small image size
   DOCKERFILE="linter/Dockerfile"
-elif [[ "$image" == *riscv* ]]; then
-  # Use RISC-V specific Dockerfile
+elif [[ "$image" == *riscv*cross* ]]; then
+  # Use RISC-V cross-compilation specific Dockerfile
   DOCKERFILE="ubuntu-cross-riscv/Dockerfile"
 fi
 
@@ -91,13 +91,6 @@ fi
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$tag" in
-  pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11)
-    CUDA_VERSION=12.4
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
-    KATEX=yes
-    TRITON=yes
-    ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11)
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.10
@@ -114,9 +107,57 @@ case "$tag" in
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11)
+    CUDA_VERSION=13.2.1
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INSTALL_MINGW=yes
+    ;;
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks)
+    CUDA_VERSION=13.2.1
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11)
+    CUDA_VERSION=13.2.1
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INSTALL_MINGW=yes
+    ;;
+  pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11)
+    CUDA_VERSION=13.4.0
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INSTALL_MINGW=yes
+    ;;
+  pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11)
+    CUDA_VERSION=13.0.2
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INSTALL_MINGW=yes
+    ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks)
     CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-inductor-benchmarks)
+    CUDA_VERSION=13.0.2
+    ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     KATEX=yes
     TRITON=yes
@@ -129,29 +170,32 @@ case "$tag" in
     KATEX=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-py3.10-clang18)
+  pytorch-linux-jammy-py3.10-clang21)
     ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     GCC_VERSION=11
     KATEX=yes
     DOCS=yes
     ONNX=yes
     ;;
-  pytorch-linux-jammy-py3.11-clang18)
+  pytorch-linux-jammy-py3.11-clang21)
     ANACONDA_PYTHON_VERSION=3.11
-    CLANG_VERSION=18
+    CLANG_VERSION=21
+    TVM=yes
     ;;
-  pytorch-linux-jammy-py3.12-clang18)
+  pytorch-linux-jammy-py3.12-clang21)
     ANACONDA_PYTHON_VERSION=3.12
-    CLANG_VERSION=18
+    CLANG_VERSION=21
+    TVM=yes
     ;;
-  pytorch-linux-jammy-py3.13-clang18)
+  pytorch-linux-jammy-py3.13-clang21)
     ANACONDA_PYTHON_VERSION=3.13
-    CLANG_VERSION=18
+    CLANG_VERSION=21
+    TVM=yes
     ;;
-  pytorch-linux-jammy-py3.14-clang18)
+  pytorch-linux-jammy-py3.14-clang21)
     ANACONDA_PYTHON_VERSION=3.14
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then
@@ -160,7 +204,8 @@ case "$tag" in
       ANACONDA_PYTHON_VERSION=3.12
     fi
     GCC_VERSION=13
-    ROCM_VERSION=7.2
+    ROCM_VERSION=10.0
+    THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
     TRITON=yes
     KATEX=yes
     PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
@@ -168,25 +213,28 @@ case "$tag" in
       INDUCTOR_BENCHMARKS=yes
     fi
     ;;
-  pytorch-linux-noble-rocm-nightly-py3)
+  pytorch-linux-noble-rocm-preview-py3)
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
-    ROCM_VERSION=nightly
+    ROCM_VERSION=10.1.0a20260821
+    THEROCK_INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
+    USE_MSLK=0
     TRITON=yes
     KATEX=yes
-    PYTORCH_ROCM_ARCH="gfx942"
+    PYTORCH_ROCM_ARCH="gfx950"
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    XPU_VERSION=2025.3
+    XPU_VERSION=2026.0
     XPU_DRIVER_TYPE=LTS
     TRITON=yes
     ;;
   pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-client | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
-    XPU_VERSION=2026.0
+    XPU_VERSION=2026.1
+    OMIX_VERSION=0.3.0
     if [[ $tag =~ "client" ]]; then
       XPU_DRIVER_TYPE=CLIENT
     else
@@ -204,15 +252,9 @@ case "$tag" in
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang18)
+  pytorch-linux-jammy-py3-clang21-executorch)
     ANACONDA_PYTHON_VERSION=3.10
-    CUDA_VERSION=12.8.1
-    CLANG_VERSION=18
-    TRITON=yes
-    ;;
-  pytorch-linux-jammy-py3-clang18-executorch)
-    ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=18
+    CLANG_VERSION=21
     EXECUTORCH=yes
     ;;
   pytorch-linux-jammy-py3.12-halide)
@@ -221,11 +263,6 @@ case "$tag" in
     GCC_VERSION=11
     HALIDE=yes
     TRITON=yes
-    ;;
-  pytorch-linux-jammy-py3.12-pallas)
-    ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=11
-    PALLAS=yes
     ;;
   pytorch-linux-jammy-cuda12.8-py3.12-pallas)
     CUDA_VERSION=12.8.1
@@ -248,10 +285,12 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-linter)
     PYTHON_VERSION=3.10
+    CLANG_VERSION=18
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-linter)
     PYTHON_VERSION=3.10
     CUDA_VERSION=13.0.2
+    CLANG_VERSION=18
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc13)
     ANACONDA_PYTHON_VERSION=3.10
@@ -267,6 +306,18 @@ case "$tag" in
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14)
+    GCC_VERSION=14
+    PYTHON_VERSION=3.12
+    OPENBLAS=yes
+    if [[ "$(uname -m)" != "riscv64" ]]; then
+      platform_flag="--platform linux/riscv64" # we are building using QEMU
+    fi
+    # Use a custom PyPI index to get pre-built wheels for RISC-V
+    # See https://riseproject-dev.github.io/python-wheels/
+    PIP_EXTRA_INDEX_URL=https://pypi.riseproject.dev/simple
+    PIP_PREFER_BINARY=1
+    ;;
+  pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build)
     GCC_VERSION=14
     ;;
   *)
@@ -307,13 +358,19 @@ case "$tag" in
   ;;
 esac
 
+# ubuntu/Dockerfile provisions Python from a deadsnakes venv keyed on
+# PYTHON_VERSION, while the rocm/xpu images still express it as
+# ANACONDA_PYTHON_VERSION (they keep conda). Mirror the value so both flavors
+# get what they expect.
+if [ -z "${PYTHON_VERSION}" ]; then
+  PYTHON_VERSION="${ANACONDA_PYTHON_VERSION}"
+fi
+
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
-no_cache_flag=""
 progress_flag=""
-# Do not use cache and progress=plain when in CI
+# Plain (non-TTY) progress output in CI for complete, readable build logs.
 if [[ -n "${CI:-}" ]]; then
-  no_cache_flag="--no-cache"
   progress_flag="--progress=plain"
 fi
 
@@ -321,14 +378,25 @@ fi
 # `--load`, so push directly to the registry instead. The caller is expected
 # to have logged in to the target registry already (e.g. via ecr-login).
 output_flag="--load -t ${tmp_tag}"
+cache_flag=""
 if [[ -n "${REMOTE_BUILDKIT:-}" ]]; then
   output_flag="--push"
+  # Remote BuildKit pods are ephemeral with pod-private caches, so share a cache
+  # via a per-image (hence per-arch) tag in the same registry. mode=max caches
+  # intermediate stages; image-manifest/oci-mediatypes keep it ECR-compatible.
+  if [[ -n "${DOCKER_IMAGE:-}" ]]; then
+    cache_ref="${DOCKER_IMAGE%:*}:${image}-buildcache"
+    cache_flag="--cache-from type=registry,ref=${cache_ref}"
+    cache_flag="${cache_flag} --cache-to type=registry,ref=${cache_ref},mode=max,image-manifest=true,oci-mediatypes=true"
+  fi
 fi
 
 # Build image
-docker buildx build \
-       ${no_cache_flag} \
+build_image() {
+  docker buildx build \
        ${progress_flag} \
+       ${platform_flag:-} \
+       ${cache_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
@@ -342,11 +410,14 @@ docker buildx build \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
+       --build-arg "THEROCK_INDEX_URL=${THEROCK_INDEX_URL:-}" \
+       --build-arg "USE_MSLK=${USE_MSLK:-}" \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \
        --build-arg "ONNX=${ONNX}" \
+       --build-arg "TVM=${TVM}" \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
@@ -356,14 +427,50 @@ docker buildx build \
        --build-arg "TSAN=${TSAN}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
+       --build-arg "OMIX_VERSION=${OMIX_VERSION}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
+       --build-arg "PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL:-}" \
+       --build-arg "PIP_PREFER_BINARY=${PIP_PREFER_BINARY:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        ${output_flag} \
        "$@" \
        .
+}
+
+if [[ -z "${REMOTE_BUILDKIT:-}" ]]; then
+  build_image "$@"
+else
+  # The autoscaled pool may be cold / at capacity at start, where buildx's ~20s
+  # connect (gRPC default) fails before scale-up. Retry connection failures (not
+  # build errors) for ~2h so a capacity-limited build waits for a free pod instead
+  # of hard-failing — still within the 240m job timeout.
+  attempts="${REMOTE_BUILDKIT_CONNECT_ATTEMPTS:-360}"
+  delay="${REMOTE_BUILDKIT_CONNECT_DELAY:-15}"
+  for attempt in $(seq 1 "${attempts}"); do
+    build_log="$(mktemp)"
+    set +e
+    build_image "$@" 2>&1 | tee "${build_log}"
+    rc="${PIPESTATUS[0]}"
+    set -e
+    if [[ "${rc}" -eq 0 ]]; then
+      rm -f "${build_log}"
+      break
+    fi
+    if [[ "${attempt}" -lt "${attempts}" ]] && grep -qiE \
+      "waiting for connection|context deadline exceeded|server preface|failed to (dial|list workers)|connection (refused|reset)|no such host|transport: Error|i/o timeout|use of closed network connection|EOF" \
+      "${build_log}"; then
+      echo "Remote BuildKit not ready yet (attempt ${attempt}/${attempts}); retrying in ${delay}s..." >&2
+      rm -f "${build_log}"
+      sleep "${delay}"
+      continue
+    fi
+    rm -f "${build_log}"
+    exit "${rc}"
+  done
+fi
 
 # NVIDIA dockers for RC releases use tag names like `11.0-cudnn9-devel-ubuntu18.04-rc`,
 # for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
@@ -408,7 +515,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 fi
 
 if [ -n "$GCC_VERSION" ]; then
-  if [[ "$image" == *riscv* ]]; then
+  if [[ "$image" == *riscv*cross* ]]; then
     # Check RISC-V cross-compilation toolchain version
     if !(drun riscv64-linux-gnu-gcc-${GCC_VERSION} --version 2>&1 | grep -q " $GCC_VERSION\\W"); then
       echo "RISC-V GCC_VERSION=$GCC_VERSION, but:"

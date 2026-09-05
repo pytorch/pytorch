@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import TEST_WITH_ROCM
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
+from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -242,6 +243,43 @@ class OptimizeForInferenceTemplate(TestCase):
         with torch.no_grad():
             mod_eager = mod()
             self.assertEqual(foo(mod), mod_eager)
+
+    def test_aliased_intermediate_output_folds_params(self):
+        # https://github.com/pytorch/pytorch/issues/191449
+        # base_idx on an alias_of_intermediate* output indexes user outputs,
+        # not graph inputs. Treating it as an input index preserved whichever
+        # parameter happened to share that number, silently disabling folding.
+        from unittest.mock import patch as mock_patch
+
+        from torch._inductor import freezing
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                base = self.lin(x)
+                return base, base.view_as(base)
+
+        mod = Mod().to(self.device).eval()
+        inp = torch.randn(2, 4, device=self.device)
+        preserved = []
+        orig = freezing.replace_params_with_constants
+
+        def spy(gm, flat_params, fw_metadata):
+            out = orig(gm, flat_params, fw_metadata)
+            preserved.append(list(out))
+            return out
+
+        with torch.no_grad():
+            mod_eager = mod(inp)
+            with mock_patch.object(freezing, "replace_params_with_constants", spy):
+                self.assertEqual(torch.compile(mod)(inp), mod_eager)
+
+        # Only the graph input survives; the Linear weight and bias are folded.
+        self.assertTrue(preserved)
+        self.assertEqual(preserved[0], [2])
 
     def test_autocast(self):
         if self.device == "cpu":
@@ -764,6 +802,8 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod_eager = mod(x)
                 self.assertEqual(foo(mod, x), mod_eager)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180128")
+    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/106557")
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
         TEST_WITH_SLOW_GRADCHECK,
@@ -901,6 +941,51 @@ class OptimizeForInferenceTemplate(TestCase):
             out_compiled = func1(x.clone())
             self.assertEqual(out_eager, out_compiled)
 
+    @torch._inductor.config.patch(
+        layout_optimization=True, force_layout_optimization=True
+    )
+    def test_as_strided_input_layout_with_symbolic_strides(self):
+        from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                y = x.transpose(1, 2)
+                return torch.as_strided(y, y.size(), y.stride())
+
+        graph_modules = []
+
+        def my_inner_compile(gm, example_inputs, *args, **kwargs):
+            graph_modules.append(gm)
+            return compile_fx_inner(gm, example_inputs, *args, **kwargs)
+
+        mod = Model().eval().to(self.device)
+        inp = torch.randn(2, 3, 4, device=self.device)
+        torch._dynamo.mark_dynamic(inp, 1)
+        torch._dynamo.mark_dynamic(inp, 2)
+
+        with torch.no_grad():
+            expected = mod(inp)
+            opt_mod = torch.compile(
+                mod,
+                backend=functools.partial(compile_fx, inner_compile=my_inner_compile),
+                dynamic=True,
+            )
+            actual = opt_mod(inp)
+            self.assertEqual(expected, actual)
+
+        self.assertTrue(graph_modules)
+        gm = graph_modules[0]
+        nodes = list(gm.graph.nodes)
+        force_stride_node = next(
+            n for n in nodes if n.target == prims.inductor_force_stride_order.default
+        )
+        as_strided_node = next(n for n in nodes if n.target == aten.as_strided.default)
+
+        self.assertLess(nodes.index(force_stride_node), nodes.index(as_strided_node))
+        for stride_arg in force_stride_node.args[1]:
+            if isinstance(stride_arg, torch.fx.Node):
+                self.assertLess(nodes.index(stride_arg), nodes.index(force_stride_node))
+
     @tf32_on_and_off(0.001)
     @torch._inductor.config.patch(layout_optimization=True)
     def test_redundant_clone_for_layout_convert(self):
@@ -961,10 +1046,16 @@ class OptimizeForInferenceTemplate(TestCase):
 
         # we don't change the stride of y returned by forward. So there will
         # be no extra copy
-        self.assertTrue(num_same_stride == 1, f"num_same_stride is {num_same_stride}")
+        self.assertTrue(
+            num_same_stride == 1,
+            lambda msg: f"{msg}\nnum_same_stride is {num_same_stride}",
+        )
         # we changed the stride of self.conv(x) returned by forward. So there
         # may be an extra copy
-        self.assertTrue(num_diff_stride == 1, f"num_diff_stride is {num_diff_stride}")
+        self.assertTrue(
+            num_diff_stride == 1,
+            lambda msg: f"{msg}\nnum_diff_stride is {num_diff_stride}",
+        )
 
 
 if TEST_WITH_ROCM:

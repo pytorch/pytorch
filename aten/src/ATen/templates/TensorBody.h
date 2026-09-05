@@ -32,7 +32,6 @@
 #include <ATen/core/CheckMemoryFormat.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
 #include <c10/core/SymInt.h>
 #include <ATen/core/TensorAccessor.h>
@@ -144,7 +143,7 @@ class TORCH_API Tensor: public TensorBase {
     C10_DIAGNOSTIC_POP()
   }
 
-  // Aliased by Dimname overloads, so need explicit using
+  // Bring in base class methods
   using TensorBase::size;
   using TensorBase::sym_size;
   using TensorBase::stride;
@@ -240,11 +239,6 @@ class TORCH_API Tensor: public TensorBase {
   // TODO: Deprecate me
   Tensor toBackend(Backend b) const {
     return to(options().device(backendToDeviceType(b)).layout(layout_from_backend(b)), /*non_blocking*/ false, /*copy*/ false);
-  }
-
-  C10_DEPRECATED_MESSAGE("Tensor.is_variable() is deprecated; everything is a variable now. (If you want to assert that variable has been appropriately handled already, use at::impl::variable_excluded_from_dispatch())")
-  bool is_variable() const noexcept {
-    return !at::impl::variable_excluded_from_dispatch();
   }
 
   template<typename T>
@@ -444,7 +438,7 @@ class TORCH_API Tensor: public TensorBase {
     // currently does not support optional of TensorList our approach is to replace
     // backward in native_functions.yaml with _backward and call it here instead.
     if (inputs.has_value()) {
-      TORCH_CHECK(inputs.value().size() > 0, "'inputs' argument to backward cannot be empty")
+      TORCH_CHECK(!inputs.value().empty(), "'inputs' argument to backward cannot be empty")
       this->_backward(inputs.value(), gradient, retain_graph, create_graph);
     } else {
       this->_backward({}, gradient, retain_graph, create_graph);
@@ -584,11 +578,6 @@ class TORCH_API Tensor: public TensorBase {
   // Hooks
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::invoke_result_t<T&, Tensor>>::value, unsigned>;
-  template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same_v<typename std::invoke_result_t<T&, Tensor>, Tensor>, unsigned>;
-
   /// Registers a backward hook.
   ///
   /// The hook will be called every time a gradient with respect to the Tensor is computed.
@@ -620,9 +609,7 @@ class TORCH_API Tensor: public TensorBase {
   /// v.remove_hook(h);  // removes the hook
   /// @endcode
   template <typename T>
-  hook_return_void_t<T> register_hook(T&& hook) const;
-  template <typename T>
-  hook_return_var_t<T> register_hook(T&& hook) const;
+  unsigned register_hook(T&& hook) const;
 
   // Variable methods
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

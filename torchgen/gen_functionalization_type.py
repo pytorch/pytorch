@@ -83,8 +83,6 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
 CUMULATIVE_OUT_OPS_PRESERVING_OUT_DTYPE = {
     OperatorName.parse("cumsum.out"),
     OperatorName.parse("cumprod.out"),
-    OperatorName.parse("cumsum.dimname_out"),
-    OperatorName.parse("cumprod.dimname_out"),
 }
 
 # This file contains codegen that relates to the functionalization pass.
@@ -351,7 +349,7 @@ def emit_expr_has_symbolic_values(expr: str, type: CType) -> str:
 
 # Detects whether any of the SymInt arguments are, in fact, symbolic values.
 # This is used in the constructor of ViewMeta.
-def emit_has_symbolic_inputs(sig: DispatcherSignature) -> tuple[str, str]:
+def emit_has_symbolic_inputs(sig: DispatcherSignature) -> str:
     name = "has_symbolic_inputs"
     statements = [
         f"{name} = {name} | ({emit_expr_has_symbolic_values(binding.name, binding.nctype.type)});"
@@ -362,12 +360,9 @@ def emit_has_symbolic_inputs(sig: DispatcherSignature) -> tuple[str, str]:
         )
     ]
     body = "\n      ".join(statements)
-    return (
-        name,
-        f"""
+    return f"""
       bool {name} = false;
-      {body}""",
-    )
+      {body}"""
 
 
 # Generates the Functionalization kernel for:
@@ -426,10 +421,7 @@ def emit_view_functionalization_body(
             e.expr for e in translate(meta_call_ctx, call_sig.arguments(), method=False)
         ]
 
-        (
-            symbolic_inputs_varname,
-            symbolic_inputs_check,
-        ) = emit_has_symbolic_inputs(call_sig)
+        symbolic_inputs_check = emit_has_symbolic_inputs(call_sig)
 
         if "inplace_view" in f.tags:
             # See Note [Functionalization Pass - Inplace View Ops] for more details
@@ -795,6 +787,37 @@ def gen_functionalization_view_inverse_declaration(
     return emit_decl_helper(g)
 
 
+# Replaying a multi-output view op to regenerate a single output builds every
+# sibling view and discards all but one, so regenerating the N views of one base
+# costs O(N^2) tensors. Under torch.compile that is O(N^2) fake tensors and
+# proxies, and it shows up as an N-long run of identical view nodes in the traced
+# graph. These are the only multi-output view ops, and each of their outputs is
+# exactly one slice or select of the base, which we can build directly. The
+# original op already validated its arguments when the view was first created.
+#
+# Autograd's restriction on mutating one output of a multi-output view is keyed
+# off CreationMeta, not off the grad_fn, so apply_view_meta_sequence restores it
+# directly. See [Note: multi-output view replay].
+#
+# Keyed by operator name; the body is formatted with the view op to call, which
+# differs between the view and the view_copy variant.
+SINGLE_OUTPUT_VIEW_REPLAY: dict[str, str] = {
+    "split.Tensor": """\
+  // split() chunk `i` is base[i * split_size : (i + 1) * split_size] along dim,
+  // and slice clamps the end, which gives the short final chunk for free.
+  auto start = split_size * out_index;
+  return {slice}(base, dim, start, start + split_size, 1);""",
+    "split_with_sizes": """\
+  c10::SymInt start = 0;
+  for (int64_t i = 0; i < out_index; ++i) {{
+    start += split_sizes[i];
+  }}
+  return {slice}(base, dim, start, start + split_sizes[out_index], 1);""",
+    "unbind.int": """\
+  return {select}(base, dim, out_index);""",
+}
+
+
 # Helper class for generating `ViewMeta` specializations.
 @dataclass
 class ViewMetaSpecialization:
@@ -952,14 +975,42 @@ struct TORCH_API {self.classname} : public ViewMeta {{
 
         return f"{opname}({arguments}){maybe_index}"
 
+    @property
+    def single_output_body(self) -> str | None:
+        # A new multi-output view op would otherwise silently keep replaying the
+        # whole operation and stay quadratic, with no golden to flag it.
+        name = str(self.f.func.name)
+        if self.is_multi_output and name not in SINGLE_OUTPUT_VIEW_REPLAY:
+            raise AssertionError(f"no single-output replay for {name}")
+        return SINGLE_OUTPUT_VIEW_REPLAY.get(name)
+
+    # The two arms of `forward`, one per value of `reapply_views`.
+    def forward_arms(self) -> tuple[str, str]:
+        body = self.single_output_body
+        if body is None:
+            return (
+                f"    return {self.opcall(is_reverse=False, reapply_views=True)};",
+                f"    return {self.opcall(is_reverse=False, reapply_views=False)};",
+            )
+
+        def arm(slice_op: str, select_op: str) -> str:
+            filled = body.format(slice=slice_op, select=select_op)
+            return "\n".join("  " + line for line in filled.splitlines())
+
+        return (
+            arm("at::_ops::slice_Tensor::call", "at::_ops::select_int::call"),
+            arm("at::_ops::slice_copy_Tensor::call", "at::_ops::select_copy_int::call"),
+        )
+
     def impl(self) -> list[str]:
+        views_arm, view_copy_arm = self.forward_arms()
         functions = [
             f"""
 at::Tensor {self.classname}::forward(const at::Tensor& base) {{
   if (reapply_views) {{
-    return {self.opcall(is_reverse=False, reapply_views=True)};
+{views_arm}
   }} else {{
-    return {self.opcall(is_reverse=False, reapply_views=False)};
+{view_copy_arm}
   }}
 }}""",
             f"""

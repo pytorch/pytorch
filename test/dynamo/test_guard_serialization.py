@@ -31,7 +31,12 @@ from torch._dynamo.symbolic_convert import (
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_MACOS,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils import _pytree as pytree
 
@@ -288,7 +293,7 @@ class SubclassWithSubclassInnerTensor(torch.Tensor):
 
 
 # defines a custom __eq__() / __hash__() to be registered as a pytree constant type
-class CustomConstantType(torch._opaque_base.OpaqueBase):
+class CustomConstantType(torch._custom_class_base.CustomClassBase):
     def __init__(self, a, b):
         self.a = a
         self.b = b
@@ -310,7 +315,7 @@ class CustomConstantType(torch._opaque_base.OpaqueBase):
         }
 
 
-torch._library.opaque_object.register_opaque_type(CustomConstantType, typ="value")
+torch._library.opaque_object.register_custom_class(CustomConstantType, typ="constant")
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
@@ -569,16 +574,22 @@ class TestGuardSerialization(TestGuardSerializationBase):
                         "HINT: type",
                         verbose_str,
                         (
-                            "TYPE_MATCH guard should include 'HINT: type' "
-                            f"annotation.\nGuard: {verbose_str}"
+                            lambda msg: f"{msg}\n"
+                            + (
+                                "TYPE_MATCH guard should include 'HINT: type' "
+                                f"annotation.\nGuard: {verbose_str}"
+                            )
                         ),
                     )
                     self.assertIn(
                         "GlobalModule",
                         verbose_str,
                         (
-                            "TYPE_MATCH guard should include type name "
-                            f"'GlobalModule'.\nGuard: {verbose_str}"
+                            lambda msg: f"{msg}\n"
+                            + (
+                                "TYPE_MATCH guard should include type name "
+                                f"'GlobalModule'.\nGuard: {verbose_str}"
+                            )
                         ),
                     )
             for child_mgr in mgr.get_child_managers():
@@ -709,6 +720,29 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # different "bar"
         check_with_meta({"foo": 5, "bar": "world"}, False)
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
+    def test_transparent_subclass_tensor_match(self):
+        # AsyncCollectiveTensor is a transparent traceable wrapper subclass: its
+        # __torch_dispatch__ desugars ops to the inner tensor, so
+        # torch.empty_like(act) returns a plain Tensor and drops the subclass
+        # type. Guard-state serialization must round-trip such an input by
+        # unflattening through the recorded pytype rather than type(meta_tensor)
+        # (which would be torch.Tensor, with no __tensor_unflatten__).
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        def fn(w):
+            return w.sum()
+
+        base = torch.randn(3, 4)
+        ref, loaded = self._test_serialization(
+            "TENSOR_MATCH", fn, AsyncCollectiveTensor(base)
+        )
+        self._test_check_fn(ref, loaded, {"w": AsyncCollectiveTensor(base)}, True)
+        # The reloaded guard must also match the resolved plain Tensor -- the
+        # ACT->Tensor reuse this relaxation enables, and the case that matters
+        # for precompile under FSDP+TP.
+        self._test_check_fn(ref, loaded, {"w": base}, True)
+
     def test_equals_match(self):
         def fn(x, y):
             # CustomConstantType is registered as a pytree constant so this should
@@ -741,6 +775,27 @@ class TestGuardSerialization(TestGuardSerializationBase):
             },
             False,
         )
+
+    def test_autocast_equals_match(self):
+        class Module(torch.nn.Module):
+            def __init__(self, ctx):
+                super().__init__()
+                self.ctx = ctx
+
+            def forward(self, x):
+                with self.ctx:
+                    return x @ x
+
+        module = Module(torch.amp.autocast("cpu", dtype=torch.bfloat16))
+        x = torch.randn(4, 4)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", module, x)
+        self._test_check_fn(ref, loaded, {"self": module, "x": x}, True)
+
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.bfloat16)
+        self._test_check_fn(ref, loaded, {"self": module, "x": x}, True)
+
+        module.ctx = torch.amp.autocast("cpu", dtype=torch.float16)
+        self._test_check_fn(ref, loaded, {"self": module, "x": x}, False)
 
     def test_constant_match(self):
         # === bool constant ===
@@ -959,14 +1014,42 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": x, "counter": itertools.count(2, 4)}, False
         )
 
-    def test_dict_version(self):
+    def test_supported_nodes_dict_keys_match(self):
         def fn(x):
             return pytree.tree_leaves(x)[0] + 1
 
-        with self.assertRaisesRegex(
-            PackageError, "DICT_VERSION guard cannot be serialized."
-        ):
-            self._test_serialization("DICT_VERSION", fn, {"t": torch.randn(3)})
+        ref, loaded = self._test_serialization(
+            "DICT_KEYS_MATCH", fn, {"t": torch.randn(3)}
+        )
+        self._test_check_fn(ref, loaded, {"x": {"t": torch.randn(3)}}, True)
+        self._test_check_fn(ref, loaded, {"x": {}}, False)
+
+        # Sticky flag must survive pickling so load keeps keys-match instead of
+        # re-promoting SUPPORTED_NODES to DICT_VERSION.
+        guards_state = torch._dynamo.package.load_guards_state(
+            self._cached_guards_state
+        )
+        self.assertTrue(
+            any(g._force_dict_keys_match for g in guards_state.output_graph.guards)
+        )
+
+        # Loaded keys-match guard must observe SUPPORTED_NODES key changes, not
+        # only changes to the user input dict.
+        class _TmpPytreeNode:
+            def __init__(self, x):
+                self.x = x
+
+        inputs = {"x": {"t": torch.randn(3)}}
+        self.assertTrue(loaded.check(inputs))
+        try:
+            pytree.register_pytree_node(
+                _TmpPytreeNode,
+                lambda n: ([n.x], None),
+                lambda xs, _: _TmpPytreeNode(xs[0]),
+            )
+            self.assertFalse(loaded.check(inputs))
+        finally:
+            pytree._deregister_pytree_node(_TmpPytreeNode)
 
     def test_dict_contains(self):
         def fn(x):
@@ -1520,7 +1603,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             True,
         )
 
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_ddp_module(self):
         import torch.distributed as dist
 
@@ -1538,13 +1620,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
             def foo(ddp, x):
                 return ddp(x)
 
+            unsupported = frozenset(
+                torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            )
             x = torch.randn(10)
             package = CompilePackage(foo)
             torch._dynamo.optimize(
                 package=package,
                 guard_filter_fn=lambda gs: [
-                    x.guard_type not in ("CLOSURE_MATCH", "ID_MATCH", "CLASS_MATCH")
-                    for x in gs
+                    x.guard_type not in unsupported for x in gs
                 ],
             )(foo)(ddp_model, x)
             self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)
@@ -1903,6 +1987,10 @@ if torch.distributed.is_available() and not IS_MACOS:
             TestGuardSerializationBase.setUp(self)
             FSDPTestMultiThread.setUp(self)
 
+        @unittest.skipIf(
+            TEST_WITH_ASAN or IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/162793",
+        )
         def test_guard_serialization_fsdp_module(self):
             from torch.distributed._tensor import distribute_tensor, Replicate
             from torch.distributed.device_mesh import init_device_mesh

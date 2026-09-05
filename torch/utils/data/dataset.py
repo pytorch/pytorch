@@ -169,7 +169,7 @@ class IterableDataset(Dataset[_T_co], Iterable[_T_co]):
         ...     dataset.end = min(dataset.start + per_worker, overall_end)
         ...
 
-        >>> # Mult-process loading with the custom `worker_init_fn`
+        >>> # Multi-process loading with the custom `worker_init_fn`
         >>> # Worker 0 fetched [3, 4].  Worker 1 fetched [5, 6].
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=2, worker_init_fn=worker_init_fn)))
         [3, 5, 4, 6]
