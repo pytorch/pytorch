@@ -1655,6 +1655,49 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=True,
         )
 
+    def _test_sdpa_rewriter_25_fp32_mask(self):
+        # Regression test for #195784: fp16 q/k/v with an fp32 additive mask.
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            attn_mask: torch.Tensor,
+            training: bool,
+        ) -> torch.Tensor:
+            query = query.transpose(1, 2)
+            key = key.transpose(1, 2)
+            value = value.transpose(1, 2)
+            scores = torch.matmul(query, key.permute(0, 1, 3, 2))
+            scores = scores + attn_mask
+            attn_weights = scores.float().softmax(dim=-1).type(value.dtype)
+            attn_weights = torch.nn.functional.dropout(
+                attn_weights, p=0.1, training=training
+            )
+            return attn_weights.matmul(value)
+
+        for tensor_shape, suffix in [((4, 2, 16, 32), ""), ((1, 2, 16, 32), "_bs1")]:
+            # finfo(float32).min overflows fp16; the fusion must keep the fp32 mask.
+            attn_mask = torch.randn((1, 1, 2, 2), dtype=torch.float, device=self.device)
+            attn_mask[..., 0, :] = torch.finfo(torch.float).min
+            attn_mask[..., 1, 1:] = torch.finfo(torch.float).min
+            args = [
+                torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+                torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+                torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+                attn_mask,
+            ]
+            expected = {False: f"_sfdp_pattern_25_half_mask_fp32{suffix}_inference"}
+            self._check_common(
+                dot_prod_attention,
+                args1=args,
+                has_dropout=True,
+                check_train=False,
+                override_check_equal=True,
+                atol=1e-2,
+                rtol=1e-2,
+                expected_fused_attention_patterns=expected,
+            )
+
     @torch._inductor.config.patch("cache_sdpa_constraint", True)
     def _test_cache_sdpa_constraint_shared_kv_enabled(self):
         """When cache_sdpa_constraint is True and the same tensor feeds both key
@@ -1754,6 +1797,48 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             has_dropout=True,
             check_train=True,
         )
+
+    def _test_sdpa_rewriter_26_fp32_mask(self):
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            attn_mask: torch.Tensor,
+            training: bool,
+        ) -> torch.Tensor:
+            query = query.transpose(1, 2)
+            key = key.transpose(1, 2)
+            value = value.transpose(1, 2)
+            scores = torch.matmul(query, key.permute(0, 1, 3, 2))
+            scores = scores + attn_mask
+            attn_weights = scores.float().softmax(dim=-1).type(value.dtype)
+            attn_weights = torch.nn.functional.dropout(
+                attn_weights, p=0.1, training=training
+            )
+            return attn_weights.matmul(value), key, value
+
+        for tensor_shape, suffix in [((4, 2, 16, 32), ""), ((1, 2, 16, 32), "_bs1")]:
+            # finfo(float32).min overflows fp16; the fusion must keep the fp32 mask.
+            attn_mask = torch.randn((1, 1, 2, 2), dtype=torch.float, device=self.device)
+            attn_mask[..., 0, :] = torch.finfo(torch.float).min
+            attn_mask[..., 1, 1:] = torch.finfo(torch.float).min
+            args = [
+                torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+                torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+                torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+                attn_mask,
+            ]
+            expected = {False: f"_sfdp_pattern_26_half_mask_fp32{suffix}_inference"}
+            self._check_common(
+                dot_prod_attention,
+                args1=args,
+                has_dropout=True,
+                check_train=False,
+                override_check_equal=True,
+                atol=1e-2,
+                rtol=1e-2,
+                expected_fused_attention_patterns=expected,
+            )
 
     def _test_sdpa_rewriter_27(self):
         def dot_prod_attention(
@@ -2061,6 +2146,12 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
             test_sdpa_rewriter_27_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_27
             )
+            test_sdpa_rewriter_25_fp32_mask_gpu = functools.partialmethod(
+                TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_25_fp32_mask
+            )
+            test_sdpa_rewriter_26_fp32_mask_gpu = functools.partialmethod(
+                TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_26_fp32_mask
+            )
 
         @skipIfXpu(msg="FIXME: ENable for XPU")
         def test_skip_non_tf32(self):
@@ -2178,6 +2269,12 @@ if HAS_CPU:
         )
         test_sdpa_rewriter_24_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24
+        )
+        test_sdpa_rewriter_25_fp32_mask_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_25_fp32_mask
+        )
+        test_sdpa_rewriter_26_fp32_mask_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_26_fp32_mask
         )
         test_cache_sdpa_constraint_shared_kv_cpu = (
             TestSDPAPatternRewriterTemplate._test_cache_sdpa_constraint_shared_kv
