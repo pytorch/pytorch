@@ -15949,6 +15949,474 @@ fn
         res = opt_fn(t)
         self.assertEqual(ref, res)
 
+    @parametrize(
+        "grad_mode_decorator",
+        ["no_grad", "enable_grad", "dual_level"],
+    )
+    def test_sourceless_bound_method_in_closure(self, grad_mode_decorator):
+        # Constructing an object inside the graph and calling a grad-mode
+        # decorated method on it (e.g. @torch.no_grad()) requires wrapping a
+        # bound method (the decorator's ctx_factory closure cell) whose
+        # __self__ was never observed directly by Dynamo, and then cloning
+        # that context manager (self.__class__()) without a source to
+        # construct from. See gh-194763.
+        #
+        # Each case runs under an ambient state the decorator actually
+        # flips, so a version that silently dropped the decorator's effect
+        # (rather than truly applying it) would produce a different,
+        # detectably wrong result -- not just coincidentally match the
+        # no-op default.
+        if grad_mode_decorator == "no_grad":
+
+            class A:
+                @torch.no_grad()
+                def method(self, x):
+                    return x + 1
+
+            def fn(x):
+                return A().method(x)
+
+        elif grad_mode_decorator == "enable_grad":
+
+            class A:
+                @torch.enable_grad()
+                def method(self, x):
+                    return x + 1
+
+            def fn(x):
+                # Ambient grad is enabled by default, so enable_grad's
+                # effect is only observable if the call itself happens
+                # inside an outer no_grad -- otherwise "did the decorator
+                # apply" and "did it get silently dropped" look identical.
+                with torch.no_grad():
+                    return A().method(x)
+
+        else:
+
+            class A:
+                @torch.autograd.forward_ad.dual_level()
+                def method(self, x):
+                    # _current_level is -1 outside any dual_level context and
+                    # >= 0 inside one; reading it directly makes a dropped
+                    # dual_level entry (silently falling back to -1) produce
+                    # a different, wrong numeric result instead of an
+                    # incidental match.
+                    return x + torch.autograd.forward_ad._current_level
+
+            def fn(x):
+                return A().method(x)
+
+        x = torch.tensor(1.0, requires_grad=True)
+        ref = fn(x)
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        if grad_mode_decorator in ("no_grad", "enable_grad"):
+            # Value equality alone doesn't exercise what these decorators
+            # actually control; assert the grad-mode side effect matches
+            # too.
+            self.assertEqual(ref.requires_grad, res.requires_grad)
+
+    def test_sourceless_bound_method_in_closure_set_grad_enabled_graph_breaks(self):
+        # set_grad_enabled.clone() forwards a saved constructor arg and
+        # mutates real global autograd state as a side effect of
+        # construction (unlike no_grad/enable_grad/dual_level's unmodified
+        # clone), so it is deliberately NOT in
+        # maybe_reconstruct_decorator_ctx_manager_clone's allowlist. It
+        # should graph-break cleanly under fullgraph=True (and fall back to
+        # eager under fullgraph=False), not silently drop the decorator's
+        # effect. See gh-194763.
+        class A:
+            @torch.set_grad_enabled(False)
+            def method(self, x):
+                return x + 1
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0, requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(ref.requires_grad, res.requires_grad)
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        # The shared reconstruction predicate rejects set_grad_enabled's
+        # overridden clone/class pair at SourcelessBuilder's gate.
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
+
+    @parametrize("mode", [True, False])
+    def test_sourceless_bound_method_in_closure_inference_mode_graph_breaks(self, mode):
+        # inference_mode.clone() forwards a saved constructor arg
+        # (self.mode). maybe_reconstruct_decorator_ctx_manager_clone
+        # resolves this symbolically (avoiding the torch/autograd skip-list
+        # break) only when it can build a real source for self.mode --
+        # otherwise baking it in as an unguarded constant would silently
+        # reuse a stale value if the real instance's .mode is mutated
+        # between compiles without an intervening reset. Here `self` (the
+        # inference_mode instance) is reached only via a closure cell of a
+        # method that's itself reached off a graph-internal object (A()) --
+        # genuinely sourceless, gh-194763's exact scope -- so no source is
+        # available and this case correctly falls through: graph-break
+        # cleanly under fullgraph=True, fall back to eager under
+        # fullgraph=False. Contrast with a *sourced* inference_mode
+        # instance (e.g. `@torch.inference_mode()` applied directly to a
+        # module-level function), which does get the fast path -- see
+        # test_torch_inference_mode_ctx in test_export.py.
+        class A:
+            @torch.inference_mode(mode)
+            def method(self, x):
+                return x + 1
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0, requires_grad=True)
+        ref = fn(x)
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(torch.is_inference(ref), torch.is_inference(res))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        # Although the function/class pair is otherwise reconstructable,
+        # inference_mode.clone needs a source for self.mode. SourcelessBuilder
+        # rejects it before constructing an untracked receiver VT.
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
+
+    def test_sourced_inference_mode_clone_guards_on_mode(self):
+        # Contrast with test_sourceless_bound_method_in_closure_inference_mode_graph_breaks
+        # above: here the inference_mode instance itself IS sourced (a
+        # module-scope-like local reachable directly from the compiled
+        # root function's closure, the same shape as
+        # test_torch_inference_mode_ctx in test_export.py), so
+        # maybe_reconstruct_decorator_ctx_manager_clone's inference_mode
+        # case takes the fast path and builds mode_var with a real source
+        # (AttrSource(obj_source, "mode")) rather than falling through.
+        # That source is what makes this safe: without it (or without
+        # this whole case, as an earlier version of this fix mistakenly
+        # dropped it entirely), mutating .mode and recompiling without an
+        # intervening torch._dynamo.reset() would either silently keep
+        # using the stale cached value or -- as actually happened -- lose
+        # the fast path altogether and regress a pre-existing, unrelated
+        # upstream test (test_torch_inference_mode_ctx) by forcing a graph
+        # break on ordinary sourced @torch.inference_mode() usage.
+        im = torch.inference_mode(True)
+
+        @im
+        def fn(x):
+            return x + 1
+
+        x = torch.tensor(1.0)
+
+        torch._dynamo.reset()
+        res1 = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.is_inference(res1), True)
+
+        im.mode = False
+        # No reset() -- the guard on im.mode must catch this and recompile,
+        # not silently reuse the fullgraph=True-compiled result above.
+        res2 = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.is_inference(res2), False)
+
+    def test_sourceless_generic_ctx_manager_with_usage_graph_breaks(self):
+        # A context manager reached without a source (e.g. pulled out of a
+        # closure cell whose enclosing function is itself reached off a
+        # graph-internal object -- see gh-194763) has no way for Dynamo to
+        # codegen a mutation replay, since there's no source to locate the
+        # real object at runtime. `with cm:` (which calls __enter__/
+        # __exit__, mutating self.entered) must graph-break cleanly, and
+        # under fullgraph=False must fall back far enough that the real
+        # __enter__/__exit__ still run -- not silently skip them while
+        # still returning a plausible-looking value.
+        class MyCM:
+            def __init__(self):
+                self.entered = 0
+                self.exited = 0
+
+            def __enter__(self):
+                self.entered += 1
+                return self
+
+            def __exit__(self, *a):
+                self.exited += 1
+                return False
+
+        def make_method(cm):
+            local_cm = cm
+
+            def method(self, x):
+                with local_cm:
+                    return x + 1
+
+            return method
+
+        class A:
+            method = make_method(MyCM())
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        cm = A.method.__closure__[0].cell_contents
+        self.assertEqual((cm.entered, cm.exited), (1, 1))
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(ref, res)
+        self.assertEqual((cm.entered, cm.exited), (2, 2))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        # The builder rejects the sourceless context manager before creating
+        # an untracked wrapper that could lose __enter__/__exit__ mutations.
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless context manager entered without mutation support",
+        )
+
+    def test_sourceless_generic_ctx_manager_method_call_graph_breaks(self):
+        # Same setup as test_sourceless_generic_ctx_manager_with_usage_graph_breaks,
+        # but for an ordinary (non-`with`) method call rather than __enter__/
+        # __exit__. This must graph-break cleanly too -- not silently drop
+        # the call's return value and mutation (as happens if the object is
+        # incorrectly treated as safe to inline methods on), and not crash
+        # with an internal AssertionError in method_setattr_standard.
+        class Counter:
+            # __enter__/__exit__ are what used to make is_generic_ctx_manager_cls
+            # match this class and route it through the removed
+            # GenericContextWrappingVariable branch; without them, this test
+            # would exercise a different, never-buggy code path.
+            def __init__(self):
+                self.log = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def rec(self, v):
+                self.log.append(v)
+                return len(self.log)
+
+        def make_method(counter):
+            local_counter = counter
+
+            def method(self, x):
+                return x + local_counter.rec(1)
+
+            return method
+
+        class A:
+            method = make_method(Counter())
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        counter = A.method.__closure__[0].cell_contents
+        # rec() returns len(self.log) after appending, so each call's
+        # result -- and therefore fn's return value -- depends on how many
+        # times rec() has been called before it. ref != the next call's
+        # result by construction; check both against the counter state that
+        # produced them instead of comparing them to each other.
+        self.assertEqual((ref.item(), counter.log), (2.0, [1]))
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual((res.item(), counter.log), (3.0, [1, 1]))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        # The same raise-only gate also prevents ordinary methods from being
+        # inlined against a sourceless, mutation-unsafe receiver.
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless context manager entered without mutation support",
+        )
+
+    def test_sourceless_decorator_ctx_manager_other_method_graph_breaks(self):
+        # SourcelessBuilder.create's types.MethodType branch builds a fresh,
+        # untracked UserDefinedObjectVariable for __self__ when it's a
+        # torch.utils._contextlib._DecoratorContextManager instance reached
+        # via a closure cell -- but only to support resolving a bound
+        # *.clone* call symbolically (see
+        # maybe_reconstruct_decorator_ctx_manager_clone in user_defined.py).
+        # That untracked VT must never be used as the receiver for inlining
+        # some OTHER method: it has no source, so a mutation performed by an
+        # inlined call wouldn't be replayable, and a non-mutating call's
+        # return value would be used without ever having actually run on the
+        # real object. The gate must key off which *method* is bound
+        # (value.__func__ is the base class's .clone), not just the type of
+        # __self__ -- a user-defined _DecoratorContextManager subclass with
+        # an extra method is the case that would slip through a type-only
+        # gate. See gh-194763.
+        class MyCM(torch.utils._contextlib._DecoratorContextManager):
+            def __init__(self):
+                self.log = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def rec(self, v):
+                self.log.append(v)
+                return len(self.log)
+
+        def make_method(bound):
+            local_bound = bound
+
+            def method(self, x):
+                return x + local_bound(1)
+
+            return method
+
+        class A:
+            method = make_method(MyCM().rec)
+
+        def fn(x):
+            return A().method(x)
+
+        cm = A.method.__closure__[0].cell_contents.__self__
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        self.assertEqual((ref.item(), cm.log), (2.0, [1]))
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        # If local_bound(1) were silently inlined with an untracked self (the
+        # bug this test guards), the real cm.log would never be appended to
+        # and res would incorrectly equal ref instead of reflecting the real
+        # call's effect.
+        self.assertEqual((res.item(), cm.log), (3.0, [1, 1]))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
+
+    def test_sourceless_decorator_ctx_manager_inherited_clone_graph_breaks(self):
+        # A sourceless subclass that inherits the base clone() has the same
+        # function identity as supported context managers, but its class is
+        # not reconstructable. The shared allowlist must reject that pair at
+        # the builder gate instead of handing an untracked self to normal
+        # method inlining. See gh-194763.
+        class MyCM(torch.utils._contextlib._DecoratorContextManager):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def make_method(bound):
+            local_bound = bound
+
+            def method(self, x):
+                local_bound()
+                return x + 1
+
+            return method
+
+        class A:
+            method = make_method(MyCM().clone)
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(ref, res)
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
+
+    def test_sourceless_decorator_ctx_manager_mutating_method_graph_breaks(self):
+        # Same bug as test_sourceless_decorator_ctx_manager_other_method_graph_breaks,
+        # but for a method that mutates self directly (STORE_ATTR) rather
+        # than a tracked container -- this is what would hit the internal
+        # AssertionError in method_setattr_standard if the untracked VT were
+        # incorrectly used as an inlining receiver, under both
+        # fullgraph=False and fullgraph=True.
+        class MyCM(torch.utils._contextlib._DecoratorContextManager):
+            def __init__(self):
+                self.n = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def bump(self):
+                self.n = self.n + 1
+                return self.n
+
+        def make_method(bound):
+            local_bound = bound
+
+            def method(self, x):
+                return x + local_bound()
+
+            return method
+
+        class A:
+            method = make_method(MyCM().bump)
+
+        def fn(x):
+            return A().method(x)
+
+        cm = A.method.__closure__[0].cell_contents.__self__
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        self.assertEqual((ref.item(), cm.n), (2.0, 1))
+
+        torch._dynamo.reset()
+        # Must not raise AssertionError: Attempted setattr on a user-defined
+        # object that does not have an AttributeMutation mutation_type.
+        # bump() returns self.n after incrementing it, so (like rec() above)
+        # each call's result depends on cm.n's state at that point -- check
+        # against that state rather than comparing to `ref` directly.
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual((res.item(), cm.n), (3.0, 2))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
+
     def test_inspect_signature_parameters(self):
         import inspect
 

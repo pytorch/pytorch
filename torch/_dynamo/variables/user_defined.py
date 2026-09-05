@@ -241,6 +241,92 @@ def is_forbidden_context_manager(ctx: object) -> bool:
     return ctx in f_ctxs
 
 
+def is_reconstructable_decorator_ctx_manager_clone(
+    func: Callable[..., Any], obj_cls: type[Any]
+) -> bool:
+    return (
+        func is torch.utils._contextlib._DecoratorContextManager.clone
+        and obj_cls
+        in (torch.no_grad, torch.enable_grad, torch.autograd.forward_ad.dual_level)
+        or func is torch.autograd.grad_mode.inference_mode.clone
+        and obj_cls is torch.autograd.grad_mode.inference_mode
+    )
+
+
+def maybe_reconstruct_decorator_ctx_manager_clone(
+    tx: "InstructionTranslatorBase",
+    func: Callable[..., Any],
+    obj: Any,
+    obj_source: "Source | None",
+    args: "list[VariableTracker]",
+    kwargs: "dict[str, VariableTracker]",
+    /,
+) -> "VariableTracker | None":
+    """Symbolically (non-eager) reconstruct a call to a bound
+    _DecoratorContextManager.clone method, for a fixed allowlist of
+    PyTorch-owned subclasses. `func` is the unbound function
+    (`bound_method.__func__`), `obj` is the real Python object it's bound to
+    (`bound_method.__self__`), `obj_source` is `obj`'s source if Dynamo has
+    one (e.g. the closure cell of a directly-compiled root function), else
+    None (e.g. reached only via a closure cell nested off a graph-internal
+    object -- see gh-194763).
+
+    clone() is `return self.__class__()` (or `self.__class__(self.mode)` for
+    inference_mode, which overrides it). Constructing a fresh instance
+    normally requires inlining through UserDefinedClassVariable.call_function,
+    which needs a `source` on the class reference. When the bound `clone`
+    itself has no source, inlining isn't available, so the class is
+    reconstructed directly via TorchCtxManagerClassVariable instead (the
+    same path a sourced `torch.no_grad()` call would take). This is also
+    used for a SOURCED `clone` to skip inlining, since `clone` lives under
+    torch/autograd and is skip-listed from tracing -- without this fast
+    path, even the fully-sourced case would take an unnecessary graph break.
+
+    Deliberately an explicit allowlist, not "any class using the base
+    clone": TorchCtxManagerClassVariable.call_function hard-asserts on
+    argument arity per class (e.g. it requires exactly one arg for
+    set_grad_enabled, _set_fwd_grad_enabled), so blindly forwarding to it
+    for an unhandled class can crash with an internal AssertionError instead
+    of a graph break. Other _DecoratorContextManager subclasses
+    (set_grad_enabled, set_multithreading_enabled,
+    _force_original_view_tracking, set_stance, _set_fwd_grad_enabled, ...)
+    return None here. SourcelessBuilder rejects those unsupported pairs
+    before constructing an untracked receiver VT; sourced callers retain
+    their normal handling.
+
+    inference_mode.clone() forwards `self.mode`, which needs its own source
+    to be guarded safely -- baking it in as an unguarded constant would let
+    a cached compile silently go stale if the real object's `.mode` is
+    mutated later without an intervening recompile (reproduced via
+    `im = torch.inference_mode(True); ...; im.mode = False` with no
+    `torch._dynamo.reset()` between compiles). When `obj_source` is None
+    (the object itself has no source -- gh-194763's actual scope), there is
+    no way to derive a source for `.mode` either, so this case falls
+    through (return None) instead of guessing. The primary sourceless
+    builder path rejects this pair before constructing an untracked
+    receiver; other callers apply their own unsupported fallback.
+
+    Returns None if `func`/`obj` don't match a handled case; the caller
+    should fall through to its own default handling in that case.
+    """
+    if (
+        args
+        or kwargs
+        or not is_reconstructable_decorator_ctx_manager_clone(func, obj.__class__)
+    ):
+        return None
+    if func is torch.utils._contextlib._DecoratorContextManager.clone:
+        return variables.TorchCtxManagerClassVariable(obj.__class__).call_function(
+            tx, [], {}
+        )
+    if obj_source is None:
+        return None
+    mode_var = VariableTracker.build(tx, obj.mode, AttrSource(obj_source, "mode"))
+    return variables.TorchCtxManagerClassVariable(obj.__class__).call_function(
+        tx, [mode_var], {}
+    )
+
+
 def is_generic_ctx_manager_cls(cls: type) -> bool:
     # A class is wrapped/entered as a GenericContextWrappingVariable only when
     # its __enter__/__exit__ are plain Python-function methods: GCWV.enter/exit
@@ -3153,26 +3239,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif istype(self.value, types.MethodType):
             func = self.value.__func__
             obj = self.value.__self__
-            if (
-                func is torch.utils._contextlib._DecoratorContextManager.clone
-                and variables.TorchCtxManagerClassVariable.is_matching_cls(
-                    obj.__class__
-                )
-                and not (args or kwargs)
-            ):
-                return variables.TorchCtxManagerClassVariable(
-                    obj.__class__
-                ).call_function(tx, args, kwargs)
-
-            if (
-                func is torch.autograd.grad_mode.inference_mode.clone
-                and obj.__class__ is torch.autograd.grad_mode.inference_mode
-            ):
-                # simulate the inference_mode.clone implementation
-                var = VariableTracker.build(tx, obj.mode)  # type: ignore[attr-defined]
-                return variables.TorchCtxManagerClassVariable(
-                    obj.__class__
-                ).call_function(tx, [var], kwargs)
+            obj_source = (
+                AttrSource(self.source, "__self__") if self.source is not None else None
+            )
+            reconstructed = maybe_reconstruct_decorator_ctx_manager_clone(
+                tx, func, obj, obj_source, args, kwargs
+            )
+            if reconstructed is not None:
+                return reconstructed
 
             if self.source is None:
                 unimplemented(
