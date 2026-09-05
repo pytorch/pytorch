@@ -517,7 +517,7 @@ class TestSchemaCheckModeOpInfo(JitTestCase):
             with SchemaCheckMode():
                 op(sample.input, *sample.args, **sample.kwargs)
 
-instantiate_device_type_tests(TestSchemaCheckModeOpInfo, globals())
+instantiate_device_type_tests(TestSchemaCheckModeOpInfo, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
     run_tests()
