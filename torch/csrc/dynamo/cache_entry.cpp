@@ -8,7 +8,7 @@
 #include <atomic>
 
 CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
-    : backend{py::cast<py::object>(get_backend(backend))} {
+    : backend{get_backend(backend)} {
   this->guard_manager = guarded_code.attr("guard_manager");
   this->code = guarded_code.attr("code");
   this->compile_id = guarded_code.attr("compile_id");
@@ -85,44 +85,50 @@ void enable_precompile_cache_keys() {
   precompile_cache_keys_in_use.store(true, std::memory_order_relaxed);
 }
 
-// Borrowed on success, nullptr when absent, WITHOUT raising. py::hasattr and
+// Owned on success, empty when absent, WITHOUT raising. py::hasattr and
 // PyObject_GetAttrString both build a str from the char* and then raise and
 // clear an AttributeError on a miss, and every level of every intercepted
 // frame's callback chain is a miss for the attributes below. Interned names
 // plus the no-raise lookup keep the walk off the exception path entirely.
-PyObject* lookup_optional(py::handle handle, PyObject* name) {
+py::object lookup_optional(py::handle handle, PyObject* name) {
   PyObject* value = nullptr;
   // pythoncapi_compat provides PyObject_GetOptionalAttr before 3.13.
   if (PyObject_GetOptionalAttr(handle.ptr(), name, &value) < 0) {
     PyErr_Clear();
-    return nullptr;
+    return py::object();
   }
-  // A borrowed reference is what the caller wants and what the chain keeps
-  // alive; drop the one the lookup handed us rather than leak it.
-  Py_XDECREF(value);
-  return value;
+  // Own the new reference (empty when the attribute is absent). A computed
+  // attribute (property / __getattr__) has no other owner, so a borrowed
+  // pointer would dangle the moment this returns.
+  return py::reinterpret_steal<py::object>(value);
 }
 
-PyObject* get_backend(PyObject* callback) {
+// Returns an OWNED reference, so the _torchdynamo_cache_key /
+// _torchdynamo_orig_backend attributes may be computed (property /
+// __getattr__) without the returned backend dangling.
+py::object get_backend(PyObject* callback) {
   static PyObject* cache_key_name =
       PyUnicode_InternFromString("_torchdynamo_cache_key");
   static PyObject* orig_backend_name =
       PyUnicode_InternFromString("_torchdynamo_orig_backend");
   const bool check_cache_key =
       precompile_cache_keys_in_use.load(std::memory_order_relaxed);
-  py::handle handle = py::handle(callback);
+  // `current` owns a reference at every step, so each attribute read runs
+  // against a live object and the returned backend is never a dangling pointer
+  // even when a link in the chain is a computed attribute.
+  py::object current = py::reinterpret_borrow<py::object>(py::handle(callback));
   while (true) {
     if (check_cache_key) {
-      PyObject* key = lookup_optional(handle, cache_key_name);
-      if (key != nullptr) {
+      py::object key = lookup_optional(current, cache_key_name);
+      if (key) {
         return key;
       }
     }
-    PyObject* next = lookup_optional(handle, orig_backend_name);
-    if (next == nullptr) {
+    py::object next = lookup_optional(current, orig_backend_name);
+    if (!next) {
       break;
     }
-    handle = py::handle(next);
+    current = std::move(next);
   }
-  return handle.ptr();
+  return current;
 }
