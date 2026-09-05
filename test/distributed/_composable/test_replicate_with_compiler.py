@@ -28,16 +28,15 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     skip_if_lt_x_gpu,
-    sm_is_or_higher_than,
 )
-from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import IS_LINUX, run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_LINUX,
+    run_tests,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils.checkpoint import checkpoint
-
-
-device_type = get_devtype().type
 
 DIM = 2000
 
@@ -81,9 +80,11 @@ class MultiProcessInductorTestCase(DistributedTestBase, InductorTestCase):
 
 
 class ReplicateTest(MultiProcessInductorTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
-        return min(2, torch.get_device_module(device_type).device_count())
+        return min(2, torch.accelerator.device_count())
 
     def _test_compile(
         self,
@@ -98,7 +99,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self.create_pg(device)
         torch._dynamo.config.optimize_ddp = "python_reducer"
         torch.manual_seed(123)
-        if device_type == "xpu":
+        if device == "xpu":
             torch.use_deterministic_algorithms(True, warn_only=True)
         model = Net(checkpoint=checkpoint).to(device)
         input = torch.randn([1, DIM], device=device)
@@ -178,9 +179,12 @@ class ReplicateTest(MultiProcessInductorTestCase):
         )
         dist.destroy_process_group()
 
+
+class ReplicateTestCPU(ReplicateTest):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/160597")
     def test_compile_cpu(self):
-        # Test the coalesced_op with CPU.
         torch._inductor.config._fuse_ddp_communication_passes = [
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
@@ -188,69 +192,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self._test_compile(no_sync=False, device="cpu")
 
     def test_compile_cpu_no_sync(self):
-        # Test the coalesced_op with CPU.
         torch._inductor.config._fuse_ddp_communication_passes = [
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
         self._test_compile(no_sync=True, device="cpu")
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
-    @torch._inductor.config.patch(
-        reorder_for_locality=False, reorder_for_peak_memory=False
-    )
-    def test_compile_gpu(self):
-        self._test_compile(no_sync=False, checkpoint=False, device=device_type)
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
-    @torch._inductor.config.patch(
-        reorder_for_locality=False, reorder_for_peak_memory=False
-    )
-    def test_compile_gpu_ac(self):
-        self._test_compile(no_sync=False, checkpoint=True, device=device_type)
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
-    def test_compile_bf16(self):
-        # Check device capability wrt bf16
-        if (
-            not sm_is_or_higher_than(torch.device(device_type), 8, 0)
-            and torch.version.hip is None
-        ):
-            self.skipTest("bf16 requires sm >= 8.0")
-
-        def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
-            model.register_comm_hook(None, ddp_default_hooks.bf16_compress_hook)
-            compiled_m = compiled_replicate_model._orig_mod
-            compiled_m.register_comm_hook(None, ddp_default_hooks.bf16_compress_hook)
-            compiled_ddp_model.register_comm_hook(
-                None, ddp_default_hooks.bf16_compress_hook
-            )
-
-        self._test_compile(no_sync=False, setup_func=setup, device=device_type)
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
-    def test_compile_fp16(self):
-        def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
-            model.register_comm_hook(None, ddp_default_hooks.fp16_compress_hook)
-            compiled_m = compiled_replicate_model._orig_mod
-            compiled_m.register_comm_hook(None, ddp_default_hooks.fp16_compress_hook)
-            compiled_ddp_model.register_comm_hook(
-                None, ddp_default_hooks.fp16_compress_hook
-            )
-
-        # TODO: figure out why we need to disable Inductor to avoid test errors.
-        self._test_compile(
-            no_sync=False, setup_func=setup, no_inductor=True, device=device_type
-        )
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
-    def test_compile_backward_only(self):
-        self._test_compile(no_sync=False, no_compile_forward=True, device=device_type)
 
     def test_ddp_optimizer_splits_graph(self):
         if self.world_size < 2:
@@ -393,12 +339,71 @@ class ReplicateTest(MultiProcessInductorTestCase):
         fc.run(code)
 
 
+
+
+class ReplicateTestGPU(ReplicateTest):
+    hw_classification = HardwareClassification.CUDA
+
+    @skip_if_lt_x_gpu(2)
+    @torch._inductor.config.patch(
+        reorder_for_locality=False, reorder_for_peak_memory=False
+    )
+    def test_compile_gpu(self, device):
+        self._test_compile(no_sync=False, checkpoint=False, device=device)
+
+    @skip_if_lt_x_gpu(2)
+    @torch._inductor.config.patch(
+        reorder_for_locality=False, reorder_for_peak_memory=False
+    )
+    def test_compile_gpu_ac(self, device):
+        self._test_compile(no_sync=False, checkpoint=True, device=device)
+
+    @skip_if_lt_x_gpu(2)
+    def test_compile_bf16(self, device):
+        major, _ = torch.cuda.get_device_capability()
+        if major < 8 and torch.version.hip is None:
+            self.skipTest("bf16 requires compute capability >= 8.0")
+
+        def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
+            model.register_comm_hook(None, ddp_default_hooks.bf16_compress_hook)
+            compiled_m = compiled_replicate_model._orig_mod
+            compiled_m.register_comm_hook(None, ddp_default_hooks.bf16_compress_hook)
+            compiled_ddp_model.register_comm_hook(
+                None, ddp_default_hooks.bf16_compress_hook
+            )
+
+        self._test_compile(no_sync=False, setup_func=setup, device=device)
+
+    @skip_if_lt_x_gpu(2)
+    def test_compile_fp16(self, device):
+        def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
+            model.register_comm_hook(None, ddp_default_hooks.fp16_compress_hook)
+            compiled_m = compiled_replicate_model._orig_mod
+            compiled_m.register_comm_hook(None, ddp_default_hooks.fp16_compress_hook)
+            compiled_ddp_model.register_comm_hook(
+                None, ddp_default_hooks.fp16_compress_hook
+            )
+
+        self._test_compile(
+            no_sync=False, setup_func=setup, no_inductor=True, device=device
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_compile_backward_only(self, device):
+        self._test_compile(no_sync=False, no_compile_forward=True, device=device)
+
+
+instantiate_device_type_tests(ReplicateTestGPU, globals(), only_for="cuda", allow_xpu=True)
+
+
 class DDP_TP_Test(InductorTestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         self.rank = 0
         self.world_size = 4
-        torch.get_device_module(device_type).set_device(self.rank)
+        torch.cuda.set_device(self.rank)
 
         store = FakeStore()
         dist.init_process_group(
@@ -414,12 +419,11 @@ class DDP_TP_Test(InductorTestCase):
     @unittest.skip(
         "Temporarily disabled due to SymInt error: `unhashable type: non-nested SymInt`"
     )
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_ddp_tp(self):
+    def test_ddp_tp(self, device):
         ref_model = Net()
         compiled_replicate_model = deepcopy(ref_model)
         mesh_2d = init_device_mesh(
-            device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+            device, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
@@ -438,7 +442,7 @@ class DDP_TP_Test(InductorTestCase):
             compiled_replicate_model, device_mesh=dp_mesh
         )
         compiled_replicate_model = torch.compile(compiled_replicate_model)
-        data = torch.randn([1, DIM])
+        data = torch.randn([1, DIM], device=device)
         with compiled_autograd._enable(compiler_fn()):
             loss = compiled_replicate_model(data).sum()
             # TODO: We need "pre-dispatch tracing of backward graph" to make this work:
@@ -455,6 +459,7 @@ class DDP_TP_Test(InductorTestCase):
         #     ref_model.parameters(), compiled_replicate_model.parameters()
         # ):
         #     self.assertEqual(p1.grad, p2.grad)
+instantiate_device_type_tests(DDP_TP_Test, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
