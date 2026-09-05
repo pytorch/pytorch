@@ -13,6 +13,7 @@ import unittest
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import patch
 
 from parameterized import parameterized_class
 
@@ -25,6 +26,7 @@ from torch._inductor.utils import fresh_cache
 from torch.export import Dim
 from torch.export.experimental import _ExportPackage
 from torch.export.pt2_archive._package import (
+    _load_aoti,
     AOTICompiledModel,
     load_pt2,
     load_weights_to_pt2_contents,
@@ -73,6 +75,25 @@ def compile(
     )  # type: ignore[arg-type]
     loaded = load_package(package_path)
     return loaded
+
+
+class TestAOTInductorPackageAPI(TestCase):
+    def test_load_aoti_reuses_loader_metadata(self):
+        with (
+            patch(
+                "torch.export.pt2_archive._package.torch._C._aoti.AOTIModelPackageLoader"
+            ) as package_loader,
+            patch("torch._inductor.codecache.get_device_information", return_value={}),
+        ):
+            loader = package_loader.return_value
+            loader.get_metadata.return_value = {"AOTI_DEVICE_KEY": "cpu"}
+
+            loaded = _load_aoti("model.pt2", "model", False, 1, -1)
+
+        self.assertIs(loaded.loader, loader)
+        package_loader.assert_called_once_with("model.pt2", "model", False, 1, -1)
+        loader.get_metadata.assert_called_once_with()
+        package_loader.load_metadata_from_package.assert_not_called()
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
