@@ -54,6 +54,17 @@ def _time_fn(fn: Callable):
     return start_event.elapsed_time(end_event)
 
 
+def _time_ref_and_test(ref_fn: Callable, test_fn: Callable, iters: int = 3):
+    # GPU sleeps burn a fixed number of cycles, whose wall-clock duration can
+    # vary with DVFS and contention. Interleave measurements to sample similar
+    # clock windows, and use the least-perturbed time from each.
+    ref_time = test_time = float("inf")
+    for _ in range(iters):
+        ref_time = min(ref_time, _time_fn(ref_fn))
+        test_time = min(test_time, _time_fn(test_fn))
+    return ref_time, test_time
+
+
 class TestFullyShardOverlap(FSDPTest):
     """
     NOTE: Testing stream overlap in PyTorch CI is tricky.
@@ -139,8 +150,7 @@ class TestFullyShardOverlap(FSDPTest):
             with patch_all_gather(delayed_all_gather):
                 model(inp)
 
-        ref_fwd_time = _time_fn(ref_fwd)
-        fwd_time = _time_fn(fwd)
+        ref_fwd_time, fwd_time = _time_ref_and_test(ref_fwd, fwd)
         # Forward: only 1st all-gather is exposed
         # NOTE: Do not enforce the expected forward time due to flakiness in CI
         # expected_fwd_time = comm_sleep_ms + num_linears * compute_sleep_ms + buffer_ms
@@ -181,8 +191,7 @@ class TestFullyShardOverlap(FSDPTest):
                 loss = model(inp).sum()
                 loss.backward()
 
-        ref_fwd_bwd_time = _time_fn(ref_fwd_bwd)
-        fwd_bwd_time = _time_fn(fwd_bwd)
+        ref_fwd_bwd_time, fwd_bwd_time = _time_ref_and_test(ref_fwd_bwd, fwd_bwd)
         # Backward: only 1st all-gather and last reduce-scatter are exposed;
         # double the backward compute since computing two gradients per layer
         # NOTE: Do not enforce the expected forward-backward time due to
