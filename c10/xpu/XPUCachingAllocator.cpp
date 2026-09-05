@@ -507,6 +507,69 @@ class RingBuffer {
 
 static char SHAREABLE_HANDLE_VERSION = 1;
 enum ShareableHandleType : char { SHAREABLE_XPU_MALLOC = 'c' };
+// BlockState, SegmentState, and PrivatePoolState contain the information
+// needed to reconstruct a private pool to a previous state.
+struct BlockState {
+  c10::DeviceIndex device = 0;
+  sycl::queue* queue = nullptr;
+  stream_set stream_uses;
+  size_t size = 0;
+  void* ptr = nullptr;
+  bool allocated = false;
+
+  explicit BlockState(Block* block);
+};
+
+struct SegmentState {
+  std::vector<BlockState> blocks;
+  bool is_small = false;
+
+  explicit SegmentState(Block* head);
+};
+
+struct PrivatePoolState : AllocatorState {
+  MempoolId_t owner_id = {0, 0};
+  std::vector<SegmentState> segments;
+
+  PrivatePoolState(
+      MempoolId_t pool_id,
+      const std::vector<Block*>& private_pool_head_blocks);
+};
+
+struct RestoreResult {
+  std::vector<void*> allocations_freed;
+  std::vector<Block*> allocations_created;
+};
+
+BlockState::BlockState(Block* block)
+    : device(block->device),
+      queue(block->queue),
+      stream_uses(block->stream_uses),
+      size(block->size),
+      ptr(block->ptr),
+      allocated(block->allocated) {
+  TORCH_CHECK(
+      block->event_count == 0,
+      "Events should have synchronized when checkpointing block");
+}
+
+SegmentState::SegmentState(Block* head) {
+  TORCH_INTERNAL_ASSERT(head->prev == nullptr && head->pool != nullptr);
+  is_small = head->pool->is_small;
+
+  for (Block* curr = head; curr != nullptr; curr = curr->next) {
+    blocks.emplace_back(curr);
+  }
+}
+
+PrivatePoolState::PrivatePoolState(
+    MempoolId_t pool_id,
+    const std::vector<Block*>& private_pool_head_blocks)
+    : owner_id(std::move(pool_id)) {
+  for (Block* head : private_pool_head_blocks) {
+    segments.emplace_back(head);
+  }
+}
 
 } // anonymous namespace
 
@@ -1423,6 +1486,113 @@ class DeviceCachingAllocator {
     }
   }
 
+  // Restores the state of an allocation segment (which may have been split
+  // into multiple blocks) to match a previously checkpointed SegmentState.
+  void setSegmentStateToCheckpoint(
+      Block* block,
+      SegmentState& segment,
+      const std::shared_ptr<GatheredContext>& context,
+      RestoreResult& rr) {
+    Block* curr_block = block;
+    Block* last_block = block;
+
+    TORCH_INTERNAL_ASSERT(block->pool);
+    BlockPool& pool = *block->pool;
+    const auto segment_len = segment.blocks.size();
+
+    auto is_unmapped_tail = [](Block* b) {
+      return b->next == nullptr && !b->mapped && !b->allocated;
+    };
+
+    // Allocate all blocks in the segment.
+    for (size_t i = 0; i < segment_len; ++i) {
+      // Note [Last block when restoring checkpoint state]
+      // The last block in an expandable segment is one of:
+      // - case 1: an unmapped tail with remaining virtual address space.
+      // - case 2: segment has grown since checkpoint; after allocating all
+      //      checkpoint blocks, one extra mapped block and an unmapped tail
+      //      remain.
+      if (i == segment_len - 1 && curr_block->expandable_segment) {
+        bool valid_structure =
+            /* case 1 */ is_unmapped_tail(curr_block) ||
+            /* case 2 */
+            (curr_block->mapped && !curr_block->allocated && curr_block->next &&
+             is_unmapped_tail(curr_block->next));
+        TORCH_CHECK(
+            valid_structure,
+            "Invalid expandable segment structure during checkpoint restore");
+        continue;
+      }
+
+      auto& block_state = segment.blocks.at(i);
+      AllocParams params(
+          block_state.device,
+          block_state.size,
+          block_state.queue,
+          &pool,
+          block_state.size);
+      pool.blocks.erase(curr_block);
+      params.block = curr_block;
+      params.stat_types = get_stat_types_for_pool(pool);
+
+      bool split = curr_block->size > block_state.size;
+
+      curr_block = alloc_found_block(params, block_state.size, context, split);
+
+      TORCH_CHECK(curr_block->ptr == block_state.ptr);
+      TORCH_CHECK(curr_block->size == block_state.size);
+
+      last_block = curr_block;
+      curr_block = curr_block->next;
+
+      TORCH_CHECK((curr_block != nullptr) == ((i + 1) < (segment_len)));
+    }
+
+    while (last_block->prev) {
+      last_block = last_block->prev;
+    }
+
+    // Free blocks that are not allocated in the checkpoint.
+    curr_block = last_block;
+
+    for (size_t i = 0; i < segment_len; ++i, curr_block = curr_block->next) {
+      if (i == segment_len - 1 && curr_block->expandable_segment) {
+        // See Note [Last block when restoring checkpoint state]
+        bool valid_structure =
+            /* case 1 */ is_unmapped_tail(curr_block) ||
+            /* case 2 */
+            (curr_block->mapped && !curr_block->allocated && curr_block->next &&
+             is_unmapped_tail(curr_block->next));
+        TORCH_CHECK(
+            valid_structure,
+            "Invalid expandable segment structure during checkpoint restore");
+        continue;
+      }
+
+      auto& block_state = segment.blocks.at(i);
+      TORCH_INTERNAL_ASSERT(curr_block != nullptr);
+
+      if (block_state.allocated) {
+        rr.allocations_created.push_back(curr_block);
+        continue;
+      }
+
+      free(curr_block);
+
+      TORCH_CHECK(curr_block->ptr == block_state.ptr);
+      TORCH_CHECK(curr_block->allocated == block_state.allocated);
+
+      // See Note [Last block when restoring checkpoint state]
+      // The last mapped block (i == segment_len - 2) may merge with extra
+      // mapped memory from segment growth, making it larger than checkpoint.
+      bool is_last_mapped =
+          (i == segment_len - 2) && curr_block->expandable_segment;
+      TORCH_CHECK(
+          curr_block->size == block_state.size ||
+          (is_last_mapped && curr_block->size >= block_state.size));
+    }
+  }
+
   std::vector<Block*> get_private_pool_head_blocks(PrivatePool* pool) const {
     std::vector<Block*> blocks;
     for (Block* b : active_blocks) {
@@ -1682,6 +1852,132 @@ class DeviceCachingAllocator {
       stats.inactive_split_bytes[statType].reset_peak();
       stats.requested_bytes[statType].reset_peak();
     }
+  }
+
+  std::unique_ptr<PrivatePoolState> getCheckpointState(MempoolId_t id) {
+    auto context = maybeGatherContext(RecordContext::ALL);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    insert_events_deferred_until_no_capture(context);
+
+    auto pool = graph_pools.find(id);
+    if (pool != graph_pools.end()) {
+      auto private_pool_head_blocks =
+          get_private_pool_head_blocks(pool->second.get());
+      return std::make_unique<PrivatePoolState>(id, private_pool_head_blocks);
+    } else if (graph_pools_freeable.count(id)) {
+      TORCH_CHECK(false, "Not expected to checkpoint freeable graph");
+    } else {
+      TORCH_CHECK(false, "Could not find pool of id");
+    }
+  }
+
+  void freeBlocksAllocatedToPool(PrivatePool* private_pool, RestoreResult& rr) {
+    auto pool_blocks = get_private_pool_head_blocks(private_pool);
+
+    std::vector<Block*> head_blocks;
+    for (Block* block : pool_blocks) {
+      if (block->prev == nullptr) {
+        head_blocks.push_back(block);
+      }
+    }
+
+    for (Block* block : head_blocks) {
+      Block* curr = block;
+
+      while (curr) {
+        // When we free a block, its pointer should never change
+        // only its adjacent blocks, so free, then look at pointer
+        if (curr->allocated) {
+          TORCH_CHECK(
+              curr->event_count == 0,
+              "Events should have synchronized when setting checkpointed block");
+          rr.allocations_freed.push_back(curr->ptr);
+          free(curr);
+          TORCH_CHECK(!curr->allocated)
+        }
+        curr = curr->next;
+      }
+    }
+
+    for (Block* b : get_private_pool_head_blocks(private_pool)) {
+      Block* curr = b;
+      while (curr) {
+        TORCH_CHECK(!curr->allocated);
+        curr = curr->next;
+      }
+    }
+  }
+
+  RestoreResult setCheckpointPoolState(PrivatePoolState& pps) {
+    std::shared_ptr<GatheredContext> context =
+        maybeGatherContext(RecordContext::STATE);
+
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    RestoreResult rr;
+
+    TORCH_CHECK(
+        !graph_pools_freeable.count(pps.owner_id),
+        "Not expected to checkpoint freeable graph");
+
+    auto pool = graph_pools.find(pps.owner_id);
+    TORCH_CHECK(pool != graph_pools.end(), "Could not find private pool id");
+
+    PrivatePool* private_pool = pool->second.get();
+
+    freeBlocksAllocatedToPool(private_pool, rr);
+
+    std::unordered_map<void*, Block*> ptrs_to_blocks;
+    // at this point, all of the blocks should be free, so they will all be in
+    // the block set
+    for (Block* block : private_pool->small_blocks.blocks) {
+      ptrs_to_blocks[block->ptr] = block;
+    }
+    for (Block* block : private_pool->large_blocks.blocks) {
+      ptrs_to_blocks[block->ptr] = block;
+    }
+
+    for (auto& segment : pps.segments) {
+      auto ptr = segment.blocks.at(0).ptr;
+      TORCH_CHECK(ptrs_to_blocks.count(ptr), " could not find ", ptr)
+      auto block = ptrs_to_blocks[ptr];
+
+      setSegmentStateToCheckpoint(block, segment, context, rr);
+    }
+    return rr;
+  }
+
+  bool checkPoolLiveAllocations(
+      MempoolId_t mempool_id,
+      const std::unordered_set<void*>& expected_live_allocations) const {
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+
+    PrivatePool* pool = nullptr;
+    auto pool_it = graph_pools.find(mempool_id);
+    TORCH_CHECK(pool_it != graph_pools.end(), "Could not find pool of id");
+    pool = pool_it->second.get();
+
+    TORCH_INTERNAL_ASSERT(pool != nullptr);
+
+    size_t allocated_pool_blocks = 0;
+
+    for (Block* b : active_blocks) {
+      TORCH_INTERNAL_ASSERT(b != nullptr);
+      TORCH_INTERNAL_ASSERT(b->pool != nullptr);
+      if (b->allocated && b->pool->owner_PrivatePool == pool) {
+        if (!expected_live_allocations.count(b->ptr)) {
+          return false;
+        }
+
+        allocated_pool_blocks += 1;
+      }
+    }
+
+    return allocated_pool_blocks == expected_live_allocations.size();
+  }
+
+  bool isHistoryEnabled() const {
+    return record_history;
   }
 
   void record_trace(
@@ -2268,6 +2564,52 @@ class NativeCachingAllocator : public XPUAllocator {
     return result;
   }
 
+  std::shared_ptr<AllocatorState> getCheckpointState(
+      c10::DeviceIndex device,
+      MempoolId_t id) {
+    return device_allocators[device]->getCheckpointState(id);
+  }
+
+  CheckpointDelta setCheckpointPoolState(
+      c10::DeviceIndex device,
+      std::shared_ptr<AllocatorState> as) {
+    std::shared_ptr<PrivatePoolState> pps =
+        std::dynamic_pointer_cast<PrivatePoolState>(as);
+
+    TORCH_CHECK(pps, "Expected PrivatePoolState");
+
+    auto rr = device_allocators[device]->setCheckpointPoolState(*pps);
+
+    CheckpointDelta cpd;
+    for (void* ptr : rr.allocations_freed) {
+      get_allocated_block(ptr, /*remove*/ true);
+      cpd.ptrs_freed.push_back(ptr);
+    }
+    for (Block* block : rr.allocations_created) {
+      add_allocated_block(block);
+      cpd.dataptrs_allocd.emplace_back(
+          block->ptr,
+          block->ptr,
+          &local_raw_delete,
+          Device(DeviceType::XPU, device));
+    }
+
+    return cpd;
+  }
+
+  bool isHistoryEnabled() {
+    c10::DeviceIndex device = c10::xpu::current_device();
+    return device_allocators[device]->isHistoryEnabled();
+  }
+
+  bool checkPoolLiveAllocations(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      const std::unordered_set<void*>& expected_live_allocations) {
+    return device_allocators[device]->checkPoolLiveAllocations(
+        mempool_id, expected_live_allocations);
+  }
+  
   void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
     assertValidDevice(dev);
     assertValidDevice(dev_to_access);
@@ -2519,6 +2861,30 @@ void setUseOnOOM(
 
 int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return native_allocator.getPoolUseCount(device, mempool_id);
+}
+
+std::shared_ptr<AllocatorState> getCheckpointState(
+    c10::DeviceIndex device,
+    MempoolId_t id) {
+  return native_allocator.getCheckpointState(device, id);
+}
+
+CheckpointDelta setCheckpointPoolState(
+    c10::DeviceIndex device,
+    std::shared_ptr<AllocatorState> as) {
+  return native_allocator.setCheckpointPoolState(device, std::move(as));
+}
+
+bool isHistoryEnabled() {
+  return native_allocator.isHistoryEnabled();
+}
+
+bool checkPoolLiveAllocations(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id,
+    const std::unordered_set<void*>& expected_live_allocations) {
+  return native_allocator.checkPoolLiveAllocations(
+      device, mempool_id, expected_live_allocations);
 }
 
 } // namespace c10::xpu::XPUCachingAllocator
