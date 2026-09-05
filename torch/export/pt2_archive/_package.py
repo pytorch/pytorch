@@ -748,6 +748,12 @@ class AOTICompiledModel:
     def get_metadata(self) -> dict[str, str]:
         return self.loader.get_metadata()
 
+    def get_input_names(self) -> list[str]:
+        return self.loader.get_input_names()
+
+    def get_output_names(self) -> list[str]:
+        return self.loader.get_output_names()
+
     def load_constants(
         self,
         constants_map: dict[str, torch.Tensor],
