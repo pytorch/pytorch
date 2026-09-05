@@ -40,6 +40,7 @@ from torch.testing._internal.common_device_type import (
     xfail,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_S390X,
     IS_WINDOWS,
@@ -47,21 +48,15 @@ from torch.testing._internal.common_utils import (
     parametrize,
     scoped_load_inline,
     skipIfWindows,
-    skipIfXpu,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
-    HAS_GPU,
     HAS_GPU_AND_TRITON,
+    requires_triton,
 )
 from torch.testing._internal.logging_utils import logs_to_string
-from torch.testing._internal.triton_utils import (
-    requires_cuda_and_triton,
-    requires_gpu_and_triton,
-)
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -139,7 +134,7 @@ class BaseCustomOp(torch.autograd.Function):
         raise NotImplementedError("must override")
 
 
-class TestCompiledAutograd(TestCase):
+class TestCompiledAutogradBase(TestCase):
     def setUp(self) -> None:
         self.exit_stack = contextlib.ExitStack()
         self.exit_stack.enter_context(config.patch("record_runtime_overhead", False))
@@ -188,6 +183,10 @@ class TestCompiledAutograd(TestCase):
             )
         except subprocess.CalledProcessError as e:
             self.fail(f"Subprocess exited with return code: {e.returncode}")
+
+
+class TestCompiledAutogradGeneric(TestCompiledAutogradBase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_hipify_not_loaded_with_import_torch(self):
         script = """
@@ -1600,76 +1599,6 @@ main()
 
         self.check_output_and_recompiles(fn, count=1)
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    def test_issue106555(self):
-        DEVICE = torch.device(GPU_TYPE, 0)
-        NUM_FEATURES = 256
-
-        def bias_sigmoid_mul(x1, x2, bias):
-            x2 = torch.sigmoid(x2 + bias)
-            y = x1 * x2
-            return y
-
-        bias_sigmoid_mul_jit = torch.compile(bias_sigmoid_mul)
-
-        class ModuleWithJit(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear_1 = nn.Linear(NUM_FEATURES, NUM_FEATURES, bias=True)
-                self.linear_2 = nn.Linear(NUM_FEATURES, NUM_FEATURES, bias=False)
-                self.linear_2_bias = nn.Parameter(torch.zeros(NUM_FEATURES))
-
-            def forward(self, input_tensor):
-                x1 = self.linear_1(input_tensor)
-                x2 = self.linear_2(input_tensor)
-                output = bias_sigmoid_mul_jit(x1, x2, self.linear_2_bias)
-                return output
-
-        class Model(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.module_with_jit_1 = ModuleWithJit()
-                self.module_with_jit_2 = ModuleWithJit()
-
-            def forward(self, x, gradient_checkpointing: bool):
-                if gradient_checkpointing:
-                    y = torch.utils.checkpoint.checkpoint(
-                        self._forward, x, use_reentrant=True
-                    )
-                else:
-                    y = self._forward(x)
-                return y
-
-            def _forward(self, x):
-                x = x + self.module_with_jit_1(x)
-                x = x + self.module_with_jit_2(x.transpose(-2, -3)).transpose(-2, -3)
-                return x
-
-        device_interface = get_interface_for_device(GPU_TYPE)
-        device_interface.set_device(device=DEVICE)
-        torch.manual_seed(1234567890)
-        model = Model()
-        model.train()
-        model.to(device=DEVICE)
-        model_parameters = list(model.parameters())
-
-        torch.manual_seed(1234567890)
-        input_tensor = torch.randn(1, 128, 256, NUM_FEATURES).to(device=DEVICE)
-        input_tensor.requires_grad = True
-        target_tensor = torch.randn(1, 128, 256, NUM_FEATURES).to(
-            dtype=input_tensor.dtype, device=DEVICE
-        )
-
-        for _ in range(10):
-            for param in model_parameters:
-                param.grad = None
-            output_tensor = model(
-                x=input_tensor.clone(),
-                gradient_checkpointing=True,
-            )
-            loss = torch.mean(torch.abs(target_tensor - output_tensor))
-            loss.backward()
-
     def test_keep_graph_simple(self):
         x = torch.tensor([2.0], requires_grad=True)
         y = x**2
@@ -1865,93 +1794,6 @@ main()
                 yield z
 
         self.check_output_and_recompiles(fn)
-
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    def test_logging_tensor_flaky(self) -> None:
-        # when you first run some test using triton and then run test_inputs_aliasing_bytecode_stack_restore
-        # resulting in:
-        #   - pytest: `TypeError: unsupported operand type(s) for +: 'Tensor' and 'LoggingTensor'`
-        #   - python: `TypeError: not all arguments converted during string formatting`
-
-        # 1. some triton involving test
-        def fn():
-            def _fn(x):
-                return x
-
-            x = torch.arange(
-                1, 10, requires_grad=True, dtype=torch.float16, device=GPU_TYPE
-            )
-            out = _fn(x)
-            loss = out.sum()
-            loss.backward()
-
-        with compiled_autograd._enable(compiler_fn):
-            fn()
-
-        logging.getLogger().setLevel(
-            logging.WARNING
-        )  # triton setup overwrote it to INFO
-        # 2. test_inputs_aliasing_bytecode_stack_restore
-        from torch.testing._internal.logging_tensor import LoggingTensor
-
-        def forward(inputs):
-            add = inputs[0] + 1
-            add_1 = add + inputs[1]
-            out = add_1.cpu()
-            return (out,)
-
-        gm = torch.fx.symbolic_trace(forward)
-        print(gm.print_readable())
-        torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
-        compiled_fn = torch.compile(gm)
-
-        inputs = [
-            torch.ones(1000000, dtype=torch.float32),
-            LoggingTensor(torch.ones(1)),
-        ]
-
-        compiled_fn(inputs)
-
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    def test_custom_fn_output_metadata(self):
-        def my_compiler_fn(gm):
-            for node in gm.graph.nodes:
-                if isinstance(node.target, torch._ops.OpOverload):
-                    if node.target._name == "aten::_to_copy":
-                        raise AssertionError(
-                            "there should be no implicit copies (e.g. dtype casting)"
-                        )
-
-            def inner_compiler(gm_, example_inputs_):
-                counters["compiled_autograd"]["compiles"] += 1
-                return inductor.compile(gm_, example_inputs_)
-
-            return torch.compile(
-                gm, backend=inner_compiler, fullgraph=True, dynamic=True
-            )
-
-        def fn():
-            class MyFn(torch.autograd.Function):
-                @staticmethod
-                def forward(ctx, x):
-                    return x
-
-                @staticmethod
-                def backward(ctx, gO):
-                    return gO
-
-            x = torch.arange(
-                1, 10, requires_grad=True, dtype=torch.float16, device=GPU_TYPE
-            )
-            x_view = x.view(3, 3)
-            out = MyFn.apply(x_view)
-            loss = out.sum()
-            loss.backward()
-            yield x.dtype
-            yield x.device
-            yield x.grad
-
-        self.check_output_and_recompiles(fn, count=1)
 
     def test_custom_fn_with_same_graph(self):
         def fn():
@@ -3059,114 +2901,6 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent_$is_traceable, m) {
                 fn, count=[3, 6], compiler_fn=make_compiler_fn(fullgraph=False)
             )
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    def test_free_activation_memory(self):
-        script = """
-import torch
-from torch._dynamo.device_interface import get_interface_for_device
-from torch.testing._internal.inductor_utils import GPU_TYPE
-
-def main():
-    device_interface = get_interface_for_device(GPU_TYPE)
-    assert(device_interface.memory_allocated() == 0)  # noqa: S101
-
-    # Use an op to check that the memory is freed by the time the op is executed
-    def assertion_impl(to_clone):
-        mem_allocated = device_interface.memory_allocated()
-        assert mem_allocated < 4000000  # noqa: S101  # some activations should be freed
-        return to_clone.clone()
-
-    with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
-        lib.define(
-            "assertion_op(Tensor x) -> Tensor", tags=(torch.Tag.pt2_compliant_tag,)
-        )
-        lib.impl("assertion_op", assertion_impl, "CPU")
-        lib.impl("assertion_op", lambda x: x.clone(), "Meta")
-
-        # Create a graph that allows inputs stealing
-        def forward(activations):
-            add = activations[0] + 1
-            out = add.cpu()
-            cloned_out = torch.ops.test_compiled_autograd.assertion_op(out)
-            return (cloned_out,)
-
-        gm = torch.fx.symbolic_trace(forward)
-        torch._dynamo.utils.set_locals_to_steal(gm, ["activations"])
-        compiled_fn = torch.compile(gm)
-
-        # allocate at least 4,000,000 bytes (1,000,000 * 4 bytes)
-        activations = [torch.ones(1000000, dtype=torch.float32, device=GPU_TYPE)]
-        assert device_interface.memory_allocated() > 4000000  # noqa: S101
-
-        out = compiled_fn(activations)
-        assert len(activations) == 0  # noqa: S101
-
-main()
-        """
-        self.run_as_subprocess(script)
-
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    def test_free_activation_memory_subclass(self):
-        # cover the case when aot inputs have subclasses, resulting in a different runtime wrapper
-
-        script = """
-import torch
-from torch._dynamo.device_interface import get_interface_for_device
-from torch.testing._internal.inductor_utils import GPU_TYPE
-
-def main():
-    device_interface = get_interface_for_device(GPU_TYPE)
-    assert device_interface.memory_allocated() == 0  # noqa: S101
-
-    # Use an op to check that the memory is freed by the time the op is executed
-    def assertion_impl(to_clone):
-        mem_allocated = device_interface.memory_allocated()
-        assert mem_allocated < 1200000  # noqa: S101  # some activations should be freed
-        assert mem_allocated > 800000  # noqa: S101  # currently subclasses don't seem to be freed in inductor
-        return to_clone.clone()
-
-    with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
-        lib.define(
-            "assertion_op(Tensor x) -> Tensor", tags=(torch.Tag.pt2_compliant_tag,)
-        )
-        lib.impl("assertion_op", assertion_impl, "CPU")
-        lib.impl("assertion_op", lambda x: x.clone(), "Meta")
-        lib.impl("assertion_op", lambda x: x.clone(), "NestedTensor")
-
-        def fn(inputs):
-            _, y = inputs
-            out = y.cpu()
-            cloned_out = torch.ops.test_compiled_autograd.assertion_op(out)
-            return cloned_out
-
-        gm = torch.fx.symbolic_trace(fn)
-        torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
-        compiled_fn = torch.compile(gm)
-
-        from torch.nested._internal.nested_tensor import jagged_from_list
-
-        activations = [
-            jagged_from_list(
-                [
-                    torch.ones((1, 100000), device=GPU_TYPE),  # 400,000 bytes
-                    torch.ones((1, 100000), device=GPU_TYPE),  # 400,000 bytes
-                ],
-                None,
-            )[
-                0
-            ],  # NestedTensor
-            torch.ones((1, 100000), device=GPU_TYPE),  # 400,000 bytes
-        ]
-        # 1,200,000 bytes (3 * 4 * 100,000 bytes)
-        assert device_interface.memory_allocated() > 1200000  # noqa: S101
-
-        out = compiled_fn(activations)
-        assert len(activations) == 0  # noqa: S101
-
-main()
-        """
-        self.run_as_subprocess(script)
-
     def test_callback_graph_break_throws_error(self):
         called = [0]
 
@@ -3193,191 +2927,6 @@ main()
             with compiled_autograd._enable(make_compiler_fn(fullgraph=False)):
                 b = MyFunc.apply(a)
                 b.sum().backward()
-
-    @requires_cuda_and_triton
-    def test_cudagraphs_cpu_division(self):
-        from torch._dynamo.testing import reduce_to_scalar_loss
-
-        model = torch.nn.Linear(10, 10, dtype=torch.float16).cuda()
-        inputs = torch.randn(10, 10, dtype=torch.float16).cuda()
-        out = model(inputs)
-        loss = reduce_to_scalar_loss(out)
-
-        stderr_msgs = io.StringIO()
-        with (
-            mock.patch("sys.stderr", stderr_msgs),
-            compiled_autograd._enable(compiler_fn),
-        ):
-            torch._inductor.config.triton.cudagraphs = True
-            loss.backward()
-            torch._inductor.config.triton.cudagraphs = False
-
-        if inductor_config.cpp_wrapper:
-            self.assertIn("skipping cudagraphs", stderr_msgs.getvalue())
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
-        else:
-            self.assertNotIn("skipping cudagraphs", stderr_msgs.getvalue())
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
-
-    @parametrize("graph_partition", [False, True])
-    def test_cudagraphs_cpu_graph(self, graph_partition):
-        from torch._dynamo.testing import reduce_to_scalar_loss
-
-        model = torch.nn.Linear(10, 10, dtype=torch.float16)
-        inputs = torch.randn(10, 10, dtype=torch.float16)
-        out = model(inputs)
-        loss = reduce_to_scalar_loss(out)
-
-        with (
-            torch._inductor.config.patch(graph_partition=graph_partition),
-            compiled_autograd._enable(compiler_fn),
-        ):
-            torch._inductor.config.triton.cudagraphs = True
-            loss.backward()
-            torch._inductor.config.triton.cudagraphs = False
-
-        # CPU-only graphs skip cudagraphs regardless of graph_partition setting
-        # (no GPU devices to use cudagraphs with)
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
-
-    @skipIfXpu(msg="cudagraphs not supported on xpu for now!")
-    @requires_gpu_and_triton
-    def test_cudagraphs_sdpa(self):
-        query = torch.rand(
-            32, 8, 128, 64, dtype=torch.float16, device=GPU_TYPE, requires_grad=True
-        )
-        key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=GPU_TYPE)
-        value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=GPU_TYPE)
-        out = torch.nn.functional.scaled_dot_product_attention(query, key, value)
-
-        with (
-            config.patch(compiled_autograd=True),
-            inductor_config.patch("triton.cudagraphs", True),
-        ):
-            opt_bwd = torch.compile(lambda: out.sum().backward())
-            opt_bwd()
-
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-        self.assertEqual(
-            counters["inductor"]["cudagraph_skips"],
-            2 if inductor_config.cpp_wrapper else 0,
-        )
-
-    @requires_cuda_and_triton
-    def test_cudagraphs_cpu_scalar_used_in_python_custom_op(self):
-        class MyFn(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                cpu_tensor = torch.tensor(5)
-                ctx.save_for_backward(x, cpu_tensor)  # visible to c++/autograd
-                ctx.cpu_scalar = 5  # opaque to c++/autograd
-                return x.sum()
-
-            @staticmethod
-            def backward(ctx, gO):
-                x, cpu_tensor = ctx.saved_tensors
-                expand = gO * torch.ones_like(x)
-                return expand * cpu_tensor * ctx.cpu_scalar
-
-        x = torch.randn(10, requires_grad=True, device="cuda")
-        out = MyFn.apply(x)
-        with (
-            config.patch(compiled_autograd=True),
-            inductor_config.patch("triton.cudagraphs", True),
-        ):
-            opt_bwd = torch.compile(lambda: out.backward())
-            opt_bwd()
-
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-        # Compiled autograd lifts custom autograd.Function bwd instead of tracing it.
-        # Must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
-        if inductor_config.graph_partition:
-            # instead of skipping cudagraph, graph partition splits off cpu inputs/outputs and ops
-            # and cudagraphify the remaining computation. So there is no cudagraph skip.
-            expected_cudagraph_skips = 0
-        else:
-            expected_cudagraph_skips = 1
-
-        self.assertEqual(
-            counters["inductor"]["cudagraph_skips"], expected_cudagraph_skips
-        )
-
-    @scoped_load_inline
-    @requires_cuda_and_triton
-    def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self, load_inline):
-        cpp_source = """
-struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
-  static constexpr bool is_traceable = true;
-
-  static torch::Tensor forward(
-      torch::autograd::AutogradContext* ctx,
-      const torch::Tensor& x) {
-    const auto& cpu_tensor = torch::tensor(1);
-    ctx->save_for_backward({x, cpu_tensor});
-    ctx->saved_data["cpu_scalar"] = 1;
-    return x;
-  }
-
-  static torch::autograd::variable_list backward(
-      torch::autograd::AutogradContext *ctx,
-      torch::autograd::variable_list grad_output) {
-    const auto& saved_variables = ctx->get_saved_variables();
-    assert(saved_variables.size() == 2);
-    torch::Tensor x = saved_variables[0];
-    torch::Tensor cpu_tensor = saved_variables[1];
-    int cpu_scalar = ctx->saved_data["cpu_scalar"].toInt();
-    auto expand = grad_output[0] * torch::ones_like(x);
-    torch::autograd::variable_list grad_inputs(1);
-    grad_inputs[0] = expand * cpu_tensor * cpu_scalar;  // autograd engine asserts that tensors are on same device
-    return grad_inputs;
-  }
-};
-
-torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x) {
-  return CustomOpAutogradFunction::apply(x);
-}
-
-TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
-    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
-}
-        """
-
-        module = load_inline(
-            name="test_cudagraphs_cpu_scalar_used_in_cpp_custom_op",
-            cpp_sources=cpp_source,
-            functions="custom_op_backed_by_autograd_fn",
-            verbose=True,
-        )
-
-        x = torch.randn(2, 2, requires_grad=True, device="cuda")
-        with (
-            config.patch(compiled_autograd=True),
-            inductor_config.patch("triton.cudagraphs", True),
-        ):
-            out = torch.ops.test_cudagraphs_cpu_scalar_used_in_cpp_custom_op.custom_op_backed_by_autograd_fn(
-                x
-            )
-            opt_bwd = torch.compile(lambda: out.sum().backward())
-            opt_bwd()
-
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-        # Compiled autograd's initial capture lifts custom C++ autograd::Function bwd instead of tracing
-        # into it. We must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
-        # In the future, we can consider having a cpu scalar movement pass sometime after we trace
-        # into the custom C++ autograd::Function (like in AOTDispatcher)
-        if inductor_config.graph_partition:
-            # instead of skipping cudagraph, graph partition splits off cpu inputs/outputs and ops
-            # and cudagraphify the remaining computation. So there is no cudagraph skip.
-            expected_cudagraph_skips = 0
-        elif inductor_config.cpp_wrapper:
-            expected_cudagraph_skips = 2
-        else:
-            expected_cudagraph_skips = 1
-
-        self.assertEqual(
-            counters["inductor"]["cudagraph_skips"],
-            expected_cudagraph_skips,
-        )
 
     def test_logs(self):
         logs, ctx = logs_to_string(
@@ -3943,34 +3492,6 @@ class CompiledAutograd0(torch.nn.Module):
         self.assertTrue(isinstance(view_nodes[0].args[1][0], torch.fx.Node))
         self.assertTrue(isinstance(view_nodes[1].args[1][0], torch.fx.Node))
 
-    @requires_gpu_and_triton
-    def test_flex_attention(self):
-        def _squared(score, b, h, m, n):
-            """Joint graph needed for correctness"""
-            return score * score
-
-        def fn():
-            @torch.compile(backend="aot_eager")
-            def fwd_bwd(x: torch.Tensor):
-                flex_attention(x, x, x, score_mod=_squared).sum().backward()
-
-            for a, b in zip([12, 24, 12], [64, 128, 64]):
-                v = torch.zeros(
-                    1,
-                    1,
-                    a * b,
-                    b,
-                    dtype=torch.bfloat16,
-                    device=GPU_TYPE,
-                    requires_grad=True,
-                )
-                fwd_bwd(v)
-                yield v.grad
-
-        self.check_output_and_recompiles(
-            fn, count=2, compiler_fn=make_compiler_fn(backend="aot_eager")
-        )
-
     def test_saved_tensor_unpack_hook_ordering(self):
         def f(x, y):
             return x * y
@@ -4110,84 +3631,6 @@ class CompiledAutograd0(torch.nn.Module):
                 count=[1, 0],
                 compiler_fn=make_compiler_fn(backend="ca_eager", gm_hook=check),
             )
-
-    @requires_cuda_and_triton
-    def test_cpu_offloading(self):
-        def fn():
-            def pack(x):
-                return x.cpu()
-
-            def unpack(x):
-                return x.cuda()
-
-            class MyMatMul(torch.autograd.Function):
-                @staticmethod
-                def forward(ctx, x):
-                    ctx.save_for_backward(x)
-                    return torch.matmul(x, x)
-
-                @staticmethod
-                def backward(ctx, grad_out):
-                    (x,) = ctx.saved_tensors
-                    return grad_out * x
-
-            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
-                for i in [10, 100, 10, 20, 30]:
-                    x = torch.randn(i, requires_grad=True).cuda()
-                    MyMatMul.apply(x).sum().backward()
-                    yield x.grad
-
-        i = 0
-
-        def check(gm):
-            nonlocal i
-            if i == 0:
-                i += 1
-                return
-
-            graph_code = normalize_gm(gm.print_readable(print_output=False))
-            self.assertExpectedInline(
-                graph_code,
-                """\
-class CompiledAutograd1(torch.nn.Module):
-    def forward(self, inputs, sizes, scalars, hooks, packed_data):
-        getitem = inputs[0]
-        getitem_1 = inputs[1];  inputs = None
-        getitem_2 = sizes[0];  getitem_2 = None
-        getitem_3 = sizes[1]
-        getitem_4 = sizes[2];  sizes = None
-
-        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cuda', index=0), 6, 0, None), [], False)]);  getitem = None
-        getitem_5 = validate_outputs[0];  validate_outputs = None
-
-        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_5], [True], []);  getitem_5 = None
-        getitem_6 = sum_backward0[0];  sum_backward0 = None
-        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_6], [((None, None, device(type='cuda', index=0), 6, 0, None), [], False)]);  getitem_6 = None
-        getitem_7 = validate_outputs_1[0];  validate_outputs_1 = None
-
-        getitem_8 = hooks[0]
-        getitem_9 = packed_data[0];  packed_data = None
-        getitem_10 = hooks[1];  hooks = None
-        call_hook = torch__dynamo_external_utils_call_hook(getitem_8, getitem_9, hook_type = 'unpack_hook');  getitem_8 = getitem_9 = None
-        call_backward = torch__dynamo_external_utils_call_backward(getitem_10, (call_hook,), getitem_7);  getitem_10 = call_hook = getitem_7 = None
-        getitem_12 = call_backward[0];  call_backward = None
-        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_12], [((None, None, device(type='cuda', index=0), 6, 0, None), [getitem_3], False)]);  getitem_12 = getitem_3 = None
-        getitem_13 = validate_outputs_2[0];  validate_outputs_2 = None
-
-        to_copy_backward0 = torch__dynamo_compiled_autograd_ops_ToCopyBackward0([getitem_13], [True], (None, None, device(type='cpu'), 6, 0, None));  getitem_13 = None
-        getitem_14 = to_copy_backward0[0];  to_copy_backward0 = None
-        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_14], [((None, None, device(type='cpu'), 6, 0, None), [getitem_4], False)]);  getitem_14 = getitem_4 = None
-        getitem_15 = validate_outputs_3[0];  validate_outputs_3 = None
-
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, None, getitem_15);  getitem_1 = getitem_15 = accumulate_grad__default = None
-        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
-        return []
-""",
-            )
-
-        self.check_output_and_recompiles(
-            fn, compiler_fn=make_compiler_fn(gm_hook=check)
-        )
 
     @skipIfWindows(msg="temp dir not compatible")
     def test_disk_offloading(self):
@@ -5288,6 +4731,575 @@ copy_.default""",
         )
 
 
+class TestCompiledAutogradAccel(TestCompiledAutogradBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_triton()
+    def test_issue106555(self, device):
+        DEVICE = torch.device(device, 0)
+        NUM_FEATURES = 256
+
+        def bias_sigmoid_mul(x1, x2, bias):
+            x2 = torch.sigmoid(x2 + bias)
+            y = x1 * x2
+            return y
+
+        bias_sigmoid_mul_jit = torch.compile(bias_sigmoid_mul)
+
+        class ModuleWithJit(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear_1 = nn.Linear(NUM_FEATURES, NUM_FEATURES, bias=True)
+                self.linear_2 = nn.Linear(NUM_FEATURES, NUM_FEATURES, bias=False)
+                self.linear_2_bias = nn.Parameter(torch.zeros(NUM_FEATURES))
+
+            def forward(self, input_tensor):
+                x1 = self.linear_1(input_tensor)
+                x2 = self.linear_2(input_tensor)
+                output = bias_sigmoid_mul_jit(x1, x2, self.linear_2_bias)
+                return output
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.module_with_jit_1 = ModuleWithJit()
+                self.module_with_jit_2 = ModuleWithJit()
+
+            def forward(self, x, gradient_checkpointing: bool):
+                if gradient_checkpointing:
+                    y = torch.utils.checkpoint.checkpoint(
+                        self._forward, x, use_reentrant=True
+                    )
+                else:
+                    y = self._forward(x)
+                return y
+
+            def _forward(self, x):
+                x = x + self.module_with_jit_1(x)
+                x = x + self.module_with_jit_2(x.transpose(-2, -3)).transpose(-2, -3)
+                return x
+
+        device_interface = get_interface_for_device(device)
+        device_interface.set_device(device=DEVICE)
+        torch.manual_seed(1234567890)
+        model = Model()
+        model.train()
+        model.to(device=DEVICE)
+        model_parameters = list(model.parameters())
+
+        torch.manual_seed(1234567890)
+        input_tensor = torch.randn(1, 128, 256, NUM_FEATURES).to(device=DEVICE)
+        input_tensor.requires_grad = True
+        target_tensor = torch.randn(1, 128, 256, NUM_FEATURES).to(
+            dtype=input_tensor.dtype, device=DEVICE
+        )
+
+        for _ in range(10):
+            for param in model_parameters:
+                param.grad = None
+            output_tensor = model(
+                x=input_tensor.clone(),
+                gradient_checkpointing=True,
+            )
+            loss = torch.mean(torch.abs(target_tensor - output_tensor))
+            loss.backward()
+
+    @requires_triton()
+    def test_logging_tensor_flaky(self, device) -> None:
+        # when you first run some test using triton and then run test_inputs_aliasing_bytecode_stack_restore
+        # resulting in:
+        #   - pytest: `TypeError: unsupported operand type(s) for +: 'Tensor' and 'LoggingTensor'`
+        #   - python: `TypeError: not all arguments converted during string formatting`
+
+        # 1. some triton involving test
+        def fn():
+            def _fn(x):
+                return x
+
+            x = torch.arange(
+                1, 10, requires_grad=True, dtype=torch.float16, device=device
+            )
+            out = _fn(x)
+            loss = out.sum()
+            loss.backward()
+
+        with compiled_autograd._enable(compiler_fn):
+            fn()
+
+        logging.getLogger().setLevel(
+            logging.WARNING
+        )  # triton setup overwrote it to INFO
+        # 2. test_inputs_aliasing_bytecode_stack_restore
+        from torch.testing._internal.logging_tensor import LoggingTensor
+
+        def forward(inputs):
+            add = inputs[0] + 1
+            add_1 = add + inputs[1]
+            out = add_1.cpu()
+            return (out,)
+
+        gm = torch.fx.symbolic_trace(forward)
+        print(gm.print_readable())
+        torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
+        compiled_fn = torch.compile(gm)
+
+        inputs = [
+            torch.ones(1000000, dtype=torch.float32),
+            LoggingTensor(torch.ones(1)),
+        ]
+
+        compiled_fn(inputs)
+
+    @requires_triton()
+    def test_custom_fn_output_metadata(self, device):
+        def my_compiler_fn(gm):
+            for node in gm.graph.nodes:
+                if isinstance(node.target, torch._ops.OpOverload):
+                    if node.target._name == "aten::_to_copy":
+                        raise AssertionError(
+                            "there should be no implicit copies (e.g. dtype casting)"
+                        )
+
+            def inner_compiler(gm_, example_inputs_):
+                counters["compiled_autograd"]["compiles"] += 1
+                return inductor.compile(gm_, example_inputs_)
+
+            return torch.compile(
+                gm, backend=inner_compiler, fullgraph=True, dynamic=True
+            )
+
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return gO
+
+            x = torch.arange(
+                1, 10, requires_grad=True, dtype=torch.float16, device=device
+            )
+            x_view = x.view(3, 3)
+            out = MyFn.apply(x_view)
+            loss = out.sum()
+            loss.backward()
+            yield x.dtype
+            yield x.device
+            yield x.grad
+
+        self.check_output_and_recompiles(fn, count=1)
+
+    @requires_triton()
+    def test_free_activation_memory(self, device):
+        script = """
+import torch
+from torch._dynamo.device_interface import get_interface_for_device
+from torch.testing._internal.inductor_utils import GPU_TYPE
+
+def main():
+    device_interface = get_interface_for_device(GPU_TYPE)
+    assert(device_interface.memory_allocated() == 0)  # noqa: S101
+
+    # Use an op to check that the memory is freed by the time the op is executed
+    def assertion_impl(to_clone):
+        mem_allocated = device_interface.memory_allocated()
+        assert mem_allocated < 4000000  # noqa: S101  # some activations should be freed
+        return to_clone.clone()
+
+    with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
+        lib.define(
+            "assertion_op(Tensor x) -> Tensor", tags=(torch.Tag.pt2_compliant_tag,)
+        )
+        lib.impl("assertion_op", assertion_impl, "CPU")
+        lib.impl("assertion_op", lambda x: x.clone(), "Meta")
+
+        # Create a graph that allows inputs stealing
+        def forward(activations):
+            add = activations[0] + 1
+            out = add.cpu()
+            cloned_out = torch.ops.test_compiled_autograd.assertion_op(out)
+            return (cloned_out,)
+
+        gm = torch.fx.symbolic_trace(forward)
+        torch._dynamo.utils.set_locals_to_steal(gm, ["activations"])
+        compiled_fn = torch.compile(gm)
+
+        # allocate at least 4,000,000 bytes (1,000,000 * 4 bytes)
+        activations = [torch.ones(1000000, dtype=torch.float32, device=GPU_TYPE)]
+        assert device_interface.memory_allocated() > 4000000  # noqa: S101
+
+        out = compiled_fn(activations)
+        assert len(activations) == 0  # noqa: S101
+
+main()
+        """
+        self.run_as_subprocess(script)
+
+    @requires_triton()
+    def test_free_activation_memory_subclass(self, device):
+        # cover the case when aot inputs have subclasses, resulting in a different runtime wrapper
+
+        script = """
+import torch
+from torch._dynamo.device_interface import get_interface_for_device
+from torch.testing._internal.inductor_utils import GPU_TYPE
+
+def main():
+    device_interface = get_interface_for_device(GPU_TYPE)
+    assert device_interface.memory_allocated() == 0  # noqa: S101
+
+    # Use an op to check that the memory is freed by the time the op is executed
+    def assertion_impl(to_clone):
+        mem_allocated = device_interface.memory_allocated()
+        assert mem_allocated < 1200000  # noqa: S101  # some activations should be freed
+        assert mem_allocated > 800000  # noqa: S101  # currently subclasses don't seem to be freed in inductor
+        return to_clone.clone()
+
+    with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
+        lib.define(
+            "assertion_op(Tensor x) -> Tensor", tags=(torch.Tag.pt2_compliant_tag,)
+        )
+        lib.impl("assertion_op", assertion_impl, "CPU")
+        lib.impl("assertion_op", lambda x: x.clone(), "Meta")
+        lib.impl("assertion_op", lambda x: x.clone(), "NestedTensor")
+
+        def fn(inputs):
+            _, y = inputs
+            out = y.cpu()
+            cloned_out = torch.ops.test_compiled_autograd.assertion_op(out)
+            return cloned_out
+
+        gm = torch.fx.symbolic_trace(fn)
+        torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
+        compiled_fn = torch.compile(gm)
+
+        from torch.nested._internal.nested_tensor import jagged_from_list
+
+        activations = [
+            jagged_from_list(
+                [
+                    torch.ones((1, 100000), device=GPU_TYPE),  # 400,000 bytes
+                    torch.ones((1, 100000), device=GPU_TYPE),  # 400,000 bytes
+                ],
+                None,
+            )[
+                0
+            ],  # NestedTensor
+            torch.ones((1, 100000), device=GPU_TYPE),  # 400,000 bytes
+        ]
+        # 1,200,000 bytes (3 * 4 * 100,000 bytes)
+        assert device_interface.memory_allocated() > 1200000  # noqa: S101
+
+        out = compiled_fn(activations)
+        assert len(activations) == 0  # noqa: S101
+
+main()
+        """
+        self.run_as_subprocess(script)
+
+    @requires_triton()
+    def test_flex_attention(self, device):
+        def _squared(score, b, h, m, n):
+            """Joint graph needed for correctness"""
+            return score * score
+
+        def fn():
+            @torch.compile(backend="aot_eager")
+            def fwd_bwd(x: torch.Tensor):
+                flex_attention(x, x, x, score_mod=_squared).sum().backward()
+
+            for a, b in zip([12, 24, 12], [64, 128, 64]):
+                v = torch.zeros(
+                    1,
+                    1,
+                    a * b,
+                    b,
+                    dtype=torch.bfloat16,
+                    device=device,
+                    requires_grad=True,
+                )
+                fwd_bwd(v)
+                yield v.grad
+
+        self.check_output_and_recompiles(
+            fn, count=2, compiler_fn=make_compiler_fn(backend="aot_eager")
+        )
+
+    @requires_triton()
+    def test_cpu_offloading(self, device):
+        def fn():
+            def pack(x):
+                return x.cpu()
+
+            def unpack(x):
+                return x.to(device)
+
+            class MyMatMul(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return torch.matmul(x, x)
+
+                @staticmethod
+                def backward(ctx, grad_out):
+                    (x,) = ctx.saved_tensors
+                    return grad_out * x
+
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                for i in [10, 100, 10, 20, 30]:
+                    x = torch.randn(i, requires_grad=True).to(device)
+                    MyMatMul.apply(x).sum().backward()
+                    yield x.grad
+
+        i = 0
+
+        def check(gm):
+            nonlocal i
+            if i == 0:
+                i += 1
+                return
+
+            graph_code = normalize_gm(gm.print_readable(print_output=False))
+            self.assertExpectedInline(
+                graph_code,
+                """\
+class CompiledAutograd1(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+        getitem = inputs[0]
+        getitem_1 = inputs[1];  inputs = None
+        getitem_2 = sizes[0];  getitem_2 = None
+        getitem_3 = sizes[1]
+        getitem_4 = sizes[2];  sizes = None
+
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type=\""""
+                + device
+                + """\", index=0), 6, 0, None), [], False)]);  getitem = None
+        getitem_5 = validate_outputs[0];  validate_outputs = None
+
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_5], [True], []);  getitem_5 = None
+        getitem_6 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_6], [((None, None, device(type=\""""
+                + device
+                + """\", index=0), 6, 0, None), [], False)]);  getitem_6 = None
+        getitem_7 = validate_outputs_1[0];  validate_outputs_1 = None
+
+        getitem_8 = hooks[0]
+        getitem_9 = packed_data[0];  packed_data = None
+        getitem_10 = hooks[1];  hooks = None
+        call_hook = torch__dynamo_external_utils_call_hook(getitem_8, getitem_9, hook_type = 'unpack_hook');  getitem_8 = getitem_9 = None
+        call_backward = torch__dynamo_external_utils_call_backward(getitem_10, (call_hook,), getitem_7);  getitem_10 = call_hook = getitem_7 = None
+        getitem_12 = call_backward[0];  call_backward = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_12], [((None, None, device(type=\""""
+                + device
+                + """\", index=0), 6, 0, None), [getitem_3], False)]);  getitem_12 = getitem_3 = None
+        getitem_13 = validate_outputs_2[0];  validate_outputs_2 = None
+
+        to_copy_backward0 = torch__dynamo_compiled_autograd_ops_ToCopyBackward0([getitem_13], [True], (None, None, device(type='cpu'), 6, 0, None));  getitem_13 = None
+        getitem_14 = to_copy_backward0[0];  to_copy_backward0 = None
+        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_14], [((None, None, device(type='cpu'), 6, 0, None), [getitem_4], False)]);  getitem_14 = getitem_4 = None
+        getitem_15 = validate_outputs_3[0];  validate_outputs_3 = None
+
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, None, getitem_15);  getitem_1 = getitem_15 = accumulate_grad__default = None
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+""",
+            )
+
+        self.check_output_and_recompiles(
+            fn, compiler_fn=make_compiler_fn(gm_hook=check)
+        )
+
+
+class TestCompiledAutogradCudagraph(TestCompiledAutogradBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_triton()
+    def test_cudagraphs_cpu_division(self, device):
+        from torch._dynamo.testing import reduce_to_scalar_loss
+
+        model = torch.nn.Linear(10, 10, device=device, dtype=torch.float16)
+        inputs = torch.randn(10, 10, device=device, dtype=torch.float16)
+        out = model(inputs)
+        loss = reduce_to_scalar_loss(out)
+
+        stderr_msgs = io.StringIO()
+        with (
+            mock.patch("sys.stderr", stderr_msgs),
+            compiled_autograd._enable(compiler_fn),
+        ):
+            torch._inductor.config.triton.cudagraphs = True
+            loss.backward()
+            torch._inductor.config.triton.cudagraphs = False
+
+        if inductor_config.cpp_wrapper:
+            self.assertIn("skipping cudagraphs", stderr_msgs.getvalue())
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+        else:
+            self.assertNotIn("skipping cudagraphs", stderr_msgs.getvalue())
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+    @parametrize("graph_partition", [False, True])
+    def test_cudagraphs_cpu_graph(self, device, graph_partition):
+        from torch._dynamo.testing import reduce_to_scalar_loss
+
+        model = torch.nn.Linear(10, 10, dtype=torch.float16)
+        inputs = torch.randn(10, 10, dtype=torch.float16)
+        out = model(inputs)
+        loss = reduce_to_scalar_loss(out)
+
+        with (
+            torch._inductor.config.patch(graph_partition=graph_partition),
+            compiled_autograd._enable(compiler_fn),
+        ):
+            torch._inductor.config.triton.cudagraphs = True
+            loss.backward()
+            torch._inductor.config.triton.cudagraphs = False
+
+        # CPU-only graphs skip cudagraphs regardless of graph_partition setting
+        # (no GPU devices to use cudagraphs with)
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
+    @requires_triton()
+    def test_cudagraphs_sdpa(self, device):
+        query = torch.rand(
+            32, 8, 128, 64, dtype=torch.float16, device=device, requires_grad=True
+        )
+        key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=device)
+        value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=device)
+        out = torch.nn.functional.scaled_dot_product_attention(query, key, value)
+
+        with (
+            config.patch(compiled_autograd=True),
+            inductor_config.patch("triton.cudagraphs", True),
+        ):
+            opt_bwd = torch.compile(lambda: out.sum().backward())
+            opt_bwd()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        self.assertEqual(
+            counters["inductor"]["cudagraph_skips"],
+            2 if inductor_config.cpp_wrapper else 0,
+        )
+
+    @requires_triton()
+    def test_cudagraphs_cpu_scalar_used_in_python_custom_op(self, device):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                cpu_tensor = torch.tensor(5)
+                ctx.save_for_backward(x, cpu_tensor)  # visible to c++/autograd
+                ctx.cpu_scalar = 5  # opaque to c++/autograd
+                return x.sum()
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, cpu_tensor = ctx.saved_tensors
+                expand = gO * torch.ones_like(x)
+                return expand * cpu_tensor * ctx.cpu_scalar
+
+        x = torch.randn(10, requires_grad=True, device=device)
+        out = MyFn.apply(x)
+        with (
+            config.patch(compiled_autograd=True),
+            inductor_config.patch("triton.cudagraphs", True),
+        ):
+            opt_bwd = torch.compile(lambda: out.backward())
+            opt_bwd()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        # Compiled autograd lifts custom autograd.Function bwd instead of tracing it.
+        # Must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
+        if inductor_config.graph_partition:
+            # instead of skipping cudagraph, graph partition splits off cpu inputs/outputs and ops
+            # and cudagraphify the remaining computation. So there is no cudagraph skip.
+            expected_cudagraph_skips = 0
+        else:
+            expected_cudagraph_skips = 1
+
+        self.assertEqual(
+            counters["inductor"]["cudagraph_skips"], expected_cudagraph_skips
+        )
+
+    @scoped_load_inline
+    @requires_triton()
+    def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self, device, load_inline):
+        cpp_source = """
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static constexpr bool is_traceable = true;
+
+  static torch::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x) {
+    const auto& cpu_tensor = torch::tensor(1);
+    ctx->save_for_backward({x, cpu_tensor});
+    ctx->saved_data["cpu_scalar"] = 1;
+    return x;
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    const auto& saved_variables = ctx->get_saved_variables();
+    assert(saved_variables.size() == 2);
+    torch::Tensor x = saved_variables[0];
+    torch::Tensor cpu_tensor = saved_variables[1];
+    int cpu_scalar = ctx->saved_data["cpu_scalar"].toInt();
+    auto expand = grad_output[0] * torch::ones_like(x);
+    torch::autograd::variable_list grad_inputs(1);
+    grad_inputs[0] = expand * cpu_tensor * cpu_scalar;  // autograd engine asserts that tensors are on same device
+    return grad_inputs;
+  }
+};
+
+torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x) {
+  return CustomOpAutogradFunction::apply(x);
+}
+
+TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+}
+        """
+
+        module = load_inline(
+            name="test_cudagraphs_cpu_scalar_used_in_cpp_custom_op",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        x = torch.randn(2, 2, requires_grad=True, device=device)
+        with (
+            config.patch(compiled_autograd=True),
+            inductor_config.patch("triton.cudagraphs", True),
+        ):
+            out = torch.ops.test_cudagraphs_cpu_scalar_used_in_cpp_custom_op.custom_op_backed_by_autograd_fn(
+                x
+            )
+            opt_bwd = torch.compile(lambda: out.sum().backward())
+            opt_bwd()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        # Compiled autograd's initial capture lifts custom C++ autograd::Function bwd instead of tracing
+        # into it. We must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
+        # In the future, we can consider having a cpu scalar movement pass sometime after we trace
+        # into the custom C++ autograd::Function (like in AOTDispatcher)
+        if inductor_config.graph_partition:
+            # instead of skipping cudagraph, graph partition splits off cpu inputs/outputs and ops
+            # and cudagraphify the remaining computation. So there is no cudagraph skip.
+            expected_cudagraph_skips = 0
+        elif inductor_config.cpp_wrapper:
+            expected_cudagraph_skips = 2
+        else:
+            expected_cudagraph_skips = 1
+
+        self.assertEqual(
+            counters["inductor"]["cudagraph_skips"],
+            expected_cudagraph_skips,
+        )
+
+
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
     with mock.patch("sys.path", [*sys.path, str(testdir)]):
@@ -5357,6 +5369,8 @@ def wrap_test_class(orig_cls):
 
 
 class WrapTestClassTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_wrap_preserves_inheritance_and_super(self):
         class DummyTest(unittest.TestCase):
             def runTest(self):
@@ -5736,6 +5750,8 @@ hop_test_hops_in_bwd_failures = {
 
 
 class TestCompiledAutogradOpInfo(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self) -> None:
         super().setUp()
         reset()
@@ -5798,7 +5814,13 @@ class TestCompiledAutogradOpInfo(TestCase):
 
 
 instantiate_device_type_tests(TestCompiledAutogradOpInfo, globals(), allow_xpu=True)
-instantiate_parametrized_tests(TestCompiledAutograd)
+instantiate_parametrized_tests(TestCompiledAutogradGeneric)
+instantiate_device_type_tests(
+    TestCompiledAutogradAccel, globals(), allow_xpu=True, except_for="cpu"
+)
+instantiate_device_type_tests(
+    TestCompiledAutogradCudagraph, globals(), except_for="cpu"
+)
 
 if __name__ == "__main__":
     if HAS_CPU:
