@@ -119,6 +119,19 @@ class _PrecompileBreakingModule(torch.nn.Module):
         return y.sum() + 1
 
 
+class _PrecompileAliasedMutationModule(torch.nn.Module):
+    """Mutates one of two aliased inputs: the synthetic-base shape the training
+    composer refuses to render as source."""
+
+    def __init__(self):
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.randn(4))
+
+    def forward(self, a, b):
+        a.mul_(2)
+        return ((a + b) * self.w).sum()
+
+
 def _precompile_unreachable_helper(y):
     z = y * 3
     torch._dynamo.graph_break()
