@@ -10,6 +10,7 @@
 # Taken and modified from original source:
 # https://eli.thegreenplace.net/2015/redirecting-all-kinds-of-stdout-in-python/
 import ctypes
+import io
 import logging
 import os
 import sys
@@ -77,6 +78,15 @@ def _c_std(stream: str):
 
 def _python_std(stream: str):
     return {"stdout": sys.stdout, "stderr": sys.stderr}[stream]
+
+
+def _is_backed_by(stream, fd: int) -> bool:
+    """Whether writes to ``stream`` reach file descriptor ``fd``."""
+    try:
+        return stream.fileno() == fd
+    except (AttributeError, OSError, ValueError):
+        # io.UnsupportedOperation derives from both OSError and ValueError.
+        return False
 
 
 _VALID_STD = {"stdout", "stderr"}
@@ -210,7 +220,12 @@ else:
 
         c_std = _c_std(std)
         python_std = _python_std(std)
-        std_fd = python_std.fileno()
+        # C and subprocess output always goes to fds 1 and 2, so those are what
+        # must be redirected, not whatever sys.stdout is currently bound to.
+        # A test runner rebinds it: pytest's fd capture reports a temp file's
+        # fd and its sys capture has no fd at all. Windows uses the same
+        # constants above.
+        std_fd = 1 if std == "stdout" else 2
 
         def _redirect(dst):
             libc.fflush(c_std)
@@ -219,9 +234,23 @@ else:
 
         with os.fdopen(os.dup(std_fd)) as orig_std, open(to_file, mode="w+b") as dst:
             _redirect(dst)
+
+            # A rebound sys.stdout does not write to std_fd, so point it at the
+            # destination too. In the common case nothing is rebound.
+            rebound_std = None
+            if not _is_backed_by(python_std, std_fd):
+                rebound_std = io.TextIOWrapper(
+                    open(std_fd, mode="wb", closefd=False),  # noqa: SIM115
+                    line_buffering=True,
+                )
+                setattr(sys, std, rebound_std)
+
             try:
                 yield
             finally:
+                if rebound_std is not None:
+                    rebound_std.flush()  # before std_fd is pointed back
+                    setattr(sys, std, python_std)
                 _redirect(orig_std)
 
 
