@@ -13,6 +13,7 @@ import unittest
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import patch
 
 from parameterized import parameterized_class
 
@@ -73,6 +74,31 @@ def compile(
     )  # type: ignore[arg-type]
     loaded = load_package(package_path)
     return loaded
+
+
+class TestAOTInductorPackageAPI(TestCase):
+    def test_aoti_compile_and_package_does_not_mutate_configs(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        ep = torch.export.export(Model(), (torch.ones(1),))
+        inductor_configs = {"max_autotune": True}
+
+        with patch(
+            "torch._inductor.debug.aot_inductor_minifier_wrapper",
+            return_value="model.pt2",
+        ) as compile_and_package:
+            result = torch._inductor.aoti_compile_and_package(
+                ep, inductor_configs=inductor_configs
+            )
+
+        self.assertEqual(result, "model.pt2")
+        self.assertEqual(inductor_configs, {"max_autotune": True})
+        self.assertEqual(
+            compile_and_package.call_args.kwargs["inductor_configs"],
+            {"max_autotune": True, "aot_inductor.package": True},
+        )
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
