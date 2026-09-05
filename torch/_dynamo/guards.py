@@ -2740,7 +2740,13 @@ class GuardBuilder(GuardBuilderBase):
 
             return tuple(map(id, hooks))
 
-        guard_hooks_ids = hooks_ids_fn(get_hooks())
+        guard_hooks = get_hooks()
+        if are_inline_hooks(guard_hooks):
+            guard_hooks_ids: tuple[int, ...] | None = tuple(
+                self.id_ref(hook, "saved_tensors_hooks") for hook in guard_hooks
+            )
+        else:
+            guard_hooks_ids = None
 
         code = [
             f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == {guard_hooks_ids}"

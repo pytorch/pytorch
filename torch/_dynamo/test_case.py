@@ -70,7 +70,9 @@ class TestCase(TorchTestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
-        cls._exit_stack.close()
+        # absent when MRO resolves setUpClass elsewhere (e.g. to a device base)
+        if "_exit_stack" in cls.__dict__:
+            cls._exit_stack.close()
         super().tearDownClass()
 
     @classmethod
@@ -213,7 +215,8 @@ class CPythonTestCase(TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
-        cls._stack.close()
+        if "_stack" in cls.__dict__:
+            cls._stack.close()
         super().tearDownClass()
 
     @classmethod
