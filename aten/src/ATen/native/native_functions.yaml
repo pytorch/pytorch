@@ -1293,8 +1293,7 @@
 - func: logical_xor.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA, XPU: logical_xor_out
-    MPS: logical_xor_out_mps
+    CPU, CUDA, MPS, MTIA, XPU: logical_xor_out
   tags: pointwise
 
 - func: logical_and(Tensor self, Tensor other) -> Tensor
@@ -1314,8 +1313,7 @@
 - func: logical_and.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA, XPU: logical_and_out
-    MPS: logical_and_out_mps
+    CPU, CUDA, MPS, MTIA, XPU: logical_and_out
   tags: pointwise
 
 - func: logical_or(Tensor self, Tensor other) -> Tensor
@@ -1335,8 +1333,7 @@
 - func: logical_or.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA, XPU: logical_or_out
-    MPS: logical_or_out_mps
+    CPU, CUDA, MPS, MTIA, XPU: logical_or_out
   tags: pointwise
 
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -6864,7 +6861,7 @@
 
 - func: frexp.Tensor_out(Tensor self, *, Tensor(a!) mantissa, Tensor(b!) exponent) -> (Tensor(a!) mantissa, Tensor(b!) exponent)
   dispatch:
-    CPU, CUDA, XPU: frexp_out
+    CPU, CUDA, MPS, XPU: frexp_out
   tags: pointwise
 
 # Deprecated (v.1.12)
