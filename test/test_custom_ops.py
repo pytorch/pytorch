@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import collections
+import contextlib
 import io
 import itertools
 import os
@@ -6761,9 +6762,1266 @@ class TestOpProfiles(TestCase):
             loaded = read_profiles_from_yaml(yaml_str)
 
 
+_FT_COMPILE_KNOBS = [
+    subtest((True, None), name="fullgraph"),
+    subtest((False, "reduce-overhead"), name="reduce_overhead"),
+    subtest((True, "reduce-overhead"), name="fullgraph_reduce_overhead"),
+]
+
+
+class TestFuncTorchCompatibility(CustomOpTestCaseBase):
+    """Coverage for make_autograd_impl with nested torch.func transforms.
+
+    The register_autograd path uses _SingleLevelFunction. That is enough for
+    one torch.func level (first-order grad / VJP cotangent), but the VJP
+    primal must also stay live under an outer torch.func.grad.
+
+    Hybrid training does::
+
+        energy, vjp_fn = torch.func.vjp(f, x)  # energy = custom-op primal
+        forces = vjp_fn(ones)
+        loss = mse(energy) + mse(forces)
+        torch.func.grad_and_value(loss, argnums=params)
+
+    These tests require the energy-path (VJP primal under outer grad) to match
+    a plain tensor op.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._opaque_calls = {"real_forward": 0}
+        self._saves_out_calls = {"real_forward": 0}
+        self._list_calls = {"scale_list": 0, "grad_relay": 0}
+        self._ro_calls = {"real_forward": 0}
+        self._register_scale_op()
+
+    def _register_scale_op(self):
+        lib = self.lib()
+        lib.define("ft_scale(Tensor x, Tensor w) -> Tensor")
+
+        def scale_impl(x, w):
+            return x * w
+
+        lib.impl("ft_scale", scale_impl, "CPU")
+        if torch.cuda.is_available():
+            lib.impl("ft_scale", scale_impl, "CUDA")
+        if TEST_XPU:
+            lib.impl("ft_scale", scale_impl, "XPU")
+
+        @torch.library.register_fake(f"{self.test_ns}::ft_scale", lib=lib)
+        def _(x, w):
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            ctx.save_for_backward(inputs[0], inputs[1])
+
+        def backward(ctx, grad):
+            x, w = ctx.saved_tensors
+            return grad * w, (grad * x).sum_to_size(w.shape)
+
+        torch.library.register_autograd(
+            f"{self.test_ns}::ft_scale",
+            backward,
+            setup_context=setup_context,
+            lib=lib,
+        )
+
+    def _scale_op(self, x, w):
+        return self.ns().ft_scale(x, w)
+
+    def _scale_direct(self, x, w):
+        return x * w
+
+    def _quad_energy(self, z, ww):
+        return self._scale_op(z.square(), ww).sum()
+
+    def _require_cuda(self, device):
+        if torch.device(device).type != "cuda":
+            self.skipTest("CUDA required for this compile mode")
+
+    def _maybe_require_cuda_for_mode(self, device, mode):
+        if mode == "reduce-overhead":
+            self._require_cuda(device)
+
+    def _clone_grad_and_value_out(self, out):
+        if isinstance(out, tuple):
+            grads, value = out
+            if torch.is_tensor(grads):
+                return grads.clone(), value.detach().clone()
+            if isinstance(grads, (tuple, list)):
+                return tuple(g.clone() for g in grads), value.detach().clone()
+            raise TypeError(f"Unexpected grad payload type: {type(grads)}")
+        if torch.is_tensor(out):
+            return out.clone(), None
+        raise TypeError(f"Unexpected compile output type: {type(out)}")
+
+    def _run_compiled(self, fn, args, *, fullgraph, mode, backend=None):
+        torch._dynamo.reset()
+        kwargs = {"fullgraph": fullgraph}
+        if mode is not None:
+            kwargs["mode"] = mode
+        if backend is not None:
+            kwargs["backend"] = backend
+        compiled = torch.compile(fn, **kwargs)
+        if mode == "reduce-overhead":
+            torch.compiler.cudagraph_mark_step_begin()
+        result, value = self._clone_grad_and_value_out(compiled(*args))
+        if mode == "reduce-overhead":
+            torch.compiler.cudagraph_mark_step_begin()
+            replay, replay_value = self._clone_grad_and_value_out(
+                compiled(*tuple(a.clone() for a in args))
+            )
+            if torch.is_tensor(result):
+                self.assertEqual(replay, result, rtol=1e-5, atol=1e-6)
+            else:
+                self.assertTrue(isinstance(result, tuple) and isinstance(replay, tuple))
+                for a, b in zip(replay, result):
+                    self.assertEqual(a, b, rtol=1e-5, atol=1e-6)
+            if value is not None:
+                self.assertIsNotNone(replay_value)
+                self.assertEqual(replay_value, value, rtol=1e-5, atol=1e-6)
+        return result, value
+
+    def _nequip_style_flat_loss(
+        self, *, include_energy, include_force, x, target_e, target_f
+    ):
+        def flat_loss(ww):
+            def compute_energy(pos):
+                return self._scale_op(pos.square(), ww).sum()
+
+            energy, vjp_fn = torch.func.vjp(compute_energy, x)
+            total = energy.new_zeros(())
+            if include_energy:
+                total = total + (energy - target_e).pow(2)
+            if include_force:
+                (forces,) = vjp_fn(torch.ones_like(energy))
+                total = total + (forces - target_f).pow(2).sum()
+            return total
+
+        return flat_loss
+
+    def _has_fake_inputs(self, tensors):
+        from torch._guards import detect_fake_mode
+
+        if detect_fake_mode() is not None:
+            return True
+        return any(
+            isinstance(t, torch._subclasses.fake_tensor.FakeTensor) for t in tensors
+        )
+
+    def _register_opaque_scale(self):
+        calls = self._opaque_calls
+        has_fake = self._has_fake_inputs
+
+        @torch.library.custom_op(f"{self.test_ns}::opaque_scale", mutates_args=())
+        def opaque_scale(x: Tensor, w: Tensor) -> Tensor:
+            if has_fake([x, w]):
+                return torch.zeros_like(x)
+            calls["real_forward"] += 1
+            return x * w
+
+        @opaque_scale.register_fake
+        def _(x, w):
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            ctx.save_for_backward(inputs[0], inputs[1])
+
+        def backward(ctx, grad):
+            x, w = ctx.saved_tensors
+            return grad * w, (grad * x).sum_to_size(w.shape)
+
+        opaque_scale.register_autograd(backward, setup_context=setup_context)
+        return opaque_scale
+
+    def _opaque_op(self, x, w):
+        return self.ns().opaque_scale(x, w)
+
+    def _register_saves_output(self):
+        calls = self._saves_out_calls
+        has_fake = self._has_fake_inputs
+
+        @torch.library.custom_op(f"{self.test_ns}::saves_output", mutates_args=())
+        def saves_output(x: Tensor) -> Tensor:
+            if has_fake([x]):
+                return torch.zeros_like(x)
+            calls["real_forward"] += 1
+            return torch.exp(x)
+
+        @saves_output.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            del inputs
+            ctx.save_for_backward(output)
+
+        def backward(ctx, grad):
+            (out,) = ctx.saved_tensors
+            return grad * out
+
+        saves_output.register_autograd(backward, setup_context=setup_context)
+        return saves_output
+
+    def _register_tensorlist_ops(self):
+        calls = self._list_calls
+        has_fake = self._has_fake_inputs
+        ns = self.test_ns
+
+        @torch.library.custom_op(f"{ns}::grad_relay", mutates_args=())
+        def grad_relay(tensors: list[Tensor]) -> list[Tensor]:
+            if has_fake(list(tensors)):
+                return [torch.zeros_like(t) for t in tensors]
+            calls["grad_relay"] += 1
+            return [t.clone() for t in tensors]
+
+        @grad_relay.register_fake
+        def _(tensors):
+            return [torch.empty_like(t) for t in tensors]
+
+        def relay_setup(ctx, inputs, output):
+            del ctx, inputs, output
+
+        def relay_backward(ctx, grad_outputs):
+            del ctx
+            return (list(grad_outputs),)
+
+        grad_relay.register_autograd(relay_backward, setup_context=relay_setup)
+
+        @torch.library.custom_op(f"{ns}::scale_list", mutates_args=())
+        def scale_list(tensors: list[Tensor], w: Tensor) -> list[Tensor]:
+            if has_fake([*tensors, w]):
+                return [torch.zeros_like(t) for t in tensors]
+            calls["scale_list"] += 1
+            return [t * w for t in tensors]
+
+        @scale_list.register_fake
+        def _(tensors, w):
+            return [torch.empty_like(t) for t in tensors]
+
+        def scale_setup(ctx, inputs, output):
+            del output
+            tensors, w = inputs
+            ctx.save_for_backward(*tensors, w)
+
+        def scale_backward(ctx, grad_outputs):
+            saved = ctx.saved_tensors
+            tensors, w = list(saved[:-1]), saved[-1]
+            relayed = getattr(torch.ops, ns).grad_relay(list(grad_outputs))
+            grad_tensors = [g * w for g in relayed]
+            grad_w = sum((g * t).sum_to_size(w.shape) for g, t in zip(relayed, tensors))
+            return grad_tensors, grad_w
+
+        scale_list.register_autograd(scale_backward, setup_context=scale_setup)
+        return scale_list, grad_relay
+
+    def _register_ro_scale(self):
+        calls = self._ro_calls
+        has_fake = self._has_fake_inputs
+
+        @torch.library.custom_op(
+            f"{self.test_ns}::ro_scale",
+            mutates_args=(),
+            tags=(torch.Tag.cudagraph_unsafe,),
+        )
+        def ro_scale(x: Tensor, w: Tensor) -> Tensor:
+            if has_fake([x, w]):
+                return torch.zeros_like(x)
+            calls["real_forward"] += 1
+            return x * w
+
+        @ro_scale.register_fake
+        def _(x, w):
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            ctx.save_for_backward(inputs[0], inputs[1])
+
+        def backward(ctx, grad):
+            x, w = ctx.saved_tensors
+            return grad * w, (grad * x).sum_to_size(w.shape)
+
+        ro_scale.register_autograd(backward, setup_context=setup_context)
+        return ro_scale
+
+    def _functorch_stack_guard(self):
+        @contextlib.contextmanager
+        def guard():
+            try:
+                yield
+            finally:
+                leaked = torch._C._functorch.peek_interpreter_stack()
+                if leaked is not None:
+                    raise AssertionError(
+                        f"functorch interpreter stack leaked a layer: {leaked}. "
+                        "Later tests in this process would be silently corrupted."
+                    )
+
+        return guard()
+
+    def test_first_order_func_grad_matches_direct(self, device):
+        torch.manual_seed(0)
+        x = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+
+        def loss_op(ww):
+            return self._scale_op(x, ww).sum()
+
+        def loss_direct(ww):
+            return self._scale_direct(x, ww).sum()
+
+        self.assertEqual(
+            torch.func.grad(loss_op)(w.clone()),
+            torch.func.grad(loss_direct)(w.clone()),
+        )
+
+    def test_vjp_cotangent_then_outer_grad_matches_direct(self, device):
+        torch.manual_seed(1)
+        x = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+
+        def energy_op(xx):
+            return self._scale_op(xx.square(), w).sum()
+
+        def energy_direct(xx):
+            return self._scale_direct(xx.square(), w).sum()
+
+        def force_loss(energy_fn):
+            def loss(xx):
+                _e, vjp_fn = torch.func.vjp(energy_fn, xx)
+                (forces,) = vjp_fn(torch.ones((), device=xx.device, dtype=xx.dtype))
+                return forces.pow(2).sum()
+
+            return loss
+
+        g_op = torch.func.grad(force_loss(energy_op))(x.clone())
+        g_direct = torch.func.grad(force_loss(energy_direct))(x.clone())
+        self.assertGreater(float(g_direct.norm()), 0.0)
+        self.assertEqual(g_op, g_direct, rtol=1e-5, atol=1e-6)
+
+    def test_outer_func_grad_through_vjp_primal_matches_direct(self, device):
+        torch.manual_seed(2)
+        x = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+
+        def energy_op(xx):
+            return self._scale_op(xx, w).sum()
+
+        def energy_direct(xx):
+            return self._scale_direct(xx, w).sum()
+
+        def primal_loss(energy_fn):
+            def loss(xx):
+                e, _vjp = torch.func.vjp(energy_fn, xx)
+                del _vjp
+                return e
+
+            return loss
+
+        g_op = torch.func.grad(primal_loss(energy_op))(x.clone())
+        g_direct = torch.func.grad(primal_loss(energy_direct))(x.clone())
+        self.assertGreater(float(g_direct.norm()), 0.0)
+        self.assertEqual(g_op, g_direct, rtol=1e-5, atol=1e-6)
+
+    def test_energy_only_param_grads_through_vjp_primal_match_direct(self, device):
+        torch.manual_seed(3)
+        x = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+        target = torch.randn((), device=device)
+
+        def loss_op(ww):
+            def energy(xx):
+                return self._scale_op(xx, ww).sum()
+
+            e, _vjp = torch.func.vjp(energy, x)
+            del _vjp
+            return (e - target).pow(2)
+
+        def loss_direct(ww):
+            def energy(xx):
+                return self._scale_direct(xx, ww).sum()
+
+            e, _vjp = torch.func.vjp(energy, x)
+            del _vjp
+            return (e - target).pow(2)
+
+        g_op = torch.func.grad(loss_op)(w.clone())
+        g_direct = torch.func.grad(loss_direct)(w.clone())
+        self.assertGreater(float(g_direct.norm()), 0.0)
+        self.assertEqual(g_op, g_direct, rtol=1e-5, atol=1e-6)
+
+    @requires_compile
+    @parametrize("fullgraph,mode", _FT_COMPILE_KNOBS)
+    @parametrize(
+        "pattern",
+        [
+            "order1_grad",
+            "order2_vjp_primal",
+            "order2_vjp_cotangent",
+            "order2_hybrid_e_plus_f",
+            "order2_grad_and_value_primal",
+            "order2_grad_and_value_hybrid",
+            "order2_param_energy_only",
+        ],
+    )
+    def test_compile_func_grad_paths_match_eager(
+        self, device, fullgraph, mode, pattern
+    ):
+        self._maybe_require_cuda_for_mode(device, mode)
+        torch.manual_seed(10)
+        x = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+        target = torch.randn((), device=device)
+
+        if pattern == "order1_grad":
+
+            def eager_fn(ww):
+                return self._scale_op(x, ww).sum()
+
+            g_eager = torch.func.grad(eager_fn)(w.clone())
+            g_compiled, _ = self._run_compiled(
+                torch.func.grad(eager_fn),
+                (w.clone(),),
+                fullgraph=fullgraph,
+                mode=mode,
+            )
+        elif pattern == "order2_vjp_primal":
+
+            def loss(xx):
+                e, _vjp = torch.func.vjp(lambda z: self._quad_energy(z, w), xx)
+                del _vjp
+                return e
+
+            g_eager = torch.func.grad(loss)(x.clone())
+            g_compiled, _ = self._run_compiled(
+                torch.func.grad(loss),
+                (x.clone(),),
+                fullgraph=fullgraph,
+                mode=mode,
+            )
+        elif pattern == "order2_vjp_cotangent":
+
+            def loss(xx):
+                _e, vjp_fn = torch.func.vjp(lambda z: self._quad_energy(z, w), xx)
+                (forces,) = vjp_fn(torch.ones((), device=xx.device, dtype=xx.dtype))
+                return forces.pow(2).sum()
+
+            g_eager = torch.func.grad(loss)(x.clone())
+            g_compiled, _ = self._run_compiled(
+                torch.func.grad(loss),
+                (x.clone(),),
+                fullgraph=fullgraph,
+                mode=mode,
+            )
+        elif pattern == "order2_hybrid_e_plus_f":
+
+            def loss(xx):
+                e, vjp_fn = torch.func.vjp(lambda z: self._quad_energy(z, w), xx)
+                (forces,) = vjp_fn(torch.ones_like(e))
+                return e + forces.pow(2).sum()
+
+            g_eager = torch.func.grad(loss)(x.clone())
+            g_compiled, _ = self._run_compiled(
+                torch.func.grad(loss),
+                (x.clone(),),
+                fullgraph=fullgraph,
+                mode=mode,
+            )
+        elif pattern == "order2_grad_and_value_primal":
+
+            def loss(xx):
+                e, _vjp = torch.func.vjp(lambda z: self._quad_energy(z, w), xx)
+                del _vjp
+                return e
+
+            g_eager, v_eager = torch.func.grad_and_value(loss)(x.clone())
+            g_compiled, v_compiled = self._run_compiled(
+                torch.func.grad_and_value(loss),
+                (x.clone(),),
+                fullgraph=fullgraph,
+                mode=mode,
+            )
+            self.assertIsNotNone(v_compiled)
+            self.assertEqual(v_compiled, v_eager, rtol=1e-5, atol=1e-6)
+        elif pattern == "order2_grad_and_value_hybrid":
+
+            def loss(xx):
+                e, vjp_fn = torch.func.vjp(lambda z: self._quad_energy(z, w), xx)
+                (forces,) = vjp_fn(torch.ones_like(e))
+                return (e - target).pow(2) + forces.pow(2).sum()
+
+            g_eager, v_eager = torch.func.grad_and_value(loss)(x.clone())
+            g_compiled, v_compiled = self._run_compiled(
+                torch.func.grad_and_value(loss),
+                (x.clone(),),
+                fullgraph=fullgraph,
+                mode=mode,
+            )
+            self.assertIsNotNone(v_compiled)
+            self.assertEqual(v_compiled, v_eager, rtol=1e-5, atol=1e-6)
+        elif pattern == "order2_param_energy_only":
+
+            def loss(ww):
+                e, _vjp = torch.func.vjp(lambda z: self._scale_op(z, ww).sum(), x)
+                del _vjp
+                return (e - target).pow(2)
+
+            g_eager = torch.func.grad(loss)(w.clone())
+            g_compiled, _ = self._run_compiled(
+                torch.func.grad(loss),
+                (w.clone(),),
+                fullgraph=fullgraph,
+                mode=mode,
+            )
+        else:
+            raise AssertionError(pattern)
+
+        self.assertTrue(torch.is_tensor(g_compiled))
+        self.assertGreater(float(g_eager.detach().norm()), 0.0)
+        self.assertEqual(g_compiled, g_eager, rtol=1e-5, atol=1e-6)
+
+    @requires_compile
+    @parametrize(
+        "pattern",
+        [
+            "order2_vjp_cotangent",
+            "order2_hybrid_e_plus_f",
+            "order2_grad_and_value_hybrid",
+        ],
+    )
+    def test_compile_eager_backend_dual_layer_force_paths_match_eager(
+        self, device, pattern
+    ):
+        torch.manual_seed(11)
+        x = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+        target = torch.randn((), device=device)
+
+        if pattern == "order2_vjp_cotangent":
+
+            def loss(xx):
+                _e, vjp_fn = torch.func.vjp(lambda z: self._quad_energy(z, w), xx)
+                (forces,) = vjp_fn(torch.ones((), device=xx.device, dtype=xx.dtype))
+                return forces.pow(2).sum()
+
+            g_eager = torch.func.grad(loss)(x.clone())
+            g_compiled, _ = self._run_compiled(
+                torch.func.grad(loss),
+                (x.clone(),),
+                fullgraph=True,
+                mode=None,
+                backend="eager",
+            )
+        elif pattern == "order2_hybrid_e_plus_f":
+
+            def loss(xx):
+                e, vjp_fn = torch.func.vjp(lambda z: self._quad_energy(z, w), xx)
+                (forces,) = vjp_fn(torch.ones_like(e))
+                return e + forces.pow(2).sum()
+
+            g_eager = torch.func.grad(loss)(x.clone())
+            g_compiled, _ = self._run_compiled(
+                torch.func.grad(loss),
+                (x.clone(),),
+                fullgraph=True,
+                mode=None,
+                backend="eager",
+            )
+        elif pattern == "order2_grad_and_value_hybrid":
+
+            def loss(xx):
+                e, vjp_fn = torch.func.vjp(lambda z: self._quad_energy(z, w), xx)
+                (forces,) = vjp_fn(torch.ones_like(e))
+                return (e - target).pow(2) + forces.pow(2).sum()
+
+            g_eager, v_eager = torch.func.grad_and_value(loss)(x.clone())
+            g_compiled, v_compiled = self._run_compiled(
+                torch.func.grad_and_value(loss),
+                (x.clone(),),
+                fullgraph=True,
+                mode=None,
+                backend="eager",
+            )
+            self.assertIsNotNone(v_compiled)
+            self.assertEqual(v_compiled, v_eager, rtol=1e-5, atol=1e-6)
+        else:
+            raise AssertionError(pattern)
+
+        self.assertTrue(torch.is_tensor(g_compiled))
+        self.assertGreater(float(g_eager.detach().norm()), 0.0)
+        self.assertEqual(g_compiled, g_eager, rtol=1e-5, atol=1e-6)
+
+    @requires_compile
+    @parametrize("fullgraph,mode", _FT_COMPILE_KNOBS)
+    @parametrize("pattern", ["force_only", "hybrid_e_plus_f"])
+    def test_compile_module_dual_layer_force_paths_match_eager(
+        self, device, fullgraph, mode, pattern
+    ):
+        self._maybe_require_cuda_for_mode(device, mode)
+        torch.manual_seed(12)
+        x = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+        test_self = self
+
+        class _LossModule(torch.nn.Module):
+            def forward(self, xx):
+                if pattern == "force_only":
+                    _e, vjp_fn = torch.func.vjp(
+                        lambda z: test_self._quad_energy(z, w), xx
+                    )
+                    (forces,) = vjp_fn(torch.ones((), device=xx.device, dtype=xx.dtype))
+                    return forces.pow(2).sum()
+                e, vjp_fn = torch.func.vjp(lambda z: test_self._quad_energy(z, w), xx)
+                (forces,) = vjp_fn(torch.ones_like(e))
+                return e + forces.pow(2).sum()
+
+        module = _LossModule().to(device)
+        xx_e = x.clone().requires_grad_(True)
+        module(xx_e).backward()
+        self.assertIsNotNone(xx_e.grad)
+        g_eager = xx_e.grad.detach().clone()
+        self.assertGreater(float(g_eager.norm()), 0.0)
+
+        kwargs = {"fullgraph": fullgraph}
+        if mode is not None:
+            kwargs["mode"] = mode
+        compiled = torch.compile(module, **kwargs)
+        xx_c = x.clone().requires_grad_(True)
+        if mode == "reduce-overhead":
+            torch.compiler.cudagraph_mark_step_begin()
+        compiled(xx_c).backward()
+        self.assertIsNotNone(xx_c.grad)
+        self.assertEqual(xx_c.grad, g_eager, rtol=1e-5, atol=1e-6)
+
+        if mode == "reduce-overhead":
+            torch.compiler.cudagraph_mark_step_begin()
+            xx_r = x.clone().requires_grad_(True)
+            compiled(xx_r).backward()
+            self.assertIsNotNone(xx_r.grad)
+            self.assertEqual(xx_r.grad, g_eager, rtol=1e-5, atol=1e-6)
+
+    @requires_compile
+    @parametrize("fullgraph,mode", _FT_COMPILE_KNOBS)
+    @parametrize("loss_kind", ["energy_only", "force_only", "hybrid"])
+    def test_compile_grad_and_value_vjp_nequip_style_matches_eager(
+        self, device, fullgraph, mode, loss_kind
+    ):
+        self._maybe_require_cuda_for_mode(device, mode)
+        torch.manual_seed(20)
+        x = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+        target_e = torch.randn((), device=device)
+        target_f = torch.randn_like(x)
+
+        include_energy = loss_kind in ("energy_only", "hybrid")
+        include_force = loss_kind in ("force_only", "hybrid")
+        loss_fn = self._nequip_style_flat_loss(
+            include_energy=include_energy,
+            include_force=include_force,
+            x=x,
+            target_e=target_e,
+            target_f=target_f,
+        )
+
+        g_eager, v_eager = torch.func.grad_and_value(loss_fn)(w.clone())
+        g_compiled, v_compiled = self._run_compiled(
+            torch.func.grad_and_value(loss_fn),
+            (w.clone(),),
+            fullgraph=fullgraph,
+            mode=mode,
+        )
+        self.assertTrue(torch.is_tensor(g_compiled))
+        self.assertIsNotNone(v_compiled)
+        self.assertGreater(float(g_eager.detach().norm()), 0.0)
+        self.assertEqual(g_compiled, g_eager, rtol=1e-5, atol=1e-5)
+        self.assertEqual(v_compiled, v_eager, rtol=1e-5, atol=1e-5)
+
+    @requires_compile
+    @parametrize("fullgraph,mode", _FT_COMPILE_KNOBS)
+    def test_compile_grad_and_value_hybrid_force_term_is_live(
+        self, device, fullgraph, mode
+    ):
+        self._maybe_require_cuda_for_mode(device, mode)
+        torch.manual_seed(21)
+        x = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+        target_e = torch.randn((), device=device)
+        target_f = torch.randn_like(x)
+
+        hybrid = self._nequip_style_flat_loss(
+            include_energy=True,
+            include_force=True,
+            x=x,
+            target_e=target_e,
+            target_f=target_f,
+        )
+        energy_only = self._nequip_style_flat_loss(
+            include_energy=True,
+            include_force=False,
+            x=x,
+            target_e=target_e,
+            target_f=target_f,
+        )
+        force_only = self._nequip_style_flat_loss(
+            include_energy=False,
+            include_force=True,
+            x=x,
+            target_e=target_e,
+            target_f=target_f,
+        )
+
+        g_h, v_h = self._run_compiled(
+            torch.func.grad_and_value(hybrid),
+            (w.clone(),),
+            fullgraph=fullgraph,
+            mode=mode,
+        )
+        g_e, v_e = self._run_compiled(
+            torch.func.grad_and_value(energy_only),
+            (w.clone(),),
+            fullgraph=fullgraph,
+            mode=mode,
+        )
+        g_f, v_f = self._run_compiled(
+            torch.func.grad_and_value(force_only),
+            (w.clone(),),
+            fullgraph=fullgraph,
+            mode=mode,
+        )
+        self.assertTrue(
+            torch.is_tensor(g_h) and torch.is_tensor(g_e) and torch.is_tensor(g_f)
+        )
+        self.assertIsNotNone(v_h)
+        self.assertIsNotNone(v_e)
+        self.assertIsNotNone(v_f)
+
+        self.assertGreater(float((g_h - g_e).abs().max()), 1e-3)
+        self.assertGreater(float((v_h - v_e).abs()), 1e-3)
+        self.assertGreater(float(g_f.detach().norm()), 0.0)
+
+        self.assertEqual(g_h, g_e + g_f, rtol=1e-4, atol=1e-5)
+        self.assertEqual(v_h, v_e + v_f, rtol=1e-4, atol=1e-5)
+
+    @requires_compile
+    @parametrize("fullgraph,mode", _FT_COMPILE_KNOBS)
+    def test_compile_grad_and_value_vjp_wrt_positions_hybrid(
+        self, device, fullgraph, mode
+    ):
+        self._maybe_require_cuda_for_mode(device, mode)
+        torch.manual_seed(22)
+        x = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+        target_e = torch.randn((), device=device)
+        target_f = torch.randn_like(x)
+
+        def loss(xx):
+            e, vjp_fn = torch.func.vjp(lambda z: self._quad_energy(z, w), xx)
+            (forces,) = vjp_fn(torch.ones_like(e))
+            return (e - target_e).pow(2) + (forces - target_f).pow(2).sum()
+
+        g_eager, v_eager = torch.func.grad_and_value(loss)(x.clone())
+        g_compiled, v_compiled = self._run_compiled(
+            torch.func.grad_and_value(loss),
+            (x.clone(),),
+            fullgraph=fullgraph,
+            mode=mode,
+        )
+        self.assertTrue(torch.is_tensor(g_compiled))
+        self.assertIsNotNone(v_compiled)
+        self.assertGreater(float(g_eager.detach().norm()), 0.0)
+        self.assertEqual(g_compiled, g_eager, rtol=1e-5, atol=1e-5)
+        self.assertEqual(v_compiled, v_eager, rtol=1e-5, atol=1e-5)
+
+        def energy_only(xx):
+            e, _vjp = torch.func.vjp(lambda z: self._quad_energy(z, w), xx)
+            del _vjp
+            return (e - target_e).pow(2)
+
+        g_e_only, _ = torch.func.grad_and_value(energy_only)(x.clone())
+        self.assertGreater(float((g_eager - g_e_only).abs().max()), 1e-3)
+
+    @requires_compile
+    def test_compile_grad_vjp_missing_device_kernel_raises(self, device):
+        lib = self.lib()
+        lib.define("ghost(Tensor x, Tensor w) -> Tensor")
+
+        @torch.library.register_fake(f"{self.test_ns}::ghost", lib=lib)
+        def _(x, w):
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            ctx.save_for_backward(inputs[0], inputs[1])
+
+        def backward(ctx, grad):
+            x, w = ctx.saved_tensors
+            return grad * w, (grad * x).sum_to_size(w.shape)
+
+        torch.library.register_autograd(
+            f"{self.test_ns}::ghost",
+            backward,
+            setup_context=setup_context,
+            lib=lib,
+        )
+
+        torch.manual_seed(40)
+        x = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+        op = self.ns().ghost
+
+        def loss(xx):
+            e, vjp_fn = torch.func.vjp(lambda z: op(z.square(), w).sum(), xx)
+            (forces,) = vjp_fn(torch.ones_like(e))
+            return e + forces.pow(2).sum()
+
+        torch._dynamo.reset()
+        compiled = torch.compile(torch.func.grad_and_value(loss), fullgraph=True)
+        with self.assertRaisesRegex(NotImplementedError, "Could not run"):
+            compiled(x.clone())
+
+    @requires_compile
+    def test_compile_grad_vjp_non_composite_device_kernel_is_valid(self, device):
+        lib = self.lib()
+        lib.define("opaque(Tensor x, Tensor w) -> Tensor")
+
+        def opaque_impl(x, w):
+            return torch.empty_like(x)
+
+        lib.impl("opaque", opaque_impl, "CPU")
+        if torch.cuda.is_available():
+            lib.impl("opaque", opaque_impl, "CUDA")
+        if TEST_XPU:
+            lib.impl("opaque", opaque_impl, "XPU")
+
+        @torch.library.register_fake(f"{self.test_ns}::opaque", lib=lib)
+        def _(x, w):
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            ctx.save_for_backward(inputs[0], inputs[1])
+
+        def backward(ctx, grad):
+            x, w = ctx.saved_tensors
+            return grad * w, (grad * x).sum_to_size(w.shape)
+
+        torch.library.register_autograd(
+            f"{self.test_ns}::opaque",
+            backward,
+            setup_context=setup_context,
+            lib=lib,
+        )
+
+        torch.manual_seed(41)
+        x = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+        op = self.ns().opaque
+
+        def loss(xx):
+            e, vjp_fn = torch.func.vjp(lambda z: op(z.square(), w).sum(), xx)
+            (forces,) = vjp_fn(torch.ones_like(e))
+            return e + forces.pow(2).sum()
+
+        g_eager = torch.func.grad(loss)(x.clone())
+        self.assertGreater(float(g_eager.detach().norm()), 0.0)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(torch.func.grad(loss), fullgraph=True)
+        g_compiled = compiled(x.clone())
+        self.assertEqual(g_compiled, g_eager, rtol=1e-5, atol=1e-6)
+
+    @requires_compile
+    @parametrize("fullgraph,mode", _FT_COMPILE_KNOBS)
+    def test_compile_grad_vjp_third_order_force_and_force_grad_in_loss(
+        self, device, fullgraph, mode
+    ):
+        self._maybe_require_cuda_for_mode(device, mode)
+        torch.manual_seed(55)
+        x = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+
+        def energy_op(z):
+            return self._scale_op(z.square() * z, w).sum()
+
+        def energy_direct(z):
+            return (z.square() * z * w).sum()
+
+        def make_loss(energy):
+            def force_sq(zz):
+                e, vjp_fn = torch.func.vjp(energy, zz)
+                (f,) = vjp_fn(torch.ones_like(e))
+                return f.pow(2).sum()
+
+            def loss(xx):
+                e, vjp_fn = torch.func.vjp(energy, xx)
+                (f,) = vjp_fn(torch.ones_like(e))
+                g = torch.func.grad(force_sq)(xx)
+                return e + f.pow(2).sum() + g.pow(2).sum()
+
+            return loss
+
+        loss_op = make_loss(energy_op)
+        loss_direct = make_loss(energy_direct)
+
+        g_direct, v_direct = torch.func.grad_and_value(loss_direct)(x.clone())
+        g_eager, v_eager = torch.func.grad_and_value(loss_op)(x.clone())
+        self.assertGreater(float(g_direct.norm()), 0.0)
+        self.assertEqual(g_eager, g_direct, rtol=1e-4, atol=1e-5)
+        self.assertEqual(v_eager, v_direct, rtol=1e-4, atol=1e-5)
+
+        g_compiled, v_compiled = self._run_compiled(
+            torch.func.grad_and_value(loss_op),
+            (x.clone(),),
+            fullgraph=fullgraph,
+            mode=mode,
+        )
+        self.assertIsNotNone(v_compiled)
+        self.assertEqual(g_compiled, g_eager, rtol=1e-4, atol=1e-5)
+        self.assertEqual(v_compiled, v_eager, rtol=1e-4, atol=1e-5)
+
+    @requires_compile
+    @parametrize(
+        "pattern", ["order1_grad", "order2_vjp_primal", "order2_hybrid_e_plus_f"]
+    )
+    def test_compile_grad_vjp_opaque_custom_op_stays_opaque(self, device, pattern):
+        self._register_opaque_scale()
+        torch.manual_seed(50)
+        x = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+
+        if pattern == "order1_grad":
+
+            def loss(ww):
+                return self._opaque_op(x, ww).sum()
+
+            arg = w
+        elif pattern == "order2_vjp_primal":
+
+            def loss(xx):
+                e, _vjp = torch.func.vjp(
+                    lambda z: self._opaque_op(z.square(), w).sum(),
+                    xx,
+                )
+                del _vjp
+                return e
+
+            arg = x
+        elif pattern == "order2_hybrid_e_plus_f":
+
+            def loss(xx):
+                e, vjp_fn = torch.func.vjp(
+                    lambda z: self._opaque_op(z.square(), w).sum(),
+                    xx,
+                )
+                (forces,) = vjp_fn(torch.ones_like(e))
+                return e + forces.pow(2).sum()
+
+            arg = x
+        else:
+            raise AssertionError(pattern)
+
+        g_eager, v_eager = torch.func.grad_and_value(loss)(arg.clone())
+        self.assertGreater(float(g_eager.detach().norm()), 0.0)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(torch.func.grad_and_value(loss), fullgraph=True)
+        compiled(arg.clone())
+
+        before = self._opaque_calls["real_forward"]
+        g_compiled, v_compiled = compiled(arg.clone())
+        real_calls = self._opaque_calls["real_forward"] - before
+
+        self.assertGreaterEqual(
+            real_calls,
+            1,
+            msg=(
+                "Real kernel never ran during the compiled invocation: the op was "
+                f"inlined at trace time instead of kept opaque (pattern={pattern})."
+            ),
+        )
+        self.assertEqual(g_compiled, g_eager, rtol=1e-5, atol=1e-6)
+        self.assertEqual(v_compiled, v_eager, rtol=1e-5, atol=1e-6)
+
+    @requires_compile
+    def test_compile_grad_vjp_opaque_op_backward_uses_saved_output(self, device):
+        self._register_saves_output()
+        torch.manual_seed(51)
+        x = torch.randn(4, 3, device=device)
+        saves_output = self.ns().saves_output
+
+        def loss_op(xx):
+            e, vjp_fn = torch.func.vjp(
+                lambda z: saves_output(z.square()).sum(),
+                xx,
+            )
+            (forces,) = vjp_fn(torch.ones_like(e))
+            return e + forces.pow(2).sum()
+
+        def loss_direct(xx):
+            e, vjp_fn = torch.func.vjp(lambda z: torch.exp(z.square()).sum(), xx)
+            (forces,) = vjp_fn(torch.ones_like(e))
+            return e + forces.pow(2).sum()
+
+        g_direct, v_direct = torch.func.grad_and_value(loss_direct)(x.clone())
+        g_eager, v_eager = torch.func.grad_and_value(loss_op)(x.clone())
+        self.assertEqual(g_eager, g_direct, rtol=1e-5, atol=1e-6)
+        self.assertEqual(v_eager, v_direct, rtol=1e-5, atol=1e-6)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(torch.func.grad_and_value(loss_op), fullgraph=True)
+        compiled(x.clone())
+        before = self._saves_out_calls["real_forward"]
+        g_compiled, v_compiled = compiled(x.clone())
+        self.assertGreaterEqual(self._saves_out_calls["real_forward"] - before, 1)
+        self.assertEqual(g_compiled, g_direct, rtol=1e-5, atol=1e-6)
+        self.assertEqual(v_compiled, v_direct, rtol=1e-5, atol=1e-6)
+
+    @requires_compile
+    def test_compile_grad_vjp_opaque_tensorlist_op_with_custom_op_backward(
+        self, device
+    ):
+        self._register_tensorlist_ops()
+        torch.manual_seed(52)
+        x = torch.randn(4, 3, device=device)
+        y = torch.randn(4, 3, device=device)
+        w = torch.randn(3, device=device)
+        scale_list = self.ns().scale_list
+
+        def loss_op(xx):
+            def energy(z):
+                a, b = scale_list([z.square(), (z * y).cos()], w)
+                return a.sum() + b.sum()
+
+            e, vjp_fn = torch.func.vjp(energy, xx)
+            (forces,) = vjp_fn(torch.ones_like(e))
+            return e + forces.pow(2).sum()
+
+        def loss_direct(xx):
+            def energy(z):
+                return (z.square() * w).sum() + ((z * y).cos() * w).sum()
+
+            e, vjp_fn = torch.func.vjp(energy, xx)
+            (forces,) = vjp_fn(torch.ones_like(e))
+            return e + forces.pow(2).sum()
+
+        g_direct, v_direct = torch.func.grad_and_value(loss_direct)(x.clone())
+        g_eager, v_eager = torch.func.grad_and_value(loss_op)(x.clone())
+        self.assertEqual(g_eager, g_direct, rtol=1e-5, atol=1e-6)
+        self.assertEqual(v_eager, v_direct, rtol=1e-5, atol=1e-6)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(torch.func.grad_and_value(loss_op), fullgraph=True)
+        compiled(x.clone())
+        before_scale = self._list_calls["scale_list"]
+        before_relay = self._list_calls["grad_relay"]
+        g_compiled, v_compiled = compiled(x.clone())
+        self.assertGreaterEqual(
+            self._list_calls["scale_list"] - before_scale,
+            1,
+            msg="Tensorlist forward op inlined instead of kept opaque.",
+        )
+        self.assertGreaterEqual(
+            self._list_calls["grad_relay"] - before_relay,
+            1,
+            msg="Custom op inside the backward formula inlined instead of kept opaque.",
+        )
+        self.assertEqual(g_compiled, g_direct, rtol=1e-5, atol=1e-6)
+        self.assertEqual(v_compiled, v_direct, rtol=1e-5, atol=1e-6)
+
+    @requires_compile
+    def test_compile_grad_vjp_opaque_custom_op_runs_every_invocation(self, device):
+        self._register_opaque_scale()
+        torch.manual_seed(53)
+        w = torch.randn(3, device=device)
+
+        def loss(xx):
+            e, vjp_fn = torch.func.vjp(
+                lambda z: self._opaque_op(z.square(), w).sum(),
+                xx,
+            )
+            (forces,) = vjp_fn(torch.ones_like(e))
+            return e + forces.pow(2).sum()
+
+        torch._dynamo.reset()
+        compiled = torch.compile(torch.func.grad_and_value(loss), fullgraph=True)
+        compiled(torch.randn(4, 3, device=device))
+
+        for step in range(4):
+            x = torch.randn(4, 3, device=device)
+            before = self._opaque_calls["real_forward"]
+            g_compiled, v_compiled = compiled(x.clone())
+            real_calls = self._opaque_calls["real_forward"] - before
+            g_eager, v_eager = torch.func.grad_and_value(loss)(x.clone())
+            self.assertGreaterEqual(
+                real_calls,
+                1,
+                msg=(
+                    f"step {step}: real kernel did not run -- compiled artifact is "
+                    "serving cached/baked values instead of executing the op."
+                ),
+            )
+            self.assertEqual(
+                g_compiled, g_eager, rtol=1e-5, atol=1e-6, msg=f"grad step {step}"
+            )
+            self.assertEqual(
+                v_compiled, v_eager, rtol=1e-5, atol=1e-6, msg=f"value step {step}"
+            )
+
+    @requires_compile
+    @parametrize("fullgraph", [True, False])
+    def test_compile_reduce_overhead_cudagraph_unsafe_op_runs_every_invocation(
+        self, device, fullgraph
+    ):
+        self._require_cuda(device)
+        self._register_ro_scale()
+        torch.manual_seed(54)
+        w = torch.randn(3, device=device)
+        ro_scale = self.ns().ro_scale
+
+        def loss(xx):
+            e, vjp_fn = torch.func.vjp(
+                lambda z: ro_scale(z.square(), w).sum(),
+                xx,
+            )
+            (forces,) = vjp_fn(torch.ones_like(e))
+            return e + forces.pow(2).sum()
+
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            torch.func.grad_and_value(loss),
+            fullgraph=fullgraph,
+            mode="reduce-overhead",
+        )
+        for _ in range(3):
+            torch.compiler.cudagraph_mark_step_begin()
+            compiled(torch.randn(4, 3, device=device))
+
+        for step in range(4):
+            x = torch.randn(4, 3, device=device)
+            before = self._ro_calls["real_forward"]
+            torch.compiler.cudagraph_mark_step_begin()
+            g_compiled, v_compiled = compiled(x.clone())
+            g_compiled = g_compiled.clone()
+            v_compiled = v_compiled.clone()
+            real_calls = self._ro_calls["real_forward"] - before
+            g_eager, v_eager = torch.func.grad_and_value(loss)(x.clone())
+            self.assertGreaterEqual(
+                real_calls,
+                1,
+                msg=(
+                    f"step {step}: cudagraph replay skipped the real op body -- the "
+                    "op was captured/baked instead of kept an eager opaque node."
+                ),
+            )
+            self.assertEqual(
+                g_compiled, g_eager, rtol=1e-5, atol=1e-6, msg=f"grad step {step}"
+            )
+            self.assertEqual(
+                v_compiled, v_eager, rtol=1e-5, atol=1e-6, msg=f"value step {step}"
+            )
+
+    def test_func_vmap_through_custom_op_matches_direct(self, device):
+        with self._functorch_stack_guard():
+            torch.manual_seed(60)
+            x = torch.randn(5, 3, device=device)
+            w = torch.randn(3, device=device)
+
+            out = torch.func.vmap(lambda row: self._scale_op(row, w))(x)
+            self.assertEqual(out, x * w)
+
+            g_op = torch.func.grad(
+                lambda z: torch.func.vmap(lambda r: self._scale_op(r, w))(z).sum(),
+            )(x)
+            g_direct = torch.func.grad(
+                lambda z: torch.func.vmap(lambda r: r * w)(z).sum(),
+            )(x)
+            self.assertGreater(float(g_direct.norm()), 0.0)
+            self.assertEqual(g_op, g_direct)
+
+    def test_func_jacrev_through_custom_op_matches_direct(self, device):
+        with self._functorch_stack_guard():
+            torch.manual_seed(61)
+            x = torch.randn(4, 3, device=device)
+            w = torch.randn(3, device=device)
+
+            got = torch.func.jacrev(lambda z: self._scale_op(z.square(), w).sum())(x)
+            ref = torch.func.jacrev(lambda z: (z.square() * w).sum())(x)
+            self.assertGreater(float(ref.norm()), 0.0)
+            self.assertEqual(got, ref)
+
+    def test_func_vjp_mixed_with_autograd_grad_same_leaf(self, device):
+        with self._functorch_stack_guard():
+            torch.manual_seed(62)
+            x = torch.randn(4, 3, device=device)
+            w = torch.randn(3, device=device)
+
+            def run(energy):
+                leaf = x.clone().requires_grad_(True)
+                e, vjp_fn = torch.func.vjp(energy, leaf)
+                (f,) = vjp_fn(torch.ones_like(e))
+                (g,) = torch.autograd.grad(f.pow(2).sum(), leaf)
+                return g
+
+            g_op = run(lambda z: self._scale_op(z.square(), w).sum())
+            g_direct = run(lambda z: (z.square() * w).sum())
+            self.assertGreater(float(g_direct.norm()), 0.0)
+            self.assertEqual(g_op, g_direct)
+
+    @unittest.expectedFailure
+    def test_func_jvp_through_custom_op_matches_direct(self, device):
+        # Forward-mode AD treats the custom op as a constant: jvp returns a
+        # ZERO tangent (silently wrong, no error raised).
+        with self._functorch_stack_guard():
+            torch.manual_seed(63)
+            x = torch.randn(4, 3, device=device)
+            w = torch.randn(3, device=device)
+            tangent = torch.randn_like(x)
+
+            v_op, jv_op = torch.func.jvp(
+                lambda z: self._scale_op(z.square(), w).sum(),
+                (x,),
+                (tangent,),
+            )
+            v_ref, jv_ref = torch.func.jvp(
+                lambda z: (z.square() * w).sum(),
+                (x,),
+                (tangent,),
+            )
+            self.assertEqual(v_op, v_ref)
+            self.assertEqual(jv_op, jv_ref)
+
+    @unittest.expectedFailure
+    def test_func_jacfwd_through_custom_op_matches_direct(self, device):
+        # jacfwd rides forward-mode AD: the custom op contributes ZERO columns.
+        with self._functorch_stack_guard():
+            torch.manual_seed(64)
+            x = torch.randn(4, 3, device=device)
+            w = torch.randn(3, device=device)
+
+            got = torch.func.jacfwd(lambda z: self._scale_op(z.square(), w).sum())(x)
+            ref = torch.func.jacfwd(lambda z: (z.square() * w).sum())(x)
+            self.assertGreater(float(ref.norm()), 0.0)
+            self.assertEqual(got, ref)
+
+    @unittest.expectedFailure
+    def test_func_hessian_through_custom_op_matches_direct(self, device):
+        # hessian = jacfwd(jacrev): nesting forward-mode over the patched
+        # backward trips a functorch internal assert.
+        with self._functorch_stack_guard():
+            torch.manual_seed(65)
+            x = torch.randn(4, 3, device=device)
+            w = torch.randn(3, device=device)
+
+            got = torch.func.hessian(lambda z: self._scale_op(z.square(), w).sum())(x)
+            ref = torch.func.hessian(lambda z: (z.square() * w).sum())(x)
+            self.assertGreater(float(ref.norm()), 0.0)
+            self.assertEqual(got, ref)
+
+
 only_for = ("cpu", "cuda", "xpu")
 instantiate_device_type_tests(
     TestCustomOpTesting, globals(), only_for=only_for, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestFuncTorchCompatibility, globals(), only_for=only_for, allow_xpu=True
 )
 instantiate_parametrized_tests(TestCustomOp)
 instantiate_parametrized_tests(TestCustomOpAPI)
