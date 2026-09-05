@@ -99,6 +99,8 @@ class AOTCompilePickler(FunctionPicklerBase):
                 kwdefaults=obj.__kwdefaults__,
                 closure=obj.__closure__,
                 attributes=obj.__dict__,
+                annotations=obj.__annotations__,
+                type_params=getattr(obj, "__type_params__", None),
             )
 
         return NotImplemented
