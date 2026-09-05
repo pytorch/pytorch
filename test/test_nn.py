@@ -12966,13 +12966,17 @@ if __name__ == '__main__':
         torch._C._nn.rrelu_with_noise(x, noise, 0.1, 0.3, True, None, out=out)
         self.assertEqual(out.shape, x.shape)
 
+    @onlyCPU
+    def test_rrelu_with_noise_expanded_noise_rejected(self, device):
         # The shape check passes for an expanded noise whose storage holds one
-        # element; writing self.numel() of them into it is the same defect.
+        # element; writing self.numel() distinct values into it is the same
+        # out-of-bounds-write defect as an undersized out.
+        x = torch.randn(64, device=device)
         expanded_noise = torch.zeros(1, device=device).expand(64)
-        out2 = torch.empty(64, device=device)
+        out = torch.empty(64, device=device)
         with self.assertRaisesRegex(RuntimeError, "noise tensor must be contiguous"):
             torch._C._nn.rrelu_with_noise(
-                x, expanded_noise, 0.1, 0.3, True, None, out=out2)
+                x, expanded_noise, 0.1, 0.3, True, None, out=out)
 
     @onlyCPU
     def test_rrelu_bounds_validation(self, device):
