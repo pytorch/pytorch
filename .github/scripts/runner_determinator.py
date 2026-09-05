@@ -77,6 +77,7 @@ GITHUB_OUTPUT = os.getenv("GITHUB_OUTPUT", "")
 GH_OUTPUT_KEY_AMI = "runner-ami"
 GH_OUTPUT_KEY_LABEL_TYPE = "label-type"
 GH_OUTPUT_KEY_AMD_SANDBOX_LABEL_TYPE = "amd-sandbox-label-type"
+GH_OUTPUT_KEY_SCALE_CONFIG_LABEL_TYPE = "scale-config-label-type"
 OPT_OUT_LABEL = "no-runner-experiments"
 
 SETTING_EXPERIMENTS = "experiments"
@@ -89,8 +90,13 @@ LF_FLEET_EXPERIMENT = "lf"
 # The Meta (OSDC) fleet is the default; the "lf" experiment switches to the
 # Linux Foundation fleet. META_LABEL_PREFIX is also the fallback on error.
 META_LABEL_PREFIX = "mt-"
-META_CANARY_LABEL_PREFIX = "c-mt-"
 LF_LABEL_PREFIX = "lf-"
+
+# Experiments naming a scale-config AMI variant, selected by prefixing the
+# runner type: wincanary.windows.12xlarge. Fleet experiments are excluded on
+# purpose -- lf rolls out over ALL workflows and would move Windows builds off
+# their fleet as a side effect.
+SCALE_CONFIG_VARIANT_EXPERIMENTS = frozenset({"wincanary", "wincanarylf"})
 
 AMD_SANDBOX_EXPERIMENT = "amd-sandbox"
 AMD_SANDBOX_LABEL_PREFIX = "amd-sandbox-"
@@ -122,6 +128,7 @@ class RunnerPrefixResult(NamedTuple):
     # Dedicated prefix for the amd-sandbox experiment, exposed via its own output
     # (amd-sandbox-label-type) instead of being folded into ``prefix``.
     amd_sandbox_prefix: str = ""
+    scale_config_prefix: str = ""
 
 
 class Settings(NamedTuple):
@@ -523,7 +530,6 @@ def get_runner_prefix(
     branch: str,
     eligible_experiments: frozenset[str] = frozenset(),
     opt_out_experiments: frozenset[str] = frozenset(),
-    is_canary: bool = False,
     workflow_name: str = "",
 ) -> RunnerPrefixResult:
     settings = parse_settings(rollout_state)
@@ -531,6 +537,7 @@ def get_runner_prefix(
 
     lf_enabled = False
     amd_sandbox_prefix = ""
+    scale_config_experiments: list[str] = []
     for experiment_name, experiment_settings in settings.experiments.items():
         if not experiment_settings.all_branches and is_exception_branch(branch):
             log.info(
@@ -652,6 +659,12 @@ def get_runner_prefix(
             elif experiment_name == LF_FLEET_EXPERIMENT:
                 lf_enabled = True
                 log.info("lf experiment enabled. Using the Linux Foundation fleet.")
+            elif experiment_name in SCALE_CONFIG_VARIANT_EXPERIMENTS:
+                scale_config_experiments.append(experiment_name)
+                log.info(
+                    f"Experiment '{experiment_name}' enabled; offering it on "
+                    "scale-config-label-type."
+                )
             else:
                 log.info(
                     f"Experiment '{experiment_name}' enabled but no longer affects "
@@ -660,11 +673,24 @@ def get_runner_prefix(
 
     # Fleet selection: the Meta (OSDC) fleet is the default; the lf experiment
     # switches to the Linux Foundation fleet.
-    if lf_enabled:
-        prefix = LF_LABEL_PREFIX
-    else:
-        prefix = META_CANARY_LABEL_PREFIX if is_canary else META_LABEL_PREFIX
-    return RunnerPrefixResult(prefix=prefix, amd_sandbox_prefix=amd_sandbox_prefix)
+    prefix = LF_LABEL_PREFIX if lf_enabled else META_LABEL_PREFIX
+
+    if len(scale_config_experiments) > 1:
+        log.error(
+            "Only one scale-config AMI variant can be enabled for a job at any time. "
+            f"Enabling {scale_config_experiments[0]} and ignoring the rest, which "
+            f"are {', '.join(scale_config_experiments[1:])}"
+        )
+        del scale_config_experiments[1:]
+    scale_config_prefix = (
+        f"{scale_config_experiments[0]}." if scale_config_experiments else ""
+    )
+
+    return RunnerPrefixResult(
+        prefix=prefix,
+        amd_sandbox_prefix=amd_sandbox_prefix,
+        scale_config_prefix=scale_config_prefix,
+    )
 
 
 def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -> str:
@@ -728,6 +754,7 @@ def main() -> None:
 
     runner_label_prefix = META_LABEL_PREFIX
     amd_sandbox_label_prefix = ""
+    scale_config_label_prefix = ""
 
     # no-runner-experiments means "use Meta, not LF": opt out of the lf
     # experiment, so the run stays on the default Meta fleet.
@@ -757,19 +784,17 @@ def main() -> None:
             args.github_branch,
         )
 
-        is_canary = args.github_repo == "pytorch/pytorch-canary"
-
         result = get_runner_prefix(
             rollout_state,
             (args.github_issue_owner, username),
             args.github_branch,
             args.eligible_experiments,
             opt_out_experiments,
-            is_canary,
             workflow_name=args.workflow_name,
         )
         runner_label_prefix = result.prefix
         amd_sandbox_label_prefix = result.amd_sandbox_prefix
+        scale_config_label_prefix = result.scale_config_prefix
 
     except Exception as e:
         log.error(
@@ -778,6 +803,7 @@ def main() -> None:
 
     set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
     set_github_output(GH_OUTPUT_KEY_AMD_SANDBOX_LABEL_TYPE, amd_sandbox_label_prefix)
+    set_github_output(GH_OUTPUT_KEY_SCALE_CONFIG_LABEL_TYPE, scale_config_label_prefix)
 
 
 if __name__ == "__main__":
