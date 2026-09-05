@@ -12957,9 +12957,7 @@ if __name__ == '__main__':
 
     @onlyCPU
     def test_rrelu_with_noise_out_smaller_than_input(self, device):
-        # rrelu_with_noise is not a structured out= op, so nothing sizes out
-        # for the kernel, which writes self.numel() elements into it. A short
-        # out used to be written past its end and corrupt the heap.
+        # A short out used to be written past its end and corrupt the heap.
         x = torch.randn(64, device=device)
         noise = torch.empty_like(x)
         out = torch.empty(2, device=device)
@@ -12968,9 +12966,8 @@ if __name__ == '__main__':
 
     @onlyCPU
     def test_rrelu_with_noise_expanded_noise_rejected(self, device):
-        # The shape check passes for an expanded noise whose storage holds one
-        # element; writing self.numel() distinct values into it is the same
-        # out-of-bounds-write defect as an undersized out.
+        # An expanded noise's storage holds one element; the same defect as
+        # an undersized out.
         x = torch.randn(64, device=device)
         expanded_noise = torch.zeros(1, device=device).expand(64)
         out = torch.empty(64, device=device)

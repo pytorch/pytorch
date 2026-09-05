@@ -617,12 +617,9 @@ Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
     Tensor& output) {
   TORCH_CHECK(self.sym_sizes() == noise.sym_sizes(), "noise tensor shape must match self tensor shape. Got self.shape = ", self.sym_sizes(), " noise.shape = ", noise.sym_sizes());
   if (training) {
-    // The size check above passes for an expanded noise whose storage holds
-    // one element, but the kernel below writes self.numel() distinct values
-    // into it, so it has to be a real per-element buffer.
+    // The shape check above also passes for an expanded (0-stride) noise.
     TORCH_CHECK(noise.is_contiguous(), "rrelu_with_noise: noise tensor must be contiguous, got one with sizes ", noise.sizes(), " and strides ", noise.strides());
-    // Not a structured op, so nothing else has sized output for us, and the
-    // kernel below writes self.numel() elements into it regardless.
+    // Not a structured op, so nothing else has sized output for us.
     resize_output(output, self.sizes());
     AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
       _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
