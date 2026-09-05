@@ -54,7 +54,7 @@ from torch.utils._triton import has_triton_package
 
 
 try:
-    from triton_constexpr_configs import (
+    from .triton_constexpr_configs import (
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
         UserDefinedPydanticLikeConfig,
@@ -66,7 +66,7 @@ try:
         UserDefinedTritonKernelNonInitConfig,
     )
 except ImportError:
-    from test.inductor.triton_constexpr_configs import (
+    from triton_constexpr_configs import (
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
         UserDefinedPydanticLikeConfig,
