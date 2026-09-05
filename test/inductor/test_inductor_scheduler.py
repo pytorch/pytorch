@@ -2167,7 +2167,7 @@ class TestScheduler(TestCase):
 
 class TestScoreFusionMemory(TestCase):
     """
-    Tests for _score_fusion_memory_by_buffer_overlap.
+    Tests for fusion memory scoring.
 
     These tests validate the fusion scoring logic that determines when nodes
     should be fused together based on their memory access patterns.
@@ -2209,6 +2209,50 @@ class TestScoreFusionMemory(TestCase):
         self.assertTrue(torch.allclose(out2_eager, out2_compiled, atol=1e-3, rtol=1e-3))
         # Should fuse into 1 kernel since both ops read exact same buffer
         self.assertEqual(metrics.generated_kernel_count, 1)
+
+    @onlyCUDA
+    def test_reduction_common_read_scoring(self) -> None:
+        def fn(base, correction):
+            base_3d = base.view(2, 16, 64)
+            final = torch.cat(
+                (
+                    base_3d[:, :1],
+                    base_3d[:, 1:] + correction.view(2, 15, 64),
+                ),
+                dim=1,
+            )
+            return final.flatten(0, 1).amax(-1), base.amax(-1)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        args = (
+            torch.randn(32, 64, device=GPU_TYPE),
+            torch.randn(30, 64, device=GPU_TYPE),
+        )
+
+        expected = fn(*args)
+        actual = torch.compile(fn, fullgraph=True)(*args)
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        with inductor_config.patch("reduction_common_read_fusion", False):
+            actual = torch.compile(fn, fullgraph=True)(*args)
+        self.assertEqual(expected, actual)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+        def disjoint(x):
+            return (
+                x[:16].repeat(2, 1).amax(-1),
+                x[16:].repeat(2, 1).amax(-1),
+            )
+
+        metrics.reset()
+        x = torch.randn(32, 64, device=GPU_TYPE)
+        self.assertEqual(disjoint(x), torch.compile(disjoint, fullgraph=True)(x))
+        self.assertEqual(metrics.generated_kernel_count, 2)
 
     @skipIf(not HAS_GPU, "GPU not available")
     @inductor_config.patch("score_fusion_memory_threshold", 1)

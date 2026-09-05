@@ -1029,6 +1029,9 @@ max_fusion_size = 64
 # Valid range: [0, 1]. Default to not fusion.
 min_overlap_ratio = 1.1
 
+# Score compatible sibling CUDA reductions by their direct common reads.
+reduction_common_read_fusion = True
+
 # how many nodes to attempt pairwise fusion with in a buffer group
 max_fusion_buffer_group_pairwise_attempts = 64
 

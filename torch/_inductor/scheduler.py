@@ -6844,7 +6844,30 @@ class Scheduler:
                 config.loop_ordering_after_fusion
                 or config.loop_index_inversion_in_fusion
             ):
+                old_len = len(nodes)
                 nodes = self.fuse_nodes_once(nodes, is_reorder_round=True)
+                if config.reduction_common_read_fusion and 1 < len(nodes) < old_len:
+                    reduction_readers = collections.defaultdict(list)
+                    for node in nodes:
+                        device = node.get_device()
+                        if (
+                            device is not None
+                            and device.type == "cuda"
+                            and node.is_reduction()
+                        ):
+                            for name in OrderedSet(
+                                dep.name for dep in node.read_writes.reads
+                            ):
+                                reduction_readers[name].append(node)
+                    pair_limit = config.max_fusion_buffer_group_pairwise_attempts
+                    if any(
+                        self._score_reduction_common_reads(node1, node2, True)
+                        for readers in reduction_readers.values()
+                        for index, node1 in enumerate(readers)
+                        for node2 in readers[index + 1 : index + 1 + pair_limit]
+                    ):
+                        # Reordering can expose sibling common reads.
+                        nodes = self.fuse_nodes_once(nodes, is_reorder_round=False)
             return nodes
 
     def process_grouped_nodes(self) -> None:
@@ -10788,13 +10811,96 @@ class Scheduler:
 
         # This is a horizontal/common-read locality heuristic, not a
         # producer-consumer dependency match.
-        buffer_overlap_score = 0
-        if score == 0 and self._can_use_buffer_overlap_scoring(node1, node2):
+        buffer_overlap_score = self._score_reduction_common_reads(
+            node1, node2, count_bytes
+        )
+        if buffer_overlap_score == 0 and self._can_use_buffer_overlap_scoring(
+            node1, node2
+        ):
             buffer_overlap_score = self._score_fusion_memory_by_buffer_overlap(
                 node1, node2
             )
 
         return _construct_return_value(score, buffer_overlap_score, False)
+
+    def _score_reduction_common_reads(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        count_bytes: bool,
+    ) -> int:
+        """Score sibling reductions that directly read mostly the same buffers."""
+        if not config.reduction_common_read_fusion:
+            return 0
+
+        device1 = node1.get_device()
+        device2 = node2.get_device()
+        if (
+            device1 is None
+            or device2 is None
+            or device1.type != "cuda"
+            or device2.type != "cuda"
+            or not node1.is_reduction()
+            or not node2.is_reduction()
+            or node1.is_template()
+            or node2.is_template()
+            or node1.group != node2.group
+            or node1.get_operation_names() & node2.ancestors
+            or node2.get_operation_names() & node1.ancestors
+        ):
+            return 0
+
+        def external_reads(node: BaseSchedulerNode) -> list[Dep]:
+            outputs = node.get_buffer_names()
+            return [dep for dep in node.read_writes.reads if dep.name not in outputs]
+
+        reads1 = external_reads(node1)
+        reads2 = external_reads(node2)
+        common_names = OrderedSet(dep.name for dep in reads1) & OrderedSet(
+            dep.name for dep in reads2
+        )
+        common_reads = [
+            dep for dep in itertools.chain(reads1, reads2) if dep.name in common_names
+        ]
+        if not common_names or any(
+            not isinstance(dep, MemoryDep) or dep.is_indirect() for dep in common_reads
+        ):
+            return 0
+        common_memory_reads = typing.cast(list[MemoryDep], common_reads)
+        for name in common_names:
+            buffer_size = self.dep_size_hint(StarDep(name), count_bytes)
+            if buffer_size <= 0 or not any(
+                dep.name == name
+                and self.dep_size_hint(dep, count_bytes) == buffer_size
+                and dep.normalize().is_contiguous()
+                for dep in common_memory_reads
+            ):
+                return 0
+
+        def read_sizes(reads: list[Dep]) -> dict[str, int] | None:
+            sizes: dict[str, int] = defaultdict(int)
+            for dep in reads:
+                size = self.dep_size_hint(dep, count_bytes)
+                if size <= 0:
+                    return None
+                sizes[dep.name] += size
+            for name, size in sizes.items():
+                buffer_size = self.dep_size_hint(StarDep(name), count_bytes)
+                if buffer_size <= 0:
+                    return None
+                sizes[name] = min(size, buffer_size)
+            return sizes
+
+        sizes1 = read_sizes(reads1)
+        sizes2 = read_sizes(reads2)
+        if sizes1 is None or sizes2 is None:
+            return 0
+        total = max(sum(sizes1.values()), sum(sizes2.values()))
+        common = sum(min(sizes1[name], sizes2[name]) for name in common_names)
+        # The target reads one shared base plus an approximately equal-size
+        # correction, so 50% is the narrowest threshold that admits it. This
+        # path is separate from min_overlap_ratio, which excludes reductions.
+        return common if common * 2 >= total else 0
 
     def _can_use_buffer_overlap_scoring(
         self,
