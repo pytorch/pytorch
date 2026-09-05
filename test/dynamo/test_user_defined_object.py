@@ -10,7 +10,11 @@ import torch
 import torch._dynamo.testing as dynamo_testing
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    make_dynamo_test,
+    parametrize,
+)
 
 
 class SlotsOnly:
@@ -1217,6 +1221,78 @@ class TestUserDefinedSetitem(TestCase):
 
 
 class TestObjectConstruction(TestCase):
+    @parametrize(
+        "tensor_type_name,dtype",
+        [
+            ("FloatTensor", torch.float32),
+            ("BoolTensor", torch.bool),
+        ],
+    )
+    def test_privateuse1_tensor_constructor_routed_in_graph(
+        self, tensor_type_name, dtype
+    ):
+        from torch._dynamo.variables.user_defined import UserDefinedClassVariable
+
+        class TensorTypeMeta(type):
+            def __call__(cls, value):
+                return torch.as_tensor(value, dtype=cls.dtype)
+
+        PrivateUse1Tensor = TensorTypeMeta(
+            f"PrivateUse1{tensor_type_name}", (), {"dtype": dtype}
+        )
+        UnregisteredTensor = TensorTypeMeta(tensor_type_name, (), {"dtype": dtype})
+
+        privateuse1_module = types.SimpleNamespace(
+            **{tensor_type_name: PrivateUse1Tensor},
+        )
+
+        # The static class cache may be populated before a backend is registered.
+        self.assertNotIn(
+            PrivateUse1Tensor,
+            UserDefinedClassVariable._in_graph_classes(),
+        )
+
+        with (
+            unittest.mock.patch.object(
+                torch._C,
+                "_get_privateuse1_backend_name",
+                return_value="stub_privateuse1",
+            ),
+            unittest.mock.patch.object(
+                torch,
+                "stub_privateuse1",
+                privateuse1_module,
+                create=True,
+            ),
+        ):
+            self.assertFalse(
+                UserDefinedClassVariable._is_privateuse1_tensor_class(
+                    UnregisteredTensor
+                )
+            )
+            backend = dynamo_testing.EagerAndRecordGraphs()
+
+            @torch.compile(backend=backend, fullgraph=True)
+            def fn(x, y):
+                return PrivateUse1Tensor([x, y])
+
+            x = torch.tensor(1, dtype=dtype)
+            y = torch.tensor(0, dtype=dtype)
+            self.assertEqual(fn(x, y), torch.stack([x, y]))
+            self.assertEqual(len(backend.graphs), 1)
+            self.assertTrue(
+                any(
+                    node.op == "call_function" and node.target is torch.stack
+                    for node in backend.graphs[0].graph.nodes
+                )
+            )
+            self.assertTrue(
+                any(
+                    node.op == "call_function" and node.target is PrivateUse1Tensor
+                    for node in backend.graphs[0].graph.nodes
+                )
+            )
+
     @make_dynamo_test
     def test_object_call_identity(self):
         a = object()
@@ -1553,6 +1629,9 @@ class TestSimpleNamespace(TestCase):
         ns_compiled = types.SimpleNamespace(name="cfg", scale=2)
         self.assertEqual(fn(ns_eager, x), opt_fn(ns_compiled, x))
         self.assertEqual(vars(ns_eager), vars(ns_compiled))
+
+
+instantiate_parametrized_tests(TestObjectConstruction)
 
 
 if __name__ == "__main__":

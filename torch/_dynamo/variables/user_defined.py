@@ -428,6 +428,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return set(tensortype_to_dtype.keys()) | _in_graph_class_list
 
     @staticmethod
+    def _is_privateuse1_tensor_class(value: type[object]) -> bool:
+        privateuse1_module = getattr(
+            torch, torch._C._get_privateuse1_backend_name(), None
+        )
+        return privateuse1_module is not None and any(
+            value is getattr(privateuse1_module, tensor_type.__name__, None)
+            for tensor_type in tensortype_to_dtype
+        )
+
+    @staticmethod
     @functools.cache
     def supported_c_new_functions() -> set[Any]:
         exceptions: set[Any] = {
@@ -1544,6 +1554,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif (
             self.value in self._in_graph_classes()
+            or self._is_privateuse1_tensor_class(self.value)
             or is_traceable_wrapper_subclass_type(self.value)
         ):
             # torch.LongTensor cannot accept a list of FakeTensors.
@@ -1552,7 +1563,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             if (
                 np
-                and self.value in tensortype_to_dtype
+                and (
+                    self.value in tensortype_to_dtype
+                    or self._is_privateuse1_tensor_class(self.value)
+                )
                 and len(args) == 1
                 and isinstance(args[0], ListVariable)
                 and len(args[0].items) > 1
