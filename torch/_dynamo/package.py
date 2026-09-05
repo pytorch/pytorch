@@ -408,6 +408,7 @@ def load_guard_manager(
         shape_code_parts=guards_state.shape_code_parts,
         runtime_global_scope=runtime_global_scope,
         guard_build_local_state=getattr(guards_state, "local_state", None),
+        explicit_capture=True,
     ).guard_manager
 
 
@@ -424,18 +425,21 @@ def _backend_ids_from_code(code: types.CodeType) -> Iterator[_BackendId]:
             yield from _backend_ids_from_code(const)
 
 
+@dataclasses.dataclass
+class _PreparedInstall:
+    """What install() would have computed, computed early by prepare()."""
+
+    backends: dict[_BackendId, Any]
+    managers: dict[tuple[types.CodeType, int], Any]
+    guard_states: dict[tuple[types.CodeType, int], Any]
+
+
 @dataclasses.dataclass(frozen=True)
 class InlinedSource:
     module: str
     firstlineno: int
     lastlineno: int
     checksum: str
-    content: str
-
-
-@functools.cache
-def _get_module_content(module: types.ModuleType) -> str:
-    return inspect.getsource(module)
 
 
 def _defining_module_name(code: types.CodeType) -> str | None:
@@ -481,17 +485,24 @@ def _scan_sys_modules_for_file(filename: str) -> str | None:
     keeps a stale miss, and ``del sys.modules[m]; import m`` -- the ordinary
     force-reimport idiom -- is exactly that. sys.modules exposes no mutation
     counter to use instead. A stale MISS costs this file's checksum, so a later
-    edit to it is not caught at load; worth knowing when hunting a checksum
-    that should have fired.
+    edit to it is not caught at load; worth knowing when hunting a checksum that
+    should have fired.
+
+    A cached HIT is revalidated against sys.modules before it is returned, for
+    the cost of one dict lookup rather than the scan the memo exists to avoid.
+    Trusting it instead made ``del sys.modules[m]`` -- with no re-import, so the
+    ABA check above cannot see it -- hand back a dead name that ``add_code``
+    then raised KeyError on.
     """
     generation = len(sys.modules)
     cached = _MODULE_KEY_BY_FILE.get(filename)
     if cached is not None:
-        if cached[1] is None:
-            if cached[0] == generation:
+        cached_generation, cached_key = cached
+        if cached_key is None:
+            if cached_generation == generation:
                 return None
-        elif getattr(sys.modules.get(cached[1]), "__file__", None) == filename:
-            return cached[1]
+        elif getattr(sys.modules.get(cached_key), "__file__", None) == filename:
+            return cached_key
     found = None
     for key, candidate in list(sys.modules.items()):
         if getattr(candidate, "__file__", None) == filename:
@@ -526,7 +537,6 @@ class SourceInfo:
                 firstlineno=firstlineno,
                 lastlineno=lastlineno,
                 checksum=_hash_source(source),
-                content=_get_module_content(module),
             )
         )
 
@@ -656,6 +666,27 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
     return fn
 
 
+def _descriptor_functions(obj: Any) -> list[tuple[str, Any]]:
+    """The functions a descriptor wraps, as (attribute name, function) pairs.
+
+    ``getattr`` on the CLASS returns the descriptor itself, not the function
+    inside it, so a code object defined under ``@property`` resolves to a
+    ``property`` object that nothing downstream can descend into. The attribute
+    name is what makes the path round-trip: the loader replays it with plain
+    ``getattr``, and ``property.fget`` is an ordinary attribute.
+    """
+    if isinstance(obj, property):
+        wrapped = (("fget", obj.fget), ("fset", obj.fset), ("fdel", obj.fdel))
+    elif isinstance(obj, functools.cached_property):
+        wrapped = (("func", obj.func),)
+    else:
+        return []
+    # A pybind11 property wraps an instancemethod, not a Python function: no
+    # code object to name and not even hashable, so keep only real functions
+    # the loader can round-trip through getattr.
+    return [(name, fn) for name, fn in wrapped if inspect.isfunction(fn)]
+
+
 def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
     raise PackageError(
         f"Cannot resolve a fully qualified name for {code}. Lookup scope: {scope}"
@@ -686,7 +717,15 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             if not hasattr(toplevel, part):
                 _raise_resolution_error(code, toplevel)
             toplevel = getattr(toplevel, part)
-            if inspect.isfunction(toplevel) or inspect.ismethod(toplevel):
+            if (
+                inspect.isfunction(toplevel)
+                or inspect.ismethod(toplevel)
+                or _descriptor_functions(toplevel)
+            ):
+                # Stop at a descriptor too, and let _find_code_source unwrap it.
+                # Walking past one cannot work: the remaining parts of a
+                # qualname like "C.prop.<locals>.inner" are not attributes of
+                # the property object.
                 break
     seen = set()
 
@@ -705,6 +744,13 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             for i, const in enumerate(obj.co_consts):
                 if (res := _find_code_source(const)) is not None:
                     return f".co_consts[{i}]{res}"
+
+        for attr, wrapped in _descriptor_functions(obj):
+            if (res := _find_code_source(wrapped)) is not None:
+                # No `toplevel = obj` here: the recursive call sets it to the
+                # wrapped function, whose __qualname__ is the descriptor's own
+                # dotted name, which is what the loader walks to.
+                return f".{attr}{res}"
 
         if inspect.ismethod(obj):
             if (res := _find_code_source(obj.__func__)) is not None:
@@ -749,15 +795,25 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                         value = getattr(obj, name)
                     except AttributeError:
                         continue
+                    # A descriptor is what getattr on the CLASS returns for
+                    # anything defined under @property or @cached_property, so
+                    # excluding it here hides every code object inside one.
+                    wrapped = _descriptor_functions(value)
                     if not (
                         inspect.isfunction(value)
                         or inspect.isclass(value)
                         or inspect.ismethod(value)
+                        or wrapped
                     ):
                         continue
                     if (res := _find_code_source(value)) is not None:
-                        if value.__name__ != name:
-                            _raise_resolution_error(code, toplevel)
+                        # A descriptor has no __name__; the functions it wraps
+                        # carry the attribute's name instead. An alias (or a
+                        # property built from a differently named function) is
+                        # skipped so the definition's own name resolves it.
+                        actual = wrapped[0][1].__name__ if wrapped else value.__name__
+                        if actual != name:
+                            continue
                         return res
         return None
 
@@ -1284,6 +1340,7 @@ class CompilePackage:
         # so repeated loads of one artifact cannot grow the frame cache and
         # module globals without bound. Registered by install().
         self._uninstall_finalizer: weakref.finalize[..., CompilePackage] | None = None
+        self._prepared: _PreparedInstall | None = None
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[_InstalledGlobal]] = {}
@@ -1371,6 +1428,7 @@ class CompilePackage:
         # field a load writes has to be reset here rather than trusted to still
         # hold its __init__ value.
         self._source_info = SourceInfo(inlined_sources=set())
+        self._prepared = None
         self._codes = {}
         self._device_types = set()
         self._system_info = None
@@ -1884,7 +1942,13 @@ class CompilePackage:
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
-        deserialized_backends = self._deserialize_backends(backends)
+        prepared = self._prepared
+        self._prepared = None
+        deserialized_backends = (
+            prepared.backends
+            if prepared is not None
+            else self._deserialize_backends(backends)
+        )
         with _PACKAGE_INSTALL_LOCK:
             _cleanup_dead_packages(blocking=True)
             self._uninstall()
@@ -1895,7 +1959,11 @@ class CompilePackage:
             self._install_owner = object()
             self._installed_precompile_region_id = isolate_recompiles_id
             try:
-                self._install_codes(deserialized_backends)
+                self._install_codes(
+                    deserialized_backends,
+                    prepared.managers if prepared is not None else {},
+                    prepared.guard_states if prepared is not None else {},
+                )
             except BaseException:
                 # A half-installed package is worse than an unloaded one: some
                 # frames serve precompiled code and some do not, and because
@@ -1941,7 +2009,53 @@ class CompilePackage:
                 raise AssertionError("failed install left package state installed")
             self._initialized = False
 
-    def _install_codes(self, backends: dict[_BackendId, Any]) -> None:
+    def prepare(self, backends: dict[_BackendId, Any]) -> None:
+        """Do install()'s pure half now, so its failures land here.
+
+        Deserializing the backends and building the guard trees touches nothing
+        the interpreter can see -- a guard manager reads its example values from
+        the state it was pickled with, and only STORES the runtime scope -- but
+        they are where an artifact that does not fit this host says so. Running
+        them at load costs nothing extra, because install() consumes what this
+        leaves rather than redoing it, and it moves the failure off the first
+        served call.
+        """
+        managers = {}
+        guard_states = {}
+        for code, entry in self._codes.items():
+            if entry.bypassed or not entry.guarded_codes:
+                continue
+            target_code = _lookup_code(entry) if entry.code_source else code
+            scope = sys.modules[entry.python_module].__dict__
+            for index, guarded_code in enumerate(entry.guarded_codes):
+                try:
+                    guards_state = load_guards_state(guarded_code.guards_state)
+                    guard_states[(target_code, index)] = guards_state
+                    managers[(target_code, index)] = load_guard_manager(
+                        guards_state,
+                        target_code,
+                        scope,
+                    )
+                except Exception as e:
+                    # Name the frame and the variant: several frames can guard
+                    # the same source, so without them a failure here cannot be
+                    # told apart from one the capture reported dropping.
+                    raise RuntimeError(
+                        f"{entry.python_module}.{target_code.co_name} "
+                        f"variant {index}: {type(e).__name__}: {e}"
+                    ) from e
+        self._prepared = _PreparedInstall(
+            backends=self._deserialize_backends(backends),
+            managers=managers,
+            guard_states=guard_states,
+        )
+
+    def _install_codes(
+        self,
+        backends: dict[_BackendId, Any],
+        prebuilt: dict[tuple[types.CodeType, int], Any] | None = None,
+        prebuilt_states: dict[tuple[types.CodeType, int], Any] | None = None,
+    ) -> None:
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
@@ -2097,9 +2211,11 @@ class CompilePackage:
                             _SKIP_INSTALLERS[target_code] = state
                         state.owners.add(self)
 
-                for guarded_code in entry.guarded_codes:
-                    with dynamo_timed("precompile_load_guards"):
-                        guards_state = load_guards_state(guarded_code.guards_state)
+                for _index, guarded_code in enumerate(entry.guarded_codes):
+                    guards_state = (prebuilt_states or {}).get((target_code, _index))
+                    if guards_state is None:
+                        with dynamo_timed("precompile_load_guards"):
+                            guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
                     # The installed builtins dict might be absent from the runtime
                     # while loading guards. Populate it if it's missing.
@@ -2152,10 +2268,15 @@ class CompilePackage:
                         raise AssertionError(
                             f"Expected GuardsState, got {type(guards_state)}"
                         )
-                    with dynamo_timed("precompile_build_guards"):
-                        guard_manager = load_guard_manager(
-                            guards_state, target_code, runtime_global_scope
-                        )
+                    # Keyed by the code object install() itself resolved, so a
+                    # prepare that resolved a different one falls back to
+                    # building rather than serving a stale tree.
+                    guard_manager = (prebuilt or {}).get((target_code, _index))
+                    if guard_manager is None:
+                        with dynamo_timed("precompile_build_guards"):
+                            guard_manager = load_guard_manager(
+                                guards_state, target_code, runtime_global_scope
+                            )
                     _load_precompile_entry(
                         target_code,
                         guard_manager,
