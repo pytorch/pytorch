@@ -182,7 +182,7 @@ jobs:
       - name: Build all wheels
         shell: bash
         run: |
-          # shellcheck disable=SC1091
+          # shellcheck disable=SC1090,SC1091
           source "${BINARY_ENV_FILE}"
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
@@ -271,7 +271,7 @@ jobs:
       - name: Build all wheels
         shell: bash
         run: |
-          # shellcheck disable=SC1091
+          # shellcheck disable=SC1090,SC1091
           source "${BINARY_ENV_FILE}"
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
@@ -360,7 +360,7 @@ jobs:
       - name: Build all wheels
         shell: bash
         run: |
-          # shellcheck disable=SC1091
+          # shellcheck disable=SC1090,SC1091
           source "${BINARY_ENV_FILE}"
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
@@ -449,7 +449,7 @@ jobs:
       - name: Build all wheels
         shell: bash
         run: |
-          # shellcheck disable=SC1091
+          # shellcheck disable=SC1090,SC1091
           source "${BINARY_ENV_FILE}"
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
@@ -538,7 +538,7 @@ jobs:
       - name: Build all wheels
         shell: bash
         run: |
-          # shellcheck disable=SC1091
+          # shellcheck disable=SC1090,SC1091
           source "${BINARY_ENV_FILE}"
           bash .ci/manywheel/build_all.sh
       # One artifact per built Python -- names must match what the test/upload
