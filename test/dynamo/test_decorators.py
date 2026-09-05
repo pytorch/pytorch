@@ -30,6 +30,10 @@ def my_custom_function(x):
     return x + 1
 
 
+class CodelessCallPartial(functools.partial):
+    pass
+
+
 class DecoratorTests(PytreeRegisteringTestCase):
     def test_disallow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1570,6 +1574,32 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(Foo.bar(x), expected)
         self.assertEqual(Foo().bar(x), expected)
         self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_compile_class_caching_precompile(self):
+        # Regression: @torch.compile on a class under caching_precompile=True
+        # crashed in _TorchDynamoContext.__call__ before reaching the isclass
+        # branch — the caching_precompile block accessed fn.__code__ on the
+        # class and raised `AttributeError: type object 'Foo' has no attribute
+        # '__code__'` at decoration time. Third-party libs decorate autograd
+        # Function subclasses this way at import.
+        from torch._dynamo.package import DynamoCache
+
+        DynamoCache.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        class Foo:
+            def __call__(self, x):
+                return x.sin()
+
+        x = torch.randn(4)
+        expected = x.sin()
+        self.assertEqual(Foo()(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
+
+        CompiledPartial = torch.compile(backend="eager")(CodelessCallPartial)
+        self.assertEqual(CompiledPartial(torch.sin)(x), expected)
 
     def test_class_methods(self):
         class A:
