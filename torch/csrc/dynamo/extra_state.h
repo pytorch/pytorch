@@ -96,8 +96,8 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   mutable std::recursive_mutex cache_mutex;
   // Frame state to detect dynamic shape dims in the default compile scope.
   py::dict frame_state;
-  // Isolated compile scopes must not teach the default scope which dimensions
-  // to generalize.
+  // Per-region frame_state, so an isolated compile's frame_id numbers
+  // independently of the default scope.
   std::unordered_map<int64_t, py::dict> region_frame_state_map;
   // Guards frame_state and region_frame_state_map alike: the module runs
   // without the GIL on free-threaded builds, so the default dict's move in
@@ -158,10 +158,15 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   };
   std::vector<PendingEviction> pending_evictions;
   std::atomic<bool> has_pending_evictions{false};
-  // Nesting count of cache_mutex holders on THIS thread currently running
-  // Python (guard evaluation, backend __eq__, pybind attribute stores).
-  // Guarded by cache_mutex.
-  size_t cache_python_depth{0};
+  // Count of live lookup() snapshots iterating raw entry pointers with
+  // cache_mutex released for guard evaluation. lookup() raises it under the
+  // lock at depth 0, then drops the lock; another thread that takes cache_mutex
+  // sees a non-zero count and parks every destroy/relink
+  // (apply_pending_evictions, drain_pending_invalidations, invalidate,
+  // clear_in_place) so those snapshots stay valid. It is thus a cross-thread
+  // signal decremented on lookup()'s return paths after the lock is dropped, so
+  // it is atomic rather than cache_mutex-guarded.
+  std::atomic<size_t> cache_python_depth{0};
 
   ExtraState(PyCodeObject* orig_code_arg);
   std::list<CacheEntry>& cache_entry_list(int64_t isolate_recompiles_id);
