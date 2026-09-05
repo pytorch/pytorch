@@ -17532,6 +17532,13 @@ fn
         expected = hex(255) + oct(8) + bin(3) + ascii("hello") + format(42, "x")
         self.assertEqual(res, x + len(expected))
 
+    def test_builtin_bytes_zero_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return bytes()
+
+        self.assertEqual(fn(), b"")
+
     def test_guard_string_escaped(self):
         d = {frozenset({0}): {frozenset({0}): 1}}
 
