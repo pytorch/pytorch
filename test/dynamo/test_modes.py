@@ -337,15 +337,22 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         torch.set_default_device(None)
 
     def test_pop_torch_function_mode(self):
-        m = BaseTorchFunctionMode()
+        class AddHundred(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                out = super().__torch_function__(func, types, args, kwargs or {})
+                if func is torch.add:
+                    out = out + 100
+                return out
+
+        m = AddHundred()
         with m:
 
             @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
             def fn(x):
                 _pop_torch_function_stack()
-                return x + 1
+                return torch.add(x, 1)
 
-            fn(torch.ones(2, 2))
+            self.assertEqual(fn(torch.ones(2, 2)), torch.full((2, 2), 2.0))
 
             self.assertEqual(_len_torch_function_stack(), 0)
             # reset stack so __exit__ doesn't crash
@@ -1058,6 +1065,59 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             opt_fn,
             x,
         )
+
+    def test_inlined_mode_not_reapplied_at_runtime(self):
+        class AddHundred(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                kwargs = kwargs or {}
+                out = super().__torch_function__(func, types, args, kwargs)
+                if func is torch.add:
+                    out = out + 100
+                return out
+
+        def fn(x):
+            return torch.add(x, 1) * 2
+
+        x = torch.zeros(2)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        with AddHundred():
+            expected = fn(x)
+            self.assertEqual(opt_fn(x), expected)
+            self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_inlined_mode_preserves_backend_modes(self):
+        seen = []
+
+        class AddHundred(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                kwargs = kwargs or {}
+                out = super().__torch_function__(func, types, args, kwargs)
+                if func is torch.add:
+                    out = out + 100
+                return out
+
+        class RecordingMode(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                seen.append(func)
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        def backend(gm, _):
+            def run(*args):
+                with RecordingMode():
+                    return gm(*args)
+
+            return run
+
+        def fn(x):
+            return torch.add(x, 1)
+
+        x = torch.zeros(2)
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        with AddHundred():
+            self.assertEqual(opt_fn(x), fn(x))
+        self.assertTrue(seen)
 
 
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
