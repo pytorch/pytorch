@@ -35,9 +35,11 @@ might be used interchangeably in this documentation.
 :::
 
 `torch.compiler` also includes an ahead-of-time API, `torch.compiler.precompile`. It
-captures a whole computation `fn(*example_inputs)` -- with the model(s) passed among
-`example_inputs`, e.g. `precompile(lambda model, x: model(x), model, x)` -- and lowers it
-to a self-contained, runnable Python source string plus an acceleration cache. Reload the
+captures a whole computation -- with the model(s) passed among the arguments of the
+example call, e.g. `precompile(lambda model, x: model(x), example_inputs=[(model, x)])`
+-- and lowers it to a self-contained, runnable Python source string plus an acceleration
+cache. Pass `tracer="dynamo"` to capture several calls, with the graph breaks and
+recompilations between them. Reload the
 artifact with `torch.compiler.precompile.load`; since no weights are baked in, you pass
 the model again at runtime. See the {ref}`API reference <torch.compiler_api>` for details.
 
