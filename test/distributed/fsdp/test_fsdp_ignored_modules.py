@@ -10,6 +10,11 @@ import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy, transformer_auto_wrap_policy
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -18,7 +23,7 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -35,8 +40,6 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 class Model(torch.nn.Module):
@@ -95,11 +98,13 @@ class ModelWithIgnoredModules(Model):
 
 
 class TestFSDPIgnoredModules(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return min(torch.accelerator.device_count(), 2)
 
-    def _train_model(self, model, optim, num_iters, device=torch.device(device_type)):
+    def _train_model(self, model, optim, num_iters, device):
         for _ in range(num_iters):
             module = model.module if isinstance(model, FSDP) else model
             inp = module.get_input(device)
@@ -108,10 +113,12 @@ class TestFSDPIgnoredModules(FSDPTestContinuous):
             module.run_backward(loss)
             optim.step()
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_ignored_modules_transformer(self):
+    def test_ignored_modules_transformer(self, device):
         """Tests that ignored modules' parameters are not flattened for a
         transformer model with shared parameters."""
+        device_type = torch.device(device).type
         self.run_subtests(
             {
                 "use_orig_params": [False, True],
@@ -119,6 +126,7 @@ class TestFSDPIgnoredModules(FSDPTestContinuous):
                 "use_auto_wrap": [False, True],
             },
             self._test_ignored_modules_transformer,
+            device_type=device_type,
         )
 
     def _test_ignored_modules_transformer(
@@ -126,15 +134,16 @@ class TestFSDPIgnoredModules(FSDPTestContinuous):
         use_orig_params: bool,
         ignore_modules: bool,  # as opposed to `ignored_states`
         use_auto_wrap: bool,
+        device_type: str,
     ):
         # Initialize an FSDP-wrapped transformer model that has FSDP ignore
         # the `nn.Transformer` module's parameters
         model: nn.Module = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            DEVICEInitMode.DEVICE_BEFORE,
+            DEVICEInitMode.DEVICE_NEVER,
             deterministic=True,
-        )
+        ).to(device_type)
         fsdp_kwargs = {"process_group": self.process_group}
         if use_auto_wrap:
             # Unshare the output projection weight and embedding weight to be
@@ -152,9 +161,9 @@ class TestFSDPIgnoredModules(FSDPTestContinuous):
         nonwrapped_model: nn.Module = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            DEVICEInitMode.DEVICE_BEFORE,
+            DEVICEInitMode.DEVICE_NEVER,
             deterministic=True,
-        )
+        ).to(device_type)
         if use_auto_wrap:
             nonwrapped_model.output_proj.weight = nn.Parameter(
                 nonwrapped_model.output_proj.weight.clone()
@@ -183,21 +192,26 @@ class TestFSDPIgnoredModules(FSDPTestContinuous):
         self.assertEqual(fsdp_managed_numel, nonignored_numel)
         # Check that we can run a few iterations
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
-        self._train_model(wrapped_model, optim, 3)
+        self._train_model(wrapped_model, optim, 3, torch.device(device_type))
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_ignored_modules_nested(self):
+    def test_ignored_modules_nested(self, device):
         """Tests that passing a module with nested FSDP modules does not
         error and still ignores non-FSDP modules' parameters."""
+        device_type = torch.device(device).type
         self.run_subtests(
             {
                 "use_orig_params": [False, True],
                 "ignore_modules": [True, False],
             },
             self._test_ignored_modules_nested,
+            device_type=device_type,
         )
 
-    def _test_ignored_modules_nested(self, use_orig_params: bool, ignore_modules: bool):
+    def _test_ignored_modules_nested(
+        self, use_orig_params: bool, ignore_modules: bool, device_type: str
+    ):
         # Initialize an FSDP-wrapped nested model that first wraps the nested
         # sequential's second linear layer (`layer1[1]`) and then wraps the
         # overall model while ignoring the nested sequential (`layer1`)
@@ -233,10 +247,12 @@ class TestFSDPIgnoredModules(FSDPTestContinuous):
             self.assertEqual(flat_param_numel, nonignored_numel)
         # Check that we can run a few iterations
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
-        self._train_model(wrapped_model, optim, 3)
+        self._train_model(wrapped_model, optim, 3, torch.device(device_type))
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_ignored_states_auto_wrap(self):
+    def test_ignored_states_auto_wrap(self, device):
+        device_type = torch.device(device).type
         transformer_policy = functools.partial(
             transformer_auto_wrap_policy, transformer_layer_cls={nn.Sequential}
         )
@@ -246,9 +262,12 @@ class TestFSDPIgnoredModules(FSDPTestContinuous):
                 "ignore_bias": [True, False],
             },
             self._test_ignored_states_auto_wrap,
+            device_type=device_type,
         )
 
-    def _test_ignored_states_auto_wrap(self, policy, ignore_bias: bool):
+    def _test_ignored_states_auto_wrap(
+        self, policy, ignore_bias: bool, device_type: str
+    ):
         model = Model().to(device_type)
         ignored_states = [model.layer1[1].weight]
         if ignore_bias:
@@ -284,10 +303,12 @@ class TestFSDPIgnoredModules(FSDPTestContinuous):
             fsdp_model.module._flat_param.numel(), expected_model_sharded_numel
         )
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_ignored_modules_invalid(self):
+    def test_ignored_modules_invalid(self, device):
         """Tests that passing an FSDP module as an ignored module or the
         top-level module itself errors."""
+        device_type = torch.device(device).type
         model = Model().to(device_type)
         wrap_cls = FSDP
         model.layer1 = wrap_cls(model.layer1)
@@ -308,8 +329,9 @@ class TestFSDPIgnoredModules(FSDPTestContinuous):
             new_model = Model().to(device_type)
             wrap_cls(new_model, ignored_modules=[new_model])
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_diff_ignored_modules_across_ranks(self):
+    def test_diff_ignored_modules_across_ranks(self, device):
         """
         Tests ignoring different modules across ranks.
 
@@ -320,18 +342,21 @@ class TestFSDPIgnoredModules(FSDPTestContinuous):
                 all ignored modules (representing a superset of the children's
                 ignored modules) to the root FSDP instance.
         """
+        device_type = torch.device(device).type
         self.run_subtests(
             {
                 "pass_ignored_modules_to_root": [False, True],
                 "ignore_modules": [True, False],
             },
             self._test_diff_ignored_modules_across_ranks,
+            device_type=device_type,
         )
 
     def _test_diff_ignored_modules_across_ranks(
         self,
         pass_ignored_modules_to_root: bool,
         ignore_modules: bool,
+        device_type: str,
     ):
         # To exercise different `FlatParameter` enumerations across ranks,
         # we wrap `layer3` with FSDP, where `layer3` is registered as a module
@@ -368,11 +393,13 @@ class TestFSDPIgnoredModules(FSDPTestContinuous):
         )
         wrapped_model = wrap_cls(model, **ignore_kwargs_top)
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
-        self._train_model(wrapped_model, optim, 3)
+        self._train_model(wrapped_model, optim, 3, torch.device(device_type))
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
     @parametrize("ignore_modules", [True, False])
-    def test_ignored_modules_not_under_wrapped_root(self, ignore_modules: bool):
+    def test_ignored_modules_not_under_wrapped_root(self, device, ignore_modules: bool):
+        device_type = torch.device(device).type
         model = Model().to(device_type)
         ignored_modules = list(model.layer1.children())[1:]
 
@@ -398,20 +425,23 @@ class TestFSDPIgnoredModules(FSDPTestContinuous):
         )
 
         optim = torch.optim.Adam(model.parameters(), lr=1e-3)
-        self._train_model(model, optim, 3)
+        self._train_model(model, optim, 3, torch.device(device_type))
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(1)
-    def test_ignored_states_check(self):
+    def test_ignored_states_check(self, device):
         """
         Tests that passing invalid ``ignored_modules`` or ``ignored_states``
         raises an appropriate error.
         """
+        device_type = torch.device(device).type
         self.run_subtests(
             {"ignore_modules": [True, False]},
             self._test_ignored_states_check,
+            device_type=device_type,
         )
 
-    def _test_ignored_states_check(self, ignore_modules: bool):
+    def _test_ignored_states_check(self, ignore_modules: bool, device_type: str):
         model = Model().to(device_type)
         ignored_modules = list(model.layer1.children())[1:]
         ignored_params = {p for m in ignored_modules for p in m.parameters()}
@@ -448,7 +478,12 @@ class TestFSDPIgnoredModules(FSDPTestContinuous):
                 FSDP(model, ignored_states=ignored_states)
 
 
-instantiate_parametrized_tests(TestFSDPIgnoredModules)
+instantiate_device_type_tests(
+    TestFSDPIgnoredModules,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
