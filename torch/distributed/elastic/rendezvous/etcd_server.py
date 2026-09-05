@@ -62,7 +62,7 @@ def find_free_port():
         except OSError as e:
             if s is not None:
                 s.close()
-            print(f"Socket creation attempt failed: {e}")
+            logger.warning("Socket creation attempt failed: %s", e)
     raise RuntimeError("Failed to create a socket")
 
 
