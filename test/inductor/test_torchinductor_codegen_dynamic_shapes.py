@@ -352,6 +352,7 @@ test_failures = {
     "test_add_complex7_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_add_complex8_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_add_complex9_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_add_complex11_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_randn_generator_dynamic_shapes": TestFailure(("cpu",)),
     "test_randn_like_empty_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_single_elem_dynamic_shapes": TestFailure(("cpu",)),

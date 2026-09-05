@@ -2041,6 +2041,14 @@ class CommonTemplate:
         y = torch.rand((), dtype=torch.complex64, device=self.device)
         self.common(fn, (x, y, 2))
 
+    def test_add_complex11(self):
+        def fn(a, b, alpha):
+            return torch.add(a, b, alpha=alpha)
+
+        x = torch.randn(3, 0, dtype=torch.complex64, device=self.device)
+        y = torch.randn(3, 0, dtype=torch.complex64, device=self.device)
+        self.common(fn, (x, y, 2))
+
     def test_concat_add_inplace(self):
         def fn(x, y, z):
             return torch.cat([x, y], dim=1).add_(z)
