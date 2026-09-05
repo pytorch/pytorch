@@ -26,6 +26,7 @@ from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.schema import HopSchemaGenerator
 from torch._higher_order_ops.switch import switch
 from torch._higher_order_ops.while_loop import while_loop
+from torch._inductor import config as inductor_config
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
     FunctionalTensor,
@@ -13138,18 +13139,20 @@ class <lambda>(torch.nn.Module):
         y = torch.ones(4, requires_grad=False)
         self.check(M, (y,), device, dynamic)
 
-    # cond_fn mutating a carried input alone is rejected by
-    # functionalization (auto-functionalization does not kick in because
-    # no captured tensor is mutated).
+    # https://github.com/pytorch/pytorch/issues/195966
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipCUDAIf(not SM70OrLater, "triton")
-    def test_while_loop_cond_mutates_carry_raises(self, device):
+    @parametrize("mutate_in", ["cond", "body"])
+    def test_while_loop_carried_input_mutation_raises(self, device, mutate_in):
         def f(x):
             def cond_fn(i, acc):
-                acc.mul_(0.99)
+                if mutate_in == "cond":
+                    acc.mul_(0.99)
                 return i < 2
 
             def body_fn(i, acc):
+                if mutate_in == "body":
+                    acc.mul_(0.99)
                 return i + 1, acc + 1.0
 
             return while_loop(
@@ -13162,32 +13165,32 @@ class <lambda>(torch.nn.Module):
         with (
             torch.no_grad(),
             self.assertRaisesRegex(
-                RuntimeError, "cond_fn might be modifying the input"
+                torch._dynamo.exc.TorchRuntimeError,
+                f"{mutate_in}_fn might be modifying a carried input",
             ),
         ):
             torch.compile(f, backend="inductor", fullgraph=True)(x)
 
-    # cond_fn mutates both a carried input and a pre-mutated captured
-    # tensor: the captured-tensor mutation makes auto-functionalization
-    # kick in, so the carry mutation reaches Inductor's while_loop
-    # lowering instead of being rejected up front. The carry's final
-    # value must come from body_fn's output, not the pre-loop buffer.
+    # https://github.com/pytorch/pytorch/issues/195966
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipCUDAIf(not SM70OrLater, "triton")
-    @parametrize("dynamic", [True, False])
-    def test_while_loop_cond_mutates_carry_and_pre_mutated_tensor(
-        self, device, dynamic
+    @parametrize("mutate_in", ["cond", "body"])
+    @parametrize("cpp_wrapper", [False, True])
+    def test_while_loop_carried_input_and_captured_input_mutation_raises(
+        self, device, mutate_in, cpp_wrapper
     ):
         class M(torch.nn.Module):
             def forward(self, y):
-                y.mul_(0.8)
-
                 def cond_fn(i, acc):
-                    acc.mul_(0.99)
-                    y.mul_(0.5)
+                    if mutate_in == "cond":
+                        acc.mul_(0.99)
+                        y.mul_(0.5)
                     return i < 2
 
                 def body_fn(i, acc):
+                    if mutate_in == "body":
+                        acc.mul_(0.99)
+                        y.add_(1.0)
                     return i + 1, acc + y
 
                 i, acc = while_loop(
@@ -13201,7 +13204,45 @@ class <lambda>(torch.nn.Module):
                 return i, acc, y.clone()
 
         y = torch.ones(4, requires_grad=False)
-        self.check(M, (y,), device, dynamic)
+        with (
+            torch.no_grad(),
+            inductor_config.patch(cpp_wrapper=cpp_wrapper),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.TorchRuntimeError,
+                f"{mutate_in}_fn might be modifying a carried input",
+            ),
+        ):
+            torch.compile(M(), backend="inductor", fullgraph=True)(y.to(device))
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_while_loop_python_false_cond_alias_mutation_raises(self, device):
+        def f(x):
+            carried = x.view_as(x)
+
+            def cond_fn(i, acc):
+                x.add_(1)
+                return False
+
+            def body_fn(i, acc):
+                return i + 1, acc
+
+            return while_loop(
+                cond_fn,
+                body_fn,
+                (torch.zeros((), dtype=torch.int64, device=x.device), carried),
+            )
+
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.TorchRuntimeError,
+                "cond_fn might be modifying a carried input",
+            ),
+        ):
+            torch.compile(f, backend="inductor", fullgraph=True)(
+                torch.ones(4, device=device)
+            )
 
     # https://github.com/pytorch/pytorch/issues/195327
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
