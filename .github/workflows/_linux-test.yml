@@ -105,6 +105,21 @@ on:
         required: false
         type: string
         default: ""
+      ref:
+        required: false
+        type: string
+        default: ""
+        description: |
+          Git SHA to test instead of the ref the workflow was triggered on.
+          Used by td-holdout to test a historical commit.
+      no-td:
+        required: false
+        type: boolean
+        default: false
+        description: |
+          Force NO_TD=1. Callers that exist to measure the unfiltered suite
+          should set this rather than relying on run_test.py's enable-td gate
+          happening to be false for them.
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -150,6 +165,23 @@ jobs:
           cuda-version: ${{ inputs.cuda-version }}
           submodules: 'false'
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          # See _linux-build.yml: a treeless clone stalls `git checkout <sha>`
+          # on recursive tree discovery (#194683). Unchanged without a ref.
+          checkout-mode: ${{ inputs.ref != '' && 'blobless' || 'treeless' }}
+
+      # Must match the ref the build job used, or the test scripts and the built
+      # wheel come from different commits.
+      - name: Check out target ref
+        if: inputs.ref != ''
+        timeout-minutes: 30
+        shell: bash
+        env:
+          TARGET_REF: ${{ inputs.ref }}
+        run: |
+          set -eux
+          git fetch --no-tags --force --progress origin "${TARGET_REF}"
+          git checkout --force --detach "${TARGET_REF}"
+          git rev-parse HEAD
 
       - name: Configure AWS credentials
         id: aws-creds
@@ -274,7 +306,7 @@ jobs:
           JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
           JOB_NAME: ${{ steps.setup-linux.outputs.job-name }}
           BRANCH: ${{ steps.setup-linux.outputs.branch }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          SHA1: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
@@ -286,7 +318,7 @@ jobs:
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
-          NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
+          NO_TD: ${{ inputs.no-td && '1' || steps.keep-going.outputs.ci-no-td }}
           TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1

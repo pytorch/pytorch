@@ -1,0 +1,181 @@
+# Owner(s): ["module: ci"]
+#
+# Replays a PR's first commit with target determination off.
+#
+# TD only ever reports on the tests it chose to run, so its own misses are
+# invisible in normal CI. Rebuilding the first commit of a PR -- before the
+# author iterated, and before TD's PreviouslyFailedInPR heuristic has any
+# history to feed on -- and running the full suite gives the unfiltered result
+# TD would have been graded against.
+#
+# Results land in ClickHouse through the usual path: `td-holdout` is registered
+# in upload-test-stats.yml, and `run-name` carries the PR number into
+# workflow_run.display_title so runs are joinable back to their source PR.
+name: td-holdout
+
+run-name: td-holdout-prototype pr-${{ inputs.pr-number }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        description: "PR whose first commit to replay"
+        required: true
+        type: string
+      selected-test-configs:
+        description: "Narrow the matrix, e.g. 'default'. Empty runs pull's full matrix."
+        required: false
+        type: string
+        default: ""
+      tests-to-include:
+        description: "Narrow to these test files, e.g. 'test_autograd'. Empty runs everything."
+        required: false
+        type: string
+        default: ""
+
+  # ─── TEMPORARY: DELETE BEFORE MERGE ──────────────────────────────────────
+  # workflow_dispatch resolves only against the default branch, so this file
+  # cannot be exercised until it lands. A pull_request trigger runs the PR's
+  # own copy, including the local-path _linux-build/_linux-test changes.
+  # Scoped to this one path so it cannot fire on unrelated PRs.
+  pull_request:
+    paths:
+      - .github/workflows/td-holdout.yml
+  # ─────────────────────────────────────────────────────────────────────────
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.pr-number || github.event.pull_request.number }}
+  # Holdout runs are the product, so never cancel one. PR test runs are throwaway.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: github.repository_owner == 'pytorch'
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  resolve:
+    name: resolve pr-${{ inputs.pr-number }}
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.first-commit.outputs.sha }}
+      ci-docker-hash: ${{ steps.first-commit.outputs.ci-docker-hash }}
+    steps:
+      - name: Find the PR's first commit
+        id: first-commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          # TEMPORARY: inputs are empty on pull_request, so pin a target here to
+          # exercise the workflow from the PR. DELETE BEFORE MERGE.
+          #
+          # Chosen as a positive control: this commit edits TensorImpl.cpp and
+          # AutogradComposite.cpp, and 4 of its third_party pins differ from
+          # main -- so it exercises the C++ build and the submodule resync, not
+          # just the dispatch path. It has known deterministic failures (see
+          # tests-to-include below), so a green run means the ref swap silently
+          # built the wrong tree.
+          PINNED_SHA: "57fa17402dc01448d9ab593cb69f1d14779602ad"
+        run: |
+          set -euo pipefail
+          if [ -z "${PR_NUMBER}" ]; then
+            PR_NUMBER="(pinned)"
+            SHA="${PINNED_SHA}"
+          else
+            # Commits come back oldest-first, so [0] is the bottom of the branch.
+            SHA=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits" --jq '.[0].sha')
+          fi
+          # Docker tags are the .ci/docker tree hash, so an old commit needs the
+          # image that was current when it was written. Same value as
+          # `git rev-parse ${SHA}:.ci/docker`, without cloning.
+          CI_TREE=$(gh api "repos/${GITHUB_REPOSITORY}/git/trees/${SHA}" --jq '.tree[]|select(.path==".ci")|.sha')
+          HASH=$(gh api "repos/${GITHUB_REPOSITORY}/git/trees/${CI_TREE}" --jq '.tree[]|select(.path=="docker")|.sha')
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "ci-docker-hash=${HASH}" >> "$GITHUB_OUTPUT"
+          echo "PR #${PR_NUMBER} first commit: \`${SHA}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # Matrix is copied verbatim from pull.yml's linux-jammy-py3.10-gcc11 build.
+  # TD filters every one of these configs in pull, so a holdout that runs only
+  # `default` would leave most of what TD drops unmeasured. Keep the two in sync.
+  build:
+    name: linux-jammy-py3.10-gcc11
+    uses: ./.github/workflows/_linux-build.yml
+    needs: [resolve, get-label-type]
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      ci-docker-hash: ${{ needs.resolve.outputs.ci-docker-hash }}
+      # TEMPORARY: 'default' on PR runs trims 24 jobs to 10. DELETE BEFORE MERGE.
+      selected-test-configs: ${{ inputs.selected-test-configs || (github.event_name == 'pull_request' && 'default' || '') }}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 2, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 3, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 4, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 5, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 6, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 7, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 8, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "docs_test", shard: 1, num_shards: 1,  runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          # Use m7i instead of m7a to match the existing (Intel Xeon) numerics. DTensor crossref tests like linalg.multi_dot have tight
+          # float32 tolerances sensitive to different FMA/reduction order across CPU vendors.
+          { config: "distributed", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "distributed", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "distributed", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "distributed", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "distributed", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "distributed", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "distributed", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "distributed", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "numpy_2_x", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "libtorch_agnostic_targetting", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+      python-version: "3.10"
+      compiler: gcc11
+      # Not a correctness call -- the graft would be sound, since it only fires
+      # for Python-only diffs. It simply can never hit: reuse_old_whl.py looks
+      # for runs of *this* workflow on main at the merge base, and td-holdout is
+      # dispatch-only. Leaving it on would just cost a doomed lookup, and the
+      # build is under 2% of a run anyway.
+      allow-reuse-old-whl: false
+    secrets: inherit
+
+  test:
+    name: linux-jammy-py3.10-gcc11
+    uses: ./.github/workflows/_linux-test.yml
+    needs: [build, resolve]
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      # Redundant today -- run_test.py's gate already fails on both the missing
+      # PR number and the workflow name. Set anyway: "no TD" is the entire point
+      # of this job, so it should not depend on what the workflow is called.
+      no-td: true
+      build-environment: ${{ needs.build.outputs.build-environment }}
+      docker-image: ${{ needs.build.outputs.docker-image }}
+      test-matrix: ${{ needs.build.outputs.test-matrix }}
+      # TEMPORARY: the two files that PINNED_SHA is known to break, so the PR
+      # run is both cheap and a positive control. Expect red. DELETE BEFORE MERGE.
+      tests-to-include: ${{ inputs.tests-to-include || (github.event_name == 'pull_request' && 'dynamo/test_subclasses dynamo/test_repros' || '') }}
+      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      python-version: "3.10"
+      compiler: gcc11
+    secrets: inherit

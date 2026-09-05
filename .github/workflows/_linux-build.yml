@@ -131,6 +131,13 @@ on:
         type: string
         default: ""
         description: CUDA version to use for the OSDC build.
+      ref:
+        required: false
+        type: string
+        default: ""
+        description: |
+          Git SHA to build instead of the ref the workflow was triggered on.
+          Used by td-holdout to rebuild a historical commit.
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -175,6 +182,12 @@ jobs:
           compiler: ${{ inputs.compiler }}
           cuda-version: ${{ inputs.cuda-version }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          # The default treeless clone (--filter=tree:0) makes checking out a
+          # different commit fetch trees one round trip at a time -- tree
+          # discovery is recursive, so it cannot batch. That stalled for 8h in
+          # #194683. Blobless keeps trees local; only blobs lazy-load, and those
+          # do batch. Unchanged for every caller that does not pass a ref.
+          checkout-mode: ${{ inputs.ref != '' && 'blobless' || 'treeless' }}
 
       - name: Check if can use old whl build
         id: use-old-whl
@@ -222,6 +235,34 @@ jobs:
           # The max duration enforced by the server side
           role-duration-seconds: 18000
 
+      # Deliberately last: everything above is CI harness that must reflect the
+      # current fleet and tooling, not the commit under test. map_ec2_to_arc.py
+      # in particular runs from the working tree, so swapping the ref earlier
+      # would route runners using a months-old label map. Only build.sh below,
+      # and the sources it compiles, should come from the target commit.
+      - name: Check out target ref
+        if: inputs.ref != ''
+        # A stalled checkout must not silently eat the job's 480min budget.
+        timeout-minutes: 30
+        shell: bash
+        env:
+          TARGET_REF: ${{ inputs.ref }}
+        run: |
+          set -eux
+          echo "::group::fetch ${TARGET_REF}"
+          git fetch --no-tags --force --progress origin "${TARGET_REF}"
+          echo "::endgroup::"
+          echo "::group::checkout"
+          git checkout --force --detach "${TARGET_REF}"
+          echo "::endgroup::"
+          # Pins move constantly (~55 bumps/60d), so C++ builds need these
+          # resynced to the target or they compile against the wrong headers.
+          echo "::group::submodules"
+          git submodule sync --recursive
+          git submodule update --init --recursive --force
+          echo "::endgroup::"
+          git rev-parse HEAD
+
       - name: Build
         if: (steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == '') && steps.use-old-whl.outputs.reuse != 'true'
         id: build
@@ -229,7 +270,7 @@ jobs:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.setup-linux.outputs.branch }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          SHA1: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1
           SCCACHE_S3_NO_CREDENTIALS: ${{ steps.aws-creds.outcome != 'success' && 'true' || 'false' }}
