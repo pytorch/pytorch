@@ -880,11 +880,7 @@ print(t.is_pinned())
                 # ROCm logic is less so, it's cublaslt for some Instinct, cublas for all else
                 # Mirror CUDAHooks::getHipblasltPreferredArchs in CUDAHooks.cpp
                 ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split(".")[:2])
-                archs = ["gfx90a", "gfx942"]
-                if ROCM_VERSION >= (6, 4):
-                    archs.extend(["gfx1200", "gfx1201"])
-                if ROCM_VERSION >= (7, 0):
-                    archs.append("gfx950")
+                archs = ["gfx90a", "gfx942", "gfx1200", "gfx1201", "gfx950"]
                 if ROCM_VERSION >= (7, 13):
                     archs.extend(["gfx1100", "gfx1101", "gfx1151"])
                 if ROCM_VERSION >= (7, 14):
