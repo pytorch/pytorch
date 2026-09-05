@@ -2706,6 +2706,10 @@ class TestHessian(TestCase):
         y = torch.randn(3, device=device)
         self._test_against_reference(f, (x, y))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 14),
+        "Frame Handling Difference between Python versions",
+    )
     def test_jacfwd_different_levels(self, device):
         # Test case from:
         # https://github.com/pytorch/functorch/issues/597
@@ -4952,6 +4956,37 @@ class TestFunctionalize(TestCase):
             return x
 
         self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
+
+    def test_multioutput_view_preserves_autograd_metadata(self, device):
+        # Regenerating the view rebuilds it as a select, so it carries a
+        # SelectBackward, but autograd must still reject mutating it: the
+        # restriction rides on CreationMeta, which the replay restores.
+        def f(x):
+            base = x.clone()
+            out = base.unbind(0)[0]
+            base.add_(1)
+            return out
+
+        out = torch.func.functionalize(f)(
+            torch.ones(2, 3, device=device, requires_grad=True)
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "output of a function that returns multiple views"
+        ):
+            out.mul_(2)
+
+    def test_multioutput_view_regeneration_matches_eager(self, device):
+        # An uneven split exercises the short final chunk, where the generated
+        # single-output replay relies on slice clamping the end, and the
+        # accumulating offsets of split_with_sizes.
+        def f(x):
+            base = x.clone()
+            outs = base.split(2)
+            base.add_(1)
+            return tuple(o.clone() for o in outs)
+
+        x = torch.arange(15.0, device=device).reshape(5, 3)
+        self.assertEqual(torch.func.functionalize(f)(x), f(x))
 
     def test_inplace_view(self, device):
         def f(x: torch.Tensor) -> torch.Tensor:

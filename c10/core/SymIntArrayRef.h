@@ -7,6 +7,7 @@
 #include <c10/util/irange.h>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <optional>
 #include <string>
 
@@ -20,6 +21,13 @@ C10_NOINLINE inline std::string formatSymIntArrayRefToIntArrayRefError(
     int64_t line) {
   const auto problem_index = static_cast<size_t>(&problem - ar.data());
   const bool is_symbolic = problem.is_symbolic();
+  std::string problem_and_array =
+      " (value and full array unavailable because stringification failed)";
+  try {
+    problem_and_array = c10::str(": ", problem, " in SymIntArrayRef ", ar);
+  } catch (const std::exception&) {
+    // Diagnostic enrichment must not mask the conversion error.
+  }
   return c10::str(
       file,
       ":",
@@ -29,10 +37,7 @@ C10_NOINLINE inline std::string formatSymIntArrayRefToIntArrayRefError(
       is_symbolic ? "symbolic SymInt" : "heap-allocated concrete SymInt",
       " at index ",
       problem_index,
-      ": ",
-      problem,
-      " in SymIntArrayRef ",
-      ar,
+      problem_and_array,
       is_symbolic
           ? ". This commonly happens when an operator/kernel does not support "
             "symbolic shapes at this dispatch key. Common causes include "
@@ -45,8 +50,8 @@ C10_NOINLINE inline std::string formatSymIntArrayRefToIntArrayRefError(
             "this call."
           : ". This value is concrete, but the non-owning IntArrayRef "
             "conversion used here cannot represent heap-allocated SymInt "
-            "values. Use an owning conversion or guard/specialize the value "
-            "before this call.");
+            "values. Use an owning conversion such as asIntArrayRefSlowAlloc "
+            "to materialize the values into a DimVector before this call.");
 }
 
 inline at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {

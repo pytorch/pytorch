@@ -49,8 +49,15 @@ enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
 enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
 // DEFAULT is an internal-only sentinel meaning "use legacy backend default
 // unless a parent setting overrides it". NONE means "explicitly set to
-// inherit/no-op".
-enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16, DEFAULT };
+// inherit/no-op". Append new values because Dynamo guards serialize this enum.
+enum class TORCH_API Float32Precision {
+  NONE,
+  IEEE,
+  TF32,
+  BF16,
+  DEFAULT,
+  BF16X9
+};
 
 enum class TORCH_API CuDNNDepthwiseKernel { AUTO, CUDNN, NATIVE };
 
@@ -282,6 +289,9 @@ class TORCH_API Context {
   void setSDPUseFA3(bool /*e*/);
   bool userEnabledFA3SDP() const;
 
+  void setSDPUseFA4(bool /*e*/);
+  bool userEnabledFA4SDP() const;
+
   void setSDPUseMemEfficient(bool /*e*/);
   bool userEnabledMemEfficientSDP() const;
 
@@ -444,6 +454,17 @@ class TORCH_API Context {
   void unsetDefaultMobileCPUAllocator();
   bool allowFP16ReductionCPU() const;
   void setAllowFP16ReductionCPU(bool /*b*/);
+  // Gates the native-AOT DispatchStubs consulted by generated structured
+  // wrappers (see NativeAotStubs.h). Off means stock kernels even with an
+  // AOT kernel library loaded, e.g. for reference computations.
+  bool allowNativeAot() const;
+  void setAllowNativeAot(bool /*b*/);
+  // Ops whose declaration is UNCONDITIONAL read this instead: their AOT
+  // kernels are the implementation, so allowNativeAot must not mask them.
+  // Default false; torch._native._unconditional_masked() is the only caller
+  // that flips it, so a numerics test can obtain stock aten values.
+  bool maskUnconditionalNativeAot() const;
+  void setMaskUnconditionalNativeAot(bool /*b*/);
 
   // Preserved for BC
   void lazyInitCUDA() {
@@ -488,6 +509,7 @@ class TORCH_API Context {
       at::SDPBackend::overrideable};
   bool enabled_flashSDP = true;
   bool enabled_fa3SDP = false;
+  bool enabled_fa4SDP = false;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
   bool enabled_cudnnSDP = true;
@@ -541,6 +563,8 @@ class TORCH_API Context {
   std::atomic<at::QEngine> quantized_engine = at::QEngine::NoQEngine;
   std::optional<bool> enable_sparse_tensor_invariant_checks = std::nullopt;
   bool allow_fp16_reduction_cpu = false;
+  bool allow_native_aot = true;
+  bool mask_unconditional_native_aot = false;
 
   using Key = std::pair<Float32Backend, Float32Op>;
   std::unordered_map<Key, Float32Precision, c10::hash<Key>> fp32_precision = {
@@ -707,11 +731,12 @@ inline void manual_seed(uint64_t seed) {
   }
 }
 
-// When the global flag `allow_tf32` is set to true, cuBLAS handles are
-// automatically configured to use math mode CUBLAS_TF32_TENSOR_OP_MATH.
-// For some operators, such as addmv, TF32 offers no performance improvement
-// but causes precision loss. To help this case, this class implements
-// a RAII guard that can be used to quickly disable TF32 within its scope.
+// When CUDA FP32 matmul precision is set to a reduced-precision mode, cuBLAS
+// may use reduced precision internally. For some operators, such as addmv,
+// reduced precision offers no performance improvement but causes precision
+// loss. To help this case, this class implements a RAII guard that can be used
+// to quickly disable reduced-precision FP32 arithmetic and force IEEE within
+// its scope. Its name predates the fp32_precision API.
 //
 // Usage:
 //     NoTF32Guard disable_tf32;
@@ -722,6 +747,8 @@ struct TORCH_API NoTF32Guard {
   NoTF32Guard& operator=(const NoTF32Guard&) = delete;
   NoTF32Guard& operator=(NoTF32Guard&&) = delete;
   ~NoTF32Guard();
+  static bool should_disable_fp32_reduced_precision();
+  // Compatibility alias for the original TF32-specific name.
   static bool should_disable_tf32();
 
  private:

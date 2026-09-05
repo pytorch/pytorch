@@ -433,6 +433,22 @@ def check_tensor_meta_match(
         )
 
 
+def _merge_ints_to_symint(
+    values: list[int], mode: FakeTensorMode
+) -> int | torch.SymInt:
+    """Merge N concrete ints into a single unbacked SymInt bounded [min, max].
+
+    Returns the value unchanged when all values are equal.
+    """
+    if all(v == values[0] for v in values):
+        return values[0]
+    if mode.shape_env is None:
+        raise AssertionError("mode.shape_env is None")
+    merged = mode.shape_env.create_unbacked_symint()
+    mode.shape_env.constrain_symbol_range(merged.node.expr, min(values), max(values))
+    return merged
+
+
 def _merge_output(
     a: torch.Tensor | int | None,
     b: torch.Tensor | int | None,
@@ -463,13 +479,7 @@ def _merge_output(
         )
 
     if type(a) is int and type(b) is int:
-        if a == b:
-            return a
-        if mode.shape_env is None:
-            raise AssertionError("mode.shape_env is None")
-        merged_out = mode.shape_env.create_unbacked_symint()
-        mode.shape_env.constrain_symbol_range(merged_out.node.expr, *min_max(a, b))
-        return merged_out
+        return _merge_ints_to_symint([a, b], mode)
 
     if not (type(a) is FakeTensor and type(b) is FakeTensor):
         raise AssertionError(

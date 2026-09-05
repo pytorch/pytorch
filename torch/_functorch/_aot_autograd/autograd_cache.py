@@ -13,10 +13,10 @@ import json
 import logging
 import os
 import pickle
-import random
 import shutil
 import time
 import traceback
+import uuid
 from copy import copy
 from typing import Any, TYPE_CHECKING
 from typing_extensions import override
@@ -143,6 +143,76 @@ def should_bundle_autograd_cache() -> bool:
     return config.bundled_autograd_cache or torch._dynamo.config.caching_precompile
 
 
+def sync_cache_decision_cross_ranks(local_hit: bool) -> bool:
+    """
+    Whether every rank hit AOTAutogradCache. The caller has to drop a lone hit.
+
+    Compilation itself issues collectives (see config._sync_decision_cross_ranks and the
+    inductor pass that reorders collectives), and only the ranks that actually compile
+    reach them, so the hit/miss decision has to be unanimous. Every rank that could
+    reach one of those collectives should call this.
+
+    The outcome is synchronized rather than the cache key: a key only says which entries
+    are candidates, while the hit is decided afterwards by evaluating each candidate's
+    dynamic shape guards against rank local hints, which can diverge for equal keys.
+
+    No attempt to skip collective free graphs: the partitioner can gate on the joint
+    graph, but this sees the Dynamo graph, where a DTensor collective is still just a
+    redistribute() call. Gating here would no-op the feature for the TP/SP jobs it is
+    for, and a 4 byte gloo all_reduce is nothing next to a compile.
+    """
+    dist = torch.distributed
+    if not (dist.is_available() and dist.is_initialized()):
+        return local_hit
+    if dist.get_world_size() < 2:
+        return local_hit
+
+    from torch._dynamo.distributed import get_compile_sync_pg
+
+    if not config._sync_cache_decision_cross_ranks:
+        # Nothing to decide, but _sync_decision_cross_ranks builds this same group lazily
+        # on the partitioner path, which a partial cache hit leaves to the ranks that
+        # missed: a subset of ranks building a group hangs in the rendezvous, and worse,
+        # advances _world.group_count only on those ranks, which is the salt every later
+        # group name is derived from. Build it here instead, where every rank is. Skipped
+        # without gloo so such a build keeps failing where it did before, in the
+        # partitioner and only for the graphs it actually syncs.
+        if config._sync_decision_cross_ranks and dist.is_gloo_available():
+            get_compile_sync_pg()
+        return local_hit
+
+    pg = get_compile_sync_pg()
+    if pg is None:
+        return local_hit
+
+    from torch._subclasses.fake_tensor import unset_fake_temporarily
+    from torch.utils._mode_utils import no_dispatch
+
+    with no_dispatch(), unset_fake_temporarily():
+        decision = torch.tensor(
+            [local_hit],
+            dtype=torch.int32,
+            device=dist.distributed_c10d._get_object_coll_device(pg),
+        )
+        dist.all_reduce(decision, op=dist.ReduceOp.MIN, group=pg)
+        all_ranks_hit = bool(decision.item())
+
+    if all_ranks_hit:
+        return True
+
+    # The collective only carries whether every rank hit, so each rank reports its
+    # own decision here: grep for local_hit=False to find the ranks that missed.
+    log.info(
+        "AOTAutograd cache cross rank miss: rank=%d local_hit=%s",
+        dist.get_rank(),
+        local_hit,
+    )
+
+    if local_hit:
+        counters["aot_autograd"]["autograd_cache_cross_rank_miss"] += 1
+    return False
+
+
 def check_node_safe(node: Node) -> None:
     """
     Checks that the node only uses supported operators. We are starting with very
@@ -172,6 +242,13 @@ def check_node_safe(node: Node) -> None:
         "torch.sym_sum",
         "torch.autograd.grad",
         "torch.distributed.tensor._api.from_local",
+        # An autocast context manager *inside* a compiled region is traced into
+        # these calls. What they do is fully determined by their arguments
+        # (device type, dtype, enabled, cache_enabled), which are constants in
+        # the graph and therefore part of the cache key, so a graph compiled
+        # under one autocast setting can never be reused for another.
+        "torch.amp.autocast_mode._enter_autocast",
+        "torch.amp.autocast_mode._exit_autocast",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
@@ -234,7 +311,7 @@ def check_node_safe(node: Node) -> None:
         if node.meta and node.meta.get("is_wrapped", False):
             # This is fx.wrap function
             # By default we BypassAOTAutogradCache for unknown functions,
-            # But if user explicitly specified cache hash - allow to cache it.
+            # But if user explicitly specified cache hash - allow caching it.
             if node.meta.get("user_cache_hash", None):
                 return
         if isinstance(node.target, str):
@@ -256,17 +333,23 @@ def check_node_safe(node: Node) -> None:
                 f"expected method_target to be Node, got {type(method_target)}"
             )
         if not is_tensor(method_target):
-            module = getattr(method_target, "__module__", None)
-            name = getattr(method_target, "__name__", None)
+            # Node.__str__ is just the node name, so name the method separately.
+            try:
+                receiver = method_target.format_node()
+            except Exception:
+                # Formatting is best-effort; preserve the cache bypass on failure.
+                receiver = f"%{method_target.name} : {method_target.op}"
             raise BypassAOTAutogradCache(
-                f"Unsupported call_method target {method_target}. \nMethod module: {module}, \nMethod name: {name}"
+                f"Unsupported call_method {method_name!r} on receiver "
+                f"{receiver}, "
+                f"which has no example_value and so is not known to be a Tensor"
             )
         if (
             type(method_name) is not str
             and type(method_name).__name__ != "method_descriptor"
         ):
             raise BypassAOTAutogradCache(
-                f"Unsupported call_method method {node.target}: {method_name}"
+                f"Unsupported call_method method {method_name}"
             )
     # Cache safe
     elif node.op in ("placeholder", "get_attr", "call_module", "output"):
@@ -514,16 +597,14 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         )
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
 
-        # region_activation_memory_budget is graph-wide (the partitioner enforces
-        # a single value across the graph) and propagates to every node, so the
-        # cache key only needs the value off the first node. node.meta is stripped
-        # by GraphModule.__reduce__, so without recording it here a budget change
-        # would not invalidate the cache.
-        first_node = next(iter(gm.graph.nodes), None)
-        self.region_activation_memory_budget: float | None = (
-            _get_memory_budget_annotation(first_node)
-            if first_node is not None
-            else None
+        # node.meta is stripped by GraphModule.__reduce__, so preserve the
+        # location and value of every budget annotation in the cache key.
+        self.region_activation_memory_budget_annotations = tuple(
+            (module_name, node_index, budget)
+            for module_name, module in gm.named_modules()
+            if isinstance(module, torch.fx.GraphModule)
+            for node_index, node in enumerate(module.graph.nodes)
+            if (budget := _get_memory_budget_annotation(node)) is not None
         )
 
         # Note: We use the live config module, not self.autograd_config (the
@@ -566,8 +647,15 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
-    def __init__(self, gm: torch.fx.GraphModule) -> None:
+    def __init__(
+        self,
+        gm: torch.fx.GraphModule,
+        symint_name_map: dict[str, str] | None = None,
+        graph_symint_names: set[str] | None = None,
+    ) -> None:
         super().__init__(gm)
+        self._symint_name_map: dict[str, str] = symint_name_map or {}
+        self._graph_symint_names: set[str] = graph_symint_names or set()
         # pyrefly: ignore[missing-attribute]
         self.dispatch_table.update(
             {
@@ -577,8 +665,23 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             }
         )
 
+    def _reduce_symint(
+        self, s: torch.SymInt
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
+        name = str(s)
+        normalized = self._symint_name_map.get(name)
+        if normalized is not None:
+            if name in self._graph_symint_names:
+                return (_ident, (normalized,))
+            # Non-graph SymInt with non-deterministic name (from MetaConverter).
+            # Include the hint to distinguish different specializations.
+            hint = s.node.hint
+            if hint is not None:
+                return (_ident, (normalized, hint))
+        return (_ident, (name,))
+
     # pyrefly: ignore [bad-override]
-    def reducer_override(self, obj: Any) -> Any:
+    def reducer_override(self, obj: object) -> Any:
         """
         Override to handle tensor subclasses (like DTensor) that aren't caught
         by the dispatch_table's exact type matching.
@@ -599,7 +702,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return super().reducer_override(obj)
 
     @staticmethod
-    def _format_global_for_cache_key(name: str, obj: Any) -> str:
+    def _format_global_for_cache_key(name: str, obj: object) -> str:
         if (numpy_key := numpy_wrapper_cache_key(obj)) is not None:
             return f"# cache_key_numpy_wrapper {name}: {numpy_key!r}"
 
@@ -645,10 +748,10 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
     def _hash_bytes_for_cache(self, data: bytes) -> str:
         return hashlib.blake2b(data, digest_size=16).hexdigest()
 
-    def _hash_pickled_value_for_cache(self, value: Any) -> str:
+    def _hash_pickled_value_for_cache(self, value: object) -> str:
         return self._hash_bytes_for_cache(pickle.dumps(value))
 
-    def _stable_hash_for_cache_value(self, obj: Any) -> str:
+    def _stable_hash_for_cache_value(self, obj: object) -> str:
         """Get a stable hash for an object used inside tensor subclass metadata."""
         from torch._custom_class_base import CustomClassBase
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -774,10 +877,18 @@ def normalize_placeholder_names(
 
     # Track all the old state of placeholders
     old_placeholder_names = []
+    old_symint_names = []
     old_used_names = copy(gm.graph._graph_namespace._used_names)
     i = 0
+    j = 0
     for n in gm.graph.find_nodes(op="placeholder", sort=True):
-        if n.type != torch.SymInt:
+        if n.type == torch.SymInt:
+            new_name = f"s_{j}"
+            old_symint_names.append((n.name, n.target))
+            n.target = new_name
+            n._rename(new_name)
+            j += 1
+        else:
             # _rename renames the node in the body of the function,
             # but it doesn't change the raw name from node.target
             # So we also set the raw_name of node.target to a new placeholder name
@@ -795,8 +906,14 @@ def normalize_placeholder_names(
         gm.graph._graph_namespace._used_names = set()
         # Restore the placeholder names
         i = 0
+        j = 0
         for n in gm.graph.find_nodes(op="placeholder", sort=True):
-            if n.type != torch.SymInt:
+            if n.type == torch.SymInt:
+                (name, target) = old_symint_names[j]
+                n.target = target
+                n._rename(name)
+                j += 1
+            else:
                 (name, target) = old_placeholder_names[i]
                 n.target = target
                 n._rename(name)
@@ -804,6 +921,10 @@ def normalize_placeholder_names(
         if i != len(old_placeholder_names):
             raise AssertionError(
                 f"i={i} != len(old_placeholder_names)={len(old_placeholder_names)}"
+            )
+        if j != len(old_symint_names):
+            raise AssertionError(
+                f"j={j} != len(old_symint_names)={len(old_symint_names)}"
             )
         # Now restore the old namespace's used names
         gm.graph._graph_namespace._used_names = old_used_names
@@ -819,7 +940,7 @@ def create_fx_config(
         boxed_forward_device_index = None
     else:
         cudagraphs = compiler_config_extra.cudagraphs
-        boxed_forward_device_index = compiler_config_extra.forward_device
+        boxed_forward_device_index = compiler_config_extra.forward_device_index
     return {
         "cudagraphs": cudagraphs,
         "boxed_forward_device_index": boxed_forward_device_index,
@@ -875,8 +996,22 @@ def autograd_cache_key(
     """
 
     gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
-    with sanitize_gm_for_cache(gm):
-        try:
+    try:
+        # Capture graph SymInt placeholder names before normalization so the
+        # pickler can distinguish graph-native SymInts (deterministic names)
+        # from MetaConverter-generated SymInts (non-deterministic names).
+        graph_symint_names: set[str] = set()
+        symint_name_map: dict[str, str] = {}
+        if torch._functorch.config.autograd_cache_normalize_inputs:
+            for n in gm.graph.find_nodes(op="placeholder", sort=True):
+                if n.type == torch.SymInt:
+                    graph_symint_names.add(n.target)
+            j = 0
+            for inp in example_inputs:
+                if isinstance(inp, torch.SymInt):
+                    symint_name_map[str(inp)] = f"s_{j}"
+                    j += 1
+        with sanitize_gm_for_cache(gm):
             check_cacheable(gm)
             _check_triton_cache_version()
             details = AOTAutogradCacheDetails(
@@ -886,24 +1021,26 @@ def autograd_cache_key(
                 create_fx_config(compiler_config_extra),
                 act_input_paths,
             )
-            pickler = AOTAutogradCachePickler(gm)
+            pickler = AOTAutogradCachePickler(gm, symint_name_map, graph_symint_names)
             # The prefix distinguishes among the other kinds of objects we cache
             key = AOTAUTOGRAD_CACHE_PREFIX + pickler.get_hash(details)
             debug_lines = _get_debug_lines_for_cache_key(pickler, details, key)
             return key, debug_lines
-        except Exception:
-            # If enable_aot_compile is set, we're in AOT precompile mode where we always
-            # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
-            # a proper key because we are guaranteed in an AOT precompile world users are in
-            # complete control of distributing and loading artifacts.
-            if torch._functorch.config.bypass_autograd_cache_key:
-                log.info(
-                    "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
-                    exc_info=True,
-                )
-                return str(random.random()), []
-            else:
-                raise
+    except Exception:
+        # If enable_aot_compile is set, we're in AOT precompile mode where we always
+        # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
+        # a proper key because we are guaranteed in an AOT precompile world users are in
+        # complete control of distributing and loading artifacts.
+        if torch._functorch.config.bypass_autograd_cache_key:
+            log.info(
+                "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
+                exc_info=True,
+            )
+            # Use UUID rather than random.random() so fallback keys are independent of
+            # application RNG state and remain unique across processes with the same seed.
+            return uuid.uuid4().hex, []
+        else:
+            raise
 
 
 @contextlib.contextmanager
@@ -1016,17 +1153,59 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         debug_lines: list[str] = []
         cache_event_time = time.time_ns()
         cache_state = None
+        result: tuple[GenericAOTAutogradResult[Any, Any], bytes] | None = None
+
+        # Most often this is BypassAOTAutogradCache, but
+        # if there's ever different reason we can't cache,
+        # we still never want to hard throw an exception, since
+        # we can always fallback to a cache bypass.
+        # As an example, if the user calls autograd via
+        # standalone inductor, we will sometimes get a GraphModule
+        # that doesn't actually have a `.graph` on it. Instead
+        # of checking every single case, we safely catch the exception
+        # in those cases.
+        def record_bypass(e: Exception) -> None:
+            nonlocal cache_key, cache_state, cache_event_time
+            cache_key = None
+            counters["aot_autograd"]["autograd_cache_bypass"] += 1
+            log.info("Bypassing autograd cache due to: %s", e)
+            cache_state = "bypass"
+            cache_event_time = time.time_ns()
+            cache_info["cache_bypass_reason"] = str(e)
+            cache_info["cache_bypass_exception_type"] = type(e).__name__
+            cache_info["cache_bypass_traceback"] = traceback.format_exc().split("\n")
+            # TODO: this gets logged implicitly by cache_bypass_reason,
+            # and here we explicitly log it into tlparse.
+            # We may want to log this as an extra column in Scuba, though.
+            cache_info["cache_bypass_hard_exception"] = not isinstance(
+                e, BypassAOTAutogradCache
+            )
+            if remote:
+                log_cache_bypass("bypass_aot_autograd", str(e))
+            if config.strict_autograd_cache or torch._dynamo.config.strict_precompile:
+                raise e
+
         try:
             cache_key, debug_lines = autograd_cache_key(
                 mod, args, aot_config, compiler_config_extra, act_input_paths
             )
-            result: tuple[GenericAOTAutogradResult[Any, Any], bytes] | None = (
-                AOTAutogradCache._lookup(
-                    cache_key, local, remote, args, cache_info, aot_config
-                )
+            result = AOTAutogradCache._lookup(
+                cache_key, local, remote, args, cache_info, aot_config
             )
-            if result is not None:
-                (entry, pickled_content) = result
+        except Exception as e:
+            record_bypass(e)
+
+        # Outside the try so bypassing ranks reach it too, and before the load rather
+        # than after: the load ends in _check_guards, which installs the entry's guards
+        # into the ShapeEnv (see [Note: Caching guards generated by AOTAutograd and
+        # Inductor]). Dropping the callable does not undo that, so a rank rejected post
+        # load would recompile under constraints the cleanly missing ranks never saw.
+        if not sync_cache_decision_cross_ranks(result is not None):
+            result = None
+
+        if result is not None:
+            (entry, pickled_content) = result
+            try:
                 fx_config = create_fx_config(compiler_config_extra, compile_region_name)
                 compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                 # Make the compiled_fn serializable, where the serialize function just
@@ -1034,6 +1213,33 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 compiled_fn = SerializableCompiledFunction(
                     compiled_fn, lambda: pickle.loads(pickled_content)
                 )
+            # Count missing the FXGraphCache as a miss not a bypass, which is what
+            # leaving cache_state unset gets us from the tail below.
+            except FXGraphCacheMiss as e:
+                if (
+                    config.strict_autograd_cache
+                    or torch._dynamo.config.strict_precompile
+                ):
+                    raise e
+            except Exception as e:
+                record_bypass(e)
+
+            # Unanimous above, so every rank reaches this backstop. It catches the one
+            # asymmetry the first sync cannot see: an entry that loaded here but whose
+            # FXGraphCache missed on another rank. FXGraphCacheMiss is raised before
+            # _check_guards, so this does leave the ShapeEnv lopsided and only buys
+            # lockstep recompiling instead of a hang, which is enough for a window that
+            # needs the two caches to disagree with each other.
+            if not sync_cache_decision_cross_ranks(compiled_fn is not None):
+                compiled_fn = None
+
+            # Reported only once the hit is final, so a rank whose hit was rejected falls
+            # through to the miss tail instead: no autograd_cache_hit, no time saved in
+            # cache_info, and no ephemeral timeout bump for time it is about to spend
+            # compiling anyway. cache_status_detailed, which _lookup already put in
+            # cache_info, is deliberately left alone: it describes what the lookup found,
+            # which is true either way.
+            if compiled_fn is not None:
                 log.info("AOTAutograd cache hit for key %s", cache_key)
 
                 counters["aot_autograd"]["autograd_cache_hit"] += 1
@@ -1060,45 +1266,12 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
 
-            if compiled_fn is None:
-                log.info("AOTAutograd cache miss for key %s", cache_key)
-                counters["aot_autograd"]["autograd_cache_miss"] += 1
-                cache_state = "miss"
-                cache_event_time = time.time_ns()
-        # Count missing the FXGraphCache as a miss not a bypass
-        except FXGraphCacheMiss as e:
+        if compiled_fn is None and cache_state is None:
+            log.info("AOTAutograd cache miss for key %s", cache_key)
             counters["aot_autograd"]["autograd_cache_miss"] += 1
             cache_state = "miss"
-            if config.strict_autograd_cache or torch._dynamo.config.strict_precompile:
-                raise e
-        # Most often this is BypassAOTAutogradCache, but
-        # if there's ever different reason we can't cache,
-        # we still never want to hard throw an exception, since
-        # we can always fallback to a cache bypass.
-        # As an example, if the user calls autograd via
-        # standalone inductor, we will sometimes get a GraphModule
-        # that doesn't actually have a `.graph` on it. Instead
-        # of checking every single case, we safely catch the exception
-        # in those cases.
-        except Exception as e:
-            cache_key = None
-            counters["aot_autograd"]["autograd_cache_bypass"] += 1
-            log.info("Bypassing autograd cache due to: %s", e)
-            cache_state = "bypass"
             cache_event_time = time.time_ns()
-            cache_info["cache_bypass_reason"] = str(e)
-            cache_info["cache_bypass_exception_type"] = type(e).__name__
-            cache_info["cache_bypass_traceback"] = traceback.format_exc().split("\n")
-            # TODO: this gets logged implicitly by cache_bypass_reason,
-            # and here we explicitly log it into tlparse.
-            # We may want to log this as an extra column in Scuba, though.
-            cache_info["cache_bypass_hard_exception"] = not isinstance(
-                e, BypassAOTAutogradCache
-            )
-            if remote:
-                log_cache_bypass("bypass_aot_autograd", str(e))
-            if config.strict_autograd_cache or torch._dynamo.config.strict_precompile:
-                raise e
+
         if compiled_fn is None:
             # Set the cache key so we can save a cache result later
             symints = AOTAutogradCache._filter_backed_symints(args)

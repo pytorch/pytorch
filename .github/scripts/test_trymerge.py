@@ -21,26 +21,46 @@ from urllib.error import HTTPError
 
 from github_utils import gh_graphql
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
+from greenlight_guard import (
+    GREENLIGHT_LOGIN,
+    GreenlightWaitWindow,
+    GuardResult,
+    GuardVerdict,
+)
+from greenlight_identity import normalize_login
 from trymerge import (
+    _AUTHORIZED_WITHOUT_GREENLIGHT,
     _find_non_matching_files,
     _revlist_to_prs,
+    can_skip_internal_checks,
     categorize_checks,
+    check_greenlight_reviewed_head_sha,
     DRCI_CHECKRUN_NAME,
+    ensure_mergeable_labels,
     find_matching_merge_rule,
     get_classifications,
+    get_docker_build_checks,
     get_drci_classifications,
+    get_topmost_docker_pr,
     gh_get_team_members,
     GitHubPR,
+    is_authorized_without_greenlight,
+    is_bot_initiated_codev_merge,
+    is_docker_affecting_files,
     iter_issue_timeline_until_comment,
     JobCheckState,
     main as trymerge_main,
     MandatoryChecksMissingError,
+    merge,
+    merge_authorized_logins,
     MergeRule,
     MergeRuleFailedError,
     PostCommentError,
     RE_GHSTACK_DESC,
     read_merge_rules,
     remove_job_name_suffix,
+    REVIEW_PAGE_LIMIT,
+    REVIEWS_PER_PAGE,
     sha_from_committed_event,
     sha_from_force_push_after,
     validate_revert,
@@ -52,6 +72,8 @@ if "GIT_REMOTE_URL" not in os.environ:
 
 GQL_MOCKS = "gql_mocks.json.gz"
 DRCI_MOCKS = "drci_mocks.json.gz"
+
+MALFORMED_TEAM_REF = "pytorch/pytorch-dev-infra/extra"
 
 
 def mock_query(
@@ -247,6 +269,38 @@ def mocked_read_merge_rules_approvers(
     ]
 
 
+def mocked_read_merge_rules_greenlight(
+    repo: Any, org: str, project: str
+) -> list[MergeRule]:
+    return [
+        MergeRule(
+            name="Greenlight Review Bot",
+            patterns=["*"],
+            approved_by=[GREENLIGHT_LOGIN],
+            mandatory_checks_name=["Lint", "pull"],
+        ),
+        MergeRule(
+            name="Core Maintainers",
+            patterns=["*"],
+            approved_by=["malfet"],
+            mandatory_checks_name=["Lint", "pull"],
+        ),
+    ]
+
+
+def mocked_read_merge_rules_malformed_team(
+    repo: Any, org: str, project: str
+) -> list[MergeRule]:
+    return [
+        MergeRule(
+            name="Malformed Team",
+            patterns=["*"],
+            approved_by=[MALFORMED_TEAM_REF],
+            mandatory_checks_name=["Lint", "pull"],
+        ),
+    ]
+
+
 def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> list[MergeRule]:
     raise RuntimeError("testing")
 
@@ -291,6 +345,24 @@ class TestTryMerge(TestCase):
         merge_rules = read_merge_rules(repo, "pytorch", "pytorch")
         self.assertGreater(len(merge_rules), 1)
 
+    def test_merge_rules_still_grant_greenlight_merge_authority(
+        self, *args: Any
+    ) -> None:
+        """GREENLIGHT_LOGIN is a copy of a login in merge_rules.yaml.
+
+        Renaming it there and not here would leave the guard watching for an approval
+        nobody can give, which silently switches the guard off.
+        """
+        merge_rules = read_merge_rules(DummyGitRepo(), "pytorch", "pytorch")
+        self.assertTrue(
+            any(
+                normalize_login(login) == GREENLIGHT_LOGIN
+                for rule in merge_rules
+                for login in rule.approved_by
+            ),
+            f"no merge rule lists {GREENLIGHT_LOGIN} in approved_by",
+        )
+
     def test_negative_pattern_excludes_subpath(self, *args: Any) -> None:
         "Patterns prefixed with '-' exclude matching files from a rule."
         patterns = [".ci/**", "-.ci/docker/**", ".github/**"]
@@ -315,6 +387,154 @@ class TestTryMerge(TestCase):
         "Without negative patterns, behavior matches the positive-only case."
         files = [".ci/test.sh", "torch/foo.py"]
         self.assertEqual(_find_non_matching_files([".ci/**"], files), ["torch/foo.py"])
+
+    @staticmethod
+    def _pr_with_merge_comment(
+        author_login: str,
+        author_url: str | None = None,
+        diff_revision: str | None = "D123456",
+        editor_login: str | None = None,
+    ) -> Any:
+        pr = mock.MagicMock()
+        pr.get_diff_revision.return_value = diff_revision
+        pr.get_comment_by_id.return_value = mock.MagicMock(
+            author_login=author_login,
+            author_url=author_url,
+            editor_login=editor_login,
+        )
+        return pr
+
+    def test_is_bot_initiated_codev_merge_meta_codesync(self, *args: Any) -> None:
+        "meta-codesync, the current export bot, is recognized as a co-dev merge."
+        pr = self._pr_with_merge_comment(
+            "meta-codesync[bot]", "https://github.com/apps/meta-codesync"
+        )
+        self.assertTrue(is_bot_initiated_codev_merge(pr, 123))
+
+    def test_is_bot_initiated_codev_merge_legacy_bots(self, *args: Any) -> None:
+        "The bots meta-codesync superseded are still recognized."
+        tools = self._pr_with_merge_comment(
+            "facebook-github-tools[bot]",
+            "https://github.com/apps/facebook-github-tools",
+        )
+        self.assertTrue(is_bot_initiated_codev_merge(tools, 123))
+        legacy = self._pr_with_merge_comment("facebook-github-bot")
+        self.assertTrue(is_bot_initiated_codev_merge(legacy, 123))
+
+    def test_is_bot_initiated_codev_merge_false_without_diff(self, *args: Any) -> None:
+        "A bot-initiated merge without an internal diff is not a co-dev merge."
+        pr = self._pr_with_merge_comment(
+            "meta-codesync[bot]",
+            "https://github.com/apps/meta-codesync",
+            diff_revision=None,
+        )
+        self.assertFalse(is_bot_initiated_codev_merge(pr, 123))
+
+    def test_is_bot_initiated_codev_merge_false_when_human(self, *args: Any) -> None:
+        "A human-initiated merge is never treated as a co-dev merge."
+        pr = self._pr_with_merge_comment("some-human")
+        self.assertFalse(is_bot_initiated_codev_merge(pr, 123))
+
+    def test_is_bot_initiated_codev_merge_false_when_edited(self, *args: Any) -> None:
+        "An edited merge comment can't be trusted to name its real author."
+        pr = self._pr_with_merge_comment(
+            "meta-codesync[bot]",
+            "https://github.com/apps/meta-codesync",
+            editor_login="some-human",
+        )
+        self.assertFalse(is_bot_initiated_codev_merge(pr, 123))
+
+    def test_codev_bot_list_does_not_widen_internal_checks(self, *args: Any) -> None:
+        "Auto-labeling meta-codesync must not also waive the Phabricator guard."
+        pr = self._pr_with_merge_comment(
+            "meta-codesync[bot]", "https://github.com/apps/meta-codesync"
+        )
+        self.assertTrue(is_bot_initiated_codev_merge(pr, 123))
+        self.assertFalse(can_skip_internal_checks(pr, 123))
+
+    def test_is_bot_initiated_codev_merge_without_author_url(self, *args: Any) -> None:
+        """Recognition must not depend on author_url. Only `comments(last: 5)`
+        selects it; GH_GET_PR_PREV_COMMENTS and the reviews fragment select
+        `login` alone, so a merge comment older than the prefetched window comes
+        back with author_url=None."""
+        node = {
+            "bodyText": "@pytorchbot merge",
+            "createdAt": "2026-08-04T22:14:27Z",
+            # No "url" — exactly what the paginated query returns.
+            "author": {"login": "meta-codesync[bot]"},
+            "authorAssociation": "NONE",
+            "editor": None,
+            "databaseId": 5185216222,
+            "url": "https://github.com/pytorch/pytorch/pull/192125#issuecomment-1",
+        }
+        comment = GitHubPR._comment_from_node(node)
+        self.assertIsNone(comment.author_url)
+
+        pr = mock.MagicMock()
+        pr.get_diff_revision.return_value = "D114427100"
+        pr.get_comment_by_id.return_value = comment
+        self.assertTrue(is_bot_initiated_codev_merge(pr, 5185216222))
+
+    @mock.patch("trymerge.gh_post_pr_comment")
+    @mock.patch("trymerge.gh_add_labels")
+    @mock.patch("trymerge.is_bot_initiated_codev_merge", return_value=True)
+    @mock.patch("trymerge.has_required_labels", return_value=False)
+    def test_ensure_mergeable_labels_autolabels_codev_merge(
+        self,
+        mock_labels: Any,
+        mock_codev: Any,
+        mock_add: Any,
+        mock_comment: Any,
+        *args: Any,
+    ) -> None:
+        "An unlabeled co-dev merge is auto-labeled instead of raising."
+        pr = mock.MagicMock(org="pytorch", project="pytorch", pr_num=123)
+        ensure_mergeable_labels(pr, 456, dry_run=False)
+        mock_add.assert_called_once_with(
+            "pytorch", "pytorch", 123, ["topic: not user facing"], False
+        )
+        mock_comment.assert_called_once()
+
+    @mock.patch("trymerge.gh_post_pr_comment", side_effect=RuntimeError("boom"))
+    @mock.patch("trymerge.gh_add_labels")
+    @mock.patch("trymerge.is_bot_initiated_codev_merge", return_value=True)
+    @mock.patch("trymerge.has_required_labels", return_value=False)
+    def test_ensure_mergeable_labels_does_not_label_without_audit_comment(
+        self,
+        mock_labels: Any,
+        mock_codev: Any,
+        mock_add: Any,
+        mock_comment: Any,
+        *args: Any,
+    ) -> None:
+        """A failed audit comment must not leave the label behind: the label alone
+        satisfies has_required_labels, so the retry would silently skip the notice."""
+        pr = mock.MagicMock(org="pytorch", project="pytorch", pr_num=123)
+        with self.assertRaises(RuntimeError):
+            ensure_mergeable_labels(pr, 456, dry_run=False)
+        mock_add.assert_not_called()
+
+    @mock.patch("trymerge.gh_add_labels")
+    @mock.patch("trymerge.is_bot_initiated_codev_merge", return_value=False)
+    @mock.patch("trymerge.has_required_labels", return_value=False)
+    def test_ensure_mergeable_labels_raises_for_human_merge(
+        self, mock_labels: Any, mock_codev: Any, mock_add: Any, *args: Any
+    ) -> None:
+        "An unlabeled human-initiated merge still fails the label check."
+        pr = mock.MagicMock(org="pytorch", project="pytorch", pr_num=123)
+        with self.assertRaises(RuntimeError):
+            ensure_mergeable_labels(pr, 456, dry_run=False)
+        mock_add.assert_not_called()
+
+    @mock.patch("trymerge.gh_add_labels")
+    @mock.patch("trymerge.has_required_labels", return_value=True)
+    def test_ensure_mergeable_labels_noop_when_labeled(
+        self, mock_labels: Any, mock_add: Any, *args: Any
+    ) -> None:
+        "A PR that already has a required label is left untouched."
+        pr = mock.MagicMock(org="pytorch", project="pytorch", pr_num=123)
+        ensure_mergeable_labels(pr, 456, dry_run=False)
+        mock_add.assert_not_called()
 
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
     def test_match_rules(self, *args: Any) -> None:
@@ -352,6 +572,25 @@ class TestTryMerge(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 115495)
         # Test that PR with the correct approvers doesn't raise any exception
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
+
+    @mock.patch(
+        "trymerge.read_merge_rules",
+        side_effect=mocked_read_merge_rules_malformed_team,
+    )
+    def test_match_rules_malformed_team_ref(self, *args: Any) -> None:
+        "Tests that a multi-slash approved_by entry aborts instead of matching any approval"
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        repo = DummyGitRepo()
+
+        with mock.patch(
+            "trymerge.gh_get_team_members", return_value=[]
+        ) as mock_members:
+            self.assertRaisesRegex(
+                ValueError,
+                MALFORMED_TEAM_REF,
+                lambda: find_matching_merge_rule(pr, repo),
+            )
+        mock_members.assert_not_called()
 
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
     def test_lint_fails(self, *args: Any) -> None:
@@ -1455,6 +1694,770 @@ class TestTimelineFunctions(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 77700)
         sha = pr.get_commit_sha_at_comment(100)
         self.assertIsNone(sha)
+
+
+class TestDockerCiGates(TestCase):
+    """Unit tests for the docker-image merge gates."""
+
+    def test_is_docker_affecting_files(self) -> None:
+        self.assertTrue(is_docker_affecting_files([".ci/docker/build.sh"]))
+        self.assertTrue(
+            is_docker_affecting_files(["README.md", ".ci/docker/ubuntu/Dockerfile"])
+        )
+        # Exact directory path also counts
+        self.assertTrue(is_docker_affecting_files([".ci/docker"]))
+        # Unrelated files, including a lookalike prefix, don't count
+        self.assertFalse(is_docker_affecting_files(["torch/foo.py", "README.md"]))
+        self.assertFalse(is_docker_affecting_files([".ci/docker-something/x"]))
+        self.assertFalse(is_docker_affecting_files([]))
+
+    def test_get_docker_build_checks(self) -> None:
+        def check(name: str) -> JobCheckState:
+            return JobCheckState(name, "", "SUCCESS", None, None, None, None)
+
+        checks = {
+            name: check(name)
+            for name in (
+                "docker-builds / docker-build (pytorch-linux-jammy)",
+                "docker-builds",
+                "linux-build / build",
+                "docker-builds-nightly / x",
+            )
+        }
+        self.assertEqual(
+            set(get_docker_build_checks(checks)),
+            {
+                "docker-builds / docker-build (pytorch-linux-jammy)",
+                "docker-builds",
+            },
+        )
+
+    def test_get_topmost_docker_pr(self) -> None:
+        lower_docker_pr = mock.MagicMock()
+        lower_docker_pr.is_docker_affecting.return_value = True
+        middle_pr = mock.MagicMock()
+        middle_pr.is_docker_affecting.return_value = False
+        top_docker_pr = mock.MagicMock()
+        top_docker_pr.is_docker_affecting.return_value = True
+
+        self.assertIs(
+            get_topmost_docker_pr([lower_docker_pr, middle_pr]), lower_docker_pr
+        )
+        self.assertIs(
+            get_topmost_docker_pr([lower_docker_pr, middle_pr, top_docker_pr]),
+            top_docker_pr,
+        )
+        self.assertIsNone(get_topmost_docker_pr([middle_pr]))
+
+    @mock.patch("trymerge.check_docker_builds_ready")
+    @mock.patch("trymerge.get_ghstack_prs")
+    @mock.patch("trymerge.find_matching_merge_rule")
+    @mock.patch("trymerge.can_skip_internal_checks", return_value=False)
+    def test_merge_into_gates_lower_ghstack_docker_pr(
+        self,
+        _mock_can_skip_internal_checks: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        mock_get_ghstack_prs: mock.MagicMock,
+        mock_check_docker_builds_ready: mock.MagicMock,
+    ) -> None:
+        lower_pr = mock.MagicMock(spec=GitHubPR)
+        lower_pr.pr_num = 1000
+        lower_pr.is_closed.return_value = False
+        lower_pr.is_docker_affecting.return_value = True
+        top_pr = mock.MagicMock(spec=GitHubPR)
+        top_pr.org = "pytorch"
+        top_pr.project = "pytorch"
+        top_pr.pr_num = 1001
+        top_pr.is_ghstack_pr.return_value = True
+        top_pr.is_closed.return_value = False
+        top_pr.is_docker_affecting.return_value = False
+        top_pr.is_dependabot_pr.return_value = False
+        top_pr.merge_changes_locally.side_effect = RuntimeError("stop after gates")
+        repo = mock.MagicMock(spec=GitRepo)
+        ghstack_prs = [(lower_pr, "lower_rev"), (top_pr, "top_rev")]
+        mock_get_ghstack_prs.return_value = ghstack_prs
+        mock_find_matching_merge_rule.return_value = (None, [], [], {})
+
+        with self.assertRaisesRegex(RuntimeError, "stop after gates"):
+            GitHubPR.merge_into(top_pr, repo, comment_id=1)
+
+        mock_get_ghstack_prs.assert_called_once_with(repo, top_pr, open_only=False)
+        mock_check_docker_builds_ready.assert_called_once_with(lower_pr)
+        top_pr.merge_changes_locally.assert_called_once_with(
+            repo, False, 1, ghstack_prs=ghstack_prs
+        )
+
+
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+@mock.patch(
+    "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
+)
+@mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules_greenlight)
+class TestAuthorizedWithoutGreenlight(TestCase):
+    def setUp(self) -> None:
+        # The answer is memoized for the lifetime of a merge command's process; each
+        # test is a different command.
+        _AUTHORIZED_WITHOUT_GREENLIGHT.clear()
+
+    def _pr_approved_by(self, *logins: str) -> GitHubPR:
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        pr._reviews = [(login, "APPROVED") for login in logins]
+        return pr
+
+    def test_greenlight_alone_is_required(self, *args: Any) -> None:
+        pr = self._pr_approved_by(GREENLIGHT_LOGIN)
+        self.assertFalse(is_authorized_without_greenlight(pr, DummyGitRepo()))
+
+    def test_drive_by_approver_does_not_authorize_the_pr(self, *args: Any) -> None:
+        pr = self._pr_approved_by(GREENLIGHT_LOGIN, "a-random-stranger")
+        self.assertFalse(is_authorized_without_greenlight(pr, DummyGitRepo()))
+
+    def test_a_real_rule_approver_makes_greenlight_unnecessary(
+        self, *args: Any
+    ) -> None:
+        pr = self._pr_approved_by(GREENLIGHT_LOGIN, "malfet")
+        self.assertTrue(is_authorized_without_greenlight(pr, DummyGitRepo()))
+
+    def test_greenlight_is_stripped_case_insensitively(self, *args: Any) -> None:
+        pr = self._pr_approved_by("PyTorchGreenlight")
+        self.assertFalse(is_authorized_without_greenlight(pr, DummyGitRepo()))
+
+    def test_dismissed_greenlight_approval_is_not_an_approval(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        pr._reviews = [(GREENLIGHT_LOGIN, "DISMISSED"), ("malfet", "APPROVED")]
+        self.assertEqual(pr.get_approved_by(), ["malfet"])
+        self.assertTrue(is_authorized_without_greenlight(pr, DummyGitRepo()))
+
+    def test_a_bot_suffixed_greenlight_approval_is_still_greenlights(
+        self, *args: Any
+    ) -> None:
+        """REST spells the App `pytorchgreenlight[bot]`; dropping it must still work."""
+        pr = self._pr_approved_by(f"{GREENLIGHT_LOGIN}[bot]")
+        self.assertFalse(is_authorized_without_greenlight(pr, DummyGitRepo()))
+
+    def test_the_reject_reason_is_logged(self, *args: Any) -> None:
+        pr = self._pr_approved_by(GREENLIGHT_LOGIN, "a-random-stranger")
+        with mock.patch("builtins.print") as mock_print:
+            self.assertFalse(is_authorized_without_greenlight(pr, DummyGitRepo()))
+        logged = " ".join(str(call.args[0]) for call in mock_print.call_args_list)
+        self.assertIn("#115495", logged)
+        self.assertIn("Core Maintainers", logged)
+
+    def test_the_answer_is_computed_once_per_approver_set(self, *args: Any) -> None:
+        pr = self._pr_approved_by(GREENLIGHT_LOGIN)
+        repo = DummyGitRepo()
+        with mock.patch(
+            "trymerge.find_matching_merge_rule",
+            side_effect=MergeRuleFailedError("no rule"),
+        ) as mock_rule:
+            self.assertFalse(is_authorized_without_greenlight(pr, repo))
+            self.assertFalse(is_authorized_without_greenlight(pr, repo))
+        mock_rule.assert_called_once()
+
+    def test_an_approval_arriving_mid_merge_is_not_masked_by_the_cache(
+        self, *args: Any
+    ) -> None:
+        repo = DummyGitRepo()
+        self.assertFalse(
+            is_authorized_without_greenlight(
+                self._pr_approved_by(GREENLIGHT_LOGIN), repo
+            )
+        )
+        self.assertTrue(
+            is_authorized_without_greenlight(
+                self._pr_approved_by(GREENLIGHT_LOGIN, "malfet"), repo
+            )
+        )
+
+    def test_the_real_gates_arguments_are_used_verbatim(self, *args: Any) -> None:
+        """A rule the real gate would skip must not answer this question instead."""
+        pr = self._pr_approved_by(GREENLIGHT_LOGIN, "malfet")
+        repo = DummyGitRepo()
+        with mock.patch("trymerge.find_matching_merge_rule") as mock_rule:
+            is_authorized_without_greenlight(
+                pr,
+                repo,
+                skip_mandatory_checks=True,
+                skip_internal_checks=True,
+                ignore_current_checks=["some-check"],
+            )
+        self.assertEqual(
+            mock_rule.call_args.kwargs,
+            {
+                "skip_mandatory_checks": True,
+                "skip_internal_checks": True,
+                "ignore_current_checks": ["some-check"],
+                "approved_by_override": {"malfet"},
+            },
+        )
+
+    def test_pending_mandatory_checks_keep_the_guard_on(self, *args: Any) -> None:
+        """The real gate skips such a rule and falls through to the Greenlight rule."""
+        pr = self._pr_approved_by(GREENLIGHT_LOGIN, "malfet")
+        with mock.patch(
+            "trymerge.find_matching_merge_rule",
+            side_effect=MandatoryChecksMissingError("Lint is pending"),
+        ):
+            self.assertFalse(is_authorized_without_greenlight(pr, DummyGitRepo()))
+
+    def test_an_unusable_rule_set_keeps_the_guard_on(self, *args: Any) -> None:
+        pr = self._pr_approved_by(GREENLIGHT_LOGIN, "malfet")
+        with mock.patch(
+            "trymerge.find_matching_merge_rule",
+            side_effect=RuntimeError("This PR has internal changes"),
+        ):
+            self.assertFalse(is_authorized_without_greenlight(pr, DummyGitRepo()))
+
+
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+class TestMergeAuthorizedLogins(TestCase):
+    """greenlight's merge_authz.resolve_authorized_logins, mirrored for the guard."""
+
+    @mock.patch(
+        "trymerge.read_merge_rules", side_effect=mocked_read_merge_rules_greenlight
+    )
+    def test_every_rules_approvers_are_unioned_and_lowercased(self, *args: Any) -> None:
+        self.assertEqual(
+            merge_authorized_logins(DummyGitRepo(), "pytorch", "pytorch"),
+            frozenset({GREENLIGHT_LOGIN, "malfet"}),
+        )
+
+    @mock.patch("trymerge.read_merge_rules")
+    def test_team_refs_are_expanded_to_members(
+        self, mock_rules: Any, *args: Any
+    ) -> None:
+        mock_rules.return_value = [
+            MergeRule(
+                name="Some Team",
+                patterns=["*"],
+                approved_by=["pytorch/some-team", "Malfet"],
+                mandatory_checks_name=None,
+            )
+        ]
+        with mock.patch(
+            "trymerge.gh_get_team_members", return_value=["Alice", "bob"]
+        ) as mock_members:
+            self.assertEqual(
+                merge_authorized_logins(DummyGitRepo(), "pytorch", "pytorch"),
+                frozenset({"alice", "bob", "malfet"}),
+            )
+        mock_members.assert_called_once_with("pytorch", "some-team")
+
+    @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules_raise)
+    def test_an_unreadable_rules_file_yields_an_empty_set(self, *args: Any) -> None:
+        self.assertEqual(
+            merge_authorized_logins(DummyGitRepo(), "pytorch", "pytorch"), frozenset()
+        )
+
+    @mock.patch("trymerge.read_merge_rules")
+    def test_an_unexpandable_team_ref_yields_an_empty_set(
+        self, mock_rules: Any, *args: Any
+    ) -> None:
+        """Expanding a team ref is a live request; a blip must not end the merge."""
+        mock_rules.return_value = [
+            MergeRule(
+                name="Some Team",
+                patterns=["*"],
+                approved_by=["pytorch/some-team"],
+                mandatory_checks_name=None,
+            )
+        ]
+        with mock.patch(
+            "trymerge.gh_get_team_members", side_effect=RuntimeError("testing")
+        ):
+            self.assertEqual(
+                merge_authorized_logins(DummyGitRepo(), "pytorch", "pytorch"),
+                frozenset(),
+            )
+
+    @mock.patch(
+        "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
+    )
+    @mock.patch("trymerge.read_merge_rules")
+    def test_a_malformed_team_ref_in_an_unmatched_rule_yields_an_empty_set(
+        self, mock_rules: Any, *args: Any
+    ) -> None:
+        """Refusing a mis-typed team ref is deliberate: it must never resolve to nobody.
+
+        find_matching_merge_rule drops a rule whose patterns miss the PR before it
+        expands that rule's approvers, so the ref below never reaches it. This set
+        spans every rule in the file regardless of patterns, and the empty set it
+        produces instead is what the guard reads as "no human authorized this".
+        """
+        mock_rules.return_value = [
+            MergeRule(
+                name="Malformed Team",
+                patterns=["some/path/that/no/pr/touches/**"],
+                approved_by=[MALFORMED_TEAM_REF],
+                mandatory_checks_name=None,
+            )
+        ]
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+
+        with mock.patch(
+            "trymerge.gh_get_team_members", return_value=[]
+        ) as mock_members:
+            self.assertRaisesRegex(
+                MergeRuleFailedError,
+                "No rule found to match PR",
+                lambda: find_matching_merge_rule(pr, DummyGitRepo()),
+            )
+            self.assertEqual(
+                merge_authorized_logins(DummyGitRepo(), "pytorch", "pytorch"),
+                frozenset(),
+            )
+        mock_members.assert_not_called()
+
+
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+@mock.patch(
+    "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
+)
+class TestApprovedByOverride(TestCase):
+    @mock.patch(
+        "trymerge.read_merge_rules", side_effect=mocked_read_merge_rules_approvers
+    )
+    def test_override_replaces_the_prs_real_approvers(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        repo = DummyGitRepo()
+
+        self.assertIsNotNone(find_matching_merge_rule(pr, repo))
+        self.assertIsNotNone(
+            find_matching_merge_rule(pr, repo, approved_by_override={"malfet"})
+        )
+        self.assertRaisesRegex(
+            MergeRuleFailedError,
+            "has not been reviewed yet",
+            lambda: find_matching_merge_rule(pr, repo, approved_by_override=set()),
+        )
+        self.assertRaisesRegex(
+            MergeRuleFailedError,
+            "Core Maintainers",
+            lambda: find_matching_merge_rule(
+                pr, repo, approved_by_override={"a-random-stranger"}
+            ),
+        )
+
+
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+class TestReviewAccessors(TestCase):
+    def test_get_changes_requested_by(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        pr._reviews = [
+            ("malfet", "APPROVED"),
+            ("some-reviewer", "CHANGES_REQUESTED"),
+            ("a-commenter", "COMMENTED"),
+        ]
+        self.assertEqual(pr.get_changes_requested_by(), ["some-reviewer"])
+        self.assertEqual(pr.get_approved_by(), ["malfet"])
+
+    @mock.patch("trymerge.gh_fetch_json_dict")
+    def test_get_updated_at(self, mock_fetch: Any, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        mock_fetch.return_value = {"updated_at": "2026-08-25T11:00:00Z"}
+        self.assertEqual(pr.get_updated_at(), "2026-08-25T11:00:00Z")
+        self.assertIn(
+            "/repos/pytorch/pytorch/pulls/115495", mock_fetch.call_args.args[0]
+        )
+
+    @mock.patch("trymerge.gh_fetch_json_dict")
+    def test_get_updated_at_returns_none_when_unavailable(
+        self, mock_fetch: Any, *args: Any
+    ) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        mock_fetch.return_value = {}
+        self.assertIsNone(pr.get_updated_at())
+        mock_fetch.side_effect = HTTPError(
+            "https://api.github.com",
+            500,
+            "boom",
+            {},  # type: ignore[arg-type]
+            None,
+        )
+        self.assertIsNone(pr.get_updated_at())
+
+    @mock.patch("trymerge.gh_fetch_json_list")
+    def test_get_bot_reviewers(self, mock_fetch: Any, *args: Any) -> None:
+        """REST names an App `slug[bot]`, and that is the login callers get back."""
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        mock_fetch.return_value = [
+            {"user": {"login": "some-app[bot]", "type": "Bot"}},
+            {"user": {"login": "malfet", "type": "User"}},
+            {"user": None},
+            {},
+        ]
+        self.assertEqual(pr.get_bot_reviewers(), frozenset({"some-app[bot]"}))
+        self.assertIn(
+            "/repos/pytorch/pytorch/pulls/115495/reviews", mock_fetch.call_args.args[0]
+        )
+
+    @mock.patch("trymerge.gh_fetch_json_list")
+    def test_get_bot_reviewers_walks_every_page(
+        self, mock_fetch: Any, *args: Any
+    ) -> None:
+        """GitHub returns reviews oldest first, so the last page holds the recent ones."""
+        full_page = [{"user": {"login": "malfet", "type": "User"}}] * REVIEWS_PER_PAGE
+        mock_fetch.side_effect = [
+            full_page,
+            [{"user": {"login": "late-app[bot]", "type": "Bot"}}],
+        ]
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        self.assertEqual(pr.get_bot_reviewers(), frozenset({"late-app[bot]"}))
+        self.assertEqual(
+            [call.kwargs["params"]["page"] for call in mock_fetch.call_args_list],
+            [1, 2],
+        )
+
+    @mock.patch("trymerge.gh_fetch_json_list")
+    def test_get_bot_reviewers_stops_at_the_page_limit(
+        self, mock_fetch: Any, *args: Any
+    ) -> None:
+        mock_fetch.return_value = [
+            {"user": {"login": "some-app[bot]", "type": "Bot"}}
+        ] * REVIEWS_PER_PAGE
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        self.assertEqual(pr.get_bot_reviewers(), frozenset({"some-app[bot]"}))
+        self.assertEqual(mock_fetch.call_count, REVIEW_PAGE_LIMIT)
+
+    @mock.patch("trymerge.gh_fetch_json_list")
+    def test_get_bot_reviewers_is_none_when_unavailable(
+        self, mock_fetch: Any, *args: Any
+    ) -> None:
+        """None, not an empty set: an outage must not read as "this PR has no Apps"."""
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        mock_fetch.side_effect = HTTPError(
+            "https://api.github.com",
+            500,
+            "boom",
+            {},  # type: ignore[arg-type]
+            None,
+        )
+        self.assertIsNone(pr.get_bot_reviewers())
+
+    @mock.patch("trymerge.gh_fetch_json_list")
+    def test_get_bot_reviewers_is_none_for_a_malformed_payload(
+        self, mock_fetch: Any, *args: Any
+    ) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        mock_fetch.return_value = {"message": "Not Found"}
+        self.assertIsNone(pr.get_bot_reviewers())
+
+    @mock.patch("trymerge.gh_fetch_json_dict")
+    def test_get_updated_at_is_none_for_a_malformed_payload(
+        self, mock_fetch: Any, *args: Any
+    ) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        mock_fetch.return_value = ["not", "a", "dict"]
+        self.assertIsNone(pr.get_updated_at())
+
+
+class TestGreenlightGuardCallSite(TestCase):
+    def setUp(self) -> None:
+        for patcher in (
+            mock.patch("trymerge.check_docker_builds_ready"),
+            mock.patch("trymerge.can_skip_internal_checks", return_value=False),
+            mock.patch(
+                "trymerge.find_matching_merge_rule", return_value=(None, [], [], {})
+            ),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _pr(self, pr_num: int, ghstack: bool = False) -> Any:
+        pr = mock.MagicMock(spec=GitHubPR)
+        pr.org = "pytorch"
+        pr.project = "pytorch"
+        pr.pr_num = pr_num
+        pr.is_ghstack_pr.return_value = ghstack
+        pr.is_closed.return_value = False
+        pr.is_docker_affecting.return_value = False
+        pr.is_dependabot_pr.return_value = False
+        pr.get_approved_by.return_value = [GREENLIGHT_LOGIN]
+        pr.get_changes_requested_by.return_value = []
+        pr.get_labels.return_value = []
+        pr.merge_changes_locally.side_effect = RuntimeError("stop after gates")
+        return pr
+
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    def test_non_ghstack_pr_is_checked_at_its_head(self, mock_evaluate: Any) -> None:
+        pr = self._pr(1)
+        pr.last_commit_sha.return_value = "head-sha"
+        mock_evaluate.return_value = GuardResult(GuardVerdict.ALLOW)
+
+        with self.assertRaisesRegex(RuntimeError, "stop after gates"):
+            GitHubPR.merge_into(pr, mock.MagicMock(spec=GitRepo), comment_id=1)
+
+        repo_full_name, prs = mock_evaluate.call_args.args
+        self.assertEqual(repo_full_name, "pytorch/pytorch")
+        self.assertEqual([(p.pr_num, p.head_sha) for p in prs], [(1, "head-sha")])
+
+    @mock.patch("trymerge.get_ghstack_prs")
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    def test_ghstack_stack_is_checked_at_the_github_heads(
+        self, mock_evaluate: Any, mock_get_ghstack_prs: Any
+    ) -> None:
+        """greenlight records `gh/USER/N/head`, never the `/orig` rev git cherry-picks."""
+        lower_pr = self._pr(1)
+        lower_pr.last_commit_sha.return_value = "lower-github-head"
+        closed_pr = self._pr(2)
+        closed_pr.is_closed.return_value = True
+        top_pr = self._pr(3, ghstack=True)
+        top_pr.last_commit_sha.return_value = "top-github-head"
+        mock_get_ghstack_prs.return_value = [
+            (lower_pr, "lower_rev"),
+            (closed_pr, "closed_rev"),
+            (top_pr, "top_rev"),
+        ]
+        mock_evaluate.return_value = GuardResult(GuardVerdict.ALLOW)
+
+        with self.assertRaisesRegex(RuntimeError, "stop after gates"):
+            GitHubPR.merge_into(top_pr, mock.MagicMock(spec=GitRepo), comment_id=1)
+
+        _, prs = mock_evaluate.call_args.args
+        self.assertEqual(
+            [(p.pr_num, p.head_sha) for p in prs],
+            [(1, "lower-github-head"), (3, "top-github-head")],
+        )
+
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    def test_wait_raises_the_retryable_error(self, mock_evaluate: Any) -> None:
+        pr = self._pr(1)
+        pr.last_commit_sha.return_value = "head-sha"
+        mock_evaluate.return_value = GuardResult(GuardVerdict.WAIT, "still reviewing")
+
+        with self.assertRaisesRegex(MandatoryChecksMissingError, "still reviewing"):
+            GitHubPR.merge_into(pr, mock.MagicMock(spec=GitRepo), comment_id=1)
+        pr.merge_changes_locally.assert_not_called()
+
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    def test_deny_raises_a_non_retryable_error(self, mock_evaluate: Any) -> None:
+        pr = self._pr(1)
+        pr.last_commit_sha.return_value = "head-sha"
+        mock_evaluate.return_value = GuardResult(GuardVerdict.DENY, "refusing")
+
+        with self.assertRaisesRegex(MergeRuleFailedError, "refusing") as cm:
+            GitHubPR.merge_into(pr, mock.MagicMock(spec=GitRepo), comment_id=1)
+        self.assertNotIsInstance(cm.exception, MandatoryChecksMissingError)
+        pr.merge_changes_locally.assert_not_called()
+
+    @mock.patch("trymerge.gh_post_pr_comment")
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    def test_a_returned_comment_is_posted_to_the_pr_being_merged(
+        self, mock_evaluate: Any, mock_post: Any
+    ) -> None:
+        pr = self._pr(1)
+        pr.last_commit_sha.return_value = "head-sha"
+        mock_evaluate.return_value = GuardResult(
+            GuardVerdict.WAIT, "still reviewing", "hold tight"
+        )
+
+        with self.assertRaises(MandatoryChecksMissingError):
+            GitHubPR.merge_into(
+                pr, mock.MagicMock(spec=GitRepo), comment_id=1, dry_run=True
+            )
+        mock_post.assert_called_once_with("pytorch", "pytorch", 1, "hold tight", True)
+
+    @mock.patch("trymerge.gh_post_pr_comment")
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    def test_no_comment_is_posted_when_the_guard_returns_none(
+        self, mock_evaluate: Any, mock_post: Any
+    ) -> None:
+        pr = self._pr(1)
+        pr.last_commit_sha.return_value = "head-sha"
+        mock_evaluate.return_value = GuardResult(GuardVerdict.WAIT, "still reviewing")
+
+        with self.assertRaises(MandatoryChecksMissingError):
+            GitHubPR.merge_into(pr, mock.MagicMock(spec=GitRepo), comment_id=1)
+        mock_post.assert_not_called()
+
+    @mock.patch("trymerge.gh_post_pr_comment")
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    def test_a_failed_comment_does_not_end_the_merge(
+        self, mock_evaluate: Any, mock_post: Any
+    ) -> None:
+        pr = self._pr(1)
+        pr.last_commit_sha.return_value = "head-sha"
+        mock_post.side_effect = RuntimeError("github is down")
+        mock_evaluate.return_value = GuardResult(
+            GuardVerdict.WAIT, "still reviewing", "hold tight"
+        )
+
+        with self.assertRaisesRegex(MandatoryChecksMissingError, "still reviewing"):
+            GitHubPR.merge_into(pr, mock.MagicMock(spec=GitRepo), comment_id=1)
+
+    @mock.patch("greenlight_ledger.gh_fetch_url")
+    def test_the_guard_is_skipped_when_greenlight_did_not_approve(
+        self, mock_fetch_url: Any
+    ) -> None:
+        pr = self._pr(1)
+        pr.last_commit_sha.return_value = "head-sha"
+        pr.get_approved_by.return_value = ["malfet"]
+
+        with self.assertRaisesRegex(RuntimeError, "stop after gates"):
+            GitHubPR.merge_into(pr, mock.MagicMock(spec=GitRepo), comment_id=1)
+        mock_fetch_url.assert_not_called()
+
+
+@mock.patch("trymerge.gh_add_labels")
+@mock.patch("trymerge.check_for_sev")
+@mock.patch("trymerge.post_starting_merge_comment")
+@mock.patch("trymerge.ensure_mergeable_labels")
+@mock.patch("trymerge.find_matching_merge_rule")
+@mock.patch("trymerge.get_classifications", return_value={})
+class TestGreenlightWaitPlumbing(TestCase):
+    def _pr(self) -> Any:
+        pr = mock.MagicMock(spec=GitHubPR)
+        pr.org = "pytorch"
+        pr.project = "pytorch"
+        pr.pr_num = 1
+        pr.last_commit_sha.return_value = "head-sha"
+        pr.get_labels.return_value = []
+        pr.is_ghstack_pr.return_value = False
+        pr.get_checkrun_conclusions.return_value = {}
+        return pr
+
+    @mock.patch("trymerge.GitHubPR")
+    def test_normal_merge_gets_a_wait_window(
+        self, mock_pr_cls: Any, *args: Any
+    ) -> None:
+        pr = self._pr()
+        mock_pr_cls.return_value = pr
+        merge(pr, mock.MagicMock(spec=GitRepo), comment_id=1, dry_run=True)
+        self.assertIsInstance(
+            pr.merge_into.call_args.kwargs["greenlight_wait"], GreenlightWaitWindow
+        )
+
+    @mock.patch("trymerge.time.sleep")
+    @mock.patch("trymerge.GitHubPR")
+    def test_every_retry_shares_one_wait_window(
+        self, mock_pr_cls: Any, _mock_sleep: Any, *args: Any
+    ) -> None:
+        pr = self._pr()
+        mock_pr_cls.return_value = pr
+        pr.merge_into.side_effect = [
+            MandatoryChecksMissingError("waiting on greenlight"),
+            None,
+        ]
+        merge(pr, mock.MagicMock(spec=GitRepo), comment_id=1, dry_run=True)
+        windows = [
+            call.kwargs["greenlight_wait"] for call in pr.merge_into.call_args_list
+        ]
+        self.assertEqual(len(windows), 2)
+        self.assertIs(windows[0], windows[1])
+
+    def test_force_merge_gets_no_window_so_it_cannot_wait(self, *args: Any) -> None:
+        pr = self._pr()
+        merge(
+            pr,
+            mock.MagicMock(spec=GitRepo),
+            comment_id=1,
+            dry_run=True,
+            skip_mandatory_checks=True,
+        )
+        self.assertIsNone(pr.merge_into.call_args.kwargs["greenlight_wait"])
+
+
+class TestGreenlightGuardWiring(TestCase):
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    def test_pr_facts_are_forwarded_to_the_guard(self, mock_evaluate: Any) -> None:
+        pr = mock.MagicMock(spec=GitHubPR)
+        pr.org = "pytorch"
+        pr.project = "pytorch"
+        pr.pr_num = 7
+        pr.last_commit_sha.return_value = "head-sha"
+        pr.get_approved_by.return_value = [GREENLIGHT_LOGIN]
+        pr.get_changes_requested_by.return_value = ["some-reviewer"]
+        pr.get_labels.return_value = ["Stale"]
+        pr.get_updated_at.return_value = "2026-08-25T11:00:00Z"
+        pr.get_bot_reviewers.return_value = frozenset({"some-app[bot]"})
+        mock_evaluate.return_value = GuardResult(GuardVerdict.ALLOW)
+
+        with mock.patch(
+            "trymerge.merge_authorized_logins", return_value=frozenset({"malfet"})
+        ) as mock_logins:
+            check_greenlight_reviewed_head_sha(pr, None, [pr], wait_window=None)
+
+        repo_full_name, prs = mock_evaluate.call_args.args
+        self.assertEqual(repo_full_name, "pytorch/pytorch")
+        self.assertEqual(len(prs), 1)
+        forwarded = prs[0]
+        self.assertEqual(forwarded.pr_num, 7)
+        self.assertEqual(forwarded.head_sha, "head-sha")
+        self.assertEqual(forwarded.approved_by, [GREENLIGHT_LOGIN])
+        self.assertEqual(forwarded.changes_requested_by, ["some-reviewer"])
+        self.assertEqual(forwarded.labels, ["Stale"])
+        self.assertEqual(forwarded.get_updated_at(), "2026-08-25T11:00:00Z")
+        self.assertEqual(forwarded.get_bot_reviewers(), frozenset({"some-app[bot]"}))
+        self.assertEqual(forwarded.get_merge_authorized_logins(), frozenset({"malfet"}))
+        mock_logins.assert_called_once_with(None, "pytorch", "pytorch")
+        self.assertIsNone(mock_evaluate.call_args.kwargs["wait_window"])
+
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    def test_the_real_gates_arguments_reach_the_authorization_question(
+        self, mock_evaluate: Any
+    ) -> None:
+        pr = mock.MagicMock(spec=GitHubPR)
+        pr.org = "pytorch"
+        pr.project = "pytorch"
+        pr.pr_num = 7
+        pr.last_commit_sha.return_value = "head-sha"
+        pr.get_approved_by.return_value = [GREENLIGHT_LOGIN]
+        pr.get_changes_requested_by.return_value = []
+        pr.get_labels.return_value = []
+        pr.get_bot_reviewers.return_value = frozenset()
+        mock_evaluate.return_value = GuardResult(GuardVerdict.ALLOW)
+
+        with mock.patch("trymerge.is_authorized_without_greenlight") as mock_authz:
+            check_greenlight_reviewed_head_sha(
+                pr,
+                None,
+                [pr],
+                wait_window=None,
+                skip_mandatory_checks=True,
+                skip_internal_checks=True,
+                ignore_current_checks=["some-check"],
+            )
+            _, prs = mock_evaluate.call_args.args
+            prs[0].is_authorized_without_greenlight()
+        self.assertEqual(
+            mock_authz.call_args.kwargs,
+            {
+                "skip_mandatory_checks": True,
+                "skip_internal_checks": True,
+                "ignore_current_checks": ["some-check"],
+            },
+        )
+
+    @mock.patch("trymerge.check_greenlight_reviewed_head_sha")
+    @mock.patch("trymerge.check_docker_builds_ready")
+    @mock.patch("trymerge.can_skip_internal_checks", return_value=True)
+    @mock.patch("trymerge.find_matching_merge_rule", return_value=(None, [], [], {}))
+    def test_merge_into_hands_the_guard_the_gate_it_just_ran(
+        self, _rule: Any, _skip: Any, _docker: Any, mock_check: Any
+    ) -> None:
+        pr = mock.MagicMock(spec=GitHubPR)
+        pr.org = "pytorch"
+        pr.project = "pytorch"
+        pr.pr_num = 1
+        pr.is_ghstack_pr.return_value = False
+        pr.is_dependabot_pr.return_value = False
+        pr.is_docker_affecting.return_value = False
+        pr.merge_changes_locally.side_effect = RuntimeError("stop after gates")
+
+        with self.assertRaisesRegex(RuntimeError, "stop after gates"):
+            GitHubPR.merge_into(
+                pr,
+                mock.MagicMock(spec=GitRepo),
+                comment_id=1,
+                skip_mandatory_checks=True,
+                ignore_current_checks=["some-check"],
+            )
+
+        self.assertEqual(mock_check.call_args.kwargs["skip_mandatory_checks"], True)
+        self.assertEqual(mock_check.call_args.kwargs["skip_internal_checks"], True)
+        self.assertEqual(
+            mock_check.call_args.kwargs["ignore_current_checks"], ["some-check"]
+        )
 
 
 if __name__ == "__main__":

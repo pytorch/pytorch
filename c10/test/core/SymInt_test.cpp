@@ -31,6 +31,15 @@ TEST(SymIntTest, CheckRange) {
   EXPECT_FALSE(SymInt::check_range(INT64_MIN));
 }
 
+namespace {
+class SymNodeWithoutStr final : public SymNodeImpl {
+ public:
+  bool is_int() override {
+    return true;
+  }
+};
+} // namespace
+
 TEST(SymIntTest, SymIntArrayRefErrorDistinguishesHeapAllocatedConcrete) {
   const std::vector<SymInt> values{
       SymInt(SymInt::min_representable_int() - 1), SymInt(5)};
@@ -48,9 +57,34 @@ TEST(SymIntTest, SymIntArrayRefErrorDistinguishesHeapAllocatedConcrete) {
         message.find("cannot represent heap-allocated SymInt values"),
         std::string::npos)
         << message;
+    EXPECT_NE(message.find("asIntArrayRefSlowAlloc"), std::string::npos)
+        << message;
+    EXPECT_EQ(message.find("guard/specialize"), std::string::npos) << message;
     EXPECT_EQ(message.find("Found symbolic SymInt"), std::string::npos)
         << message;
     EXPECT_EQ(message.find("symbolic shapes"), std::string::npos) << message;
+  }
+}
+
+TEST(SymIntTest, SymIntArrayRefErrorHandlesSymNodeWithoutStr) {
+  const std::vector<SymInt> values{
+      SymInt(5), SymInt(SymNode(c10::make_intrusive<SymNodeWithoutStr>()))};
+
+  try {
+    (void)c10::asIntArrayRefSlow(values, __FILE__, __LINE__);
+    FAIL() << "Expected asIntArrayRefSlow to reject symbolic SymInt";
+  } catch (const c10::Error& e) {
+    const std::string message = e.what_without_backtrace();
+    EXPECT_NE(
+        message.find("Found symbolic SymInt at index 1"), std::string::npos)
+        << message;
+    EXPECT_NE(
+        message.find(
+            "value and full array unavailable because stringification failed"),
+        std::string::npos)
+        << message;
+    EXPECT_NE(message.find("FakeTensorMode"), std::string::npos) << message;
+    EXPECT_EQ(message.find("NYI"), std::string::npos) << message;
   }
 }
 

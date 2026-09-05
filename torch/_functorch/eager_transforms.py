@@ -1133,6 +1133,9 @@ def jvp(
         >>> from torch.func import jvp
         >>> x = torch.randn([])
         >>> f = lambda x: x * torch.tensor([1.0, 2.0, 3])
+        >>> warnings.filterwarnings(
+        ...     "ignore", message=".*torch.jit.script"
+        ... )  # docs: hide
         >>> value, grad = jvp(f, (x,), (torch.tensor(1.0),))
         >>> assert torch.allclose(value, f(x))
         >>> assert torch.allclose(grad, torch.tensor([1.0, 2, 3]))
@@ -1847,6 +1850,7 @@ def linearize(
         >>> def fn(x):
         ...     return x.sin()
         ...
+        >>> warnings.filterwarnings("ignore", message=".*Attempted to insert a get_attr Node with no underlying reference")  # docs: hide
         >>> output, jvp_fn = linearize(fn, torch.zeros(3, 3))
         >>> jvp_fn(torch.ones(3, 3))
         tensor([[1., 1., 1.],

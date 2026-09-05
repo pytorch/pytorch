@@ -26,11 +26,12 @@ from ...ir import (
     ChoiceCaller,
     CUTLASSTemplateBuffer,
     FixedLayout,
+    FlexibleLayout,
     IRNode,
     Layout,
     ReinterpretView,
 )
-from ...utils import is_dynamic, Placeholder
+from ...utils import is_dynamic, Placeholder, sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer
 from ..cuda import cuda_env
@@ -782,7 +783,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
         """
-        Swap operands X and W (aka operans A and B) of the GEMM operation. This
+        Swap operands X and W (aka operands A and B) of the GEMM operation. This
         requires transposing the operands, which is done by swapping the strides.
         Note that we don't change the apparent external layout, just the operand layout.
         this is intentional.
@@ -1247,14 +1248,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         if epilogue_nodes or is_scaled_mm:
             if epilogue_nodes:
-                (
-                    input_names,
-                    output_names,
-                    var_name_to_buffer_name,
-                    evt_py_code,
-                ) = CutlassEVTCodegen.ir_to_evt_python_code(
+                epilogue = CutlassEVTCodegen.ir_to_evt_python_code(
                     Y.get_name(), epilogue_nodes, V.kernel.removed_buffers
                 )
+                input_names = epilogue.reads
+                output_names = epilogue.writes
+                var_name_to_buffer_name = epilogue.renames
+                evt_py_code = epilogue.source
+                if evt_py_code is None:
+                    raise AssertionError("expected EVT epilogue source")
 
                 # TODO: mlazos remove this by returning buffer metadata from
                 # ir_to_evt_python code
@@ -1282,6 +1284,36 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     and D_output_buffer.get_size() != template_buffer_node.get_size()
                 ):
                     name_to_buffer[D_output_name] = template_buffer_node
+
+                # Apply the same normalization to external read inputs. EVT
+                # propagates shapes against the 2D (M, N) accumulator, so a
+                # higher-rank read with the same number of elements (e.g. a bias
+                # whose shape is a compatible reshape of the GEMM output) must be
+                # viewed as the 2D template shape. This is only valid for
+                # contiguous reads, where the row-major flatten is
+                # memory-equivalent and thus numerically identical.
+                if template_buffer_node is not None:
+                    template_size = list(template_buffer_node.get_size())
+                    for name in input_names:
+                        buf = name_to_buffer[name]
+                        buf_layout = buf.get_layout()
+                        if (
+                            list(buf.get_size()) != template_size
+                            and buf_layout.is_contiguous()
+                            and V.graph.sizevars.statically_known_equals(
+                                sympy_product(buf.get_size()),
+                                sympy_product(template_size),
+                            )
+                        ):
+                            new_layout = FixedLayout(
+                                buf_layout.device,
+                                buf_layout.dtype,
+                                template_size,
+                                FlexibleLayout.contiguous_strides(template_size),
+                            )
+                            name_to_buffer[name] = ReinterpretView(  # type: ignore[assignment] # pyrefly: ignore[unsupported-operation]
+                                data=buf, layout=new_layout
+                            )
 
                 if not output_names:
                     raise AssertionError("There should be at least one write")

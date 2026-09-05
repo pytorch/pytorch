@@ -61,6 +61,7 @@ RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface-r
 # Install XPU Dependencies
 ARG XPU_VERSION
 ARG XPU_DRIVER_TYPE
+ARG OMIX_VERSION
 COPY ./common/install_xpu.sh install_xpu.sh
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 
@@ -74,8 +75,17 @@ COPY triton_xpu_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton-xpu.txt triton_version.txt
 
+# Install Rust toolchain (needed to build the torch._rust extension).
+COPY ./common/install_rust.sh install_rust.sh
+COPY ./ci_commit_pins/rust.txt rust.txt
+ENV RUSTUP_HOME /opt/rust
+ENV CARGO_HOME /opt/rust
+ENV PATH /opt/rust/bin:$PATH
+RUN bash ./install_rust.sh && rm install_rust.sh rust.txt
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
+COPY ./common/patches /opt/cache/patches
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
 
