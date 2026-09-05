@@ -32,7 +32,7 @@ from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import PackageError
-from torch._dynamo.graph_utils import _graph_device_type
+from torch._dynamo.graph_utils import _graph_device_types
 from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import (
@@ -109,6 +109,180 @@ class SerializedCode:
         return types.CodeType(
             *kwargs.values(),
         )
+
+
+class FunctionPicklerBase(pickle.Pickler):
+    """Reducers shared by GuardsStatePickler and AOTCompilePickler.
+
+    Both rebuild the same kinds of objects that pickle cannot do by reference:
+    code objects, closure cells, python modules, bound methods, and functions
+    rebuilt from their code object. Each subclass keeps its own dispatch and
+    decides what a rebuilt function carries; this class fixes HOW it is rebuilt
+    so a fix in one pickler cannot be missed in the other.
+
+    Defaults, __doc__, __dict__, and the globals snapshot travel as pickle STATE, applied
+    after memoization, so `wrapper.me = wrapper` and module-scope cycles end.
+    A closure cell is a reduce ARGUMENT: a function closing over itself is
+    reduced twice, and save_reduce's recursive-object fallback (present in both
+    the C and the pure-Python pickler) drops the outer copy.
+    """
+
+    @classmethod
+    def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
+        return SerializedCode.to_code_object(serialized_code)
+
+    @classmethod
+    def _unpickle_python_module(cls, name: str) -> types.ModuleType:
+        return importlib.import_module(name)
+
+    @classmethod
+    def _unpickle_bound_method(cls, func: Any, base: Any) -> types.MethodType:
+        return types.MethodType(func, base)
+
+    @classmethod
+    def _unpickle_empty_cell(cls) -> types.CellType:
+        return types.CellType()
+
+    @staticmethod
+    def _set_cell_contents(cell: types.CellType, state: tuple[Any]) -> None:
+        # The contents travel wrapped in a 1-tuple: pickle skips the state step
+        # entirely when the state object is None, and None is an ordinary cell
+        # value that must not come back as an empty cell.
+        cell.cell_contents = state[0]
+
+    @classmethod
+    def _build_function(
+        cls,
+        f_globals: dict[str, Any],
+        module: str,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        fn = types.FunctionType(code, f_globals, name, None, closure)
+        # FunctionType derives __module__ from f_globals["__name__"], so any
+        # scope that is not the real module dict leaves it None and a guard
+        # rooted at fn.__module__ rebuilds against that.
+        fn.__module__ = module
+        fn.__qualname__ = qualname
+        return fn
+
+    @classmethod
+    def _unpickle_fn_from_module(
+        cls,
+        module: str,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        # functools.wraps copies __module__, so this scope can be a different
+        # file from the one the function lives in; a pickler that guards
+        # __globals__ sends the snapshot variant instead. A module that only
+        # existed in sys.modules at save (exec-created, transformers_modules.*)
+        # gets an empty scope: a guard never calls the rebuilt function.
+        f_globals: dict[str, Any]
+        try:
+            f_globals = importlib.import_module(module).__dict__
+        except ImportError:
+            f_globals = {}
+        return cls._build_function(f_globals, module, code, qualname, name, closure)
+
+    @classmethod
+    def _unpickle_fn_from_snapshot(
+        cls,
+        module: str,
+        code: types.CodeType,
+        qualname: str,
+        name: str,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
+        # The scope arrives as pickle STATE, through _apply_function_state.
+        return cls._build_function({}, module, code, qualname, name, closure)
+
+    @staticmethod
+    def _apply_function_state(fn: types.FunctionType, state: tuple[Any, ...]) -> None:
+        (
+            defaults,
+            kwdefaults,
+            attributes,
+            globals_snapshot,
+            doc,
+            annotations,
+            type_params,
+        ) = state
+        fn.__defaults__ = defaults
+        fn.__kwdefaults__ = kwdefaults
+        # FunctionType took __doc__/__annotations__/__type_params__ from the code
+        # object; functools.wraps overwrote them on the live function and a guard
+        # rooted there rebakes, so restore what the reducer captured.
+        fn.__doc__ = doc
+        fn.__annotations__ = annotations
+        if type_params is not None:
+            fn.__type_params__ = type_params
+        fn.__dict__.update(attributes)
+        if globals_snapshot is not None:
+            fn.__globals__.update(globals_snapshot)
+
+    def _reduce_cell(self, cell: types.CellType) -> tuple[Any, ...]:
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            # A free variable only assigned on a path that did not run.
+            return type(self)._unpickle_empty_cell, ()
+        return (
+            type(self)._unpickle_empty_cell,
+            (),
+            (contents,),
+            None,
+            None,
+            type(self)._set_cell_contents,
+        )
+
+    def _reduce_bound_method(self, method: types.MethodType) -> tuple[Any, ...] | None:
+        # pickle rebuilds a bound method by getattr() on self at load, which is
+        # wrong when that does not resolve back to the same function; those
+        # carry the function and self explicitly.
+        func = method.__func__
+        inner = getattr(method.__self__, func.__name__, None)
+        if inspect.ismethod(inner):
+            inner = inner.__func__
+        if func is inner:
+            return None
+        return type(self)._unpickle_bound_method, (func, method.__self__)
+
+    def _reduce_function(
+        self,
+        fn: types.FunctionType,
+        *,
+        defaults: tuple[Any, ...] | None,
+        kwdefaults: dict[str, Any] | None,
+        closure: tuple[types.CellType, ...] | None,
+        attributes: dict[str, Any],
+        annotations: dict[str, Any],
+        type_params: tuple[Any, ...] | None,
+        globals_snapshot: dict[str, Any] | None = None,
+    ) -> tuple[Any, ...]:
+        # annotations/type_params are passed in rather than read off fn: the
+        # guard pickler prunes what no guard reads, so an unpicklable local class
+        # in an annotation cannot fail the whole dump (a failure there silently
+        # bypasses the package).
+        args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
+        if globals_snapshot is None:
+            unpickle = type(self)._unpickle_fn_from_module
+        else:
+            unpickle = type(self)._unpickle_fn_from_snapshot
+        state = (
+            defaults,
+            kwdefaults,
+            attributes,
+            globals_snapshot,
+            fn.__doc__,
+            annotations,
+            type_params,
+        )
+        return unpickle, args, state, None, None, type(self)._apply_function_state
 
 
 @dataclasses.dataclass
@@ -387,10 +561,107 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     return toplevel.__qualname__, code_source.strip(".")
 
 
+_CpuCodegenTarget = tuple[str, str, int, int | None, str | None]
+
+
+def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
+    """(machine, vec_isa, vec_isa_width, simdlen, march): what inductor bakes into CPU code.
+
+    ``pick_vec_isa`` dry-compiles a probe with the C++ toolchain, so call this
+    only when the artifact can hold native CPU code. None means the host has no
+    usable CPU codegen target: the probe raised, or it picked no valid vector
+    ISA (``pick_vec_isa`` never raises for a missing compiler; it returns
+    ``invalid_vec_isa``), so it can neither produce nor run a vectorized
+    inductor CPU kernel.
+    """
+    from torch._inductor import config as inductor_config, cpu_vec_isa
+
+    try:
+        vec_isa = cpu_vec_isa.pick_vec_isa()
+    except Exception:
+        logger.warning(
+            "Could not determine the CPU vector ISA, so no CPU codegen target "
+            "is recorded and none will be checked.",
+            exc_info=True,
+        )
+        return None
+    if isinstance(vec_isa, cpu_vec_isa.InvalidVecISA):
+        return None
+
+    return (
+        platform.machine(),
+        str(vec_isa),
+        vec_isa.bit_width(),
+        inductor_config.cpp.simdlen,
+        inductor_config.cpp.march,
+    )
+
+
+def _cpu_codegen_target_problem(
+    cached: _CpuCodegenTarget, current: _CpuCodegenTarget | None
+) -> str | None:
+    """Why code generated for ``cached`` cannot be built and run here, or None.
+
+    The artifact carries kernel source tiled for the ISA pick_vec_isa() made at
+    codegen, and the loading host compiles that source with the flags of its
+    own pick_vec_isa(). The two must agree, so every component is compared
+    exactly; a wider host ISA is not a superset here, its masked loads
+    zero-fill the lanes the narrower tiling never wrote. The ISA name and its
+    bit width must both agree: VecSVE(128) and VecSVE(256) share the name
+    "asimd", so the name alone would accept a kernel tiled for the wrong width.
+    """
+    if current is None:
+        return (
+            "This host has no usable CPU codegen target (no C++ toolchain or no "
+            "supported vector ISA), so it cannot build the artifact's vectorized "
+            "CPU kernels."
+        )
+    machine, vec_isa, vec_isa_width, simdlen, march = cached
+    if machine != current[0]:
+        return f"The artifact was built for machine {machine!r}, this host is {current[0]!r}."
+    if (vec_isa, vec_isa_width) != (current[1], current[2]):
+        return (
+            f"The artifact's CPU kernels were generated for vector ISA {vec_isa!r} "
+            f"({vec_isa_width}-bit); this host would compile them for {current[1]!r} "
+            f"({current[2]}-bit). Set ATEN_CPU_CAPABILITY or "
+            "torch._inductor.config.cpp.simdlen so the host picks the same ISA."
+        )
+    if simdlen != current[3]:
+        return f"The artifact was built with simdlen={simdlen!r}, this host uses {current[3]!r}."
+    if march != current[4]:
+        return f"The artifact was built with march={march!r}, this host uses {current[4]!r}."
+    return None
+
+
+# Registered backends that generate no native code, so an artifact of theirs
+# has no baked vector width to protect and must not be gated on one. This is a
+# blacklist on purpose: anything unrecognised -- including a user's own
+# callable, whose compiler_name is just its __name__ -- is assumed to emit
+# code, because a false rejection at load is recoverable and silently running a
+# kernel built for another ISA is not.
+_NO_NATIVE_CODE_BACKENDS = frozenset(
+    {
+        "aot_eager",
+        "aot_eager_decomp_partition",
+        "aot_eager_decomp_partition_crossref",
+        "aot_eager_decomp_partition_with_mode",
+        "aot_eager_default_partitioner",
+        "eager",
+        "eager_debug",
+        "eager_noexcept",
+        "pre_dispatch_eager",
+    }
+)
+
+
+def emits_native_code(backend_name: str) -> bool:
+    return backend_name not in _NO_NATIVE_CODE_BACKENDS
+
+
 @dataclasses.dataclass(frozen=True)
 class SystemInfo:
     """
-    System information including Python, PyTorch, and GPU details.
+    System information including Python, PyTorch, CPU codegen, and GPU details.
     This information is used to ensure compiled artifacts can only be loaded
     with compatible system configurations.
     """
@@ -400,13 +671,16 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
+    cpu_codegen_target: _CpuCodegenTarget | None = None
     CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
-    def current(cls) -> "SystemInfo":
-        """Create a SystemInfo instance with current system information."""
-        # Get GPU name if CUDA or XPU is available
-        gpu_name = None
+    def current(cls, *, cpu_codegen: bool = True) -> "SystemInfo":
+        """Create a SystemInfo instance with current system information.
+
+        ``cpu_codegen=False`` skips the C++ toolchain probe behind
+        ``cpu_codegen_target``.
+        """
         from torch.utils._triton import get_triton_version
 
         gpu_name, toolkit_version = None, None
@@ -425,10 +699,15 @@ class SystemInfo:
             toolkit_version=toolkit_version,
             triton_version=get_triton_version((0, 0)),
             gpu_name=gpu_name,
+            cpu_codegen_target=_current_cpu_codegen_target() if cpu_codegen else None,
         )
 
     def check_compatibility(
-        self, other: "SystemInfo", device_type: str = "cpu"
+        self,
+        other: "SystemInfo",
+        device_type: str = "cpu",
+        *,
+        check_codegen: bool = True,
     ) -> None:
         """
         Check if this SystemInfo is compatible with another SystemInfo.
@@ -443,9 +722,33 @@ class SystemInfo:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
             )
+        # A cached None means the artifact predates this field, not "no vector
+        # ISA"; for a release build that is every artifact already on disk.
+        if (
+            check_codegen
+            and device_type == "cpu"
+            and self.cpu_codegen_target is not None
+        ):
+            problem = _cpu_codegen_target_problem(
+                self.cpu_codegen_target, other.cpu_codegen_target
+            )
+            if problem is not None:
+                raise RuntimeError(
+                    "Compile package was created for a CPU codegen target this host "
+                    f"cannot run: cached={self.cpu_codegen_target}, "
+                    f"current={other.cpu_codegen_target}. {problem}"
+                )
         if device_type in self.CHECK_GPUS:
+            # Device EXISTENCE is not a native-code question: an artifact
+            # holding cuda tensors cannot run without cuda whatever backend
+            # produced it, so this check stays outside check_codegen. Only the
+            # toolkit/Triton/GPU-model checks below describe generated code and
+            # are skipped for a backend that emits none.
             if not getattr(torch, device_type).is_available():
                 raise RuntimeError(f"{device_type} is not available")
+
+            if not check_codegen:
+                return
 
             if self.toolkit_version != other.toolkit_version:
                 raise RuntimeError(
@@ -474,6 +777,10 @@ class _DynamoCacheEntry:
     source_info: SourceInfo
     device_type: str
     system_info: SystemInfo = dataclasses.field(default_factory=SystemInfo.current)
+    # device_type keeps the collapsed accelerator-wins value for BC; a mixed
+    # cpu+accelerator capture still holds native CPU code, so keep the full set.
+    device_types: frozenset[str] | None = None
+    requires_native_backend_compatibility: bool = True
     fn_name: str | None = None
     fn_first_lineno: str | None = None
 
@@ -483,8 +790,22 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
-        current_system_info = SystemInfo.current()
-        self.system_info.check_compatibility(current_system_info, self.device_type)
+        device_types = self.device_types or frozenset((self.device_type,))
+        check_codegen = self.requires_native_backend_compatibility
+        current_system_info = SystemInfo.current(
+            cpu_codegen=(
+                check_codegen
+                and "cpu" in device_types
+                and self.system_info.cpu_codegen_target is not None
+            )
+        )
+        # cpu first, so a codegen-target refusal is not masked by a GPU error.
+        for device_type in sorted(device_types):
+            self.system_info.check_compatibility(
+                current_system_info,
+                device_type,
+                check_codegen=check_codegen,
+            )
 
     def debug_info(self) -> dict[str, Any]:
         if len(self.codes) == 0:
@@ -631,14 +952,21 @@ class CompilePackage:
         fn: Callable[..., Any] | None,
         dynamo: _DynamoCacheEntry | None = None,
         ignore_inlined_sources: bool = False,
+        *,
+        requires_native_backend_compatibility: bool = True,
     ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
         self._current_entry: _DynamoCodeCacheEntry | None = None
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        # device_type that model compiled with.
-        self._device_type = "cpu"
+        # Empty means no graph named a device; cache_entry records that as cpu.
+        self._device_types: set[str] = set()
+        # An eager backend bakes no vector width, so it neither pays the C++
+        # toolchain probe at save nor is rejected on ISA skew at load.
+        self._requires_native_backend_compatibility = (
+            requires_native_backend_compatibility
+        )
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
@@ -686,6 +1014,11 @@ class CompilePackage:
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
+            # Restored so a re-save keeps checking what the capture targeted.
+            self._device_types = set(dynamo.device_types or (dynamo.device_type,))
+            self._requires_native_backend_compatibility = (
+                dynamo.requires_native_backend_compatibility
+            )
         else:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
@@ -798,12 +1131,16 @@ class CompilePackage:
             self._source_info.add_code(code)
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
-        self._device_type = _graph_device_type(graph)
+        self._device_types.update(_graph_device_types(graph))
 
     def bypass_current_entry(self) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in bypass_current_entry")
         self._current_entry.bypassed = True
+        # A bypassed entry is never installed, so what it already registered
+        # would only be serialized for nothing.
+        self._current_entry.backend_ids.clear()
+        self._current_entry.guarded_codes.clear()
 
     def add_resume_function(
         self,
@@ -1000,10 +1337,27 @@ class CompilePackage:
         self.validate()
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in cache_entry")
+        device_types = frozenset(self._device_types or ("cpu",))
+        device_type = next(
+            (device for device in sorted(device_types) if device != "cpu"),
+            "cpu",
+        )
         return _DynamoCacheEntry(
             codes=list(self._codes.values()),
             source_info=self._source_info,
-            device_type=self._device_type,
+            device_type=device_type,
+            device_types=device_types,
+            # The codegen probe runs the C++ toolchain; only pay for it when the
+            # artifact can hold native CPU code.
+            system_info=SystemInfo.current(
+                cpu_codegen=(
+                    self._requires_native_backend_compatibility
+                    and "cpu" in device_types
+                )
+            ),
+            requires_native_backend_compatibility=(
+                self._requires_native_backend_compatibility
+            ),
             fn_name=self._innermost_fn.__qualname__,
             fn_first_lineno=self._innermost_fn.__code__.co_firstlineno,
         )
