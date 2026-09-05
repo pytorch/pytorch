@@ -2809,6 +2809,7 @@ class TestImports(TestCase):
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
+                           "torch._native.ops.linear_cross_entropy.fused_grad_logits_kernel",  # depends on cutlass
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
                            "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.reductions.inner_tree_kernel",  # depends on cutlass

@@ -48,6 +48,10 @@ class TestLinearCrossEntropyOverride(TestCase):
             self.assertTrue(live, f"no live cutedsl override for {op_symbol}")
             self.assertIn(key, registry_module._override_libs)
 
+    @unittest.skipIf(
+        not TEST_CUDA or not cutedsl_impl._arch_supported(),
+        "the scalar op's kernel declines this device, so `mean` would not route",
+    )
     @parametrize("reduction", ["mean", "none"])
     def test_cutedsl_path_is_used(self, reduction):
         """A call must route to one of the registered overrides.
@@ -113,7 +117,13 @@ class TestLinearCrossEntropyOverride(TestCase):
 
         The shared accumulator is called if and only if a chunked op runs (the
         reference path uses linear + cross_entropy instead), so counting entries
-        into it is the same question the predicate answers.
+        into it is the same question the predicate answers -- but only while no
+        override REPLACES that call. The kernel, where it is eligible for the
+        sample, runs instead of the accumulator and makes the witness read
+        False for a sample that did reach the op, so the whole loop runs with
+        the cutedsl overrides disabled. That is also the honest scope: the predicate
+        describes the functional's gate, which is about whether a chunked op is
+        reached, not about which implementation answers.
 
         The predicate is evaluated in the same grad mode as the call it
         describes: one of its clauses reads ``torch.is_grad_enabled()``, so
@@ -131,11 +141,14 @@ class TestLinearCrossEntropyOverride(TestCase):
             if reduction == "none"
             else cmi.sample_inputs_linear_cross_entropy_chunked
         )
-        with unittest.mock.patch.object(
-            lce_module,
-            "_linear_cross_entropy_batch_chunked_accumulator",
-            wraps=lce_module._linear_cross_entropy_batch_chunked_accumulator,
-        ) as accumulator:
+        with (
+            torch.backends.python_native.cutedsl.disabled(),
+            unittest.mock.patch.object(
+                lce_module,
+                "_linear_cross_entropy_batch_chunked_accumulator",
+                wraps=lce_module._linear_cross_entropy_batch_chunked_accumulator,
+            ) as accumulator,
+        ):
             for i, sample in enumerate(
                 generator(None, "cuda", torch.float16, requires_grad), start=1
             ):
@@ -161,6 +174,75 @@ class TestLinearCrossEntropyOverride(TestCase):
                 0,
                 f"{generator.__name__} admits none of its samples",
             )
+
+    @unittest.skipIf(
+        not TEST_CUDA or not cutedsl_impl._arch_supported(),
+        "the kernel declines this device, so there is no kernel path to test "
+        "-- the call would fall back to eager",
+    )
+    def test_kernel_path_is_deterministic(self):
+        """Two identical calls must give bit-identical gradients.
+
+        The dense grad-logits formulation replaced eager's `index_add_` --
+        atomic on CUDA, and used there for both `grad_linear_weight` and
+        `grad_linear_bias` -- with a GEMM and a fixed-order column sum, so the
+        whole backward is deterministic. That is a user-visible property, and
+        the reason a bias-grad epilogue built on atomics was rejected, so it is
+        pinned here rather than left aspirational.
+        """
+        import torch.nn.modules.linear_cross_entropy as lce_module
+
+        torch.manual_seed(0)
+        num_batches, in_features, num_classes = 96, 64, 512
+        input = torch.randn(
+            num_batches, in_features, device="cuda", dtype=torch.bfloat16
+        )
+        linear_weight = (
+            torch.randn(num_classes, in_features, device="cuda", dtype=torch.bfloat16)
+            / in_features**0.5
+        )
+        linear_bias = torch.randn(num_classes, device="cuda", dtype=torch.bfloat16)
+        target = torch.randint(0, num_classes, (num_batches,), device="cuda")
+        options = LinearCrossEntropyOptions(
+            acc_policy="compact",
+            acc_dtype=torch.float32,
+            chunking_method=None,
+            batch_chunk_size=32,
+        )
+
+        def once():
+            leaves = [
+                t.detach().clone().requires_grad_()
+                for t in (input, linear_weight, linear_bias)
+            ]
+            loss = torch.nn.functional.linear_cross_entropy(
+                leaves[0], leaves[1], target, linear_bias=leaves[2], options=options
+            )
+            loss.backward()
+            return (loss.detach(), *(t.grad for t in leaves))
+
+        # The kernel replaces the accumulator, so any entry into it means the
+        # call fell back and this test never saw the kernel path.
+        with unittest.mock.patch.object(
+            lce_module,
+            "_linear_cross_entropy_batch_chunked_accumulator",
+            wraps=lce_module._linear_cross_entropy_batch_chunked_accumulator,
+        ) as accumulator:
+            first, second = once(), once()
+            self.assertEqual(
+                accumulator.call_count,
+                0,
+                "the call fell back to the accumulator, so this asserted "
+                "determinism of the eager path, not the kernel's",
+            )
+        names = ("loss", "grad_input", "grad_linear_weight", "grad_linear_bias")
+        for name, a, b in zip(names, first, second):
+            if not torch.equal(a, b):
+                self.fail(
+                    f"{name} differs between two identical runs (max abs diff "
+                    f"{(a - b).abs().max().item():.3e}), so the kernel path is "
+                    "not deterministic"
+                )
 
 
 instantiate_parametrized_tests(TestLinearCrossEntropyOverride)
