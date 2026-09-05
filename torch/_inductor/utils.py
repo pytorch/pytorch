@@ -1594,6 +1594,17 @@ FORBIDDEN_CUDAGRAPH_OPS = frozenset(
         # on the 2nd replay of a recorded graph.
         [
             "aten.topk.default",
+            # rocm workaround: MIOpen convolution kernels are not cudagraph-safe.
+            # See https://rocm.docs.amd.com/en/latest/reference/graph-safe-support.html
+            # and https://github.com/pytorch/pytorch/issues/188338
+            # aten.convolution routes through MIOpen on ROCm when the ATEN
+            # fallback is used (e.g. transposed convs with no Triton template).
+            "aten.convolution.default",
+            "aten.convolution_backward.default",
+            # Direct MIOpen ops in case they appear in FX graphs.
+            "aten.miopen_convolution.default",
+            "aten.miopen_convolution_transpose.default",
+            "aten.miopen_depthwise_convolution.default",
         ]
         if torch.version.hip is not None
         else []
