@@ -198,6 +198,12 @@ if [[ "$(uname)" != Darwin ]]; then
 EOL
 fi
 
+if [[ "${OS:-}" == windows && "$DESIRED_CUDA" == cu* ]]; then
+  # FlashAttention TUs are compiled once per arch in TORCH_CUDA_ARCH_LIST and each
+  # nvcc invocation is memory-hungry, so bound this target instead of MAX_JOBS.
+  echo "export FLASH_ATTENTION_MAX_JOBS=\"${FLASH_ATTENTION_MAX_JOBS:-4}\"" >> "$envfile"
+fi
+
 echo 'retry () {' >> "$envfile"
 echo '    $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)' >> "$envfile"
 echo '}' >> "$envfile"
