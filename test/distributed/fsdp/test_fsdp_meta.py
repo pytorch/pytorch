@@ -468,7 +468,7 @@ class TestFSDPWithMetaDevice(FSDPTestContinuous):
 instantiate_device_type_tests(
     TestFSDPWithMetaDevice,
     globals(),
-    only_for=("cuda", "hpu", "xpu", "privateuse1"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
