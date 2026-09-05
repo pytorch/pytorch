@@ -5,7 +5,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/native/Pool.h>
-#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
@@ -20,6 +19,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/max_pool3d_with_indices_native.h>
 #include <ATen/ops/max_pool3d_with_indices_backward_native.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #endif
 
 namespace at::native {
@@ -190,6 +190,7 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   int itime, int iheight, int iwidth,
   int obatch, int otime, int oheight, int owidth,
   int offsetZ,
+  const int64_t gradInput_numel,
   bool channels_last)
 {
   int64_t oColumn = blockIdx.x * blockDim.x + threadIdx.x;
@@ -224,11 +225,19 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
     int64_t maxIndex = indicesData[out_index];
     if (maxIndex != -1) {
       if (!channels_last) {
-        gpuAtomicAddNoReturn(&gradInputData[slice * itime  * iheight * iwidth + maxIndex],
-          gradOutputData[out_index]);
+        fastAtomicAdd(
+          gradInputData,
+          slice * itime * iheight * iwidth + maxIndex,
+          gradInput_numel,
+          gradOutputData[out_index],
+          true);
       } else {
-        gpuAtomicAddNoReturn(&gradInputData[((int64_t) batch * itime * iheight * iwidth + maxIndex) * features + channel],
-          gradOutputData[out_index]);
+        fastAtomicAdd(
+          gradInputData,
+          ((int64_t) batch * itime * iheight * iwidth + maxIndex) * features + channel,
+          gradInput_numel,
+          gradOutputData[out_index],
+          true);
       }
     }
   }
@@ -243,6 +252,7 @@ void max_pool3d_with_indices_backward_out_frame(
   int64_t totalZ,
   int itime, int iheight, int iwidth,
   int obatch, int otime, int oheight, int owidth,
+  const int64_t gradInput_numel,
   bool channels_last)
 {
   int offsetZ = 0;
@@ -271,6 +281,7 @@ void max_pool3d_with_indices_backward_out_frame(
         itime, iheight, iwidth,
         obatch, otime, oheight, owidth,
         offsetZ,
+        gradInput_numel,
         channels_last);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -538,6 +549,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
         totalZ,
         itime, iheight, iwidth,
         nbatch, otime, oheight, owidth,
+        work_grad_input.numel(),
         channels_last);
     }
   );

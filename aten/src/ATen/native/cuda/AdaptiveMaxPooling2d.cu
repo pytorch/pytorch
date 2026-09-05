@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/Dispatch.h>
@@ -16,6 +15,7 @@
 #include <ATen/ops/adaptive_max_pool2d_backward_native.h>
 #include <ATen/ops/adaptive_max_pool2d_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #endif
 
 #include <algorithm>
@@ -193,7 +193,8 @@ __global__ void atomicadaptivemaxgradinput(
       int argmax = (*ptr_ind);
 
       // atomic add since different threads could update same variable
-      gpuAtomicAddNoReturn(&(gradInput[argmax]), z);
+      // numel is the plane the base pointer addresses, not the whole tensor.
+      fastAtomicAdd(gradInput, argmax, isizeH * isizeW, z, true);
     }
   }
 }
