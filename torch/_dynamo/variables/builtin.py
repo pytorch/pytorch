@@ -145,7 +145,7 @@ from .object_protocol import (
     type_implements_sq_length,
     vt_identity_compare,
 )
-from .sets import FrozensetVariable, SetVariable
+from .sets import FrozensetVariable, OrderedSetVariable, SetVariable
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
@@ -2444,6 +2444,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 variables.SetVariable,
                 variables.FrozensetVariable,
                 variables.DictKeySetVariable,
+                variables.OrderedSetVariable,
                 variables.ConstDictVariable,
             ),
         ):
@@ -3216,6 +3217,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 SetVariable,
                 FrozensetVariable,
                 variables.DictKeySetVariable,
+                OrderedSetVariable,
             ),
         ):
             return VariableTracker.build(tx, len(a.items) == 0)
@@ -3403,6 +3405,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 variables.SetVariable,
                 variables.FrozensetVariable,
                 variables.DictKeySetVariable,
+                variables.OrderedSetVariable,
                 ConstDictVariable,
             ),
         ):
