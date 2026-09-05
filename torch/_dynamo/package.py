@@ -285,21 +285,26 @@ class FunctionPicklerBase(pickle.Pickler):
         kwdefaults: dict[str, Any] | None,
         closure: tuple[types.CellType, ...] | None,
         attributes: dict[str, Any],
+        annotations: dict[str, Any],
+        type_params: tuple[Any, ...] | None,
         globals_snapshot: dict[str, Any] | None = None,
     ) -> tuple[Any, ...]:
+        # annotations/type_params are passed in rather than read off fn: the
+        # guard pickler prunes what no guard reads, so an unpicklable local class
+        # in an annotation cannot fail the whole dump (a failure there silently
+        # bypasses the package).
         args = (fn.__module__, fn.__code__, fn.__qualname__, fn.__name__, closure)
         if globals_snapshot is None:
             unpickle = type(self)._unpickle_fn_from_module
         else:
             unpickle = type(self)._unpickle_fn_from_snapshot
-        type_params = getattr(fn, "__type_params__", None)
         state = (
             defaults,
             kwdefaults,
             attributes,
             globals_snapshot,
             fn.__doc__,
-            fn.__annotations__,
+            annotations,
             type_params,
         )
         return unpickle, args, state, None, None, type(self)._apply_function_state
@@ -708,11 +713,11 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     return toplevel.__qualname__, code_source.strip(".")
 
 
-_CpuCodegenTarget = tuple[str, str, int | None, str | None]
+_CpuCodegenTarget = tuple[str, str, int, int | None, str | None]
 
 
 def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
-    """(machine, vec_isa, simdlen, march): what inductor bakes into CPU code.
+    """(machine, vec_isa, vec_isa_width, simdlen, march): what inductor bakes into CPU code.
 
     ``pick_vec_isa`` dry-compiles a probe with the C++ toolchain, so call this
     only when the artifact can hold native CPU code. None means the host has no
@@ -738,6 +743,7 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
     return (
         platform.machine(),
         str(vec_isa),
+        vec_isa.bit_width(),
         inductor_config.cpp.simdlen,
         inductor_config.cpp.march,
     )
@@ -752,26 +758,30 @@ def _cpu_codegen_target_problem(
     codegen, and the loading host compiles that source with the flags of its
     own pick_vec_isa(). The two must agree, so every component is compared
     exactly; a wider host ISA is not a superset here, its masked loads
-    zero-fill the lanes the narrower tiling never wrote.
+    zero-fill the lanes the narrower tiling never wrote. The ISA name and its
+    bit width must both agree: VecSVE(128) and VecSVE(256) share the name
+    "asimd", so the name alone would accept a kernel tiled for the wrong width.
     """
     if current is None:
         return (
             "This host has no usable CPU codegen target (no C++ toolchain or no "
-            "supported vector ISA), so it cannot run inductor CPU kernels."
+            "supported vector ISA), so it cannot build the artifact's vectorized "
+            "CPU kernels."
         )
-    machine, vec_isa, simdlen, march = cached
+    machine, vec_isa, vec_isa_width, simdlen, march = cached
     if machine != current[0]:
         return f"The artifact was built for machine {machine!r}, this host is {current[0]!r}."
-    if vec_isa != current[1]:
+    if (vec_isa, vec_isa_width) != (current[1], current[2]):
         return (
-            f"The artifact's CPU kernels were generated for vector ISA {vec_isa!r}; "
-            f"this host would compile them for {current[1]!r}. Set ATEN_CPU_CAPABILITY "
-            "or torch._inductor.config.cpp.simdlen so the host picks the same ISA."
+            f"The artifact's CPU kernels were generated for vector ISA {vec_isa!r} "
+            f"({vec_isa_width}-bit); this host would compile them for {current[1]!r} "
+            f"({current[2]}-bit). Set ATEN_CPU_CAPABILITY or "
+            "torch._inductor.config.cpp.simdlen so the host picks the same ISA."
         )
-    if simdlen != current[2]:
-        return f"The artifact was built with simdlen={simdlen!r}, this host uses {current[2]!r}."
-    if march != current[3]:
-        return f"The artifact was built with march={march!r}, this host uses {current[3]!r}."
+    if simdlen != current[3]:
+        return f"The artifact was built with simdlen={simdlen!r}, this host uses {current[3]!r}."
+    if march != current[4]:
+        return f"The artifact was built with march={march!r}, this host uses {current[4]!r}."
     return None
 
 
@@ -1246,8 +1256,12 @@ class CompilePackage:
             # Written last so a failed load cannot leak into a cold-cache fallback.
             self._device_types = set(dynamo.device_types or (dynamo.device_type,))
             self._system_info = dynamo.system_info
+            # OR, never replace: a loaded entry that did not require native
+            # backend compatibility must not relax a host that does, or the ISA
+            # check fails open on a kernel built for another target.
             self._requires_native_backend_compatibility = (
-                dynamo.requires_native_backend_compatibility
+                self._requires_native_backend_compatibility
+                or dynamo.requires_native_backend_compatibility
             )
         else:
             module_name = (
