@@ -2,7 +2,10 @@
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import xfailCUDAIfSM89OrLaterOnWindows
+from torch.testing._internal.common_cuda import (
+    SM80OrLater,
+    xfailCUDAIfSM89OrLaterOnWindows,
+)
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
@@ -12,6 +15,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyNativeDeviceTypes,
     onlyOn,
+    skipCUDAIf,
     skipCUDAIfNotRocm,
     skipMeta,
     skipXPUIf,
@@ -920,6 +924,27 @@ class TestTorchDlPack(TestCase):
 
         # Verify they're on different devices
         self.assertNotEqual(t0.device, t1.device)
+
+    @skipMeta
+    @onlyOn(["xpu", "cuda"])
+    @skipCUDAIf(not SM80OrLater, "SM80+ required")
+    @skipIfTorchDynamo(
+        "ReadOnlyTensorWrapper is eager-only; __dlpack__ unsupported in dynamo"
+    )
+    def test_readonly_wrapper_bare_capsule_is_valid(self, device):
+        a = torch.randn(8, device=device, dtype=torch.float32)
+        a_cow = a._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        addr = a_cow.const_data_ptr()
+
+        # Bare-capsule protocol: from_dlpack() calls __dlpack__() directly and
+        # ignores __dlpack_c_exchange_api__ (the fast path covered by
+        # TestReadOnlyDLPack.test_wrapper_routes_fast_path_to_const_api).
+        back = torch.from_dlpack(ReadOnlyTensorWrapper(a_cow))
+
+        self.assertTrue(torch._C._is_cow_tensor(a_cow))
+        self.assertEqual(a_cow.const_data_ptr(), addr)
+        torch.testing.assert_close(back, a)
 
 
 instantiate_device_type_tests(
