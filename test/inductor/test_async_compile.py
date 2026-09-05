@@ -381,6 +381,43 @@ def test_flydsl_loader_main(value, stream):
         finally:
             shutdown_compile_workers()
 
+    def test_autotune_lookup_table_with_triton_jit_options(self):
+        triton_src = """\
+def triton_user_kernel(in_ptr0, XBLOCK: tl.constexpr):
+    offset = tl.program_id(0) * XBLOCK
+    tl.store(in_ptr0 + offset, 1.0)
+"""
+        source_code = f"""\
+size_hints={{'x': 32}}
+@triton.jit(noinline=True)
+def triton_user_kernel_helper(value):
+    return value + 1
+
+@triton.jit(noinline=True, do_not_specialize=('in_ptr0',))
+{triton_src}"""
+        fn_hash = generate_lookup_hash_from_source_code(str({"x": 32}), triton_src)
+        lookup_config = {"XBLOCK": 32, "num_warps": 4, "num_stages": 1}
+        process_pool = Mock()
+
+        with (
+            config.patch(autotune_lookup_table={fn_hash: lookup_config}),
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "process_pool", return_value=process_pool),
+            patch(
+                "torch._inductor.async_compile.CompiledTritonKernels.get",
+                return_value=None,
+            ),
+            patch("torch._inductor.async_compile.CompiledTritonKernels.save"),
+            patch("torch._inductor.async_compile._compile_start"),
+            patch("torch._inductor.async_compile._set_triton_libdevice_path"),
+        ):
+            AsyncCompile().triton("triton_user_kernel", source_code)
+
+        extra_config = process_pool.submit.call_args.args[3]
+        self.assertEqual(
+            extra_config["autotune_lookup_table"], {fn_hash: lookup_config}
+        )
+
     @requires_gpu()
     @requires_triton()
     @patch("torch._inductor.runtime.coordinate_descent_tuner.CoordescTuner.autotune")

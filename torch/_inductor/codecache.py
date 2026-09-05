@@ -1565,6 +1565,7 @@ class FxGraphHashDetails:
             triton_kernel_wrapper_mutation,
         )
         from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_specialization,
             user_defined_triton_kernel_transitive_closure_source_code,
         )
 
@@ -1602,11 +1603,20 @@ class FxGraphHashDetails:
                             kernel
                         )
                     )
+                    do_not_specialize, do_not_specialize_on_alignment = (
+                        user_defined_triton_kernel_specialization(kernel)
+                    )
                     constant_args = kernel_side_table.get_constant_args(
                         node.kwargs["constant_args_idx"]
                     )
                     self.user_defined_triton_source.append(
-                        (kernel_source, constant_args, configs)
+                        (
+                            kernel_source,
+                            do_not_specialize,
+                            do_not_specialize_on_alignment,
+                            constant_args,
+                            configs,
+                        )
                     )
 
         no_tensor_inputs = not any(isinstance(x, torch.Tensor) for x in example_inputs)
