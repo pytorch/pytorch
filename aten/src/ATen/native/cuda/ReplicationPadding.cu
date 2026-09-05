@@ -2,12 +2,12 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
-#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -82,7 +82,7 @@ __global__ void replication_pad_backward_kernel(
   const auto inputPointX = imin(imax(padL, outputPointX), gradInput.size(2) + padL - 1) - oStartX + iStartX;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointX];
-  gpuAtomicAddNoReturn(&gradInput[batch][plane][inputPointX], valueToCopy);
+  fastAtomicAdd(gradInput, valueToCopy, batch, plane, inputPointX);
 }
 
 template <typename scalar_t>
@@ -140,7 +140,7 @@ __global__ void replication_pad_backward_kernel(
   const int inputPointY = imin(imax(padT, outputPointY), gradInput.size(2) + padT - 1) - oStartY + iStartY;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointY][outputPointX];
-  gpuAtomicAddNoReturn(&gradInput[batch][plane][inputPointY][inputPointX], valueToCopy);
+  fastAtomicAdd(gradInput, valueToCopy, batch, plane, inputPointY, inputPointX);
 }
 
 template <typename scalar_t>
@@ -221,8 +221,8 @@ __global__ void replication_pad_backward_kernel(
 
   scalar_t valueToCopy =
     gradOutput[batch][plane][outputPointZ][outputPointY][outputPointX];
-  gpuAtomicAddNoReturn(&gradInput[batch][plane][inputPointZ][inputPointY][inputPointX],
-      valueToCopy);
+  fastAtomicAdd(
+      gradInput, valueToCopy, batch, plane, inputPointZ, inputPointY, inputPointX);
 }
 
 void replication_pad2d_backward_out_cuda_template(
