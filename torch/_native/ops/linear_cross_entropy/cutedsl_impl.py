@@ -15,18 +15,82 @@ registration loop and the tests both read it, so adding an override is one row.
 
 import functools
 import importlib
+from collections.abc import Callable
+from typing import Any, NamedTuple
 
 import torch
 
-from ... import cutedsl_utils as cu
+from ... import cutedsl_utils as cu, variants
 
 
-def _no_reduction_cond(*args: object, **kwargs: object) -> bool:
-    # Where this op's kernel gate goes; nothing declines yet.
+def _always(*args: object, **kwargs: object) -> bool:
+    """Eligibility of the passthrough variant: anything the op itself accepts.
+
+    Keeping this wide is what lets `passthrough` reproduce routing-only
+    behaviour for every input a kernel variant declines, so a plot's routing
+    curve means the same thing whatever kernels exist.
+    """
     return True
 
 
-def _no_reduction_impl(
+def _batch_chunked_passthrough(
+    input: torch.Tensor,
+    linear_weight: torch.Tensor,
+    target: torch.Tensor,
+    linear_bias: torch.Tensor | None,
+    weight: torch.Tensor | None,
+    reduction: str,
+    ignore_index: int,
+    label_smoothing: float,
+    batch_chunk_size: int,
+    acc_policy: str,
+    acc_dtype: torch.dtype,
+    allow_retain_graph: bool,
+    compute_input_grad: bool,
+    compute_linear_weight_grad: bool,
+    compute_linear_bias_grad: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    # Installing at a backend key means the op's body never runs, so its checks
+    # have to be run here. ``allow_retain_graph`` is a backward-only flag that
+    # neither the checks nor the accumulator take.
+    #
+    # A kernel replacing the accumulator call below also loses the checks
+    # *inside* it and must re-enforce those: the unresolved
+    # ``acc_policy`` / ``acc_dtype`` check, and ``_ChunkContext.build``'s
+    # ``linear_bias`` shape and ``acc_dtype`` compatibility checks.
+    from torch.nn.modules.linear_cross_entropy import (
+        _check_batch_chunked_grad_flags,
+        _linear_cross_entropy_batch_chunked_accumulator,
+    )
+
+    _check_batch_chunked_grad_flags(
+        input,
+        linear_weight,
+        target,
+        linear_bias,
+        compute_input_grad,
+        compute_linear_weight_grad,
+        compute_linear_bias_grad,
+    )
+    return _linear_cross_entropy_batch_chunked_accumulator(
+        input,
+        linear_weight,
+        target,
+        linear_bias,
+        weight,
+        reduction,
+        ignore_index,
+        label_smoothing,
+        batch_chunk_size,
+        acc_policy,
+        acc_dtype,
+        compute_input_grad,
+        compute_linear_weight_grad,
+        compute_linear_bias_grad,
+    )
+
+
+def _no_reduction_passthrough(
     input: torch.Tensor,
     linear_weight: torch.Tensor,
     target: torch.Tensor,
@@ -104,27 +168,30 @@ def _kernel_eligible(
     compute_input_grad: bool,
     compute_linear_weight_grad: bool,
     compute_linear_bias_grad: bool,
+    *,
+    dtypes: tuple[torch.dtype, ...] = (torch.bfloat16,),
 ) -> bool:
-    """What the kernel implements. Shapes, dtypes and device only -- no data
-        reads, so this is safe under FakeTensor tracing.
+    """What the kernel variants implement. Shapes, dtypes and device only --
+    no data reads, so this is safe under FakeTensor tracing.
 
-        Everything outside this set stays with the op: an ineligible input never
-        enters the override at all and the router falls back, which keeps "the
-        kernel ran" observable in a profile rather than hidden behind an internal
-        delegation.
+    Everything outside this set stays with the op: `cond` evaluates the
+    selected variant's eligibility, so an ineligible input never enters the
+    override at all and the router falls back, which keeps "the kernel ran"
+    observable in a profile.
 
-        The architecture condition is the DSL runtime's floor rather than a list of
-        architectures this was measured on -- see `_arch_supported`.
+    The architecture condition is the DSL runtime's floor rather than a list of
+    architectures this was measured on -- see `_arch_supported`.
 
-    fp16 is eligible because eager keeps fp16 logits under `compact` (fp32
-        for bf16), so at fp16 a chunk is two bytes per element -- which this kernel
-        matches by aliasing `g` into the logits rather than allocating a second
-        buffer.
+    `dtypes` is a parameter because a future variant may implement a different
+    set. fp16 is in this one because eager keeps fp16 logits under `compact`
+    (fp32 for bf16), so at fp16 a chunk is two bytes per element -- which this
+    kernel matches by aliasing `g` into the logits rather than allocating a
+    second buffer.
     """
     return (
         input.device.type == "cuda"
         and _arch_supported(input.device.index or 0)
-        and input.dtype in (torch.bfloat16, torch.float16)
+        and input.dtype in dtypes
         and linear_weight.dtype is input.dtype
         and acc_dtype is torch.float32
         and acc_policy == "compact"
@@ -188,7 +255,7 @@ def _batch_chunked_kernel(
     while the softmax depends on their differences, so the gradients degrade
     once |z| reaches the tens -- the regime a trained head operates in.
 
-    `g` is a view of the logits storage rather than a second buffer, which
+    `g` is a VIEW of the logits storage rather than a second buffer, which
     reaches a low-precision buffer's footprint without its rounding: a chunk
     costs one `(Bc, V)` buffer and no value loses precision. Only a kernel that
     owns a whole row in one block can do this, since it has to order its writes
@@ -373,13 +440,85 @@ _NAMESPACE = "torch_nn"
 _DEFINING_MODULE = "torch.nn.modules.linear_cross_entropy"
 
 
-_OVERRIDES = (
-    ("_linear_cross_entropy_batch_chunked", _kernel_eligible, _batch_chunked_kernel),
-    (
-        "_linear_cross_entropy_batch_chunked_no_reduction",
-        _no_reduction_cond,
-        _no_reduction_impl,
-    ),
+# Named implementations per op. `cond` answers whether the override applies;
+# this answers which of them runs when it does. `PASSTHROUGH` is reserved and
+# delegates to the op's own body, so selecting it reproduces routing-only
+# behaviour -- the baseline a kernel is measured against -- in any tree,
+# however many kernels the table grows.
+class _Variant(NamedTuple):
+    # `eligible` is what the registry's `cond` evaluates for whichever variant
+    # is selected, so an input a kernel cannot take never enters the override
+    # and falls back through the router -- rather than entering and delegating
+    # internally, which would make "the kernel ran" unobservable.
+    eligible: Callable[..., bool]
+    impl: Callable[..., Any]
+
+
+_VARIANTS: dict[str, dict[str, _Variant]] = {
+    "_linear_cross_entropy_batch_chunked": {
+        # The name is carried over from the variant study that produced it:
+        # recorded measurement rows are keyed on it, and labels are data.
+        "fused_inplace": _Variant(
+            functools.partial(_kernel_eligible, dtypes=(torch.bfloat16, torch.float16)),
+            _batch_chunked_kernel,
+        ),
+        variants.PASSTHROUGH: _Variant(_always, _batch_chunked_passthrough),
+    },
+    "_linear_cross_entropy_batch_chunked_no_reduction": {
+        variants.PASSTHROUGH: _Variant(_always, _no_reduction_passthrough),
+    },
+}
+
+# What runs when nothing is selected. Promoting a kernel to default is an edit
+# here; the OpInfo entries follow it with no test changes, since they exercise
+# whichever variant is default.
+#
+# `passthrough` is reserved and is NOT the fallback path -- an ineligible input
+# falls back through the ROUTER, via `cond`, without entering the override at
+# all. It earns its keep three other ways: the sweep's `route` stage, which
+# separates routing cost from kernel effect; the live registration that the next
+# kernels land into as new variants; and the portable routing test plus the
+# per-process kill switch.
+_DEFAULT_VARIANTS: dict[str, str] = {
+    "_linear_cross_entropy_batch_chunked": "fused_inplace",
+    "_linear_cross_entropy_batch_chunked_no_reduction": variants.PASSTHROUGH,
+}
+
+
+def _selected_name(op_symbol: str) -> str:
+    return variants.get_variant(
+        f"{_NAMESPACE}::{op_symbol}", _DEFAULT_VARIANTS[op_symbol]
+    )
+
+
+def _make_variant_cond(op_symbol: str) -> Callable[..., bool]:
+    def cond(*args: Any, **kwargs: Any) -> bool:
+        selected = _VARIANTS[op_symbol].get(_selected_name(op_symbol))
+        # An unknown name routes anyway, so the impl can raise naming the
+        # declared variants; returning False here would spend a typo as a
+        # silent fall back to the op.
+        return True if selected is None else selected.eligible(*args, **kwargs)
+
+    return cond
+
+
+def _make_variant_impl(op_symbol: str) -> Callable[..., Any]:
+    def impl(*args: Any, **kwargs: Any) -> Any:
+        name = _selected_name(op_symbol)
+        selected = _VARIANTS[op_symbol].get(name)
+        if selected is None:
+            raise ValueError(
+                f"unknown variant {name!r} for {_NAMESPACE}::{op_symbol}; this "
+                f"module declares {sorted(_VARIANTS[op_symbol])}"
+            )
+        return selected.impl(*args, **kwargs)
+
+    return impl
+
+
+_OVERRIDES = tuple(
+    (op_symbol, _make_variant_cond(op_symbol), _make_variant_impl(op_symbol))
+    for op_symbol in _VARIANTS
 )
 
 

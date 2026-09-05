@@ -516,6 +516,7 @@ test_python_smoke_b200() {
   time python test/run_test.py --include \
     python_native/test_linear_cross_entropy_override \
     python_native/test_lce_fused_grad_logits_kernel \
+    python_native/test_variants \
     $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # The op's own accuracy harness: fp16/bf16 against an fp64 reference with
