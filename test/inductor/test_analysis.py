@@ -20,9 +20,11 @@ from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    skipCUDAIf,
     skipIf,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize,
     run_tests,
     TEST_XPU,
@@ -243,6 +245,8 @@ prefix = ["profile.py"]
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_tabulate2d(self):
         headers = ["Kernel", "Self H100 TIME (ms)", "Count", "Percent"]
         rows = [
@@ -283,14 +287,11 @@ class TestUtils(TestCase):
         self.assertEqual(lookup_device_info("amd instinct mi300x"), upper)
 
 
-def has_supported_gpu():
-    """Check if any GPU platform with Triton support is available."""
-    return torch.xpu.is_available() or SM80OrLater or torch.version.hip
-
-
 class TestAnalysis(TestCase):
-    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
-    def test_noop(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipCUDAIf(not SM80OrLater, "Requires SM80+")
+    def test_noop(self, device):
         with (
             patch("sys.stdout", new_callable=StringIO) as mock_stdout,
             patch("sys.argv", [*prefix]),
@@ -298,14 +299,14 @@ class TestAnalysis(TestCase):
             main()
             self.assertEqual(mock_stdout.getvalue(), "")
 
-    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
+    @skipCUDAIf(not SM80OrLater, "Requires SM80+")
     @dtypes(torch.float, torch.double, torch.float16)
     @xfailIfNoAcceleratorTriton
     def test_diff(self, device, dtype):
         """
         diff, testing out the nruns feature too.
         """
-        if device == "cpu" or torch.version.hip is not None:
+        if torch.version.hip is not None:
             # TODO cpu support
             return
         om = _test_model(device, dtype)
@@ -343,14 +344,14 @@ class TestAnalysis(TestCase):
         ):
             main()
 
-    @skipIf(not (SM80OrLater or TEST_XPU), "Requires SM80 or XPU")
-    def test_augment_trace_helper_unit(self):
+    @skipCUDAIf(not SM80OrLater, "Requires SM80+")
+    def test_augment_trace_helper_unit(self, device):
         js = json.loads(example_profile)
         out_profile = _augment_trace_helper(js)
         expected_flops = [4096000, 4096000, 223552896, 223552896, 0, 0, 0]
         verify_flops(self, expected_flops, out_profile)
 
-    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
+    @skipCUDAIf(not SM80OrLater, "Requires SM80+")
     @dtypes(torch.float, torch.double, torch.float16)
     @parametrize(
         "maxat",
@@ -364,7 +365,7 @@ class TestAnalysis(TestCase):
         """
         make sure that the chrome trace of triton kernels contains certain values
         """
-        if device == "cpu" or torch.version.hip is not None:
+        if torch.version.hip is not None:
             return
 
         T = cT(device, dtype)
@@ -404,7 +405,7 @@ class TestAnalysis(TestCase):
 
         verify_triton(comp_omni)
 
-    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
+    @skipCUDAIf(not SM80OrLater, "Requires SM80+")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
@@ -423,7 +424,7 @@ class TestAnalysis(TestCase):
     def test_augment_trace_against_flop_counter(self, device, dtype, maxat):
         # this tests to see if we can only use a Triton backend for max autotune
         max_autotune, backends = maxat
-        if device == "cpu" or torch.version.hip is not None:
+        if torch.version.hip is not None:
             return
         om = _test_model(device, dtype, compile=False)
 
@@ -517,7 +518,7 @@ class TestAnalysis(TestCase):
         self.assertTrue(seen_baddbmm)
         self.assertTrue(seen_conv)
 
-    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
+    @skipCUDAIf(not SM80OrLater, "Requires SM80+")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
@@ -535,7 +536,7 @@ class TestAnalysis(TestCase):
     def test_pointwise_bandwidth(self, device, dtype, maxat):
         # this tests to see if we can only use a Triton backend for max autotune
         max_autotune, backends = maxat
-        if device == "cpu" or torch.version.hip is not None:
+        if torch.version.hip is not None:
             return
         om = _pointwise_test_model(device, dtype, compile=False)
         comp_omni = torch.compile(
@@ -567,14 +568,14 @@ class TestAnalysis(TestCase):
             if event["name"] == "triton_poi_fused_add_randn_sin_0":
                 event["args"]["kernel_num_gb"] = 0.002097168
 
-    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
+    @skipCUDAIf(not SM80OrLater, "Requires SM80+")
     @dtypes(torch.float, torch.float16)
     @xfailIfNoAcceleratorTriton
     def test_combine_profiles(self, device, dtype):
         """
         Test combining multiple profiles into a single profile.
         """
-        if device == "cpu" or torch.version.hip is not None:
+        if torch.version.hip is not None:
             return
 
         # Create three different models to generate different traces
@@ -644,10 +645,7 @@ class TestAnalysis(TestCase):
 
         # Verify device properties are present
         self.assertIn("deviceProperties", combined_profile)
-        # XPU currently does not have the deviceProperties like CUDA.
-        # See https://github.com/intel/torch-xpu-ops/issues/2247
-        if torch.cuda.is_available():
-            self.assertGreater(len(combined_profile["deviceProperties"]), 0)
+        self.assertGreater(len(combined_profile["deviceProperties"]), 0)
 
         # Verify some trace events from each original profile are present
         combined_event_names = {
@@ -665,7 +663,7 @@ class TestAnalysis(TestCase):
         self.assertTrue(profile3_event_names.intersection(combined_event_names))
 
 
-instantiate_device_type_tests(TestAnalysis, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestAnalysis, globals(), allow_xpu=True, except_for="cpu")
 
 if __name__ == "__main__":
     run_tests()
