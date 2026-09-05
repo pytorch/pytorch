@@ -15354,6 +15354,12 @@
     CUDA: _cudnn_attention_forward
   tags: nondeterministic_seeded
 
+- func: _cudnn_attention_forward_no_dropout_inplace(Tensor(a!) out, Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, bool is_causal=False, *, float? scale=None, Tensor? seqused_k=None, Tensor? block_table=None) -> Tensor logsumexp
+  variants: function
+  dispatch:
+    CUDA: _cudnn_attention_forward_no_dropout_inplace
+  tags: nondeterministic_seeded
+
 - func: _cudnn_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor attn_bias, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, *, float? scale=None) -> (Tensor, Tensor, Tensor)
   dispatch:
     CUDA: _cudnn_attention_backward
