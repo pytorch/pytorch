@@ -150,7 +150,7 @@ void quick_select_template(
     }
 
     // Use median of three for pivot choice
-    auto P = L + (R - L) / 2;
+    auto P = std::midpoint(L, R);
     swap_fn(P, L + 1);
     if (gt_or_nan(arr[L + 1], arr[R])) {
       swap_fn(L + 1, R);
@@ -204,7 +204,7 @@ void quantile_select_recurse(
   if (ulo >= uhi) {
     return;
   }
-  const int64_t umid = ulo + (uhi - ulo) / 2;
+  const int64_t umid = std::midpoint(ulo, uhi);
   const int64_t r = ranks[umid];
   std::nth_element(
       idx + lo, idx + r, idx + hi, [data](int64_t a, int64_t b) {
