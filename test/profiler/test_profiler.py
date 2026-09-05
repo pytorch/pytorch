@@ -4608,9 +4608,15 @@ class TestPythonChromeTraceExport(TestCase):
             with open(py_path) as f:
                 py_trace = json.load(f)
 
-        for key in ("cuda_driver_version", "cuda_runtime_version"):
-            self.assertIn(key, py_trace)
-            self.assertEqual(py_trace[key], kineto_trace[key])
+        self.assertEqual(
+            py_trace["cuda_runtime_version"], kineto_trace["cuda_runtime_version"]
+        )
+        # The Python exporter omits the driver version when the optional cuda-bindings
+        # package is unavailable or cannot query its CUDA runtime.
+        if "cuda_driver_version" in py_trace:
+            self.assertEqual(
+                py_trace["cuda_driver_version"], kineto_trace["cuda_driver_version"]
+            )
         # regsPerBlock is the one field torch's device properties do not carry, so the
         # exporter omits it; everything else must match what kineto wrote.
         for py_device, kineto_device in zip(
