@@ -284,7 +284,7 @@ class TestForwardOverlapWorldSizeTwo(TestForwardOverlapWorldSizeOne):
 instantiate_device_type_tests(
     TestForwardOverlapWorldSizeOne,
     globals(),
-    only_for=("cuda", "hpu", "xpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 if __name__ == "__main__":
