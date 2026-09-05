@@ -5,6 +5,7 @@ from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._library._out_variant import check_out_variant, to_out_variant
 from torch._library.utils import is_out
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -48,6 +49,8 @@ _test_lib.impl("add_mul.out", _add_mul_out_impl, "CompositeExplicitAutograd")
 
 @skipIfTorchDynamo("custom operator tests not applicable to dynamo")
 class TestOutVariant(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.lib = torch.library.Library("_TestOutVariant", "FRAGMENT")  # noqa: SCOPED_LIBRARY
