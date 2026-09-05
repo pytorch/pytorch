@@ -122,7 +122,6 @@ import collections
 import contextlib
 import contextvars
 import copy
-import dataclasses
 import functools
 import hashlib
 import importlib.machinery
@@ -141,7 +140,7 @@ from typing_extensions import Self
 
 import torch
 import torch._functorch.config as functorch_config
-from torch._guards import ChainedSource, Guard, Source
+from torch._guards import ChainedSource, Source
 from torch.compiler._precompile_types import (
     FrameInvariants,
     GuardFact as _GuardFact,
@@ -160,7 +159,7 @@ from .package import (
     PrecompileCacheEntry,
 )
 from .pgo import _use_code_state
-from .source import AttrSource, DictGetItemSource, GlobalSource, LocalSource
+from .source import AttrSource, DictGetItemSource, GlobalSource
 
 
 if TYPE_CHECKING:
@@ -184,7 +183,6 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 # import *` in a debugging session pulls the entry points rather than every
 # private helper, and so linters do not flag them as unused.
 __all__ = [
-    "precompile_load",
     "FrameInvariants",
     "PrecompileSession",
     "PrecompileSummary",
