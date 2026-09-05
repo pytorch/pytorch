@@ -239,6 +239,12 @@ class SideEffects:
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
     keepalive: list[object]
+    # Memoizes VTs for mutable attributes of classes built during tracing, which
+    # have no source to key on. See build_sourceless_cls_attr. The tuple holds the
+    # object itself to keep its id() valid -- deliberately not via keepalive, which
+    # track_runahead_tensor_and_symvar_side_effects requires to be a subset of
+    # id_to_variable.
+    sourceless_cls_attrs: dict[int, tuple[Any, VariableTracker]]
     # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
     mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
 
@@ -253,6 +259,7 @@ class SideEffects:
         mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
         | None = None,
         keepalive: list[object] | None = None,
+        sourceless_cls_attrs: dict[int, tuple[Any, VariableTracker]] | None = None,
         save_for_backward: list[
             tuple[AutogradFunctionContextVariable, list[VariableTracker]]
         ]
@@ -275,6 +282,7 @@ class SideEffects:
         self.attr_mutation_kinds = attr_mutation_kinds or {}
         self.mutation_user_stacks = mutation_user_stacks or {}
         self.keepalive = keepalive or []
+        self.sourceless_cls_attrs = sourceless_cls_attrs or {}
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
         # Used by MappingProxyVariable to graph break in case of any mutated
@@ -395,7 +403,10 @@ class SideEffects:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SideEffects):
             raise AssertionError(f"Expected SideEffects, got {type(other)}")
-        # NB: do NOT test keepalive
+        # NB: do NOT test keepalive. sourceless_cls_attrs is also excluded --
+        # unlike keepalive it holds VTs that can affect future tracing, but
+        # there are currently no callers of __eq__/diff that exercise a code
+        # path where two SideEffects could differ only in this field.
         return (
             self.id_to_variable == other.id_to_variable
             and self.store_attr_mutations == other.store_attr_mutations
@@ -444,6 +455,7 @@ class SideEffects:
             },
             mutation_user_stacks=self.mutation_user_stacks,
             keepalive=list(self.keepalive),
+            sourceless_cls_attrs=dict(self.sourceless_cls_attrs),
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
         )
@@ -811,6 +823,30 @@ class SideEffects:
             variable,
             mutation_type_cls=AttributeMutationExisting,
         )
+
+    def build_sourceless_cls_attr(
+        self, tx: "InstructionTranslatorBase", item: Any
+    ) -> VariableTracker:
+        """Get-or-build the memoized VT for a mutable sourceless class
+        attribute (see sourceless_cls_attrs). Keyed by identity of item.
+
+        If item is already tracked under a real source (e.g. it's a class
+        attribute that aliases a global read earlier in the same trace),
+        reuse that VT instead of building a second, sourceless one for the
+        same object -- this makes mutations made through the class
+        attribute correctly guard and replay onto the real object, for
+        that ordering. It only helps when the sourced read happens first;
+        if this sourceless read happens first, nothing here can add a
+        guard for the alias discovered later. See the aliasing note on the
+        isinstance check at the call sites in user_defined.py."""
+        existing = self.id_to_variable.get(id(item))
+        if existing is not None:
+            return existing
+        entry = self.sourceless_cls_attrs.get(id(item))
+        if entry is None:
+            entry = (item, VariableTracker.build(tx, item, None))
+            self.sourceless_cls_attrs[id(item)] = entry
+        return entry[1]
 
     def track_attribute_mutation_new(self, variable: VariableTracker) -> None:
         """Register a sourceless VT (e.g. a synthetic exception) as a new
@@ -1595,6 +1631,7 @@ class SideEffects:
     def clear(self) -> None:
         self.keepalive.clear()
         self.id_to_variable.clear()
+        self.sourceless_cls_attrs.clear()
 
 
 @register_side_effect_replay_handler(

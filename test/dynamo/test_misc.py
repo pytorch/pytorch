@@ -17071,6 +17071,143 @@ fn
         obj = fn(t)
         self.assertEqual(obj.compute(), t.sin())
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___mutable_attr_mutation(self):
+        # A class defined in the compiled region has no source, so each read of
+        # a mutable class attribute used to build a fresh VariableTracker and
+        # silently drop mutations made through an earlier read.
+        def fn(t):
+            class Holder:
+                items = []
+                lookup = {}
+
+            Holder.items.append(1)
+            Holder.lookup["k"] = 2
+            # read the same attributes back through an instance as well
+            obj = Holder()
+            obj.items.append(3)
+            return t + len(Holder.items) + len(Holder.lookup) + len(obj.items)
+
+        t = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___mutable_attr_aliases_global_sourced_first(self):
+        # A class attribute can alias an object that's also reachable as a
+        # plain global (the class body runs eagerly at trace time, so
+        # `items = some_global` really does bind the same object). If the
+        # global gets a normal sourced read (LOAD_GLOBAL) before the
+        # sourceless class-attr memo is built for the same object,
+        # build_sourceless_cls_attr reuses that already-tracked, guarded VT
+        # instead of a second sourceless one -- so the mutation made
+        # through the class attribute correctly replays onto the real
+        # global. (The reverse ordering -- class attr mutated before the
+        # global is ever read directly -- isn't guarded; that's a known,
+        # separate limitation, not what this test covers.)
+        global _test_build_class_aliased_global
+        _test_build_class_aliased_global = []
+        try:
+
+            def fn(t):
+                class Holder:
+                    items = _test_build_class_aliased_global
+
+                n = len(_test_build_class_aliased_global)  # sourced read first
+                Holder.items.append(1)  # reuses that sourced VT
+                return t + n
+
+            t = torch.randn(2)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            out = opt_fn(t)
+            self.assertEqual(out, t)  # n was 0 at read time
+            self.assertEqual(_test_build_class_aliased_global, [1])
+        finally:
+            del _test_build_class_aliased_global
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___mutable_attr_escapes_compiled_region(self):
+        # The mutated container itself (not just a value derived from it)
+        # is returned, so it must still be live on tx.stack when
+        # SideEffects finalizes -- exercises reconstruction of a sourceless
+        # class attribute that survives past the read/mutate call sites
+        # above, unlike the other tests here which only return derived
+        # values (len(), sums, etc).
+        def fn(t):
+            class Holder:
+                items = []
+
+            Holder.items.append(1)
+            return Holder.items
+
+        t = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        # Assert the literal, not just equality with a second eager call --
+        # a reconstruction that returned [] would still match an equally
+        # broken eager run if we only compared the two. Call twice: the
+        # class body isn't re-traced on the second call (Dynamo caches the
+        # compiled code), so this also catches the compiled path baking in
+        # a stale value instead of reconstructing [1] fresh each time.
+        self.assertEqual(opt_fn(t), [1])
+        self.assertEqual(opt_fn(t), [1])
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___mutable_attr_mutation_with_hop_in_frame(self):
+        # register_hook triggers restore_side_effects=True on the HOP path,
+        # which walks SideEffects.keepalive and indexes id_to_variable for
+        # each entry unguarded. A sourceless class attr's VT must not be
+        # pinned via keepalive without a matching id_to_variable entry, or
+        # this raises KeyError instead of just losing the mutation.
+        # fullgraph=True + frame_count pin that this traces through cleanly,
+        # so a future change can't silently turn the KeyError into a quiet
+        # graph break instead of a fix.
+        def fn(t):
+            class Holder:
+                items = []
+
+            Holder.items.append(1)
+            y = t * 2
+            y.register_hook(lambda g: g)
+            return y.sum() + len(Holder.items)
+
+        t = torch.randn(3, requires_grad=True)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(t), fn(t))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___mutable_attr_mutation_across_hop_scope_graph_breaks(
+        self,
+    ):
+        # A sourceless class attr's memo is created at whatever scope reads it
+        # first. If that's the top-level scope and a later mutation happens
+        # inside a HOP body (here, a register_hook callback), the mutation is
+        # now caught by the ordinary cross-scope HOP side-effect check instead
+        # of being silently dropped -- this graph breaks rather than losing
+        # the mutation, which is the intended behavior for this memoization.
+        def fn(t):
+            class Holder:
+                items = []
+
+            n = len(Holder.items)
+
+            def hook(g):
+                Holder.items.append(1)
+                return g
+
+            y = t * 2
+            y.register_hook(hook)
+            return y.sum() + n
+
+        t = torch.randn(3, requires_grad=True)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Mutating a variable from outside the scope of this HOP",
+        ):
+            opt_fn(t)
+
     @torch._dynamo.config.patch(enable_trace_load_build_class=False)
     def test___build_class___disabled(self):
         @torch.compile(backend="eager", fullgraph=True)
