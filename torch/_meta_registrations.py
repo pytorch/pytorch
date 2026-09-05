@@ -6634,6 +6634,46 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
     attn_mask: Tensor | None = None,
     scale: float | None = None,
 ):
+    # Ported from _scaled_dot_product_flash_attention_cpu in
+    # aten/src/ATen/native/transformers/attention.cpp. Without these the meta
+    # kernel accepts inputs the CPU kernel rejects, so a compiled graph is built
+    # around a call that cannot run.
+    torch._check(
+        torch.is_floating_point(query),
+        lambda: "scaled_dot_product_attention_flash_attention: Expected data type "
+        f"in FP32, FP64, BF16, FP16, but got {query.dtype} instead.",
+    )
+    torch._check(
+        query.dim() == 4 and key.dim() == 4 and value.dim() == 4,
+        lambda: "scaled_dot_product_attention_flash_attention: Accept only 4 dims "
+        "inputs shape of {B, H, T, K}",
+    )
+    torch._check(
+        dropout_p == 0.0,
+        lambda: "scaled_dot_product_attention_flash_attention: Currently do not "
+        "support dropout > 0",
+    )
+    # Checked as two separate torch._check calls rather than one `and`: `and`
+    # forces bool() on the first SymBool, which is an unbacked guard, while
+    # torch._check takes the SymBool and defers it to a runtime assert.
+    head_size_msg = (
+        "scaled_dot_product_attention_flash_attention: Q/K/V should have "
+        "the same head size"
+    )
+    torch._check(query.size(3) == value.size(3), lambda: head_size_msg)
+    torch._check(key.size(3) == value.size(3), lambda: head_size_msg)
+    if attn_mask is not None:
+        torch._check(
+            attn_mask.dtype == torch.float or attn_mask.dtype == query.dtype,
+            lambda: "scaled_dot_product_attention_flash_attention: Attention mask "
+            "is the same data type as query",
+        )
+        torch._check(
+            attn_mask.dim() == 2 or attn_mask.dim() == 4,
+            lambda: "scaled_dot_product_attention_flash_attention: Attention mask "
+            "dim in {2, 4}",
+        )
+
     batch_size = query.size(0)
     num_heads = query.size(1)
     max_seqlen_batch_q = query.size(2)
