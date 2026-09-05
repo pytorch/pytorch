@@ -4759,12 +4759,25 @@ class GuardsStatePickler(FunctionPicklerBase):
             for name, value in obj.__dict__.items()
             if keep_attributes or self._keep(value)
         }
+        # An annotation or type param nothing guards can be an unpicklable local
+        # class; prune it rather than let it fail the whole dump.
+        annotations = {
+            name: self._prune(value, "unguarded function annotation")
+            for name, value in obj.__annotations__.items()
+        }
+        type_params = getattr(obj, "__type_params__", None)
+        if type_params:
+            type_params = tuple(
+                self._prune(t, "unguarded function type param") for t in type_params
+            )
         return self._reduce_function(
             obj,
             defaults=defaults,
             kwdefaults=kwdefaults,
             closure=closure,
             attributes=attributes,
+            annotations=annotations,
+            type_params=type_params,
             globals_snapshot=snapshot,
         )
 
