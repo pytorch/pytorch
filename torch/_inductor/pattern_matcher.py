@@ -882,6 +882,22 @@ class _TargetExpr(PatternExpr):
 _SimpleSpec = tuple[Any, ...]
 
 
+# `add`/`mul` are commutative, so `attn_mask + scores` is equivalent to
+# `scores + attn_mask`. Patterns that encode such ops in a fixed operand order
+# (e.g. the masked SDPA patterns) should match both forms. Restrict this to the
+# binary tensor overloads where swapping the two tensor operands is always safe.
+_COMMUTATIVE_BINARY_TENSOR_OPS = frozenset(
+    {
+        torch.ops.aten.add.Tensor,
+        torch.ops.aten.mul.Tensor,
+    }
+)
+
+
+def _is_commutative_binary_tensor_op(node: torch.fx.Node) -> bool:
+    return extract_target(node) in _COMMUTATIVE_BINARY_TENSOR_OPS
+
+
 class _TargetArgsExpr(_TargetExpr):
     """
     Base class for filtering match by node.{target,args,kwargs}
@@ -1009,6 +1025,26 @@ class _TargetArgsExpr(_TargetExpr):
         if len(node_items) != len(self_items):
             raise AssertionError("node_items and self_items length mismatch")
 
+        if (
+            _is_commutative_binary_tensor_op(node)
+            and len(_args) == len(self.args) == 2
+            # aten.add.Tensor(a, b, alpha=k) means a + k*b which is only
+            # commutative when alpha is absent or equals 1.
+            and node.kwargs.get("alpha", 1) == 1
+        ):
+            # `add`/`mul` are commutative, so e.g. `attn_mask + scores` should
+            # match the same pattern as `scores + attn_mask`. Try both operand
+            # orders, only committing the matched state to ctx on success.
+            swapped_items = list(node_items[:2][::-1]) + list(node_items[2:])
+            return self._match_commutative(
+                node, ctx, self_items, node_items, swapped_items
+            )
+
+        return self._match_args_items(node, ctx, self_items, node_items)
+
+    def _match_args_items(
+        self, node: torch.fx.Node, ctx: MatchContext, self_items, node_items
+    ) -> MatchResult:
         m = Match(ctx, self)
         for pattern, child_node in zip(self_items, node_items):
             if isinstance(pattern, PatternExpr):
@@ -1026,6 +1062,26 @@ class _TargetArgsExpr(_TargetExpr):
         m.nodes.append(node)
         m.targets[self] = node.target
         return m
+
+    def _match_commutative(
+        self,
+        node: torch.fx.Node,
+        ctx: MatchContext,
+        self_items,
+        node_items,
+        swapped_items,
+    ) -> MatchResult:
+        # Snapshot the shared match state so a failed attempt in one operand
+        # order does not poison the retry in the other order.
+        saved_pattern_to_node = dict(ctx.pattern_to_node)
+        saved_exclusive = list(ctx.exclusive_node_set)
+        result = self._match_args_items(node, ctx, self_items, node_items)
+        if is_match(result):
+            return result
+        ctx.pattern_to_node.clear()
+        ctx.pattern_to_node.update(saved_pattern_to_node)
+        ctx.exclusive_node_set[:] = saved_exclusive
+        return self._match_args_items(node, ctx, self_items, swapped_items)
 
     def find_anchor_nodes(
         self, ctx: MatchContext, searched: OrderedSet[torch.fx.Node]
