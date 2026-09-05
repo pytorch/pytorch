@@ -1119,6 +1119,25 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
+    def test_negative_pad_loop_split_tail(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 50, (2, 2))
+                self.bn = nn.BatchNorm2d(50)
+                self.fc = nn.Linear(50, 10)
+
+            def forward(self, x):
+                x = self.bn(self.conv(x))
+                x = x.view(x.shape[0], -1)
+                return self.fc(F.pad(x, (0, 50 - x.shape[-1])))
+
+        torch.manual_seed(420)
+        model = M().eval()
+        x = torch.randn(3, 1, 4, 4)
+        with torch.no_grad():
+            self.assertEqual(torch.compile(model)(x), model(x))
+
     def test_masked_fill_with_inf_or_nan_value(self):
         def fn(value, mask):
             y1 = torch.masked_fill(value, mask, float("inf"))
