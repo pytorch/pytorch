@@ -2473,6 +2473,13 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     ) -> None:
         raise NotImplementedError
 
+    def set_codegen_phase(self, phase: int) -> None:
+        """Notify a backend that scheduler codegen entered a new phase."""
+
+    def is_buffer_retained_locally(self, name: str, *, store: bool) -> bool:
+        """Whether the current access is redirected to backend-local storage."""
+        return False
+
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         raise NotImplementedError(
             f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
@@ -3084,7 +3091,10 @@ class CSEProxy(DefaultHandler):
         return self.kernel.check_bounds(expr, size, lower, upper)
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
-        if name in self.kernel.cse.invalidated_stores:
+        if (
+            name in self.kernel.cse.invalidated_stores
+            and not self.kernel.is_buffer_retained_locally(name, store=False)
+        ):
             # A load from an invalidated store requires us to
             # keep the actual buffer around
             V.kernel.must_keep_buffers.add(name)
@@ -3096,7 +3106,9 @@ class CSEProxy(DefaultHandler):
         out = self.kernel.load(name, index)
         # count load that is not in the store_cache, and also not in the
         # cse cache.
-        if out.use_count == 1:
+        if out.use_count == 1 and not self.kernel.is_buffer_retained_locally(
+            name, store=False
+        ):
             self.kernel.num_load += 1
         self.kernel.record_op_trace("load", (name, index), {}, out)
         return out
@@ -3117,7 +3129,8 @@ class CSEProxy(DefaultHandler):
             self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
-            self.kernel.num_store += 1
+            if not self.kernel.is_buffer_retained_locally(name, store=True):
+                self.kernel.num_store += 1
             self.kernel.store_buffer_counts[name] = (
                 self.kernel.store_buffer_counts.get(name, 0) + 1
             )
