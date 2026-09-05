@@ -5,7 +5,7 @@ from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
-from torch.types import _Number, _size
+from torch.types import _size, Number
 
 
 __all__ = ["Laplace"]
@@ -55,7 +55,7 @@ class Laplace(Distribution):
         validate_args: bool | None = None,
     ) -> None:
         self.loc, self.scale = broadcast_all(loc, scale)
-        if isinstance(loc, _Number) and isinstance(scale, _Number):
+        if isinstance(loc, Number) and isinstance(scale, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
