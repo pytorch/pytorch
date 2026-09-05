@@ -243,7 +243,7 @@ Adafactor.__doc__ = (
             parameter scaling. (default: (None, 1e-3))
         d (float, optional): the clipping threshold, used to avoid larger-than-desired
             updates.
-        weight_decay (float, optional): weight decay coefficient (default: 1e-2)
+        weight_decay (float, optional): weight decay coefficient (default: 0)
         foreach (bool, optional): whether foreach implementation of optimizer is used. Note
             that the foreach implementation uses ~ sizeof(params) more peak memory than the
             for-loop version due to the intermediates being a tensorlist vs just one tensor.

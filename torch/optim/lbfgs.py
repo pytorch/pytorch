@@ -536,7 +536,7 @@ LBFGS.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize. Parameters must be real.
+        params (iterable): iterable of parameters to optimize.
         lr (float, optional): learning rate (default: 1)
         max_iter (int, optional): maximal number of iterations per optimization step
             (default: 20)
