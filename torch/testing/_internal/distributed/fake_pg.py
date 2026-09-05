@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 
+import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import FakeProcessGroup, FakeStore
 
@@ -41,9 +42,55 @@ def _create_fake_pg(common_opts, backend_opts):
     )
 
 
+class _FakeBackendDevices(list):
+    """
+    Device types supported by the fake backend.
+
+    Third-party accelerators (e.g. npu) register themselves through
+    torch.accelerator, but this module may be imported before (or even during)
+    the import of the backend module — e.g. the backend autoloads through
+    ``torch._import_device_backends`` and its import chain pulls in test infra
+    — so the accelerator type cannot be probed eagerly at registration time.
+    The device list is consumed lazily when ``init_process_group`` builds its
+    device-to-backend map, so resolve the current accelerator's device type
+    lazily at read time instead of hardcoding a per-backend whitelist.
+    """
+
+    _BASE_DEVICES = ("cpu", "cuda", "hpu", "xpu")
+
+    def __init__(self):
+        super().__init__(self._BASE_DEVICES)
+
+    def _accelerator_type(self):
+        try:
+            acc = torch.accelerator.current_accelerator()
+        except Exception:
+            # The accelerator module may not be fully initialized yet; fall
+            # back to the base device list in that case.
+            return None
+        return acc.type if acc is not None else None
+
+    def __iter__(self):
+        yield from self._BASE_DEVICES
+        accelerator_type = self._accelerator_type()
+        if accelerator_type is not None and accelerator_type not in self._BASE_DEVICES:
+            yield accelerator_type
+
+    def __contains__(self, item):
+        return any(device == item for device in self.__iter__())
+
+    def __len__(self):
+        accelerator_type = self._accelerator_type()
+        has_accelerator = (
+            accelerator_type is not None
+            and accelerator_type not in self._BASE_DEVICES
+        )
+        return len(self._BASE_DEVICES) + int(has_accelerator)
+
+
 dist.Backend.register_backend(
     dist.Backend.FAKE,
     _create_fake_pg,
     extended_api=True,
-    devices=["cpu", "cuda", "hpu", "xpu"],
+    devices=_FakeBackendDevices(),
 )
