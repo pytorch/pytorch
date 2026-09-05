@@ -1676,7 +1676,10 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             return attn_weights.matmul(value)
 
         for tensor_shape, suffix in [((4, 2, 16, 32), ""), ((1, 2, 16, 32), "_bs1")]:
-            attn_mask = torch.randn((1, 1, 1, 2), dtype=torch.float, device=self.device)
+            # finfo(float32).min overflows fp16; the fusion must keep the fp32 mask.
+            attn_mask = torch.randn((1, 1, 2, 2), dtype=torch.float, device=self.device)
+            attn_mask[..., 0, :] = torch.finfo(torch.float).min
+            attn_mask[..., 1, 1:] = torch.finfo(torch.float).min
             args = [
                 torch.randn(tensor_shape, dtype=torch.half, device=self.device),
                 torch.randn(tensor_shape, dtype=torch.half, device=self.device),
@@ -1815,7 +1818,10 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             return attn_weights.matmul(value), key, value
 
         for tensor_shape, suffix in [((4, 2, 16, 32), ""), ((1, 2, 16, 32), "_bs1")]:
-            attn_mask = torch.randn((1, 1, 1, 2), dtype=torch.float, device=self.device)
+            # finfo(float32).min overflows fp16; the fusion must keep the fp32 mask.
+            attn_mask = torch.randn((1, 1, 2, 2), dtype=torch.float, device=self.device)
+            attn_mask[..., 0, :] = torch.finfo(torch.float).min
+            attn_mask[..., 1, 1:] = torch.finfo(torch.float).min
             args = [
                 torch.randn(tensor_shape, dtype=torch.half, device=self.device),
                 torch.randn(tensor_shape, dtype=torch.half, device=self.device),
