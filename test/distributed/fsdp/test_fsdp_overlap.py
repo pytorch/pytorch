@@ -2,7 +2,6 @@
 
 import sys
 import time
-import unittest
 from statistics import mean
 from unittest.mock import patch
 
@@ -10,13 +9,18 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist, Event
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
+    device_sleep,
     get_cycles_per_ms,
+    HardwareClassification,
     run_tests,
-    TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_XPU,
     xfailIf,
@@ -34,13 +38,12 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
 
 class Layer(nn.Module):
-    def __init__(self, compute_cycles, has_params: bool):
+    def __init__(self, compute_cycles, has_params: bool, device_type: str):
         super().__init__()
         self.sleep_cycles = compute_cycles
+        self.device_type = device_type
         self.optional_param = None
         if has_params:
             self.optional_param = nn.Parameter(torch.rand(1))
@@ -53,8 +56,7 @@ class Layer(nn.Module):
         # Record the fake forward compute time.
         self.e1.record()
         if self.sleep_cycles > 0:
-            if torch.cuda.is_available():
-                torch.cuda._sleep(self.sleep_cycles)
+            device_sleep(self.device_type, self.sleep_cycles)
         if self.optional_param is not None:
             x = x + self.optional_param  # force the param to be part of the graph
         self.e2.record()
@@ -65,15 +67,28 @@ class Layer(nn.Module):
         return self.e1.elapsed_time(self.e2)
 
 
-def _create_model(compute_cycles, has_params: bool):
+def _create_model(compute_cycles, has_params: bool, device):
+    device_type = torch.device(device).type
     # Use `limit_all_gathers=False` since the timing being tested relies on the
     # CPU running ahead of the GPU
     model = FSDP(
         nn.Sequential(
-            FSDP(Layer(compute_cycles, has_params), limit_all_gathers=False),
-            FSDP(Layer(compute_cycles, has_params), limit_all_gathers=False),
-            FSDP(Layer(compute_cycles, has_params), limit_all_gathers=False),
-            FSDP(Layer(compute_cycles, has_params), limit_all_gathers=False),
+            FSDP(
+                Layer(compute_cycles, has_params, device_type),
+                limit_all_gathers=False,
+            ),
+            FSDP(
+                Layer(compute_cycles, has_params, device_type),
+                limit_all_gathers=False,
+            ),
+            FSDP(
+                Layer(compute_cycles, has_params, device_type),
+                limit_all_gathers=False,
+            ),
+            FSDP(
+                Layer(compute_cycles, has_params, device_type),
+                limit_all_gathers=False,
+            ),
         ),
         limit_all_gathers=False,
     ).to(device_type)
@@ -97,11 +112,14 @@ class Min10:
 
 
 class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 1
 
-    def _dist_train(self):
+    def _dist_train(self, device):
+        device_type = torch.device(device).type
         rank = self.rank
         world_size = self.world_size
         # Save the original torch.distributed.all_gather_single function since we will
@@ -110,7 +128,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
 
         def run(compute_cycles, all_gather_cycles):
             has_params = all_gather_cycles > 0
-            model = _create_model(compute_cycles, has_params)
+            model = _create_model(compute_cycles, has_params, device)
 
             # Get the input and sets the input's requires_grad to True because
             # we have a fake compute in the forward pass.
@@ -141,8 +159,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
                 def _delayed_all_gather(*args, **kwargs):
                     nonlocal all_gather_called
                     all_gather_called = True
-                    if torch.cuda.is_available():
-                        torch.cuda._sleep(all_gather_cycles)
+                    device_sleep(device_type, all_gather_cycles)
                     if not orig_all_gather:
                         raise AssertionError("Expected orig_all_gather to be truthy")
                     return orig_all_gather(*args, **kwargs)
@@ -193,7 +210,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
                 "gpu_total": gpu_total.avg(),
             }
 
-        sleep_cycles = int(100 * get_cycles_per_ms())
+        sleep_cycles = int(100 * get_cycles_per_ms(device_type))
 
         e1 = run(0, 0)  # no compute, no all-gather
         e2 = run(0, sleep_cycles)  # no compute, only all-gather
@@ -248,11 +265,14 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
             both = e4["gpu_total"]
             self.assertTrue(compute_only + all_gather_only > 1.1 * both)
 
-    @unittest.skipIf(TEST_HPU, "HPU doesn't has HW sleep API support, skipping")
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1504
     @skip_if_lt_x_gpu(2)
-    def test_forward_overlap(self):
-        self._dist_train()
+    def test_forward_overlap(self, device):
+        device_type = torch.device(device).type
+        if not hasattr(torch.get_device_module(device_type), "_sleep"):
+            self.skipTest(f"{device_type} does not support device sleep")
+        self._dist_train(device)
 
 
 class TestForwardOverlapWorldSizeTwo(TestForwardOverlapWorldSizeOne):
@@ -261,9 +281,11 @@ class TestForwardOverlapWorldSizeTwo(TestForwardOverlapWorldSizeOne):
         return 2
 
 
-devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
-    TestForwardOverlapWorldSizeOne, globals(), only_for=devices, allow_xpu=True
+    TestForwardOverlapWorldSizeOne,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
 )
 if __name__ == "__main__":
     run_tests()
