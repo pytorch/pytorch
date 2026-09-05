@@ -337,13 +337,10 @@ import hashlib
 import inspect
 import io
 import logging
-import os
 import pickle
-import sys
 import threading
 import types
-import uuid
-from collections.abc import Callable, Mapping, Sequence  # noqa: TC003
+from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 from typing_extensions import Self
@@ -365,11 +362,11 @@ _RECORD_LOCK = threading.Lock()
 
 
 if TYPE_CHECKING:
+    import os
     from collections.abc import Callable, Mapping
 
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
     from torch._subclasses.fake_tensor import FakeTensorMode
-    from torch.compiler._precompile_types import FrameInvariants, PrecompileSummary
 
 
 # ``precompile`` and ``PrecompileError`` are exposed under the compiler namespace as
