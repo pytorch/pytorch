@@ -112,10 +112,10 @@ static std::tuple<Tensor, Tensor, int64_t, bool, VmapDimVector> multi_margin_los
 
   Tensor self_flat;
   Tensor target_flat;
-  int64_t nframe;
+  int64_t nframe = 0;
   bool target_has_logical_dim = rankWithoutBatchDim(target, target_bdim) > 0;
   if (self_logical_rank <= 1) {
-    self_flat = self_.reshape({bdim_size, self_.numel() / bdim_size});
+    self_flat = self_.reshape({bdim_size, -1});
     target_flat = target_.reshape({bdim_size});
     nframe = 1;
   } else {
@@ -156,14 +156,19 @@ static Tensor multi_margin_loss_per_frame_weight(
     std::optional<int64_t> weight_bdim,
     const Tensor& target_flat,
     int64_t bdim_size,
-    int64_t nframe) {
+    int64_t nframe,
+    int64_t nclass) {
   auto weight_ = moveBatchDimToFront(weight, weight_bdim);
   weight_ = ensure_has_bdim(weight_, weight_bdim.has_value(), bdim_size);
-  const auto nclass = weight_.size(-1);
-  auto weight_flat = weight_.unsqueeze(1)
-                         .expand({bdim_size, nframe, nclass})
-                         .reshape({bdim_size * nframe, nclass});
-  return weight_flat.gather(1, target_flat.unsqueeze(1)).squeeze(1);
+  // The native op validates weight against nclass, but the batched path passes
+  // weight=None to it, so re-check here to stay in parity with eager instead of
+  // silently gathering with a mismatched (or wrong-rank) weight.
+  TORCH_CHECK(
+      weight_.dim() == 2 && weight_.size(-1) == nclass,
+      "inconsistent weight size, expected ", nclass, " but got ",
+      weight_.sizes().slice(1));
+  auto per_frame = weight_.gather(1, target_flat.view({bdim_size, nframe}));
+  return per_frame.reshape({bdim_size * nframe});
 }
 
 static std::tuple<at::Tensor, std::optional<int64_t>>
@@ -189,7 +194,8 @@ multi_margin_loss_batch_rule(
       weight_batched ? std::optional<Tensor>() : weight_opt, Reduction::None);
   if (weight_batched) {
     result = result * multi_margin_loss_per_frame_weight(
-                          *weight_opt, weight_bdim, target_flat, bdim_size, nframe);
+                          *weight_opt, weight_bdim, target_flat, bdim_size, nframe,
+                          self_flat.size(1));
   }
   result = multi_margin_loss_restore_forward(
       result, bdim_size, nframe, target_has_logical_dim, reduction);
@@ -242,7 +248,7 @@ multi_margin_loss_backward_batch_rule(
   if (weight_batched) {
     // weight scales every frame's whole gradient row by weight[target].
     auto w = multi_margin_loss_per_frame_weight(
-        *weight_opt, weight_bdim, target_flat, bdim_size, nframe);
+        *weight_opt, weight_bdim, target_flat, bdim_size, nframe, self_flat.size(1));
     grad_input = grad_input * w.unsqueeze(1);
   }
   if (reduction == Reduction::Mean && nframe > 1) {
