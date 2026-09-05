@@ -4946,13 +4946,15 @@ class TestSDPACudaOnly(NNTestCase):
         device_capability = None
         if "cuda" in str(device):
             device_capability = torch.cuda.get_device_capability()
-        prefer_cudnn = "TORCH_CUDNN_SDPA_PREFERRED" not in os.environ or bool(os.environ["TORCH_CUDNN_SDPA_PREFERRED"])
+        prefer_cudnn = os.getenv("TORCH_CUDNN_SDPA_DEPRIORITIZED") != "1"
         # cuDNN prioritization requires cuDNN > 9.15.0 (91500) per sdp_utils.cpp:83
         cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
-        is_hopper_or_newer = device_capability and (device_capability[0] == 9 or device_capability[0] == 10)
-        prefer_cudnn = prefer_cudnn and is_hopper_or_newer and cudnn_version > 91500
+        is_cudnn_preferred_arch = device_capability and (
+            device_capability in [(8, 6), (8, 9)] or device_capability[0] in [9, 10]
+        )
+        prefer_cudnn = prefer_cudnn and is_cudnn_preferred_arch and cudnn_version > 91500
 
-        # cuDNN is enabled by default on SM 9.0/10.0 with cuDNN > 9.15.0 (per #169849)
+        # cuDNN is enabled by default on SM 8.6/8.9/9.0/10.0 with cuDNN > 9.15.0 (per #169849)
         # For older cuDNN versions or other architectures, Flash Attention is preferred
         if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and prefer_cudnn:
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
