@@ -3,6 +3,7 @@
 #include <torch/csrc/cuda/nccl.h>
 
 #include <ATen/ATen.h>
+#include <ATen/core/grad_mode.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
@@ -12,6 +13,7 @@
 #include <nccl.h>
 
 #include <sched.h>
+#include <algorithm>
 #include <limits>
 #include <sstream>
 #include <type_traits>
@@ -490,6 +492,24 @@ void comm_destroy(ncclComm_t comm) {
 }
 
 namespace {
+void check_no_autograd(bool requires_grad) {
+  TORCH_CHECK(
+      !at::GradMode::is_enabled() || !requires_grad,
+      "NCCL does not support autograd. Please call with tensors "
+      "that do not require gradients or use torch.no_grad().");
+}
+
+void check_no_autograd(TensorList tensors) {
+  check_no_autograd(
+      std::any_of(tensors.begin(), tensors.end(), [](const auto& tensor) {
+        return tensor.requires_grad();
+      }));
+}
+
+void check_no_autograd(const Tensor& tensor) {
+  check_no_autograd(tensor.requires_grad());
+}
+
 // NCCL changed the numerical type used for count between NCCL1 and NCCL2.
 // So we use the following struct, which gets the type of the second argument
 // of T, if T is a function type, with ncclBcast, to get that type statically
@@ -530,6 +550,7 @@ void broadcast(
   TORCH_CHECK(
       root >= 0 && static_cast<size_t>(root) < tensors.size(), "invalid root");
   check_inputs(tensors, tensors, 1, 1);
+  check_no_autograd(tensors);
   auto data_type = to_nccl_data_type(tensors[0]);
   int64_t numel = tensors[0].numel();
 
@@ -580,6 +601,8 @@ void reduce(
       root >= 0 && static_cast<size_t>(root) < inputs.size(), "invalid root");
 
   check_inputs(inputs, output, root, 1, 1);
+  check_no_autograd(inputs);
+  check_no_autograd(output);
   const auto len = inputs.size();
 
   auto data_type = to_nccl_data_type(inputs[0]);
@@ -634,6 +657,8 @@ void all_reduce(
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   check_inputs(inputs, outputs, 1, 1);
+  check_no_autograd(inputs);
+  check_no_autograd(outputs);
   const auto len = inputs.size();
 
   auto data_type = to_nccl_data_type(inputs[0]);
@@ -677,6 +702,8 @@ void reduce_scatter(
   using namespace torch::cuda::nccl::detail;
   const auto len = inputs.size();
   check_inputs(inputs, outputs, 1, len);
+  check_no_autograd(inputs);
+  check_no_autograd(outputs);
 
   auto data_type = to_nccl_data_type(inputs[0]);
 
@@ -718,6 +745,8 @@ void all_gather(
   using namespace torch::cuda::nccl::detail;
   const auto len = inputs.size();
   check_inputs(inputs, outputs, len, 1);
+  check_no_autograd(inputs);
+  check_no_autograd(outputs);
 
   auto data_type = to_nccl_data_type(inputs[0]);
 
