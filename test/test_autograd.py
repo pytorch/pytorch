@@ -13757,6 +13757,23 @@ class TestAutogradForwardMode(TestCase):
         b = torch.randn(1, 2)
         check(a, b)
 
+    def test_softmax_forward_backward_ad(self):
+        # Regression test for gh-162350
+        ops = {
+            "softmax": lambda x: x.softmax(dim=-1),
+            "log_softmax": lambda x: x.log_softmax(dim=-1),
+            "logsumexp": lambda x: x.logsumexp(dim=-1),
+        }
+        for name, op in ops.items():
+            with self.subTest(op=name):
+                acts = torch.randn(3, 6, 16, requires_grad=True)
+                with fwAD.dual_level():
+                    dual_input = fwAD.make_dual(acts, torch.randn_like(acts))
+                    x = op(dual_input)
+                    x = x + fwAD.unpack_dual(x).tangent
+                    primal, _ = fwAD.unpack_dual(x)
+                    primal.sum().backward()
+
     def test_backward_graph_destruction(self):
         def fn():
             a = torch.rand(10, requires_grad=True)
