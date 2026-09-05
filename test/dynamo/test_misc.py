@@ -9141,6 +9141,93 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
 
+    def test_isinstance_runtime_checkable_protocol_union_and_tuple(self):
+        # https://github.com/pytorch/pytorch/issues/195969
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        @typing.runtime_checkable
+        class HasFoo(typing.Protocol):
+            def foo(self) -> int: ...
+
+        class Obj:
+            ports = (1, 2)
+
+            def foo(self) -> int:
+                return 1
+
+        class Other:
+            pass
+
+        def single(x, o):
+            return x + 1 if isinstance(o, HasPorts) else x - 1
+
+        def union(x, o):
+            return x + 1 if isinstance(o, HasPorts | HasFoo) else x - 1
+
+        def tup(x, o):
+            return x + 1 if isinstance(o, (HasPorts, HasFoo)) else x - 1
+
+        def union_rev(x, o):
+            return x + 1 if isinstance(o, HasFoo | HasPorts) else x - 1
+
+        def optional(x, o):
+            return x + 1 if isinstance(o, HasPorts | None) else x - 1
+
+        def mixed(x, o):
+            return x + 1 if isinstance(o, (int, HasPorts)) else x - 1
+
+        def separate(x, o):
+            hit = isinstance(o, HasPorts) or isinstance(o, HasFoo)
+            return x + 1 if hit else x - 1
+
+        x = torch.ones(3)
+        for fn in (single, union, tup, union_rev, optional, mixed, separate):
+            for o in (Obj(), Other(), None, 3):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(opt_fn(x, o), fn(x, o), msg=f"{fn.__name__}({o!r})")
+
+    def test_isinstance_protocol_without_issubclass_graph_breaks(self):
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        def fn(x):
+            # The list is built during tracing, so Dynamo has no Python object
+            # to run the Protocol's __instancecheck__ on and must fall back.
+            return x + 1 if isinstance([x], HasPorts) else x - 1
+
+        x = torch.ones(3)
+        with self.assertRaisesRegex(Unsupported, "does not support issubclass"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_isinstance_non_runtime_checkable_protocol_raises(self):
+        class NotRuntime(typing.Protocol):
+            ports: tuple[int, ...]
+
+        @typing.runtime_checkable
+        class HasFoo(typing.Protocol):
+            def foo(self) -> int: ...
+
+        class Obj:
+            ports = (1, 2)
+
+        def fn(x, o):
+            try:
+                isinstance(o, NotRuntime | HasFoo)
+            except TypeError:
+                return x + 1
+            return x - 1
+
+        x = torch.ones(3)
+        o = Obj()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, o), fn(x, o))
+
     def test_tensor_isinstance_custom_instancecheck_graph_break(self):
         shape_context = threading.local()
 
