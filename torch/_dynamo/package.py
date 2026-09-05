@@ -644,11 +644,11 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     return toplevel.__qualname__, code_source.strip(".")
 
 
-_CpuCodegenTarget = tuple[str, str, int, int | None, str | None]
+_CpuCodegenTarget = tuple[str, str, int, tuple[str, ...], int | None, str | None]
 
 
 def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
-    """(machine, vec_isa, vec_isa_width, simdlen, march): what inductor bakes into CPU code.
+    """(machine, vec_isa, vec_isa_width, vec_isa_macro, simdlen, march): what inductor bakes into CPU code.
 
     ``pick_vec_isa`` dry-compiles a probe with the C++ toolchain, so call this
     only when the artifact can hold native CPU code. None means the host has no
@@ -675,6 +675,7 @@ def _current_cpu_codegen_target() -> _CpuCodegenTarget | None:
         platform.machine(),
         str(vec_isa),
         vec_isa.bit_width(),
+        tuple(vec_isa.build_macro()),
         inductor_config.cpp.simdlen,
         inductor_config.cpp.march,
     )
@@ -692,6 +693,10 @@ def _cpu_codegen_target_problem(
     zero-fill the lanes the narrower tiling never wrote. The ISA name and its
     bit width must both agree: VecSVE(128) and VecSVE(256) share the name
     "asimd", so the name alone would accept a kernel tiled for the wrong width.
+    The build macros disambiguate further: VecNEON and VecSVE(128) share both
+    the name "asimd" and a 128-bit width but compile with different capability
+    macros, so name and width alone would accept a kernel tiled for the wrong
+    one.
     """
     if current is None:
         return (
@@ -699,20 +704,20 @@ def _cpu_codegen_target_problem(
             "supported vector ISA), so it cannot build the artifact's vectorized "
             "CPU kernels."
         )
-    machine, vec_isa, vec_isa_width, simdlen, march = cached
+    machine, vec_isa, vec_isa_width, vec_isa_macro, simdlen, march = cached
     if machine != current[0]:
         return f"The artifact was built for machine {machine!r}, this host is {current[0]!r}."
-    if (vec_isa, vec_isa_width) != (current[1], current[2]):
+    if (vec_isa, vec_isa_width, vec_isa_macro) != (current[1], current[2], current[3]):
         return (
             f"The artifact's CPU kernels were generated for vector ISA {vec_isa!r} "
             f"({vec_isa_width}-bit); this host would compile them for {current[1]!r} "
             f"({current[2]}-bit). Set ATEN_CPU_CAPABILITY or "
             "torch._inductor.config.cpp.simdlen so the host picks the same ISA."
         )
-    if simdlen != current[3]:
-        return f"The artifact was built with simdlen={simdlen!r}, this host uses {current[3]!r}."
-    if march != current[4]:
-        return f"The artifact was built with march={march!r}, this host uses {current[4]!r}."
+    if simdlen != current[4]:
+        return f"The artifact was built with simdlen={simdlen!r}, this host uses {current[4]!r}."
+    if march != current[5]:
+        return f"The artifact was built with march={march!r}, this host uses {current[5]!r}."
     return None
 
 
