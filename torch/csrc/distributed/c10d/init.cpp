@@ -52,6 +52,11 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #endif
 
+#ifdef USE_C10D_TCCL
+#include <torch/csrc/distributed/c10d/ProcessGroupTCCL.hpp>
+#include <torch/csrc/distributed/c10d/TCCLUtils.hpp>
+#endif
+
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
 #include <pybind11/functional.h>
@@ -3873,6 +3878,104 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               "get_error",
               &::c10d::ProcessGroupWrapper::getError,
               py::call_guard<py::gil_scoped_release>());
+#endif
+
+#ifdef USE_C10D_TCCL
+  auto processGroupTCCL =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupTCCL>(
+          module, "ProcessGroupTCCL", backend);
+
+  py::enum_<::c10d::ProcessGroupTCCL::Topology>(processGroupTCCL, "Topology")
+      .value("MESH", ::c10d::ProcessGroupTCCL::Topology::Mesh)
+      .value("RING", ::c10d::ProcessGroupTCCL::Topology::Ring);
+
+  intrusive_ptr_class_<::c10d::ProcessGroupTCCL::Options>(
+      processGroupTCCL, "_Options", backendOptions)
+      .def(py::init<std::chrono::milliseconds>(), py::arg("timeout"))
+      .def_readwrite(
+          "_device_name", &::c10d::ProcessGroupTCCL::Options::device_name)
+      .def_readwrite(
+          "_num_wires", &::c10d::ProcessGroupTCCL::Options::num_wires)
+      .def_readwrite(
+          "_topology", &::c10d::ProcessGroupTCCL::Options::topology);
+
+  processGroupTCCL
+      .def(
+          py::init(
+              [](const c10::intrusive_ptr<::c10d::Store>& store,
+                 int rank,
+                 int size,
+                 const c10::intrusive_ptr<::c10d::ProcessGroupTCCL::Options>&
+                     options) {
+                py::gil_scoped_release nogil{};
+                return c10::make_intrusive<::c10d::ProcessGroupTCCL>(
+                    store, rank, size, options);
+              }),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          py::arg("options"),
+          R"(Create a new ProcessGroupTCCL instance.)")
+      .def(
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                      int rank,
+                      int size,
+                      std::chrono::milliseconds timeout) {
+            py::gil_scoped_release nogil{};
+            return c10::make_intrusive<::c10d::ProcessGroupTCCL>(
+                store,
+                rank,
+                size,
+                ::c10d::ProcessGroupTCCL::Options::create(timeout));
+          }),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          py::arg("timeout") = kProcessGroupDefaultTimeout,
+          R"(Create a new ProcessGroupTCCL instance.)")
+      .def(
+          "_set_default_timeout",
+          &::c10d::ProcessGroupTCCL::setTimeout,
+          py::arg("timeout"),
+          py::call_guard<py::gil_scoped_release>())
+      .def_property_readonly(
+          "options",
+          &::c10d::ProcessGroupTCCL::getOptions,
+          R"(Return the options used to create this ProcessGroupTCCL instance.)");
+
+  // Diagnostic: verify the BSD interface backing the requested rdma_enX
+  // device has a non-link-local IPv4 address. Throws DistBackendError with
+  // the exact sudo commands to run if the prerequisite isn't met. Exposed
+  // here so users can call it before init_process_group to validate setup
+  // independently of constructing a ProcessGroup.
+  module.def(
+      "_tccl_check_link_layer",
+      &::c10d::checkLinkLayer,
+      py::arg("device_name"),
+      py::call_guard<py::gil_scoped_release>(),
+      R"(Check the link-layer prerequisite for TCCL on a given RDMA device.
+
+Throws RuntimeError if the BSD interface corresponding to ``device_name``
+(e.g. ``rdma_en2`` → ``en2``) lacks a non-link-local static IPv4 address.
+The error message includes the exact ``ifconfig`` / ``route`` commands
+required.)");
+
+  // Diagnostic: enumerate RDMA devices visible to librdma on this host.
+  // Loads librdma.dylib via dlopen on first call (singleton). Returns an
+  // empty list when the library loads but no devices are present (most
+  // likely Thunderbolt is bridged — user should run `sudo tbtrdmactl
+  // unbridge`). Throws RuntimeError when librdma itself can't be loaded.
+  module.def(
+      "_tccl_list_devices",
+      &::c10d::listRdmaDevices,
+      py::call_guard<py::gil_scoped_release>(),
+      R"(Enumerate RDMA devices visible to TCCL on this host.
+
+Returns a list of device names (e.g. ``["rdma_en2"]``). Returns an empty
+list if Thunderbolt RDMA is enabled but no devices appear — most likely
+the Thunderbolt fabric is bridged and needs ``sudo tbtrdmactl unbridge``.
+Raises RuntimeError if ``librdma.dylib`` cannot be loaded (e.g. macOS
+< 26.2 or RDMA not enabled via ``bputil``).)");
 #endif
 
 #ifdef USE_C10D_NCCL
