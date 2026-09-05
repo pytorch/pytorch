@@ -73,17 +73,19 @@ if TEST_WITH_ROCM:
 else:
     DEVICE_COUNT = 4
 
-if TEST_CUDA:
-    DEVICE_TYPE = "cuda"
-    DISTRIBUTED_BACKEND = "nccl"
-    DEVICE_COUNT = torch.cuda.device_count()
-elif TEST_HPU:
+if TEST_HPU:
+    # HPU is registered as "fake" in Backend.default_device_backend_map by default.
+    # The real HCCL backend should be registered by torch_hpu; this branch handles
+    # environments where that registration has not occurred.
     DEVICE_TYPE = "hpu:0"
     DISTRIBUTED_BACKEND = "hccl"
-elif TEST_XPU:
-    DEVICE_TYPE = "xpu"
-    DISTRIBUTED_BACKEND = "xccl"
-    DEVICE_COUNT = torch.xpu.device_count()
+elif torch.accelerator.is_available():
+    acc = torch.accelerator.current_accelerator()
+    DEVICE_TYPE = str(acc)
+    # Use the backend registered for this accelerator type. If no backend is
+    # registered, the accelerator's companion plugin is missing or broken.
+    DISTRIBUTED_BACKEND = dist.Backend.default_device_backend_map[acc.type]
+    DEVICE_COUNT = torch.get_device_module(acc.type).device_count()
 else:
     DEVICE_TYPE = "cpu"
     DISTRIBUTED_BACKEND = "gloo"
@@ -1245,7 +1247,8 @@ class FSDPTestMixin:
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
+        # Keep the same semantics as the original `TEST_CUDA or TEST_XPU`
+        if torch.accelerator.is_available() and not TEST_HPU:
             torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
@@ -1588,7 +1591,8 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
+        # Keep the same semantics as the original `TEST_CUDA or TEST_XPU`
+        if torch.accelerator.is_available() and not TEST_HPU:
             torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
@@ -1635,7 +1639,8 @@ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
             sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
 
         device_id = rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
+        # Keep the same semantics as the original `TEST_CUDA or TEST_XPU`
+        if torch.accelerator.is_available() and not TEST_HPU:
             torch.accelerator.set_device_index(device_id)
 
         super()._init_pg(rank, world_size, rdvz_file)
