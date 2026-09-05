@@ -338,8 +338,6 @@ void set_extra_state(PyCodeObject* code, ExtraState* extra_state);
 // the final owner of these references.
 ExtraState* init_and_set_extra_state(PyCodeObject* code);
 
-// Extracts the backend fn from the callback.
-PyObject* get_backend(PyObject* callback);
 // Turn on the cache-key lookup inside get_backend. Called once, when the first
 // backend carrying one is constructed; see cache_entry.cpp.
 void enable_precompile_cache_keys();
@@ -348,10 +346,16 @@ void enable_precompile_cache_keys();
 
 } // extern "C"
 
-// Attribute lookup that returns a borrowed reference on success and nullptr
-// when absent, WITHOUT raising; name must be an interned str. Defined in
-// cache_entry.cpp; use this instead of py::hasattr on hot frame paths.
-PyObject* lookup_optional(py::handle handle, PyObject* name);
+// Extracts the backend fn from the callback. Returns an OWNED reference; lives
+// outside the extern "C" block because it returns a py::object. Only called
+// from C++ (cache_entry.cpp, the frame evaluator).
+py::object get_backend(PyObject* callback);
+
+// Attribute lookup that returns an owned reference on success and an empty
+// py::object when absent, WITHOUT raising; name must be an interned str.
+// Defined in cache_entry.cpp; use this instead of py::hasattr on hot frame
+// paths.
+py::object lookup_optional(py::handle handle, PyObject* name);
 
 // Create a new cache entry at extra_state holding on to guarded_code. Only
 // called from C++ (the frame evaluator), so it lives outside the extern "C"
