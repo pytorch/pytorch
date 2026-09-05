@@ -14,6 +14,7 @@ from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._guards import detect_fake_mode
+from torch._higher_order_ops.flydsl_kernel_wrap import flydsl_kernel_wrapper_functional
 from torch._higher_order_ops.triton_kernel_wrap import (
     kernel_side_table,
     triton_kernel_wrapper_functional,
@@ -998,6 +999,31 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                             continue
                         replacement = output_idx_to_replacement[idx]
                         replace_and_collect(user, replacement)
+        elif node.target is flydsl_kernel_wrapper_functional:
+            mutated_arg_indices = node.kwargs["mutated_arg_indices"]
+            flydsl_args = node.kwargs["args"]
+            output_tensors = {
+                output_idx: flydsl_args[arg_idx]
+                for output_idx, arg_idx in enumerate(mutated_arg_indices)
+            }
+            tensors_to_clone = reinplace_and_refine_tensors_to_clone(
+                node.kwargs["tensors_to_clone"],
+                output_tensors,
+                f"flydsl_launcher_{node.kwargs['launcher_idx']}",
+                ReInplaceTrigger.FLYDSL_OPS,
+            )
+
+            kwargs = dict(node.kwargs)
+            kwargs["tensors_to_clone"] = tuple(tensors_to_clone)
+            node.kwargs = immutable_dict(kwargs)
+            if "eager_input_vals" in node.meta:
+                args, kwargs = node.meta["eager_input_vals"]
+                new_kwargs = {**kwargs}
+                new_kwargs["tensors_to_clone"] = tuple(tensors_to_clone)
+                node.meta["eager_input_vals"] = (
+                    args,
+                    immutable_dict(new_kwargs),
+                )
         elif node.target in inplaceable_triton_ops:
             kernel_idx = node.kwargs["kernel_idx"]
             kernel = kernel_side_table.get_kernel(kernel_idx)
