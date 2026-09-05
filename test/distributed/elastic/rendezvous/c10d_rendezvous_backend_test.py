@@ -288,3 +288,18 @@ class CreateBackendTest(TestCase):
             r"details.$",
         ):
             create_backend(self._params_filestore)
+
+    @mock.patch("os.close")
+    @mock.patch("tempfile.mkstemp")
+    def test_create_backend_closes_mkstemp_fd(
+        self, tempfile_mock, close_mock
+    ) -> None:
+        fake_fd = 999
+        _, real_path = tempfile.mkstemp()
+        self.addCleanup(os.remove, real_path)
+        tempfile_mock.return_value = (fake_fd, real_path)
+
+        self._params_filestore.endpoint = ""
+        create_backend(self._params_filestore)
+
+        close_mock.assert_called_once_with(fake_fd)
