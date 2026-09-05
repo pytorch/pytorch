@@ -537,8 +537,8 @@ PyObject* dynamo__custom_eval_frame(
       !callback.is_none() && callback.ptr() != Py_False) {
     static PyObject* force_callback_marker_name =
         PyUnicode_InternFromString("_torchdynamo_force_callback_on_cache_miss");
-    force_callback_on_cache_miss =
-        lookup_optional(callback, force_callback_marker_name) != nullptr;
+    force_callback_on_cache_miss = static_cast<bool>(
+        lookup_optional(callback, force_callback_marker_name));
   }
   // The marker also keeps a RUN_ONLY recursive action from demoting callees to
   // Py_False: their misses must reach the same callback rather than run eager.
@@ -554,7 +554,10 @@ PyObject* dynamo__custom_eval_frame(
     return eval_result;
   }
 
-  PyObject* backend = get_backend(callback.ptr()); // borrowed
+  // get_backend hands back an OWNED reference; keep it alive across the cache
+  // lookups below, which read the backend to match entries.
+  py::object backend_obj = get_backend(callback.ptr());
+  PyObject* backend = backend_obj.ptr();
 
   // We don't run the current custom_eval_frame behavior for guards.
   // So we temporarily set the callback to Py_None to drive the correct behavior
