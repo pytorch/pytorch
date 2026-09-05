@@ -7893,6 +7893,52 @@ Done""",
                                 with self.assertRaisesRegex(RuntimeError, fail_msg):
                                     run()
 
+    def test_gradcheck_equal_nan(self):
+        """Two NaNs in the same position of both Jacobians are not a mismatch when opted in.
+
+        `torch.acosh` is NaN-valued on [0, 1), so the numerical and the analytical
+        Jacobian are both all-NaN and agree, but the comparison is `torch.allclose`,
+        which reports NaN != NaN. Backward mode is off here because a NaN gradient
+        separately, and correctly, fails `_test_backward_mul_by_grad_output`: it is
+        not zero when grad_output is zero, which `equal_nan` should not hide.
+        """
+        from torch.autograd.gradcheck import GradcheckError
+
+        fwd_mismatch = "Jacobian computed with forward mode mismatch"
+
+        class BadJvp(Function):
+            @staticmethod
+            def forward(ctx, foo):
+                return foo * 2
+
+            @staticmethod
+            def jvp(ctx, gI):
+                return gI * 5
+
+        for fast_mode in (True, False):
+            x = torch.rand(4, dtype=torch.double, requires_grad=True)
+            kwargs = {
+                "check_backward_ad": False,
+                "check_forward_ad": True,
+                "fast_mode": fast_mode,
+            }
+
+            with self.assertRaisesRegex(GradcheckError, fwd_mismatch):
+                gradcheck(torch.acosh, (x,), **kwargs)
+            self.assertTrue(gradcheck(torch.acosh, (x,), equal_nan=True, **kwargs))
+
+            # A wrong formula is still caught, NaN or not
+            y = torch.rand(3, dtype=torch.double, requires_grad=True)
+            with self.assertRaisesRegex(GradcheckError, fwd_mismatch):
+                gradcheck(BadJvp.apply, (y,), equal_nan=True, **kwargs)
+
+            # and a correct function passes either way
+            z = torch.rand(3, dtype=torch.double, requires_grad=True)
+            self.assertTrue(gradcheck(torch.sin, (z,), fast_mode=fast_mode))
+            self.assertTrue(
+                gradcheck(torch.sin, (z,), fast_mode=fast_mode, equal_nan=True)
+            )
+
     def test_gradcheck_forward_ad_batched_grad(self):
         x = torch.rand(2, dtype=torch.double, requires_grad=True)
 
