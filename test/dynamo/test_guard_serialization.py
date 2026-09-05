@@ -1090,6 +1090,23 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertFalse(_cell_is_empty(out.__closure__[0]))
         self.assertIsNone(out())
 
+    def test_reduce_sentinels_an_unpicklable_annotation(self):
+        # An annotation nothing guards can be an unpicklable local class; it must
+        # be pruned to a sentinel rather than fail the whole dump (which silently
+        # bypasses the package).
+        class Local:
+            pass
+
+        def fn(x):
+            return x
+
+        fn.__annotations__ = {"x": Local, "return": Local}
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, buf).dump({"fn": fn})
+        out = pickle.loads(buf.getvalue())["fn"]
+        self.assertIsInstance(out.__annotations__["x"], _Missing)
+        self.assertIsInstance(out.__annotations__["return"], _Missing)
+
     def test_function_reaching_itself_through_its_dict(self):
         # wrapper.me = wrapper, and wrapper is its own free variable; identity
         # has to survive the round trip through both.
