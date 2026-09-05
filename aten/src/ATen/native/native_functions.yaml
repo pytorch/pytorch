@@ -14381,7 +14381,7 @@
   python_module: linalg
   variants: function
   dispatch:
-    CPU, CUDA, MPS: linalg_lstsq_out
+    CPU, CUDA, MPS, XPU: linalg_lstsq_out
   tags: dynamic_output_shape
 
 # torch.linalg.matmul, alias for torch.matmul
