@@ -1,5 +1,6 @@
 # Owner(s): ["module: dsl-native-ops"]
 
+import contextlib
 from unittest.mock import MagicMock, patch
 
 import torch
@@ -130,9 +131,10 @@ class TestRegistry(TestCase):
             return x
 
         node = self.registry._OverrideNode(
-            "test_dsl", "add.Tensor", "CPU", cond_fn, impl_fn, "test_node"
+            "test_dsl", "aten", "add.Tensor", "CPU", cond_fn, impl_fn, "test_node"
         )
         self.assertEqual(node.dsl_name, "test_dsl")
+        self.assertEqual(node.lib_symbol, "aten")
         self.assertEqual(node.op_symbol, "add.Tensor")
         self.assertEqual(node.dispatch_key, "CPU")
         self.assertEqual(node.cond_fn, cond_fn)
@@ -157,7 +159,7 @@ class TestRegistry(TestCase):
             "test_backend", "aten", "add.Tensor", "CPU", cond_fn, impl_fn
         )
 
-        key = ("add.Tensor", "CPU")
+        key = ("aten", "add.Tensor", "CPU")
         self.assertEqual(len(self.registry._graphs[key]), 1)
         node = self.registry._graphs[key][0]
         self.assertEqual(node.dsl_name, "test_backend")
@@ -182,7 +184,7 @@ class TestRegistry(TestCase):
             "test_backend", "aten", "mul.Tensor", "CPU", cond_fn, impl_fn
         )
 
-        key = ("mul.Tensor", "CPU")
+        key = ("aten", "mul.Tensor", "CPU")
         self.assertTrue(self.registry._graphs[key][0].active)
 
         # Then deregister
@@ -194,7 +196,7 @@ class TestRegistry(TestCase):
     def test_reorder_graphs_from_user_function_basic(self):
         """Test basic graph reordering functionality."""
         # Set up test data
-        key = ("test_reorder.Tensor", "CPU")
+        key = ("aten", "test_reorder.Tensor", "CPU")
 
         def cond_fn(x):
             return True
@@ -205,13 +207,31 @@ class TestRegistry(TestCase):
         # Create nodes in specific order
         nodes = [
             self.registry._OverrideNode(
-                "dsl_c", "test_reorder.Tensor", "CPU", cond_fn, impl_fn, "node_c"
+                "dsl_c",
+                "aten",
+                "test_reorder.Tensor",
+                "CPU",
+                cond_fn,
+                impl_fn,
+                "node_c",
             ),
             self.registry._OverrideNode(
-                "dsl_a", "test_reorder.Tensor", "CPU", cond_fn, impl_fn, "node_a"
+                "dsl_a",
+                "aten",
+                "test_reorder.Tensor",
+                "CPU",
+                cond_fn,
+                impl_fn,
+                "node_a",
             ),
             self.registry._OverrideNode(
-                "dsl_b", "test_reorder.Tensor", "CPU", cond_fn, impl_fn, "node_b"
+                "dsl_b",
+                "aten",
+                "test_reorder.Tensor",
+                "CPU",
+                cond_fn,
+                impl_fn,
+                "node_b",
             ),
         ]
         self.registry._graphs[key] = nodes
@@ -231,7 +251,7 @@ class TestRegistry(TestCase):
     def test_reorder_graphs_from_user_function_error_handling(self):
         """Test error handling in graph reordering."""
         # Set up test data
-        key = ("test_error.Tensor", "CPU")
+        key = ("aten", "test_error.Tensor", "CPU")
 
         def cond_fn(x):
             return True
@@ -240,7 +260,13 @@ class TestRegistry(TestCase):
             return x
 
         node = self.registry._OverrideNode(
-            "test_dsl", "test_error.Tensor", "CPU", cond_fn, impl_fn, "test_node"
+            "test_dsl",
+            "aten",
+            "test_error.Tensor",
+            "CPU",
+            cond_fn,
+            impl_fn,
+            "test_node",
         )
         original_graph = [node]
         self.registry._graphs[key] = original_graph.copy()
@@ -301,7 +327,7 @@ class TestRegistry(TestCase):
             "backend_a", "aten", "test.Tensor", "CPU", cond_fn, impl_fn2
         )
 
-        key = ("test.Tensor", "CPU")
+        key = ("aten", "test.Tensor", "CPU")
 
         # Verify initial order
         initial_names = [node.dsl_name for node in self.registry._graphs[key]]
@@ -337,6 +363,24 @@ class TestRegistry(TestCase):
                 self.registry.register_op_override(
                     "test_dsl", "aten", "mul.Tensor", bad_key, cond, impl
                 )
+
+    def test_lib_symbol_off_the_allowlist_rejected(self):
+        """Namespace support is opt-in; anything not on the allowlist is
+        rejected at registration time.
+
+        `_native` stands in for "not allowlisted" because it can never be
+        allowlisted -- it holds the ops carrying the override impls.
+        """
+        self.assertNotIn("_native", self.registry._ALLOWED_LIB_SYMBOLS)
+        with self.assertRaisesRegex(ValueError, "is not overridable"):
+            self.registry.register_op_override(
+                "test_dsl",
+                "_native",
+                "some_op",
+                "CPU",
+                lambda *a, **k: True,
+                lambda *a, **k: None,
+            )
 
     def test_cond_none_without_unconditional_override_rejected(self):
         """cond=None is only valid when unconditional_override=True."""
@@ -387,15 +431,17 @@ class TestRegistryRuntime(TestCase):
         self.registry._dispatch_key_to_lib_graph.clear()
 
     def tearDown(self):
-        # Destroy any aten overrides the test installed so the dispatcher
-        # returns to its pre-test state.
-        for lib in list(self.registry._aten_override_libs.values()):
-            lib._destroy()
+        # Destroy only what this test installed. On a DSL-equipped machine
+        # `import torch` leaves production overrides live in
+        # `_aten_override_libs`; destroying those would strip the dispatcher
+        # of kernels the registry still lists as installed, for the rest of
+        # the process.
+        saved_override_libs = self._saved["aten_override_libs"]
+        for key, lib in list(self.registry._aten_override_libs.items()):
+            if key not in saved_override_libs:
+                lib._destroy()
         self.registry._aten_override_libs.clear()
-
-        # Restore aten override libs (none expected from other tests, but
-        # be defensive).
-        self.registry._aten_override_libs.update(self._saved["aten_override_libs"])
+        self.registry._aten_override_libs.update(saved_override_libs)
 
         # _native namespace DEF libraries and the ops defined on them persist
         # for the lifetime of the process (torch.library has no "undefine"),
@@ -418,12 +464,13 @@ class TestRegistryRuntime(TestCase):
         for k, v in self._saved["dk_map"].items():
             self.registry._dispatch_key_to_lib_graph[k] = list(v)
 
-    def _install(self, op_symbol, dispatch_key):
+    def _install(self, op_symbol, dispatch_key, lib_symbol="aten"):
         """Build the graph then push it through the real registration path."""
         self.registry._register_overrides_from_graph(
+            lib_symbol,
             op_symbol,
             dispatch_key,
-            self.registry._graphs[(op_symbol, dispatch_key)],
+            self.registry._graphs[(lib_symbol, op_symbol, dispatch_key)],
         )
 
     def test_cond_false_falls_through_to_native(self):
@@ -798,17 +845,19 @@ class TestRegistryRuntime(TestCase):
 
         # Override active.
         self.assertTrue(torch.equal(mul(a, b), torch.tensor([7.0, 7.0])))
-        self.assertIn(("mul.Tensor", "CPU"), self.registry._aten_override_libs)
+        self.assertIn(("aten", "mul.Tensor", "CPU"), self.registry._aten_override_libs)
 
         # Deregister → native kernel returns.
         self.registry.deregister_op_overrides(disable_dsl_names="test_dsl")
         self.assertTrue(torch.equal(mul(a, b), torch.tensor([8.0, 15.0])))
-        self.assertNotIn(("mul.Tensor", "CPU"), self.registry._aten_override_libs)
+        self.assertNotIn(
+            ("aten", "mul.Tensor", "CPU"), self.registry._aten_override_libs
+        )
 
         # Reenable → override fires again.
         self.registry.reenable_op_overrides(enable_dsl_names="test_dsl")
         self.assertTrue(torch.equal(mul(a, b), torch.tensor([7.0, 7.0])))
-        self.assertIn(("mul.Tensor", "CPU"), self.registry._aten_override_libs)
+        self.assertIn(("aten", "mul.Tensor", "CPU"), self.registry._aten_override_libs)
 
     def test_empty_graph_tears_down_router(self):
         """An empty graph passed to _cleanup_and_reregister_graph must still
@@ -834,15 +883,20 @@ class TestRegistryRuntime(TestCase):
         b = torch.tensor([4.0, 5.0])
         mul = torch.ops.aten.mul.Tensor
         self.assertTrue(torch.equal(mul(a, b), torch.tensor([99.0, 99.0])))
-        self.assertIn(("mul.Tensor", "CPU"), self.registry._aten_override_libs)
+        self.assertIn(("aten", "mul.Tensor", "CPU"), self.registry._aten_override_libs)
 
         # Simulate a filter-out-everything transformation.
-        self.registry._graphs[("mul.Tensor", "CPU")] = []
+        self.registry._graphs[("aten", "mul.Tensor", "CPU")] = []
         self.registry._cleanup_and_reregister_graph(
-            "mul.Tensor", "CPU", self.registry._graphs[("mul.Tensor", "CPU")]
+            "aten",
+            "mul.Tensor",
+            "CPU",
+            self.registry._graphs[("aten", "mul.Tensor", "CPU")],
         )
 
-        self.assertNotIn(("mul.Tensor", "CPU"), self.registry._aten_override_libs)
+        self.assertNotIn(
+            ("aten", "mul.Tensor", "CPU"), self.registry._aten_override_libs
+        )
         self.assertTrue(torch.equal(mul(a, b), torch.tensor([8.0, 15.0])))
 
     def test_fake_tensor_shape_inference(self):
@@ -902,6 +956,215 @@ class TestRegistryRuntime(TestCase):
             )
         )
         self.assertEqual(call_count[0], 2)
+
+
+@skipIfTorchDynamo("Runtime registry tests exercise the dispatcher directly")
+class TestRegistryNonAtenNamespace(TestCase):
+    """Overrides on namespaces other than `aten`.
+
+    Mirrors how a Python-defined op looks to the registry: the op's own
+    implementation sits at CompositeExplicitAutograd (what
+    `torch.library.custom_op` produces), so the override is installed at the
+    backend key and the captured fallback resolves to the composite kernel.
+
+    These ops carry no Autograd kernel above the router, so the autograd
+    layer -- the shape a real `torch.library.custom_op` takes, and the
+    motivation for the widened keys -- is not covered here. That coverage
+    lives with the first torch_nn override and its own test.
+    """
+
+    NS = "_native_registry_test"
+    NS2 = "_native_registry_test2"
+    MISSING_NS = "_native_registry_missing_ns"
+
+    def setUp(self):
+        super().setUp()
+        self.registry = registry_module
+
+        self._saved_graphs = dict(self.registry._graphs)
+        self._saved_override_libs = dict(self.registry._aten_override_libs)
+        self._saved_maps = {
+            name: {k: list(v) for k, v in getattr(self.registry, name).items()}
+            for name in (
+                "_dsl_name_to_lib_graph",
+                "_op_symbol_to_lib_graph",
+                "_dispatch_key_to_lib_graph",
+            )
+        }
+        self.registry._graphs.clear()
+
+        # These throwaway namespaces are not on the production allowlist.
+        self._stack = contextlib.ExitStack()
+        self._stack.enter_context(
+            patch.object(
+                self.registry,
+                "_ALLOWED_LIB_SYMBOLS",
+                self.registry._ALLOWED_LIB_SYMBOLS
+                | {self.NS, self.NS2, self.MISSING_NS},
+            )
+        )
+
+        # A throwaway namespace with one op whose only kernel is composite,
+        # matching the shape of a `torch.library.custom_op` definition.
+        self.lib = self._stack.enter_context(
+            torch.library._scoped_library(self.NS, "DEF")
+        )
+        self.lib.define("twice(Tensor self) -> Tensor")
+        self.lib.impl("twice", lambda x: x * 2, "CompositeExplicitAutograd")
+        self.op = getattr(torch.ops, self.NS).twice.default
+
+        # A second namespace defining the SAME op symbol, so the tests below
+        # exercise the per-op-symbol maps the widened keys share. Its
+        # fallback triples rather than doubles, to tell the two apart.
+        self.lib2 = self._stack.enter_context(
+            torch.library._scoped_library(self.NS2, "DEF")
+        )
+        self.lib2.define("twice(Tensor self) -> Tensor")
+        self.lib2.impl("twice", lambda x: x * 3, "CompositeExplicitAutograd")
+        self.op2 = getattr(torch.ops, self.NS2).twice.default
+
+        self._saved_filter_state = (
+            set(self.registry._filter_state._dsl_names),
+            set(self.registry._filter_state._op_symbols),
+            set(self.registry._filter_state._dispatch_keys),
+        )
+
+    def tearDown(self):
+        # Only what this test installed; production overrides in the snapshot
+        # stay live (see TestRegistryRuntime.tearDown).
+        for key, lib in list(self.registry._aten_override_libs.items()):
+            if key not in self._saved_override_libs:
+                lib._destroy()
+        self.registry._aten_override_libs.clear()
+        self.registry._aten_override_libs.update(self._saved_override_libs)
+
+        self._stack.close()
+
+        dsl_names, op_symbols, dispatch_keys = self._saved_filter_state
+        for attr, saved in (
+            ("_dsl_names", dsl_names),
+            ("_op_symbols", op_symbols),
+            ("_dispatch_keys", dispatch_keys),
+        ):
+            target = getattr(self.registry._filter_state, attr)
+            target.clear()
+            target.update(saved)
+
+        self.registry._graphs.clear()
+        self.registry._graphs.update(self._saved_graphs)
+        for name, saved in self._saved_maps.items():
+            target = getattr(self.registry, name)
+            target.clear()
+            for k, v in saved.items():
+                target[k] = list(v)
+        super().tearDown()
+
+    def _install(self, lib_symbol, op_symbol="twice", dispatch_key="CPU"):
+        key = (lib_symbol, op_symbol, dispatch_key)
+        self.registry._register_overrides_from_graph(
+            lib_symbol, op_symbol, dispatch_key, self.registry._graphs[key]
+        )
+
+    def _register(self, cond, impl, lib_symbol=None):
+        self.registry.register_op_override(
+            "test_dsl", lib_symbol or self.NS, "twice", "CPU", cond, impl
+        )
+
+    def test_graph_key_and_node_carry_the_namespace(self):
+        self._register(lambda *a, **k: True, lambda x: x)
+        key = (self.NS, "twice", "CPU")
+        self.assertIn(key, self.registry._graphs)
+        self.assertEqual(self.registry._graphs[key][0].lib_symbol, self.NS)
+
+    def test_cond_true_routes_to_impl(self):
+        self._register(lambda *a, **k: True, lambda x: torch.full_like(x, 99.0))
+        self._install(self.NS)
+        self.assertEqual(self.op(torch.tensor([1.0, 2.0])), torch.tensor([99.0, 99.0]))
+
+    def test_cond_false_falls_back_to_composite_kernel(self):
+        def impl(x):
+            raise AssertionError("impl must not run when cond is False")
+
+        self._register(lambda *a, **k: False, impl)
+        self._install(self.NS)
+        self.assertEqual(self.op(torch.tensor([1.0, 2.0])), torch.tensor([2.0, 4.0]))
+
+    def test_teardown_restores_the_original_kernel(self):
+        self._register(lambda *a, **k: True, lambda x: torch.full_like(x, 99.0))
+        self._install(self.NS)
+        self.assertEqual(self.op(torch.tensor([1.0])), torch.tensor([99.0]))
+
+        self.registry._graphs[(self.NS, "twice", "CPU")] = []
+        self._install(self.NS)
+        self.assertNotIn((self.NS, "twice", "CPU"), self.registry._aten_override_libs)
+        self.assertEqual(self.op(torch.tensor([1.0])), torch.tensor([2.0]))
+
+    def _register_both(self):
+        self._register(lambda *a, **k: True, lambda x: torch.full_like(x, 99.0))
+        self._register(
+            lambda *a, **k: True,
+            lambda x: torch.full_like(x, 7.0),
+            lib_symbol=self.NS2,
+        )
+        self._install(self.NS)
+        self._install(self.NS2)
+
+    def test_same_op_symbol_in_two_namespaces_is_independent(self):
+        """Two namespaces defining the same op symbol land in one
+        per-op-symbol bucket; each must still route to its own override."""
+        self._register_both()
+
+        x = torch.tensor([1.0, 2.0])
+        self.assertEqual(self.op(x), torch.full_like(x, 99.0))
+        self.assertEqual(self.op2(x), torch.full_like(x, 7.0))
+
+        bucket = self.registry._op_symbol_to_lib_graph["twice"]
+        self.assertIn((self.NS, "twice", "CPU"), bucket)
+        self.assertIn((self.NS2, "twice", "CPU"), bucket)
+
+    def test_op_symbol_filters_are_namespace_blind(self):
+        """`disable_op_symbols` matches the bare op symbol in every namespace,
+        and a "ns::op"-qualified string matches nothing. Pinned here because
+        the widened keys make same-symbol collisions across namespaces
+        possible for the first time."""
+        self._register_both()
+        x = torch.tensor([1.0, 2.0])
+
+        self.registry.deregister_op_overrides(disable_op_symbols=[f"{self.NS}::twice"])
+        self.assertEqual(self.op(x), torch.full_like(x, 99.0))
+        self.assertEqual(self.op2(x), torch.full_like(x, 7.0))
+
+        self.registry.deregister_op_overrides(disable_op_symbols=["twice"])
+        self.assertEqual(self.op(x), x * 2)
+        self.assertEqual(self.op2(x), x * 3)
+
+        self.registry.reenable_op_overrides(enable_op_symbols=["twice"])
+        self.assertEqual(self.op(x), torch.full_like(x, 99.0))
+        self.assertEqual(self.op2(x), torch.full_like(x, 7.0))
+
+    def test_get_dsl_operations_reports_one_namespace(self):
+        """Reporting is scoped: the throwaway namespace's op appears only when
+        asked for, and never in the default `aten` view."""
+        self._register(lambda *a, **k: True, lambda x: x)
+        self.assertEqual(
+            self.registry.get_dsl_operations("test_dsl", lib_symbol=self.NS),
+            ["twice"],
+        )
+        self.assertNotIn("twice", self.registry.get_dsl_operations("test_dsl"))
+
+    def test_undefined_op_raises_on_install(self):
+        """A namespace whose op is not in the dispatcher must fail loudly at
+        install time rather than silently registering nothing.
+
+        Loud failure is the deliberate contract: a registration naming an op
+        that does not resolve breaks `import torch` rather than degrading
+        quietly. Unlike `aten`, whose ops the build guarantees, a non-aten
+        op's existence is a runtime property, so drift is caught before it
+        ships by the drift-guard test that accompanies each such override.
+        """
+        self._register(lambda *a, **k: True, lambda x: x, lib_symbol=self.MISSING_NS)
+        with self.assertRaisesRegex(AttributeError, "twice op not found"):
+            self._install(self.MISSING_NS)
 
 
 if __name__ == "__main__":
