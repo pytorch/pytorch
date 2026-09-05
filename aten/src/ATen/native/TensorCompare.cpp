@@ -601,17 +601,28 @@ static void isin_sorting(
     bool assume_unique,
     bool invert,
     const Tensor& out) {
+  // Promote to a common dtype before unique/sort. Without this, distinct values
+  // can become equal only after promotion and be misclassified as matches when
+  // adjacent in the sorted list.
+  const auto common_type = at::native::result_type(elements, test_elements);
+  const Tensor& promoted_elements =
+      elements.scalar_type() == common_type ? elements : elements.to(common_type);
+  const Tensor& promoted_test_elements =
+      test_elements.scalar_type() == common_type
+      ? test_elements
+      : test_elements.to(common_type);
+
   // 1. Concatenate unique elements with unique test elements in 1D form. If
   //    assume_unique is true, skip calls to unique().
   Tensor elements_flat, test_elements_flat, unique_order;
   if (assume_unique) {
-    elements_flat = elements.ravel();
-    test_elements_flat = test_elements.ravel();
+    elements_flat = promoted_elements.ravel();
+    test_elements_flat = promoted_test_elements.ravel();
   } else {
     std::tie(elements_flat, unique_order) =
-        at::_unique(elements, /*sorted=*/false, /*return_inverse=*/true);
+        at::_unique(promoted_elements, /*sorted=*/false, /*return_inverse=*/true);
     std::tie(test_elements_flat, std::ignore) =
-        at::_unique(test_elements, /*sorted=*/false);
+        at::_unique(promoted_test_elements, /*sorted=*/false);
   }
 
   // 2. Stable sort all elements, maintaining order indices to reverse the

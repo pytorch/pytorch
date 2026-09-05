@@ -1365,6 +1365,13 @@ class TestSortAndSelectDevice(TestCase):
                     c = torch.isin(a, b, assume_unique=assume_unique)
                     self.assertEqual(c, ec)
 
+    def test_isin_dtype_promotion_duplicates(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/194725
+        elements = torch.tensor([4097, 4098], device=device, dtype=torch.int32)
+        test_elements = torch.arange(1, 21, device=device, dtype=torch.float16)
+        expected = torch.tensor([False, False], device=device)
+        self.assertEqual(torch.isin(elements, test_elements), expected)
+
     @onlyAccelerator
     @dtypes(*all_types())
     def test_isin_different_devices(self, device, dtype):
