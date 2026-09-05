@@ -1466,13 +1466,13 @@ class TestFSDPStateDict4GPUs(FSDPTest):
 instantiate_device_type_tests(
     TestFSDPStateDict,
     globals(),
-    only_for=("cuda", "hpu", "xpu", "privateuse1"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestFSDPStateDict4GPUs,
     globals(),
-    only_for=("cuda", "hpu", "xpu", "privateuse1"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
