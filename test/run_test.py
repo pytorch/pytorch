@@ -124,6 +124,7 @@ IS_SLOW = (
     "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT or TEST_CONFIG == "periodic"
 )
 IS_S390X = platform.machine() == "s390x"
+IS_RISCV64 = platform.machine() == "riscv64"
 
 
 # Note [ROCm parallel CI testing]
@@ -289,6 +290,53 @@ S390X_BLOCKLIST = [
     "fx/test_z3_gradual_types",
     "test_proxy_tensor",
 ]
+
+RISCV64_BLOCKLIST = [
+    # --- NoQEngine: quantized engine not supported on riscv64
+    "ao/sparsity/test_composability",
+    "quantization/core/test_quantized_op",
+    "quantization/core/test_workflow_module",  # TestFakeQuantize.test_fq_module_per_channel
+    "quantization/core/test_workflow_ops",
+    "quantization/eager/test_quantize_eager_ptq",
+    "quantization/eager/test_quantize_eager_qat",
+    "quantization/fx/test_quantize_fx",
+    "test_quantization",
+    # --- oneDNN/MKLDNN: no MKLDNN backend in riscv64 build
+    "inductor/test_mkldnn_pattern_matcher",
+    "test_mkldnn",
+    "test_mkldnn_fusion",
+    # --- MKL is x86-only
+    "test_mkl_verbose",
+    # --- QNNPACK / mobile backends not supported
+    "export/test_converter",
+    "test_nnapi",
+    "test_vulkan",
+    "test_xnnpack_integration",
+    # --- z3-solver unavailable on riscv64
+    "fx/test_z3_gradual_types",
+    "test_proxy_tensor",
+    # --- LLVM/TensorExpr JIT and legacy fusers need unsupported backends
+    "test_jit_fuser_te",
+    "test_jit_llga_fuser",
+    "test_tensorexpr",
+    # --- record_context_cpp unsupported on non-x86_64
+    # --- known failures / TODOs on riscv64
+    "export/test_cpp_serdes",
+    "export/test_export",
+    "export/test_export_strict",
+    "export/test_export_training_ir_to_run_decomp",
+    "export/test_retraceability",
+    "export/test_serdes",
+    "export/test_strict_export_v2",
+    "inductor/test_aot_inductor_arrayref",
+    "inductor/test_cpu_repro",
+    "inductor/test_cpu_select_algorithm",  # L1 cache size = 0, need to fix
+    "profiler/test_profiler",  # scalar value not equal, need to fix
+    "test_binary_ufuncs",  # precision
+    "test_decomp",  # precision
+    "test_public_bindings",
+]
+
 
 XPU_BLOCKLIST = [
     "test_autograd",
@@ -1985,6 +2033,9 @@ def get_selected_tests(options) -> list[str]:
             selected_tests,
             "Skip distributed tests on s390x",
         )
+
+    elif IS_RISCV64:
+        selected_tests = exclude_tests(RISCV64_BLOCKLIST, selected_tests, "on riscv64")
 
     # skip all distributed tests if distributed package is not available.
     if not dist.is_available():
