@@ -1,13 +1,19 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 from torch.ao.quantization.utils import get_fqn_to_example_inputs
 from torch.ao.nn.quantized.modules.utils import _quantize_weight
 from torch.ao.quantization import MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_get_fqn_to_example_inputs(self, M, example_inputs, expected_fqn_to_dim):
         m = M().eval()
         fqn_to_example_inputs = get_fqn_to_example_inputs(m, example_inputs)
