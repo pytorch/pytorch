@@ -8,6 +8,7 @@ import sympy
 import torch
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.exc import InternalTorchDynamoError
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch._inductor import config as inductor_config, ir
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.sizevars import SizeVarAllocator
@@ -1413,6 +1414,30 @@ class TestUnbackedSymints(InductorTestCase):
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
+
+    def test_masked_fill_scalar_assignment(self, device):
+        # canDispatchToMaskedFill compares the mask extents against self's; doing
+        # that with int64_t sizes used to specialize the unbacked extents.
+        def fn(x, mask, value):
+            x[mask] = value
+            return x
+
+        def make_inputs(n):
+            x = torch.zeros(n, 3, device=device)
+            mask = torch.zeros(n, 3, dtype=torch.bool, device=device)
+            mask[:, 0] = True
+            torch._dynamo.decorators.mark_unbacked(x, 0)
+            torch._dynamo.decorators.mark_unbacked(mask, 0)
+            return x, mask
+
+        cnt = CompileCounterWithBackend("inductor")
+        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        for n in (2, 5):
+            x, mask = make_inputs(n)
+            expected = fn(*make_inputs(n), 7.0)
+            torch.testing.assert_close(compiled_fn(x, mask, 7.0), expected)
+        # A specializing guard would force a second graph for n=5.
+        self.assertEqual(cnt.frame_count, 1)
 
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
