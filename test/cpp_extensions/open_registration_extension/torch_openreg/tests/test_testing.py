@@ -15,7 +15,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     HPUTestBase,
     instantiate_device_type_tests,
-    onlyCUDA,
+    onlyAccelerator,
     onlyOn,
     ops,
     precisionOverride,
@@ -28,13 +28,13 @@ from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo
 
 
 class TestBypassDeviceRestrictions(TestCase):
-    """Verify that PrivateUse1 backends can run tests decorated with @onlyCUDA.
+    """Verify that PrivateUse1 backends can run tests decorated with @onlyAccelerator.
 
     PrivateUse1TestBase sets bypass_device_restrictions = False by default.
     Backends that are ready to run @onlyOn-gated tests must explicitly opt in
     by setting bypass_device_restrictions = True in their setUp or subclass.
     This allows out-of-tree backends to run accelerator tests that are
-    currently gated behind @onlyCUDA while the long-term migration to
+    currently gated behind @onlyAccelerator while the long-term migration to
     device-generic tests is in progress.
     """
 
@@ -58,8 +58,8 @@ class TestBypassDeviceRestrictions(TestCase):
             )
         super().tearDownClass()
 
-    @onlyCUDA
-    def test_bypass_only_cuda(self, device):
+    @onlyAccelerator
+    def test_bypass_only_accelerator(self, device):
         type(self).executed_count += 1
         self.assertEqual(torch.device(device).type, "openreg")
 
@@ -332,15 +332,15 @@ class TestCapabilityGating(TestCase):
             )
         super().tearDownClass()
 
-    @requires_capabilities(Capability.lib.triton)
+    @requires_capabilities(Capability.dtype.fp8)
     def test_capability_supported(self, device):
         type(self).executed_count += 1
         self.assertEqual(torch.device(device).type, "openreg")
 
-    @requires_capabilities(Capability.dtype.fp64)
+    @requires_capabilities(Capability.dtype.bf16)
     def test_capability_unsupported(self, device):
         type(self).executed_count += 1
-        self.fail("Expected skip: dtype.fp64 is unsupported on this device")
+        self.fail("Expected skip: dtype.bf16 is unsupported on this device")
 
     def test_capability_missing(self, device):
         """@requires_capabilities raises AssertionError for undeclared capabilities."""
@@ -361,7 +361,7 @@ class TestCapabilityGating(TestCase):
         includes an undeclared capability."""
 
         @requires_capabilities(
-            Capability.lib.triton,
+            Capability.dtype.fp8,
             Capability.dtype.bf16,
             Capability.attention.flash_attention,
         )
@@ -378,10 +378,9 @@ class TestCapabilityGating(TestCase):
 
 def _openreg_test_capabilities(_cls):
     capabilities = PrivateUse1TestBase._capabilities()
-    capabilities[Capability.lib].update({Capability.lib.triton: lambda: True})
     capabilities[Capability.dtype] = {
+        Capability.dtype.fp8: lambda: True,
         Capability.dtype.bf16: lambda: False,
-        Capability.dtype.fp64: lambda: False,
     }
     return capabilities
 
