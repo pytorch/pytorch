@@ -44,6 +44,7 @@ from torch.testing._internal.common_cuda import (
     has_device_side_assert,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     PLATFORM_SUPPORTS_WORKQUEUE_CONFIG,
+    ROCM_VERSION,
     SM70OrLater,
     SM89OrLater,
     TEST_CUDNN,
@@ -879,7 +880,6 @@ print(t.is_pinned())
             else:
                 # ROCm logic is less so, it's cublaslt for some Instinct, cublas for all else
                 # Mirror CUDAHooks::getHipblasltPreferredArchs in CUDAHooks.cpp
-                ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split(".")[:2])
                 archs = ["gfx90a", "gfx942"]
                 if ROCM_VERSION >= (6, 4):
                     archs.extend(["gfx1200", "gfx1201"])
