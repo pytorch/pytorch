@@ -114,10 +114,10 @@ def _nvgemm_config(**overrides):
     return cfg
 
 
-# TODO(nikhilap): Remove Blackwell restriction once cutlass_api includes H100 kernels
+# TODO(nikhilap): Remove Blackwell restriction once cutlass.operators includes H100 kernels
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
-    "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
+    "NVIDIA Universal GEMM (cutlass.operators) library not available or not on Blackwell",
 )
 @instantiate_parametrized_tests
 class TestNVUniversalGemm(TestCase):
@@ -462,7 +462,7 @@ class TestNVUniversalGemm(TestCase):
     def test_unaligned_base_pointer_rejected(self):
         """Test that matmul with unaligned base pointer is rejected.
 
-        cutlass_api requires 16-byte aligned base pointers. Since alignment
+        cutlass.operators requires 16-byte aligned base pointers. Since alignment
         can't be checked at compile time (FakeTensors don't have real pointers),
         Inductor must guard against unaligned buffers.
         """
@@ -533,13 +533,14 @@ class TestNVUniversalGemm(TestCase):
 
         torch._dynamo.reset()
 
-        import cutlass_api
+        import cutlass.operators
+        from cutlass.operators.workspace import AllocationRequirement
 
         def patched_get_workspace_size(self, args):
-            return 1024
+            return AllocationRequirement(size_bytes=1024, ptr_alignment=1)
 
         with patch.object(
-            cutlass_api.Kernel,
+            cutlass.operators.Operator,
             "get_workspace_size",
             patched_get_workspace_size,
         ):
@@ -1800,7 +1801,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
         and is_datacenter_blackwell_arch()
         and ensure_nvmatmul_heuristics_available()
     ),
-    "Requires cutlass_api, nvMatmulHeuristics, and Blackwell GPU",
+    "Requires cutlass.operators, nvMatmulHeuristics, and Blackwell GPU",
 )
 class TestNVUniversalGemmHeuristicsIntegration(TestCase):
     """Integration tests for nvMatmulHeuristics with real library calls."""
@@ -1862,7 +1863,7 @@ class TestNVUniversalGemmHeuristicsIntegration(TestCase):
 
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
-    "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
+    "NVIDIA Universal GEMM (cutlass.operators) library not available or not on Blackwell",
 )
 class TestNVUniversalGemmDynamicShapes(TestCase):
     """Test cases for NVIDIA Universal GEMM with dynamic shapes."""
@@ -1888,8 +1889,8 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
             ):
                 compiled_fn(x, w)
 
-    def test_dynamic_shapes(self):
-        """Stress test dynamic shapes with extreme variations."""
+    def test_dynamic_shapes_rejected(self):
+        """Test that NVGEMM rejects backed symbolic shapes."""
 
         def matmul(a, b):
             return a @ b
@@ -1899,33 +1900,17 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
         with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
             compiled_fn = torch.compile(matmul, dynamic=True)
 
-            shapes = [
-                (4, 4, 4, False),
-                (16, 16, 16, True),
-                (2048, 64, 128, True),
-                (4, 4, 4, False),  # Unsupported again
-                (64, 2048, 128, True),
-                (128, 128, 2048, True),
-                (2048, 2048, 512, True),
-                (16, 16, 16, True),
-            ]
-
-            for m, n, k, supported in shapes:
-                a = torch.randn(m, k, dtype=torch.bfloat16, device="cuda")
-                b = torch.randn(k, n, dtype=torch.bfloat16, device="cuda")
-                if not supported:
-                    with self.assertRaisesRegex(
-                        Exception, "NoValidChoicesError|no valid choice"
-                    ):
-                        compiled_fn(a, b)
-                else:
-                    result = compiled_fn(a, b)
-                    torch.testing.assert_close(result, a @ b)
+            a = torch.randn(16, 16, dtype=torch.bfloat16, device="cuda")
+            b = torch.randn(16, 16, dtype=torch.bfloat16, device="cuda")
+            with self.assertRaisesRegex(
+                Exception, "NoValidChoicesError|no valid choice"
+            ):
+                compiled_fn(a, b)
 
 
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
-    "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
+    "NVIDIA Universal GEMM (cutlass.operators) library not available or not on Blackwell",
 )
 @instantiate_parametrized_tests
 class TestNVUniversalGemmEpilogueFusion(TestCase):
@@ -2927,14 +2912,14 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         if efc_kernel is None:
             self.skipTest("No matching EFC kernel found in cache")
 
-        import cutlass_api
-        from cutlass_api.artifact import CompiledArtifact
+        import cutlass.operators
+        from cutlass.operators.artifact import CompiledArtifact
 
         a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
         out = torch.empty(self.M, self.N, device="cuda", dtype=torch.bfloat16)
 
-        args = cutlass_api.arguments.GemmArguments(
+        args = cutlass.operators.arguments.GemmArguments(
             a, b, out, accumulator_type=torch.float32
         )
         artifact = efc_kernel.compile(args)
@@ -2953,11 +2938,13 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertIsNotNone(loaded, "disk_cache_get returned None")
 
         rewrapped = _rewrap_efc_compiled_obj(loaded, efc_kernel)
-        reloaded_artifact = CompiledArtifact(rewrapped, efc_kernel)
+        reloaded_artifact = CompiledArtifact(
+            rewrapped, efc_kernel, artifact.compiled_for
+        )
 
         # Run with reloaded artifact and verify correctness
         out2 = torch.empty(self.M, self.N, device="cuda", dtype=torch.bfloat16)
-        args2 = cutlass_api.arguments.GemmArguments(
+        args2 = cutlass.operators.arguments.GemmArguments(
             a, b, out2, accumulator_type=torch.float32
         )
         efc_kernel.run(
@@ -2987,7 +2974,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         catch the regression we intercept _benchmark_nvgemm_module to record
         every (ms, path) it returns and assert at least one finite-ms result —
         i.e., at least one EFC choice with workspace did get benchmarked."""
-        import cutlass_api
+        import cutlass.operators
+        from cutlass.operators.workspace import AllocationRequirement
 
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
@@ -3010,7 +2998,11 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch._dynamo.reset()
         with (
             patch.object(
-                cutlass_api.Kernel, "get_workspace_size", lambda self, args: 4096
+                cutlass.operators.Operator,
+                "get_workspace_size",
+                lambda self, args: AllocationRequirement(
+                    size_bytes=4096, ptr_alignment=1
+                ),
             ),
             mock.patch.object(
                 CUDACombinedScheduling, "_benchmark_nvgemm_module", capturing_bench
@@ -3030,8 +3022,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         finite = [(ms, p) for ms, p in bench_results if ms != float("inf")]
         self.assertTrue(
             finite,
-            lambda msg: f"{msg}\nAll NVGEMM benchmarks returned inf — workspace handling likely "
-            f"broken. Results: {bench_results}",
+            lambda msg: (
+                f"{msg}\nAll NVGEMM benchmarks returned inf — workspace handling likely "
+                f"broken. Results: {bench_results}"
+            ),
         )
 
 

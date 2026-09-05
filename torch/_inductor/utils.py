@@ -2656,18 +2656,14 @@ def use_nv_universal_gemm_template(
         4. Max autotune or max autotune gemm is enabled
         5. Not in AOT Inductor mode (requires runtime JIT compilation)
         6. Base pointers are 16-byte aligned
-        7. Shape dimensions are not unbacked symbols
+        7. Shape dimensions are static
 
     Note:
         - Shape and stride constraints are handled internally by
           cutlass.operators.get_operators() which filters incompatible kernels.
         - GroupedGemm currently only supports TN layout (column-major B).
           Any other layout will act as a noop and fall back to ATen.
-        - Dynamic shapes are supported as long as they have hints
-          (from example inputs).
     """
-    from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
-
     if not ensure_cute_available():
         return False
 
@@ -2688,13 +2684,12 @@ def use_nv_universal_gemm_template(
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
-    # cutlass.operators can't handle unbacked symbols because it needs to evaluate
-    # shape constraints (e.g., stride divisibility by 8, N/K divisibility by 16).
-    # Unbacked symbols have no hint values, causing GuardOnDataDependentSymNode errors.
+    # cutlass.operators 0.2 cannot handle symbolic shapes because it hashes
+    # dimensions while evaluating its constraints.
     dims_to_check = [m, n, k]
     if g is not None:
         dims_to_check.append(g)
-    if any(has_free_unbacked_symbols(dim) for dim in dims_to_check):
+    if has_free_symbols(dims_to_check):
         return False
 
     # Base pointer must be 16-byte aligned. cutlass.operators can't check this at
