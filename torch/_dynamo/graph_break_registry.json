@@ -2757,6 +2757,16 @@
       ]
     }
   ],
+  "GB1583": [
+    {
+      "Gb_type": "builtin isinstance() with classinfo that does not support issubclass()",
+      "Context": "isinstance({arg}, {isinstance_type})",
+      "Explanation": "issubclass({arg_type}, {member}) raised TypeError: {e}. Dynamo emulates isinstance() with issubclass() for this argument and cannot determine the result.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0170": [
     {
       "Gb_type": "Data-dependent branching",
