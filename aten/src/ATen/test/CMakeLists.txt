@@ -86,6 +86,7 @@ list(APPEND ATen_HIP_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_apply_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_complex_math_test.hip
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_complex_test.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_device_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_distributions_test.hip
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_dlconvertor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_generator_test.hip
