@@ -309,11 +309,7 @@ if torch.backends.mps.is_available():
             "nn.functional.conv3d": [torch.int64],
             "nn.functional.conv_transpose1d": [torch.int64],
             "nn.functional.conv_transpose2d": [torch.int64, torch.bfloat16],
-            "nn.functional.conv_transpose3d": [
-                torch.int64,
-                torch.bfloat16,
-                torch.float16,
-            ],
+            "nn.functional.conv_transpose3d": [torch.int64],
             # Unsupported dtypes
             # _mps_linear rejects non-float inputs; unlike mm/matmul it has no
             # integral Metal GEMM fallback.
@@ -587,7 +583,6 @@ if torch.backends.mps.is_available():
             "nn.functional.conv3d": [torch.float16],
             "nn.functional.conv_transpose1d": [torch.float16],
             "nn.functional.conv_transpose2d": [torch.float16],
-            "nn.functional.conv_transpose3d": [torch.float16],
         }
 
         ON_MPS_XFAILLIST = {
