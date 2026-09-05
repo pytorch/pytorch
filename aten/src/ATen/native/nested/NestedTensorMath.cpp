@@ -1074,8 +1074,8 @@ static Tensor cat_nested_impl(
     std::vector<at::Tensor> sizes;
     buffers.reserve(tensors.size());
     sizes.reserve(tensors.size());
-    for (const auto i : c10::irange(tensors.size())) {
-      const Tensor& t = tensors[i];
+    for (const auto& tensors_elem : tensors) {
+      const Tensor& t = tensors_elem;
       TORCH_CHECK(
           t.is_nested(), "Expected each tensor in given list to be nested.");
       TORCH_CHECK(

@@ -194,7 +194,7 @@ static void NCCL_CHECK_TIMEOUT(
   ncclResult_t result = to_nccl_result(status);
   auto startTimepoint = std::chrono::steady_clock::now();
   if (result == ncclInProgress) {
-    for (const auto i : c10::irange(comms.size())) {
+    for (const auto& comm : comms) {
       do {
         auto currentTimepoint = std::chrono::steady_clock::now();
         auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -204,7 +204,7 @@ static void NCCL_CHECK_TIMEOUT(
             timeElapsed <= nccl_nonblocking_timeout(),
             "NCCL timeout when waiting for nonblocking call to become successful.");
         sched_yield(); // yield to other threads
-        ncclCommGetAsyncError(to_nccl_comm(comms[i]), &result);
+        ncclCommGetAsyncError(to_nccl_comm(comm), &result);
       } while (result == ncclInProgress);
       if (result != ncclSuccess) {
         break; /* fall through to failed case */

@@ -1587,8 +1587,8 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_single_coalesced(
     buffers.push_back(inputTensors[i].clone());
   }
   std::vector<c10::intrusive_ptr<Work>> works;
-  for (const auto i : c10::irange(buffers.size())) {
-    std::vector<at::Tensor> inp = {buffers[i]};
+  for (const auto& buffer : buffers) {
+    std::vector<at::Tensor> inp = {buffer};
     AllreduceOptions arOpts;
     arOpts.reduceOp = opts.reduceOp;
     arOpts.timeout = opts.timeout;
@@ -2270,8 +2270,8 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter(
     }
   }
   std::vector<c10::intrusive_ptr<Work>> works;
-  for (const auto i : c10::irange(buffers.size())) {
-    std::vector<at::Tensor> inp = {buffers[i]};
+  for (const auto& buffer : buffers) {
+    std::vector<at::Tensor> inp = {buffer};
     AllreduceOptions arOpts;
     arOpts.reduceOp = opts.reduceOp;
     arOpts.timeout = opts.timeout;

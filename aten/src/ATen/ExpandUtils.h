@@ -433,14 +433,14 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   // expands a list of Tensors; ignores undefined (null) tensors
   bool first = true;
   SymDimVector sizes;
-  for (const auto i : c10::irange(to_expand.size())) {
-    if (!to_expand[i].defined()) {
+  for (const auto& to_expand_elem : to_expand) {
+    if (!to_expand_elem.defined()) {
       continue;
     } else if (first) {
-      sizes = to_expand[i].sym_sizes();
+      sizes = to_expand_elem.sym_sizes();
       first = false;
     } else {
-      sizes = infer_size_symdimvector(sizes, to_expand[i].sym_sizes());
+      sizes = infer_size_symdimvector(sizes, to_expand_elem.sym_sizes());
     }
   }
 

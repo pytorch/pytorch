@@ -355,14 +355,14 @@ namespace {
   {
     int64_t dims_before = 0, dims_indexed = 0;
     SymIntArrayRef replacement_shape;
-    for (const auto dim : c10::irange(indices_list.size())) {
-      if (!indices_list[dim].defined()) {
+    for (const auto& indices_list_elem : indices_list) {
+      if (!indices_list_elem.defined()) {
         if (dims_indexed == 0) {
           dims_before++;
         }
       } else {
         dims_indexed++;
-        replacement_shape = indices_list[dim].sym_sizes();
+        replacement_shape = indices_list_elem.sym_sizes();
       }
     }
 

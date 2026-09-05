@@ -213,8 +213,8 @@ TEST(TestStream, StreamPoolTest) {
 
   std::unordered_set<cudaStream_t> stream_set{};
   bool hasDuplicates = false;
-  for (const auto i: c10::irange(streams.size())) {
-    cudaStream_t cuda_stream = streams[i];
+  for (const auto& stream : streams) {
+    cudaStream_t cuda_stream = stream;
     auto result_pair = stream_set.insert(cuda_stream);
     if (!result_pair.second)
       hasDuplicates = true;
