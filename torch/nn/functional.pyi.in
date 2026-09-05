@@ -603,6 +603,7 @@ def mse_loss(
     size_average: bool | None = ...,
     reduce: bool | None = ...,
     reduction: str = ...,
+    weight: Tensor | None = ...,
 ) -> Tensor: ...
 
 __all__ += ["mse_loss"]
