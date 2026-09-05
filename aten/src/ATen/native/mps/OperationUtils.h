@@ -320,6 +320,15 @@ struct MPSKernelCache {
     return static_cast<T*>(LookUp(key));
   }
 
+  void clear() {
+    dispatch_sync(serialQueue_, ^() {
+      for (const auto& i : cache_) {
+        delete i.second.cachedKernel_;
+      }
+      cache_.clear();
+    });
+  }
+
  private:
   MPSKernelCache() {
     serialQueue_ = dispatch_queue_create("kernel cache queue", DISPATCH_QUEUE_SERIAL);
