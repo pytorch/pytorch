@@ -10,48 +10,19 @@ the closure that iterated over all args.
 
 Enabled via torch._functorch.config.debug_assert = True.
 
-Tests verify that a "debug_assert_wrapper" artifact is emitted via
-trace_structured.
+Tests inspect the generated "debug_assert_wrapper" source section.
 """
 
-import logging
-from contextlib import contextmanager
+from common_utils import capture_codegen_source
 
 import torch
 import torch._functorch.config
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-trace_log = logging.getLogger("torch.__trace")
-
-
 class TestCodegenDebugAssert(TestCase):
-    @contextmanager
     def _capture_codegen_source(self, artifact_name):
-        """Capture codegen artifacts from the structured trace log."""
-        captured: list[str] = []
-
-        class _ArtifactHandler(logging.Handler):
-            def emit(self, record):
-                metadata = getattr(record, "metadata", {})
-                if (
-                    "artifact" in metadata
-                    and metadata["artifact"].get("name") == artifact_name
-                ):
-                    payload = getattr(record, "payload", None)
-                    if payload is not None:
-                        captured.append(payload)
-
-        handler = _ArtifactHandler()
-        handler.setLevel(logging.DEBUG)
-        old_level = trace_log.level
-        trace_log.setLevel(logging.DEBUG)
-        trace_log.addHandler(handler)
-        try:
-            yield captured
-        finally:
-            trace_log.removeHandler(handler)
-            trace_log.setLevel(old_level)
+        return capture_codegen_source(artifact_name)
 
     @torch._functorch.config.patch(debug_assert=True)
     def test_mixed_requires_grad(self):
