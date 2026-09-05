@@ -2599,6 +2599,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   test_python_shard "$SHARD_NUMBER"
   test_aten
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  # Sleep for 8 hours when running shard 1
+  # echo "Shard ${SHARD_NUMBER} detected: sleeping for 8 hours"
+  # sleep 8h
   # TODO(temporary): run distributed-single first for faster signal while we
   # validate the split; move to the end once it's proven stable.
   if [[ "${BUILD_ENVIRONMENT}" == *cuda* || "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
