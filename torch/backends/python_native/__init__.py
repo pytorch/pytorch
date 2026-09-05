@@ -211,14 +211,18 @@ class PythonNativeModule(PropModule):
         result = registry.list_all_dsls()
         return list(result) if not isinstance(result, list) else result
 
-    def get_dsl_operations(self, dsl_name: str) -> list[str]:
-        """Get list of operations registered by a specific DSL.
+    def get_dsl_operations(self, dsl_name: str, lib_symbol: str = "aten") -> list[str]:
+        """Get list of operations registered by a specific DSL in one namespace.
 
         Args:
             dsl_name (str): Name of the DSL to query (e.g., 'triton', 'cutedsl').
+            lib_symbol (str): Namespace to report on, ``"aten"`` by default.
+                One namespace per call: op symbols are unique within a
+                namespace but not across them.
 
         Returns:
-            list[str]: Sorted list of operation names registered by the DSL.
+            list[str]: Sorted list of op symbols the DSL registered on
+            ``lib_symbol``.
 
         Example::
 
@@ -227,7 +231,7 @@ class PythonNativeModule(PropModule):
         """
         from torch._native.registry import get_dsl_operations
 
-        return get_dsl_operations(dsl_name)
+        return get_dsl_operations(dsl_name, lib_symbol)
 
     def disable_operations(self, *op_symbols: str):
         """Disable specific operations across all DSLs.

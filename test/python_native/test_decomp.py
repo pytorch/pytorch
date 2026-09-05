@@ -48,7 +48,7 @@ class TestNativeDecompTable(TestCase):
         self.dsl_name = f"test_{uuid.uuid4().hex[:8]}"
 
         # Snapshot registry state that registrations / deregistrations
-        # touch. `_graphs` is the source of truth; `_aten_override_libs`
+        # touch. `_graphs` is the source of truth; `_override_libs`
         # and `_libs` are derived (materialized dispatcher registrations)
         # and get rebuilt from `_graphs` on tearDown rather than restored
         # directly -- restoring destroyed Library objects would leave the
@@ -93,9 +93,9 @@ class TestNativeDecompTable(TestCase):
         """Tear down every live aten override + _native IMPL library and
         clear their dicts. The C++ dispatcher has no per-kernel removal,
         so Library._destroy() is the only way to unregister."""
-        for lib in list(self.registry._aten_override_libs.values()):
+        for lib in list(self.registry._override_libs.values()):
             lib._destroy()
-        self.registry._aten_override_libs.clear()
+        self.registry._override_libs.clear()
         for lib in list(self.registry._libs.values()):
             lib._destroy()
         self.registry._libs.clear()
