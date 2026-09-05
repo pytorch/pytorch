@@ -35,23 +35,65 @@ if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
 # by an equivalent.
 
 
+def _installed_torch_path(*path_components: str) -> str | None:
+    """Absolute path to ``<installed torch>/<path_components>``, or None.
+
+    Resolves through the installed distribution rather than ``__file__``, which
+    under a redirect-mode editable install points into the source checkout.
+
+    ``importlib.metadata.distribution("torch")`` is not sufficient: it returns
+    the first torch distribution on ``sys.path``, which need not be the
+    installed one. Consider every candidate and take one that is a real
+    installed distribution with an absolute path that exists.
+
+    The name filter matches on distribution directory names, so this does not
+    parse metadata for unrelated packages.
+    """
+    try:
+        from importlib.metadata import distributions
+    except Exception:
+        return None
+
+    relative = os.path.join("torch", *path_components)
+
+    def _is_installed_dist(dist: Any) -> bool:
+        # .dist-info carries METADATA; a setuptools .egg-info carries PKG-INFO.
+        # Both answer to the name "torch", and an .egg-info in a checkout can
+        # resolve to files that exist, so existence alone does not separate them.
+        try:
+            return dist.read_text("METADATA") is not None
+        except Exception:
+            return False
+
+    candidates = list(distributions(name="torch"))
+    for dist in sorted(candidates, key=lambda d: not _is_installed_dist(d)):
+        try:
+            # str() rather than os.fspath(): locate_file is typed as returning
+            # the SimplePath protocol, which does not promise __fspath__.
+            candidate = str(dist.locate_file(relative))
+        except Exception:
+            continue
+        if os.path.isabs(candidate) and os.path.exists(candidate):
+            return candidate
+    return None
+
+
 def _compute_torch_parent() -> str:
     torch_dir = os.path.dirname(os.path.abspath(__file__))
     if os.path.basename(torch_dir) == "shared":
         return os.path.dirname(os.path.dirname(torch_dir))
-    # In scikit-build-core editable installs with redirect mode, binary
-    # artifacts (bin/, lib/) are installed to the dist package directory
-    # rather than the source tree. Fall back to the installed package
-    # location for get_file_path.
-    if not os.path.isdir(os.path.join(torch_dir, "bin")):
-        try:
-            from importlib.metadata import distribution
-
-            installed = str(distribution("torch").locate_file("torch"))
-            if os.path.isdir(os.path.join(installed, "bin")):
-                return os.path.dirname(installed)
-        except Exception:
-            pass
+    # scikit-build-core editable installs in redirect mode put CMake-installed
+    # artifacts (bin/, lib/, include/, share/) beside the installed
+    # distribution rather than in the source tree, so resolve through the
+    # distribution whenever it actually holds them. For a wheel that is the
+    # same directory, so this only changes the answer for a split layout.
+    #
+    # Not keyed on `bin/` existing next to this module: tools/build_libtorch.py
+    # installs into <repo>/torch by design, so a checkout can hold one while the
+    # artifacts that matter live elsewhere.
+    installed_bin = _installed_torch_path("bin")
+    if installed_bin is not None:
+        return os.path.dirname(os.path.dirname(installed_bin))
     return os.path.dirname(torch_dir)
 
 

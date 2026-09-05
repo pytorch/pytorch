@@ -407,27 +407,40 @@ def _load_global_deps() -> None:
     lib_ext = ".dylib" if platform.system() == "Darwin" else ".so"
     lib_name = f"libtorch_global_deps{lib_ext}"
     here = os.path.abspath(__file__)
-    global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
+    beside_module = os.path.join(os.path.dirname(here), "lib", lib_name)
 
-    # In scikit-build-core editable installs with redirect mode, native libs are
-    # installed to the dist package location rather than relative to __file__.
-    if not os.path.exists(global_deps_lib_path):
-        try:
-            from importlib.metadata import distribution
+    # Prefer the installed distribution's copy over whatever sits beside
+    # __file__. Under a redirect-mode editable install those differ: __file__ is
+    # in the source checkout, which tools/build_libtorch.py also installs into by
+    # design, so the checkout can hold a loadable library from a different build.
+    # Preferring it would bind that one silently rather than erroring. For a
+    # wheel the two are the same directory and this changes nothing.
+    #
+    # _utils_internal is replaced wholesale in some downstream builds (see its
+    # header), so treat the helper as optional rather than assuming it exists.
+    try:
+        from torch._utils_internal import _installed_torch_path
+    except ImportError:
+        installed = None
+    else:
+        installed = _installed_torch_path("lib", lib_name)
 
-            installed = distribution("torch").locate_file(
-                os.path.join("torch", "lib", lib_name)
+    if installed is not None:
+        global_deps_lib_path = installed
+    else:
+        global_deps_lib_path = beside_module
+        if not os.path.exists(global_deps_lib_path):
+            # Nothing resolved. Reporting that plainly beats handing the path
+            # we already know is missing to CDLL, whose OSError is then routed
+            # through the CUDA-dependency retry below and surfaces as an
+            # unrelated dlopen failure naming the source checkout.
+            raise RuntimeError(
+                f"{lib_name} was not found next to torch/__init__.py "
+                f"({global_deps_lib_path}) and no installed torch distribution "
+                "provides it. On an editable install, a leftover .egg-info in "
+                "the checkout can shadow the real distribution; `spin clean` "
+                "removes it. Set USE_GLOBAL_DEPS=0 to skip this preload."
             )
-            # The importlib metadata SimplePath protocol was missing the exists
-            # method in older versions; however, the actual Path implementation
-            # has it and newer versions of importlib metadata have added it to
-            # the protocol, making the following ignore unnecessary from
-            # importlib_metadata 7.0.1 and Python 3.13 onwards.
-            # pyrefly: ignore[missing-attribute]
-            if installed.exists():
-                global_deps_lib_path = str(installed)
-        except Exception:
-            pass
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
