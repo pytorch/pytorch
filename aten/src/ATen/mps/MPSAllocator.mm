@@ -4,6 +4,7 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/mps/MPSAllocator.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/AllocatorConfig.h>
 #include <c10/core/Storage.h>
 #include <c10/util/Logging.h>
 #include <c10/util/env.h>
@@ -25,6 +26,66 @@ uint64_t HeapBlock::heap_counter = 0;
 // actually in use). Lets the registered c10 allocator report readiness via
 // DeviceAllocator::initialized() without forcing Metal initialization.
 static std::atomic<bool> s_mps_allocator_initialized{false};
+
+// MPS-specific allocator settings, parsed from the shared accelerator config
+// (PYTORCH_ALLOC_CONF, or torch._C._accelerator_setAllocatorSettings), the same
+// way CUDAAllocatorConfig registers a device parser hook. The only MPS key is
+// `mps_large_alloc_threshold_mb`: tensors at or above this size get their own
+// right-sized, non-split OVERSIZE heap (see HeapAllocator::getHeapTier) instead
+// of sharing a 1 GiB XLARGE heap. 0 (the default) leaves the XLARGE/OVERSIZE
+// boundary at its built-in kXLargeHeap/2 cutoff.
+class MPSAllocatorConfig {
+ public:
+  static MPSAllocatorConfig& instance() {
+    static MPSAllocatorConfig* s_instance = ([]() {
+      auto* inst = new MPSAllocatorConfig();
+      auto env = c10::utils::get_env("PYTORCH_ALLOC_CONF");
+      if (env.has_value()) {
+        inst->parseArgs(env.value());
+      }
+      return inst;
+    })();
+    return *s_instance;
+  }
+
+  static const std::unordered_set<std::string>& getKeys() {
+    static std::unordered_set<std::string> keys{"mps_large_alloc_threshold_mb"};
+    return keys;
+  }
+
+  size_t large_alloc_threshold_bytes() const {
+    return m_large_alloc_threshold_bytes.load();
+  }
+
+  void parseArgs(const std::string& env) {
+    // Reset to the default (disabled) if the key is not present, matching the
+    // shared AcceleratorAllocatorConfig::parseArgs convention: each settings
+    // string is a full spec, so omitting the key reverts to default.
+    m_large_alloc_threshold_bytes.store(0);
+    c10::CachingAllocator::ConfigTokenizer tokenizer(env);
+    for (size_t i = 0; i < tokenizer.size(); i++) {
+      const auto& key = tokenizer[i];
+      if (key == "mps_large_alloc_threshold_mb") {
+        tokenizer.checkToken(++i, ":");
+        m_large_alloc_threshold_bytes.store(tokenizer.toSizeT(++i) * 1024ull * 1024ull);
+      } else {
+        const auto& shared_keys = c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
+        TORCH_CHECK(
+            shared_keys.find(key) != shared_keys.end(), "Unrecognized key '", key, "' in MPS allocator config.");
+        i = tokenizer.skipKey(i);
+      }
+      if (i + 1 < tokenizer.size()) {
+        tokenizer.checkToken(++i, ",");
+      }
+    }
+  }
+
+ private:
+  MPSAllocatorConfig() = default;
+  std::atomic<size_t> m_large_alloc_threshold_bytes{0};
+};
+
+REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(MPSAllocatorConfig)
 
 void MPSHeapAllocatorImpl::init_allocator() {
   TORCH_CHECK(m_device.hasUnifiedMemory, "MPS backend is only supported on devices with unified memory");
@@ -100,8 +161,10 @@ size_t MPSHeapAllocatorImpl::get_allocation_size(size_t size, uint32_t usage) co
   // Keep the request in its original heap-size class (see getHeapTier): never let
   // rounding cross into a larger class, which would reserve a much larger backing
   // heap, nor push it past Metal's per-buffer limit.
+  const size_t oversize_threshold_bytes = MPSAllocatorConfig::instance().large_alloc_threshold_bytes();
   if (bucketed >= m_max_buffer_size ||
-      getHeapTier(bucketed, /*has_memory_pressure=*/false) != getHeapTier(aligned, /*has_memory_pressure=*/false)) {
+      getHeapTier(bucketed, /*has_memory_pressure=*/false, oversize_threshold_bytes) !=
+          getHeapTier(aligned, /*has_memory_pressure=*/false, oversize_threshold_bytes)) {
     return aligned;
   }
   return bucketed;
@@ -421,6 +484,11 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
   // we care about memory pressure if only we're allocating large buffers when the
   // low watermark limit has been reached
   params.has_memory_pressure = !(pool.usage & UsageFlags::SMALL) && getLowWatermarkValue() <= 0;
+  // Lowers the OVERSIZE cutoff (see HeapAllocator::getHeapTier) so a large-but-
+  // sub-512MB tensor gets a dedicated, non-split heap instead of sharing a 1 GiB
+  // XLARGE heap with everything else in that size class. 0 (the default) keeps
+  // the built-in kXLargeHeap/2 cutoff.
+  params.oversize_threshold_bytes = MPSAllocatorConfig::instance().large_alloc_threshold_bytes();
 
   // first, try to get a block from the existing pool.
   bool block_found = get_free_buffer(params);
@@ -598,12 +666,19 @@ id<MTLBuffer> MPSHeapAllocatorImpl::malloc_host(size_t size, uint32_t usage) {
   return buffer_block ? buffer_block->buffer : nullptr;
 }
 
+static bool block_is_shared(const BufferBlock* buffer_block) {
+  if (!buffer_block) {
+    return false;
+  }
+  return buffer_block->heap->pool->usage & UsageFlags::SHARED;
+}
+
 bool MPSHeapAllocatorImpl::isSharedBuffer(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
   // it's OK for the buffer_block to not exist yet
-  return buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED);
+  return block_is_shared(buffer_block);
 }
 
 id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size_t size) {
@@ -629,7 +704,7 @@ std::pair<const void*, uint32_t> MPSHeapAllocatorImpl::getSharedBufferPtr(const 
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
   // return if buffer was not allocated on MPSAllocator or isn't a Shared buffer
-  if (!buffer_block || !(buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
+  if (!buffer_block || !block_is_shared(buffer_block)) {
     return {nullptr, 0};
   }
   if (!buffer_block->cpu_ptr) {
@@ -656,7 +731,7 @@ c10::Storage MPSHeapAllocatorImpl::getHostAliasStorage(const c10::Storage& mps_s
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
   BufferBlock* buffer_block = get_allocated_buffer_block(mps_storage.data());
   TORCH_CHECK(buffer_block, "getHostAliasStorage: storage was not allocated by the MPSAllocator");
-  TORCH_CHECK(buffer_block->heap->pool->usage & UsageFlags::SHARED,
+  TORCH_CHECK(block_is_shared(buffer_block),
               "getHostAliasStorage: storage is not backed by a shared (unified) MTLBuffer");
 
   if (!buffer_block->cpu_ptr) {
@@ -682,7 +757,7 @@ bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
   for (const auto& buffer : buffers) {
     BufferBlock* buffer_block = get_allocated_buffer_block(buffer);
     // return if buffer was not allocated on MPSAllocator or isn't a Shared buffer
-    if (buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED)) {
+    if (block_is_shared(buffer_block)) {
       if (!buffer_block->event) {
         buffer_block->event = m_event_pool->acquireEvent(false, nullptr);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(buffer_block->event);
@@ -702,8 +777,7 @@ bool MPSHeapAllocatorImpl::waitForEvents(c10::ArrayRef<const void*> buffers) {
       BufferBlock* buffer_block = get_allocated_buffer_block(buffer);
       // wait on event if "shared" buffer was allocated on MPSAllocator and
       // or actually needs waiting (based on retainCount)
-      if (buffer_block && (buffer_block->heap->pool->usage & UsageFlags::SHARED) && buffer_block->retainCount() > 1 &&
-          buffer_block->event) {
+      if (block_is_shared(buffer_block) && buffer_block->retainCount() > 1 && buffer_block->event) {
         buffer_blocks.push_back(buffer_block);
       }
     }
