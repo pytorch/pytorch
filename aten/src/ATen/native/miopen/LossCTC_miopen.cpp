@@ -97,9 +97,6 @@ bool _use_miopen_ctc_loss(
     // The two length lists should be the same size, but nothing has compared
     // them by the time this runs; see the note in the cuDNN copy.
     use_miopen = use_miopen && (input_lengths.size() == target_lengths.size());
-  }
-
-  if (use_miopen) {
     int64_t max_input_length = log_probs.size(0);
     for (const auto input_length : input_lengths) {
       use_miopen = use_miopen && ((input_length == max_input_length) ? 1 : 0);

@@ -100,9 +100,6 @@ bool _use_cudnn_ctc_loss(
     // Nothing has compared these sizes yet; without this the loop below
     // reads input_lengths past its end.
     use_cudnn = use_cudnn && (input_lengths.size() == target_lengths.size());
-  }
-
-  if (use_cudnn) {
     int64_t max_input_length = log_probs.size(0);
     for (const auto input_length : input_lengths) {
       use_cudnn = use_cudnn && ((input_length == max_input_length) ? 1 : 0);
