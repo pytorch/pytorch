@@ -1,13 +1,12 @@
 # Owner(s): ["module: dynamo"]
 
-import unittest
-
 import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skipIfCrossRef,
     TestCase,
@@ -22,6 +21,8 @@ class TestDynamoDecompositions(torch._dynamo.test_case.TestCase):
     into their constituent ops to avoid item() graph breaks.
     When False, the original ops are preserved.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfCrossRef
     def test_addcmul_inplace_decomposition_enabled(self):
@@ -611,6 +612,8 @@ class GraphModule(torch.nn.Module):
 class TestDynamoDecompositionsNumerics(TestCase):
     """Numerics tests for dynamo decompositions across devices."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
     def test_addcmul_tensor_value_numerics(self, device):
@@ -860,7 +863,26 @@ class TestDynamoDecompositionsNumerics(TestCase):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
+    def test_add_scalar_alpha(self, device):
+        """Compiled add_ with scalar alpha matches eager."""
+        torch.manual_seed(42)
+        x = torch.randn(64, 64, device=device)
+        other = torch.randn(64, 64, device=device)
+
+        def fn(x, other):
+            return x.add_(other, alpha=2.3)
+
+        expected = fn(x.clone(), other)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), other)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(expected, actual)
+
+
+@xfailIfNoAcceleratorTriton
+class TestDynamoDecompositionsCUDAOnly(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
     def test_addcdiv_scalar_value_cuda(self, device):
         """Compiled addcdiv_ with scalar value matches eager on CUDA.
 
@@ -881,7 +903,6 @@ class TestDynamoDecompositionsNumerics(TestCase):
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
     def test_addcdiv_tensor_value_cuda(self, device):
         """Compiled addcdiv_ with tensor value matches eager on CUDA.
 
@@ -901,23 +922,13 @@ class TestDynamoDecompositionsNumerics(TestCase):
         actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2, value)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(expected, actual)
 
-    @skipIfCrossRef
-    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
-    def test_add_scalar_alpha(self, device):
-        """Compiled add_ with scalar alpha matches eager."""
-        torch.manual_seed(42)
-        x = torch.randn(64, 64, device=device)
-        other = torch.randn(64, 64, device=device)
-
-        def fn(x, other):
-            return x.add_(other, alpha=2.3)
-
-        expected = fn(x.clone(), other)
-        actual = torch.compile(fn, fullgraph=True)(x.clone(), other)  # noqa: UNSPECIFIED_BACKEND
-        self.assertEqual(expected, actual)
-
 
 instantiate_device_type_tests(TestDynamoDecompositionsNumerics, globals())
+instantiate_device_type_tests(
+    TestDynamoDecompositionsCUDAOnly,
+    globals(),
+    only_for="cuda",
+)
 
 if __name__ == "__main__":
     run_tests()
