@@ -2600,6 +2600,135 @@ kernel void luApplyPivotsRHS(
 INSTANTIATE_LU_APPLY_PIVOTS_RHS(float)
 INSTANTIATE_LU_APPLY_PIVOTS_RHS(float2)
 
+// Small-matrix inverse (luInvSmall): one thread per matrix, the matrix and
+// its inverse live in registers. Every array index must stay a compile-time
+// constant after unrolling, so row swaps scan for r == p instead of indexing
+// a[p] directly.
+template <short N>
+kernel void luInvSmall(
+    device const float* A [[buffer(0)]],
+    device float* X [[buffer(1)]],
+    device int* info [[buffer(2)]],
+    constant LUSmallInvParams<>& params [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  device const float* Ab = A + long(tid) * params.A_bstride;
+  device float* Xb = X + long(tid) * params.X_bstride;
+
+  float a[N][N];
+  float x[N][N];
+#pragma unroll
+  for (short r = 0; r < N; r++) {
+#pragma unroll
+    for (short c = 0; c < N; c++) {
+      a[r][c] = Ab[long(r) * params.A_rstride + long(c) * params.A_cstride];
+      x[r][c] = (r == c) ? 1.0f : 0.0f;
+    }
+  }
+
+  int inf = 0;
+#pragma unroll
+  for (short j = 0; j < N; j++) {
+    float bv = -1.0f;
+    short p = j;
+#pragma unroll
+    for (short r = 0; r < N; r++) {
+      if (r >= j) {
+        const float v = luPivotMag(a[r][j]);
+        if (v > bv) {
+          bv = v;
+          p = r;
+        }
+      }
+    }
+    if (bv == 0.0f && inf == 0) {
+      inf = j + 1;
+    }
+#pragma unroll
+    for (short r = 0; r < N; r++) {
+      if (r > j && r == p) {
+#pragma unroll
+        for (short c = 0; c < N; c++) {
+          const float ta = a[j][c];
+          a[j][c] = a[r][c];
+          a[r][c] = ta;
+          const float tx = x[j][c];
+          x[j][c] = x[r][c];
+          x[r][c] = tx;
+        }
+      }
+    }
+    if (bv != 0.0f) {
+      const float rp = luRecip(a[j][j]);
+#pragma unroll
+      for (short r = 0; r < N; r++) {
+        if (r > j) {
+          const float l = a[r][j] * rp;
+#pragma unroll
+          for (short c = 0; c < N; c++) {
+            if (c > j) {
+              a[r][c] = fma(-l, a[j][c], a[r][c]);
+            }
+            x[r][c] = fma(-l, x[j][c], x[r][c]);
+          }
+        }
+      }
+    }
+  }
+#pragma unroll
+  for (short c = N - 1; c >= 0; c--) {
+#pragma unroll
+    for (short k = 0; k < N; k++) {
+      x[c][k] = x[c][k] / a[c][c];
+    }
+#pragma unroll
+    for (short i = 0; i < N; i++) {
+      if (i < c) {
+#pragma unroll
+        for (short k = 0; k < N; k++) {
+          x[i][k] = fma(-a[i][c], x[c][k], x[i][k]);
+        }
+      }
+    }
+  }
+  info[tid] = inf;
+
+#pragma unroll
+  for (short r = 0; r < N; r++) {
+#pragma unroll
+    for (short c = 0; c < N; c++) {
+      Xb[long(r) * params.X_rstride + long(c) * params.X_cstride] = x[r][c];
+    }
+  }
+}
+
+#define INSTANTIATE_LU_INV_SMALL(N)                      \
+  template [[host_name("luInvSmall_" #N)]]               \
+  kernel void luInvSmall<N>(                             \
+      device const float* A [[buffer(0)]],               \
+      device float* X [[buffer(1)]],                     \
+      device int* info [[buffer(2)]],                    \
+      constant LUSmallInvParams<>& params [[buffer(3)]], \
+      uint tid [[thread_position_in_grid]]);
+
+// exact sizes 1..kLUSmallInvMax picked by lu_inv_small_encode
+INSTANTIATE_LU_INV_SMALL(1)
+INSTANTIATE_LU_INV_SMALL(2)
+INSTANTIATE_LU_INV_SMALL(3)
+INSTANTIATE_LU_INV_SMALL(4)
+INSTANTIATE_LU_INV_SMALL(5)
+INSTANTIATE_LU_INV_SMALL(6)
+INSTANTIATE_LU_INV_SMALL(7)
+INSTANTIATE_LU_INV_SMALL(8)
+INSTANTIATE_LU_INV_SMALL(9)
+INSTANTIATE_LU_INV_SMALL(10)
+INSTANTIATE_LU_INV_SMALL(11)
+INSTANTIATE_LU_INV_SMALL(12)
+INSTANTIATE_LU_INV_SMALL(13)
+INSTANTIATE_LU_INV_SMALL(14)
+INSTANTIATE_LU_INV_SMALL(15)
+INSTANTIATE_LU_INV_SMALL(16)
+static_assert(kLUSmallInvMax == 16, "update luInvSmall instantiations");
+
 kernel void applyPivots(
     device float* P [[buffer(0)]],
     device const int* pivots [[buffer(1)]],
