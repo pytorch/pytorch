@@ -1165,6 +1165,24 @@ class AutogradFunctionVariable(VariableTracker):
     def python_type(self) -> type:
         return type
 
+    def get_real_python_backed_value(self) -> Any:
+        return self.fn_cls
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        return hash(self.fn_cls), False
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "ConstantVariable":
+        if self.fn_cls_source is None:
+            return super().call_obj_hasattr(tx, name)
+        install_guard(
+            self.fn_cls_source.make_guard(
+                functools.partial(GuardBuilder.HASATTR, attr=name)
+            )
+        )
+        return variables.ConstantVariable.create(hasattr(self.fn_cls, name))
+
     def _resolve_kwargs(
         self,
         args: list[VariableTracker],
