@@ -28,6 +28,7 @@ from torch._prims_common import (
     FloatLike,
     FloatWithoutSymFloat,
     IntLike,
+    IntWithoutSymInt,
     is_contiguous_for_memory_format_or_false,
     is_contiguous_or_false,
     is_weakly_lesser_type,
@@ -604,6 +605,22 @@ def _make_inplace(fn):
     # nb. We use the name of the first argument used in the unary references
     @wraps(fn)
     def _fn(a, *args, **kwargs):
+        # In-place ops never resize `a`, but out_wrapper would resize `out=a`
+        # if the broadcasted result shape were larger. Reject the mismatch up
+        # front with the same error eager (TensorIterator) raises. Otherwise
+        # fake/meta tensors silently change shape here, which corrupts shape
+        # metadata recorded before the op (e.g. dynamo's tracked fakes).
+        shapes = [
+            t.shape
+            for t in itertools.chain(args, kwargs.values())
+            if isinstance(t, TensorLike)
+        ]
+        if shapes:
+            broadcasted_shape = tuple(_broadcast_shapes(a.shape, *shapes))
+            torch._check(
+                broadcasted_shape == a.shape,
+                lambda: f"output with shape {a.shape} doesn't match the broadcast shape {broadcasted_shape}",
+            )
         return fn(a, *args, out=a, **kwargs)
 
     inplace_name = f"{fn.__name__}_"
@@ -677,7 +694,7 @@ def is_complex(input: TensorLikeType):
 
 
 @register_decomposition(aten.conj_physical)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def conj_physical(input: TensorLikeType):
     if not utils.is_complex_dtype(input.dtype):
         return input
@@ -782,8 +799,9 @@ def frac(x: TensorLikeType) -> TensorLikeType:
 def imag(a: TensorLikeType) -> TensorLikeType:
     if not isinstance(a, TensorLike):
         raise AssertionError(f"a must be TensorLike, got {type(a)}")
-    torch._check(
-        utils.is_complex_dtype(a.dtype), lambda: "imag only supports complex tensors."
+    torch._check_type(
+        utils.is_complex_dtype(a.dtype),
+        lambda: "imag only supports complex tensors.",
     )
     return prims.imag(a)
 
@@ -813,7 +831,7 @@ def isinf(a: TensorLikeType) -> TensorLikeType:
     exact_dtype=True,
 )
 def isposinf(a: TensorLikeType) -> TensorLikeType:
-    torch._check(
+    torch._check_type(
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isposinf, got dtype {a.dtype}",
     )
@@ -827,7 +845,7 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
     exact_dtype=True,
 )
 def isneginf(a: TensorLikeType) -> TensorLikeType:
-    torch._check(
+    torch._check_type(
         not utils.is_complex_dtype(a.dtype),
         lambda: f"Complex dtype is not supported for isneginf, got dtype {a.dtype}",
     )
@@ -925,7 +943,7 @@ def logsumexp(
 
 
 @register_decomposition(aten.nan_to_num)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def nan_to_num(
     a: TensorLikeType,
     nan: NumberType | None = 0.0,
@@ -954,7 +972,7 @@ def nan_to_num(
 
 
 def _neg_meta(a: TensorLikeType):
-    torch._check(
+    torch._check_not_implemented(
         a.dtype is not torch.bool,
         lambda: (
             "Negation, the `-` operator, on a bool tensor is not supported. "
@@ -978,7 +996,7 @@ def positive(a: TensorLikeType) -> TensorLikeType:
         raise AssertionError(f"a must be TensorLike, got {type(a)}")
     if a.dtype is torch.bool:
         msg = "positive does not support bool tensors."
-        raise RuntimeError(msg)
+        raise NotImplementedError(msg)
     return a
 
 
@@ -1521,7 +1539,7 @@ def fmod(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 @register_decomposition(aten.frexp)
-@out_wrapper("mantissa", "exponent")
+@out_wrapper("mantissa", "exponent", exact_dtype=True)
 def frexp(self: TensorLikeType) -> tuple[TensorLikeType, TensorLikeType]:
     return torch.return_types.frexp(prims.frexp(self))
 
@@ -1865,7 +1883,7 @@ def sub(
     a, b = _maybe_broadcast(a, b)
 
     if isinstance(a, TensorLike) and isinstance(b, TensorLike):
-        torch._check(
+        torch._check_not_implemented(
             not utils.is_boolean_dtype(a.dtype) and not utils.is_boolean_dtype(b.dtype),
             lambda: (
                 "Subtraction, the `-` operator, with two bool tensors is not supported. "
@@ -2017,6 +2035,29 @@ def clamp(
     if min is None and max is None:
         msg = "clamp called but both min and max are none!"
         raise ValueError(msg)
+
+    if utils.is_integer_dtype(a.dtype):
+        # A lower bound below the dtype's range (or an upper bound above it) is a
+        # no-op and is dropped. The opposite case would force every element to an
+        # unrepresentable value, so it is rejected.
+        limits = torch.iinfo(a.dtype)
+        if isinstance(min, IntWithoutSymInt):
+            if min > limits.max:
+                raise RuntimeError(
+                    f"Clamp min value {min} is outside the representable range of {a.dtype}"
+                )
+            if min < limits.min:
+                min = None
+        if isinstance(max, IntWithoutSymInt):
+            if max < limits.min:
+                raise RuntimeError(
+                    f"Clamp max value {max} is outside the representable range of {a.dtype}"
+                )
+            if max > limits.max:
+                max = None
+        if min is None and max is None:
+            # Both bounds were dropped as no-ops; return a fresh tensor.
+            return torch.clone(a)
 
     if min is not None:
         a_isnan = torch.isnan(a)
@@ -2398,7 +2439,7 @@ def _make_copy_from_view(fn, return_none_on_out_variant=False):
 
 
 @register_decomposition(aten.all)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def all(
     a: TensorLikeType,
     dim: DimsType | None = None,
@@ -2413,7 +2454,7 @@ def all(
 
 
 @register_decomposition(aten.any)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def any(
     a: TensorLikeType,
     dim: DimsType | None = None,
@@ -2522,6 +2563,13 @@ def amin(
     *,
     out: Tensor | None = None,
 ) -> TensorLikeType:
+    if out is not None:
+        torch._check(
+            a.dtype == out.dtype,
+            lambda: f"Expected the dtype for input and out to match, but got "
+            f"{a.dtype} for input's dtype and {out.dtype} for out's dtype.",
+        )
+
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
@@ -2546,6 +2594,13 @@ def amax(
     *,
     out: Tensor | None = None,
 ) -> TensorLikeType:
+    if out is not None:
+        torch._check(
+            a.dtype == out.dtype,
+            lambda: f"Expected the dtype for input and out to match, but got "
+            f"{a.dtype} for input's dtype and {out.dtype} for out's dtype.",
+        )
+
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
@@ -3374,14 +3429,61 @@ def native_group_norm(
     eps: float,
 ) -> tuple[Tensor, Tensor, Tensor]:
     torch._check(
-        input.ndim >= 2,
-        lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
+        num_channels > 0,
+        lambda: f"Expected number of channels to be greater than 0, got {num_channels}",
+    )
+    torch._check(
+        flattened_inner_size > 0,
+        lambda: f"Expected HxW to be greater than 0, got {flattened_inner_size}",
+    )
+    torch._check(
+        num_groups > 0,
+        lambda: f"Expected num groups to be greater than 0, got {num_groups}",
     )
     torch._check(
         num_channels % num_groups == 0,
-        lambda: "Expected number of channels in input to be divisible by num_groups, "
-        + f"but got input of shape {input.shape} and num_groups = {num_groups}",
+        lambda: (
+            "Expected number of channels in input to be divisible by num_groups, "
+            f"but got input of shape {input.shape} and num_groups={num_groups}"
+        ),
     )
+    torch._check(
+        weight is None or (weight.ndim == 1 and weight.numel() == num_channels),
+        lambda: (
+            "Expected weight to be a vector of size equal to the number of "
+            f"channels in input, but got weight of shape {weight.shape} "  # pyrefly: ignore[missing-attribute]
+            f"and input of shape {input.shape}"
+        ),
+    )
+    torch._check(
+        bias is None or (bias.ndim == 1 and bias.numel() == num_channels),
+        lambda: (
+            "Expected bias to be a vector of size equal to the number of "
+            f"channels in input, but got bias of shape {bias.shape} "  # pyrefly: ignore[missing-attribute]
+            f"and input of shape {input.shape}"
+        ),
+    )
+    # This check isn't in the C++ operator, but is necessary for how we apply weight and
+    # bias below.
+    torch._check(
+        input.ndim >= 2,
+        lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
+    )
+
+    supports_memory_format = input.device.type in (
+        "cpu",
+        "cuda",
+        "meta",
+        torch._C._get_privateuse1_backend_name(),
+    )
+    mem_fmt = (
+        utils.suggest_memory_format(input)
+        if supports_memory_format
+        else torch.contiguous_format
+    )
+    input = input.contiguous(memory_format=mem_fmt)
+    weight = weight.contiguous() if weight is not None else None
+    bias = bias.contiguous() if bias is not None else None
 
     computation_dtype = utils.get_computation_dtype(input.dtype)
     input_acc = _maybe_convert_to_dtype(input, computation_dtype)
@@ -3425,6 +3527,7 @@ def native_group_norm(
             out = out + unsqueeze_bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
+    out = out.contiguous(memory_format=mem_fmt)
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
     rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
 
@@ -3675,7 +3778,7 @@ def stft(
     else:
         return_complex_ = return_complex
 
-    torch._check(
+    torch._check_not_implemented(
         utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
         lambda: "stft expected a tensor of floating point or complex values",
     )
@@ -3773,11 +3876,11 @@ def istft(
     hop_length_ = hop_length if hop_length is not None else n_fft // 4
     win_length_ = win_length if win_length is not None else n_fft
 
-    torch._check(
+    torch._check_type(
         utils.is_complex_dtype(input.dtype),
         lambda: (
-            "istft input and window must be on the same device but got self on "
-            + f"{input.device} and window on {window.device}"  # type: ignore[union-attr]
+            "istft requires a complex-valued input tensor matching the "
+            "output from stft with return_complex=True."
         ),
     )
     n_frames = input.size(-1)
@@ -4364,7 +4467,7 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
         )
 
 
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return x.clone(memory_format=torch.contiguous_format).index_copy_(
         dim, index, tensor
@@ -4449,7 +4552,7 @@ def _index_fill(
         return out
 
 
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_add(
     x: TensorLike,
     dim: int,
@@ -4468,7 +4571,7 @@ def index_add(
 
 
 @register_decomposition(aten.index_select)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def index_select(x: TensorLike, dim: int, index: TensorLike):
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
@@ -6147,7 +6250,14 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
         # `masked_fill` allows cpu scalar to be moved to cuda, xpu and hpu but not otherwise.
         is_cpu_scalar = (
             a.device.type
-            in ["cuda", "xpu", "mps", torch._C._get_privateuse1_backend_name(), "hpu"]
+            in [
+                "cuda",
+                "xpu",
+                "mps",
+                torch._C._get_privateuse1_backend_name(),
+                "hpu",
+                "mtia",
+            ]
             and value.device.type == "cpu"
         )
         torch._check(
@@ -6276,7 +6386,7 @@ rpow = _make_r_binary_op(pow)
 
 
 @register_decomposition(aten.triu)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def triu(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
     torch._check(
         a.ndim >= 2, lambda: "triu: input tensor must have at least 2 dimensions"
@@ -6293,7 +6403,7 @@ def triu(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
 
 
 @register_decomposition(aten.tril)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def tril(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
     torch._check(
         a.ndim >= 2, lambda: "tril: input tensor must have at least 2 dimensions"

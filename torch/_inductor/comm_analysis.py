@@ -865,7 +865,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
             backend = pg._get_backend(device)
         except RuntimeError:
             return None
-        if not backend.supports_time_estimate:
+        if not backend._supports_time_estimate:
             return None
 
         flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))

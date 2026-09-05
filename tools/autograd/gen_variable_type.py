@@ -295,6 +295,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "matrix_exp",
     "linalg_matrix_exp",
     "linalg_matrix_sqrth",
+    "linalg_polar",
     "_linalg_eigh",
     "cholesky_solve",
     "linalg_qr",
@@ -450,9 +451,10 @@ if (${tensor_name}_storage_saved.has_value() &&
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate(
     """\
-std::vector<::std::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
+std::vector<::std::optional<Storage>> ${tensorlist_name}_storage_saved;
+${tensorlist_name}_storage_saved.reserve(${tensorlist_name}.size());
 for (const Tensor& tensor : ${tensorlist_name})
-  ${tensorlist_name}_storage_saved.push_back(
+  ${tensorlist_name}_storage_saved.emplace_back(
     tensor.has_storage() ? ::std::optional<Storage>(tensor.storage()) : ::std::nullopt);
 """
 )
@@ -468,9 +470,10 @@ for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled
 
 SAVE_OPTIONALTENSORLIST_STORAGE = CodeTemplate(
     """\
-std::vector<::std::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
+std::vector<::std::optional<Storage>> ${tensorlist_name}_storage_saved;
+${tensorlist_name}_storage_saved.reserve(${tensorlist_name}.size());
 for (const ::std::optional<Tensor>& tensor : ${tensorlist_name})
-  ${tensorlist_name}_storage_saved.push_back(
+  ${tensorlist_name}_storage_saved.emplace_back(
     tensor.has_value() && tensor->has_storage() ? ::std::optional<Storage>(tensor->storage()) : ::std::nullopt);
 """
 )
@@ -705,12 +708,34 @@ if (grad_fn) {
 """
 )
 
+# rebase_history returns the node actually attached as the new history (the
+# CopySlices node when rebasing through a view). It is captured so that node
+# creation hooks fire on the composed node, not the inner one.
+REBASE_HISTORY = CodeTemplate(
+    """\
+c10::intrusive_ptr<Node> _rebased_fn;
+if (grad_fn) {
+    _rebased_fn = rebase_history(${differentiable_outputs}, grad_fn);
+}
+"""
+)
+
+# Fired at the very end of the function, after saved variables (including
+# saved outputs) have been stored on grad_fn.
+FIRE_NODE_CREATION_HOOKS = CodeTemplate(
+    """\
+if (${node}) {
+    fire_node_creation_hooks(${node});
+}
+"""
+)
+
 LOOP_OVER_VECTOR_OF_GRAD_FNS = CodeTemplate(
     """\
 if (!grad_fns.empty()) {
     ${preamble}
     for (const auto& i : c10::irange(grad_fns.size())) {
-        auto grad_fn = grad_fns[i];
+        const auto& grad_fn = grad_fns[i];
         if (grad_fn != nullptr) {
             ${statements}
         }
@@ -1808,14 +1833,36 @@ def emit_body(
             outs=output_names if not is_inplace_foreach else "self"
         )
         if not is_inplace_foreach:
+            if fn == "rebase":
+                return REBASE_HISTORY.substitute(differentiable_outputs=outs)
             return SET_HISTORY.substitute(fn=fn, differentiable_outputs=outs)
         else:
-            return LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(
+            decl = ""
+            capture = ""
+            if fn == "rebase":
+                decl = "c10::SmallVector<c10::intrusive_ptr<Node>, 8> _rebased_fns(grad_fns.size());\n"
+                capture = "_rebased_fns[i] = "
+            return decl + LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(
                 preamble=(
                     f"auto differentiable_outputs = {outs};\n"
                     f"TORCH_INTERNAL_ASSERT(differentiable_outputs.size() == grad_fns.size());"
                 ),
-                statements=f"{fn}_history(differentiable_outputs[i], grad_fns[i]);",
+                statements=f"{capture}{fn}_history(differentiable_outputs[i], grad_fns[i]);",
+            )
+
+    def emit_fire_creation_hooks() -> str:
+        rebase = modifies_arguments(f) and view_info is None
+        if not is_inplace_foreach:
+            node = "_rebased_fn" if rebase else "grad_fn"
+            return FIRE_NODE_CREATION_HOOKS.substitute(node=node)
+        else:
+            node = "_rebased_fns[i]" if rebase else "grad_fns[i]"
+            return (
+                "for (const auto& i : c10::irange(grad_fns.size())) {\n"
+                f"    if ({node}) {{\n"
+                f"        fire_node_creation_hooks({node});\n"
+                "    }\n"
+                "}\n"
             )
 
     def emit_save_outputs() -> str:
@@ -2248,6 +2295,9 @@ def emit_body(
     if requires_derivative:
         # Save only after the forward AD has been set up
         body.append(emit_save_outputs())
+        # Fire node creation hooks only once the node is fully populated,
+        # including saved outputs above.
+        body.append(emit_fire_creation_hooks())
 
     if str(f.func.name.name) in RESET_GRAD_ACCUMULATOR:
         # `inplace` implies that there is exactly one output named `self`,

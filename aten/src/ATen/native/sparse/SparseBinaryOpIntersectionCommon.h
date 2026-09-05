@@ -113,11 +113,11 @@ TensorIterator make_value_selection_intersection_iter(
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_owned_output(res_values)
-    .add_owned_input(restride_values(lhs_values))
-    .add_owned_input(restride_idx(lhs_select_idx))
-    .add_owned_input(restride_values(rhs_values))
-    .add_owned_input(restride_idx(rhs_select_idx))
-    .add_owned_input(restride_idx(intersection_counts))
+    .add_owned_const_input(restride_values(lhs_values))
+    .add_owned_const_input(restride_idx(lhs_select_idx))
+    .add_owned_const_input(restride_values(rhs_values))
+    .add_owned_const_input(restride_idx(rhs_select_idx))
+    .add_owned_const_input(restride_idx(intersection_counts))
     .build();
 
   return iter;
@@ -264,7 +264,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .add_output(hash)
-      .add_input(probably_coalesced_nnz_arange)
+      .add_const_input(probably_coalesced_nnz_arange)
       .build();
 
     {
@@ -339,21 +339,21 @@ void _sparse_binary_op_intersection_kernel_impl(
       ? (*source_indices_hash_opt).contiguous()
       : at::empty({0}, probably_coalesced._indices().options().dtype(kLong));
     const auto* RESTRICT hash_ptr = source_indices_hash_opt.has_value()
-      ? hash.data_ptr<int64_t>()
+      ? hash.const_data_ptr<int64_t>()
       : nullptr;
 
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
       .add_owned_output(dummy.expand_as(source_arange))
-      .add_input(source_arange)
+      .add_const_input(source_arange)
       .build();
 
     {
       const auto* RESTRICT ptr_indices = source_indices.const_data_ptr<index_t>();
       const auto* RESTRICT ptr_sorted_hash = sorted_hash.const_data_ptr<int64_t>();
       const auto sorted_hash_len = sorted_hash.numel();
-      auto* RESTRICT ptr_intersection_count = intersection_count.data_ptr<int64_t>();
-      auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.data_ptr<int64_t>();
+      auto* RESTRICT ptr_intersection_count = intersection_count.mutable_data_ptr<int64_t>();
+      auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.mutable_data_ptr<int64_t>();
 
       // Fusing hash computation with hash intersection.
       KernelLauncher::launch(iter,

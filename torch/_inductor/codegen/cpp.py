@@ -630,14 +630,18 @@ class RecordOptimizationContext:
         return self.current_node
 
 
-def decltype_promoted(*args):
+def arith_promoted(op, a, b):
+    args = (a, b)
     if any(isinstance(arg, CppCSEVariable) and arg.is_vec for arg in args):
         raise AssertionError("Promotion of vector types is not supported")
 
-    if (dt := get_promote_dtype(args)) is not None:
-        return DTYPE_TO_CPP[dt]
-    else:
-        return f"decltype({args[0]})"
+    dtype = get_promote_dtype(args)
+    cpp_type = DTYPE_TO_CPP[dtype] if dtype is not None else f"decltype({a})"
+    if dtype in (torch.int32, torch.int64):
+        # signed overflow is UB in C++; int8/int16 promote to int and cannot overflow
+        cast = f"static_cast<std::make_unsigned_t<{cpp_type}>>"
+        return f"{cpp_type}({cast}({a}) {op} {cast}({b}))"
+    return f"{cpp_type}({a} {op} {b})"
 
 
 class CppOverrides(OpOverrides):
@@ -645,15 +649,15 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def add(a, b):
-        return f"{decltype_promoted(a, b)}({a} + {b})"
+        return arith_promoted("+", a, b)
 
     @staticmethod
     def sub(a, b):
-        return f"{decltype_promoted(a, b)}({a} - {b})"
+        return arith_promoted("-", a, b)
 
     @staticmethod
     def mul(a, b):
-        return f"{decltype_promoted(a, b)}({a} * {b})"
+        return arith_promoted("*", a, b)
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
@@ -1335,9 +1339,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def expm1(x):
-        # decompose for a better performance
-        vec_one = f"decltype({x})(1)"
-        return f"{x}.exp() - {vec_one}"
+        return f"{x}.expm1()"
 
     @staticmethod
     def erf(x):
@@ -2313,6 +2315,9 @@ class CppKernel(Kernel):
         csevar.update_on_args("load", (self, name, index), {})
         return csevar
 
+    def _use_parallel_atomic_add(self):
+        return config.cpp.dynamic_threads or self.num_threads != 1
+
     def store(self, name, index, value, mode=None):
         if "buf" not in name:
             raise AssertionError('expected "buf" in name')
@@ -2321,7 +2326,7 @@ class CppKernel(Kernel):
         if mode is None:
             line = f"{var}[{cexpr_index(index)}] = {value};"
         elif mode == "atomic_add":
-            if not config.cpp.dynamic_threads and self.num_threads == 1:
+            if not self._use_parallel_atomic_add():
                 line = f"{var}[{cexpr_index(index)}] += {value};"
             else:
                 dtype = V.graph.get_dtype(name)
@@ -2924,7 +2929,7 @@ class CppVecKernel(CppKernel):
         if mask.dtype != torch.bool:
             raise AssertionError(repr(mask))
         num_vectors = self._get_num_vectors(dtype)
-        return f"{mask}.template cast<{DTYPE_TO_CPP[dtype]},{num_vectors}>()"
+        return f"inductor_vec_mask_cast<{DTYPE_TO_CPP[dtype]},{num_vectors}>({mask})"
 
     def _get_vec_load_line(
         self,
@@ -3199,7 +3204,7 @@ class CppVecKernel(CppKernel):
             code = self._get_store_line(value, var, index, dtype)
             self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
         elif mode == "atomic_add":
-            if not config.cpp.dynamic_threads and self.num_threads == 1:
+            if not self._use_parallel_atomic_add():
                 code = self._get_store_line(
                     f"{value}",
                     var,
@@ -3212,6 +3217,8 @@ class CppVecKernel(CppKernel):
                 n_src = self._get_num_vectors(dtype)
                 n_idx = self._get_num_vectors(torch.int64)
                 cdtype = DTYPE_TO_CPP[dtype]
+                # ops.index_expr re-applies subclass index transforms, so a caller
+                # that already transformed must pass the untransformed index
                 index = ops.index_expr(index, torch.int64).value
                 if isinstance(index, CppCSEVariable) and not index.is_vec:
                     index = self.broadcast(index)
@@ -4022,7 +4029,9 @@ class CppTile2DKernel(CppVecKernel):
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
         else:
-            new_index = self.transform_indexing(index)
+            # the parallel atomic_add path re-applies transform_indexing via ops.index_expr
+            vec_atomic_add = mode == "atomic_add" and self._use_parallel_atomic_add()
+            new_index = index if vec_atomic_add else self.transform_indexing(index)
             super().store(name, new_index, value, mode)
 
     def codegen_inner_loops(self, code):
@@ -6379,7 +6388,12 @@ class LoopNest:
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
-            num_steps = num_steps * FloorDiv(loop.size, loop.steps)
+            # Trip count of `for (var = 0; var < size; var += steps)`. The bound
+            # is `size` and the increment is `steps`, so a loop with size < steps
+            # (a vectorized loop narrower than the vector width) still runs one
+            # iteration. Use CeilDiv, not FloorDiv, which would count 0 and zero
+            # out the whole product.
+            num_steps = num_steps * CeilDiv(loop.size, loop.steps)
             max_depth += 1
 
         def get_simd_vec_depth(loops):

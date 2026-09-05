@@ -4,7 +4,8 @@
 # This workflow runs smoke tests on B200 hardware
 #
 # Flow:
-# 1. Builds PyTorch with CUDA 13.0+ and sm100 architecture for B200
+# 1. Builds PyTorch with CUDA 13.0 for B200's sm100 architecture
+#    (CUDA 13.2 sm100 jobs moved to trunk.yml so every commit gets tested on B200)
 # 2. Runs smoke tests on linux.dgx.b200 runner
 # 3. Tests executed are defined in .ci/pytorch/test.sh -> test_python_smoke_b200() function
 #    - Includes matmul, scaled_matmul, FP8, and FlashAttention CuTe tests
@@ -24,7 +25,7 @@ on:
       - .github/workflows/test-b200.yml
   workflow_dispatch:
   schedule:
-    - cron: 0 */2 * * *  # every 2 hours
+    - cron: 0 */6 * * *  # every 6 hours
   push:
     tags:
       - ciflow/b200/*

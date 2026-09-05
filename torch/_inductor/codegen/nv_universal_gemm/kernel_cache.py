@@ -10,6 +10,7 @@ The first call to get_kernel_by_name() loads all kernels from cutlass.operators
 dict for O(1) lookup (~0.1 μs).
 """
 
+import dataclasses
 import functools
 import logging
 import threading
@@ -17,6 +18,8 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import torch
+from torch._inductor.kernel.gemm_epilogue_codegen import get_cutedsl_epilogue_schema
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -36,7 +39,7 @@ def _device_target(cc: int) -> Any:
     return TargetSm.ensure(f"{cc}a")
 
 
-def _epilogue_args_signature(epilogue_args: Any) -> tuple:
+def _epilogue_args_signature(epilogue_args: object) -> tuple:
     """Extract a hashable signature of epilogue args for cache keying.
 
     Two callers with the same `(efc_kernel_name, epilogue_source)` but
@@ -51,11 +54,28 @@ def _epilogue_args_signature(epilogue_args: Any) -> tuple:
     tensors = getattr(epilogue_args, "tensors", None)
     if not tensors:
         return ()
-    sig: list[tuple] = []
+    from cutlass.operators.utils.tensor import TensorWrapper
+
+    schema = get_cutedsl_epilogue_schema(getattr(epilogue_args, "epilogue_fn", None))
+    scalar_broadcast_names = tuple(
+        sorted(schema.scalar_broadcast_names) if schema is not None else ()
+    )
+    sig: list[tuple] = [("scalar_broadcast_names", scalar_broadcast_names)]
     for name, val in tensors.items():
         if torch.is_tensor(val):
             sig.append(
                 (name, "tensor", val.dtype, tuple(val.shape), tuple(val.stride()))
+            )
+        elif isinstance(val, TensorWrapper):
+            sig.append(
+                (
+                    name,
+                    "tensor_wrapper",
+                    str(val.dtype),
+                    tuple(val.shape),
+                    tuple(val.stride),
+                    getattr(val, "_alignment_bytes", None),
+                )
             )
         else:
             sig.append((name, type(val).__name__))
@@ -73,7 +93,7 @@ _cache_lock = threading.RLock()
 _kernel_by_name_cache: dict[str, Any] | None = None
 
 
-def _operand_dtype_str(operand: Any) -> str | None:
+def _operand_dtype_str(operand: object) -> str | None:
     """Best-effort cutlass dtype name for a kernel operand or args operand."""
     dtype = getattr(operand, "dtype", None)
     if dtype is None:
@@ -117,11 +137,12 @@ def _get_kernel_cache() -> dict[str, Any]:
     """
     _ensure_caches()
     cache = _kernel_by_name_cache
-    assert cache is not None  # noqa: S101
+    if cache is None:
+        raise AssertionError("expected cache to be not None")
     return cache
 
 
-def _operand_sig(operand: Any) -> tuple | None:
+def _operand_sig(operand: object) -> tuple | None:
     """Hashable (dtype, shape, stride, scale-sig, mode, swizzle) signature."""
     if operand is None:
         return None
@@ -147,7 +168,7 @@ def _operand_sig(operand: Any) -> tuple | None:
     return (dtype, tuple(shape), tuple(stride), scale_sig, mode, swizzle)
 
 
-def _partition_sig(args: Any) -> tuple | None:
+def _partition_sig(args: object) -> tuple | None:
     """Signature capturing everything `supports(args)` depends on, or None if
     it can't be fully determined (falls back to a non-memoized scan)."""
     a = _operand_sig(getattr(args, "A", None))
@@ -191,9 +212,61 @@ def _args_query_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
     metadata_filter = (
         (lambda md: "EFC" in md.operator_class.__name__) if efc_only else None
     )
-    return cutlass.operators.get_operators(
-        args=args, target_sm=f"{cc}a", metadata_filter=metadata_filter
+    return _filter_supported(
+        _replace_dense_efc_with_vendored(
+            cutlass.operators.get_operators(
+                args=args, target_sm=f"{cc}a", metadata_filter=metadata_filter
+            )
+        ),
+        args,
+        cc,
     )
+
+
+def _replace_dense_efc_with_vendored(kernels: Any) -> list[Any]:
+    from cutlass.operators.providers.cutedsl.gemm.sm100_static_persistent_efc import (
+        PersistentDenseGemmEFCOperator,
+    )
+
+    from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_gemm_efc_kernel import (
+        VendoredDenseGemmEFCOperator,
+    )
+
+    result = []
+    seen_names: OrderedSet[str] = OrderedSet()
+    for kernel in kernels:
+        if kernel.metadata.operator_class is not PersistentDenseGemmEFCOperator:
+            if kernel.metadata.operator_name not in seen_names:
+                seen_names.add(kernel.metadata.operator_name)
+                result.append(kernel)
+            continue
+        design = kernel.metadata.design
+        tile_m, tile_n, tile_k = design.tile_shape
+        for vendored_tile_n in OrderedSet((tile_n, 64, 128)):
+            if vendored_tile_n < tile_n:
+                continue
+            operator_name = kernel.metadata.operator_name.replace(
+                "cutedsl.PersistentDenseGemmEFCOperator",
+                "inductor_vendored.VendoredDenseGemmEFCOperator",
+                1,
+            ).replace(
+                f"tile{tile_m}x{tile_n}x{tile_k}",
+                f"tile{tile_m}x{vendored_tile_n}x{tile_k}",
+                1,
+            )
+            metadata = dataclasses.replace(
+                kernel.metadata,
+                operator_name=operator_name,
+                operator_class=VendoredDenseGemmEFCOperator,
+                design=dataclasses.replace(
+                    design, tile_shape=(tile_m, vendored_tile_n, tile_k)
+                ),
+            )
+            if operator_name in seen_names:
+                continue
+            seen_names.add(operator_name)
+            result.append(VendoredDenseGemmEFCOperator(metadata))
+    return result
 
 
 def _filter_supported(kernels: Any, args: Any, cc: int) -> list[Any]:
@@ -233,7 +306,11 @@ def _manifest_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
             for kernel in kernels
             if "EFC" in kernel.metadata.operator_class.__name__
         )
-    return _filter_supported(kernels, args, cc)
+    return _filter_supported(
+        _replace_dense_efc_with_vendored(_filter_supported(kernels, args, cc)),
+        args,
+        cc,
+    )
 
 
 def _blockscaled_provider_classes() -> list[Any]:
@@ -340,18 +417,36 @@ def _scaled_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
     cheaper than the manifest. Falls back to the manifest if the provider is
     unavailable or nothing matches (e.g. a future non-block-scaled scaled dtype).
     """
+    from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel import (
+        VendoredDenseBlockScaledGemmEFC,
+        VendoredDenseBlockScaledGemmKernel,
+    )
+
     manifest = _blockscaled_manifest(cc, _scaled_operand_type_signature(args))
     if manifest.operators:
-        metadata_filter = (
-            (lambda md: "EFC" in md.operator_class.__name__) if efc_only else None
-        )
         out = manifest.filter_operators(
             args=args,
-            metadata_filter=metadata_filter,
             target_sm=f"{cc}a",
         )
         if out:
-            return out
+            efc = []
+            for op in out:
+                if op.metadata.operator_class is not VendoredDenseBlockScaledGemmKernel:
+                    continue
+                metadata = dataclasses.replace(
+                    op.metadata,
+                    operator_name=op.metadata.operator_name.replace(
+                        "VendoredDenseBlockScaledGemmKernel",
+                        "VendoredDenseBlockScaledGemmEFC",
+                        1,
+                    ),
+                    operator_class=VendoredDenseBlockScaledGemmEFC,
+                )
+                efc.append(VendoredDenseBlockScaledGemmEFC(metadata))
+            if efc:
+                return efc if efc_only else [*out, *efc]
+            if not efc_only:
+                return out
     return _manifest_candidates(args, cc, efc_only)
 
 
@@ -425,7 +520,19 @@ def get_kernel_by_name(kernel_name: str) -> Any:
     kernel = _ops_by_name.get(kernel_name)
     if kernel is not None:
         return kernel
-    return _get_kernel_cache().get(kernel_name)
+    cache = _get_kernel_cache()
+    kernel = cache.get(kernel_name)
+    if kernel is None and "VendoredDenseGemmEFCOperator" in kernel_name:
+        upstream_name = kernel_name.replace(
+            "inductor_vendored.VendoredDenseGemmEFCOperator",
+            "cutedsl.PersistentDenseGemmEFCOperator",
+            1,
+        )
+        upstream = cache.get(upstream_name)
+        if upstream is not None:
+            kernel = _replace_dense_efc_with_vendored((upstream,))[0]
+            _ops_by_name[kernel_name] = kernel
+    return kernel
 
 
 def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
@@ -450,11 +557,43 @@ def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
     if cached is not None:
         return cached
 
-    ops = cutlass.operators.get_operators(args=args, target_sm=f"{cc}a")
+    query_args = args
+    if "VendoredDenseGemmEFCOperator" in kernel_name:
+        from cutlass.operators.arguments import GemmArguments
+
+        query_args = GemmArguments(
+            args.A,
+            args.B,
+            args.out,
+            accumulator_type=args.accumulator_type,
+        )
+    ops = _replace_dense_efc_with_vendored(
+        cutlass.operators.get_operators(args=query_args, target_sm=f"{cc}a")
+    )
     for op in ops:
         # setdefault: keep an already-cached (possibly already-compiled) object
         # rather than replacing it with a fresh instance from this query.
         _ops_by_name.setdefault(op.metadata.operator_name, op)
+    if (
+        kernel_name not in _ops_by_name
+        and "VendoredDenseBlockScaledGemmEFC" in kernel_name
+    ):
+        from cutlass.operators.arguments import GemmArguments
+
+        base_args = GemmArguments(
+            args.A,
+            args.B,
+            args.out,
+            accumulator_type=args.accumulator_type,
+        )
+        scaled_ops = _scaled_candidates(base_args, cc, efc_only=False)
+        log.debug(
+            "Scaled by-name fallback found %d candidates for %s",
+            len(scaled_ops),
+            kernel_name,
+        )
+        for op in scaled_ops:
+            _ops_by_name.setdefault(op.metadata.operator_name, op)
     return _ops_by_name.get(kernel_name)
 
 
@@ -463,7 +602,7 @@ def ensure_cache_initialized() -> None:
     _get_kernel_cache()
 
 
-_efc_epilogue_cache: dict[tuple[str, str, tuple], Any] = {}
+_efc_epilogue_cache: dict[tuple[str, str, tuple, tuple], Any] = {}
 
 
 def clear_cache() -> None:
@@ -489,11 +628,66 @@ from torch._inductor.utils import clear_on_fresh_cache
 clear_on_fresh_cache(_NVGEMMCacheWrapper())
 
 
+def _meta_epilogue_metadata(epilogue_args: Any) -> Any:
+    """Build the cached kernel's epilogue metadata from meta-device tensors.
+
+    The EFC kernel is cached in ``_efc_epilogue_cache`` and reused across every
+    call; the real output/aux tensors are supplied per call via the runtime
+    ``GemmArguments.epilogue``, so the cached kernel needs only the epilogue's
+    shape/dtype/layout (its IR). Building it from the real ``EpilogueArguments``
+    would make it retain those tensors forever -- ``EpilogueMetadata`` shares the
+    arguments' ``tensors`` (wrapping the output ``D`` and aux inputs) and traced
+    functor -- keeping the (often intermediate) output alive: a memory leak, and
+    it breaks CUDA graph capture (a live graph-pool allocation that is not a
+    tracked graph output). Re-trace the epilogue with meta tensors (carrying
+    dtype/layout but no device storage; the tracer reads only their metadata) so
+    the cached kernel holds nothing real.
+    """
+    from cutlass.operators.arguments.epilogue import EpilogueArguments
+    from cutlass.operators.metadata import EpilogueMetadata
+    from cutlass.operators.utils.tensor import TensorWrapper
+
+    from .nv_universal_gemm_utils import cutlass_dtype_to_torch
+
+    def _meta_like(t: torch.Tensor) -> torch.Tensor:
+        return torch.empty_strided(t.shape, t.stride(), dtype=t.dtype, device="meta")
+
+    fake_kwargs = {}
+    for name, val in epilogue_args.tensors.items():
+        # Build a storage-free meta tensor with the same shape/stride/dtype.
+        # A compile-time-only TensorWrapper (the subprocess-precompile path) has
+        # no runtime tensor -- its `.runtime_tensor` property raises ValueError --
+        # so read `_runtime_tensor` directly and fall back to the wrapper's own
+        # shape/stride and its CUTLASS dtype.
+        if isinstance(val, torch.Tensor):
+            fake_kwargs[name] = _meta_like(val)
+        elif isinstance(val, TensorWrapper) and isinstance(
+            val._runtime_tensor, torch.Tensor
+        ):
+            fake_kwargs[name] = _meta_like(val._runtime_tensor)
+        elif (
+            isinstance(val, TensorWrapper)
+            and (dtype := cutlass_dtype_to_torch(val.dtype)) is not None
+        ):
+            fake_kwargs[name] = torch.empty_strided(
+                tuple(val.shape), tuple(val.stride), dtype=dtype, device="meta"
+            )
+        else:
+            fake_kwargs[name] = val
+    if get_cutedsl_epilogue_schema(epilogue_args.epilogue_fn) is not None:
+        return EpilogueMetadata.from_args(epilogue_args.with_tensors(fake_kwargs))
+    fake_args = EpilogueArguments(epilogue_args.epilogue_fn, **fake_kwargs)
+    accum = epilogue_args.traced_epilogue.example_inputs["accum"]
+    fake_args.trace(accum.shape, accum.element)
+    return EpilogueMetadata.from_args(fake_args)
+
+
 def get_efc_kernel_with_epilogue(
     efc_kernel_name: str,
     epilogue_args: Any,
     epilogue_source: str = "",
     base_kernel: Any | None = None,
+    specialization: tuple = (),
 ) -> Any:
     """Get (or create and cache) an EFC kernel bound to a specific epilogue.
 
@@ -510,6 +704,7 @@ def get_efc_kernel_with_epilogue(
         efc_kernel_name,
         epilogue_source,
         _epilogue_args_signature(epilogue_args),
+        specialization,
     )
 
     with _cache_lock:
@@ -526,9 +721,9 @@ def get_efc_kernel_with_epilogue(
             log.debug("Base EFC kernel not found: %s", efc_kernel_name)
             return None
 
-        from cutlass.operators.metadata import EpilogueMetadata, OperatorMetadata
+        from cutlass.operators.metadata import OperatorMetadata
 
-        epilogue_metadata = EpilogueMetadata.from_args(epilogue_args)
+        epilogue_metadata = _meta_epilogue_metadata(epilogue_args)
 
         base_metadata = base_kernel.metadata
         new_metadata = OperatorMetadata(
