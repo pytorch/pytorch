@@ -5323,6 +5323,99 @@ def forward(self, tangents_1):
 
         self._assert_no_extra_refs(refcount_box)
 
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_detach_output_aliasing_intermediate_base(self, backend):
+        # mark_non_differentiable is keyed on TensorImpl, and a backend is free
+        # to lower aten.detach to a no-op -- inductor does -- so y.detach() and
+        # y's intermediate base can be the same object. Marking the detach
+        # output then marks the base, which is a slot the backward requires a
+        # tangent for, and autograd hands it None because
+        # _materialize_non_diff_grads is False. Depending on whether that
+        # backward has any compute this either silently drops the gradient or
+        # dies inside the compiled backward.
+        def f(x):
+            y = torch.sin(x)
+            return y[0:4], y[4:8], y.detach(), x * 3
+
+        def run(fn, x):
+            outs = fn(x)
+            (outs[0].sum() + outs[1].sum() + outs[3].sum()).backward()
+            return outs, x.grad
+
+        x_ref = torch.arange(8, dtype=torch.float32).requires_grad_(True)
+        outs_ref, grad_ref = run(f, x_ref)
+        self.assertIsNotNone(grad_ref)
+
+        torch._dynamo.reset()
+        x = torch.arange(8, dtype=torch.float32).requires_grad_(True)
+        outs, grad = run(torch.compile(f, backend=backend), x)
+        self.assertEqual(
+            [(o.requires_grad, o.grad_fn is not None) for o in outs],
+            [(o.requires_grad, o.grad_fn is not None) for o in outs_ref],
+        )
+        self.assertEqual(grad, grad_ref)
+
+        # The detach output must stay a leaf: sparing the base must not be
+        # done by declining to mark the output that aliases it.
+        self.assertFalse(outs[2].requires_grad)
+        self.assertIsNone(outs[2].grad_fn)
+        if backend == "inductor":
+            # The backend really did hand back the base's storage in the marked
+            # slot (detach shares storage), so the collision was exercised.
+            self.assertEqual(outs[2].data_ptr(), outs[0].data_ptr())
+
+    @torch._inductor.config.patch(joint_graph_constant_folding=True)
+    def test_detach_output_aliasing_sibling_output(self):
+        # No intermediate base here: h * 1 folds to h and detach() no-ops, so
+        # two OUTPUT slots hold one object and marking the second marks the
+        # first, dropping the only gradient in the model.
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                h = torch.relu(self.l(x))
+                return h * 1.0, h.detach()
+
+        torch.manual_seed(0)
+        ref = Net()
+        x_ref = torch.randn(3, requires_grad=True)
+        out_ref = ref(x_ref)
+        out_ref[0].sum().backward()
+
+        torch._dynamo.reset()
+        torch.manual_seed(0)
+        mod = Net()
+        x = torch.randn(3, requires_grad=True)
+        outs = torch.compile(mod, backend="inductor")(x)
+        # Both slots share one storage: the fold and the no-op detach happened.
+        self.assertEqual(outs[0].data_ptr(), outs[1].data_ptr())
+        self.assertEqual(
+            [(o.requires_grad, o.grad_fn is not None) for o in outs],
+            [(o.requires_grad, o.grad_fn is not None) for o in out_ref],
+        )
+        outs[0].sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
+
+    def test_dealias_marked_returns_rebinds_only_colliding_marked_slots(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _dealias_marked_returns,
+        )
+
+        y, z, w = torch.randn(4), torch.randn(4), torch.randn(4)
+        raw = [y, y, z, w, w, 7]
+        _dealias_marked_returns(raw, [1, 3, 4, 5])
+        # Only a marked slot sharing its TensorImpl with an UNMARKED slot is rebound.
+        self.assertIsNot(raw[1], y)
+        self.assertEqual(raw[1].data_ptr(), y.data_ptr())
+        self.assertIs(raw[0], y)
+        self.assertIs(raw[2], z)
+        # Two marked slots holding one object both get marked anyway: keep identity.
+        self.assertIs(raw[3], w)
+        self.assertIs(raw[4], w)
+        self.assertEqual(raw[5], 7)
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
