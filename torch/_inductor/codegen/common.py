@@ -14,7 +14,6 @@ import re
 import tempfile
 import threading
 from abc import ABC, abstractmethod
-from enum import auto, Enum
 from itertools import chain
 from textwrap import dedent
 from typing import Any, cast, ClassVar, Generic, NamedTuple, TYPE_CHECKING
@@ -24,6 +23,10 @@ import sympy
 
 import torch
 import torch.fx
+
+# BackendFeature moved to torch._dynamo.device_interface; re-exported here so
+# existing `from .common import BackendFeature` consumers keep working.
+from torch._dynamo.device_interface import BackendFeature
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
 from torch.utils._config_module import ConfigModule
@@ -497,19 +500,6 @@ def register_backend_for_device(
                 f"{device_custom_config=} cannot be the same as the default inductor config {config=}"
             )
     custom_backend_codegen_configs[device] = device_custom_config
-
-
-class BackendFeature(Enum):
-    FOREACH = auto()
-    BUCKETIZE = auto()
-    INPLACE_BUFFERS = auto()
-    MASKED_SCATTER_WITH_INDEX = auto()
-    SCAN = auto()
-    SORT = auto()
-    TUPLE_REDUCTION = auto()
-    PREFER_STORE_LOOP_ORDER = auto()
-    TRITON_TEMPLATES = auto()
-    REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
 def get_backend_features(
