@@ -393,7 +393,7 @@ add_custom_target(
   DEPENDS ${TORCH_GENERATED_CODE}
   )
 
-# Generate torch/profiler/_cupti/_cupti_stubs.py (the CUPTI CUpti_Activity*FieldIds and
+# Generate torch/profiler/_cuspy/_cupti_stubs.py (the CUPTI CUpti_Activity*FieldIds and
 # CUpti_ActivityAttribute enums) from the CUPTI ABI header shipped by nvidia-cuda-cupti.
 # gen_cupti_stubs.py resolves the header itself (tools.setup_helpers.cupti.find_cupti_header,
 # which applies the version floor) and writes the module only when a sufficiently-new header
@@ -401,11 +401,11 @@ add_custom_target(
 # clang python bindings from the libclang wheel (a build dep; bundles libclang.so, loaded
 # automatically). We run it at configure time and gate on whether the stub file was produced.
 # CUPTI_STUBS_GENERATED records that success so the native .pftrace encoder's build deps
-# (perfetto SDK + zlib, below) are only pulled in when the CUPTI monitor is actually usable --
+# (perfetto SDK + zlib, below) are only pulled in when Cuspy is actually usable --
 # without the stubs it is unavailable at runtime, so the encoder would be dead weight.
 set(CUPTI_STUBS_GENERATED FALSE)
 if(USE_CUDA AND BUILD_PYTHON)
-  set(CUPTI_STUBS_PY "${TORCH_SRC_DIR}/profiler/_cupti/_cupti_stubs.py")
+  set(CUPTI_STUBS_PY "${TORCH_SRC_DIR}/profiler/_cuspy/_cupti_stubs.py")
   # Re-run configure (which re-runs codegen below) when the codegen or the header resolver
   # changes. The resolved CUPTI header is added as a dependency too, once the script reports it.
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
@@ -418,23 +418,23 @@ if(USE_CUDA AND BUILD_PYTHON)
     OUTPUT_VARIABLE CUPTI_STUBS_OUT
     ERROR_VARIABLE CUPTI_STUBS_ERR)
   if(NOT CUPTI_STUBS_RC EQUAL 0)
-    # A real codegen failure (e.g. header present but libclang broken); the CUPTI monitor will
+    # A real codegen failure (e.g. header present but libclang broken); Cuspy will
     # be unavailable, but it degrades gracefully at runtime so this is not fatal to the build.
-    message(WARNING "CUPTI stub codegen failed; the CUPTI monitor will be unavailable:\n${CUPTI_STUBS_OUT}${CUPTI_STUBS_ERR}")
+    message(WARNING "CUPTI stub codegen failed; Cuspy will be unavailable:\n${CUPTI_STUBS_OUT}${CUPTI_STUBS_ERR}")
   elseif(EXISTS "${CUPTI_STUBS_PY}")
     message(STATUS "Generated CUPTI stub module: ${CUPTI_STUBS_PY}")
     set(CUPTI_STUBS_GENERATED TRUE)
     # The generated module is gitignored, so scikit-build-core's package walk
     # drops it from the wheel (gitignore semantics; torch/version.py has an
     # explicit install rule in torch/CMakeLists.txt for the same reason).
-    # Without this the wheel ships torch/profiler/_cupti/ WITHOUT the stubs
-    # and importing the CUPTI monitor dies with ModuleNotFoundError; editable
+    # Without this the wheel ships torch/profiler/_cuspy/ WITHOUT the stubs
+    # and importing Cuspy dies with ModuleNotFoundError; editable
     # installs mask it (redirect mode reads the source tree). DESTINATION is
     # relative to the install prefix, which the wheel maps to torch/.
-    install(FILES "${CUPTI_STUBS_PY}" DESTINATION "profiler/_cupti")
+    install(FILES "${CUPTI_STUBS_PY}" DESTINATION "profiler/_cuspy")
     # Regenerate when the resolved header (or its version header) changes: adding them to
     # CMAKE_CONFIGURE_DEPENDS makes a later build auto-reconfigure and re-run the codegen.
-    string(REGEX MATCH "CUPTI_MONITOR_STUBS_HEADER=([^\r\n]+)" _ "${CUPTI_STUBS_OUT}")
+    string(REGEX MATCH "CUSPY_STUBS_HEADER=([^\r\n]+)" _ "${CUPTI_STUBS_OUT}")
     if(CMAKE_MATCH_1)
       get_filename_component(CUPTI_INCLUDE_DIR "${CMAKE_MATCH_1}" DIRECTORY)
       set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
@@ -638,7 +638,6 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_extension.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_all_to_all_nd.cu
-        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_all_gather_offset.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
@@ -1039,6 +1038,11 @@ elseif(USE_CUDA)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 
+  # native-AOT: embed the AOT-exported DSL kernels into torch_cuda. ONE include and no
+  # logic here: tools/native_aot/gen_aot_lib.py decides everything and emits this file.
+  # OPTIONAL, so a tree that embeds nothing does nothing.
+  include("${CMAKE_BINARY_DIR}/native_aot/native_aot.cmake" OPTIONAL)
+
   if(USE_CUFILE)
     target_link_libraries(torch_cuda PRIVATE torch::cufile)
     target_compile_definitions(torch_cuda PRIVATE USE_CUFILE)
@@ -1401,15 +1405,15 @@ target_include_directories(torch_cpu PRIVATE
 
 # The native .pftrace encoder's only extra build dep (perfetto) is pulled in
 # just when the CUPTI stubs were generated above (CUPTI_STUBS_GENERATED): the
-# encoder is useless without the CUPTI monitor, which is unavailable at runtime
+# encoder is useless without Cuspy, which is unavailable at runtime
 # absent the stubs. TORCH_CUPTI_PFTRACE selects the real encoder in
-# monitor_pftrace.cpp; without it that TU compiles a dependency-free stub that
+# cuspy_pftrace.cpp; without it that TU compiles a dependency-free stub that
 # raises, so perfetto is not required. (Compression uses the in-tree miniz,
 # already on torch_cpu's include path above, so it needs no gating.)
 if(CUPTI_STUBS_GENERATED)
   target_compile_definitions(torch_cpu PRIVATE TORCH_CUPTI_PFTRACE)
-  # Perfetto SDK amalgamation: the CUPTI monitor's native .pftrace encoder
-  # (monitor_pftrace.cpp) builds traces via protozero. perfetto.cc is one
+  # Perfetto SDK amalgamation: Cuspy's native .pftrace encoder
+  # (cuspy_pftrace.cpp) builds traces via protozero. perfetto.cc is one
   # self-contained TU; --gc-sections drops the unused tracing SDK so only the
   # protozero runtime (~15KB) survives in the final binary. Warnings are
   # suppressed for the vendored source (torch_cpu builds with -Werror).

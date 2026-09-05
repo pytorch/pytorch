@@ -391,6 +391,9 @@ cmake_dependent_option(
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
 cmake_dependent_option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" ON "USE_ROCM;NOT WIN32" OFF)
+# Off by default because enabling gfx12 adds CK SDPA code generation and compile
+# cost to ROCm builds that already target gfx1200/gfx1201.
+cmake_dependent_option(USE_ROCM_CK_SDPA_GFX12 "Also build ROCm Composable Kernel SDPA for gfx12 (RDNA4)" OFF "USE_ROCM_CK_SDPA" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
@@ -954,6 +957,7 @@ if(USE_LLVM_BOLT)
   # Extract the committed BOLT profiles for the build-time optimization
   # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
   set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
+  file(REMOVE_RECURSE "${LLVM_BOLT_PROFILES_DIR}")
   file(ARCHIVE_EXTRACT INPUT "${CMAKE_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
        DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
 endif()
@@ -1249,15 +1253,6 @@ endif()
 
 # ---[ Allowlist file if allowlist is specified
 include(cmake/Allowlist.cmake)
-
-# ---[ Set link flag, handle additional deps for gcc 4.8 and above
-if(CMAKE_COMPILER_IS_GNUCXX AND NOT ANDROID)
-  message(
-    STATUS
-      "GCC ${CMAKE_CXX_COMPILER_VERSION}: Adding gcc and gcc_s libs to link line"
-  )
-  list(APPEND Caffe2_DEPENDENCY_LIBS gcc_s gcc)
-endif()
 
 # ---[ Build flags Re-include to override append_cxx_flag_if_supported from
 # third_party/FBGEMM
