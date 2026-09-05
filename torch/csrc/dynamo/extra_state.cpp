@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 #include <c10/util/Exception.h>
@@ -596,54 +597,6 @@ static bool cache_entry_has_no_guards(
 // Search a region's cache list for a matching entry.
 // Returns the matching CacheEntry, or nullptr if no match.
 // Sets *guard_error = true if a guard evaluation exception occurred.
-static CacheEntry* lookup_in_list(
-    std::list<CacheEntry>& entries,
-    FrameLocalsMapping* f_locals,
-    PyObject* backend,
-    bool is_skip_guard_eval_unsafe,
-    bool* guard_error,
-    PyObject** maybe_cached_code) {
-  size_t index = 0;
-  for (CacheEntry& cache_entry : entries) {
-    bool valid = Py_IsFalse(backend) ||
-        backend_match(cache_entry.backend.ptr(), backend);
-
-    if (valid) {
-      try {
-        if (is_skip_guard_eval_unsafe) {
-          valid = cache_entry_has_no_guards(
-                      cache_entry, /*is_skip_guard_eval_unsafe=*/true) ||
-              torch::dynamo::run_root_guard_manager(
-                      cache_entry.diff_guard_root_mgr, f_locals);
-        } else {
-          valid = torch::dynamo::run_root_guard_manager(
-              cache_entry.root_mgr, f_locals);
-        }
-      } catch (py::error_already_set& e) {
-        if (guard_error_hook) {
-          py::handle guard_error_hook_handle(guard_error_hook);
-          py::handle f_locals_dict = (PyObject*)f_locals->to_dict();
-          guard_error_hook_handle(
-              cache_entry.guard_manager,
-              cache_entry.code,
-              f_locals_dict,
-              index,
-              index == entries.size() - 1);
-        }
-        e.restore();
-        *maybe_cached_code = nullptr;
-        *guard_error = true;
-        return nullptr;
-      }
-    }
-    if (valid) {
-      return &cache_entry;
-    }
-    ++index;
-  }
-  return nullptr;
-}
-
 static bool try_lookup_without_guard_eval_in_list(
     std::list<CacheEntry>& entries,
     PyObject* backend,
@@ -675,71 +628,125 @@ void lookup(
     PyObject** maybe_cached_code,
     std::string* trace_annotation,
     bool is_skip_guard_eval_unsafe) {
-  // Reaped nodes die AFTER the lock releases (locals declared before it).
+  // reaped_* are declared before python_depth so they destruct AFTER it: depth
+  // returns to 0 and cache_mutex is released before any reaped node runs its
+  // Python destructor.
   std::list<PrecompileEntry> reaped_precompile;
   std::unordered_map<int64_t, std::list<CacheEntry>> reaped_cache;
   std::vector<ExtraState::PendingEviction> reaped_evictions;
-  CacheLock lock(extra_state->cache_mutex);
-  extra_state->apply_pending_evictions(
-      reaped_precompile, reaped_cache, reaped_evictions);
-  extra_state->drain_pending_invalidations();
-  // Guard evaluation below runs Python that can re-enter this state on this
-  // thread (reset_code -> clear_in_place); the depth tells clear_in_place to
-  // park dead nodes instead of destroying what this frame is iterating.
-  CachePythonDepth python_depth(extra_state);
-  CacheEntry* found = nullptr;
-  bool guard_error = false;
 
-  // Precompile entries match their OWN region only, deliberately unlike the
-  // cache-entry fallback below. The identity guards that would tell two
-  // artifacts of one model apart are exactly the ones precompile has to drop,
-  // so a fallback here serves another artifact's graph for a call this region
-  // does not cover, instead of the miss that serving() turns into a loud error.
-  // The cache-entry fallback is narrower than it looks but is not a precedent:
-  // lookup_in_list also requires backend_match, though note that short-circuits
-  // when the backend is Py_False, which is every frame under run-only. Callers
-  // that install for an isolated region must pass its id (see
-  // CompilePackage.install) rather than rely on the default bucket.
-  for (const auto& entry : extra_state->precompile_entries) {
-    if (entry.isolate_recompiles_id == isolate_recompiles_id &&
-        torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
-      *maybe_cached_code = entry.code.inc_ref().ptr();
+  // Guard evaluation runs arbitrary Python (guard closures, backend __eq__,
+  // guard_error_hook) that can call torch._dynamo.reset()/remove_from_cache,
+  // which take convert_frame.compile_lock. Holding cache_mutex across that
+  // orders (cache_mutex, compile_lock) -- the reverse of create_cache_entry
+  // (compile_lock, then cache_mutex) and of this file's header invariant -- an
+  // ABBA deadlock across threads. So snapshot the candidates under the lock,
+  // raise CachePythonDepth, RELEASE the lock, evaluate guards lock-free, and
+  // re-lock only for the structural mutation on a hit. While depth is non-zero
+  // every destroy/relink path parks (apply_pending_evictions,
+  // drain_pending_invalidations, invalidate, clear_in_place), so the raw entry
+  // pointers snapshotted below cannot be freed or relinked; a concurrent
+  // create_cache_entry only appends (no move, no free) and its new entry is
+  // simply absent from this snapshot.
+  std::optional<CachePythonDepth> python_depth;
+  std::vector<const PrecompileEntry*> precompile_candidates;
+  struct CacheCandidate {
+    CacheEntry* entry;
+    std::list<CacheEntry>* list;
+  };
+  std::vector<CacheCandidate> cache_candidates;
+
+  // Search own bucket first, then fall back to default bucket (-1). This lets
+  // isolated compiles reuse compilations from non-isolated torch.compile()
+  // calls (BC friendly). New entries are still written to the isolated bucket.
+  std::array<int64_t, 2> ids_to_search = {isolate_recompiles_id, -1};
+  int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
+
+  {
+    CacheLock lock(extra_state->cache_mutex);
+    extra_state->apply_pending_evictions(
+        reaped_precompile, reaped_cache, reaped_evictions);
+    extra_state->drain_pending_invalidations();
+    // Raised at depth 0 (after apply/drain) while still under the lock, so it
+    // is coherent to any thread that takes cache_mutex once we release it.
+    python_depth.emplace(extra_state);
+    // Precompile entries match their OWN region only, deliberately unlike the
+    // cache-entry fallback below. The identity guards that would tell two
+    // artifacts of one model apart are exactly the ones precompile has to drop,
+    // so a fallback here serves another artifact's graph for a call this region
+    // does not cover, instead of the miss that serving() turns into a loud
+    // error. Callers that install for an isolated region must pass its id (see
+    // CompilePackage.install) rather than rely on the default bucket.
+    for (const auto& entry : extra_state->precompile_entries) {
+      if (entry.isolate_recompiles_id == isolate_recompiles_id) {
+        precompile_candidates.push_back(&entry);
+      }
+    }
+    for (int i = 0; i < num_ids; i++) {
+      auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
+      if (it != extra_state->cache_entry_map.end()) {
+        std::list<CacheEntry>& entries = it->second;
+        for (CacheEntry& e : entries) {
+          cache_candidates.push_back(CacheCandidate{&e, &entries});
+        }
+      }
+    }
+  }
+
+  // ---- guard evaluation, cache_mutex NOT held (depth stays raised) ----
+  for (const PrecompileEntry* entry : precompile_candidates) {
+    if (torch::dynamo::run_root_guard_manager(entry->root_mgr, f_locals)) {
+      *maybe_cached_code = entry->code.inc_ref().ptr();
       return;
     }
   }
 
-  // Search own bucket first, then fall back to default bucket (-1).
-  // This lets isolated compiles reuse compilations from non-isolated
-  // torch.compile() calls (BC friendly). New entries are still written
-  // to the isolated bucket.
-  std::array<int64_t, 2> ids_to_search = {isolate_recompiles_id, -1};
-  int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
+  CacheEntry* found = nullptr;
   std::list<CacheEntry>* found_list = nullptr;
-
-  for (int i = 0; i < num_ids && found == nullptr; i++) {
-    auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
-    if (it != extra_state->cache_entry_map.end()) {
-      // Bound BEFORE the guards run: their Python can re-enter this state and
-      // create_cache_entry into the map, and a rehash invalidates `it` but not
-      // a reference to its mapped list.
-      std::list<CacheEntry>& entries = it->second;
-      found = lookup_in_list(
-          entries,
-          f_locals,
-          backend,
-          is_skip_guard_eval_unsafe,
-          &guard_error,
-          maybe_cached_code);
-      if (guard_error) {
-        return;
+  const size_t num_candidates = cache_candidates.size();
+  for (size_t index = 0; index < num_candidates; index++) {
+    CacheEntry& cache_entry = *cache_candidates[index].entry;
+    bool valid = Py_IsFalse(backend) ||
+        backend_match(cache_entry.backend.ptr(), backend);
+    if (!valid) {
+      continue;
+    }
+    try {
+      if (is_skip_guard_eval_unsafe) {
+        valid = cache_entry_has_no_guards(
+                    cache_entry, /*is_skip_guard_eval_unsafe=*/true) ||
+            torch::dynamo::run_root_guard_manager(
+                    cache_entry.diff_guard_root_mgr, f_locals);
+      } else {
+        valid = torch::dynamo::run_root_guard_manager(
+            cache_entry.root_mgr, f_locals);
       }
-      if (found) {
-        found_list = &entries;
+    } catch (py::error_already_set& e) {
+      if (guard_error_hook) {
+        py::handle guard_error_hook_handle(guard_error_hook);
+        py::handle f_locals_dict = (PyObject*)f_locals->to_dict();
+        guard_error_hook_handle(
+            cache_entry.guard_manager,
+            cache_entry.code,
+            f_locals_dict,
+            index,
+            index == num_candidates - 1);
       }
+      e.restore();
+      *maybe_cached_code = nullptr;
+      return;
+    }
+    if (valid) {
+      found = cache_candidates[index].entry;
+      found_list = cache_candidates[index].list;
+      break;
     }
   }
 
   if (found) {
+    // Re-lock for the only structural mutation on the hit path. found is still
+    // in found_list: depth kept every eviction/invalidation parked during eval.
+    CacheLock lock(extra_state->cache_mutex);
     if (use_lru) {
       extra_state->move_to_front(found, *found_list);
     }
