@@ -3,6 +3,8 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
+#include <string>
 #include <utility>
 
 #include <ATen/mps/MPSDevice.h>
@@ -21,6 +23,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wobjc-property-no-attribute")
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 typedef MPSCommandBuffer* MPSCommandBuffer_t;
+typedef id<MTLCommandBuffer> MTLCommandBuffer_t;
 typedef id<MTLCommandQueue> MTLCommandQueue_t;
 typedef id<MTLComputeCommandEncoder> MTLComputeCommandEncoder_t;
 typedef id<MTLSharedEvent> MTLSharedEvent_t;
@@ -29,6 +32,7 @@ typedef id<MTLBuffer> MTLBuffer_t;
 #else
 #include <dispatch/dispatch.h>
 typedef void* MPSCommandBuffer_t;
+typedef void* MTLCommandBuffer_t;
 typedef void* MPSGraph;
 typedef void* MPSGraphExecutionDescriptor;
 typedef void* MPSGraphCompilationDescriptor;
@@ -130,6 +134,23 @@ class TORCH_API MPSStream {
   bool _enableCommitAndContinue = true;
   // Buffer that contains last raised error
   MTLBuffer_t _errorBuffer = nil;
+
+  // Fault state for root MTLCommandBuffers. commitAndContinue retires the root out from under the
+  // MPSCommandBuffer wrapper (MPSGraph does this internally too), so a faulted root's status can no
+  // longer be queried by the time we wait on it. Each root gets a completion handler that records the
+  // fault in _pendingFault instead, tagged with the root it came from so commitAndWait can prefer its
+  // own better-attributed message for the root it waited on. Both roots are retained: the tags are
+  // compared by pointer, and a released root could otherwise be replaced at the same address.
+  // _pendingFault is written from Metal's completion queue and drained on the calling thread, hence
+  // the lock.
+  MTLCommandBuffer_t _trackedRoot = nil;
+  std::mutex _faultMutex;
+  std::string _pendingFault;
+  MTLCommandBuffer_t _pendingFaultRoot = nil;
+
+  void trackRootCommandBuffer(MPSCommandBuffer_t buffer);
+  std::string rootFaultMessage(MPSCommandBuffer_t buffer);
+  std::string takePendingFault(MTLCommandBuffer_t currentRoot);
 
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();

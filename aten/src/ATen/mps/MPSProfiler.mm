@@ -126,7 +126,13 @@ MPSProfiler::MPSProfiler() : m_os_log_events(nullptr), m_os_log_intervals(nullpt
 MPSProfiler::~MPSProfiler() {
   // first make sure completion handlers are completed
   if (hasPendingCompletionHandlers) {
-    at::mps::synchronizeAllMPSStreams(SyncType::COMMIT_AND_WAIT);
+    // commitAndWait throws on a faulted command buffer; a throw out of this destructor would
+    // terminate instead of reporting, losing both the fault and the Python-level traceback.
+    try {
+      at::mps::synchronizeAllMPSStreams(SyncType::COMMIT_AND_WAIT);
+    } catch (const std::exception& e) {
+      TORCH_WARN("MPSProfiler: error while draining the stream at shutdown: ", e.what());
+    }
   }
   logProfilingStats();
 
