@@ -37,7 +37,11 @@ static void fill_mps_kernel(TensorIterator& iter, const Scalar& value) {
   const Tensor& self = iter.tensor(0);
   const auto dtype = self.scalar_type();
   const auto stream = getCurrentMPSStream();
-  const auto type_str = scalarToMetalTypeString(dtype);
+  const auto scalar_type_str = scalarToMetalTypeString(dtype);
+  // A fill stores a fixed byte pattern, so fp8 dtypes (for which vec<T, 4>
+  // does not exist) reuse the uchar kernels; getMPSScalar already encodes
+  // the value as the fp8 bit pattern.
+  const auto type_str = isFloat8Type(dtype) ? "uchar" : scalar_type_str;
   const bool can_fill_linearly = self.is_non_overlapping_and_dense();
   const bool is_byte_type = self.element_size() == 1;
 
