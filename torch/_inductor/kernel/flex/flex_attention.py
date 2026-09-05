@@ -1007,6 +1007,35 @@ def flex_attention_backward(*args, **kwargs):
     invalid_block_options: dict[str, Any] | None = None
 
     original_kernel_options = kernel_options.copy()
+    bwd_input_nodes = [
+        query,
+        key,
+        value,
+        logsumexp,
+        delta,
+        grad_out,
+        grad_query,
+        broadcasted_grad_value,
+        kv_num_blocks,
+        kv_indices,
+        q_num_blocks,
+        q_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        full_q_num_blocks,
+        full_q_indices,
+    ]
+    bwd_subgraphs = [
+        fw_subgraph_buffer,
+        joint_outputs.grad_input,
+        mask_graph_buffer,
+        joint_outputs.captured_grads_compute,
+    ]
+    bwd_mutated_inputs = [
+        grad_query,
+        broadcasted_grad_value,
+        *joint_outputs.mutated_grads,
+    ]
 
     for conf in configs:
         # Performance tuning
@@ -1092,39 +1121,25 @@ def flex_attention_backward(*args, **kwargs):
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
-            input_nodes=[
-                query,
-                key,
-                value,
-                logsumexp,
-                delta,
-                grad_out,
-                grad_query,
-                broadcasted_grad_value,
-                kv_num_blocks,
-                kv_indices,
-                q_num_blocks,
-                q_indices,
-                full_kv_num_blocks,
-                full_kv_indices,
-                full_q_num_blocks,
-                full_q_indices,
-            ],
+            input_nodes=bwd_input_nodes,
             layout=layout_broadcasted_k,  # We use store_output only for grad_key
-            subgraphs=[
-                fw_subgraph_buffer,
-                joint_outputs.grad_input,
-                mask_graph_buffer,
-                joint_outputs.captured_grads_compute,
-            ],
-            mutated_inputs=[
-                grad_query,
-                broadcasted_grad_value,
-                *joint_outputs.mutated_grads,
-            ],
+            subgraphs=bwd_subgraphs,
+            mutated_inputs=bwd_mutated_inputs,
             call_sizes=query.get_size() + key.get_size()[1:3],
             **cur_kernel_options,
         )
+
+    choices = V.choices.append_flex_attention_backward_choices(
+        choices,
+        configs,
+        list(bwd_input_nodes),
+        list(bwd_subgraphs),
+        layout_broadcasted_k,
+        original_kernel_options,
+        SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
+        mutated_inputs=list(bwd_mutated_inputs),
+    )
 
     if not choices and invalid_block_options is not None:
         raise_flex_kernel_options_error(
@@ -1139,24 +1154,7 @@ def flex_attention_backward(*args, **kwargs):
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     inputs_for_autotuning = (
-        [
-            query,
-            key,
-            value,
-            logsumexp,
-            delta,
-            grad_out,
-            grad_query,
-            broadcasted_grad_value,
-            kv_num_blocks,
-            kv_indices,
-            q_num_blocks,
-            q_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-            full_q_num_blocks,
-            full_q_indices,
-        ]
+        bwd_input_nodes
         + list(score_mod_other_buffers)
         + list(mask_mod_other_buffers)
         + joint_outputs.mutated_grads

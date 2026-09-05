@@ -197,10 +197,31 @@ class InductorChoices:
         sparse_q_block_size: int,
         sparse_kv_block_size: int,
     ) -> list[Any]:
-        """Append backend-specific flex-attention template choices.
+        """Append backend-specific forward flex-attention template choices.
 
         Default is a no-op. Subclasses may override to inject additional
         autotuning candidates (e.g. TLX templates in fbcode).
+        """
+        return choices
+
+    def append_flex_attention_backward_choices(
+        self,
+        choices: list[Any],
+        configs: list[Any],
+        input_nodes: list[Any],
+        subgraphs: list[Any],
+        layout: Any,
+        kernel_options: dict[str, Any],
+        sparse_q_block_size: int,
+        sparse_kv_block_size: int,
+        *,
+        mutated_inputs: list[Any],
+    ) -> list[Any]:
+        """Append backend-specific backward flex-attention template choices.
+
+        Default is a no-op. Subclasses may override to inject additional
+        autotuning candidates. Backward calls provide sixteen input nodes, four
+        subgraphs, and the output buffers in ``mutated_inputs``.
         """
         return choices
 
