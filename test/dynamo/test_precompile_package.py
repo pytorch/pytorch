@@ -17,10 +17,12 @@ import queue
 import re
 import sys
 import sysconfig
+import tempfile
 import textwrap
 import threading
 import types
 import unittest
+import weakref
 from unittest import mock
 
 import torch
@@ -39,19 +41,8 @@ from torch._dynamo.package import (
     SystemInfo,
 )
 from torch._dynamo.precompile_context import PrecompileContext
-from torch._dynamo.precompile_package import (
-    _compose_with_default,
-    _dynamo_alias_module,
-    _fact_order,
-    _GuardFact,
-    _normalize,
-    _SingleFileStore,
-    default_guard_filter_fn,
-    precompile_capture,
-    serving,
-    varying_guard_slots,
-)
-from torch._dynamo.types import GuardFilterEntry
+from torch._dynamo.types import FrameAction, FrameExecStrategy, GuardFilterEntry
+from torch._dynamo.utils import CleanupHook
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.compiler._precompile_types import PrecompileSummary
@@ -753,7 +744,7 @@ def _sum_if_tensor(x):
     return x.sum() if type(x) is torch.Tensor else x
 
 
-# Rows: builder, example_inputs, text the invariants file must contain, and a
+# Rows: builder, input calls, text the invariants file must contain, and a
 # pattern it must not -- object ids, the per-process counter in Dynamo's
 # builtins-dict name, and the address install_global_by_id bakes into an
 # identifier ("<prefix>_<id(value)>_c<n>": `type(x) is torch.Tensor` installs
@@ -776,26 +767,131 @@ def _mul_or_add(x, flag, k):
 # Shapes where the guard that SPLIT two compilations must show up as varying
 # and never as an invariant of both. Rows: builder, capture kwargs, calls,
 # substrings some varying fact must carry, substrings some invariant fact must
-# carry, substrings no invariant fact may carry.
+# carry, substrings no invariant fact may carry, and whether the single call
+# must be made once under no_grad and once under enable_grad to split it.
 _VARYING_CORPUS = {
     # _normalize strips object ids so the file diffs clean. It must not strip a
     # user constant with it: these two variants pin the dict to different keys.
-    "large_constant": (lambda: _scale_by_first_value, {"dynamic": False}, [(torch.ones(4), {1000000001: 2}), (torch.ones(4), {2000000002: 3})], ("[1000000001]", "[2000000002]"), (), ("dict.keys",)),
+    "large_constant": (lambda: _scale_by_first_value, {"dynamic": False}, [(torch.ones(4), {1000000001: 2}), (torch.ones(4), {2000000002: 3})], ("[1000000001]", "[2000000002]"), (), ("dict.keys",), False),
     # k is unspecialized, so its guard is "k is an int" in both variants and
     # is a real precondition. Fingerprinting the value it happened to hold
     # would split one shared guard into two indistinguishable varying facts.
-    "shared_int_guard": (lambda: _mul_or_add, {"dynamic": True}, [(torch.ones(4), True, 1), (torch.ones(4), False, 2)], (), ("___check_type_id(L['k']",), ()),
+    "shared_int_guard": (lambda: _mul_or_add, {"dynamic": True}, [(torch.ones(4), True, 1), (torch.ones(4), False, 2)], (), ("___check_type_id(L['k']",), (), False),
     # The id in an identity guard's code is normalized away, so the object has
     # to be named some other way, or self.act is reported invariant.
-    "identity_guard_named": (lambda: PrecompileSelfActPair(torch.relu, torch.sigmoid), {"dynamic": False}, [(torch.ones(4),)], ("relu on self.act", "sigmoid on self.act"), (), (".act",)),
+    "identity_guard_named": (lambda: PrecompileSelfActPair(torch.relu, torch.sigmoid), {"dynamic": False}, [(torch.ones(4),)], ("relu on self.act", "sigmoid on self.act"), (), (".act",), False),
     # Every entry of an ACT2FN-style table is "<lambda>" in one module on one
     # line; _object_identity must still tell them apart.
-    "lambda_table_pair": (lambda: PrecompileSelfActPair(*_LAMBDA_TABLE.values()), {"dynamic": False}, [(torch.randn(3, 4),)], ("self.act",), (), ("self.act",)),
-    # example_inputs run under no_grad and body calls do not, so the same call
-    # made both ways compiles twice; global-state guards carry no value of
-    # their own, so without a fingerprint nothing would be reported varying.
-    "grad_mode": (PrecompileInvariantModel, {"dynamic": False, "example_inputs": [(torch.ones(4, 8),)]}, [(torch.ones(4, 8),)], ("grad_enabled=True", "grad_enabled=False"), (), ()),
+    "lambda_table_pair": (lambda: PrecompileSelfActPair(*_LAMBDA_TABLE.values()), {"dynamic": False}, [(torch.randn(3, 4),)], ("self.act",), (), ("self.act",), False),
+    # The same call made once under no_grad and once under enable_grad compiles
+    # twice; global-state guards carry no value of their own, so without a
+    # fingerprint nothing would be reported varying.
+    "grad_mode": (PrecompileInvariantModel, {"dynamic": False}, [(torch.ones(4, 8),)], ("grad_enabled=True", "grad_enabled=False"), (), (), True),
 }  # fmt: skip
+
+_BUILTIN_ACROSS_BREAK_SRC = """\
+import torch
+
+class Model(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.scale = scale
+
+    def forward(self, x, cfg):
+        # `f` holds a builtin across the break, so the dynamo bytecode puts it
+        # back by READING Dynamo's builtins-dict global rather than by
+        # resolving the name again through the ordinary lookup.
+        f = len
+        y = x * self.scale
+        torch._dynamo.graph_break()
+        return y.sum() * f(cfg)
+"""
+
+_SHARED_FRAME_SRC = """\
+import torch
+
+class SharedBlock(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.scale = scale
+
+    def forward(self, x):
+        y = x * 2
+        marker = y.sum().item()
+        return y * self.scale + marker * 0.0
+
+class ModelOne(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.block = SharedBlock(scale)
+
+    def forward(self, x):
+        return self.block(x).sum()
+
+class ModelTwo(torch.nn.Module):
+    def __init__(self, scale):
+        super().__init__()
+        self.block = SharedBlock(scale)
+
+    def forward(self, x):
+        return self.block(x).sum() + 0.0
+"""
+
+_ENCODER_SRC = """\
+import torch
+
+
+class Encoder(torch.nn.Module):
+    def forward(self, x):
+        return x {op} 1.0
+"""
+
+_FLIPPED_ENCODER_SRC = """\
+import os
+
+import torch
+
+
+if os.environ.get("FLIP_V2") == "1":
+    class Encoder(torch.nn.Module):
+        def forward(self, x):
+            return x * 7.0
+else:
+    class Encoder(torch.nn.Module):
+        def forward(self, x):
+            return x + 1.0
+"""
+
+_SHIM_MODEL_SRC = """\
+import shim_abc
+import torch
+
+class Model(torch.nn.Module):
+    def forward(self, x):
+        return shim_abc.helper(x).sum()
+"""
+
+_DECORATOR_SRC = """\
+import functools
+
+ENABLE = True
+
+def deco(fn):
+    @functools.wraps(fn)
+    def wrapper(x):
+        y = x * 2 if ENABLE else x * 3
+        scalar = x.sum().item()
+        return y + scalar
+    return wrapper
+"""
+
+_WRAPPED_ENTRY_SRC = """\
+from precompile_entry_decorators import deco
+
+@deco
+def staged(x):
+    return x
+"""
 
 
 @instantiate_parametrized_tests
@@ -863,13 +959,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
     def _corpus_model(self, name):
         return self._corpus_module(name).Model()
-
-    def _capture(self, fn, *args, no_grad=True):
-        grad = torch.no_grad() if no_grad else contextlib.nullcontext()
-        session = precompile_capture(fn, backend="eager", dynamic=False)
-        with session as compiled, grad:
-            compiled(*args)
-        return session
 
     @parametrize("case", sorted(_CPU_TARGET_CASES))
     def test_cpu_codegen_target_is_compared_only_when_recorded(self, case):
@@ -1015,50 +1104,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         name = _defining_module_name(shim.helper.__code__)
         self.assertEqual(name, "_shim_impl")
         self.assertIs(importlib.import_module(name), impl)
-
-    def test_a_failed_load_leaves_no_device_type_behind(self):
-        # eval_frame's caching_precompile path retries a failed load on the SAME
-        # package object, and update_device_type only widens cpu -> accelerator,
-        # so a device_type left behind by the failed load can never be corrected
-        # and gets re-saved as this capture's. One outside CHECK_GPUS turns off
-        # every GPU check for whoever loads the artifact next.
-        drifted = dynamo_package.SourceInfo(
-            inlined_sources={
-                dynamo_package.InlinedSource(
-                    module="torch._dynamo.package",
-                    firstlineno=1,
-                    lastlineno=3,
-                    checksum="not-the-checksum-on-disk",
-                    content="",
-                )
-            }
-        )
-        stale = dynamo_package._DynamoCacheEntry(
-            codes=[], source_info=drifted, device_type="mtia"
-        )
-
-        package = CompilePackage(None)
-        with self.assertRaisesRegex(RuntimeError, "Source code changes detected"):
-            package.initialize(staged_with_graph_breaks, stale)
-        self.assertFalse(package.is_initialized())
-
-        package.initialize(staged_with_graph_breaks, None)
-        package.update_device_type(_graph_on("cuda"))
-        entry = package.cache_entry()
-        self.assertEqual(entry.device_type, "cuda")
-
-        # "mtia" is not in CHECK_GPUS, so had it survived it would have waved
-        # this artifact onto any host; what survives instead is gated.
-        other_host = dataclasses.replace(entry.system_info, gpu_name="Some Other GPU")
-        entry.system_info.check_compatibility(other_host, "mtia")
-        self.assertIn(entry.device_type, SystemInfo.CHECK_GPUS)
-        # The GPU-name check is what a surviving "mtia" would have skipped; it
-        # sits behind the availability check, so a cpu host reaches it mocked.
-        with (
-            mock.patch.object(torch.cuda, "is_available", return_value=True),
-            self.assertRaisesRegex(RuntimeError, "different GPU"),
-        ):
-            entry.system_info.check_compatibility(other_host, entry.device_type)
 
     @parametrize("interference", sorted(_BINDING_STACK_CASES))
     def test_unload_rebinds_a_global_through_the_binding_stack(self, interference):
@@ -1217,26 +1262,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertFalse(dynamo_package_lint._is_library_module("numpy"))
         self.assertFalse(dynamo_package_lint._is_library_module(None))
 
-    def test_an_import_alias_decodes_to_the_module_it_names(self):
-        self.assertIs(_dynamo_alias_module("__import_torch"), torch)
-        self.assertIs(
-            _dynamo_alias_module("__import_torch_dot_nn_dot_functional"),
-            torch.nn.functional,
-        )
-        self.assertIsNone(_dynamo_alias_module("__import_not_a_module_at_all"))
-        self.assertIsNone(_dynamo_alias_module("CFG"))
-
-    def test_facts_differing_only_in_value_sort_apart(self):
-        # Once the boilerplate code parts are filtered a TENSOR_MATCH renders no
-        # code at all, so two shape specializations tie on every other component
-        # of the sort key and their order falls to set iteration, which is hash
-        # seeded: the file then differs between PROCESSES, which two captures in
-        # one process cannot show.
-        def fact(shape):
-            return _GuardFact("TENSOR_MATCH", "x", (), f"shape={shape}", True)
-
-        self.assertNotEqual(_fact_order(fact((4, 8))), _fact_order(fact((5, 8))))
-
     def test_code_fingerprint_recurses_into_container_and_nested_consts(self):
         # _code_fingerprint names a callable by its body so an ACT2FN-style table
         # can be told apart. Two lambdas can differ ONLY inside a constant the
@@ -1306,48 +1331,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         for (a_name, a), (b_name, b) in itertools.combinations(sets.items(), 2):
             self.assertEqual(sorted(a & b), [], f"{a_name} overlaps {b_name}")
 
-    def test_varying_guard_slots_counts_presence_as_variation(self):
-        def fact(guard_type, source, value):
-            return _GuardFact(guard_type, source, (), value, True)
-
-        both = fact("TENSOR_MATCH", "x", "shape=(4,)")
-        differs_a = fact("CONSTANT_MATCH", "n", "1")
-        differs_b = fact("CONSTANT_MATCH", "n", "2")
-        only_one = fact("ID_MATCH", "G['fn']", "is m.f")
-        guard_sets = {
-            ("f", "f.py", 1): [
-                frozenset({both, differs_a, only_one}),
-                frozenset({both, differs_b}),
-            ]
-        }
-        self.assertEqual(
-            varying_guard_slots(guard_sets),
-            frozenset({("CONSTANT_MATCH", "n"), ("ID_MATCH", "G['fn']")}),
-        )
-
-    def test_composed_guard_filter_ands_with_the_default_and_checks_length(self):
-        def entry(guard_type, derived=()):
-            return GuardFilterEntry(
-                name="x",
-                has_value=False,
-                value=None,
-                guard_type=guard_type,
-                derived_guard_types=tuple(derived),
-                is_global=False,
-                orig_guard=None,
-            )
-
-        entries = [
-            entry("TENSOR_MATCH"),
-            entry("ID_MATCH"),
-            entry("TYPE_MATCH", ["NN_MODULE"]),
-        ]
-        self.assertEqual(default_guard_filter_fn(entries), [True, False, False])
-        drop_first = _compose_with_default(lambda es: [False] + [True] * (len(es) - 1))
-        self.assertEqual(drop_first(entries), [False, False, False])
-        with self.assertRaisesRegex(ValueError, "returned 1 decisions for 3 guards"):
-            _compose_with_default(lambda es: [True])(entries)
-
     def test_summary_is_incomplete_without_a_backend_graph(self):
         def summary(**kw):
             base = dict(
@@ -1364,521 +1347,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertFalse(summary(backend_graphs=0).complete)
         self.assertFalse(summary(guarded_codes=0).complete)
         self.assertFalse(summary(capture_errors=("boom",)).complete)
-
-    def test_normalize_scrubs_addresses_and_compile_counters(self):
-        self.assertEqual(
-            _normalize(
-                "___check_obj_id(G['fn'], 140234567890123), type=<class 'function'>"
-            ),
-            "___check_obj_id(G['fn'], <id>), type=<class 'function'>",
-        )
-        self.assertEqual(
-            _normalize("G['__builtins_dict___6']['len']"),
-            "G['__builtins_dict___<n>']['len']",
-        )
-        self.assertEqual(_normalize("__compiled_fn_3_0"), "__compiled_fn_<n>")
-        self.assertEqual(
-            _normalize("G['__tmp_140234567890123_c7']"), "G['__tmp_<id>_c<n>']"
-        )
-        self.assertEqual(_normalize("x[1234567890]"), "x[1234567890]")
-
-    def test_subgraph_renaming_leaves_lookalikes_alone(self):
-        # Per-subgraph renaming is driven by AST positions. An attribute
-        # (runner.call), a nested def (call inside class Runner) and a dotted
-        # import path (torch._inductor.async_compile) each contain a renamed
-        # name as text and must not be rewritten.
-        from torch._dynamo.precompile_package import _namespace_module_names
-
-        source = textwrap.dedent(
-            """
-            import torch._inductor.async_compile
-            from torch._inductor import async_compile
-
-
-            class Runner:
-                def call(self, x):
-                    return x
-
-
-            runner = Runner()
-
-
-            def call(x):
-                return runner.call(x) + torch._inductor.async_compile.__name__
-            """
-        )
-        (renamed,) = _namespace_module_names({"b0": source}).values()
-        self.assertIn("class Runner_s0:", renamed)
-        self.assertIn("runner_s0 = Runner_s0()", renamed)
-        self.assertIn("def call_s0(x):", renamed)
-        self.assertIn("    def call(self, x):", renamed)
-        self.assertIn(
-            "return runner_s0.call(x) + torch._inductor.async_compile.__name__", renamed
-        )
-        self.assertIn("import torch._inductor.async_compile\n", renamed)
-
-    def test_summary_reports_dropped_guards(self):
-        # Guard types the filter discards are recorded with their source name
-        # rather than silently disappearing; dropping one widens what a graph
-        # gets reused for, and only the name says whether that matters.
-        session = precompile_capture(
-            staged_with_global_dict_conditional, backend="eager", dynamic=False
-        )
-        with session as compiled:
-            compiled(torch.randn(4, 8))
-        summary = session.summary()
-        # The filter cannot serialize identity guards, so referencing the torch
-        # module at all produces at least one drop, reported as (type, source).
-        self.assertTrue(summary.dropped_guards)
-        for guard_type, source in summary.dropped_guards:
-            self.assertIsInstance(guard_type, str)
-            self.assertIsInstance(source, str)
-        self.assertEqual(
-            sum(summary.dropped_guard_types().values()), len(summary.dropped_guards)
-        )
-        self.assertIn("dropped guards", str(summary))
-        # save() can be made to enforce that nothing was dropped.
-        with self.assertRaisesRegex(PackageError, "dropped .* guard"):
-            session.save(self.path(), require_no_dropped_guards=True)
-
-    def test_strict_and_risky_drop_requirements_fail_closed(self):
-        # Strict save rejects every drop. Relaxing that still keeps the risky
-        # lint as a second gate unless the caller acknowledges it separately.
-        clean = precompile_capture(
-            PrecompileNoDispatchSlot(), backend="eager", dynamic=False
-        )
-        with clean as compiled, torch.no_grad():
-            compiled(torch.randn(3, 4))
-        clean.save(self.path())
-        with self.assertRaisesRegex(PackageError, "not serialized"):
-            clean.save(self.path(), require_no_dropped_guards=True)
-
-        torch._dynamo.reset()
-        session = precompile_capture(
-            staged_with_global_function_ref, backend="eager", dynamic=False
-        )
-        with session as compiled:
-            compiled(torch.randn(4, 8))
-        with (
-            self.assertNoLogs("torch._dynamo.precompile_package", "WARNING"),
-            self.assertRaisesRegex(PackageError, "PRECOMPILE_ACTIVATION"),
-        ):
-            session.save(self.path(), require_no_dropped_guards=False)
-        with self.assertLogs("torch._dynamo.precompile_package", "WARNING") as logs:
-            session.save(
-                self.path(),
-                require_no_risky_drops=False,
-                require_no_dropped_guards=False,
-            )
-        reported = [m for m in logs.output if "dropped guard" in m]
-        self.assertEqual(len(reported), 1, logs.output)
-        self.assertIn("PRECOMPILE_ACTIVATION", reported[0])
-        self.assertIn("require_no_risky_drops=False", logs.output[0])
-
-    def test_example_inputs_drive_the_capture(self):
-        # example_inputs is just "run these for me": capture is by execution, so
-        # the block body becomes optional.
-        session = precompile_capture(
-            PrecompileInvariantModel(),
-            backend="eager",
-            dynamic=False,
-            example_inputs=_TWO_SHAPES,
-        )
-        with session:
-            pass
-        summary = session.summary()
-        self.assertEqual(summary.frames, 2)
-        self.assertEqual(summary.guarded_codes, 4)
-
-    def test_a_failing_example_input_does_not_wedge_the_session(self):
-        # __enter__ runs example_inputs, and a __enter__ that raises never gets
-        # its __exit__, so the config patch the session holds would stay on for
-        # the life of the process and the session would refuse to save what it
-        # did capture. A bare tensor instead of a 1-tuple is the likely way in.
-        before = functorch_config.bundled_autograd_cache
-        session = precompile_capture(
-            PrecompileInvariantModel(),
-            backend="eager",
-            dynamic=False,
-            example_inputs=[torch.ones(4, 8)],
-        )
-        with self.assertRaisesRegex(TypeError, "tuples of positional args"):
-            with session:
-                pass
-        self.assertEqual(functorch_config.bundled_autograd_cache, before)
-        with self.assertRaisesRegex(PackageError, "capture raised"):
-            session.save(self.path())
-
-    def test_save_rejects_capture_that_ran_nothing(self):
-        # Capture is by execution. A session whose callable was never run has
-        # nothing to serve, and install() would just skip the frame, so
-        # serving() could not report the gap either.
-        session = precompile_capture(
-            staged_with_graph_breaks, backend="eager", dynamic=False
-        )
-        with session:
-            pass
-        summary = session.summary()
-        self.assertEqual(summary.guarded_codes, 0)
-        self.assertFalse(summary.complete)
-        with self.assertRaisesRegex(PackageError, "captured no compiled code"):
-            session.save(self.path())
-
-    def test_save_refuses_capture_that_compiled_no_graph(self):
-        # allow_empty_graphs turns a frame that compiled nothing into one guarded
-        # code, so guarded_codes alone cannot tell this from a real capture.
-        @torch._dynamo.disable
-        def body(x):
-            return x.sin()
-
-        def outer(x):
-            return body(x)
-
-        session = self._capture(outer, torch.randn(4))
-        summary = session.summary()
-        self.assertGreater(summary.guarded_codes, 0)
-        self.assertEqual(summary.backend_graphs, 0)
-        self.assertFalse(summary.complete)
-        with self.assertRaisesRegex(PackageError, "compiled no graph"):
-            session.save(self.path())
-        with self.assertRaisesRegex(PackageError, "compiled no graph"):
-            session.artifact()
-        session.save(self.path(), require_complete=False)
-
-    def test_truncation_report_is_a_lower_bound(self):
-        # Hitting recompile_limit sets FrameExecStrategy(RUN_ONLY, RUN_ONLY),
-        # whose recursive half silences every frame called beneath the offender,
-        # yet only the offender is recorded. Pin the gap the message must admit.
-        inputs = [torch.randn(*s) for s in [(4, 8), (5, 8), (6, 8)]]
-
-        def capture(limit):
-            torch._dynamo.reset()
-            session = precompile_capture(
-                PrecompileStack(5, resume_work=True),
-                backend="eager",
-                recompile_limit=limit,
-                dynamic=False,
-            )
-            with session as compiled:
-                for x in inputs:
-                    compiled(x)
-            return session
-
-        self.assertEqual(capture(64).summary().truncated, ())
-        session = capture(8)
-        summary = session.summary()
-        # One frame named, but the resume frames beneath it also lost variants.
-        self.assertEqual(len(summary.truncated), 1)
-        self.assertIn(">=1 TRUNCATED", str(summary))
-        with self.assertRaisesRegex(PackageError, "lower bound"):
-            session.save(self.path())
-
-    def test_capture_rejects_a_callable_with_no_code_object(self):
-        # An nn.Module reaches the same dead end one level down: self.forward =
-        # functools.partial(...) in __init__ shadows the class method, so the
-        # entry function has no __code__ either. Saying so is the whole point of
-        # the check; without it this died on a bare AttributeError from inside
-        # CompilePackage.
-        def scaled(scale, x):
-            return x * scale
-
-        class OnlyCall:
-            def __call__(self, x):
-                return x + 1.0
-
-        for fn in (
-            functools.partial(scaled, 2.0),
-            OnlyCall(),
-            PrecompilePartialForward(2.0),
-        ):
-            with self.assertRaisesRegex(TypeError, "no __code__"):
-                precompile_capture(fn, backend="eager")
-
-    @torch._dynamo.config.patch(caching_precompile=True)
-    def test_truncated_frame_is_not_also_reported_uncovered(self):
-        # Hitting the recompile limit happens INSIDE code_context, whose exit
-        # saw an attempt that added no guarded code and called the frame
-        # uncovered. But it has working variants: "uncovered" means no guarded
-        # code at all, which is what install() skip_code()s and what save()'s
-        # message describes.
-        session = precompile_capture(
-            PrecompileSelfAct(torch.relu),
-            backend="eager",
-            dynamic=False,
-            recompile_limit=2,
-        )
-        with session as compiled, torch.no_grad():
-            for n in (3, 4, 5, 6, 7, 8):
-                compiled(torch.randn(n, 4))
-        summary = session.summary()
-        self.assertTrue(summary.truncated)
-        self.assertGreater(summary.guarded_codes, 0)
-        self.assertEqual(summary.uncovered_frames, ())
-
-    def test_install_skips_backends_only_a_bypassed_entry_references(self):
-        # Deserializing an inductor artifact is expensive and can fail on a
-        # serving host, so install() must not touch one for an entry it will
-        # skip anyway.
-        class _Exploding:
-            def after_deserialization(self):
-                raise AssertionError("install deserialized an unusable backend")
-
-        model = PrecompileSelfAct(torch.relu)
-        session = precompile_capture(model, backend="eager", dynamic=False)
-        with session as compiled, torch.no_grad():
-            compiled(torch.randn(3, 4))
-        package = session._package
-        backend_ids = {
-            backend_id
-            for entry in package._codes.values()
-            for backend_id in entry.backend_ids
-        }
-        self.assertTrue(backend_ids)
-        for entry in package._codes.values():
-            entry.bypassed = True
-        package.install({backend_id: _Exploding() for backend_id in backend_ids})
-        package.uninstall()
-
-    def test_inductor_artifact_records_compile_time_cpu_target(self):
-        from torch._inductor import cpu_vec_isa
-
-        isa = cpu_vec_isa.pick_vec_isa()
-        if not isa:
-            raise unittest.SkipTest("no vector ISA on this host")
-        model = PrecompileEmptyGraph()
-        x = torch.randn(16)
-        with torch._inductor.config.patch({"cpp.simdlen": isa.bit_width()}):
-            session = precompile_capture(
-                model,
-                backend="inductor",
-                dynamic=False,
-                example_inputs=[(x,)],
-            )
-            with session:
-                pass
-            capture_target = session._package.cache_entry().system_info
-        session.save(self.path())
-        saved = _SingleFileStore().read(self.path()).dynamo.system_info
-
-        self.assertEqual(capture_target.cpu_codegen_target[2], isa.bit_width())
-        self.assertEqual(saved.cpu_codegen_target, capture_target.cpu_codegen_target)
-
-    @torch._dynamo.config.patch(caching_precompile=True)
-    def test_failed_cache_install_cold_falls_back_on_same_package(self):
-        from torch._dynamo.precompile_context import EagerCacheArtifact
-
-        x = torch.randn(4, 8)
-        session = precompile_capture(
-            staged_with_graph_breaks, backend="eager", dynamic=False
-        )
-        with session as compiled:
-            compiled(x)
-        session.save(self.path())
-        entry = _SingleFileStore().read(self.path())
-
-        torch._dynamo.reset()
-        with (
-            mock.patch.object(DynamoCache, "load", return_value=entry),
-            mock.patch.object(
-                EagerCacheArtifact,
-                "after_deserialization",
-                side_effect=RuntimeError("cache install failed"),
-            ),
-            self.assertLogs("torch._dynamo.eval_frame", level="WARNING"),
-        ):
-            compiled = torch.compile(
-                staged_with_graph_breaks, backend="eager", dynamic=False
-            )
-        self.assertEqual(compiled(x), staged_with_graph_breaks(x))
-
-    @parametrize("shape", sorted(_RISKY_DROP_CORPUS))
-    def test_risky_drop_corpus_is_flagged(self, shape):
-        # See _RISKY_DROP_CORPUS: this predicate has failed open three times,
-        # so every shape ever found is asserted here rather than described.
-        expected, build = _RISKY_DROP_CORPUS[shape]
-        model, args = build(self)
-        session = self._capture(model, *args)
-        risky = [name for _, name in session.summary().risky_dropped_guards]
-        for name in expected:
-            self.assertTrue(any(r.endswith(name) for r in risky), (name, risky))
-        # Guards on the torch module itself are dropped too but are not risky.
-        self.assertNotIn("G['torch']", risky)
-        # Enforcement is the default; the corpus opts out only to prove that
-        # every risky shape remains serializable when explicitly acknowledged.
-        with self.assertRaisesRegex(PackageError, re.escape(expected[0])):
-            session.save(self.path(), require_no_dropped_guards=False)
-        session.save(
-            self.path(),
-            require_no_risky_drops=False,
-            require_no_dropped_guards=False,
-        )
-
-    @parametrize("shape", sorted(_BENIGN_DROP_CORPUS))
-    def test_benign_drop_corpus_is_not_flagged(self, shape):
-        expected_dropped, build = _BENIGN_DROP_CORPUS[shape]
-        model, args = build(self)
-        session = self._capture(model, *args)
-        summary = session.summary()
-        dropped = [name for _, name in summary.dropped_guards]
-        for name in expected_dropped:
-            self.assertTrue(any(d.endswith(name) for d in dropped), (name, dropped))
-        self.assertEqual(summary.risky_dropped_guards, ())
-        session.save(self.path())
-        with self.assertRaisesRegex(PackageError, "not serialized"):
-            session.save(self.path(), require_no_dropped_guards=True)
-
-    @parametrize("shape", sorted(_VALUE_PIN_CORPUS))
-    def test_value_pinned_guards_are_reported(self, shape):
-        build, args, pinned, (kept_type, kept_source) = _VALUE_PIN_CORPUS[shape]
-        session = self._capture(build(), *args)
-        summary = session.summary()
-        self.assertTrue(summary.complete)
-        self.assertEqual(summary.wont_generalize, pinned)
-        self.assertTrue(
-            any(t == kept_type and kept_source in n for t, n in summary.kept_guards),
-            summary.kept_guards,
-        )
-        if pinned:
-            self.assertIn("value-pinned", str(summary))
-
-    def test_invariants_separate_what_holds_from_what_varies(self):
-        # Two shapes, one config value. The config read is on both sides of the
-        # break, so it is invariant; the shapes are what tell the graphs apart.
-        session = precompile_capture(
-            PrecompileInvariantModel(),
-            backend="eager",
-            dynamic=False,
-            example_inputs=_TWO_SHAPES,
-        )
-        with session:
-            pass
-
-        frames = {f.frame: f for f in session.invariants()}
-        resume = next(k for k in frames if k.startswith("torch_dynamo_resume_in"))
-        entry = frames["forward"]
-        self.assertEqual(entry.variants, 2)
-        self.assertEqual(frames[resume].variants, 2)
-
-        def rendered(facts):
-            return [f.render() for f in facts]
-
-        # The global read survives into every variant of the resume frame.
-        self.assertTrue(
-            any("['mode'] == 'sum'" in r for r in rendered(frames[resume].invariant)),
-            rendered(frames[resume].invariant),
-        )
-        # The shapes differ between variants, so they are NOT invariant. This is
-        # the half that needs the value fingerprint: TENSOR_MATCH's code_list
-        # carries no shape, so without it both variants would look identical and
-        # land in the intersection.
-        for frame in (entry, frames[resume]):
-            varies = rendered(frame.varying)
-            # Rendered as guard code, so sizes read size=[4, 8].
-            self.assertTrue(any("size=[4, 8]" in r for r in varies), varies)
-            self.assertTrue(any("size=[5, 8]" in r for r in varies), varies)
-            self.assertFalse(any("size=[" in r for r in rendered(frame.invariant)))
-
-    def test_invariants_hold_back_the_guards_no_fingerprint_models(self):
-        # GLOBAL_STATE and friends compare things this report cannot fingerprint,
-        # so calling two of them equal would assert a precondition that was never
-        # checked. They must land in `undetermined`, never in `invariant` --
-        # emptying _UNMODELLED_GUARD_TYPES makes them all compare equal and
-        # silently promotes them into the intersection.
-        from torch._dynamo.precompile_package import _UNMODELLED_GUARD_TYPES
-
-        session = precompile_capture(
-            PrecompileInvariantModel(),
-            backend="eager",
-            dynamic=False,
-            example_inputs=_TWO_SHAPES,
-        )
-        with session:
-            pass
-
-        frames = {f.frame: f for f in session.invariants()}
-        undetermined_types = {f.guard_type for f in frames["forward"].undetermined}
-        self.assertIn("GLOBAL_STATE", undetermined_types)
-        self.assertIn("TORCH_FUNCTION_STATE", undetermined_types)
-        determined = {
-            f.guard_type
-            for frame in frames.values()
-            for f in (*frame.invariant, *frame.varying)
-        }
-        self.assertFalse(determined & _UNMODELLED_GUARD_TYPES, determined)
-
-    @parametrize("case", sorted(_INVARIANTS_FILE_CASES))
-    def test_invariants_file_is_written_and_reproducible(self, case):
-        # Same contract as save(): the path names a file, written exactly where
-        # asked with its parent directories created.
-        build, inputs, must_contain, forbidden = _INVARIANTS_FILE_CASES[case]
-        texts = []
-        for name in ("a", "b"):
-            path = os.path.join(self.dir(), "snapshots", name, "invariants.txt")
-            self.assertFalse(os.path.exists(os.path.dirname(path)))
-            torch._dynamo.reset()
-            with precompile_capture(
-                build(),
-                backend="eager",
-                dynamic=False,
-                example_inputs=inputs,
-                invariants=path,
-            ):
-                pass
-            self.assertTrue(os.path.isfile(path))
-            with open(path, encoding="utf-8") as handle:
-                texts.append(handle.read())
-        text = texts[0]
-        self.assertIn("# precompile invariants for", text)
-        for needle in must_contain:
-            self.assertIn(needle, text)
-        self.assertNotRegex(text, forbidden)
-        # Object ids are normalized out, so the file is stable enough to commit
-        # and diff across runs.
-        self.assertEqual(texts[0], texts[1])
-
-    def test_invariants_report_saved_tensor_hooks_by_content(self):
-        # AUTOGRAD_SAVED_TENSORS_HOOKS renders a raw tuple(map(id, hooks)), so
-        # the ids must be normalized or the file churns -- but erasing them
-        # alone merges two variants that differ ONLY in their hooks, and the
-        # guard that split them gets printed as an invariant of both. Both
-        # directions at once: stable text, still discriminating.
-        #
-        # The hooks must be fx GraphModules or are_inline_hooks() rejects them,
-        # the guard renders "ids == None", and this passes without exercising
-        # anything. That is how an earlier version of this test was vacuous.
-        first = tuple(
-            torch.fx.symbolic_trace(f) for f in (lambda x: x + 1, lambda x: x - 1)
-        )
-        second = tuple(
-            torch.fx.symbolic_trace(f) for f in (lambda x: x * 2, lambda x: x / 2)
-        )
-
-        def f(x):
-            return (x * 2).sum()
-
-        session = precompile_capture(f, backend="eager", dynamic=False)
-        with session as compiled:
-            for hooks in (first, second):
-                with torch.autograd.graph.saved_tensors_hooks(*hooks):
-                    compiled(torch.ones(4, 8, requires_grad=True)).backward()
-        path = self.path("hooks.invariants")
-        session.write_invariants(path)
-
-        frame = session.invariants()[0]
-        self.assertEqual(frame.variants, 2)
-        hook_facts = [
-            fact.render()
-            for fact in frame.varying
-            if "top_saved_tensors_hooks" in fact.render()
-        ]
-        # The guard really did split the two compilations, so it must be here
-        # and not in the invariant set.
-        self.assertEqual(len(hook_facts), 2, frame.varying)
-        self.assertFalse(
-            any("top_saved_tensors_hooks" in f.render() for f in frame.invariant)
-        )
-        with open(path, encoding="utf-8") as handle:
-            self.assertNotRegex(handle.read(), r"\b\d{9,}\b")
 
     # Every shape found to split a compilation while the report called it an
     # invariant. The fingerprint has failed open three times -- shapes, then
@@ -1920,326 +1388,29 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         ),
     }
 
-    @parametrize("shape", sorted(_SPLIT_CORPUS))
-    def test_a_tensor_property_that_splits_a_compilation_is_reported_varying(
-        self, shape
-    ):
-        first, second = self._SPLIT_CORPUS[shape]()
-
-        def f(x):
-            return x * 2
-
-        torch._dynamo.reset()
-        session = precompile_capture(f, backend="eager", dynamic=False)
-        with session as compiled:
-            for arg in (first, second):
-                if isinstance(arg, _InferenceInput):
-                    with torch.inference_mode():
-                        compiled(arg.tensor)
-                else:
-                    with torch.no_grad():
-                        compiled(arg)
-        frame = session.invariants()[0]
-        # If Dynamo did not actually split, the case is not exercising anything
-        # and the corpus entry is wrong -- say so rather than passing quietly.
-        self.assertEqual(frame.variants, 2, f"{shape}: dynamo did not recompile")
-        # Key on the field, not the rendered text: the render is authoritative
-        # guard code now and does not spell the type.
-        self.assertTrue(
-            any(fact.guard_type == "TENSOR_MATCH" for fact in frame.varying),
-            f"{shape}: the guard that split the compilations is reported as an "
-            f"invariant of both. varying={[f.render() for f in frame.varying]}",
-        )
-        self.assertFalse(
-            any(fact.guard_type == "TENSOR_MATCH" for fact in frame.invariant)
-        )
-
-    def test_invariants_marks_unenforced_preconditions(self):
-        # An invariant whose guard could not be serialized is a precondition
-        # nothing rechecks at load. It has to be visibly distinct.
-        session = precompile_capture(
-            PrecompileInvariantModel(),
-            backend="eager",
-            dynamic=False,
-            example_inputs=_TWO_SHAPES,
-        )
-        with session:
-            pass
-        rendered = [
-            f.render() for frame in session.invariants() for f in frame.invariant
-        ]
-        self.assertTrue(any(r.startswith("[dropped ]") for r in rendered))
-        self.assertTrue(any(r.startswith("[enforced]") for r in rendered))
-
-    @parametrize("shape", sorted(_VARYING_CORPUS))
-    def test_invariants_report_what_split_the_variants_as_varying(self, shape):
-        build, kwargs, calls, must_vary, must_hold, must_not_hold = _VARYING_CORPUS[
-            shape
-        ]
-        session = precompile_capture(build(), backend="eager", **kwargs)
-        with session as compiled:
-            for args in calls:
-                compiled(*args)
-        split = [f for f in session.invariants() if f.variants > 1]
-        self.assertTrue(split, "expected a frame compiled more than once")
-        for frame in split:
-            invariant = [f.render() for f in frame.invariant]
-            varying = [f.render() for f in frame.varying]
-            self.assertEqual(len(varying), len(set(varying)), varying)
-            for needle in must_vary:
-                self.assertTrue(
-                    any(needle in r for r in varying), (frame.frame, needle, varying)
-                )
-            for needle in must_hold:
-                self.assertTrue(
-                    any(needle in r for r in invariant),
-                    (frame.frame, needle, invariant),
-                )
-            for needle in must_not_hold:
-                self.assertFalse(
-                    any(needle in r for r in invariant),
-                    (frame.frame, needle, invariant),
-                )
-
-    def test_policy_keeps_input_pins_on_a_single_example(self):
-        # A constant passed as an argument is a CONSTANT_MATCH on an input; one
-        # example makes it invariant, but dropping it would change a served
-        # answer, so the fail-closed policy must keep it.
-        def f(x, k):
-            return x * k
-
-        session = precompile_capture(
-            f,
-            backend="eager",
-            dynamic=False,
-            example_inputs=[(torch.ones(4), 3)],
-            prune_invariant_guards=True,
-        )
-        with session:
-            pass
-        kept = {(t, n) for t, n in session.summary().kept_guards}
-        self.assertIn(("CONSTANT_MATCH", "k"), kept)
-        self.assertNotIn(
-            ("CONSTANT_MATCH", "k"),
-            set(session.summary().policy_dropped_guards),
-        )
-        self.assertTrue(any(t == "TENSOR_MATCH" for t, _ in kept))
-
-    def test_policy_drops_are_absent_from_the_reserialized_guards(self):
-        from torch._dynamo.guards import strip_local_scope
-        from torch._dynamo.package import load_guards_state
-
-        session = precompile_capture(
-            PrecompileStockSequential(),
-            backend="eager",
-            dynamic=False,
-            example_inputs=[(torch.randn(n, 8),) for n in (4, 5)],
-            prune_invariant_guards=True,
-        )
-        with session:
-            pass
-        dropped = set(session.summary().policy_dropped_guards)
-        self.assertTrue(dropped)
-        for entry in session._package.code_entries():
-            for guarded in entry.guarded_codes:
-                state = load_guards_state(guarded.guards_state)
-                names = {
-                    (g.create_fn_name(), strip_local_scope(g.name))
-                    for g in state.output_graph.guards
-                }
-                self.assertEqual(names & dropped, set())
-        # The report re-marks a policy-dropped fact rather than deleting it.
-        facts = [f for fr in session.invariants() for f in fr.invariant]
-        for slot in dropped:
-            self.assertTrue(
-                any(not f.enforced and (f.guard_type, f.source) == slot for f in facts),
-                slot,
-            )
-
-    def test_policy_reserialization_failure_leaves_the_package_unpruned(self):
-        session = precompile_capture(
-            PrecompileStockSequential(),
-            backend="eager",
-            dynamic=False,
-            example_inputs=[(torch.randn(4, 8),)],
-            prune_invariant_guards=True,
-        )
-        with (
-            mock.patch(
-                "torch._dynamo.package.load_guards_state",
-                side_effect=RuntimeError("boom"),
-            ),
-            self.assertRaisesRegex(
-                PackageError, "cannot be rebuilt from their serialized form"
-            ),
-        ):
-            with session:
-                pass
-        # Nothing was pruned, and the accounting still says so.
-        summary = session.summary()
-        self.assertEqual(summary.policy_dropped_guards, ())
-        self.assertIn(("AUTOGRAD_SAVED_TENSORS_HOOKS", ""), set(summary.kept_guards))
-
-    def test_hook_guards_dynamo_skips_are_not_policy_drops(self):
-        # Under skip_nnmodule_hook_guards, the default, GuardBuilder emits
-        # nothing for EMPTY_NN_MODULE_HOOKS_DICT, so there is no check for the
-        # invariance policy to drop and none to report as dropped. With the
-        # guards on, they are rooted at the served module -- an input -- so
-        # the policy keeps them: only environment-rooted guards may be dropped.
-        def hook_slots(session):
-            return [
-                slot
-                for slot in session.summary().policy_dropped_guards
-                if slot[0] == "EMPTY_NN_MODULE_HOOKS_DICT"
-            ]
-
-        def capture():
-            session = precompile_capture(
-                PrecompileStockSequential(),
-                backend="eager",
-                dynamic=False,
-                example_inputs=[(torch.randn(n, 8),) for n in (4, 5)],
-                prune_invariant_guards=True,
-            )
-            with session:
-                pass
-            return session
-
-        session = capture()
-        self.assertEqual(hook_slots(session), [])
-        self.assertIn(
-            ("AUTOGRAD_SAVED_TENSORS_HOOKS", ""),
-            session.summary().policy_dropped_guards,
-        )
-        torch._dynamo.reset()
-        with torch._dynamo.config.patch(skip_nnmodule_hook_guards=False):
-            session = capture()
-        self.assertEqual(hook_slots(session), [])
-        kept_types = {t for t, _ in session.summary().kept_guards}
-        self.assertIn("EMPTY_NN_MODULE_HOOKS_DICT", kept_types)
-
-    @torch.compiler.set_stance("default")
-    def test_overlapping_serving_contexts_keep_compilation_disabled(self):
-        torch._dynamo.reset()
-
-        @torch.compile(backend="eager", dynamic=False)
-        def compiled(x):
-            return x + 1
-
-        compiled(torch.randn(2))
-        both_serving = threading.Barrier(2, timeout=10)
-        a_exited = threading.Event()
-        errors = queue.SimpleQueue()
-        rejected = queue.SimpleQueue()
-
-        def serve_a():
+    def test_stale_module_memo_is_revalidated(self):
+        # The filename -> module memo caches a hit outright, and its ABA check
+        # on len(sys.modules) cannot see a plain delete. Handing back the dead
+        # name made add_code raise KeyError on it.
+        name = "_precompile_stale_memo_probe"
+        source = "def probe(t):\n    return t + 1\n"
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, name + ".py")
+            with open(path, "w") as f:
+                f.write(source)
+            sys.path.insert(0, d)
             try:
-                with serving():
-                    both_serving.wait()
-                a_exited.set()
-            except Exception as e:
-                errors.put(e)
-
-        def serve_b():
-            try:
-                with serving():
-                    both_serving.wait()
-                    if not a_exited.wait(10):
-                        raise RuntimeError("timed out waiting for serving thread")
-                    try:
-                        compiled(torch.randn(3))
-                    except RuntimeError as e:
-                        rejected.put("fail_on_recompile" in str(e))
-                    else:
-                        rejected.put(False)
-            except Exception as e:
-                errors.put(e)
-
-        threads = [threading.Thread(target=fn) for fn in (serve_a, serve_b)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(10)
-        self.assertFalse(any(thread.is_alive() for thread in threads))
-        self.assertTrue(errors.empty())
-        self.assertTrue(rejected.get_nowait())
-        self.assertTrue(rejected.empty())
-        self.assertEqual(torch._dynamo.eval_frame._stance.stance, "default")
-
-    def test_precompile_entries_are_region_scoped_in_both_directions(self):
-        # Two rails that pull against each other. A precompile entry installed
-        # for the DEFAULT region must not be served to an isolated one (the
-        # identity guards that would tell two artifacts apart are the ones
-        # precompile drops), and the caching_precompile loader must therefore
-        # install into the region its own context looks up in.
-        x = torch.randn(3, 4)
-        model = PrecompileSelfAct(torch.relu)
-        self._capture(model, x).save(self.path(), require_no_risky_drops=False)
-
-        def installed(into_region):
-            torch._dynamo.reset()
-            cache_entry = _SingleFileStore().load_cache_entry(self.path())
-            package = CompilePackage(model.forward, cache_entry.dynamo)
-            ctx = torch._dynamo.optimize(
-                "eager", dynamic=False, isolate_recompiles=True
-            )
-            region = {"isolate_recompiles_id": ctx._isolate_recompiles_id}
-            package.install(cache_entry.backends, **(region if into_region else {}))
-            return package, ctx(model)
-
-        # Rail 1: default-region install is NOT visible from an isolated region.
-        package, isolated = installed(into_region=False)
-        try:
-            with (
-                torch.no_grad(),
-                serving(),
-                self.assertRaisesRegex(RecompileError, "Detected recompile"),
-            ):
-                isolated(x)
-        finally:
-            package.uninstall()
-
-        # Rail 2: installing into the region the context uses does serve.
-        package, isolated = installed(into_region=True)
-        try:
-            with torch.no_grad(), serving():
-                self.assertEqual(isolated(x), model(x))
-        finally:
-            package.uninstall()
-
-    @parametrize("error_type", (RuntimeError, KeyboardInterrupt))
-    def test_a_failed_install_leaves_nothing_installed(self, error_type):
-        self._capture(staged_with_graph_breaks, torch.randn(3, 4)).save(self.path())
-
-        torch._dynamo.reset()
-        cache_entry = _SingleFileStore().load_cache_entry(self.path())
-        backends = cache_entry.backends
-
-        class _Boom:
-            def after_deserialization(self):
-                raise error_type("artifact will not deserialize on this host")
-
-        # The last frame's backend is the one that fails, so the earlier frames
-        # are already installed when install() gives up. A backend rejected by
-        # the serving host is the realistic way into this.
-        backends[cache_entry.dynamo.codes[-1].backend_ids[-1]] = _Boom()
-
-        scope = staged_with_graph_breaks.__globals__
-        before = set(scope)
-        package = CompilePackage(staged_with_graph_breaks, cache_entry.dynamo)
-        torch._dynamo.optimize("eager", package=package, dynamic=False)(
-            staged_with_graph_breaks
-        )
-        with self.assertRaisesRegex(error_type, "will not deserialize"):
-            package.install(backends)
-
-        # install() raising leaves the caller no handle to unload with, so a
-        # partial install would be permanent: some frames served, some not.
-        leftover = [n for n in set(scope) - before if not n.startswith("__import_")]
-        self.assertEqual(sorted(leftover), [])
-        self.assertEqual(
-            _debug_get_precompile_entries(staged_with_graph_breaks.__code__), []
-        )
+                module = importlib.import_module(name)
+                scan = dynamo_package._scan_sys_modules_for_file
+                self.assertEqual(scan(module.__file__), name)
+                del sys.modules[name]
+                self.assertIsNone(scan(module.__file__))
+                # No KeyError: an unresolvable module contributes no source.
+                info = dynamo_package.SourceInfo(inlined_sources=set())
+                info.add_code(module.probe.__code__)
+            finally:
+                sys.path.remove(d)
+                sys.modules.pop(name, None)
 
 
 if __name__ == "__main__":
