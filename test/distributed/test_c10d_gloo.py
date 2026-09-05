@@ -3456,6 +3456,41 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
 
+    @requires_gloo()
+    def test_init_process_group_with_cpu_device_id(self):
+        # https://github.com/pytorch/pytorch/issues/160731
+        store = c10d.FileStore(self.file_name, self.world_size)
+        with self.assertRaisesRegex(ValueError, "must be a device with an index"):
+            c10d.init_process_group(
+                backend="gloo",
+                store=store,
+                rank=self.rank,
+                world_size=self.world_size,
+                device_id=torch.device("cpu"),
+            )
+        c10d.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            device_id=torch.device("cpu", 0),
+        )
+        default_pg = c10d.distributed_c10d._get_default_group()
+        self.assertEqual(default_pg.bound_device_id, torch.device("cpu", 0))
+        t = torch.ones(2)
+        c10d.all_reduce(t)
+        self.assertEqual(t, torch.full((2,), float(self.world_size)))
+        # A cpu-bound default pg must not break subgroup creation on
+        # non-member ranks (new_group used to call the NCCL-only
+        # perform_nocolor_split on gloo).
+        subgroup = c10d.new_group([0])
+        if self.rank == 0:
+            st = torch.ones(2)
+            c10d.all_reduce(st, group=subgroup)
+            self.assertEqual(st, torch.ones(2))
+        c10d.barrier()
+        c10d.destroy_process_group()
+
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
     def test_gloo_warn_not_in_group(self):
