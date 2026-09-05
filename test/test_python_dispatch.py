@@ -2027,9 +2027,12 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 return (torch.ones(2), torch.ones(2), torch.ones(2))
 
+        # Built outside the mode: otherwise TooMany also intercepts this
+        # single-return op and fails before max.dim is ever reached.
+        t = torch.ones(2)
         with self.assertRaisesRegex(RuntimeError, "to return 2 values"):
             with TooMany():
-                torch.ops.aten.max.dim(torch.ones(2), 0)
+                torch.ops.aten.max.dim(t, 0)
 
     def test_none_wrapping(self):
         # A Tensor subclass that returns None when doing add
