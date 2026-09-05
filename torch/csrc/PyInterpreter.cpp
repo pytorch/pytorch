@@ -235,11 +235,9 @@ py::object torchDispatchFromTensorImpl(
 }
 
 void ConcretePyInterpreterVTable::decref(PyObject* pyobj) const {
-  // Leak the pyobj if not initialized.  This can happen if we are running
-  // exit handlers that are destructing tensors with residual (owned)
-  // PyObjects stored in them.
-  if (!Py_IsInitialized())
-    return;
+  // Leak the pyobj if the GIL can't be acquired (e.g. Python isn't
+  // initialized).  This can happen if we are running exit handlers that are
+  // destructing tensors with residual (owned) PyObjects stored in them.
   torch::detail::SafeGilScopedAcquire gil;
   if (!gil) {
     return;
@@ -248,8 +246,6 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj) const {
 }
 
 void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
-  if (!Py_IsInitialized())
-    return;
   torch::detail::SafeGilScopedAcquire gil;
   if (!gil) {
     return;
@@ -259,8 +255,6 @@ void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
 
 bool ConcretePyInterpreterVTable::try_incref(
     const c10::impl::PyObjectSlot& pyobj_slot) const {
-  if (!Py_IsInitialized())
-    return false;
   torch::detail::SafeGilScopedAcquire gil;
   if (!gil) {
     return false;
@@ -273,7 +267,7 @@ bool ConcretePyInterpreterVTable::try_incref(
 }
 
 size_t ConcretePyInterpreterVTable::refcnt(PyObject* pyobj) const {
-  if (!Py_IsInitialized() || pyobj == nullptr)
+  if (pyobj == nullptr)
     return 0;
   torch::detail::SafeGilScopedAcquire gil;
   if (!gil) {

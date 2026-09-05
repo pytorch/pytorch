@@ -18,13 +18,13 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
     dict_ = PyDict_New();
   }
   ~PyAnomalyMetadata() override {
-    // If python is already dead, leak the wrapped python objects
-    if (Py_IsInitialized()) {
-      torch::detail::SafeGilScopedAcquire gil;
-      if (gil) {
-        Py_DECREF(dict_);
-      }
+    // Leak the wrapped python object if the GIL can't be acquired (e.g.
+    // python is already dead).
+    torch::detail::SafeGilScopedAcquire gil;
+    if (!gil) {
+      return;
     }
+    Py_DECREF(dict_);
   }
   void store_stack() override;
   void print_stack(const std::string& current_node_name) override;

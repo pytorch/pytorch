@@ -392,7 +392,10 @@ namespace detail {
 // Acquiring the GIL can throw; letting that escape a noexcept context
 // (destructors, refcount callbacks) calls std::terminate. Catches it and
 // reports success via the bool conversion -- check before touching any
-// GIL-dependent Python API.
+// GIL-dependent Python API. Also owns the rest of "is it safe to touch
+// Python right now": skips acquiring entirely if Python was never
+// initialized or has already fully finalized, so callers don't each need
+// their own Py_IsInitialized()/Py_IsFinalizing() guard.
 //
 // Finalization can start at any point, so this checks Py_IsFinalizing both
 // before acquiring (skip outright) and after (disarm(), since thread-state
@@ -400,7 +403,7 @@ namespace detail {
 class SafeGilScopedAcquire {
  public:
   SafeGilScopedAcquire() {
-    if (Py_IsFinalizing()) {
+    if (!Py_IsInitialized() || Py_IsFinalizing()) {
       return;
     }
     try {
