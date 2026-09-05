@@ -16,6 +16,8 @@
 #include <ATen/ops/zeros_like.h>
 #include <fmt/format.h>
 
+#include <limits>
+
 namespace at::native {
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
@@ -238,20 +240,27 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
   @autoreleasepool {
     auto [destBuffer, destOffset] = buffer_with_offset_from_tensor(dst, dst_tensor_nbytes, non_blocking);
-    // 4 bytes alignment required on macos for blits.
-    TORCH_INTERNAL_ASSERT(destOffset % 4 == 0, "Unaligned blit request");
 
     id<MTLBuffer> blitSourceBuffer = sourceBuffer;
     Tensor blitSource = src;
     NSUInteger blitSourceOffset = storage_byte_offset;
+    // Blit offsets must be 4-byte aligned on macOS. Sub-4-byte dtypes at odd
+    // element offsets (e.g. a bool slice, #119367) take the castout kernel
+    // below instead, which only needs element-size alignment. The castout API
+    // takes 32-bit offsets/numel, so unaligned sources beyond 4GB stay on the
+    // blit, matching prior behavior.
+    const bool blit_alignment_ok = destOffset % 4 == 0 && storage_byte_offset % 4 == 0;
+    const bool castout_fits = storage_byte_offset <= std::numeric_limits<uint32_t>::max() &&
+        src.numel() <= std::numeric_limits<uint32_t>::max();
     bool needsBlit = true;
-    if (src_.dtype() != dst.dtype()) {
+    if (src_.dtype() != dst.dtype() || (!blit_alignment_ok && castout_fits)) {
       // Unified memory: cast straight from the MPS source into the CPU-wrapped
       // destination buffer at the requested offsets. This avoids the temporary
       // that used to alias the live source buffer and blitting from it (see
       // #189563). src and dst are dense with identical strides here, so a linear
       // castout of numel elements from the source offset to the dest offset is a
-      // faithful conversion.
+      // faithful conversion. Same-dtype unaligned copies use the identity
+      // functor, so the castout is a plain offset-tolerant copy.
       needsBlit = false;
       const bool needs_conj = src.is_conj() != dst.is_conj();
       const bool needs_neg = src.is_neg() != dst.is_neg();
@@ -275,6 +284,9 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     }
 
     if (needsBlit) {
+      // Reachable with an unaligned dest only for >4GB unaligned source
+      // offsets, which the castout fallback cannot address.
+      TORCH_INTERNAL_ASSERT(destOffset % 4 == 0, "Unaligned blit request");
       const size_t size_to_copy = (src.nbytes() / src.element_size()) * dst.element_size();
 
       // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
