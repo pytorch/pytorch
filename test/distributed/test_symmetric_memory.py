@@ -50,10 +50,12 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm_ver_lessthan_multiprocess,
 )
 from torch.testing._internal.common_utils import (
+    get_cycles_per_ms,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda,
     requires_cuda_p2p_access,
+    requires_cuda_python_bindings,
     run_tests,
     TEST_WITH_ROCM,
     TestCase,
@@ -62,6 +64,57 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 test_contexts = [nullcontext, _test_mode]
+
+
+def _captured_kernel_nodes_and_edges(graph):
+    """Kernel nodes and edges of a captured graph, read back through
+    cuda.bindings. Imported lazily so this module still imports without it."""
+    from cuda.bindings import runtime as cuda_runtime
+
+    from torch.cuda._utils import _check_cuda_bindings
+
+    raw = graph.raw_cuda_graph()
+    _, num_nodes = _check_cuda_bindings(cuda_runtime.cudaGraphGetNodes(raw, numNodes=0))
+    nodes, _ = _check_cuda_bindings(
+        cuda_runtime.cudaGraphGetNodes(raw, numNodes=num_nodes)
+    )
+    kernels = [
+        int(node)
+        for node in nodes
+        if _check_cuda_bindings(cuda_runtime.cudaGraphNodeGetType(node))
+        == cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeKernel
+    ]
+    # Four values: cudaGraphGetEdges carries an edge-data array from CUDA 13
+    # on. Same shape as torch/cuda/graphs.py.
+    edges = []
+    _, _, _, num_edges = _check_cuda_bindings(
+        cuda_runtime.cudaGraphGetEdges(raw, numEdges=0)
+    )
+    if num_edges > 0:
+        from_nodes, to_nodes, _edge_data, _ = _check_cuda_bindings(
+            cuda_runtime.cudaGraphGetEdges(raw, numEdges=num_edges)
+        )
+        edges = [(int(a), int(b)) for a, b in zip(from_nodes, to_nodes)]
+    return kernels, edges
+
+
+def _graph_path_exists(edges, src, dst):
+    """Whether dst is reachable from src. Reachability rather than a search
+    for event nodes: a captured dependency may be lowered to a plain edge."""
+    successors: dict[int, list[int]] = {}
+    for a, b in edges:
+        successors.setdefault(a, []).append(b)
+    seen: set[int] = set()
+    stack = [src]
+    while stack:
+        node = stack.pop()
+        if node == dst:
+            return True
+        if node in seen:
+            continue
+        seen.add(node)
+        stack.extend(successors.get(node, ()))
+    return False
 
 
 @contextmanager
@@ -825,6 +878,338 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
                 any("multimem_barrier_kernel" in event.key for event in prof.events()),
                 "expected multimem_barrier_kernel in profiler events",
             )
+
+    # --- GroupStreamGuard / stream-serialization tests ---
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_stream_serialization_barrier_two_streams(self) -> None:
+        """Alternate barriers across two streams with a rank-0 GPU-side delay.
+        Without the guard the two barrier kernels can be resident at once and
+        the stream-B barrier consumes stream-A's round of signals, so it
+        completes before every rank arrived and the fill on stream B lands
+        before the fill on stream A. The peer then reads the wrong value."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        t = symm_mem.empty(64, dtype=torch.float32, device="cuda")
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        peer = (self.rank + 1) % self.world_size
+
+        stream_a = torch.cuda.Stream()
+        stream_b = torch.cuda.Stream()
+
+        with torch.cuda.stream(stream_a):
+            if self.rank == 0:
+                torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            t.fill_(self.rank + 1.0)
+            hdl.barrier(channel=0)
+
+        # Data write after the guarded barrier so it is ordered by the
+        # guard's event-wait, not racing with stream_a's barrier.
+        with torch.cuda.stream(stream_b):
+            hdl.barrier(channel=0)
+            t.fill_(self.rank + 10.0)
+
+        torch.cuda.synchronize()
+        buf = hdl.get_buffer(peer, (64,), torch.float32)
+        expected = torch.full((64,), peer + 10.0, device="cuda")
+        self.assertEqual(buf, expected)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_stream_serialization_put_wait_two_streams(self) -> None:
+        """put_signal/wait_signal across two streams in a ring pattern.
+        Without the guard the stream-B wait can consume the stream-A round's
+        signal, so round two completes out of order and the final fill is not
+        the one the peer observes."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        t = symm_mem.empty(64, dtype=torch.float32, device="cuda")
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        next_peer = (self.rank + 1) % self.world_size
+        prev_peer = (self.rank - 1 + self.world_size) % self.world_size
+
+        stream_a = torch.cuda.Stream()
+        stream_b = torch.cuda.Stream()
+
+        # Round 1: ring put then wait on stream_a
+        with torch.cuda.stream(stream_a):
+            if self.rank == 0:
+                torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            t.fill_(self.rank + 1.0)
+            hdl.put_signal(next_peer, channel=0)
+            hdl.wait_signal(prev_peer, channel=0)
+
+        # Round 2: same channel, stream_b. Guard serializes after stream_a.
+        # Data write after guarded ops so it is properly ordered.
+        with torch.cuda.stream(stream_b):
+            hdl.put_signal(next_peer, channel=0)
+            hdl.wait_signal(prev_peer, channel=0)
+            t.fill_(self.rank + 100.0)
+
+        torch.cuda.synchronize()
+        buf = hdl.get_buffer(prev_peer, (64,), torch.float32)
+        expected = torch.full((64,), prev_peer + 100.0, device="cuda")
+        self.assertEqual(buf, expected)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @requires_cuda_python_bindings
+    @parametrize("same_group", [True, False])
+    def test_stream_serialization_graph_dependency(self, same_group: bool) -> None:
+        """Capture two barriers on streams forked from a common point and
+        inspect the graph: two allocations on one process group must end up
+        ordered against each other, two different groups must not. The groups
+        here differ by name, so this covers group isolation generally, not the
+        identity keying, which only differs under thread isolation mode."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        t_a = symm_mem.empty(64, dtype=torch.float32, device="cuda")
+        t_b = symm_mem.empty(64, dtype=torch.float32, device="cuda")
+        group_b = (
+            dist.group.WORLD
+            if same_group
+            else dist.new_group(list(range(self.world_size)))
+        )
+        hdl_a = symm_mem.rendezvous(t_a, group=dist.group.WORLD)
+        hdl_b = symm_mem.rendezvous(t_b, group=group_b)
+
+        main = torch.cuda.Stream()
+        side = torch.cuda.Stream()
+
+        # Warm up both groups outside any capture so each barrier below starts
+        # from known state rather than whatever the previous test left behind.
+        main.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(main):
+            hdl_a.barrier(channel=0)
+            hdl_b.barrier(channel=0)
+        torch.cuda.current_stream().wait_stream(main)
+        torch.cuda.synchronize()
+
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(graph, stream=main):
+            # Fork first: any ordering between the two barriers has to come
+            # from the guard, not from the stream structure around them.
+            side.wait_stream(main)
+            hdl_a.barrier(channel=0)
+            with torch.cuda.stream(side):
+                hdl_b.barrier(channel=0)
+            main.wait_stream(side)
+
+        kernels, edges = _captured_kernel_nodes_and_edges(graph)
+        self.assertEqual(
+            len(kernels), 2, f"expected two barrier kernels, got {len(kernels)}"
+        )
+        first, second = kernels
+        # Node order from cudaGraphGetNodes is unspecified, so look both ways.
+        ordered = _graph_path_exists(edges, first, second) or _graph_path_exists(
+            edges, second, first
+        )
+        if same_group:
+            self.assertTrue(
+                ordered,
+                "the two barriers are on one process group but the captured "
+                "graph leaves them concurrent; allocations are not sharing "
+                "serialization state",
+            )
+        else:
+            self.assertFalse(
+                ordered,
+                "the two barriers are on different process groups but the "
+                "captured graph orders them; the groups are sharing "
+                "serialization state",
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_stream_serialization_one_shot_all_reduce(self) -> None:
+        """one_shot_all_reduce across two streams with a GPU-side delay.
+        Exercises the GroupStreamGuard placement in
+        CUDASymmetricMemoryOps.cu."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        group_name = dist.group.WORLD.group_name
+
+        stream_a = torch.cuda.Stream()
+        stream_b = torch.cuda.Stream()
+
+        inp = symm_mem.empty(64, dtype=torch.float32, device=self.device)
+        symm_mem.rendezvous(inp, group=group_name)
+
+        # Fill on stream_a, then all_reduce. one_shot_all_reduce is
+        # out-of-place, so inp retains its value after the call.
+        with torch.cuda.stream(stream_a):
+            if self.rank == 0:
+                torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            inp.fill_(1.0)
+            torch.ops.symm_mem.one_shot_all_reduce(inp, "sum", group_name)
+
+        # No data write before the guarded op on stream_b. The guard
+        # serializes this all_reduce after stream_a's; inp still
+        # contains 1.0 from stream_a's fill.
+        with torch.cuda.stream(stream_b):
+            res_b = torch.ops.symm_mem.one_shot_all_reduce(inp, "sum", group_name)
+
+        torch.cuda.synchronize()
+        expected = torch.full(
+            (64,), self.world_size, dtype=torch.float32, device=self.device
+        )
+        self.assertEqual(res_b, expected)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_stream_serialization_cuda_graph_capture(self) -> None:
+        """A barrier captured in a CUDA graph replays correctly. Inside a
+        capture the guard's event record and wait become graph nodes."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        t = symm_mem.empty(64, dtype=torch.float32, device="cuda")
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        peer = (self.rank + 1) % self.world_size
+
+        # Warm-up run (required before CUDA graph capture)
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            t.fill_(self.rank + 1.0)
+            hdl.barrier(channel=0)
+        torch.cuda.current_stream().wait_stream(s)
+        torch.cuda.synchronize()
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=s):
+            t.fill_(self.rank + 200.0)
+            hdl.barrier(channel=0)
+
+        graph.replay()
+        torch.cuda.synchronize()
+
+        buf = hdl.get_buffer(peer, (64,), torch.float32)
+        expected = torch.full((64,), peer + 200.0, device="cuda")
+        self.assertEqual(buf, expected)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_stream_serialization_capture_without_replay(self) -> None:
+        """A barrier captured into a graph that is never replayed must not
+        affect later eager barriers. Its completion event is a node of that
+        graph, recorded only when the graph runs, so waiting on it from
+        outside the capture is invalid."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        t = symm_mem.empty(64, dtype=torch.float32, device="cuda")
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        peer = (self.rank + 1) % self.world_size
+
+        capture_stream = torch.cuda.Stream()
+        capture_stream.wait_stream(torch.cuda.current_stream())
+        # Warm up first so the guard's event exists before the capture, rather
+        # than being created inside it or inherited from an earlier test.
+        with torch.cuda.stream(capture_stream):
+            hdl.barrier(channel=0)
+        torch.cuda.current_stream().wait_stream(capture_stream)
+        torch.cuda.synchronize()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=capture_stream):
+            hdl.barrier(channel=0)
+        # Deliberately never replayed.
+
+        other = torch.cuda.Stream()
+        other.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(other):
+            t.fill_(self.rank + 7.0)
+            hdl.barrier(channel=0)
+        torch.cuda.current_stream().wait_stream(other)
+        torch.cuda.synchronize()
+
+        buf = hdl.get_buffer(peer, (64,), torch.float32)
+        self.assertEqual(buf, torch.full((64,), peer + 7.0, device="cuda"))
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_stream_serialization_cuda_graph_forked_streams(self) -> None:
+        """Two streams forked inside one capture both issue barriers on the
+        same channel. The guard's record/wait become graph edges, so the two
+        pad kernels never overlap in a replay and the last fill wins on every
+        rank. Replayed several times: a balanced pad protocol must leave the
+        pad zero between replays."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        t = symm_mem.empty(64, dtype=torch.float32, device="cuda")
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        peer = (self.rank + 1) % self.world_size
+        n_replays = 4
+
+        main = torch.cuda.Stream()
+        side = torch.cuda.Stream()
+
+        # Warm-up on the capture stream.
+        main.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(main):
+            hdl.barrier(channel=0)
+        torch.cuda.current_stream().wait_stream(main)
+        torch.cuda.synchronize()
+
+        counter = torch.zeros(1, dtype=torch.float32, device="cuda")
+        # Calibrated out here: get_cycles_per_ms() issues its own CUDA work,
+        # which must not end up inside the capture.
+        delay_cycles = int(100 * get_cycles_per_ms())
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=main):
+            counter.add_(1.0)
+            # Fork above the delay and the write: side must inherit no
+            # ordering from main beyond the barrier-to-barrier edge the guard
+            # inserts. Forking below them would order side's write after
+            # main's on its own, and the value assertion would then hold with
+            # the guard doing nothing.
+            side.wait_stream(main)
+            if self.rank == 0:
+                torch.cuda._sleep(delay_cycles)
+            t.fill_(1.0)
+            hdl.barrier(channel=0)
+            with torch.cuda.stream(side):
+                hdl.barrier(channel=0)
+                t.copy_(counter.expand(64) * 100.0 + self.rank)
+            # Join.
+            main.wait_stream(side)
+
+        for _ in range(n_replays):
+            graph.replay()
+        torch.cuda.synchronize()
+
+        buf = hdl.get_buffer(peer, (64,), torch.float32)
+        expected = torch.full((64,), n_replays * 100.0 + peer, device="cuda")
+        self.assertEqual(buf, expected)
+        pad = hdl.get_signal_pad(self.rank)
+        self.assertEqual(pad, torch.zeros_like(pad))
 
 
 # We move AsyncTP tests to a separate test suite because 1) Async TP ops are not

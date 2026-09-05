@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 
@@ -379,6 +380,7 @@ void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
       "(LSA/NVLink) domain.");
   check_channel(channel, world_size_, get_signal_pad_size());
   c10::cuda::CUDAGuard device_guard(device_idx_);
+  GroupStreamGuard stream_guard(pai_->group_name_);
   barrier_kernel<<<
       1,
       std::max(at::cuda::warp_size(), world_size_),
