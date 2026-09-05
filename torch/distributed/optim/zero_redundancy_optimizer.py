@@ -378,7 +378,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         self,
         params,
         optimizer_class: type[Optimizer],
-        process_group: dist.ProcessGroup | None = None,
+        process_group: Any | None = None,
         parameters_as_bucket_view: bool = False,
         overlap_with_ddp: bool = False,
         **defaults: Any,
@@ -415,16 +415,13 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         # Default device for collective communication and buckets
         self._default_device = self._all_params[0].device
 
-        if process_group is not None:
-            self.process_group = process_group
-        else:
-            pg = dist.group.WORLD
-            if pg is None:
-                raise RuntimeError("No process group available")
-            self.process_group = pg
+        self.process_group = (
+            process_group if process_group is not None else dist.group.WORLD
+        )
         self.world_size: int = dist.get_world_size(self.process_group)
         self.rank: int = dist.get_rank(self.process_group)
         self.global_rank: int = dist.distributed_c10d.get_global_rank(
+            # pyrefly: ignore [bad-argument-type]
             self.process_group,
             self.rank,
         )
@@ -1181,7 +1178,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         return self._default_device
 
     @property
-    def join_process_group(self) -> dist.ProcessGroup:
+    def join_process_group(self) -> Any:
         r"""Return process group."""
         return self.process_group
 

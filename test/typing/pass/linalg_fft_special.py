@@ -1,11 +1,13 @@
 # flake8: noqa
 """Pass tests for torch.linalg, torch.fft, and torch.special typing."""
 
+from collections.abc import Sequence
+
 import torch
 
 
 # torch.linalg operations
-def test_linalg() -> None:
+def test_linalg(axes: Sequence[int], tensors: Sequence[torch.Tensor]) -> None:
     t = torch.randn(3, 3)
     v = torch.randn(3)
 
@@ -35,11 +37,29 @@ def test_linalg() -> None:
 
     # Products
     multi_dot = torch.linalg.multi_dot([t, t])
+    torch.linalg.multi_dot((t, t))
+    torch.linalg.multi_dot(tensors)
+    torch.linalg.tensorsolve(t, v, dims=axes)
+    torch.linalg.vector_norm(t, dim=axes)
+    torch.linalg.det(A=t)
+    torch.linalg.svd(A=t)
+    torch.linalg.svd(t, out=(t, v, t))
+    torch.linalg.qr(A=t)
+    torch.linalg.solve(A=t, B=v)
+    torch.linalg.pinv(t, rcond=1e-5)
+    torch.linalg.matrix_rank(t, tol=1e-5)
+    torch.linalg.ldl_factor(t)
+    torch.linalg.ldl_factor_ex(t)
+    torch.linalg.ldl_solve(t, torch.ones(3, dtype=torch.int32), t)
+    torch.linalg.lu_factor_ex(t)
+    torch.linalg.matrix_sqrth(t)
+    torch.linalg.polar(t)
+    error: type[RuntimeError] = torch.linalg.LinAlgError
     cross_result = torch.linalg.cross(v, v)
 
 
 # torch.fft operations
-def test_fft() -> None:
+def test_fft(axes: Sequence[int]) -> None:
     t = torch.randn(8)
     t2d = torch.randn(8, 8)
 
@@ -54,12 +74,19 @@ def test_fft() -> None:
     ifft2_result = torch.fft.ifft2(fft2_result)
 
     # N-D FFT
-    fftn_result = torch.fft.fftn(t2d)
+    fftn_result = torch.fft.fftn(t2d, dim=axes)
     ifftn_result = torch.fft.ifftn(fftn_result)
+    torch.fft.ifftn(t2d, dim=axes)
+    torch.fft.rfftn(t2d, dim=axes)
+    torch.fft.irfftn(t2d, dim=axes)
+    torch.fft.hfftn(t2d, dim=axes)
+    torch.fft.ihfftn(t2d, dim=axes)
 
     # Helper functions
     freqs = torch.fft.fftfreq(8)
     rfreqs = torch.fft.rfftfreq(8)
+    torch.fft.fftfreq(8, out=torch.empty(8))
+    torch.fft.rfftfreq(8, out=torch.empty(5))
     shifted = torch.fft.fftshift(fft_result)
     unshifted = torch.fft.ifftshift(shifted)
 
@@ -91,3 +118,9 @@ def test_special() -> None:
     # Other special functions
     ndtr_val = torch.special.ndtr(t)
     sinc_val = torch.special.sinc(t)
+    torch.special.psi(t_pos)
+    torch.special.airy_ai(x=t)
+    torch.special.xlog1py(input=1.0, other=t_pos)
+    torch.special.xlog1py(input=t_pos, other=1.0)
+    torch.special.zeta(t_pos, 2.0)
+    torch.special.chebyshev_polynomial_t(t, 2)

@@ -9,22 +9,22 @@ v = torch.randn(3)
 
 # torch.linalg decompositions with named tuple returns
 svd_result = torch.linalg.svd(t)
-reveal_type(svd_result)  # E: fallback=torch.linalg.SVDResult
+reveal_type(svd_result)  # E: torch.return_types.linalg_svd
 
 qr_result = torch.linalg.qr(t)
-reveal_type(qr_result)  # E: fallback=torch.linalg.QRResult
+reveal_type(qr_result)  # E: torch.return_types.linalg_qr
 
 eig_result = torch.linalg.eig(t)
-reveal_type(eig_result)  # E: fallback=torch.linalg.EigResult
+reveal_type(eig_result)  # E: torch.return_types.linalg_eig
 
 eigh_result = torch.linalg.eigh(t)
-reveal_type(eigh_result)  # E: fallback=torch.linalg.EighResult
+reveal_type(eigh_result)  # E: torch.return_types.linalg_eigh
 
 lu_result = torch.linalg.lu_factor(t)
-reveal_type(lu_result)  # E: fallback=torch.linalg.LUResult
+reveal_type(lu_result)  # E: torch.return_types.linalg_lu_factor
 
 slogdet_result = torch.linalg.slogdet(t)
-reveal_type(slogdet_result)  # E: fallback=torch.linalg.SlogdetResult
+reveal_type(slogdet_result)  # E: torch.return_types.linalg_slogdet
 
 # torch.linalg functions returning Tensor
 norm_val = torch.linalg.norm(t)
@@ -55,3 +55,10 @@ reveal_type(gammaln_val)  # E: torch._tensor.Tensor
 
 i0_val = torch.special.i0(v)
 reveal_type(i0_val)  # E: torch._tensor.Tensor
+
+reveal_type(torch.linalg.lu(t))  # E: torch.return_types.linalg_lu
+reveal_type(torch.linalg.lu_factor_ex(t))  # E: torch.return_types.linalg_lu_factor_ex
+reveal_type(torch.linalg.inv_ex(t))  # E: torch.return_types.linalg_inv_ex
+reveal_type(torch.linalg.ldl_factor(t))  # E: torch.return_types.linalg_ldl_factor
+reveal_type(torch.special.psi(v))  # E: torch._tensor.Tensor
+reveal_type(torch.special.xlog1py(1.0, v))  # E: torch._tensor.Tensor
