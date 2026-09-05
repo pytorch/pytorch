@@ -18,7 +18,6 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include "caffe2/core/timer.h"
 #include "caffe2/utils/string_utils.h"
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/mobile/module.h>
@@ -57,7 +56,7 @@ int main(int argc, char** argv) {
       FLAGS_iter,
       ".");
 
-  caffe2::Timer timer;
+  const auto bench_start = high_resolution_clock::now();
   std::vector<long> times;
 
   for (int i = 0; i < FLAGS_iter; ++i) {
@@ -74,7 +73,9 @@ int main(int argc, char** argv) {
     times.push_back(duration.count());
   }
 
-  const double micros = static_cast<double>(timer.MicroSeconds());
+  const double micros = duration<double, std::micro>(
+                            high_resolution_clock::now() - bench_start)
+                            .count();
   if (FLAGS_report_pep) {
     for (auto t : times) {
       std::cout << R"(PyTorchObserver {"type": "NET", "unit": "us", )"
