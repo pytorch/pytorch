@@ -594,9 +594,9 @@ def create_epilogue_with_attr(input_buffer, attr, **kwargs):
                 if dtype != torch.float:
                     input = ops.to_dtype(input, torch.float)
                 half = ops.constant(0.5, torch.float)
-                one = ops.constant(1.0, torch.float)
-                const = ops.constant(0.7071067811865476, torch.float)
-                result = input * half * (ops.erf(input * const) + one)
+                # 1 + erf(x) = erfc(-x)
+                minus_const = ops.constant(-0.7071067811865476, torch.float)
+                result = input * half * ops.erfc(input * minus_const)
                 if dtype != torch.float:
                     result = ops.to_dtype(result, dtype)
                 return result
