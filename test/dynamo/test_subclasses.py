@@ -3203,6 +3203,148 @@ class GraphModule(torch.nn.Module):
         self.assertIsInstance(result, MyTensor)
         self.assertEqual(result, x)
 
+    def test_bare_subclass_getattr_method_does_not_crash(self):
+        # https://github.com/pytorch/pytorch/issues/194323
+        # Constructing the subclass inside the compiled region must not crash.
+        class CustomTensor(torch.Tensor):
+            def __getattr__(self, attr):
+                if attr == "custom_method":
+                    return lambda x: self + x
+
+        def fn():
+            ct = CustomTensor([1, 2, 3])
+            return ct.custom_method(torch.tensor([4, 5, 6]))
+
+        expected = fn()
+        actual = torch.compile(fn, backend="eager")()
+        self.assertEqual(actual, expected)
+
+        torch._dynamo.reset()
+        # Constructor graph-breaks before wrap_tensor; still must not be an internal error.
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
+    def test_bare_subclass_getattr_swallows_graph_breaks(self):
+        # wrap_tensor swallow check: sourced tensor, so Dynamo wraps the input.
+        class CustomTensor(torch.Tensor):
+            def __getattr__(self, attr):
+                if attr == "custom_method":
+                    return lambda x: self + x
+
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3).as_subclass(CustomTensor)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(actual, expected)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "swallows missing attributes",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_bare_subclass_getattr_method_raises_does_not_crash(self):
+        class CustomTensor(torch.Tensor):
+            def __getattr__(self, attr):
+                if attr == "custom_method":
+                    return lambda x: self + x
+                raise AttributeError(attr)
+
+        def fn():
+            ct = CustomTensor([1, 2, 3])
+            return ct.custom_method(torch.tensor([4, 5, 6]))
+
+        expected = fn()
+        actual = torch.compile(fn, backend="eager")()
+        self.assertEqual(actual, expected)
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
+    def test_bare_subclass_getattr_method_inside_compiled_fn(self):
+        def fn():
+            class CustomTensor(torch.Tensor):
+                def __getattr__(self, attr):
+                    if attr == "custom_method":
+                        return lambda x: self + x
+
+            ct = CustomTensor([1, 2, 3])
+            return ct.custom_method(torch.tensor([4, 5, 6]))
+
+        expected = fn()
+        actual = torch.compile(fn, backend="eager")()
+        # Nested class objects differ across eager vs compile, compare as Tensor.
+        self.assertEqual(
+            actual.as_subclass(torch.Tensor), expected.as_subclass(torch.Tensor)
+        )
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
+    def test_bare_subclass_getattr_still_traces_tensor_methods(self):
+        class CustomTensor(torch.Tensor):
+            def __getattr__(self, attr):
+                if attr == "custom_method":
+                    return lambda x: self + x
+                raise AttributeError(attr)
+
+        def fn(x):
+            return x.sin()
+
+        x = torch.randn(3).as_subclass(CustomTensor)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+
+    def test_bare_subclass_undefined_method_graph_breaks(self):
+        class CustomTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+            def __getattr__(self, attr):
+                if attr == "custom_method":
+                    return lambda x: self + x
+                raise AttributeError(attr)
+
+        def fn(x):
+            return x.custom_method(torch.ones_like(x))
+
+        x = torch.tensor([1.0, 2.0, 3.0]).as_subclass(CustomTensor)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(actual, expected)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Tensor subclass method not defined on Tensor",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_wrapper_subclass_with_getattr_still_traces(self):
+        # Swallow check must not preempt a real flatten-protocol wrapper.
+        class TwoTensorGetattr(TwoTensor):
+            def __getattr__(self, attr):
+                if attr == "custom_method":
+                    return lambda x: self.a + x
+                raise AttributeError(attr)
+
+        def fn(x):
+            return x.sin()
+
+        x = TwoTensorGetattr(torch.randn(3), torch.randn(3))
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+
 
 instantiate_parametrized_tests(SubclassTests)
 

@@ -178,6 +178,7 @@ from ..utils import (
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
+    getattr_swallows_missing_attrs,
     is_frozen_dataclass,
     is_function,
     is_function_or_wrapper,
@@ -3071,6 +3072,24 @@ class VariableBuilder:
 
         # By this point, we should have deduplicated all tensors
         self.assert_not_wrapped_by_this_graph(value)
+
+        # Do not graph-break legitimate wrapper subclasses that also define __getattr__.
+        is_wrapper = is_traceable_wrapper_subclass(value)
+        if not is_wrapper and getattr_swallows_missing_attrs(value):
+            unimplemented(
+                gb_type="Tensor subclass __getattr__ swallows missing attributes",
+                context=type(value).__name__,
+                explanation=(
+                    f"{type(value).__name__}.__getattr__ returns for missing names "
+                    "instead of raising AttributeError, so Dynamo cannot safely "
+                    "inspect the tensor."
+                ),
+                hints=[
+                    "Raise AttributeError from `__getattr__` for unknown names.",
+                    "Prefer an explicit method on the subclass instead of `__getattr__`.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         if (
             isinstance(value, torch.Tensor)

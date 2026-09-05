@@ -1288,6 +1288,35 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)""",
 
         run_checks()
 
+    def test_traceable_wrapper_subclass_protocol_ignores_instance_getattr(
+        self,
+    ) -> None:
+        @torch._dynamo.disable
+        def run_checks() -> None:
+            class BareGetattrTensor(torch.Tensor):
+                def __getattr__(self, attr):
+                    if attr == "custom_method":
+                        return lambda x: self + x
+
+            class WrapperWithGetattr(_StaticUnflattenWrapper):
+                def __getattr__(self, attr):
+                    if attr == "custom_method":
+                        return lambda x: self.elem + x
+                    raise AttributeError(attr)
+
+            bare = BareGetattrTensor([1.0, 2.0])
+            # __getattr__ returning None makes instance hasattr a false positive.
+            self.assertTrue(hasattr(bare, "__tensor_flatten__"))
+            self.assertIsNone(bare.__tensor_flatten__)
+            self.assertFalse(is_traceable_wrapper_subclass(bare))
+            self.assertFalse(is_traceable_wrapper_subclass_type(BareGetattrTensor))
+
+            wrapped = WrapperWithGetattr(torch.randn(2, 2))
+            self.assertTrue(is_traceable_wrapper_subclass(wrapped))
+            self.assertTrue(is_traceable_wrapper_subclass_type(WrapperWithGetattr))
+
+        run_checks()
+
     def test_make_fx_with_subclass(self) -> None:
         def f(x, y):
             # Returns (TwoTensor, Tensor)
