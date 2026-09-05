@@ -248,6 +248,11 @@ class TestCodegenTriton(InductorTestCase):
             self.assertEqual(get_importable_constexpr_types([{"values": [1, 2]}]), [])
         repr_mock.assert_not_called()
 
+    def test_importable_constexpr_types_skip_namedtuple(self):
+        # NamedTuples go through namedtuple_helpers, not user-module imports.
+        Pair = namedtuple("Pair", ["x", "y"])
+        self.assertEqual(get_importable_constexpr_types([Pair(1, 2)]), [])
+
     def test_importable_constexpr_types_reserved_name_error(self):
         with self.assertRaisesRegex(ImportError, "import name tl.*reserved"):
             get_importable_constexpr_types([TritonLanguageShadowConfig(offset=2)])
