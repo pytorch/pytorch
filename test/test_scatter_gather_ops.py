@@ -273,6 +273,70 @@ class TestScatterGatherDevice(TestCase):
         expected = torch.tensor(((False, False), (True, True)), device=device, dtype=dtype)
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
+    def test_gather_0d_counts_as_1d(self, device):
+        """A 0-D tensor counts as 1-D for the dimension check (issue #134244).
+
+        ensure_nonempty_dim maps 0 -> 1, so these combinations are accepted on
+        purpose. The docs and the error message now say so.
+        """
+        src_1d = torch.tensor([10, 11, 12], device=device)
+        # 1-D input, 0-D index
+        self.assertEqual(
+            torch.gather(src_1d, 0, torch.tensor(2, device=device)),
+            torch.tensor(12, device=device),
+        )
+        # 0-D input, 1-D index
+        self.assertEqual(
+            torch.gather(torch.tensor(2, device=device), 0, torch.zeros(3, dtype=torch.long, device=device)),
+            torch.tensor([2, 2, 2], device=device),
+        )
+        # 0-D input, 0-D index
+        self.assertEqual(
+            torch.gather(torch.tensor(2, device=device), 0, torch.tensor(0, device=device)),
+            torch.tensor(2, device=device),
+        )
+
+    def test_gather_dim_mismatch_error_message(self, device):
+        """The message must not claim a rule the 0-D cases above contradict."""
+        src_1d = torch.tensor([10, 11, 12], device=device)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"0-D tensor counts as 1-D, but got index with 2 and input with 1 dimension\(s\)",
+        ):
+            torch.gather(src_1d, 0, torch.tensor([[2]], device=device))
+
+        src_2d = torch.tensor([[1, 2], [3, 4]], device=device)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"0-D tensor counts as 1-D, but got index with 0 and input with 2 dimension\(s\)",
+        ):
+            torch.gather(src_2d, 0, torch.tensor(0, device=device))
+
+    def test_scatter_add_0d_counts_as_1d(self, device):
+        """scatter_add_ mixes 0-D and 1-D on purpose too (issue #110084).
+
+        scatter_shape_check uses the same ensure_nonempty_dim helper as gather.
+        """
+        out = torch.zeros(1, device=device).scatter_add_(
+            0, torch.zeros((), dtype=torch.long, device=device), torch.ones(2, device=device)
+        )
+        self.assertEqual(out, torch.tensor([1.0], device=device))
+
+        out = torch.zeros((), device=device).scatter_add_(
+            0, torch.zeros(2, dtype=torch.long, device=device), torch.ones(3, device=device)
+        )
+        self.assertEqual(out, torch.tensor(2.0, device=device))
+
+    def test_scatter_dim_mismatch_error_message(self, device):
+        """The self-vs-index message must not claim a rule the 0-D cases contradict."""
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"0-D tensor counts as 1-D, but got index with 1 and self with 2 dimension\(s\)",
+        ):
+            torch.zeros(2, 2, device=device).scatter_(
+                0, torch.zeros(2, dtype=torch.long, device=device), torch.ones(2, device=device)
+            )
+
     @parametrize("sparse_grad", [False, True])
     @dtypes(torch.float32, torch.float64)
     def test_gather_backward_with_empty_index_tensor(self, device, dtype, sparse_grad):

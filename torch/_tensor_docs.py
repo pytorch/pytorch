@@ -4447,8 +4447,9 @@ For a 3-D tensor, :attr:`self` is updated as::
     self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
     self[i][j][index[i][j][k]] += src[i][j][k]  # if dim == 2
 
-:attr:`self`, :attr:`index` and :attr:`src` should have same number of
-dimensions. It is also required that ``index.size(d) <= src.size(d)`` for all
+:attr:`self`, :attr:`index` and :attr:`src` should have the same number of
+dimensions, where a 0-D tensor counts as 1-D:
+``max(t.dim(), 1)`` must agree across the three. It is also required that ``index.size(d) <= src.size(d)`` for all
 dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``. Note that ``index`` and ``src`` do not broadcast.
 When :attr:`index` is empty, we always return the original tensor
@@ -4500,7 +4501,8 @@ index in :attr:`self` which is specified by its index in :attr:`src` for
 tensor are included in the reduction.
 
 :attr:`self`, :attr:`index` and :attr:`src` should all have
-the same number of dimensions. It is also required that
+the same number of dimensions, where a 0-D tensor counts as 1-D:
+``max(t.dim(), 1)`` must agree across the three. It is also required that
 ``index.size(d) <= src.size(d)`` for all dimensions ``d``, and that
 ``index.size(d) <= self.size(d)`` for all dimensions ``d != dim``.
 Note that ``index`` and ``src`` do not broadcast.
