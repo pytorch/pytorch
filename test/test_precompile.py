@@ -989,11 +989,31 @@ def _serialized_guard_names(code):
     return " ".join(names)
 
 
+def _precompile_defaulted_helper(model, x, scale):
+    # A nested frame no name in the entry reaches, which is what puts the
+    # capture into the installed serving mode.
+    torch._dynamo.graph_break()
+    return model(x).sum() * scale
+
+
+def _precompile_defaulted_entry(model, x, scale=3.0):
+    """An entry with a default, which a code object does not carry."""
+    return _precompile_defaulted_helper(model, x, scale)
+
+
 # A user global the rendered inductor source shadows with a name of its own.
 BACKEND = 5.0
 
 
+def _precompile_shadowed_global_entry(t):
+    return t * BACKEND
+
+
 _DRIFT_MODULE = None
+
+
+def _precompile_drift_entry(x):
+    return _DRIFT_MODULE.scaled(x).sum()
 
 
 _PRECOMPILE_ACCUM_RAN: list[str] = []
@@ -2480,6 +2500,44 @@ class TestPrecompile(TestCase):
                 with self.assertRaisesRegex(PrecompileError, "no captured variant"):
                     static(model, *args)
 
+    def test_multi_graph_unreachable_frame_is_served_by_installing(self):
+        # A frame Dynamo compiled that is entered by an ORDINARY call -- an
+        # un-inlinable helper -- is reached only through the frame evaluator. A
+        # source artifact does not use one, so such a capture is served by
+        # installing onto the live code objects instead, and the frame that a
+        # source artifact would have run eager is named in the header.
+        from torch._dynamo.utils import counters
+        from torch._precompile import _parse_artifact_metadata
+
+        with _CaptureToFiles(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+        ) as cap:
+            with torch.no_grad():
+                cap(torch.randn(4))
+        code, cache = cap.result()
+        meta = _parse_artifact_metadata(code)
+        self.assertEqual(meta["SERVING_MODE"], "installed")
+        self.assertIn(
+            _precompile_unreachable_helper.__name__,
+            meta["UNREACHABLE_WITHOUT_INSTALL"],
+        )
+
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        # The installed shape shares the runnable base with the standalone one.
+        self.assertIsInstance(loaded, torch.compiler.PrecompiledRunnable)
+        self.assertIsInstance(loaded, torch.compiler.PrecompiledCallable)
+        self.assertTrue(loaded.installed)
+        counters.clear()
+        with loaded, torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+            # Served, not recompiled: the whole point of installing.
+            self.assertEqual(counters["stats"]["unique_graphs"], 0)
+
     def test_a_subgraph_whose_lowering_fails_keeps_the_bundle(self):
         # Rendering is per subgraph: one that compile_to_python refuses stays
         # pickled in _BACKENDS, the header counts it, and the artifact serves.
@@ -2518,6 +2576,179 @@ class TestPrecompile(TestCase):
         loaded = _load_pair(code, cache)
         with torch.no_grad():
             self.assertEqual(loaded(x), _precompile_multi_graph(x))
+
+    def test_installed_artifact_fn_must_match_the_capture(self):
+        # load(fn=...) installs onto whatever function it is given, so it has
+        # to refuse one the artifact was not captured from -- the same check
+        # the path form makes -- or the wrong callable serves the captured
+        # graphs. The function it WAS captured from is accepted.
+        with _CaptureToFiles(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+        ) as cap:
+            cap(torch.randn(4))
+        code, cache = cap.result()
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            PrecompileError, "was captured from .* but is being loaded onto"
+        ):
+            _load_pair(code, cache, fn=_precompile_unreachable_helper)
+        loaded = _load_pair(code, cache, fn=_precompile_unreachable_helper_caller)
+        with loaded, torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+
+    def test_installed_artifact_unload_releases_its_recorded_backends(self):
+        # Installing files the artifact's backends into the process-global
+        # PrecompileContext. unload() has to take exactly those out again, or
+        # every install/unload cycle leaks them for the life of the process.
+        with _CaptureToFiles(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+        ) as cap:
+            cap(torch.randn(4))
+        code, cache = cap.result()
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        registry = PrecompileContext._backend_artifacts_by_key
+        baseline = len(registry)
+        for _ in range(2):
+            with loaded, torch.no_grad():
+                self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+                self.assertGreater(len(registry), baseline)
+            self.assertEqual(len(registry), baseline)
+
+    def test_installed_artifact_handle_lifecycle(self):
+        # Installing mutates process-global code objects, so a call after
+        # unload() must raise rather than silently re-install; a fresh load() is
+        # the way to serve again. Two threads racing the FIRST call install once,
+        # and a first call that reaches the install lock only after unload()
+        # returned finds the handle retired and must not install.
+        with _CaptureToFiles(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+        ) as cap:
+            cap(torch.randn(4))
+        code, cache = cap.result()
+        x = torch.randn(4)
+        expected = _precompile_unreachable_helper_caller(x)
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with torch.no_grad():
+            self.assertEqual(loaded(x), expected)
+            loaded.unload()
+            loaded.unload()  # idempotent
+            with self.assertRaisesRegex(PrecompileError, "unloaded"):
+                loaded(x)
+            # Re-entering is the explicit way to install again; the handle is
+            # reusable across scopes.
+            with loaded:
+                self.assertEqual(loaded(x), expected)
+            with self.assertRaisesRegex(PrecompileError, "unloaded"):
+                loaded(x)
+            fresh = _load_pair(code, cache)
+            try:
+                self.assertEqual(fresh(x), expected)
+            finally:
+                fresh.unload()
+
+        loaded = _load_pair(code, cache)
+        handle = loaded._compiled
+        original_serve = handle._serve
+        serves = []
+
+        def counting_serve(fn, **kwargs):
+            serves.append(threading.current_thread().name)
+            return original_serve(fn, **kwargs)
+
+        handle._serve = counting_serve
+        barrier = threading.Barrier(2)
+        outcomes = []
+
+        def first_call():
+            barrier.wait()
+            try:
+                with torch.no_grad():
+                    outcomes.append(loaded(x))
+            except Exception as e:
+                outcomes.append(e)
+
+        threads = [threading.Thread(target=first_call) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        try:
+            self.assertEqual(len(serves), 1)
+            for out in outcomes:
+                self.assertEqual(out, expected)
+        finally:
+            loaded.unload()
+
+        loaded = _load_pair(code, cache)
+        handle = loaded._compiled
+        real_lock = handle._install_lock
+        unloaded = threading.Event()
+
+        class _GatedLock:
+            def __enter__(self):
+                if threading.current_thread().name == "racer":
+                    unloaded.wait()
+                return real_lock.__enter__()
+
+            def __exit__(self, *exc):
+                return real_lock.__exit__(*exc)
+
+        handle._install_lock = _GatedLock()
+        errors = []
+
+        def racing_call():
+            try:
+                with torch.no_grad():
+                    loaded(torch.randn(4))
+            except PrecompileError as e:
+                errors.append(e)
+
+        racer = threading.Thread(target=racing_call, name="racer")
+        racer.start()
+        loaded.unload()
+        unloaded.set()
+        racer.join()
+        self.assertEqual(len(errors), 1)
+        self.assertIn("unloaded", str(errors[0]))
+        self.assertIsNone(handle._inner)
+
+    def test_uncovered_call_outside_serving_tolerates_an_unpicklable_local(self):
+        # An installed artifact recompiles an uncovered call outside serving()
+        # the way torch.compile does. That frame is served, not captured, so
+        # its guards are not serialized: a value they could not pickle (a lock
+        # in the dict the function reads) is not an error.
+        x = torch.randn(4)
+        with _CaptureToFiles(
+            _precompile_unreachable_helper_caller_with_opts,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+        ) as cap:
+            cap(x, {"scale": 2})
+        code, cache = cap.result()
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        uncovered = {"scale": 3, "lock": threading.Lock()}
+        with loaded, torch.no_grad():
+            self.assertEqual(
+                loaded(x, {"scale": 2}), _precompile_unreachable_helper_caller(x) * 2
+            )
+            self.assertEqual(
+                loaded(x, uncovered), _precompile_unreachable_helper_caller(x) * 3
+            )
 
     def test_missing_captured_module_raises_precompile_error(self):
         # Both drivers import the modules the capture came from. A module that
@@ -2586,6 +2817,58 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "not importable here"):
             _load_pair(code, cache)
 
+    @parametrize("case", list(_PRECOMPILE_TRAINING_CASES))
+    @parametrize("backend", ("eager", "inductor"))
+    def test_training_capture_serves_a_backward_without_a_loss(self, case, backend):
+        # The capture never sees a loss and never calls .backward(). The joint
+        # trace synthesizes tangents from the forward outputs, and the backward
+        # is lowered eagerly, so a served output is still wired to
+        # AOTAutograd's CompiledFunction and .backward() runs precompiled code.
+        # The parameters carry a .grad into the capture: no guard reads it, so
+        # the pickler prunes it to _Missing, which load must drop, not assign.
+        model_cls, entry, width = _PRECOMPILE_TRAINING_CASES[case]
+        model = model_cls()
+        xs = [torch.randn(n, width) for n in (4, 6)]
+        expected = []
+        for x in xs:
+            model.zero_grad(set_to_none=True)
+            entry(model, x).sum().backward()
+            expected.append([p.grad.clone() for p in model.parameters()])
+
+        with _CaptureToFiles(
+            entry,
+            backend=backend,
+            dynamic=False,
+            tracer="dynamo",
+            training=True,
+            require_complete=False,
+            require_no_risky_drops=False,
+        ) as cap:
+            for _ex_args in [(model, x) for x in xs]:
+                cap(*_ex_args)
+        code, cache = cap.result()
+        # The example calls left the caller's gradients exactly as they were.
+        for want, param in zip(expected[-1], model.parameters()):
+            self.assertEqual(want, param.grad)
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        from torch._dynamo.utils import counters
+
+        counters.clear()
+        with _maybe_scoped(loaded):
+            for x, grads in zip(xs, expected):
+                model.zero_grad(set_to_none=True)
+                out = loaded(model, x)
+                self.assertTrue(out.requires_grad)
+                if backend == "inductor" and case == "plain":
+                    # AOTAutograd's compiled backward, not an eager autograd node.
+                    self.assertIn("CompiledFunction", type(out.grad_fn).__name__)
+                out.sum().backward()
+                for want, param in zip(grads, model.parameters()):
+                    self.assertEqual(want, param.grad)
+        # Served, not recompiled: forward and backward alike.
+        self.assertEqual(counters["stats"]["unique_graphs"], 0)
+
     def test_training_capture_does_not_read_grad_off_non_leaf_tensors(self):
         # The pickler reads .grad off the tensors it serializes. On a non-leaf
         # that is always None and warns; a training capture guards such tensors.
@@ -2641,6 +2924,115 @@ class TestPrecompile(TestCase):
         loaded = _load_pair(code, cache)
         with torch.no_grad():
             self.assertFalse(loaded(model, x).requires_grad)
+
+    @parametrize("shape", list(_BREAKING_MODELS))
+    @parametrize("backend", ["eager", "inductor"])
+    def test_dynamo_tracer_serves_each_graph_break_shape(self, shape, backend):
+        # The dynamo tracer against graph breaks and recompilations. Every case
+        # asserts the artifact serves, and that it agrees with torch.compile --
+        # parity with torch.compile is the contract, so torch.compile is the
+        # reference rather than eager.
+        from torch._dynamo.utils import counters
+
+        torch._dynamo.reset()
+        model = _BREAKING_MODELS[shape]().eval()
+        x = torch.randn(4, 4)
+        with torch.no_grad():
+            reference = torch.compile(_brk_call, backend=backend)(model, x)
+
+        torch._dynamo.reset()
+        if shape == "break_in_loop":
+            # Dynamo skips a frame that breaks inside a loop, so torch.compile
+            # runs this shape eager and there is no graph to serve. The capture
+            # is refused as empty rather than shipped as an eager artifact.
+            with (
+                torch.no_grad(),
+                self.assertRaisesRegex(PrecompileError, "compiled no graph"),
+            ):
+                with _CaptureToFiles(
+                    _brk_call,
+                    backend=backend,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                ) as cap:
+                    cap(model, x)
+                cap.result()
+                # cap.result() runs after the capture block exits (its render
+                # error is raised there, not at __exit__).
+            return
+        with torch.no_grad():
+            with _CaptureToFiles(
+                _brk_call,
+                backend=backend,
+                tracer="dynamo",
+                require_complete=False,
+                require_no_risky_drops=False,
+            ) as cap:
+                cap(model, x)
+            code, cache = cap.result()
+        self.assertGreater(_compiled_subgraph_count(code), 0)
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        counters.clear()
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(model, x), reference)
+        # Nothing compiled while serving, and an uncovered call would have
+        # raised (standalone) or compiled (installed): a captured variant served.
+        self.assertEqual(counters["stats"]["unique_graphs"], 0)
+
+    @parametrize("backend", ["eager", "inductor"])
+    def test_dynamo_tracer_serves_every_captured_recompilation(self, backend):
+        # Two axes vary -- a bool that changes the branch and a shape that
+        # changes the specialization -- so the capture holds several guarded
+        # variants of the same frames, on both sides of the break. An UNCOVERED
+        # call is never answered wrong: a STANDALONE artifact has no compiler
+        # behind it and refuses; an INSTALLED one is on the frame evaluator and
+        # recompiles exactly as torch.compile would.
+        from torch._dynamo.utils import counters
+        from torch._precompile import _parse_artifact_metadata
+
+        torch._dynamo.reset()
+        model = _BrkBranchy().eval()
+        calls = [
+            (model, torch.randn(n, 4), flag) for n in (4, 6) for flag in (False, True)
+        ]
+        uncovered = (model, torch.randn(5, 4), True)
+        torch._dynamo.reset()
+        compiled = torch.compile(_brk_call_flag, backend=backend, dynamic=False)
+        with torch.no_grad():
+            reference = [compiled(*c) for c in calls + [uncovered]]
+
+        torch._dynamo.reset()
+        with torch.no_grad():
+            with _CaptureToFiles(
+                _brk_call_flag,
+                backend=backend,
+                dynamic=False,
+                tracer="dynamo",
+                require_complete=False,
+                require_no_risky_drops=False,
+            ) as cap:
+                for _ex_args in calls:
+                    cap(*_ex_args)
+            code, cache = cap.result()
+        meta = _parse_artifact_metadata(code)
+        # The capture really did hold several variants, and really did break.
+        self.assertTrue(any(v > 1 for _, v in meta["FRAMES"]))
+        self.assertTrue(any("resume_in" in n for n, _ in meta["FRAMES"]))
+
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        counters.clear()
+        with _maybe_scoped(loaded), torch.no_grad():
+            for call, want in zip(calls, reference):
+                self.assertEqual(loaded(*call), want)
+            # Served, not recompiled: every one of those calls was captured.
+            self.assertEqual(counters["stats"]["unique_graphs"], 0)
+            if meta["SERVING_MODE"] == "installed":
+                self.assertEqual(loaded(*uncovered), reference[-1])
+            else:
+                with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                    loaded(*uncovered)
 
     @parametrize("case", list(_PRECOMPILE_GUARD_POLICY_CASES))
     def test_guard_policy_keeps_what_discriminates(self, case):
@@ -2970,6 +3362,52 @@ class TestPrecompile(TestCase):
         self.assertTrue(header[0].startswith("#    __compiled_fn_"), header[0])
         self.assertIn("NotImplementedError", header[0])
         self.assertIn("synthetic_base_wrapper", header[0])
+
+    @parametrize("construct", sorted(_EAGER_ROUND_TRIP))
+    @parametrize("broken", [False, True])
+    def test_eager_backend_graph_survives_serialization(self, construct, broken):
+        # An eager subgraph ships as a pickled GraphModule, whose reduction keeps
+        # only the generated source and re-derives the Graph by re-tracing it. A HOP
+        # explodes on the Proxy; autocast's enter/exit take no Proxy at all, so the
+        # retrace RUNS them and drops the nodes -- served output was fp32; the same
+        # for _set_grad_enabled, which also leaked into the LOADER's grad mode.
+        from torch._precompile import _parse_artifact_metadata
+
+        entry, args = (
+            (_eager_rt_broken, (construct,))
+            if broken
+            else (_EAGER_ROUND_TRIP[construct], ())
+        )
+        training = construct == "no_grad_region"
+        grad_ctx = torch.enable_grad() if training else torch.no_grad()
+        x = torch.randn(4, 4, requires_grad=training)
+        with grad_ctx:
+            expected = torch.compile(entry, backend="eager")(*args, x)
+        self.assertFalse(expected.requires_grad)
+        torch._dynamo.reset()
+        with _CaptureToFiles(
+            entry,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+            training=training,
+            require_no_risky_drops=False,
+        ) as cap:
+            with grad_ctx:
+                cap(*args, x)
+        code, cache = cap.result()
+        self.assertEqual(
+            _parse_artifact_metadata(code)["SERVING_MODE"],
+            "installed" if broken else "standalone",
+        )
+        torch._dynamo.reset()
+        with torch.no_grad():
+            loaded = _load_pair(code, cache)
+            self.assertFalse(torch.is_grad_enabled())
+        with _maybe_scoped(loaded), grad_ctx:
+            served = loaded(*args, x)
+        self.assertFalse(served.requires_grad)
+        self.assertEqual(served, expected)
 
     def test_multi_graph_bare_module_capture_is_refused(self):
         # Handing precompile a bare nn.Module compiles Dynamo's OWN wrapper
@@ -4845,6 +5283,54 @@ class TestPrecompile(TestCase):
         self.assertIn("pipeline._original_forwards[0].__func__", risky)
 
     @parametrize(
+        "attr", ["plain", "across_break", "large_then_rebound", "self_referential"]
+    )
+    def test_guard_through_a_tensor_attribute_round_trips(self, attr):
+        # A guard rooted at a Python attribute of a tensor (x._cpu_copy) is
+        # REBUILT at load, so the attribute travels in the pickle's STATE slot:
+        # after the tensor is memoized, so an attribute pointing back at its
+        # own tensor terminates, and by value, so rebinding it between capture
+        # and serve changes the answer and a large one does not land in the
+        # artifact. Both serving modes, because the standalone one raised at
+        # load() while the installed one deferred the same AttributeError into
+        # the first served call.
+        if attr == "self_referential":
+            x = torch.randn(4)
+            x.my_flag = x
+            entry, args = _precompile_reads_flag, (x,)
+        else:
+            model = _PrecompileReadsAttr()
+            x = torch.randn(8)
+            big = attr == "large_then_rebound"
+            x._cpu_copy = torch.zeros(2048, 8)[0] if big else torch.randn(8)
+            entry = (
+                _precompile_attr_entry
+                if attr == "across_break"
+                else _precompile_call_model
+            )
+            args = (model, x)
+        with torch.no_grad():
+            expected = entry(*args)
+            with _CaptureToFiles(
+                entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+            ) as cap:
+                cap(*args)
+            code, cache = cap.result()
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(*args), expected)
+            if attr == "large_then_rebound":
+                self.assertLess(len(code), 200_000)
+                for _ in range(2):
+                    x._cpu_copy = torch.randn(8)
+                    self.assertEqual(loaded(model, x), model(x))
+
+    @parametrize(
         "marking",
         [
             "unbacked",
@@ -5340,6 +5826,304 @@ class TestPrecompile(TestCase):
             with self.assertRaises(OSError):
                 _write_artifact(artifact_path, cache_dir, "NEW = 2\n", b"newcache")
             self.assertEqual(os.listdir(d), ["a.cache"])
+
+    def test_precompile_installed_entry_keeps_its_defaults(self):
+        # An installed artifact rebuilds its entry from a code object, which
+        # carries neither defaults nor closure values. Without them a defaulted
+        # parameter is simply absent at the served call, so the guard written
+        # against it has nothing to bind and every variant misses.
+        from torch._precompile import _parse_artifact_metadata
+
+        model = _PrecompileBreakingModule().eval()
+        x = torch.randn(3, 8)
+        with torch.no_grad():
+            with _CaptureToFiles(
+                _precompile_defaulted_entry,
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+                require_no_risky_drops=False,
+            ) as cap:
+                cap(model, x)
+            code, cache = cap.result()
+        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            # Called WITHOUT scale, so the served frame only has it if the
+            # artifact carried the default.
+            self.assertEqual(loaded(model, x), _precompile_defaulted_entry(model, x))
+
+    def test_precompile_user_global_wins_over_the_artifacts_own(self):
+        # The rendered backend source is exec'd into the artifact module and
+        # brings its own names with it. Binding the frames to that live dict let
+        # those shadow a user global of the same name -- which their guards were
+        # written against -- so every variant missed.
+        x = torch.randn(4)
+        with torch.no_grad():
+            with _CaptureToFiles(
+                _precompile_shadowed_global_entry,
+                tracer="dynamo",
+                backend="eager",
+                require_no_risky_drops=False,
+            ) as cap:
+                cap(x)
+            code, cache = cap.result()
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_shadowed_global_entry(x))
+
+    def test_precompile_serving_does_not_mutate_the_artifact(self):
+        # CompilePackage appends to the entry's per-code records, so a
+        # serve-time recompile used to write its new backend id back into the
+        # artifact. The next install then resolved that id against the
+        # artifact's backends, which never had it. The first install consumes a
+        # prepared copy, so the corruption only surfaced on the third.
+        model = _PrecompileBreakingModule().eval()
+        with torch.no_grad():
+            with _CaptureToFiles(
+                _precompile_attr_entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+            ) as cap:
+                cap(model, torch.randn(3, 8))
+            code, cache = cap.result()
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        # A new shape each round misses every captured variant, which is what
+        # makes the install recompile and mutate.
+        for rows in (3, 4, 5, 6):
+            with _maybe_scoped(loaded), torch.no_grad():
+                x = torch.randn(rows, 8)
+                self.assertEqual(loaded(model, x), _precompile_attr_entry(model, x))
+
+    def test_installed_artifact_unload_takes_back_only_its_own_keys(self):
+        # Backend keys are per-capture uuids, so only another handle on this
+        # artifact can legitimately hold them; a foreign object filed under one
+        # stands in for that here. unload() takes back only what this install
+        # put there: neither a key already filed nor one re-filed while
+        # installed. And two loads of one artifact share every key, so the
+        # second install must not take over the first one's entries, with
+        # nothing of either left once both have unloaded.
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+
+        with _CaptureToFiles(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+        ) as cap:
+            cap(torch.randn(4))
+        code, cache = cap.result()
+        x = torch.randn(4)
+        expected = _precompile_unreachable_helper_caller(x)
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        keys = list(loaded._compiled._backend_keys)
+        self.assertGreater(len(keys), 1)
+        for key in keys:
+            PrecompileContext.take_artifact(key)
+        theirs = EagerCacheArtifact(key=keys[0], content="theirs")
+
+        def only_theirs_remains():
+            # Their object is what remains, not the install's own backend.
+            kept = PrecompileContext.serialize_artifact_by_key(keys[0])
+            self.assertEqual(kept.content, "theirs")
+            for key in keys[1:]:
+                self.assertIsNone(PrecompileContext.serialize_artifact_by_key(key))
+            PrecompileContext.take_artifact(keys[0])
+
+        PrecompileContext.record_artifact(theirs)
+        with torch.no_grad(), loaded:
+            self.assertEqual(loaded(x), expected)
+            for key in keys:
+                self.assertIsNotNone(PrecompileContext.serialize_artifact_by_key(key))
+        only_theirs_remains()
+        with torch.no_grad(), loaded:
+            self.assertEqual(loaded(x), expected)
+            PrecompileContext.record_artifact(theirs)
+        only_theirs_remains()
+
+        a = _load_pair(code, cache)
+        b = _load_pair(code, cache)
+        self.addCleanup(a.unload)
+        self.addCleanup(b.unload)
+        with torch.no_grad():
+            a.__enter__()
+            filed = [PrecompileContext.serialize_artifact_by_key(k) for k in keys]
+            b.__enter__()
+            self.assertEqual(b(x), expected)
+            for key, artifact in zip(keys, filed):
+                self.assertIs(
+                    PrecompileContext.serialize_artifact_by_key(key), artifact
+                )
+            b.__exit__(None, None, None)
+            for key, artifact in zip(keys, filed):
+                self.assertIs(
+                    PrecompileContext.serialize_artifact_by_key(key), artifact
+                )
+            self.assertEqual(a(x), expected)
+            a.__exit__(None, None, None)
+        for key in keys:
+            self.assertIsNone(PrecompileContext.serialize_artifact_by_key(key))
+
+    @parametrize("mode", ["standalone", "installed"])
+    def test_artifact_refuses_a_foreign_torch_build(self, mode):
+        # A dynamo artifact carries Dynamo internals in its opaque blobs, so it
+        # is locked to the build that made it. The standalone driver emitted
+        # TORCH_VERSION and read it with nothing; the installed driver unpickles
+        # the same internals and did not check at all. Either way a cross-build
+        # artifact failed wherever its blob happened to break first, and the
+        # docs promise the version/build locks are catchable as PrecompileError.
+        from torch._precompile import _parse_artifact_metadata
+
+        model = _PrecompileBreakingModule().eval()
+        entry, args = (
+            (_precompile_single_graph, (torch.randn(4),))
+            if mode == "standalone"
+            else (_precompile_attr_entry, (model, torch.randn(3, 8)))
+        )
+        with torch.no_grad():
+            with _CaptureToFiles(
+                entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+            ) as cap:
+                cap(*args)
+            code, cache = cap.result()
+        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], mode)
+        torch._dynamo.reset()
+        with (
+            mock.patch.object(torch, "__version__", "0.0.0+notreal"),
+            self.assertRaisesRegex(PrecompileError, "produced by torch"),
+        ):
+            _load_pair(code, cache)
+
+    def test_standalone_artifact_refuses_drifted_inlined_source(self):
+        # A standalone artifact builds no CompilePackage, so it never ran the
+        # inlined-source check the installed mode gets for free -- and an
+        # artifact whose inlined helper has since changed does not fail, it
+        # answers with the OLD number.
+        import importlib.util
+
+        def import_from_path(name, path):
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+            return module
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            original = os.path.join(tmp_dir, "orig.py")
+            modified = os.path.join(tmp_dir, "modified.py")
+            with open(original, "w") as f:
+                f.write("def scaled(x):\n    return x * 3.0\n")
+            with open(modified, "w") as f:
+                f.write("def scaled(x):\n    return x * 5.0\n")
+            global _DRIFT_MODULE
+            self.addCleanup(sys.modules.pop, "torch.test_precompile_drift", None)
+            self.addCleanup(globals().__setitem__, "_DRIFT_MODULE", None)
+            _DRIFT_MODULE = import_from_path("torch.test_precompile_drift", original)
+            entry = _precompile_drift_entry
+            x = torch.ones(4)
+            with torch.no_grad():
+                with _CaptureToFiles(
+                    entry,
+                    backend="eager",
+                    dynamic=False,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                ) as cap:
+                    cap(x)
+                code, cache = cap.result()
+            from torch._precompile import _parse_artifact_metadata
+
+            self.assertEqual(
+                _parse_artifact_metadata(code)["SERVING_MODE"], "standalone"
+            )
+            torch._dynamo.reset()
+            loaded = _load_pair(code, cache)
+            with _maybe_scoped(loaded), torch.no_grad():
+                self.assertEqual(loaded(x), entry(x))
+
+            _DRIFT_MODULE = import_from_path("torch.test_precompile_drift", modified)
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                PrecompileError, "source code changes detected"
+            ):
+                _load_pair(code, cache)
+
+            # A serving host WITHOUT the module (its code is baked into the
+            # captured graphs) makes drift unverifiable, not detected: the
+            # check must skip rather than surface a raw ModuleNotFoundError
+            # on an artifact that serves identically -- the CAPTURED answer,
+            # x * 3, not the modified module's.
+            del sys.modules["torch.test_precompile_drift"]
+            torch._dynamo.reset()
+            loaded = _load_pair(code, cache)
+            with _maybe_scoped(loaded), torch.no_grad():
+                self.assertEqual(loaded(x), (x * 3.0).sum())
+
+    def test_installed_artifact_reports_what_it_compiles_at_serve(self):
+        # An installed artifact answers a guard miss by COMPILING, not by
+        # refusing -- a frame reachable only through the frame evaluator has no
+        # other way to run. That is deliberate, but it was invisible: the
+        # generated banner claimed the opposite, and isolate_recompiles gives
+        # the artifact a private cache identity so TORCH_LOGS=recompiles prints
+        # nothing. An artifact quietly serving less of itself looked exactly
+        # like one that was serving. And the module class is the same for every
+        # graph a model produces, so a capture that recompiled nine graphs said
+        # "GraphModule" nine times: each warning has to be traceable to one
+        # graph, including the continuations in a resume chain.
+        from torch._precompile import _parse_artifact_metadata
+
+        model = _PrecompileBreakingModule().eval()
+        captured, uncovered = torch.randn(3, 8), torch.randn(5, 8)
+        with torch.no_grad():
+            with _CaptureToFiles(
+                _precompile_attr_entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+            ) as cap:
+                cap(model, captured)
+            code, cache = cap.result()
+        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
+        # The banner has to describe the mode it was emitted for.
+        self.assertNotIn("Nothing is installed onto your code objects", code)
+        self.assertIn("compiled fresh", code)
+
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            loaded(model, captured)
+            self.assertEqual(loaded.serve_time_compiles(), 0)
+            with self.assertLogs("torch._dynamo.precompile_package", "WARNING") as cm:
+                loaded(model, uncovered)
+            self.assertGreater(loaded.serve_time_compiles(), 0)
+
+        # The count is what a job reads after the scope, when the live inner is
+        # already gone: it survives the exit rather than resetting to zero, and
+        # a re-install only adds to the running total.
+        served = loaded.serve_time_compiles()
+        self.assertGreater(served, 0)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertGreaterEqual(loaded.serve_time_compiles(), served)
+
+        warnings = [m for m in cm.output if "serving compiled a NEW graph" in m]
+        self.assertTrue(warnings)
+        for message in warnings:
+            self.assertIn("compile id ", message)
+            self.assertIn("backend id ", message)
+            self.assertIn("first traced at ", message)
+        # Distinct per graph, which is the whole point.
+        self.assertEqual(len(set(warnings)), len(warnings))
 
     def test_missing_backend_error_reports_the_recorded_split(self):
         # One missing id is fatal, so the message has to say how many of the
