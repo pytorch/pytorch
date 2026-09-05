@@ -627,6 +627,32 @@ if rank == 0:
     print(output)
 ```
 
+## Autograd and gradients
+
+:::{warning}
+Collective communication APIs under {mod}`torch.distributed` (for example
+{func}`torch.distributed.all_reduce`) are **not** autograd-aware. They update
+tensors in place and are **not** recorded in the autograd graph, so gradients
+do **not** flow through them. Using these APIs inside a model forward pass
+without an autograd-aware alternative can silently produce incorrect gradients.
+:::
+
+If you need collectives that participate in autograd:
+
+- Prefer {mod}`torch.distributed.tensor` (DTensor), which transparently inserts
+  the appropriate collectives while preserving single-device semantics for
+  backward.
+- Or use the functional collectives in
+  {mod}`torch.distributed._functional_collectives`, which have autograd support
+  for common ops (for example ``all_reduce`` with ``sum``).
+
+:::{note}
+{mod}`torch.distributed.nn` historically provided autograd wrappers around some
+collectives (for example ``torch.distributed.nn.functional.all_reduce``).
+Those APIs are deprecated in favor of functional collectives / DTensor and
+should not be used in new code.
+:::
+
 ## Collective functions
 
 ```{eval-rst}
