@@ -19,6 +19,7 @@ from torch._library.custom_ops import (
     device_types_t,
 )
 from torch._library.effects import EffectType
+from torch._library.flydsl import wrap_flydsl
 from torch._library.infer_schema import infer_schema
 from torch._library.triton import triton_op, wrap_triton
 from torch._ops import OpOverload
@@ -38,6 +39,7 @@ __all__ = [
     "get_ctx",
     "get_kernel",
     "custom_op",
+    "wrap_flydsl",
     "triton_op",
     "wrap_triton",
     "infer_schema",
