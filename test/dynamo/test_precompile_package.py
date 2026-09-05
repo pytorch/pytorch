@@ -13,16 +13,10 @@ import math
 import math as _precompile_stdlib_alias
 import os
 import pickle
-import queue
-import re
 import sys
 import sysconfig
 import tempfile
-import textwrap
-import threading
 import types
-import unittest
-import weakref
 from unittest import mock
 
 import torch
@@ -32,8 +26,7 @@ import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
 import torch.nn.functional as F
-from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.exc import PackageError, RecompileError
+from torch._dynamo.exc import PackageError
 from torch._dynamo.package import (
     _defining_module_name,
     CompilePackage,
@@ -41,9 +34,7 @@ from torch._dynamo.package import (
     SystemInfo,
 )
 from torch._dynamo.precompile_context import PrecompileContext
-from torch._dynamo.types import FrameAction, FrameExecStrategy, GuardFilterEntry
-from torch._dynamo.utils import CleanupHook
-from torch._functorch import config as functorch_config
+from torch._dynamo.types import FrameAction, FrameExecStrategy
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.compiler._precompile_types import PrecompileSummary
 from torch.testing._internal.common_utils import (
@@ -85,14 +76,14 @@ def _counting_cpu_probe(toolchain=True):
         yield calls
 
 
-_MIPS_TARGET = ("mips", "DEFAULT", 128, None, "INVALID")
+_MIPS_TARGET = ("mips", "DEFAULT", 128, ("INVALID",), None, "INVALID")
 
 # recorded target, whether the host probe works, what the comparison raises
 _CPU_TARGET_CASES = {
     "no_target_recorded": (None, True, None),
     "skewed_target": (_MIPS_TARGET, True, "built for machine 'mips'"),
     "host_probe_failed": (
-        ("x86_64", "AVX512", 512, None, "avx512"),
+        ("x86_64", "AVX512", 512, ("CPU_CAPABILITY_AVX512",), None, "avx512"),
         False,
         "no usable",
     ),
