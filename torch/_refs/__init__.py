@@ -2408,9 +2408,17 @@ def _reduction(
     return result
 
 
-def _make_copy_from_view(fn, return_none_on_out_variant=False):
+def _make_copy_from_view(fn, return_none_on_out_variant=False, clone_input=False):
     """
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
+
+    When ``clone_input=True``, the input tensor is cloned (to a contiguous
+    layout) before the view is applied. This is needed for view ops that can
+    fail on tensors with incompatible strides (e.g. zero strides from expand),
+    such as ``view`` itself. The eager view_copy implementation falls back to
+    reshape (a copy) in that case; cloning the input first replicates that
+    behaviour and avoids an extra result clone (the view of a contiguous tensor
+    is already contiguous).
     """
     aten_fn = getattr(aten, fn.__name__)
     annotations = getattr(fn, "__annotations__", {})
@@ -2420,10 +2428,17 @@ def _make_copy_from_view(fn, return_none_on_out_variant=False):
 
     @wraps(fn)
     def _fn(*args, out=None, **kwargs):
+        if clone_input and args and isinstance(args[0], torch.Tensor):
+            args = (args[0].clone(memory_format=torch.contiguous_format),) + args[1:]
         result = fn(*args, out=out, **kwargs)
         if return_none_on_out_variant and out is not None:
             return None
         if out is not None:
+            return result
+        if clone_input:
+            # The input was already materialised to a contiguous layout, and
+            # the view of a contiguous tensor is contiguous, so no extra clone
+            # is needed.
             return result
 
         return pytree.tree_map(
@@ -7029,7 +7044,7 @@ t_copy = _make_copy_from_view(aten.t)
 transpose_copy = _make_copy_from_view(aten.transpose)
 unbind_copy = _make_copy_from_view(aten.unbind, return_none_on_out_variant=True)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
-view_copy = _make_copy_from_view(aten.view)
+view_copy = _make_copy_from_view(aten.view, clone_input=True)
 
 
 # xref: isStorage in torch/csrc/DynamicTypes.cpp
