@@ -15,7 +15,7 @@ stable, and update generated-artifact compatibility deliberately if it changes.
 # dynamo/aot chain to fully initialize before the ``from .runtime_wrappers``
 # import below so a bare ``import torch`` artifact stays self-contained.
 import torch._dynamo  # noqa: F401
-from torch._prims_common import CUDARngStateHelper
+from torch._prims_common import CUDARngStateHelper, XPURngStateHelper
 
 # IDENTITY CONTRACT: these names MUST be plain re-exports that preserve the original
 # object identity -- never wrap, decorate, or alias them (e.g. functools.wraps, a thin
@@ -40,4 +40,5 @@ __all__ = [
     "mark_dynamo_propagated_dynamic_indices",
     "normalize_as_list",
     "CUDARngStateHelper",
+    "XPURngStateHelper",
 ]

@@ -34,6 +34,7 @@ from torch._dynamo.utils import (
     lazy_format_graph_code,
 )
 from torch._guards import CompileContext, TracingContext
+from torch._prims_common import get_rng_state_helper
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import getArtifactLogger, trace_structured
@@ -2629,6 +2630,9 @@ def _aot_stage2c_make_autograd_function(
         aot_config=aot_config,
         fw_metadata=fw_metadata,
         try_save_cache_entry=try_save_cache_entry,
+        rng_state_helper=get_rng_state_helper(
+            next(arg.device for arg in flat_args if isinstance(arg, Tensor))
+        ),
     )
     compiled_fn = AOTDispatchAutograd.post_compile(compile_spec)
 

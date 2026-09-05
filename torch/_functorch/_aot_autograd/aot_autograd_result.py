@@ -36,6 +36,7 @@ from torch._inductor.output_code import (
 )
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import getArtifactLogger
+from torch._prims_common import get_rng_state_helper
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
@@ -513,6 +514,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         compiled_bw_func: Callable[..., Any] | None,
         needs_autograd: bool,
         aot_config: AOTConfig,
+        args: list[torch.Tensor],
     ) -> Callable[..., Any]:
         from torch._dynamo.utils import CompileEventLogger
 
@@ -532,8 +534,14 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
 
         # In autograd case, functionalizedRngWrapper should not modify outs
         return_new_outs = not needs_autograd
+        rng_state_helper = None
+        if self.runtime_metadata.is_rng_op_functionalized:
+            rng_state_helper = get_rng_state_helper(
+                next(arg.device for arg in args if isinstance(arg, torch.Tensor))
+            )
         compiled_fw_func = FunctionalizedRngRuntimeWrapper(
-            return_new_outs=return_new_outs
+            return_new_outs=return_new_outs,
+            rng_state_helper=rng_state_helper,
         ).post_compile(
             compiled_fw_func, aot_config, runtime_metadata=self.runtime_metadata
         )
@@ -568,6 +576,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 aot_config=aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
+                rng_state_helper=rng_state_helper,
             )
             compiled_function = AOTDispatchAutograd.post_compile(compile_spec)
 
@@ -638,6 +647,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
             compiled_bw_func,
             needs_autograd,
             runtime_aot_config,
+            args,
         )
         # Now that we're pretty sure it's a successful load, add guards
         # to the existing shape environment from the cache.

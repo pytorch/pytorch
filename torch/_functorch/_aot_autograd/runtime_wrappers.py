@@ -46,7 +46,7 @@ from torch._library.opaque_object import is_custom_class
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._ops import OpOverload
-from torch._prims_common import CUDARngStateHelper
+from torch._prims_common import CUDARngStateHelper, get_rng_state_helper
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -1232,6 +1232,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
     # So in aot_dispatch_autograd, this wrapper can't edit the set of outs without making one
     # of those two indices incorrect.
     return_new_outs: bool = True
+    rng_state_helper: Any = CUDARngStateHelper
 
     def pre_compile(
         self,
@@ -1248,7 +1249,10 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
                 raise AssertionError(
                     "fake_mode must not be None when functionalize_rng_ops is True"
                 )
-            seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
+            self.rng_state_helper = get_rng_state_helper(
+                next(arg.device for arg in flat_args if isinstance(arg, Tensor))
+            )
+            seed, offset = self.rng_state_helper.get_torch_state_as_tuple(fake_mode)
             flat_args.extend([seed, offset])
             # We are not clearing flat_args here because
             # 1) There is a check in the debug compiler at the end
@@ -1279,8 +1283,8 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
         )
         buf.bind(
             _compiled_fn_=compiled_fn,
-            _get_rng_state_=CUDARngStateHelper.get_torch_state_as_tuple,
-            _set_offset_=CUDARngStateHelper.set_new_offset,
+            _get_rng_state_=self.rng_state_helper.get_torch_state_as_tuple,
+            _set_offset_=self.rng_state_helper.set_new_offset,
         )
         with buf.indent():
             buf.writeline("seed, offset = _get_rng_state_()")
@@ -1312,7 +1316,7 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
                     f"expected num_outputs_rng_offset == 1, got {metadata.num_outputs_rng_offset}"
                 )
             new_rng_offset = outs[offset_index]
-            CUDARngStateHelper.set_new_offset(new_rng_offset)
+            self.rng_state_helper.set_new_offset(new_rng_offset)
             if self.return_new_outs:
                 user_outs = outs[:offset_index] + outs[offset_index + 1 :]
                 return user_outs
@@ -2624,6 +2628,7 @@ class AOTDispatchAutogradCompileSpec:
     aot_config: AOTConfig
     fw_metadata: ViewAndMutationMeta
     try_save_cache_entry: Callable[..., Any] | None
+    rng_state_helper: Any = CUDARngStateHelper
 
 
 @dataclass
@@ -3002,6 +3007,7 @@ def _codegen_backward_prologue(
     fw_metadata: ViewAndMutationMeta,
     maybe_subclass_meta: SubclassMeta | None,
     codegen_unwrap_fn: Callable[..., Any] | None,
+    rng_state_helper: Any,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
 
@@ -3103,7 +3109,7 @@ def _codegen_backward_prologue(
         if num_backward_tokens > 0:
             parts.append(f"*([None] * {num_backward_tokens})")
         if is_rng_op_functionalized:
-            buf.bind(_get_rng_state_=CUDARngStateHelper.get_torch_state_as_tuple)
+            buf.bind(_get_rng_state_=rng_state_helper.get_torch_state_as_tuple)
             parts.append("*_get_rng_state_()")
         buf.writeline(f"all_args = [{', '.join(parts)}]")
         buf.writeline("del ctx_saved_tensors")
@@ -3174,6 +3180,7 @@ def _codegen_backward_epilogue(
     fw_metadata: ViewAndMutationMeta,
     maybe_subclass_meta: SubclassMeta | None,
     codegen_wrap_fn: Callable[..., Any] | None,
+    rng_state_helper: Any,
 ) -> Callable[..., Any]:
     from .codegen import PySourceBuilder
 
@@ -3198,7 +3205,7 @@ def _codegen_backward_epilogue(
                 raise AssertionError(
                     f"expected num_outputs_rng_offset == 1, got {fw_metadata.num_outputs_rng_offset}"
                 )
-            buf.bind(_set_offset_=CUDARngStateHelper.set_new_offset)
+            buf.bind(_set_offset_=rng_state_helper.set_new_offset)
             buf.writeline("_oi = len(out) - 1")
             buf.writeline("_set_offset_(out[_oi])")
             buf.writeline("out = out[:_oi] + out[_oi + 1:]")
@@ -3399,12 +3406,14 @@ class _AOTDispatchAutogradFunctionFactory:
             fw_metadata,
             maybe_subclass_meta,
             _codegen_bw_unwrap_fn,
+            self.spec.rng_state_helper,
         )
 
         _codegen_bw_epilogue = _codegen_backward_epilogue(
             fw_metadata,
             maybe_subclass_meta,
             _codegen_bw_wrap_fn,
+            self.spec.rng_state_helper,
         )
 
         _codegen_fwd = _codegen_compiled_forward(
