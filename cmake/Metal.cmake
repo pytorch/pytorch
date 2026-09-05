@@ -53,11 +53,22 @@ set(BFLOAT_METAL_CODE "
     ptr[idx] += 1;
   }
 ")
+# Probes the MetalPerformancePrimitives surface that the Metal 4 kernels
+# actually use, not just the metal4.0 language standard. Some SDKs accept
+# -std=metal4.0 but do not provide the cooperative-tensor input accessors,
+# and there the language-only check passes and Attention_40.air then fails
+# to build. Mirrors the instantiation in MppAttention.h: half inputs with a
+# float accumulator, since that is what the build instantiates.
 set(LAMBDA_METAL_CODE "
+#include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
   kernel void test(device float* ptr,
                    uint idx [[thread_position_in_grid]]) {
-    auto fn = [](float x) { return x + 1.0; };
-    ptr[idx] = fn(ptr[idx]);
+    constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
+        16, 32, 16, false, false, true,
+        mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate);
+    mpp::tensor_ops::matmul2d<desc, metal::execution_simdgroup> gemm_op;
+    auto ct_a = gemm_op.template get_left_input_cooperative_tensor<half, half, float>();
+    ptr[idx] = ct_a[0];
   }
 ")
 if(NOT CAN_COMPILE_METAL_FOUND)
