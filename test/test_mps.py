@@ -17253,9 +17253,26 @@ class TestErrorInputs(TestCase):
         inputs = torch.tensor([0, 1, 6], device=device)  # Note: 6 is out of bounds for weight with size 4
         weight = torch.randn(4, 2, device=device)
         offsets = torch.tensor([0, 3], device=device)
-        with self.assertRaisesRegex(torch.AcceleratorError, "Index 2 is out of bounds: 6, range 0 to 4"):
+        with self.assertRaisesRegex(torch.AcceleratorError, "Index 2 is out of bounds: 6, range 0 to 3"):
             torch.nn.functional.embedding_bag(inputs, weight, offsets)
             torch.mps.synchronize()
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/189971:
+    # the bounds check was off by one, so index == num_embeddings silently
+    # read one row past the weight table.
+    def test_embedding_bag_index_boundary(self, device):
+        weight = torch.randn(4, 2, device=device)
+        offsets = torch.tensor([0], device=device)
+        for mode in ("sum", "mean", "max"):
+            with self.subTest(mode=mode):
+                with self.assertRaisesRegex(torch.AcceleratorError, "Index 0 is out of bounds: 4"):
+                    torch.nn.functional.embedding_bag(
+                        torch.tensor([4], device=device), weight, offsets, mode=mode)
+                    torch.mps.synchronize()
+        # the last valid index (num_embeddings - 1) must not be over-rejected
+        torch.nn.functional.embedding_bag(
+            torch.tensor([3], device=device), weight, offsets)
+        torch.mps.synchronize()
 
     def test_scatter_out_of_bounds(self, device):
         with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
