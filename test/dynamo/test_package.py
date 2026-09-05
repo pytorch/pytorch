@@ -112,7 +112,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(entry.device_types, frozenset(("cpu", "cuda")))
         self.assertIsNotNone(entry.system_info.cpu_codegen_target)
 
-        stale = ("mips", "DEFAULT", None, "INVALID")
+        stale = ("mips", "DEFAULT", 128, None, "INVALID")
         entry.system_info = dataclasses.replace(
             entry.system_info, cpu_codegen_target=stale
         )
@@ -133,23 +133,34 @@ class TestPackage(torch._inductor.test_case.TestCase):
             ):
                 cached.check_compatibility(SystemInfo.current())
 
-        check(("x86_64", "avx2", None, None), ("x86_64", "avx2", None, None))
+        check(("x86_64", "avx2", 256, None, None), ("x86_64", "avx2", 256, None, None))
         with self.assertRaisesRegex(
             RuntimeError, "generated for vector ISA 'avx2'.*for 'avx512'"
         ):
-            check(("x86_64", "avx2", None, None), ("x86_64", "avx512", None, None))
+            check(
+                ("x86_64", "avx2", 256, None, None),
+                ("x86_64", "avx512", 512, None, None),
+            )
         with self.assertRaisesRegex(
             RuntimeError, "generated for vector ISA 'avx512'.*for 'avx2'"
         ):
-            check(("x86_64", "avx512", None, None), ("x86_64", "avx2", None, None))
+            check(
+                ("x86_64", "avx512", 512, None, None),
+                ("x86_64", "avx2", 256, None, None),
+            )
         with self.assertRaisesRegex(
             RuntimeError, "machine 'aarch64', this host is 'x86_64'"
         ):
-            check(("aarch64", "asimd", None, None), ("x86_64", "avx2", None, None))
+            check(
+                ("aarch64", "asimd", 128, None, None),
+                ("x86_64", "avx2", 256, None, None),
+            )
         with self.assertRaisesRegex(RuntimeError, "simdlen=256, this host uses None"):
-            check(("x86_64", "avx2", 256, None), ("x86_64", "avx2", None, None))
+            check(
+                ("x86_64", "avx2", 256, 256, None), ("x86_64", "avx2", 256, None, None)
+            )
         with self.assertRaisesRegex(RuntimeError, "no usable CPU codegen target"):
-            check(("x86_64", "avx2", None, None), None)
+            check(("x86_64", "avx2", 256, None, None), None)
 
     def test_no_valid_vec_isa_records_no_cpu_codegen_target(self):
         # pick_vec_isa never raises for a missing compiler; it returns
@@ -157,6 +168,22 @@ class TestPackage(torch._inductor.test_case.TestCase):
         # named INVALID_VEC_ISA that only an equally broken host would match.
         with patch.object(cpu_vec_isa, "valid_vec_isa_list", return_value=[]):
             self.assertIsNone(_current_cpu_codegen_target())
+
+    def test_sve_widths_do_not_collide_in_the_codegen_fingerprint(self):
+        # VecSVE(128) and VecSVE(256) both stringify to "asimd", so the ISA name
+        # alone cannot tell a 128-bit tiling from a 256-bit one. The fingerprint
+        # records bit_width() so the two do not compare equal and a kernel tiled
+        # for one width is refused on a host that picks the other.
+        narrow = cpu_vec_isa.VecSVE(_bit_width=128)
+        wide = cpu_vec_isa.VecSVE(_bit_width=256)
+        self.assertEqual(str(narrow), str(wide))
+        with patch.object(cpu_vec_isa, "pick_vec_isa", return_value=narrow):
+            narrow_target = _current_cpu_codegen_target()
+        with patch.object(cpu_vec_isa, "pick_vec_isa", return_value=wide):
+            wide_target = _current_cpu_codegen_target()
+        self.assertEqual(narrow_target[1], wide_target[1])
+        self.assertNotEqual(narrow_target[2], wide_target[2])
+        self.assertNotEqual(narrow_target, wide_target)
 
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_eager_backend_entry_is_exempt_from_the_codegen_target(self):
@@ -195,7 +222,13 @@ class TestPackage(torch._inductor.test_case.TestCase):
             entry = package.cache_entry()
             self.assertFalse(entry.requires_native_backend_compatibility)
             self.assertIsNone(entry.system_info.cpu_codegen_target)
-            resaved = CompilePackage(fn, entry).cache_entry()
+            # Reload under an eager session (native_backend=False, as eval_frame
+            # passes it): an eager artifact reloaded to be served again stays
+            # exempt, so the resave never runs the toolchain probe.
+            reloaded = CompilePackage(
+                fn, entry, requires_native_backend_compatibility=False
+            )
+            resaved = reloaded.cache_entry()
         self.assertFalse(resaved.requires_native_backend_compatibility)
         self.assertIsNone(resaved.system_info.cpu_codegen_target)
 
