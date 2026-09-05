@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 import torch
@@ -12,7 +12,9 @@ from torch._functorch.utils import exposed_in
 @exposed_in("torch.func")
 def functional_call(
     module: torch.nn.Module,
-    parameter_and_buffer_dicts: dict[str, Tensor] | Sequence[dict[str, Tensor]],
+    parameter_and_buffer_dicts: (
+        dict[str, Tensor] | Iterable[dict[str, Tensor]] | Iterable[tuple[str, Tensor]]
+    ),
     args: Any = None,
     kwargs: dict[str, Any] | None = None,
     *,
@@ -109,9 +111,10 @@ def functional_call(
 
     Args:
         module (torch.nn.Module): the module to call
-        parameters_and_buffer_dicts (Dict[str, Tensor] or tuple of Dict[str, Tensor]): the parameters that will be used in
-            the module call. If given a tuple of dictionaries, they must have distinct keys so that all dictionaries can
-            be used together
+        parameters_and_buffer_dicts (Dict[str, Tensor], iterable of Dict[str, Tensor], or iterable of (str, Tensor)):
+            the parameters that will be used in the module call. If given multiple dictionaries, they must have
+            distinct keys so that all dictionaries can be used together. An iterable of pairs can be used directly
+            with APIs such as ``module.named_parameters()``.
         args (Any or tuple): arguments to be passed to the module call. If not a tuple, considered a single argument.
         kwargs (dict): keyword arguments to be passed to the module call
         tie_weights (bool, optional): If True, then parameters and buffers tied in the original model will be treated as
@@ -127,28 +130,49 @@ def functional_call(
     """
     if isinstance(parameter_and_buffer_dicts, dict):
         parameters_and_buffers = parameter_and_buffer_dicts
-    elif isinstance(parameter_and_buffer_dicts, Sequence):
-        if not all(isinstance(d, dict) for d in parameter_and_buffer_dicts):
-            raise ValueError(
-                "Expected all elements of parameter_and_buffer_dicts to be dictionaries"
-            )
-        all_keys = [k for d in parameter_and_buffer_dicts for k in d]
-        all_keys_counter: dict[str, int] = {}
-        for k in all_keys:
-            v = all_keys_counter.get(k, 0)
-            all_keys_counter[k] = v + 1
-        repeated_keys = [key for key, n in all_keys_counter.items() if n > 1]
-        if len(repeated_keys) > 0:
-            raise ValueError(
-                f"{repeated_keys} appeared in multiple dictionaries; behavior of functional call is ambiguous"
-            )
-        parameters_and_buffers = {
-            k: v for d in parameter_and_buffer_dicts for k, v in d.items()
-        }
+    elif isinstance(parameter_and_buffer_dicts, Iterable):
+        items = list(parameter_and_buffer_dicts)
+        if all(isinstance(item, dict) for item in items):
+            all_keys = [k for d in items for k in d]
+            all_keys_counter: dict[str, int] = {}
+            for k in all_keys:
+                v = all_keys_counter.get(k, 0)
+                all_keys_counter[k] = v + 1
+            repeated_keys = [key for key, n in all_keys_counter.items() if n > 1]
+            if len(repeated_keys) > 0:
+                raise ValueError(
+                    f"{repeated_keys} appeared in multiple dictionaries; behavior of functional call is ambiguous"
+                )
+            parameters_and_buffers = {k: v for d in items for k, v in d.items()}
+        else:
+            if any(isinstance(item, dict) for item in items):
+                raise ValueError(
+                    "Expected parameter_and_buffer_dicts to contain either only dictionaries "
+                    "or only (name, Tensor) pairs"
+                )
+            parameters_and_buffers = {}
+            repeated_keys = []
+            for item in items:
+                if not (
+                    isinstance(item, tuple)
+                    and len(item) == 2
+                    and isinstance(item[0], str)
+                ):
+                    raise ValueError(
+                        "Expected parameter_and_buffer_dicts to contain (name, Tensor) pairs"
+                    )
+                name, value = item
+                if name in parameters_and_buffers:
+                    repeated_keys.append(name)
+                parameters_and_buffers[name] = value
+            if repeated_keys:
+                raise ValueError(
+                    f"{sorted(set(repeated_keys))} appeared multiple times; behavior of functional call is ambiguous"
+                )
     else:
         raise ValueError(
-            f"Expected parameter_and_buffer_dicts to be a dict, or a list/tuple of dicts, "
-            f"but got {type(parameter_and_buffer_dicts)}"
+            "Expected parameter_and_buffer_dicts to be a dict, an iterable of dicts, "
+            f"or an iterable of (name, Tensor) pairs, but got {type(parameter_and_buffer_dicts)}"
         )
 
     return nn.utils.stateless._functional_call(
