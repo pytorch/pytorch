@@ -13,19 +13,19 @@ guard-serialization caching mode), despite the shared word.
 import typing
 
 from torch._precompile import (
-    accumulate as accumulate,
-    AccumulatingCapture as AccumulatingCapture,
-    Capture as Capture,
-    capture as capture,
-    DynamoTracer as DynamoTracer,
-    load as load,
-    MakeFxTracer as MakeFxTracer,
-    PrecompileError as PrecompileError,
+    accumulate,
+    AccumulatingCapture,
+    Capture,
+    capture,
+    DynamoTracer,
+    load,
+    MakeFxTracer,
+    PrecompileError,  # noqa: F401
 )
 from torch.compiler._precompile_types import (
-    FrameInvariants as FrameInvariants,
-    GuardFact as GuardFact,
-    PrecompileSummary as PrecompileSummary,
+    FrameInvariants,
+    GuardFact,
+    PrecompileSummary,
 )
 
 
