@@ -795,24 +795,28 @@ class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
         self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
 
-# Update the supported devices in DEVICE
+# Instantiate ACCELERATOR-classified tests across every accelerator (i.e. every
+# available device type except CPU).
 instantiate_device_type_tests(
-    TestCollectivesWithDistributedBackend, globals(), only_for=DEVICE, allow_xpu=True
+    TestCollectivesWithDistributedBackend,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestDistributedBackendCollectivesWithWorldSize4,
     globals(),
-    only_for=DEVICE,
+    except_for="cpu",
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestFunctionalAutogradWithDistributedBackend,
     globals(),
-    only_for=DEVICE,
+    except_for="cpu",
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestTraceableCollectives, globals(), only_for=DEVICE, allow_xpu=True
+    TestTraceableCollectives, globals(), except_for="cpu", allow_xpu=True
 )
 
 if __name__ == "__main__":
