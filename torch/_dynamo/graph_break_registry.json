@@ -5816,6 +5816,17 @@
       ]
     }
   ],
+  "GB9271": [
+    {
+      "Gb_type": "Unsupported monkey-patched autograd.Function.apply",
+      "Context": "{self.fn_cls.__qualname__}.apply",
+      "Explanation": "Dynamo cannot trace this monkey-patched `torch.autograd.Function.apply` because its descriptor's `__get__` is not a Python function.",
+      "Hints": [
+        "Use a Python descriptor whose `__get__` is implemented ",
+        "in Python."
+      ]
+    }
+  ],
   "GB1824": [
     {
       "Gb_type": "torch.switch: unsupported branch return type",
