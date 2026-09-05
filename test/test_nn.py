@@ -11792,6 +11792,38 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue((loss >= 0).all().item())
         self.assertEqual(-log_probs.sum(0)[[0, 2], 0], loss[[0, 2]])
 
+    @onlyCPU
+    def test_ctc_loss_double_backward(self, device):
+        test_cases = [
+            (torch.tensor([1, 2, 2, 2], device=device), [4, 3], [2, 2], False),
+            (
+                torch.tensor([[1, 1, 1]], device=device),
+                torch.tensor([2], device=device),
+                torch.tensor([3], device=device),
+                True,
+            ),
+        ]
+        for targets, input_lengths, target_lengths, zero_infinity in test_cases:
+            log_probs = torch.randn(
+                int(max(input_lengths)),
+                len(input_lengths),
+                5,
+                device=device,
+                dtype=torch.double,
+            ).log_softmax(2).requires_grad_()
+
+            def ctc_loss(log_probs):
+                return F.ctc_loss(
+                    log_probs,
+                    targets,
+                    input_lengths,
+                    target_lengths,
+                    reduction="sum",
+                    zero_infinity=zero_infinity,
+                )
+
+            gradgradcheck(ctc_loss, (log_probs,))
+
     # Merge into OpInfo?
     @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
                           https://github.com/pytorch/pytorch/issues/34870""")
