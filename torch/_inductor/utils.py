@@ -2511,6 +2511,12 @@ def ensure_nvmatmul_heuristics_available() -> bool:
 
 
 def use_flydsl_gemm_template(layout: Layout) -> bool:
+    """Whether the FlyDSL GEMM templates may be offered for this layout.
+
+    The template compilation infrastructure landed in #192877; the kernels are
+    vendored per feature. Gated strictly on gfx950 because the vendored kernels
+    assume that part's LDS capacity and MFMA shapes.
+    """
     if not _use_autotune_backend("FLYDSL"):
         return False
     if not torch.version.hip:
@@ -2527,9 +2533,6 @@ def use_flydsl_gemm_template(layout: Layout) -> bool:
 
     from .codegen.flydsl.flydsl_scheduling import _get_flydsl_device_arch
 
-    # The vendored FlyDSL GEMM kernel targets the gfx950 (MI350) layout; its LDS
-    # capacity and MFMA assumptions do not hold on other archs, so gate strictly
-    # on gfx950 to avoid emitting kernels that fail to compile or run there.
     device_index = layout.device.index if layout.device.index is not None else 0
     if _get_flydsl_device_arch(device_index) != "gfx950":
         return False
