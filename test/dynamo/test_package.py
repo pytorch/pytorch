@@ -117,7 +117,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(entry.device_types, frozenset(("cpu", "cuda")))
         self.assertIsNotNone(entry.system_info.cpu_codegen_target)
 
-        stale = ("mips", "DEFAULT", 128, None, "INVALID")
+        stale = ("mips", "DEFAULT", 128, ("INVALID",), None, "INVALID")
         entry.system_info = dataclasses.replace(
             entry.system_info, cpu_codegen_target=stale
         )
@@ -138,34 +138,38 @@ class TestPackage(torch._inductor.test_case.TestCase):
             ):
                 cached.check_compatibility(SystemInfo.current())
 
-        check(("x86_64", "avx2", 256, None, None), ("x86_64", "avx2", 256, None, None))
+        avx2 = ("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), None, None)
+        avx512 = ("x86_64", "avx512", 512, ("CPU_CAPABILITY_AVX512",), None, None)
+        neon = (
+            "aarch64",
+            "asimd",
+            128,
+            ("CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VEC256_WITH_SLEEF"),
+            None,
+            None,
+        )
+        sve128 = ("aarch64", "asimd", 128, ("CPU_CAPABILITY_SVE128",), None, None)
+        check(avx2, avx2)
         with self.assertRaisesRegex(
             RuntimeError, "generated for vector ISA 'avx2'.*for 'avx512'"
         ):
-            check(
-                ("x86_64", "avx2", 256, None, None),
-                ("x86_64", "avx512", 512, None, None),
-            )
+            check(avx2, avx512)
         with self.assertRaisesRegex(
             RuntimeError, "generated for vector ISA 'avx512'.*for 'avx2'"
         ):
-            check(
-                ("x86_64", "avx512", 512, None, None),
-                ("x86_64", "avx2", 256, None, None),
-            )
+            check(avx512, avx2)
         with self.assertRaisesRegex(
             RuntimeError, "machine 'aarch64', this host is 'x86_64'"
         ):
-            check(
-                ("aarch64", "asimd", 128, None, None),
-                ("x86_64", "avx2", 256, None, None),
-            )
+            check(neon, avx2)
+        # NEON and SVE128 share both the name "asimd" and a 128-bit width, so
+        # only the build macro tells them apart.
+        with self.assertRaisesRegex(RuntimeError, "vector ISA 'asimd'"):
+            check(neon, sve128)
         with self.assertRaisesRegex(RuntimeError, "simdlen=256, this host uses None"):
-            check(
-                ("x86_64", "avx2", 256, 256, None), ("x86_64", "avx2", 256, None, None)
-            )
+            check(("x86_64", "avx2", 256, ("CPU_CAPABILITY_AVX2",), 256, None), avx2)
         with self.assertRaisesRegex(RuntimeError, "no usable CPU codegen target"):
-            check(("x86_64", "avx2", 256, None, None), None)
+            check(avx2, None)
 
     def test_no_valid_vec_isa_records_no_cpu_codegen_target(self):
         # pick_vec_isa never raises for a missing compiler; it returns
