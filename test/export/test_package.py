@@ -12,11 +12,20 @@ from torch._inductor.package import load_package
 from torch.export import Dim
 from torch.export.experimental import _ExportPackage
 from torch.export.pt2_archive._package import _load_aoti
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    decorateIf,
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 @unittest.skipIf(not is_dynamo_supported(), "dynamo isn't supported")
 class TestPackage(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self):
         def fn(x: torch.Tensor) -> torch.Tensor:
             return x + 1
@@ -98,6 +107,8 @@ class TestPackage(TestCase):
 
 
 class TestAOTIPackageDeviceValidation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_aoti_load_uses_cpp_device_validation_before_device_info(self):
         class FakeAOTIModelPackageLoader:
             @staticmethod
@@ -147,24 +158,34 @@ class TestAOTIPackageDeviceValidation(TestCase):
             ):
                 load_package("model.pt2")
 
-    @unittest.skipIf(
-        torch.cuda.is_available(), "requires CUDA to be unavailable in this process"
+    @parametrize("device_type", ["cuda", "xpu"])
+    @decorateIf(
+        unittest.skip("https://github.com/intel/torch-xpu-ops/issues/5156"),
+        lambda params: params["device_type"] == "xpu",
     )
-    def test_cpp_aoti_package_loader_validates_cuda_availability(self):
+    def test_cpp_aoti_package_loader_validates_accelerator_availability(
+        self, device_type
+    ):
+        if torch.get_device_module(device_type).is_available():
+            self.skipTest(f"Requires {device_type} to be unavailable in this process.")
         with tempfile.TemporaryDirectory() as tmp:
             model_dir = Path(tmp) / "data" / "aotinductor" / "model"
             model_dir.mkdir(parents=True)
             extension = ".pyd" if sys.platform == "win32" else ".so"
             (model_dir / f"model{extension}").touch()
             (model_dir / "model_metadata.json").write_text(
-                json.dumps({"AOTI_DEVICE_KEY": "cuda"}), encoding="utf-8"
+                json.dumps({"AOTI_DEVICE_KEY": device_type}), encoding="utf-8"
             )
 
             with self.assertRaisesRegex(
                 RuntimeError,
-                "Cannot load AOTInductor package.*(CUDA|ROCm) is not available",
+                "Cannot load AOTInductor package"
+                f".*({device_type.upper()}|ROCm) is not available",
             ):
                 torch._C._aoti.AOTIModelPackageLoader(str(tmp), "model", False, 1, -1)
+
+
+instantiate_parametrized_tests(TestAOTIPackageDeviceValidation)
 
 
 if __name__ == "__main__":
