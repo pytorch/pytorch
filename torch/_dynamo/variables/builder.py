@@ -228,6 +228,7 @@ from .dicts import ConstDictVariable, MappingProxyVariable, OrderedDictVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BoundBuiltinMethodVariable,
+    ClassMethodDescriptorVariable,
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
@@ -1969,6 +1970,8 @@ class VariableBuilder:
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MemberDescriptorType):
             return MemberDescriptorVariable(value)
+        elif isinstance(value, types.ClassMethodDescriptorType):
+            return ClassMethodDescriptorVariable(value, source=self.source)
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
             # return the same object on attribute lookup. Therefore, we cannot

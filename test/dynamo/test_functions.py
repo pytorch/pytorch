@@ -5349,6 +5349,42 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(fn())
 
+    def test_classmethod_descriptor_instance_attribute(self):
+        class DictSubclass(dict):
+            pass
+
+        class Holder:
+            def __init__(self):
+                self._orig = dict.__dict__["fromkeys"]
+
+        holder = Holder()
+
+        def fn(x):
+            bound = holder._orig.__get__(None, DictSubclass)
+            d = bound(["a", "b"], 1)
+            return (
+                x + d["a"],
+                bound.__name__,
+                bound.__qualname__,
+                bound.__self__ is DictSubclass,
+            )
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+        def invalid_owner(x):
+            try:
+                holder._orig.__get__(None, list)
+            except TypeError as e:
+                return x + 1, str(e)
+            raise AssertionError("expected descriptor binding to fail")
+
+        opt_invalid_owner = torch.compile(
+            invalid_owner, backend="eager", fullgraph=True
+        )
+        self.assertEqual(opt_invalid_owner(x), invalid_owner(x))
+
     def test_torch_function_metadata_attrs_constant(self):
         def fn(x):
             names = [
