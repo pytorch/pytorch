@@ -3,6 +3,7 @@ r"""Learning Rate Scheduler."""
 
 from __future__ import annotations
 
+import inspect
 import math
 import types
 import warnings
@@ -10,7 +11,7 @@ from bisect import bisect_right
 from collections import Counter
 from functools import partial, wraps
 from typing import Any, cast, Literal, SupportsFloat, TYPE_CHECKING, TypedDict
-from typing_extensions import override, Self
+from typing_extensions import deprecated, override, Self
 from weakref import ref
 
 from torch import inf, Tensor
@@ -33,6 +34,7 @@ __all__ = [
     "SequentialLR",
     "CosineAnnealingLR",
     "ChainedScheduler",
+    "PlateauLR",
     "ReduceLROnPlateau",
     "CyclicLR",
     "CosineAnnealingWarmRestarts",
@@ -90,6 +92,14 @@ def _update_param_group_val(
         param_group[key].fill_(_to_scalar(val))
     else:
         param_group[key] = val
+
+
+def _accepts_kwargs(method: Callable[..., Any]) -> bool:
+    """Whether a bound method collects arbitrary keyword arguments."""
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in inspect.signature(method).parameters.values()
+    )
 
 
 class LRScheduler:
@@ -216,9 +226,13 @@ class LRScheduler:
         # corrupt their learning rates by modifying the outputs in place.
         return self._last_lr
 
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Args:
+            **kwargs: Extra inputs used to compute the learning rate. It's up
+                to each scheduler how to use them.
 
         Returns:
             list[float | Tensor]: A :class:`list` of learning rates for each of
@@ -235,7 +249,7 @@ class LRScheduler:
         """
         raise NotImplementedError
 
-    def step(self, epoch: int | None = None) -> None:
+    def step(self, epoch: int | None = None, **kwargs: Any) -> None:
         """Step the scheduler.
 
         Args:
@@ -245,6 +259,8 @@ class LRScheduler:
                     :meth:`_get_closed_form_lr` if it is available. This is not
                     universally supported. Use :meth:`step` without arguments
                     instead.
+            **kwargs: Extra scheduling inputs. It's up to each scheduler how to
+                use them. See :class:`PlateauLR` for an example.
 
         .. note::
             Call this method after calling the optimizer's
@@ -279,19 +295,28 @@ class LRScheduler:
         self._step_count += 1
         if epoch is not None:
             warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
-        self._update_lr(epoch)
+        if kwargs and _accepts_kwargs(self._update_lr):
+            self._update_lr(epoch, **kwargs)
+        else:
+            self._update_lr(epoch)  # For backwards compatibility
 
-    def _update_lr(self, epoch: int | None = None) -> None:
+    def _update_lr(self, epoch: int | None = None, **kwargs: Any) -> None:
         with _enable_get_lr_call(self):
             if epoch is None:
                 self.last_epoch += 1
-                values = self.get_lr()
+                if kwargs and _accepts_kwargs(self.get_lr):
+                    values = self.get_lr(**kwargs)
+                else:
+                    values = self.get_lr()  # For backwards compatibility
             else:
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
                     values = cast(list[float | Tensor], self._get_closed_form_lr())
                 else:
-                    values = self.get_lr()
+                    if kwargs and _accepts_kwargs(self.get_lr):
+                        values = self.get_lr(**kwargs)
+                    else:
+                        values = self.get_lr()  # For backwards compatibility
 
         for param_group, lr in zip(self.optimizer.param_groups, values, strict=True):
             _update_param_group_val(param_group, "lr", lr)
@@ -438,7 +463,7 @@ class LambdaLR(LRScheduler):
                 self.lr_lambdas[idx].__dict__.update(fn)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -555,7 +580,7 @@ class MultiplicativeLR(LRScheduler):
                 self.lr_lambdas[idx].__dict__.update(fn)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -630,7 +655,7 @@ class StepLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -716,7 +741,7 @@ class MultiStepLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -820,7 +845,7 @@ class ConstantLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -934,7 +959,7 @@ class LinearLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -1035,7 +1060,7 @@ class ExponentialLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -1113,6 +1138,21 @@ class SequentialLR(LRScheduler):
         >>>     validate(...)
         >>>     scheduler.step()
 
+        >>> # xdoctest: +SKIP
+        >>> # SequentialLR can pass extra keyword arguments to the schedulers it
+        >>> # holds:
+        >>> scheduler1 = LinearLR(optimizer, total_iters=5)
+        >>> scheduler2 = PlateauLR(optimizer)
+        >>> scheduler = SequentialLR(
+        ...     optimizer,
+        ...     schedulers=[scheduler1, scheduler2],
+        ...     milestones=[5],
+        ... )
+        >>> for epoch in range(100):
+        >>>     train(...)
+        >>>     val_loss = validate(...)
+        >>>     scheduler.step(metrics=val_loss)
+
     .. image:: ../scripts/lr_scheduler_images/SequentialLR.png
     """
 
@@ -1153,6 +1193,7 @@ class SequentialLR(LRScheduler):
                 f"number of milestones to be equal to {len(milestones)}"
             )
         self._schedulers = schedulers
+        self._schedulers_accept_kwargs = [_accepts_kwargs(s.step) for s in schedulers]
         self._milestones = milestones
         self.last_epoch = last_epoch + 1
         self.optimizer = optimizer
@@ -1183,15 +1224,27 @@ class SequentialLR(LRScheduler):
         elif hasattr(scheds, "last_epoch"):
             scheds.last_epoch -= 1
 
-    def step(self) -> None:  # type: ignore[override]
-        """Perform a step."""
+    def step(self, **kwargs: Any) -> None:  # type: ignore[override]
+        """Perform a step.
+
+        Args:
+            **kwargs: Forwarded to the currently active sub-scheduler. One
+                still written against the older ``step`` API, which cannot
+                take them, is stepped without them.
+        """
         self.last_epoch += 1
         idx = bisect_right(self._milestones, self.last_epoch)
         scheduler = self._schedulers[idx]
         if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
-            scheduler._update_lr(0)
+            if kwargs and _accepts_kwargs(scheduler._update_lr):
+                scheduler._update_lr(0, **kwargs)
+            else:
+                scheduler._update_lr(0)  # For backwards compatibility
         else:
-            scheduler.step()
+            if self._schedulers_accept_kwargs[idx]:
+                scheduler.step(**kwargs)
+            else:
+                scheduler.step()  # For backwards compatibility
 
         self._last_lr = scheduler.get_last_lr()
 
@@ -1199,14 +1252,15 @@ class SequentialLR(LRScheduler):
     def state_dict(self) -> dict[str, Any]:
         """Return the state of the scheduler as a :class:`dict`.
 
-        It contains an entry for every variable in ``self.__dict__`` which
-        is not the optimizer.
+        It contains an entry for every variable in ``self.__dict__`` except
+        the optimizer and derived scheduler metadata.
+
         The wrapped scheduler states will also be saved.
         """
         state_dict = {
             key: value
             for key, value in self.__dict__.items()
-            if key not in ("optimizer", "_schedulers")
+            if key not in ("optimizer", "_schedulers", "_schedulers_accept_kwargs")
         }
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 
@@ -1273,7 +1327,7 @@ class PolynomialLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -1397,7 +1451,7 @@ class CosineAnnealingLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -1503,6 +1557,18 @@ class ChainedScheduler(LRScheduler):
         >>>     validate(...)
         >>>     scheduler.step()
 
+        >>> # xdoctest: +SKIP
+        >>> # A contained PlateauLR receives the monitored metric through the
+        >>> # keyword-only `metrics` argument, forwarded here unchanged:
+        >>> scheduler = ChainedScheduler(
+        ...     [ExponentialLR(optimizer, gamma=0.9), PlateauLR(optimizer)],
+        ...     optimizer=optimizer,
+        ... )
+        >>> for epoch in range(100):
+        >>>     train(...)
+        >>>     val_loss = validate(...)
+        >>>     scheduler.step(metrics=val_loss)
+
     .. image:: ../scripts/lr_scheduler_images/ChainedScheduler.png
     """
 
@@ -1533,27 +1599,42 @@ class ChainedScheduler(LRScheduler):
                     f"which is different from {optimizer.__class__.__name__}."
                 )
         self._schedulers = schedulers
+        self._schedulers_accept_kwargs = [
+            _accepts_kwargs(scheduler.step) for scheduler in schedulers
+        ]
         self.optimizer = optimizer
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
-    def step(self) -> None:  # type: ignore[override]
-        """Perform a step."""
-        for scheduler in self._schedulers:
-            scheduler.step()
+    def step(self, **kwargs: Any) -> None:  # type: ignore[override]
+        """Perform a step.
+
+        Args:
+            **kwargs: Forwarded to every contained scheduler. One still
+                written against the older ``step`` API, which cannot take
+                them, is stepped without them.
+        """
+        for scheduler, accepts_kwargs in zip(
+            self._schedulers, self._schedulers_accept_kwargs, strict=True
+        ):
+            if accepts_kwargs:
+                scheduler.step(**kwargs)
+            else:
+                scheduler.step()  # For backwards compatibility
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
 
     @override
     def state_dict(self) -> dict[str, Any]:
         """Return the state of the scheduler as a :class:`dict`.
 
-        It contains an entry for every variable in ``self.__dict__`` which
-        is not the optimizer.
+        It contains an entry for every variable in ``self.__dict__`` except
+        the optimizer and derived scheduler metadata.
+
         The wrapped scheduler states will also be saved.
         """
         state_dict = {
             key: value
             for key, value in self.__dict__.items()
-            if key not in ("optimizer", "_schedulers")
+            if key not in ("optimizer", "_schedulers", "_schedulers_accept_kwargs")
         }
         state_dict["_schedulers"] = [None] * len(self._schedulers)
 
@@ -1581,6 +1662,283 @@ class ChainedScheduler(LRScheduler):
             self._schedulers[idx].load_state_dict(s)
 
 
+class PlateauLR(LRScheduler):
+    """Reduce learning rate when a metric has stopped improving.
+
+    Models often benefit from reducing the learning rate by a factor of 2-10
+    once learning stagnates. This scheduler reads a metrics quantity and if
+    no improvement is seen for a 'patience' number of epochs, the learning
+    rate is reduced.
+
+    Unlike :class:`ReduceLROnPlateau`, this scheduler implements :meth:`get_lr`
+    and can be used as one of the schedulers inside :class:`SequentialLR`
+    or :class:`ChainedScheduler`.
+
+    When :class:`SequentialLR` activates this scheduler at a milestone,
+    it performs its epoch-0 update as it does for every other scheduler.
+    If that call receives a metric, it establishes the initial best value;
+    otherwise, it leaves the learning rate and plateau state unchanged. The
+    first later call with a metric then establishes the initial best value.
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        mode (str): One of `min`, `max`. In `min` mode, lr will
+            be reduced when the quantity monitored has stopped
+            decreasing; in `max` mode it will be reduced when the
+            quantity monitored has stopped increasing. Default: 'min'.
+        factor (float): Factor by which the learning rate will be
+            reduced. new_lr = lr * factor. Default: 0.1.
+        patience (int): The number of allowed epochs with no improvement after
+            which the learning rate will be reduced.
+            For example, consider the case of having no patience
+            (`patience = 0`). In the first epoch, a baseline is established
+            and is always considered good as there's no previous baseline.
+            In the second epoch, if the performance is worse than the
+            baseline, we have what is considered an intolerable epoch. Since
+            the count of intolerable epochs (1) is greater than the patience
+            level (0), the learning rate is reduced at the end of this epoch.
+            From the third epoch onwards, the learning rate continues to be
+            reduced at the end of each epoch if the performance is worse than
+            the baseline. If the performance improves or remains the same,
+            the learning rate is not adjusted. Default: 10.
+        threshold (float): Threshold for measuring the new optimum,
+            to only focus on significant changes. Default: 1e-4.
+        threshold_mode (str): One of `rel`, `abs`.
+            In `rel` mode, the dynamic threshold is computed as:
+
+            * best * (1 + threshold) if mode == 'max'
+            * best * (1 - threshold) if mode == 'min'
+
+            In `abs` mode, the dynamic threshold is computed as:
+
+            * best + threshold if mode == 'max'
+            * best - threshold if mode == 'min'
+
+            Default: 'rel'.
+        cooldown (int): Number of epochs to wait before resuming
+            normal operation after lr has been reduced. Default: 0.
+        min_lr (float or list): A scalar or a list of scalars. A
+            lower bound on the learning rate of all param groups
+            or each group respectively. Default: 0.
+        eps (float): Minimal decay applied to lr. If the difference
+            between new and old lr is smaller than eps, the update is
+            ignored. Default: 1e-8.
+        last_epoch (int): Index of the last epoch. Use ``-1`` (default) to
+            initialize the scheduler. Only use a non-default value when
+            restoring this scheduler from a saved checkpoint.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+        >>> scheduler = PlateauLR(optimizer, "min")
+        >>> for epoch in range(10):
+        >>>     train(...)
+        >>>     val_loss = validate(...)
+        >>> # Note that step should be called after validate()
+        >>>     scheduler.step(metrics=val_loss)
+
+        >>> # xdoctest: +SKIP
+        >>> # Composed with a warmup schedule:
+        >>> scheduler = SequentialLR(
+        ...     optimizer,
+        ...     schedulers=[
+        ...         LinearLR(optimizer, total_iters=5),
+        ...         PlateauLR(optimizer),
+        ...     ],
+        ...     milestones=[5],
+        ... )
+        >>> for epoch in range(100):
+        >>>     train(...)
+        >>>     val_loss = validate(...)
+        >>>     scheduler.step(metrics=val_loss)
+
+    .. image:: ../scripts/lr_scheduler_images/PlateauLR.png
+    """
+
+    def __init__(
+        self,
+        optimizer: Optimizer,
+        mode: Literal["min", "max"] = "min",
+        factor: float = 0.1,
+        patience: int = 10,
+        threshold: float = 1e-4,
+        threshold_mode: Literal["rel", "abs"] = "rel",
+        cooldown: int = 0,
+        min_lr: list[float] | float = 0,
+        eps: float = 1e-8,
+        last_epoch: int = -1,
+    ) -> None:
+        if factor >= 1.0:
+            raise ValueError("Factor should be < 1.0.")
+        self.factor = factor
+
+        if not isinstance(optimizer, Optimizer):
+            raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
+
+        if isinstance(min_lr, (list, tuple)):
+            if len(min_lr) != len(optimizer.param_groups):
+                raise ValueError(
+                    f"expected {len(optimizer.param_groups)} min_lrs, got {len(min_lr)}"
+                )
+            self.default_min_lr = None
+            self.min_lrs = list(min_lr)
+        else:
+            self.default_min_lr = min_lr
+            self.min_lrs = [min_lr] * len(optimizer.param_groups)
+
+        self.patience = patience
+        self.cooldown = cooldown
+        self.eps = eps
+        self._init_is_better(
+            mode=mode, threshold=threshold, threshold_mode=threshold_mode
+        )
+        self._reset()
+        super().__init__(optimizer, last_epoch)
+
+    def _reset(self) -> None:
+        """Reset num_bad_epochs counter and cooldown counter."""
+        self.best = self.mode_worse
+        self.cooldown_counter = 0
+        self.num_bad_epochs = 0
+
+    # `epoch` was added for API parity with LRScheduler while its step argument is
+    # being deprecated.
+    @override
+    def step(self, epoch: int | None = None, **kwargs: Any) -> None:
+        r"""Perform a step.
+
+        Args:
+            epoch (int, optional):
+                .. deprecated:: 1.4
+                    Use :meth:`step` without this argument instead.
+            **kwargs: Scheduling inputs. The ``metrics`` entry is the current
+                value of the quantity being monitored, such as a validation
+                loss, and is required on every call except the implicit one
+                performed at construction.
+        """
+        metrics = kwargs.get("metrics")
+        if epoch is not None and metrics is None:
+            raise ValueError(
+                "`PlateauLR.step` received an `epoch` argument but no "
+                "`metrics` argument. Did you mean `step(metrics=...)`?"
+            )
+        if metrics is None and not self._is_initial:
+            raise ValueError(
+                "`PlateauLR` requires the metric it monitors to be passed "
+                "to `step`, but got `metrics=None`. Pass the quantity you "
+                "are monitoring, e.g. `scheduler.step(metrics=val_loss)`. "
+                "When this scheduler is held by a `SequentialLR` or a "
+                "`ChainedScheduler`, pass the metric to that scheduler's "
+                "`step` instead and it reaches this one from there."
+            )
+        super().step(epoch, **kwargs)
+
+    @override
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
+        r"""Compute the next learning rate for each optimizer parameter group.
+
+        Args:
+            **kwargs: Scheduling inputs. The ``metrics`` entry is the current
+                value of the quantity being monitored.
+
+        Without a metric for this update, the current learning rate is
+        returned unchanged; no reduction is attempted.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each
+            of the optimizer's :attr:`~torch.optim.Optimizer.param_groups`
+            with the same types as their current ``group["lr"]``\s.
+        """
+        _warn_get_lr_called_within_step(self)
+
+        current_lrs = _param_groups_val_list(self.optimizer, "lr")
+        metrics = kwargs.get("metrics")
+        if metrics is None:
+            return current_lrs
+
+        current = float(metrics)
+
+        if self._is_better(current, self.best):
+            self.best = current
+            self.num_bad_epochs = 0
+        else:
+            self.num_bad_epochs += 1
+
+        if self.in_cooldown:
+            self.cooldown_counter -= 1
+            self.num_bad_epochs = 0  # ignore any bad epochs in cooldown
+
+        if self.num_bad_epochs > self.patience:
+            current_lrs = self._reduce(current_lrs)
+            self.cooldown_counter = self.cooldown
+            self.num_bad_epochs = 0
+
+        return current_lrs
+
+    def _reduce(self, lrs: list[float | Tensor]) -> list[float | Tensor]:
+        if len(self.optimizer.param_groups) != len(self.min_lrs):
+            if self.default_min_lr is None:
+                raise RuntimeError(
+                    "The number of param groups in the `optimizer` "
+                    f"({len(self.optimizer.param_groups)}) differs "
+                    f"from when `PlateauLR` was initialized "
+                    f"({len(self.min_lrs)}), usually due to a new "
+                    "param group being added to the optimizer. Please "
+                    "modify the `min_lrs` field to match the length "
+                    "of the `optimizer` param groups."
+                )
+            self.min_lrs = [self.default_min_lr] * len(self.optimizer.param_groups)
+
+        new_lrs = list(lrs)
+        for i, lr in enumerate(lrs):
+            old_lr = float(lr)
+            new_lr = max(old_lr * self.factor, self.min_lrs[i])
+            if old_lr - new_lr > self.eps:
+                new_lrs[i] = new_lr
+        return new_lrs
+
+    @property
+    def in_cooldown(self):
+        return self.cooldown_counter > 0
+
+    def _is_better(self, a, best):
+        if self.mode == "min" and self.threshold_mode == "rel":
+            rel_epsilon = 1.0 - self.threshold
+            return a < best * rel_epsilon
+
+        elif self.mode == "min" and self.threshold_mode == "abs":
+            return a < best - self.threshold
+
+        elif self.mode == "max" and self.threshold_mode == "rel":
+            rel_epsilon = self.threshold + 1.0
+            return a > best * rel_epsilon
+
+        else:  # mode == 'max' and epsilon_mode == 'abs':
+            return a > best + self.threshold
+
+    def _init_is_better(self, mode, threshold, threshold_mode) -> None:
+        if mode not in {"min", "max"}:
+            raise ValueError("mode " + mode + " is unknown!")
+        if threshold_mode not in {"rel", "abs"}:
+            raise ValueError("threshold mode " + threshold_mode + " is unknown!")
+
+        # the worse value for the chosen mode
+        if mode == "min":
+            self.mode_worse = inf
+        else:  # mode == 'max':
+            self.mode_worse = -inf
+
+        self.mode = mode
+        self.threshold = threshold
+        self.threshold_mode = threshold_mode
+
+
+@deprecated(
+    "`ReduceLROnPlateau` is deprecated. Use `torch.optim.lr_scheduler.PlateauLR` "
+    "instead: replace `ReduceLROnPlateau(...)` with `PlateauLR(...)` and call "
+    "`scheduler.step(metrics=metric)`.",
+    category=FutureWarning,
+)
 class ReduceLROnPlateau(LRScheduler):
     """Reduce learning rate when a metric has stopped improving.
 
@@ -1998,7 +2356,7 @@ class CyclicLR(LRScheduler):
         return gamma**x
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -2167,7 +2525,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 
@@ -2208,7 +2566,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         ]
 
     @override
-    def step(self, epoch=None) -> None:
+    def step(self, epoch=None, **kwargs: Any) -> None:
         """Step could be called after every batch update.
 
         Example:
@@ -2234,6 +2592,12 @@ class CosineAnnealingWarmRestarts(LRScheduler):
             >>>     scheduler.step()
             >>> scheduler.step(26)
             >>> scheduler.step()  # scheduler.step(27), instead of scheduler(20)
+
+        Args:
+            **kwargs: Accepted for signature parity with other schedulers so
+                this class can be composed alongside :class:`PlateauLR`
+                inside :class:`SequentialLR`/:class:`ChainedScheduler`;
+                unused here.
         """
         if epoch is None and self.last_epoch < 0:
             epoch = 0
@@ -2543,7 +2907,7 @@ class OneCycleLR(LRScheduler):
         return (end - start) * pct + start
 
     @override
-    def get_lr(self) -> list[float | Tensor]:
+    def get_lr(self, **kwargs: Any) -> list[float | Tensor]:
         r"""Compute the next learning rate for each of the optimizer's
         :attr:`~torch.optim.Optimizer.param_groups`.
 

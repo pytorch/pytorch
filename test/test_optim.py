@@ -15,7 +15,6 @@ from optim.test_swa_utils import TestSWAUtils
 import torch
 from torch.nn import Parameter
 from torch.optim import Optimizer, SGD
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.optim.optimizer import (
     register_optimizer_step_post_hook,
     register_optimizer_step_pre_hook,
@@ -264,10 +263,7 @@ class TestOptimRenewed(TestCase):
                         optimizer.step()
 
                     for scheduler in schedulers:
-                        if isinstance(scheduler, ReduceLROnPlateau):
-                            scheduler.step(loss)
-                        else:
-                            scheduler.step()
+                        scheduler.step(metrics=loss)
 
                 if optim_input.kwargs.get("maximize", False):
                     self.assertGreater(closure().item(), initial_value)
@@ -324,10 +320,7 @@ class TestOptimRenewed(TestCase):
                 for _ in range(20):
                     loss = optimizer.step(closure)
                     for scheduler in schedulers:
-                        if isinstance(scheduler, ReduceLROnPlateau):
-                            scheduler.step(loss)
-                        else:
-                            scheduler.step()
+                        scheduler.step(metrics=loss)
 
                 if optim_input.kwargs.get("maximize", False):
                     self.assertGreater(closure().item(), initial_value)
@@ -367,10 +360,7 @@ class TestOptimRenewed(TestCase):
             for _ in range(20):
                 loss = optimizer.step(closure)
                 for scheduler in schedulers:
-                    if isinstance(scheduler, ReduceLROnPlateau):
-                        scheduler.step(loss)
-                    else:
-                        scheduler.step()
+                    scheduler.step(metrics=loss)
 
             self.assertLess(closure().item(), initial_value)
 
@@ -552,17 +542,11 @@ class TestOptimRenewed(TestCase):
                 w = i % 2
                 optimizer.step(functools.partial(eval, params, True, w))
                 for scheduler in schedulers:
-                    if isinstance(scheduler, ReduceLROnPlateau):
-                        scheduler.step(rosenbrock(params[0]))
-                    else:
-                        scheduler.step()
+                    scheduler.step(metrics=rosenbrock(params[0]))
                 if not optim_info.only_supports_sparse_grads:
                     optimizer_c.step(functools.partial(eval, params_c, False, w))
                     for scheduler in schedulers_c:
-                        if isinstance(scheduler, ReduceLROnPlateau):
-                            scheduler.step(rosenbrock(params_c[0]))
-                        else:
-                            scheduler.step()
+                        scheduler.step(metrics=rosenbrock(params_c[0]))
                     # Tolerance is increased due to floating point error from different
                     # code path for dense case: x v.s. x - x / 4.0 + x / 4.0
                     self.assertEqual(params, params_c, atol=5e-6, rtol=5e-6)
