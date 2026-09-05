@@ -9,11 +9,20 @@ import torch.distributed.checkpoint as dist_cp
 from torch import distributed as dist
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
     _calculate_max_contiguous_elements,
+    _InputFileData,
+    _OutputFileData,
+    _parse_input_metadata,
     _write_sub_tensor_to_file_optimized,
     consolidate_safetensors_files,
     consolidate_safetensors_files_on_every_rank,
 )
-from torch.distributed.checkpoint._hf_utils import _metadata_fn
+from torch.distributed.checkpoint._hf_utils import (
+    _metadata_fn,
+    DEFAULT_EXTRA_METADATA_KEY,
+    DTYPE_KEY,
+    SAVED_OFFSETS_KEY,
+    SHAPE_KEY,
+)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Shard
 from torch.testing._internal.common_utils import run_tests
@@ -159,6 +168,34 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
                     },
                 )
         dist.barrier()
+
+    def test_parse_input_metadata_supports_integer_and_bool_dtypes(self) -> None:
+        """Integer and bool tensors must get a byte size without torch.finfo.
+
+        torch.finfo only accepts floating-point/complex dtypes, so the previous
+        implementation raised a TypeError for checkpoints containing int or bool
+        tensors (#192485).
+        """
+        dcp_sharding_info = json.dumps({"weight": {SAVED_OFFSETS_KEY: [0, 0]}})
+        metadata = {
+            "weight": {
+                SHAPE_KEY: [2, 4],
+                DTYPE_KEY: "I32",
+            },
+            DEFAULT_EXTRA_METADATA_KEY: {
+                "DCP_SHARDING_INFO": dcp_sharding_info,
+            },
+        }
+        input_files_data = {"shard.safetensors": _InputFileData(metadata=metadata)}
+        output_files_data = {
+            "out.safetensors": _OutputFileData(fqn_data={"weight": None})
+        }
+
+        _parse_input_metadata(input_files_data, output_files_data)
+
+        fqn_data = output_files_data["out.safetensors"].fqn_data["weight"]
+        self.assertEqual(fqn_data.shape_in_file, [2, 4])
+        self.assertEqual(fqn_data.dtype_size, 4)  # int32 is 4 bytes
 
     def test_calculate_max_contiguous_elements_validations(self) -> None:
         """Test validation logic in _calculate_max_contiguous_elements function."""

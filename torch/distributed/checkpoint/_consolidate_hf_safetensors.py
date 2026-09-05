@@ -134,8 +134,9 @@ def _parse_input_metadata(
             if fqn in output_data.fqn_data:
                 output_data.fqn_data[fqn] = _FqnData(
                     shape_in_file=tensor_size,
-                    dtype_size=torch.finfo(_getdtype(dtype_str)).bits
-                    // 8,  # Convert bits to bytes
+                    dtype_size=torch.empty(
+                        (), dtype=_getdtype(dtype_str)
+                    ).element_size(),
                     dtype_str=dtype_str,
                 )
 
