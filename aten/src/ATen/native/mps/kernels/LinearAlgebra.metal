@@ -3425,6 +3425,10 @@ kernel void svd_jacobi(
   if (params.compute_uv && simd_group == 0) {
     device T* out = (params.transposed == 0u) ? U_b : V_b;
     const uint32_t ld = (params.transposed == 0u) ? params.u_ld : params.v_ld;
+    // U_b is column-major (elem i of col c at out[c*ld + i]); the transposed
+    // run emits V_b row-major (out[i*ld + c]), so index columns accordingly.
+    const uint32_t col_off = (params.transposed == 0u) ? ld : 1u;
+    const uint32_t elem_step = (params.transposed == 0u) ? 1u : ld;
     // Relative rank cutoff: sigma_j at or below the Jacobi noise floor
     // (~m*eps*sigma_max) is numerically zero, so its column is arbitrary and
     // gets completed. An absolute eps would keep noise-amplified columns.
@@ -3448,14 +3452,14 @@ kernel void svd_jacobi(
         ++cand;
         for (uint32_t pass = 0; pass < 2; ++pass) {
           for (uint32_t l = 0; l < j; ++l) {
-            device T* cl = out + l * ld;
+            device T* cl = out + l * col_off;
             T partial = T(0);
             for (uint32_t i = simd_lane; i < m; i += kSimd) {
-              partial += svd_conjmul(cl[i], col[i]);
+              partial += svd_conjmul(cl[i * elem_step], col[i]);
             }
             T dot = svd_simd_sum(partial);
             for (uint32_t i = simd_lane; i < m; i += kSimd) {
-              col[i] -= svd_mul(dot, cl[i]);
+              col[i] -= svd_mul(dot, cl[i * elem_step]);
             }
           }
         }
@@ -3466,9 +3470,9 @@ kernel void svd_jacobi(
         const float nrm_sq = c10::metal::simd_sum(partial_n);
         if (nrm_sq > kIndepThreshSq) {
           const float inv = 1.0f / precise::sqrt(nrm_sq);
-          device T* cj = out + j * ld;
+          device T* cj = out + j * col_off;
           for (uint32_t i = simd_lane; i < m; i += kSimd) {
-            cj[i] = col[i] * inv;
+            cj[i * elem_step] = col[i] * inv;
           }
           break;
         }
