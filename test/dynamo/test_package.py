@@ -770,6 +770,16 @@ def add(x, y):
                 "Detected recompile when torch.compile stance is 'fail_on_recompile'",
             ):
                 compiled(x, other)
+            # _cache_enabled is the fourth guarded field; diverging it alone must
+            # also miss, or dropping it from the tuple would go unnoticed.
+            other_cache = torch.autocast(
+                "cpu", dtype=torch.bfloat16, cache_enabled=False
+            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
+            ):
+                compiled(x, other_cache)
 
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
     def test_unserializable_guard_bypasses_the_package(self):
