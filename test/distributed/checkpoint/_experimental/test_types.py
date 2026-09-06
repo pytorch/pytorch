@@ -2,10 +2,12 @@
 
 
 from torch.distributed.checkpoint._experimental.types import RankInfo, STATE_DICT
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, HardwareClassification
 
 
 class TestRankInfo(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_rank_info_initialization(self):
         """Test that RankInfo initializes correctly with all parameters."""
         # Create a RankInfo instance with all parameters
