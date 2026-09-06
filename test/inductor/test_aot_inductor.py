@@ -10719,6 +10719,52 @@ class TestCheckLowerboundConfig(TestCase):
             ).run(code)
 
 
+class TestCheckUpperboundConfig(TestCase):
+    def test_aoti_check_upperbound_codegen(self):
+        """
+        Test that check_upperbound config controls upperbound check codegen.
+        When check_upperbound=False, no upperbound checks should be generated.
+        """
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = Model()
+        batch = Dim("batch", min=2, max=10)
+        example_inputs = (torch.randn(4, 3),)
+
+        # Test with check_upperbound=True (default)
+        with config.patch({"aot_inductor.check_upperbound": True}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile,
+                model,
+                example_inputs,
+                dynamic_shapes={"x": {0: batch}},
+            )
+            # Should have upperbound checks
+            FileCheck().check_count(
+                "dim value is too large",
+                1,
+                exactly=True,
+            ).run(code)
+
+        # Test with check_upperbound=False
+        with config.patch({"aot_inductor.check_upperbound": False}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile,
+                model,
+                example_inputs,
+                dynamic_shapes={"x": {0: batch}},
+            )
+            # Should NOT have upperbound checks
+            FileCheck().check_count(
+                "dim value is too large",
+                0,
+                exactly=True,
+            ).run(code)
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

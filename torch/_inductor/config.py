@@ -2456,6 +2456,11 @@ class aot_inductor:
     # restriction when backed_size_oblivious is off.
     check_lowerbound: bool = True
 
+    # Whether to check upperbound constraints on dynamic shapes during runtime.
+    # The upperbound is inferred from the lowering inputs and the dynamic shape
+    # spec, so it can be tighter than the traffic the model can actually serve.
+    check_upperbound: bool = True
+
     # dump an aoti minifier if program errors
     dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"
 
