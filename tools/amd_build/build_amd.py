@@ -84,7 +84,6 @@ includes = [
     "c10/cuda/*",
     "c10/cuda/test/CMakeLists.txt",
     "modules/*",
-    "third_party/nvfuser/*",
     # PyTorch paths
     # Keep this synchronized with is_pytorch_file in hipify_python.py
     "aten/src/ATen/cuda/*",
@@ -129,13 +128,6 @@ ignores = [
     # Correct path to generate HIPConfig.h:
     #   CUDAConfig.h.in -> (amd_build) HIPConfig.h.in -> (cmake) HIPConfig.h
     "aten/src/ATen/cuda/CUDAConfig.h",
-    "third_party/nvfuser/csrc/codegen.cpp",
-    "third_party/nvfuser/runtime/block_reduction.cu",
-    "third_party/nvfuser/runtime/block_sync_atomic.cu",
-    "third_party/nvfuser/runtime/block_sync_default_rocm.cu",
-    "third_party/nvfuser/runtime/broadcast.cu",
-    "third_party/nvfuser/runtime/grid_reduction.cu",
-    "third_party/nvfuser/runtime/helpers.cu",
     "torch/csrc/jit/codegen/fuser/cuda/resource_strings.h",
     "torch/csrc/jit/tensorexpr/ir_printer.cpp",
     "torch/csrc/jit/ir/ir.h",
@@ -177,7 +169,6 @@ hip_platform_files = [
     "third_party/gloo/cmake/Dependencies.cmake",
     "third_party/gloo/gloo/cuda.cu",
     "third_party/kineto/libkineto/CMakeLists.txt",
-    "third_party/nvfuser/CMakeLists.txt",
     "third_party/tensorpipe/cmake/Hip.cmake",
 ]
 
