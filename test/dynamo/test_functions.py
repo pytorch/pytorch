@@ -4297,6 +4297,88 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(opt_fn([1, 2, 3], [4, 5, 6]), [1, 2, 3, 4, 5, 6])
 
+    def test_operator_concat_strings(self):
+        def fn(a, b):
+            return operator.concat(a, b)
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertEqual(opt_fn("hello ", "world"), "hello world")
+        self.assertEqual(opt_fn("", "test"), "test")
+
+    def test_operator_concat_empty(self):
+        def fn_lists(a, b):
+            return operator.concat(a, b)
+
+        def fn_tuples(a, b):
+            return operator.concat(a, b)
+
+        opt_lists = torch.compile(fn_lists, fullgraph=True)
+        opt_tuples = torch.compile(fn_tuples, fullgraph=True)
+
+        self.assertEqual(opt_lists([], [1, 2, 3]), [1, 2, 3])
+        self.assertEqual(opt_lists([1, 2], []), [1, 2])
+        self.assertEqual(opt_tuples((), (1, 2)), (1, 2))
+        self.assertEqual(opt_tuples((1,), ()), (1,))
+
+    def test_operator_concat_constant_fold(self):
+        # Constant folding: operator.concat on constant sequence args
+        # should be resolved at compile time, not inserted into the graph
+        def fn():
+            return operator.concat((1, 2, 3), (4, 5, 6))
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertEqual(opt_fn(), (1, 2, 3, 4, 5, 6))
+
+        def fn_list_const():
+            return operator.concat([1, 2], [3, 4])
+
+        opt_fn_list = torch.compile(fn_list_const, fullgraph=True)
+        self.assertEqual(opt_fn_list(), [1, 2, 3, 4])
+
+    def test_operator_iconcat_list_mutation(self):
+        # iconcat should mutate the first list arg in-place and return it
+        def fn(a, b):
+            return operator.iconcat(a, b)
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        a = [1, 2, 3]
+        b = [4, 5]
+        result = opt_fn(a, b)
+        self.assertEqual(result, [1, 2, 3, 4, 5])
+        self.assertEqual(a, [1, 2, 3, 4, 5])
+        self.assertIs(result, a)
+
+    def test_operator_iconcat_tuple(self):
+        # iconcat on tuples (immutable) should desugar to concat
+        # via IN_PLACE_DESUGARING_MAP, since tuples can't be mutated in-place
+        def fn(a, b):
+            return operator.iconcat(a, b)
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertEqual(opt_fn((1, 2), (3, 4)), (1, 2, 3, 4))
+
+    def test_operator_iconcat_strings(self):
+        def fn(a, b):
+            return operator.iconcat(a, b)
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        self.assertEqual(opt_fn("abc", "def"), "abcdef")
+
+    def test_operator_concat_iconcat_empty_seq(self):
+        def concat_empty():
+            return operator.concat([], [])
+
+        def iconcat_empty_left():
+            return operator.iconcat([], [1, 2])
+
+        def iconcat_empty_right():
+            return operator.iconcat([1, 2], [])
+
+        for fn in (concat_empty, iconcat_empty_left, iconcat_empty_right):
+            with self.subTest(fn=fn.__name__):
+                opt_fn = torch.compile(fn, fullgraph=True)
+                self.assertEqual(opt_fn(), fn())
+
     def test_attrgetter(self):
         for attrs in (
             ("shape",),
