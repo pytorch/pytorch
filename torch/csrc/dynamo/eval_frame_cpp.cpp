@@ -537,6 +537,9 @@ PyObject* dynamo__custom_eval_frame(
       !callback.is_none() && callback.ptr() != Py_False) {
     static PyObject* force_callback_marker_name =
         PyUnicode_InternFromString("_torchdynamo_force_callback_on_cache_miss");
+    // Presence-only: the marker's VALUE is not read, so setting the attribute
+    // to anything (including False) forces the callback. This matches the
+    // hasattr convention for the marker.
     force_callback_on_cache_miss = static_cast<bool>(
         lookup_optional(callback, force_callback_marker_name));
   }
