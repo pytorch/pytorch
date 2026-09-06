@@ -2628,7 +2628,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = arg0_1 + 256;  arg0_1 = None
     sub_1 = add_2 - 1;  add_2 = None
     floordiv = sub_1 // 256;  sub_1 = None
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg1_1 = arg2_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(floordiv, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256], 'triton.tools.tensor_descriptor', 'TensorDescriptor')), 'in_desc_ptr1': ('stable', ([256], 'triton.tools.tensor_descriptor', 'TensorDescriptor')), 'out_desc_ptr': ('stable', ([256], 'triton.tools.tensor_descriptor', 'TensorDescriptor'))}, kwargs = {'in_desc_ptr0': arg1_1, 'in_desc_ptr1': arg2_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  floordiv = arg1_1 = arg2_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2652,7 +2652,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     """\
 def forward(self, arg0_1, arg1_1):
     zeros_like = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False)
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256],)), 'in_desc_ptr1': ('stable', ([256],)), 'out_desc_ptr': ('stable', ([256],))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 0, grid = [(2, 1, 1)], tma_descriptor_metadata = {'in_desc_ptr0': ('stable', ([256], 'triton.tools.tensor_descriptor', 'TensorDescriptor')), 'in_desc_ptr1': ('stable', ([256], 'triton.tools.tensor_descriptor', 'TensorDescriptor')), 'out_desc_ptr': ('stable', ([256], 'triton.tools.tensor_descriptor', 'TensorDescriptor'))}, kwargs = {'in_desc_ptr0': arg0_1, 'in_desc_ptr1': arg1_1, 'out_desc_ptr': zeros_like}, tensors_to_clone = ['out_desc_ptr']);  arg0_1 = arg1_1 = zeros_like = None
     getitem = triton_kernel_wrapper_functional_proxy['out_desc_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return (getitem,)""",
                 )
@@ -2856,6 +2856,56 @@ def forward(self, arg0_1, arg1_1):
                 self.assertEqual(code.count("TensorDescriptor.from_tensor("), 2)
         else:
             self.assertEqual(code.count("create_1d_tma_descriptor("), 2)
+
+    @requires_gpu
+    @unittest.skipIf(
+        not has_triton_tensor_descriptor_host_tma(),
+        "requires triton.tools.tensor_descriptor TMA support",
+    )
+    def test_tma_descriptor_subclass_codegen(self):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        class InductorTestTensorDescriptor(descriptor_module.TensorDescriptor):
+            @staticmethod
+            def from_tensor(tensor, block_shape):
+                return InductorTestTensorDescriptor(
+                    tensor, tensor.shape, tensor.stride(), block_shape
+                )
+
+        InductorTestTensorDescriptor.__module__ = descriptor_module.__name__
+        with mock.patch.object(
+            descriptor_module,
+            InductorTestTensorDescriptor.__name__,
+            InductorTestTensorDescriptor,
+            create=True,
+        ):
+
+            def f(a):
+                block_size = 256
+                out = torch.zeros_like(a)
+                desc_a = InductorTestTensorDescriptor.from_tensor(a, [block_size])
+                desc_out = InductorTestTensorDescriptor.from_tensor(out, [block_size])
+
+                grid = lambda meta: (triton.cdiv(out.numel(), meta["BLOCK_SIZE"]),)
+                add_kernel_with_tma_1d_new_api[grid](
+                    desc_a,
+                    desc_a,
+                    desc_out,
+                    BLOCK_SIZE=block_size,
+                )
+                return out
+
+            a = torch.randn(301, device=GPU_TYPE)
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, fullgraph=True, backend="inductor"), a
+            )
+
+        self.assertEqual(compiled_out, a + a)
+        factory = (
+            f"{descriptor_module.__name__}."
+            f"{InductorTestTensorDescriptor.__name__}.from_tensor("
+        )
+        self.assertEqual(code.count(factory), 2)
 
     @requires_gpu
     def test_wrap_tma_args_skips_constexpr(self):

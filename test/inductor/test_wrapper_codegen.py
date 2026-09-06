@@ -10,11 +10,12 @@ import torch
 import torch.utils._pytree as pytree
 from torch._inductor import ir
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+from torch._inductor.codegen.cpp_wrapper_gpu import CppWrapperGpu
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.graph import GraphLowering
 from torch._inductor.lowering import _record_symbolic_input_source
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import IndentedBuffer
+from torch._inductor.utils import AotOnlyBuffer, IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import CallMethodKey
 from torch.testing._internal.common_utils import (
@@ -124,6 +125,53 @@ class TestPythonWrapperCodegen(TestCase):
             f"output index {bad_idx} is out of range for list with 1 elements",
         ):
             self._codegen_output_symbol([[output]], keypath)
+
+    def test_aoti_stable_tma_descriptor_routes_python_import_to_autotune(self):
+        wrapper = self._new_cpp_wrapper()
+        wrapper.header = AotOnlyBuffer()
+        wrapper.kernel_autotune_calls = IndentedBuffer()
+        descriptor = SimpleNamespace(
+            block_shape=[16],
+            descriptor_module="triton.tools.tensor_descriptor",
+            descriptor_class="TensorDescriptor",
+            tensor=SimpleNamespace(codegen_reference=lambda: "buf0"),
+        )
+        graph = self._graph_with_sizevars(cpp_wrapper=True)
+        graph.sizevars.optimization_hints = lambda value: value
+
+        with (
+            V.set_graph_handler(graph),
+            torch._inductor.config.patch("triton.autotune_at_compile_time", True),
+        ):
+            wrapper._generate_tma_descriptor_call_stable(descriptor)
+
+        self.assertEqual(wrapper.header.getvalue(), "")
+        self.assertEqual(
+            wrapper.kernel_autotune_calls.getvalue(),
+            "import triton.tools.tensor_descriptor\n",
+        )
+
+    def test_cpu_cpp_wrapper_rejects_tma_descriptor(self):
+        wrapper = self._new_cpp_wrapper()
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "TMA descriptors are not supported by the CPU cpp_wrapper",
+        ):
+            wrapper.generate_tma_descriptor(SimpleNamespace())
+
+    def test_aoti_gpu_rejects_backend_tma_descriptor(self):
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        descriptor = SimpleNamespace(
+            descriptor_module="triton.backends.cpu.tensor_descriptor",
+            descriptor_class="TensorDescriptor",
+        )
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "does not support backend-specific stable TMA descriptors",
+        ):
+            wrapper._generate_stable_tma_descriptor(descriptor)
 
     def test_explicit_symbol_input_assignment_uses_canonical_symbol(self):
         wrapper = self._new_wrapper()
