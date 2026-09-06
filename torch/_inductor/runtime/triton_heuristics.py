@@ -208,6 +208,10 @@ def _resolve_dims(dims, cfg_kwargs, constants):
             result.append(int(constants[s]))
         elif isinstance(s, str) and s in cfg_kwargs:
             result.append(int(cfg_kwargs[s]))
+        elif isinstance(s, str) and s.lstrip("-").isdigit():
+            # Template descriptors render dims via texpr(), so a literal comes
+            # through as a decimal string rather than an int.
+            result.append(int(s))
         else:
             log.debug("host-side TMA: unresolved descriptor dim %r; skipping", s)
             return None
@@ -2155,6 +2159,12 @@ class CachingAutotuner(KernelInterface):
         # CTA clusters, add num_ctas/cluster_dims here from the schema.
         # Currently num_ctas is already captured via config_to_dict(launcher.config)
         # for scratch space scaling, but is not used in the actual kernel launch.
+        binary_metadata = binary.metadata
+        legacy_tensordesc_meta = (
+            binary_metadata.get("tensordesc_meta")
+            if isinstance(binary_metadata, dict)
+            else getattr(binary_metadata, "tensordesc_meta", None)
+        )
         schema = getattr(binary, "launch_metadata_schema", None)
         if schema is not None and inductor_config.use_launch_metadata_schema:
             params: dict[str, Any] = {
@@ -2170,6 +2180,9 @@ class CachingAutotuner(KernelInterface):
                 "global_scratch": launcher.global_scratch,
                 "profile_scratch": launcher.profile_scratch,
                 "cuda_arch": cuda_arch,
+                "tensordesc_meta": schema.get(
+                    "tensordesc_meta", legacy_tensordesc_meta
+                ),
             }
         else:
             # Fallback: hasattr probing for older Triton versions
@@ -2198,6 +2211,7 @@ class CachingAutotuner(KernelInterface):
                 "global_scratch": launcher.global_scratch,
                 "profile_scratch": launcher.profile_scratch,
                 "cuda_arch": cuda_arch,
+                "tensordesc_meta": legacy_tensordesc_meta,
             }
 
         from torch._inductor.codecache import CudaKernelParamCache

@@ -15,7 +15,9 @@ if [ -n "$KATEX" ]; then
 
   apt-get update
   apt-get install -y --no-install-recommends yarn
-  yarn global add katex --prefix /usr/local
+  # katex 0.18.5 requires commander@15 / node >= 22.12; pin to the last
+  # release compatible with the node 16 installed above
+  yarn global add katex@0.18.4 --prefix /usr/local
 
   sudo apt-get -y install doxygen lcov
 

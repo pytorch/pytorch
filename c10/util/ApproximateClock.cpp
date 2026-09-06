@@ -2,6 +2,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
+#include <numeric>
+
 namespace c10 {
 
 ApproximateClockToUnixTimeConverter::ApproximateClockToUnixTimeConverter()
@@ -18,8 +20,7 @@ ApproximateClockToUnixTimeConverter::measurePair() {
   auto t = std::chrono::duration_cast<std::chrono::nanoseconds>(
       wall.time_since_epoch());
 
-  // `x + (y - x) / 2` is a more numerically stable average than `(x + y) / 2`.
-  return {t.count(), fast_0 + (fast_1 - fast_0) / 2};
+  return {t.count(), std::midpoint(fast_0, fast_1)};
 }
 
 ApproximateClockToUnixTimeConverter::time_pairs

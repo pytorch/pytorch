@@ -332,6 +332,23 @@ class TestNCCL4PyBackendCollectives(MultiProcessTestCase):
         self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
+    def test_subgroup_preserves_device(self):
+        # Subgroup {1}: the backend creator only sees the group-local rank (0),
+        # which differs from this process's physical device (cuda:1). The
+        # communicator must be created on cuda:1, not cuda:(group_rank), or the
+        # collective runs against a comm on the wrong GPU.
+        self._init_pg()
+        device = torch.device(f"cuda:{self.rank}")
+        subgroup = dist.new_group([1])
+        if self.rank == 1:
+            t = torch.ones(4, device=device) * 7.0
+            dist.all_reduce(t, group=subgroup)
+            torch.cuda.synchronize(device)
+            self.assertEqual(t, torch.full((4,), 7.0, device=device))
+        dist.barrier()
+        self._destroy_pg()
+
+    @skip_if_lt_x_gpu(2)
     def test_get_future(self):
         self._init_pg()
         device = torch.device(f"cuda:{self.rank}")
