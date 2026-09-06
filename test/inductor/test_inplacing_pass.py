@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
+from torch.utils._pytree import tree_map
 
 
 aten = torch.ops.aten
@@ -219,6 +220,209 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         actual = gm(input_pos, val, actual_cache)
         self.assertEqual(actual, expected)
         self.assertEqual(actual_cache, expected_cache)
+
+    def test_index_put_reuses_matching_value_copy_back(self):
+        def f(field, indices, gain, workspace):
+            gathered = aten.index.Tensor(field, [indices])
+            values = aten.mul.Tensor(gathered, gain)
+            updated = aten.index_put.default(field, [indices], values)
+            aten.copy_.default(field, updated)
+            aten.copy_.default(workspace, values)
+
+        field = torch.randn(8)
+        indices = torch.tensor([2, 5, 2])
+        gain = torch.tensor([2.0, 3.0, 5.0])
+        workspace = torch.empty(3)
+
+        gm = make_fx(f, tracing_mode="fake")(
+            field.clone(), indices, gain, workspace.clone()
+        )
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        nodes = list(gm.graph.nodes)
+        put = next(node for node in nodes if node.target is aten.index_put_.default)
+        copies = [node for node in nodes if node.target is aten.copy_.default]
+        self.assertEqual(len(copies), 1)
+        self.assertIs(put.args[2], copies[0])
+        self.assertLess(nodes.index(copies[0]), nodes.index(put))
+
+        expected_field = field.clone()
+        expected_workspace = workspace.clone()
+        f(expected_field, indices, gain, expected_workspace)
+        actual_field = field.clone()
+        actual_workspace = workspace.clone()
+        gm(actual_field, indices, gain, actual_workspace)
+        self.assertEqual(actual_field, expected_field)
+        self.assertEqual(actual_workspace, expected_workspace)
+
+    @parametrize("effect", ["none", "valid", "invalid"])
+    def test_index_put_multiple_copy_back_candidates(self, effect):
+        def f(fields, indices, gain, workspaces, other, other_indices, other_values):
+            for i in range(3):
+                gathered = aten.index.Tensor(fields[i], [indices])
+                values = aten.mul.Tensor(gathered, gain)
+                updated = aten.index_put.default(fields[i], [indices], values)
+                aten.copy_.default(fields[i], updated)
+                if i == 1 and effect != "none":
+                    other_updated = aten.index_put.default(
+                        other, [other_indices], other_values
+                    )
+                    aten.copy_.default(other, other_updated)
+                aten.copy_.default(workspaces[i], values)
+
+        args = (
+            tuple(torch.randn(8) for _ in range(3)),
+            torch.tensor([2, 5, 2]),
+            torch.tensor([2.0, 3.0, 5.0]),
+            tuple(torch.full((3,), -1.0) for _ in range(3)),
+            torch.randn(8),
+            torch.tensor([4]),
+            torch.randn(1),
+        )
+        gm = make_fx(f, tracing_mode="fake")(*tree_map(torch.clone, args))
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        reused_workspaces = sum(
+            node.args[2].target is aten.copy_.default
+            for node in gm.graph.nodes
+            if node.target is aten.index_put_.default
+        )
+        self.assertEqual(reused_workspaces, 3 if effect == "none" else 2)
+
+        expected_args = tree_map(torch.clone, args)
+        actual_args = tree_map(torch.clone, args)
+        if effect == "invalid":
+            expected_args[5].fill_(99)
+            actual_args[5].fill_(99)
+            with self.assertRaises(IndexError):
+                f(*expected_args)
+            with self.assertRaises(IndexError):
+                gm(*actual_args)
+            for workspace in actual_args[3][1:]:
+                self.assertEqual(workspace, torch.full_like(workspace, -1.0))
+        else:
+            f(*expected_args)
+            gm(*actual_args)
+        self.assertEqual(actual_args, expected_args)
+
+    @parametrize("alias", ["field", "indices", "gain"])
+    def test_index_put_does_not_reuse_aliasing_copy_back(self, alias):
+        def f(field, indices, gain, workspace):
+            gathered = aten.index.Tensor(field, [indices])
+            values = aten.mul.Tensor(gathered, gain)
+            updated = aten.index_put.default(field, [indices], values)
+            aten.copy_.default(field, updated)
+            aten.copy_.default(workspace, values)
+
+        field = torch.arange(8)
+        indices = torch.tensor([2, 5, 2])
+        gain = torch.tensor([2, 3, 5])
+
+        def aliasing_workspace(field, indices, gain):
+            if alias == "field":
+                return field[:3]
+            if alias == "indices":
+                return indices.view(-1)
+            return gain.view(-1)
+
+        traced_field = field.clone()
+        traced_indices = indices.clone()
+        traced_gain = gain.clone()
+        traced_workspace = aliasing_workspace(traced_field, traced_indices, traced_gain)
+        gm = make_fx(f, tracing_mode="fake")(
+            traced_field, traced_indices, traced_gain, traced_workspace
+        )
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        nodes = list(gm.graph.nodes)
+        put = next(
+            node
+            for node in nodes
+            if node.target in (aten.index_put.default, aten.index_put_.default)
+        )
+        values = next(node for node in nodes if node.target is aten.mul.Tensor)
+        workspace_copy = next(
+            node
+            for node in nodes
+            if node.target is aten.copy_.default and node.args[1] is values
+        )
+        self.assertIsNot(put.args[2], workspace_copy)
+        self.assertLess(nodes.index(put), nodes.index(workspace_copy))
+
+        expected_field = field.clone()
+        expected_indices = indices.clone()
+        expected_gain = gain.clone()
+        expected_workspace = aliasing_workspace(
+            expected_field, expected_indices, expected_gain
+        )
+        f(expected_field, expected_indices, expected_gain, expected_workspace)
+        actual_field = field.clone()
+        actual_indices = indices.clone()
+        actual_gain = gain.clone()
+        actual_workspace = aliasing_workspace(actual_field, actual_indices, actual_gain)
+        gm(actual_field, actual_indices, actual_gain, actual_workspace)
+        self.assertEqual(actual_field, expected_field)
+        self.assertEqual(actual_indices, expected_indices)
+        self.assertEqual(actual_gain, expected_gain)
+
+    def test_index_put_does_not_reorder_copy_back_across_mutation(self):
+        def f(field, indices, gain, other, other_indices, other_values, workspace):
+            gathered = aten.index.Tensor(field, [indices])
+            values = aten.mul.Tensor(gathered, gain)
+            updated = aten.index_put.default(field, [indices], values)
+            aten.copy_.default(field, updated)
+            other_updated = aten.index_put.default(other, [other_indices], other_values)
+            aten.copy_.default(other, other_updated)
+            aten.copy_.default(workspace, values)
+
+        field = torch.randn(8)
+        indices = torch.tensor([2, 5, 2])
+        gain = torch.randn(3)
+        other = torch.randn(8)
+        other_indices = torch.tensor([4])
+        other_values = torch.randn(1)
+        workspace = torch.full((3,), -1.0)
+
+        gm = make_fx(f, tracing_mode="fake")(
+            field.clone(),
+            indices,
+            gain,
+            other.clone(),
+            other_indices,
+            other_values,
+            workspace.clone(),
+        )
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        nodes = list(gm.graph.nodes)
+        puts = [node for node in nodes if node.target is aten.index_put_.default]
+        workspace_copy = next(
+            node for node in nodes if node.target is aten.copy_.default
+        )
+        self.assertEqual(len(puts), 2)
+        self.assertLess(nodes.index(puts[0]), nodes.index(puts[1]))
+        self.assertLess(nodes.index(puts[1]), nodes.index(workspace_copy))
+
+        invalid_indices = torch.tensor([99])
+        with self.assertRaises(IndexError):
+            gm(
+                field.clone(),
+                indices,
+                gain,
+                other.clone(),
+                invalid_indices,
+                other_values,
+                workspace,
+            )
+        self.assertEqual(workspace, torch.full_like(workspace, -1.0))
 
     def test_counters_functionalize_old(self):
         ReinplaceCounters.clear()

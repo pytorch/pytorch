@@ -1695,6 +1695,55 @@ class CPUReproTests(TestCase):
             torch.compile(fn)(y_clone, index0_clone, index1_clone)
             self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
 
+    def test_index_put_preallocated_workspace(self):
+        # https://github.com/pytorch/pytorch/issues/195330
+        def preallocated(field, indices, gain, workspace):
+            torch.index_select(field, 0, indices, out=workspace)
+            workspace.mul_(gain)
+            field.index_copy_(0, indices, workspace)
+
+        def dependent(field, indices, gain):
+            values = torch.index_select(field, 0, indices) * gain
+            field.index_copy_(0, indices, values)
+
+        field = torch.linspace(0.25, 1.25, 16, dtype=torch.float64)
+        indices = torch.tensor([2, 5, 2])
+        gain = torch.tensor([2.0, 3.0, 5.0], dtype=torch.float64)
+
+        expected_field = field.clone()
+        expected_workspace = torch.empty_like(gain)
+        preallocated(expected_field, indices, gain, expected_workspace)
+        actual_field = field.clone()
+        actual_workspace = torch.empty_like(gain)
+        with fresh_cache():
+            _, code = run_and_get_cpp_code(
+                torch.compile(preallocated, fullgraph=True, dynamic=False),
+                actual_field,
+                indices,
+                gain,
+                actual_workspace,
+            )
+        self.assertEqual(actual_field, expected_field)
+        self.assertEqual(actual_workspace, expected_workspace)
+
+        allocation = (
+            "aoti_torch_empty_strided(" if config.cpp_wrapper else "empty_strided_cpu("
+        )
+        self.assertEqual(code.count(allocation), 0)
+
+        expected_field = field.clone()
+        dependent(expected_field, indices, gain)
+        actual_field = field.clone()
+        with fresh_cache():
+            _, code = run_and_get_cpp_code(
+                torch.compile(dependent, fullgraph=True, dynamic=False),
+                actual_field,
+                indices,
+                gain,
+            )
+        self.assertEqual(actual_field, expected_field)
+        self.assertEqual(code.count(allocation), 1)
+
     def test_index_put_bool_accumulate_codegen(self):
         # https://github.com/pytorch/pytorch/issues/113692
         def fn(x, index, values):
