@@ -1700,11 +1700,8 @@ static void triangular_solve_metal(const Tensor& A_,
                                    bool left,
                                    bool unitriangular,
                                    bool conjugate,
-                                   Tensor& out) {
+                                   const Tensor& out) {
   using namespace mps;
-  // The kernel fully overwrites X, so an uninitialized contiguous buffer is enough.
-  Tensor X = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);
-
   const uint64_t batchSize =
       std::accumulate(A_.sizes().begin(), A_.sizes().end() - 2, 1ULL, std::multiplies<uint64_t>());
   const uint64_t n = A_.size(-1);
@@ -1727,14 +1724,11 @@ static void triangular_solve_metal(const Tensor& A_,
       auto pso = lib.getPipelineStateForFunc(fmt::format("triangular_solve_{}", scalarToMetalTypeString(A_)));
       getMPSProfiler().beginProfileKernel(pso, "triangular_solve", {A_, B_}, stream);
       [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder, A_, B_, X, params);
+      mtl_setArgs(encoder, A_, B_, out, params);
       mtl_dispatch1DJob(encoder, pso, batchSize * k);
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
-  if (!X.is_same(out)) {
-    out.copy_(X);
-  }
 }
 
 static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
@@ -1753,6 +1747,18 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
               "linalg.solve_triangular(): MPS only supports float32 and complex64, got ",
               scalar_type);
   TORCH_CHECK(A.scalar_type() == B.scalar_type(), "linalg.solve_triangular(): A and B must have the same dtype");
+  // MPS ops get no generated device check and the solvers write into out= directly,
+  // so its device and dtype have to be validated here.
+  TORCH_CHECK(out.device() == A.device(),
+              "linalg.solve_triangular(): Expected out tensor on ",
+              A.device(),
+              " but got ",
+              out.device());
+  TORCH_CHECK(out.scalar_type() == scalar_type,
+              "linalg.solve_triangular(): Expected out tensor of dtype ",
+              scalar_type,
+              " but got ",
+              out.scalar_type());
   Tensor A_t, B_t;
   std::tie(B_t, A_t) = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/ nullptr);
   at::native::resize_output(out, B_t.sizes());
@@ -1772,14 +1778,21 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
     B_ = B_.clone(at::MemoryFormat::Contiguous);
   }
 
+  // Both solvers write a dense row-major solution, so a strided out needs a temporary.
+  // It is fully overwritten, hence empty rather than a copy of out.
+  Tensor out_ = out.is_contiguous() ? out : at::empty_like(out, at::MemoryFormat::Contiguous);
+
   if (scalar_type == kComplexFloat) {
-    triangular_solve_metal(A_, B_, upper, transpose, left, unitriangular, conjugate, out);
+    triangular_solve_metal(A_, B_, upper, transpose, left, unitriangular, conjugate, out_);
+    if (!out_.is_same(out)) {
+      out.copy_(out_);
+    }
     return out;
   }
 
   id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
   id<MTLBuffer> bBuffer = getMTLBufferStorage(B_);
-  id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
+  id<MTLBuffer> outBuffer = getMTLBufferStorage(out_);
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
@@ -1830,7 +1843,7 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
                                         offset:(B_.storage_offset() + bBatchOffset) * bElemSize
                                     descriptor:rightHandSideMatrixDesc] autorelease];
         MPSMatrix* solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:outBuffer
-                                                                offset:(out.storage_offset() + bBatchOffset) * bElemSize
+                                                                offset:(out_.storage_offset() + bBatchOffset) * bElemSize
                                                             descriptor:rightHandSideMatrixDesc] autorelease];
 
         [filter encodeToCommandBuffer:commandBuffer
@@ -1841,6 +1854,9 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
       getMPSProfiler().endProfileKernel(filter, mpsStream);
     }
   });
+  if (!out_.is_same(out)) {
+    out.copy_(out_);
+  }
   return out;
 }
 
