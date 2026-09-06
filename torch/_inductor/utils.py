@@ -310,6 +310,16 @@ def _collect_importable_constexpr_types(
         return
     seen.add(id(value))
 
+    # NamedTuple tl.constexpr values are reconstructed by
+    # namedtuple_helpers.namedtuple_type (pickle-safe, works for __main__).
+    # Do not emit a user-module import for them.
+    if pytree.is_namedtuple_instance(value):
+        repr_children = get_constexpr_repr_children(value)
+        if repr_children is not None:
+            for child in repr_children.values:
+                _collect_importable_constexpr_types(child, result, seen)
+        return
+
     value_type = type(value)
     type_module = getattr(value_type, "__module__", None)
     type_qualname = getattr(value_type, "__qualname__", None)
