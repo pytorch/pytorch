@@ -17430,7 +17430,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "airy_ai",
                 "legendre_polynomial_p",
                 "log_ndtr",
-                "ndtri",
             ]
             else self.assertRaises(NotImplementedError)
         )
