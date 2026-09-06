@@ -2344,6 +2344,78 @@ if __name__ == '__main__':
         )
 
     @slowTest
+    @unittest.skipIf(
+        not TEST_WITH_ROCM
+        or (
+            "USE_ROCM_KERNEL_ASSERT=1" not in torch.__config__.show()
+            and "USE_ROCM_KERNEL_ASSERT=ON" not in torch.__config__.show()
+        ),
+        "requires ROCm build with USE_ROCM_KERNEL_ASSERT enabled",
+    )
+    def test_rocm_kernel_assert_percent_in_condition(self):
+        # Device assert with '%' in #cond; stderr must match stock HIP format and
+        # the subprocess must fail (assert must not compile away silently).
+        code = """\
+import torch
+from torch.utils.cpp_extension import load_inline
+
+cuda_source = r'''
+#include <c10/macros/Macros.h>
+#include <cuda_runtime.h>
+
+__global__ void assert_mod_kernel(const int* x) {
+  CUDA_KERNEL_ASSERT(x[0] % 2 == 0);
+}
+
+void trigger_device_assert() {
+  int h = 1;
+  int* d = nullptr;
+  cudaMalloc(&d, sizeof(int));
+  cudaMemcpy(d, &h, sizeof(int), cudaMemcpyHostToDevice);
+  assert_mod_kernel<<<1, 1>>>(d);
+  cudaDeviceSynchronize();
+}
+'''
+cpp_source = "void trigger_device_assert();"
+
+mod = load_inline(
+    name="rocm_kernel_assert_percent_test",
+    cpp_sources=cpp_source,
+    cuda_sources=cuda_source,
+    functions=["trigger_device_assert"],
+    verbose=False,
+)
+mod.trigger_device_assert()
+raise RuntimeError("device assert did not fire")
+"""
+        env = os.environ.copy()
+        env["PYTORCH_API_USAGE_STDERR"] = "1"
+        env.pop("CI", None)
+        env.pop("TEST_SHOWLOCALS", None)
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            env=env,
+        )
+        stderr = proc.stderr.decode("ascii")
+        self.assertNotEqual(
+            proc.returncode,
+            0,
+            msg=(
+                "expected subprocess failure after device assert, "
+                f"got rc={proc.returncode}\n{stderr}"
+            ),
+        )
+        self.assertRegex(
+            stderr,
+            (
+                r"[^\n]+:\d+: assert_mod_kernel: "
+                r"Device-side assertion `x\[0\] % 2 == 0' failed\."
+            ),
+            msg=f"expected full HIP-format assert line in stderr, got:\n{stderr}",
+        )
+
+    @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @serialTest()
     def test_huge_index(self):
