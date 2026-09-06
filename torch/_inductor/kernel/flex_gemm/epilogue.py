@@ -1407,8 +1407,13 @@ class FlexGemmTensorSSAOpOverrides(GemmEpilogueCuteDSLOpOverrides):
         return FlexGemmTensorSSAOpOverrides.minimum(x, max)
 
 
-class FlexGemmEpiModOpOverrides(CuteDSLOpOverrides):
-    """Emit QuACK expressions while reusing Inductor's op decompositions."""
+class FlexGemmScalarCallbackOpOverrides(CuteDSLOpOverrides):
+    """Emit per-element QuACK ``epi_math`` expressions for scalar callbacks.
+
+    The generated epilogue body is TensorSSA-only; this emitter serves QuACK's
+    scalar callback ABI, which invokes grouped-reduction finalizers and prepass
+    functions once per element.
+    """
 
     def __init__(self, fast_math: bool) -> None:
         self.fast_math = fast_math
@@ -1612,7 +1617,6 @@ class FlexGemmEpiModSource:
 
     name: str
     source: str
-    fragmentwise: bool = False
     local_reduce_combine: str | None = None
     local_reduce_finalize: str | None = None
     local_reduce_store_finalize: str | None = None
@@ -1860,11 +1864,6 @@ class FlexGemmEpiModEmitter:
                 self.local_reduce_finalize_uses_prepass = bool(
                     self.local_reduce_finalize_nodes & (prepass_aliases - sink_aliases)
                 )
-        self.fragmentwise = (
-            self.local_reduce is None
-            or (self.local_reduce.feeds_main and self.local_reduce_prepass is not None)
-            or (not self.local_reduce.feeds_main and self.local_reduce_prepass is None)
-        )
         self.epilogue_arg_placeholders = epilogue_arg_placeholders
         self.alpha = alpha
         self.beta = beta
@@ -1882,18 +1881,6 @@ class FlexGemmEpiModEmitter:
             self.params.append(LOCAL_REDUCE_FEED_MAIN_ARG_NAME)
         self.local_reduce_prepass_value: CuteDSLCSEVariable | None = None
         self.env = dict(self.base_env)
-
-    def main_op_overrides(self) -> CuteDSLOpOverrides:
-        """Choose the representation used by the generated main callback."""
-        return (
-            FlexGemmTensorSSAOpOverrides()
-            if self.fragmentwise
-            else self.scalar_op_overrides()
-        )
-
-    def scalar_op_overrides(self) -> CuteDSLOpOverrides:
-        """Lower scalar EpiOp callbacks independently of the main representation."""
-        return FlexGemmEpiModOpOverrides(self.fast_math)
 
     @staticmethod
     def value(name: str, dtype: torch.dtype) -> CuteDSLCSEVariable:
@@ -1934,11 +1921,7 @@ class FlexGemmEpiModEmitter:
         ):
             dtype = node.meta["val"].dtype
             if dtype is torch.bool:
-                expr = (
-                    f"operator.ne({name}, cute.full_like({name}, 0))"
-                    if self.fragmentwise
-                    else f"epi_math.ne({name}, 0)"
-                )
+                expr = f"operator.ne({name}, cute.full_like({name}, 0))"
             else:
                 expr = name
             captures[node] = self.value(expr, dtype)
@@ -1985,7 +1968,7 @@ class FlexGemmEpiModEmitter:
             env.update((alias, prepass_value) for alias in prepass.aliases)
         with (
             V.set_kernel_handler(kernel),
-            V.set_ops_handler(self.scalar_op_overrides()),
+            V.set_ops_handler(FlexGemmScalarCallbackOpOverrides(self.fast_math)),
             use_cutedsl_fast_math(self.fast_math),
         ):
             for node in self.graph_module.graph.nodes:
@@ -2020,7 +2003,7 @@ class FlexGemmEpiModEmitter:
         env = dict(self.base_env)
         with (
             V.set_kernel_handler(kernel),
-            V.set_ops_handler(self.scalar_op_overrides()),
+            V.set_ops_handler(FlexGemmScalarCallbackOpOverrides(self.fast_math)),
             use_cutedsl_fast_math(self.fast_math),
         ):
             for node in self.graph_module.graph.nodes:
@@ -2054,9 +2037,6 @@ class FlexGemmEpiModEmitter:
                 raise AssertionError("grouped main layout requires a view or split")
             source_node = view_args[0]
         source = flex_gemm_epilogue_arg(source_node, self.env)
-        if not self.fragmentwise:
-            self.env[node] = source
-            return
         fragment_group = (
             f"cutlass.const_expr(min({layout.group_size}, "
             f"cute.size({source}.shape, mode=[0])))"
@@ -2088,9 +2068,7 @@ class FlexGemmEpiModEmitter:
         """Select one analysis-validated lane from a grouped TensorSSA value."""
         source = flex_gemm_epilogue_arg(node.args[0], self.env)
         expression = (
-            f"{source}[{index}]"
-            if not self.fragmentwise
-            else source[index]
+            source[index]
             if isinstance(source, tuple)
             else f"{source}[((0, {index}, None), None, None)]"
         )
@@ -2112,7 +2090,7 @@ class FlexGemmEpiModEmitter:
         )
         with (
             V.set_kernel_handler(self.kernel),
-            V.set_ops_handler(self.main_op_overrides()),
+            V.set_ops_handler(FlexGemmTensorSSAOpOverrides()),
             use_cutedsl_fast_math(self.fast_math),
         ):
             for node in self.graph_module.graph.nodes:
@@ -2192,30 +2170,19 @@ class FlexGemmEpiModEmitter:
                     self.kernel, self.env, node, context="FlexGEMM"
                 )
 
-    def store_result(self, node: torch.fx.Node) -> Any:
-        """Adapt an FX result to QuACK's FP32 register staging domain."""
-        result = flex_gemm_epilogue_arg(node, self.env)
-        meta = node.meta.get("val")
-        if (
-            not self.fragmentwise
-            and isinstance(meta, torch.Tensor)
-            and meta.dtype is torch.bool
-        ):
-            return f"epi_math.where({result}, 1.0, 0.0)"
-        return result
-
     def render(self) -> FlexGemmEpiModSource:
         """Render a deterministic generated EpiMod definition."""
         from torch._inductor.codegen.cutedsl._inline_asm import inline_asm_cache_key
 
         spec = self.local_reduce_spec
         sink = None if spec is None else spec.sink
-        main_result = self.store_result(self.outputs.output)
+        main_result = flex_gemm_epilogue_arg(self.outputs.output, self.env)
         aux_names = tuple(
             f"output{index}" for index in range(len(self.outputs.aux_outputs))
         )
         aux_results = tuple(
-            self.store_result(output) for output in self.outputs.aux_outputs
+            flex_gemm_epilogue_arg(output, self.env)
+            for output in self.outputs.aux_outputs
         )
         main_name = "main" if self.outputs.main_transform is not None else "D"
         result_items = [
@@ -2270,8 +2237,7 @@ class FlexGemmEpiModEmitter:
             else f"{prepass_body}return {self.local_reduce_prepass_result}\n"
         )
         key_payload = (
-            f"inline_asm={inline_asm_cache_key()}\n"
-            f"fragmentwise={self.fragmentwise}\n{self.graph_module.code}\n"
+            f"inline_asm={inline_asm_cache_key()}\n{self.graph_module.code}\n"
             f"{body}return {{{return_source}}}\n"
             f"{finalize_payload}{prepass_payload}{self.epilogue_arg_kinds!r}"
         )
@@ -2314,15 +2280,13 @@ class FlexGemmEpiModEmitter:
             "    inline_asm_elementwise_intrinsic,\n"
             ")\n\n"
         )
-        fragment_decorator = "@cute.jit\n" if self.fragmentwise else ""
         return FlexGemmEpiModSource(
             name=name,
             source=(
                 f"{generated_imports}{finalize_source}{prepass_source}"
-                f"{fragment_decorator}def {name}({', '.join(self.params)}):\n"
+                f"@cute.jit\ndef {name}({', '.join(self.params)}):\n"
                 f"{body}    return {{{return_source}}}\n"
             ),
-            fragmentwise=self.fragmentwise,
             local_reduce_combine=None if sink is None else sink.combine,
             local_reduce_finalize=(
                 None
