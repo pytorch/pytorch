@@ -684,7 +684,7 @@ class CublasltMatmulOp : public Callable<ParamsT> {
 
   TuningStatus Call(const ParamsT* params) override {
     auto problem = problem_factory_(params);
-    if (problem.workspace() == nullptr) {
+    if (problem.workspace() == nullptr && problem.workspace_size() != 0) {
       return FAIL;
     }
     cublasLtMatmulAlgo_t algo = {};
@@ -731,7 +731,7 @@ template <typename ProblemT>
 std::vector<std::pair<std::string, CublasltAlgoConfig>>
 GetCublasltHeuristicCandidates(const ProblemT& problem) {
   std::vector<std::pair<std::string, CublasltAlgoConfig>> ret;
-  if (problem.workspace() == nullptr) {
+  if (problem.workspace() == nullptr && problem.workspace_size() != 0) {
     return ret;
   }
 

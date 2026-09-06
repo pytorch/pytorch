@@ -23,17 +23,10 @@ if torch.backends.mps.is_available():
         # ops below are xfailed for complex32/complex64. Drill this list down as
         # complex support is added.
         UNSUPPORTED_COMPLEX_OPS = {
-            "__rpow__",
             "addr",
-            "as_stridedpartial_views",
             "cholesky_inverse",
             "float_power",
             "geqrf",
-            "jiterator_2inputs_2outputs",
-            "jiterator_4inputs_with_extra_args",
-            "jiterator_binary",
-            "jiterator_binary_return_by_ref",
-            "jiterator_unary",
             "linalg.eig",
             "linalg.eigvals",
             "linalg.inv",
@@ -49,7 +42,6 @@ if torch.backends.mps.is_available():
             "nn.functional.conv3d",
             "nn.functional.padreplicate_negative",
             "ormqr",
-            "pow",
             "renorm",
             "sparse.sampled_addmm",
             "to_sparse",
@@ -365,8 +357,6 @@ if torch.backends.mps.is_available():
                 torch.float16,
                 torch.bfloat16,
             ],
-            # zero to negative integer powers are undefined
-            "__rpow__": [torch.int8, torch.int16, torch.int32, torch.int64],
             # CPU Errors:
             "addr": [
                 torch.bool,

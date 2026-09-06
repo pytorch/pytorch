@@ -1255,7 +1255,7 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
     return do_metal_addbmm_or_baddbmm(input, batch1, batch2, alpha, beta, result, opType == BADDBMM_OP_TYPE);
   }
 
-  MPSStream* stream = getCurrentMPSStream();
+  auto stream = getCurrentMPSStream();
 
   struct CachedGraph : public mps::MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -2131,7 +2131,9 @@ static void svd_kernel_mps(const Tensor& A,
   // Kernel needs rows >= cols. For m<n run it on A^H: SVD(A^H)=(V,S,U^H), and
   // params.transposed tells the kernel to swap left/right into the right outputs.
   const int64_t wm = transposed ? n : m;
-  Tensor in = (transposed ? A.mH() : A).contiguous().reshape({batch, wm, k});
+  // Kernel reads the raw buffer and ignores is_conj; resolve it, since
+  // .contiguous() keeps the bit when the mH view is already contiguous.
+  Tensor in = (transposed ? A.mH() : A).resolve_conj().contiguous().reshape({batch, wm, k});
 
   auto opts = A.options();
   const bool S_direct = S.is_contiguous() && S.scalar_type() == c10::toRealValueType(A.scalar_type());

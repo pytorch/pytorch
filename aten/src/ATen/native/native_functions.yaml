@@ -475,8 +475,7 @@
 
 - func: conj_physical.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, XPU: conj_physical_out
-    MPS: conj_physical_out_mps
+    CPU, CUDA, XPU, MPS: conj_physical_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: conj_physical_out_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta, SparseCsrXPU: conj_physical_sparse_csr_out
   tags: pointwise
@@ -7172,6 +7171,7 @@
   dispatch:
     CompositeExplicitAutograd: _grouped_mm
     CUDA: _grouped_mm_cuda
+    MPS: _grouped_mm_mps
 
 # NOTE [ Sparse: autograd and API ]
 #
@@ -10258,8 +10258,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: pow_Tensor_Tensor_out
-    MPS: pow_tensor_tensor_out_mps
+    CPU, CUDA, MPS, XPU: pow_Tensor_Tensor_out
   tags: pointwise
 
 - func: pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
@@ -13322,8 +13321,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, XPU: logit_backward_out
-    MPS: logit_backward_out_mps
+    CPU, CUDA, MPS, XPU: logit_backward_out
   tags: pointwise
 
 - func: logit_backward(Tensor grad_output, Tensor self, float? eps=None) -> Tensor
@@ -13336,8 +13334,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MTIA, XPU: tanh_backward_out
-    MPS: tanh_backward_out_mps
+    CPU, CUDA, MPS, MTIA, XPU: tanh_backward_out
   tags: pointwise
 
 - func: tanh_backward(Tensor grad_output, Tensor output) -> Tensor
@@ -14693,6 +14690,7 @@
   python_module: sparse
   dispatch:
     SparseCsrCUDA: _sparse_csr_linear_solve
+    SparseCsrXPU: _sparse_csr_linear_solve_xpu
 
 - func: linalg_solve.out(Tensor A, Tensor B, *, bool left=True, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg

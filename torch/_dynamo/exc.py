@@ -73,6 +73,8 @@ from .utils import counters
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from torch._dynamo.variables import VariableTracker
     from torch._guards import CompileId
 
@@ -102,10 +104,6 @@ _EXCEPTION_STATE_ATTRS_TO_DROP = frozenset(
 )
 
 
-def _safe_exception_args(args: tuple[Any, ...]) -> tuple[Any, ...]:
-    return args
-
-
 class _SerializedException(RuntimeError):
     _dynamo_original_exception_type: str
 
@@ -120,8 +118,8 @@ def _safe_inner_exception(exc: BaseException) -> _SerializedException:
     return _SerializedException(exc)
 
 
-def _safe_exception_state(state: dict[str, Any]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
+def _safe_exception_state(state: Mapping[str, object]) -> dict[str, object]:
+    result: dict[str, object] = {}
     for name, value in state.items():
         if name in _EXCEPTION_STATE_ATTRS_TO_DROP or isinstance(value, types.FrameType):
             result[name] = None
@@ -133,7 +131,7 @@ def _safe_exception_state(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _reconstruct_torch_dynamo_exception(
-    exc_type: type[TorchDynamoException], args: tuple[Any, ...]
+    exc_type: type[TorchDynamoException], args: tuple[object, ...]
 ) -> TorchDynamoException:
     exc = exc_type.__new__(exc_type)
     BaseException.__init__(exc, *args)
@@ -152,22 +150,22 @@ class TorchDynamoException(RuntimeError):
             exception types for control flow.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
         self._torch_dynamo_tracer_output: DynamoTracerOutput | None = None
         self.frame_exec_strategy: FrameExecStrategy | None = None
 
-    def __reduce__(self) -> tuple[Any, ...]:
+    def __reduce__(self) -> tuple[object, ...]:
         return (
             _reconstruct_torch_dynamo_exception,
-            (type(self), _safe_exception_args(self.args)),
+            (type(self), self.args),
             self.__getstate__(),
         )
 
-    def __getstate__(self) -> dict[str, Any]:
+    def __getstate__(self) -> dict[str, object]:
         return _safe_exception_state(self.__dict__)
 
-    def __setstate__(self, state: dict[str, Any] | None, /) -> None:
+    def __setstate__(self, state: Mapping[str, object] | None, /) -> None:
         if state is not None:
             self.__dict__.update(state)
 
@@ -183,7 +181,7 @@ class ResumePrologueTracingError(TorchDynamoException):
 class RestartAnalysis(TorchDynamoException):
     restart_reason: str | None
 
-    def __init__(self, *args: Any, restart_reason: str | None = None) -> None:
+    def __init__(self, *args: object, restart_reason: str | None = None) -> None:
         self.restart_reason = restart_reason
         super().__init__(*args)
 
@@ -264,7 +262,10 @@ class ResetRequired(TorchDynamoException):
 
 class ShortenTraceback(TorchDynamoException):
     def __init__(
-        self, *args: Any, first_useful_frame: types.FrameType | None, **kwargs: Any
+        self,
+        *args: object,
+        first_useful_frame: types.FrameType | None,
+        **kwargs: object,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.first_useful_frame = first_useful_frame
@@ -283,11 +284,11 @@ class ShortenTraceback(TorchDynamoException):
 class BackendCompilerFailed(ShortenTraceback):
     def __init__(
         self,
-        backend_fn: Any,
+        backend_fn: object,
         inner_exception: Exception,
         first_useful_frame: types.FrameType | None,
     ) -> None:
-        self.backend_name = getattr(backend_fn, "__name__", "?")
+        self.backend_name: str = getattr(backend_fn, "__name__", "?")
         self.inner_exception = inner_exception
         msg = f"backend={self.backend_name!r} raised:\n{type(inner_exception).__name__}: {inner_exception}"
         super().__init__(msg, first_useful_frame=first_useful_frame)
@@ -431,7 +432,7 @@ class PackageError(TorchDynamoException):
 class ObservedException(TorchDynamoException):
     # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
     def __init__(
-        self, *args: Any, real_stack: StackSummary | None = None, **kwargs: Any
+        self, *args: object, real_stack: StackSummary | None = None, **kwargs: object
     ) -> None:
         super().__init__(*args, **kwargs)
         self.real_stack: StackSummary = (
@@ -443,12 +444,14 @@ class ObservedException(TorchDynamoException):
 
 class ObservedUserStopIteration(ObservedException):
     # An UserStopIteration exception observed during the Dynamo tracing (e.g Dynamo tracing __next__)
-    value: Any | None
+    # Preserve CPython's value attribute for external inspection; Dynamo tracks the
+    # symbolic payload separately through ExceptionVariable.args.
+    value: object | None
 
     # Reference `StopIteration_init` in CPython
     # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
     def __init__(
-        self, *args: Any, real_stack: StackSummary | None = None, **kwargs: Any
+        self, *args: object, real_stack: StackSummary | None = None, **kwargs: object
     ) -> None:
         super().__init__("unhandled `raise StopIteration`", real_stack=real_stack)
         if len(args) > 0:
@@ -567,6 +570,11 @@ def raise_observed_exception(
         tx, args_, kwargs or {}
     )
     tx.do_raise(exception_vt, None)
+
+
+def raise_attribute_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
+    """Raise an AttributeError as an observed exception during tracing."""
+    raise_observed_exception(AttributeError, tx, args=[msg])
 
 
 def raise_type_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
@@ -780,7 +788,7 @@ def unimplemented(
 # KeyError has special handling for its args
 # see https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L2534 for details
 class KeyErrorMsg:
-    def __init__(self, value: Any) -> None:
+    def __init__(self, value: object) -> None:
         self.value = value
 
     def __str__(self) -> str:
