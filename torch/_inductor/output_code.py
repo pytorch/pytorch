@@ -362,6 +362,16 @@ def cudagraph_partition_post_compile(
         # cudagraphify is not called if there are no partitions
         BoxedBool.disable(cudagraphs)
         maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
+
+        if any(is_gpu(device) for device in compiled_graph.device_types):
+            if cudagraph_fail_reasons:
+                log_cudagraph_skip_and_bump_counter(
+                    f"skipping cudagraphs due to {cudagraph_fail_reasons}"
+                )
+            else:
+                log_cudagraph_skip_and_bump_counter(
+                    "skipping cudagraphs as no graph partition is cudagraphable"
+                )
         return
 
     if compiled_graph.current_callable is None:
