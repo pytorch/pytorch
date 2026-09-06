@@ -57,9 +57,9 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     GetSet,
-    getset_read,
     Member,
     Method,
+    readonly_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -530,7 +530,7 @@ class BaseListVariable(VariableTracker):
         # CPython has a series of checks to optimize list.extend for different data types
         # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
         from .dicts import ConstDictVariable
-        from .sets import FrozensetVariable, SetVariable
+        from .sets import DictKeySetVariable, FrozensetVariable, SetVariable
         from .user_defined import UserDefinedObjectVariable
 
         sz = len(self.items)
@@ -538,7 +538,10 @@ class BaseListVariable(VariableTracker):
             self.items.extend(args[0].items)
         elif isinstance(args[0], UserDefinedObjectVariable):
             self.items.extend(unpack_iterable(tx, args[0]))
-        elif isinstance(args[0], (ConstDictVariable, SetVariable, FrozensetVariable)):
+        elif isinstance(
+            args[0],
+            (ConstDictVariable, SetVariable, FrozensetVariable, DictKeySetVariable),
+        ):
             items = [item.vt for item in args[0].items]
             self.items.extend(items)
         elif isinstance(args[0], ConstantVariable):
@@ -1121,9 +1124,9 @@ class RangeVariable(BaseListVariable):
     # range_members: start/stop/step are Py_READONLY _Py_T_OBJECT members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c (range_members)
     tp_members = {
-        "start": Member(getset_read(lambda s: s.items[0])),
-        "stop": Member(getset_read(lambda s: s.items[1])),
-        "step": Member(getset_read(lambda s: s.items[2])),
+        "start": Member(lambda s, _: s.items[0], readonly_setter),
+        "stop": Member(lambda s, _: s.items[1], readonly_setter),
+        "step": Member(lambda s, _: s.items[2], readonly_setter),
     }
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
@@ -1652,7 +1655,7 @@ class DequeVariable(BaseListVariable):
     # deque_getset: maxlen is a read-only getset (deque_get_maxlen, no setter).
     # https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c (deque_getset)
     tp_getset = {
-        "maxlen": GetSet(getset_read(lambda s: s.maxlen)),
+        "maxlen": GetSet(lambda s, _: s.maxlen, readonly_setter),
     }
 
     def _clamp_maxlen(self, side: str) -> None:
@@ -1787,6 +1790,10 @@ class DequeVariable(BaseListVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
+        # list_pop raises the list message ("pop from empty list"); deque uses
+        # its own, so check emptiness here before delegating.
+        if self.is_mutable() and not self.items:
+            raise_observed_exception(IndexError, tx, args=["pop from an empty deque"])
         result = BaseListVariable.list_pop(self, tx, args, kwargs)
         if result is None:
             return None
@@ -2362,9 +2369,9 @@ class SliceVariable(VariableTracker):
     # slice_members: start/stop/step are Py_READONLY _Py_T_OBJECT members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/sliceobject.c (slice_members)
     tp_members = {
-        "start": Member(getset_read(lambda s: s.items[0])),
-        "stop": Member(getset_read(lambda s: s.items[1])),
-        "step": Member(getset_read(lambda s: s.items[2])),
+        "start": Member(lambda s, _: s.items[0], readonly_setter),
+        "stop": Member(lambda s, _: s.items[1], readonly_setter),
+        "step": Member(lambda s, _: s.items[2], readonly_setter),
     }
 
     def indices(
@@ -2394,9 +2401,9 @@ class SliceVariable(VariableTracker):
 
 
 class BaseListIteratorVariable(IteratorVariable):
-    # In CPython list_iterator, tuple_iterator, and _deque_iterator are siblings,
-    # not subclasses of one another, so the concrete VTs share this base rather
-    # than each other.
+    # In CPython list_iterator, tuple_iterator, _deque_iterator, and
+    # _deque_reverse_iterator are siblings, not subclasses of one another, so
+    # the concrete VTs share this base rather than each other.
 
     _nonvar_fields = {
         "index",
@@ -2521,8 +2528,37 @@ class DequeIteratorVariable(BaseListIteratorVariable):
         return type(iter(collections.deque()))
 
 
-class DequeReverseIteratorVariable(DequeIteratorVariable):
+class DequeReverseIteratorVariable(BaseListIteratorVariable):
+    # Sibling of DequeIteratorVariable. Mutation snapshot is copied, not
+    # inherited, so isinstance(..., DequeIteratorVariable) stays false.
     _cpython_type = type(reversed(collections.deque()))
+
+    _nonvar_fields = {
+        "saved_state",
+        *BaseListIteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        items: list[VariableTracker],
+        source_deque: "DequeVariable",
+        saved_state: int,
+        index: int = 0,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(items, index=index, **kwargs)
+        self.source_deque = source_deque
+        self.saved_state = saved_state
+
+    def _check_mutation(self, tx: "InstructionTranslatorBase") -> None:
+        if self.source_deque.state != self.saved_state:
+            raise_observed_exception(
+                RuntimeError, tx, args=["deque mutated during iteration"]
+            )
+
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_mutation(tx)
+        return super().tp_iternext_impl(tx)
 
     def python_type(self) -> type:
         return type(reversed(collections.deque()))

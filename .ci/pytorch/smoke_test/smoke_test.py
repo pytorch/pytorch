@@ -534,6 +534,14 @@ def smoke_test_compile_dynamic_indirect_indexing(device: str = "cuda") -> None:
     emitted Triton whose epilogue read a loop-local temp. Only reproduces on the
     second compile, once a differing shape triggers automatic dynamic shapes.
     """
+    # fix (gh-194786) is in 2.14. This skip should be removed if also cherry-picked
+    # into prior versions.
+    from torch.torch_version import TorchVersion
+
+    if TorchVersion(torch.__version__) < (2, 14):
+        print(f"Skipping dynamic indirect indexing test on torch {torch.__version__}")
+        return
+
     if not torch.cuda.is_available():
         print("CUDA is not available, skipping dynamic indirect indexing test")
         return

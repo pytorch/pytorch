@@ -474,18 +474,18 @@ def inductor_trace_handler(
             kineto_available() and inductor_config.trace.provenance_tracking_to_timeline
         )
 
-        if getattr(prof, "_use_cupti_monitor", False):
-            observer = getattr(prof, "_cupti_profiler_observer", None)
-            has_monitor_export = (
+        if getattr(prof, "_use_cuspy", False):
+            observer = getattr(prof, "_cuspy_profiler_observer", None)
+            has_cuspy_export = (
                 observer is not None
                 and observer.available
-                and getattr(prof, "_monitor_window_id", None) is not None
+                and getattr(prof, "_cuspy_window_id", None) is not None
             )
             prof.export_chrome_trace(
                 path,
                 use_python_export=use_python_export,
             )
-            if provenance_enabled and has_monitor_export:
+            if provenance_enabled and has_cuspy_export:
                 from torch._inductor.debug import get_kernel_information_jsons
 
                 get_kernel_information_jsons().clear()

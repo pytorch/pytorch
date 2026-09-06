@@ -20,7 +20,7 @@ routes FX nodes through ``lower_view_or_reshape``,
 
 import dataclasses
 import math
-from typing import Any, cast
+from typing import Any
 
 import torch
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
@@ -30,7 +30,6 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
 from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
-    local_reduce_needs_physical_callbacks,
     LOCAL_REDUCE_PARTIAL_OUTPUT_CONTRACT_ERROR,
 )
 from torch._inductor.kernel.gemm_epilogue import (
@@ -44,8 +43,10 @@ from torch._inductor.kernel.gemm_epilogue import (
     NormalizedSqueeze,
     NormalizedView,
 )
+from torch._inductor.kernel.gemm_epilogue_codegen import (
+    canonical_tensorssa_reduction_type,
+)
 from torch._inductor.kernel.gemm_epilogue_utils import normalize_shape
-from torch._inductor.ops_handler import ReductionType
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
@@ -87,7 +88,9 @@ class GroupedTensorSSALayout(GemmReductionGeometry):
 
     @property
     def needs_physical_callbacks(self) -> bool:
-        return local_reduce_needs_physical_callbacks(self.tensorssa_axis, self.group)
+        return GemmReductionGeometry(
+            self.group, self.tensorssa_axis
+        ).needs_physical_callbacks
 
     @property
     def needs_physical_combine(self) -> bool:
@@ -467,9 +470,7 @@ def lower_tensorssa_reduce(
     layout = grouped_tensors[input_node]
     if not layout.matches_reduction_dim(dim):
         raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
-    reduction_name = cast(
-        ReductionType, "sum" if reduction_type == "mean" else reduction_type
-    )
+    reduction_name = canonical_tensorssa_reduction_type(reduction_type)
     desc = tensorssa_reduction(reduction_name)
     finalize_expr = f"value / {layout.group}.0" if reduction_type == "mean" else "value"
     source = _cute_arg(input_node, env)
