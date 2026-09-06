@@ -4,6 +4,7 @@ import io
 import logging
 import os
 import pickle
+import sys
 import tempfile
 import types
 from collections.abc import Callable, Sequence
@@ -93,13 +94,21 @@ class AOTCompilePickler(FunctionPicklerBase):
         elif inspect.isfunction(obj) and "<locals>" in obj.__qualname__:
             # The runtime env has to RUN this function, so unlike the guard
             # pickler nothing it holds is pruned.
+            if sys.version_info >= (3, 14):
+                import annotationlib
+
+                annotations = annotationlib.get_annotations(
+                    obj, format=annotationlib.Format.FORWARDREF
+                )
+            else:
+                annotations = obj.__annotations__
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
                 kwdefaults=obj.__kwdefaults__,
                 closure=obj.__closure__,
                 attributes=obj.__dict__,
-                annotations=obj.__annotations__,
+                annotations=annotations,
                 type_params=getattr(obj, "__type_params__", None),
             )
 
