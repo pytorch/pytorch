@@ -3820,6 +3820,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaises(ValueError):
             torch.nn.BatchNorm1d(10)(x)
 
+    def test_batchnorm_raises_error_for_unsupported_dtype_on_empty_input(self):
+        # https://github.com/pytorch/pytorch/issues/193825
+        with self.assertRaisesRegex(NotImplementedError, "not implemented for"):
+            torch.nn.BatchNorm1d(1)(torch.zeros(2, 0, dtype=torch.complex32))
+
     def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
         input = torch.rand(2, 10)
         running_var = torch.rand(10)
