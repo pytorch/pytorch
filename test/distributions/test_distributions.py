@@ -2795,6 +2795,67 @@ class TestDistributions(DistributionsTestCase):
         self._check_forward_ad(lambda x: torch.normal(x, x))
         self._check_forward_ad(lambda x: x.normal_())
 
+    def test_normal_sample_dtype_compile_matches_eager(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/194547:
+        # torch.compile silently promoted the output dtype instead of
+        # preserving the "first tensor arg wins" dtype eager uses when
+        # loc/scale differ. Covers both dtype directions and the
+        # scalar/tensor combinations, since dtype = tensors[0].dtype means
+        # "first tensor wins", not universally "mean wins".
+        cases = [
+            (torch.zeros(8, dtype=torch.float16), torch.ones(8, dtype=torch.float32)),
+            (0.0, torch.ones(8, dtype=torch.float32)),  # scalar mean, tensor std
+            (torch.zeros(8, dtype=torch.float16), 1.0),  # tensor mean, scalar std
+        ]
+        if torch.get_default_device().type != "mps":  # MPS has no float64 support
+            cases.append(
+                (
+                    torch.zeros(8, dtype=torch.float32),
+                    torch.ones(8, dtype=torch.float64),
+                )
+            )
+            cases.append(
+                (
+                    torch.zeros(8, dtype=torch.float64),
+                    torch.ones(8, dtype=torch.float32),
+                )
+            )
+        for loc, scale in cases:
+            eager = Normal(loc, scale).sample()
+            expected_dtype = loc.dtype if isinstance(loc, torch.Tensor) else scale.dtype
+            self.assertEqual(eager.dtype, expected_dtype)
+            compiled = torch.compile(lambda l, s: Normal(l, s).sample())(loc, scale)
+            self.assertEqual(compiled.dtype, eager.dtype)
+
+            if isinstance(loc, torch.Tensor) and isinstance(scale, torch.Tensor):
+                eager = torch.normal(loc, scale)
+                self.assertEqual(eager.dtype, expected_dtype)
+                compiled = torch.compile(torch.normal)(loc, scale)
+                self.assertEqual(compiled.dtype, eager.dtype)
+
+    def test_normal_decomp_narrowing_matches_eager_inplace_semantics(self):
+        # The aten::normal(Tensor, Tensor) eager kernel computes
+        # ret = raw_samples (in mean's dtype); ret.mul_(std); ret.add_(mean),
+        # narrowing to mean's dtype after each in-place op. The
+        # torch._refs.normal decomposition must reproduce that rounding
+        # order, not just the final dtype: narrowing only once, after
+        # computing std * samples + mean in a promoted precision, can
+        # produce different values. See https://github.com/pytorch/pytorch/pull/194550.
+        from unittest.mock import patch
+
+        mean = torch.tensor([-5.9662e-03, 1.8203e00], dtype=torch.float16)
+        std = torch.tensor([10.8452, 0.1399], dtype=torch.float32)
+        raw_samples = torch.tensor([1.5410, -0.2935], dtype=torch.float16)
+
+        expected = raw_samples.clone()
+        expected.mul_(std)
+        expected.add_(mean)
+
+        with patch("torch._refs.prims.normal", return_value=raw_samples.clone()):
+            actual = torch._refs.normal(mean, std, generator=None)
+
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
