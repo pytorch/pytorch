@@ -3324,10 +3324,13 @@ kernel void svd_jacobi(
           }
         }
       }
-      threadgroup_barrier(
-          params.stage_v
-              ? mem_flags::mem_threadgroup
-              : (mem_flags::mem_threadgroup | mem_flags::mem_device));
+      // Barrier scope must be a compile-time constant (runtime mem_flags
+      // crashes the AGX compiler)
+      if (params.stage_v) {
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+      } else {
+        threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+      }
     }
 
     threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);

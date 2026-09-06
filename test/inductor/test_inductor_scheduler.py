@@ -1316,6 +1316,121 @@ class TestScheduler(TestCase):
         self.assertIsNone(cross_group_rate)
         self.assertIsNone(x_grouped_rate)
 
+    def test_nested_reduction_rejects_ambiguous_pointwise_domain(self):
+        grouped = self._mock_schedule_node(
+            "grouped", reads=("source",), writes=("reduced",), is_reduction=True
+        )
+        grouped.get_ranges.return_value = ([8], [2])
+        consumer = self._mock_schedule_node(
+            "consumer", reads=("reduced",), ancestors=("grouped",)
+        )
+        consumer.__class__ = SchedulerNode
+        context = Mock(grouped_reduction=grouped, grouped_numel=8, grouped_rnumel=2)
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(
+                NestedReduction, "_pointwise_node_matches_domain", return_value=True
+            ),
+            patch.object(
+                NestedReduction, "_nested_sub_parent_rate", return_value=(2, 1)
+            ),
+        ):
+            result = NestedReduction._classify_grouped_pointwise_nodes(
+                context, (grouped, consumer)
+            )
+
+        self.assertIsNone(result)
+
+    def test_nested_reduction_rejects_template_nodes(self):
+        outer = self._mock_schedule_node("outer", is_reduction=True)
+        outer.node = Mock(spec=ir.TemplateBuffer)
+        outer.get_nodes.return_value = (outer,)
+        grouped = self._mock_schedule_node("grouped", is_reduction=True)
+        grouped.get_nodes.return_value = (grouped,)
+        context = Mock(grouped_axis=NestedReduction.GroupedAxis.R)
+
+        self.assertFalse(
+            NestedReduction._r_grouped_stage_accesses_match(outer, grouped, context, ())
+        )
+
+    @parametrize("writer_role", ["parent_stage", "local_input", "reduction"])
+    def test_nested_sub_parent_rejects_parent_stage_live_source(self, writer_role):
+        outer_reduction = self._mock_schedule_node(
+            "outer_reduction", writes=("rstd",), is_reduction=True
+        )
+        writer = self._mock_schedule_node(
+            "writer", writes=("source",), is_reduction=writer_role == "reduction"
+        )
+        grouped = self._mock_schedule_node(
+            "grouped", reads=("source",), writes=("scale",), is_reduction=True
+        )
+        epilogue = self._mock_schedule_node(
+            "epilogue",
+            reads=("source", "scale"),
+            writes=("packed",),
+            ancestors=("writer", "grouped"),
+        )
+        for node in (outer_reduction, writer, grouped, epilogue):
+            node.has_aliasing_or_mutation.return_value = False
+        outer = Mock()
+        outer.get_nodes.return_value = (outer_reduction, writer)
+        outer.group = (None, (8, 16))
+        context = Mock(grouped_reduction=grouped, grouped_rnumel=2)
+        domains = [(epilogue, NestedReduction.PointwiseDomain.SUB_PARENT)]
+        if writer_role == "local_input":
+            domains.append(
+                (writer, NestedReduction.PointwiseDomain.LOCAL_REDUCTION_INPUT)
+            )
+        relation = Mock(requires_live_source=True)
+        relation.consumer_access.name = "source"
+        grouping = Mock(output_groups=(Mock(output_lanes=1, nodes=(epilogue,)),))
+        grouping.factor = 2
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(
+                NestedReduction, "_nested_sub_parent_rate", return_value=(2, 1)
+            ),
+            patch.object(
+                NestedReduction,
+                "_group_sub_parent_epilogue_nodes",
+                return_value=grouping,
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_internal_access_relations",
+                return_value=(),
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_epilogue_outputs_unread",
+                return_value=True,
+            ),
+            patch.object(
+                NestedReduction,
+                "_try_get_sub_parent_access_relations",
+                return_value=(relation,),
+            ),
+            patch.object(
+                NestedReduction,
+                "_sub_parent_broadcast_access_relations",
+                return_value=(),
+            ),
+        ):
+            stage = NestedReduction._plan_nested_sub_parent_stage(
+                outer, (grouped, epilogue), context, domains
+            )
+
+        # Only a value produced inside the parent loop is dead once a looped
+        # parent closes it; displaced and reduction writers stay live.
+        if writer_role == "parent_stage":
+            self.assertIsNone(stage)
+        else:
+            self.assertIsNotNone(stage)
+
     def test_sub_parent_parent_order_closes_final_loop_dependencies(self):
         source = self._mock_schedule_node("source", writes=("source",))
         sibling = self._mock_schedule_node("sibling", writes=("sibling",))

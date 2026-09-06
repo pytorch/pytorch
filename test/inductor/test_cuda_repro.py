@@ -147,6 +147,29 @@ class CudaReproTests(TestCase):
         self.assertEqual(actual_mantissa, expected_mantissa, equal_nan=True)
         self.assertEqual(actual_exponent, expected_exponent)
 
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_frexp_subnormal(self):
+        # https://github.com/pytorch/pytorch/issues/195007
+        def fn(x):
+            return torch.frexp(x)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        for dtype, int_dtype, mbits, nbits in (
+            (torch.float32, torch.int32, 23, 32),
+            (torch.float64, torch.int64, 52, 64),
+        ):
+            # subnormals, +-0.0, and the smallest normal, both signs
+            pos = [0, 1, 2, 3, 127, (1 << mbits) - 1, 1 << mbits]
+            bits = pos + [p - (1 << (nbits - 1)) for p in pos]
+            x = torch.tensor(bits, dtype=int_dtype, device=device_type).view(dtype)
+            expected_mantissa, expected_exponent = fn(x)
+            actual_mantissa, actual_exponent = compiled(x)
+            # compare bit patterns to catch a lost -0.0 sign
+            self.assertEqual(
+                actual_mantissa.view(int_dtype), expected_mantissa.view(int_dtype)
+            )
+            self.assertEqual(actual_exponent, expected_exponent)
+
     def test_index_put_issue(self):
         def forward(
             self,

@@ -1247,7 +1247,7 @@ class ComboKernelTests(TestCase):
     def test_combo_kernel_split_large_reductions(self):
         # squeezenet1_1 backward (combo regression sum_sum_8bcd6e12dcd4):
         # two very large reductions (sum over [0,2,3] of [512,64,55,55]) must NOT be
-        # co-fused into one combo kernel -- each is split out (5 kernels, vs 4 if fused).
+        # co-fused into one combo kernel -- each is split out into its own kernel.
         import torch._inductor.inductor_prims
 
         class Model(torch.nn.Module):
@@ -1291,12 +1291,22 @@ class ComboKernelTests(TestCase):
 
         m = Model()
         torch._dynamo.reset()
-        torch._inductor.metrics.reset()
         out_eager = m(*inps)
-        out_compiled = torch.compile(m)(*inps)
+        with fresh_cache():
+            out_compiled, code = run_and_get_code(torch.compile(m), *inps)
         torch.testing.assert_close(out_eager, out_compiled, rtol=1e-4, atol=1e-4)
-        # Very-large reductions split out instead of co-fused: 5 kernels (4 = the regression).
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        # The total kernel count is device dependent: reduction_split_factor only
+        # splits these 64-output reductions into a second phase when
+        # 2 * multi_processor_count > 64, so a low-SM GPU legitimately emits one
+        # kernel fewer. Assert the invariant instead -- each very-large reduction
+        # (the same numel gate the partitioner uses) gets a kernel of its own.
+        # Co-fusing them emits both sub-kernels in a single async_compile block.
+        separated = 0
+        for kernel_src in " ".join(code).split("async_compile.triton(")[1:]:
+            numels = re.findall(r"xnumel = (\d+)\s+r0_numel = (\d+)", kernel_src)
+            if any(int(x) * int(r) > LARGE_NUMELS for x, r in numels):
+                separated += 1
+        self.assertEqual(separated, 2)
 
     @requires_gpu_and_triton
     @skipIfXpu(
