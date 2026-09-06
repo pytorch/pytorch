@@ -361,7 +361,9 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 #endif
 
   auto ltworkspace = CublasLtWorkspace();
-  TORCH_CHECK(ltworkspace.ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
+  TORCH_CHECK(
+      ltworkspace.ptr != nullptr || ltworkspace.size == 0,
+      "OOM trying to allocate workspace for cublaslt");
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
 
   cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
@@ -484,7 +486,7 @@ inline void bgemm_internal_cublas(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_D
 
 template <>
 void bgemm_internal_cublas<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -496,7 +498,7 @@ void bgemm_internal_cublas<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
 
 template <>
 void bgemm_internal_cublas<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -536,7 +538,7 @@ void bgemm_internal_cublas<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
 
 template <>
 void bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -550,7 +552,7 @@ void bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::co
 
 template <>
 void bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -564,7 +566,7 @@ void bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::com
 
 template <typename C_Dtype>
 inline void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, C_Dtype)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -580,13 +582,15 @@ inline void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYP
   void * alpha_ptr = &falpha;
   void * beta_ptr = &fbeta;
 #ifdef USE_ROCM
+  auto raw_handle = static_cast<cublasHandle_t>(handle);
   int flag = 0;
   rocblas_datatype c_type = std::is_same<C_Dtype, float>::value ? rocblas_datatype_f32_r : rocblas_datatype_f16_r;
   rocblas_datatype d_type = c_type;
 #if USE_GEMM_FLAGS_FP16_ALT_IMPL
   flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
 #endif
-  TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_gemm_strided_batched_ex((rocblas_handle)handle,
+  TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_gemm_strided_batched_ex(
+                                    reinterpret_cast<rocblas_handle>(raw_handle),
                                    hipOperationToRocOperation(opa),
                                    hipOperationToRocOperation(opb), (int)m, (int)n, (int)k,
                                    (void*)alpha_ptr, a, rocblas_datatype_f16_r, (int)lda, stridea,
@@ -637,7 +641,7 @@ inline void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYP
 template <typename C_Dtype>
 inline void bgemm_internal_cublas_bfloat16_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, C_Dtype)) {
   BGEMM_CHECK_ARGVALUES(at::BFloat16);
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -984,7 +988,7 @@ inline void gemm_internal_cublas(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dty
 
 template <>
 void gemm_internal_cublas<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -996,7 +1000,7 @@ void gemm_internal_cublas<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
 
 template <>
 void gemm_internal_cublas<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -1032,7 +1036,7 @@ void gemm_internal_cublas<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
 
 template <>
 void gemm_internal_cublas<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -1046,7 +1050,7 @@ void gemm_internal_cublas<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::comp
 
 template <>
 void gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -1060,7 +1064,7 @@ void gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::compl
 
 template <typename C_Dtype>
 inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, C_Dtype)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -1076,6 +1080,7 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
 #ifdef USE_ROCM
+  auto raw_handle = static_cast<cublasHandle_t>(handle);
   int flag = 0;
   rocblas_datatype c_type = std::is_same<C_Dtype, float>::value ? rocblas_datatype_f32_r : rocblas_datatype_f16_r;
   rocblas_datatype d_type = c_type;
@@ -1083,7 +1088,7 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
   flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
 #endif
   TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_gemm_ex(
-      (rocblas_handle)handle,
+      reinterpret_cast<rocblas_handle>(raw_handle),
       hipOperationToRocOperation(opa),
       hipOperationToRocOperation(opb),
       m,
@@ -1176,7 +1181,7 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
 
 template <typename C_Dtype>
 inline void gemm_internal_cublas_bfloat16_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, C_Dtype)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -2529,7 +2534,7 @@ void trsmBatched<c10::complex<double>>(
 
 template <>
 void gemv<c10::complex<double>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<double>)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   cublasOperation_t op = detail::cublasOpFromChar(trans);
   _cublasAdjustLdLevel2(m, n, &lda);
   GEMV_CHECK_ARGVALUES(c10::complex<double>);
@@ -2544,7 +2549,7 @@ void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>)) {
   // gemv is bw bound, and does not benefit from TF32. But the precision
   // loss still happens on TF32. So we disable it here.
   NoTF32Guard disable_tf32;
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   cublasOperation_t op = detail::cublasOpFromChar(trans);
   _cublasAdjustLdLevel2(m, n, &lda);
   GEMV_CHECK_ARGVALUES(c10::complex<float>);
@@ -2556,7 +2561,7 @@ void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>)) {
 
 template <>
 void gemv<double>(CUDABLAS_GEMV_ARGTYPES(double)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   cublasOperation_t op = detail::cublasOpFromChar(trans);
   _cublasAdjustLdLevel2(m, n, &lda);
   GEMV_CHECK_ARGVALUES(double);
@@ -2569,7 +2574,7 @@ void gemv<float>(CUDABLAS_GEMV_ARGTYPES(float)) {
   // gemv is bw bound, and does not benefit from TF32. But the precision
   // loss still happens on TF32. So we disable it here.
   NoTF32Guard disable_tf32;
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   cublasOperation_t op = detail::cublasOpFromChar(trans);
   _cublasAdjustLdLevel2(m, n, &lda);
   GEMV_CHECK_ARGVALUES(float);
@@ -2800,7 +2805,7 @@ void geqrfBatched<c10::complex<double>>(
 template <>
 void getrfBatched<double>(
     int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   TORCH_CUDABLAS_CHECK(cublasDgetrfBatched(
       handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
 }
@@ -2808,7 +2813,7 @@ void getrfBatched<double>(
 template <>
 void getrfBatched<float>(
     int n, float** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   TORCH_CUDABLAS_CHECK(cublasSgetrfBatched(
       handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
 }
@@ -2821,7 +2826,7 @@ void getrfBatched<c10::complex<double>>(
     int* ipiv_array,
     int* info_array,
     int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   TORCH_CUDABLAS_CHECK(cublasZgetrfBatched(
       handle,
       n,
@@ -2840,7 +2845,7 @@ void getrfBatched<c10::complex<float>>(
     int* ipiv_array,
     int* info_array,
     int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   TORCH_CUDABLAS_CHECK(cublasCgetrfBatched(
       handle,
       n,
