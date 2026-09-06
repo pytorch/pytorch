@@ -20,6 +20,7 @@ import time
 from collections import namedtuple
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from enum import auto, Enum
 from typing import Any, Literal
 
 import torch
@@ -35,6 +36,38 @@ else:
 # Recording the device properties in the main process but used in worker process.
 caching_worker_device_properties: dict[str, Any] = {}
 caching_worker_current_devices: dict[str, int] = {}
+
+
+class BackendFeature(Enum):
+    """Framework-wide capability bits for device backends.
+
+    Members are split into two tiers inlined as comments below.
+
+    Inductor-codegen-tier members are consumed by ``has_backend_feature`` /
+    ``V.graph.has_feature``.  Framework-level members (``GPU``,
+    ``ONLINE_SOFTMAX``, ...) are consumed via
+    :meth:`DeviceInterface.backend_features` by eager, dispatcher, and
+    downstream libraries.
+
+    A backend overrides :meth:`DeviceInterface.backend_features` to
+    advertise the members it supports.  Adding a new framework-level member
+    requires a PR; semantic changes to an existing member require an RFC.
+    """
+
+    # -- Inductor codegen capabilities (migrated from _inductor/codegen/common.py) --
+    FOREACH = auto()
+    BUCKETIZE = auto()
+    INPLACE_BUFFERS = auto()
+    MASKED_SCATTER_WITH_INDEX = auto()
+    SCAN = auto()
+    SORT = auto()
+    TUPLE_REDUCTION = auto()
+    PREFER_STORE_LOOP_ORDER = auto()
+    TRITON_TEMPLATES = auto()
+    REDUCE_TO_SINGLE_ELEMENT = auto()
+    # -- framework-level (incl. eager) capabilities --
+    GPU = auto()
+    ONLINE_SOFTMAX = auto()
 
 
 class DeviceInterface:
@@ -170,6 +203,16 @@ class DeviceInterface:
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> Any:
         raise NotImplementedError
+
+    @staticmethod
+    def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
+        """Return the set of :class:`BackendFeature` members this backend supports.
+
+        Base default is empty (unknown backends stay conservative).  In-tree
+        backends override to declare their actual capabilities.  Returns a
+        fresh ``set`` each call so callers may mutate it.
+        """
+        return set()
 
     @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
@@ -331,6 +374,18 @@ class CudaInterface(DeviceInterface):
             return torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
 
     @staticmethod
+    def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
+        return {
+            BackendFeature.FOREACH,
+            BackendFeature.BUCKETIZE,
+            BackendFeature.SCAN,
+            BackendFeature.SORT,
+            BackendFeature.TRITON_TEMPLATES,
+            BackendFeature.GPU,
+            BackendFeature.ONLINE_SOFTMAX,
+        }
+
+    @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
         # Use the Worker API (device properties cached in the main process
         # before fork) instead of torch.cuda.get_device_properties directly, so
@@ -441,6 +496,10 @@ class MtiaInterface(DeviceInterface):
         return cc
 
     @staticmethod
+    def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
+        return {BackendFeature.GPU}
+
+    @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
         return True
 
@@ -531,6 +590,15 @@ class XpuInterface(DeviceInterface):
         return cc
 
     @staticmethod
+    def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
+        return {
+            BackendFeature.FOREACH,
+            BackendFeature.TRITON_TEMPLATES,
+            BackendFeature.GPU,
+            BackendFeature.ONLINE_SOFTMAX,
+        }
+
+    @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
         return torch.xpu.is_bf16_supported()
 
@@ -589,6 +657,10 @@ class CpuInterface(DeviceInterface):
         return ""
 
     @staticmethod
+    def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
+        return {BackendFeature.FOREACH, BackendFeature.SORT}
+
+    @staticmethod
     def get_raw_stream(device_idx: Any) -> int:
         return 0
 
@@ -638,6 +710,10 @@ class MpsInterface(DeviceInterface):
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> str:
         return ""
+
+    @staticmethod
+    def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
+        return {BackendFeature.GPU}
 
     @staticmethod
     def synchronize(device: torch.types.Device = None) -> None:
