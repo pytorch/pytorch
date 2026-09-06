@@ -2467,6 +2467,27 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(F.gaussian_nll_loss(input, target, var_tensor, reduction='none'),
                          F.gaussian_nll_loss(input, target, var, reduction='none'))
 
+    def test_gaussian_nll_loss_compile_fullgraph(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/194503
+        # torch.any(var < 0) used to force a data-dependent guard under
+        # fullgraph=True even for valid, non-negative var.
+        input = torch.zeros(2, 3)
+        target = torch.ones(2, 3)
+        var = torch.ones(2, 3)
+        eager_out = F.gaussian_nll_loss(input, target, var)
+        compiled_out = torch.compile(F.gaussian_nll_loss, fullgraph=True)(input, target, var)
+        self.assertEqual(eager_out, compiled_out)
+
+    def test_gaussian_nll_loss_compile_fullgraph_negative_var(self):
+        input = torch.zeros(2, 3)
+        target = torch.ones(2, 3)
+        var = -torch.ones(2, 3)
+
+        compiled = torch.compile(F.gaussian_nll_loss, fullgraph=True)
+
+        with self.assertRaisesRegex(RuntimeError, "var has negative"):
+            compiled(input, target, var)
+
     def test_KLDivLoss_batch_mean(self):
         input_shape = (2, 5)
         log_prob1 = F.log_softmax(torch.randn(input_shape), 1)
