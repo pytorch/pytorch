@@ -221,10 +221,10 @@ Muon.__doc__ = (
             &\rule{110mm}{0.4pt} \\
             &\textbf{for}\ t=1\ \textbf{to}\ \ldots\ \textbf{do} \\[0.25ex]
             &\hspace{5mm} g_t \leftarrow \nabla_{\theta} f_t(\theta_{t-1}) \\[0.25ex]
-            &\hspace{5mm} B_t \leftarrow \mu B_{t-1} + g_t \\[0.25ex]
+            &\hspace{5mm} B_t \leftarrow \mu B_{t-1} + (1-\mu) g_t \\[0.25ex]
             &\hspace{5mm} \widetilde{B}_t \leftarrow
                 \begin{cases}
-                   g_t + \mu B_t, & \text{if nesterov}=True \\
+                   (1-\mu) g_t + \mu B_t, & \text{if nesterov}=True \\
                    B_t,           & \text{if nesterov}=False
                 \end{cases} \\[1.0ex]
             &\hspace{5mm} O_t \leftarrow \mathrm{NS}^{(a,b,c)}_{k}\!\big(\widetilde{B}_t;\ \varepsilon\big) \\[0.5ex]
@@ -235,7 +235,7 @@ Muon.__doc__ = (
             &\hspace{5mm} \theta_t \leftarrow \theta_t - \gamma\, O_t \\
             &\rule{110mm}{0.4pt} \\[-1.ex]
             &\mathbf{return}\ \theta_t \\[-1.ex]
-            &\rule{110mm}{0.4pt}s
+            &\rule{110mm}{0.4pt}
        \end{aligned}
 
     Here, :math:`\mathrm{NS}^{(a,b,c)}_{k}(\cdot;\varepsilon)` denotes :math:`k` iterations of the
