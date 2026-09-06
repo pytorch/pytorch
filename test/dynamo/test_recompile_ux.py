@@ -605,6 +605,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                 thread.join(timeout=120)
             self.assertFalse(any(t.is_alive() for t in threads), "a call wedged")
         finally:
+            stop.set()
             sys.setswitchinterval(prior_interval)
         raised = []
         while not errors.empty():
@@ -619,8 +620,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         while an installer takes the same lock to append to or splice the
         list being walked; without the lock that is a use-after-free. A wedge
         in the locking cannot fail an assertion, so faulthandler dumps every
-        thread's stack and exits at the deadline instead of letting the
-        harness time out silently. Stress test; not a deterministic
+        thread's stack at the deadline, surfacing the wedge as stacks in the
+        log rather than a silent harness timeout. Stress test; not a deterministic
         reproduction, and it passes on the lock-free parent as well: it
         guards the locking against regressions.
         """
@@ -678,9 +679,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         ]
         prior_interval = sys.getswitchinterval()
         sys.setswitchinterval(1e-6)
-        # A real fd: under pytest's capture sys.stderr has no fileno.
-        faulthandler.dump_traceback_later(120, exit=False, file=sys.__stderr__)
         try:
+            # A real fd: under pytest's capture sys.stderr has no fileno.
+            faulthandler.dump_traceback_later(120, exit=False, file=sys.__stderr__)
             for thread in callers + installers:
                 thread.start()
             for thread in installers:
