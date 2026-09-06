@@ -1881,6 +1881,13 @@ def _size_of(node: fx.Node) -> int:
             return sum(object_nbytes(n) for n in val.values())
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
+        elif isinstance(val, torch.device):
+            # A device is metadata, not data: it holds no activation memory. Nodes
+            # carrying one show up as operands to factory ops (e.g. the
+            # current_device() node compile-on-one-rank substitutes for a baked
+            # device), and the partitioner sizes a node's fx.Node args, so this is
+            # reached during a normal partition.
+            return 0
         elif isinstance(val, (torch.ScriptObject, FakeScriptObject)):
             # A (Fake)ScriptObject may hold tensors internally, so we cannot
             # soundly compute its size here. Only treat it as zero size when the
