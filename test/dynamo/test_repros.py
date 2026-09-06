@@ -64,19 +64,15 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 from torch.profiler import profile, ProfilerActivity
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_BF16,
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_FP8,
-    SM70OrLater,
-)
 from torch.testing._internal.common_device_type import (
+    Capability,
     E4M3_MAX_POS,
     e4m3_type,
     instantiate_device_type_tests,
-    onlyAccelerator,
+    requires_capabilities,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     serialTest,
@@ -87,6 +83,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
+from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -1008,6 +1005,8 @@ class LRUCacheWarningTests(LoggingTestCase):
 
 
 class ReproTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         try:
@@ -4797,49 +4796,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x1.data, x2.data)
         self.assertEqual(y1, y2)
 
-    @requires_cuda
-    def test_tensor_set_data_cross_device(self):
-        def func(x):
-            x.data = x.data.to("cuda")
-            return x + 1
-
-        x_eager = torch.randn(4, device="cpu")
-        x_compiled = x_eager.clone()
-
-        out_eager = func(x_eager)
-        out_compiled = torch.compile(func, backend="eager", fullgraph=True)(x_compiled)
-
-        self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(x_eager.device, x_compiled.device)
-
-    @requires_cuda
-    def test_tensor_set_data_cross_device_shape_mismatch_graphbreaks(self):
-        def func(x):
-            x.data = torch.randn(8, device="cuda")
-            return x + 1
-
-        x = torch.randn(4, device="cpu")
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            torch.compile(func, backend="eager", fullgraph=True)(x)
-
-    @requires_cuda
-    def test_tensor_set_data_cross_device_placeholder_metadata(self):
-        backend = torch._dynamo.testing.EagerAndRecordGraphs()
-
-        def func(x):
-            x.data = x.data.to("cuda")
-            return x + 1
-
-        x = torch.randn(4, device="cpu")
-        torch.compile(func, backend=backend, fullgraph=True)(x)
-
-        gm = backend.graphs[0]
-        for node in gm.graph.nodes:
-            if node.op == "placeholder":
-                ev = node.meta.get("example_value")
-                if isinstance(ev, torch.Tensor):
-                    self.assertEqual(ev.device.type, "cpu")
-
     def test_user_ctor_ctx_manager(self):
         class UserCtxManager:
             def __enter__(self):
@@ -6383,10 +6339,7 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         )
         self.assertEqual(actual_str, expected_str)
 
-    @unittest.skipIf(
-        not SM70OrLater,
-        "Triton only supports devices of CUDA capability >= 7.0",
-    )
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_add_complex_conj(self):
         def f(x):
             return x + x.conj()
@@ -8879,10 +8832,108 @@ SavedForBackwardsAOTOutput(idx=5)""",
         self.assertEqual(opt_fn(inp2, grid2), fn(inp2, grid2))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_enum_with_class_values(self):
+        from enum import Enum
+
+        class AvgMetric:
+            def __init__(self):
+                self.sum = None
+                self.count = 0
+
+            def append(self, x):
+                if self.count > 0:
+                    self.sum = self.sum + x
+                else:
+                    self.sum = x.clone()
+                self.count += 1
+
+        class GlobalReduction(Enum):
+            AVG = AvgMetric
+
+        class ScalarLogger:
+            def __init__(self):
+                self.metrics = {}
+
+            def log(self, key, value, global_reduction):
+                if key not in self.metrics:
+                    self.metrics[key] = global_reduction.value()
+                self.metrics[key].append(value)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(logger, x):
+            logger.log("test", x, GlobalReduction.AVG)
+            return x + 1
+
+        logger = ScalarLogger()
+        fn(logger, torch.tensor(1.0))
+
+    def test_class_attr_mutation_recompiles(self):
+        class GlobalState:
+            factor = 1.0
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            return x * GlobalState.factor
+
+        x = torch.tensor([4.0])
+
+        GlobalState.factor = 1.0
+        result1 = fn(x)
+        self.assertEqual(result1, torch.tensor([4.0]))
+        self.assertEqual(cnt.frame_count, 1)
+
+        GlobalState.factor = 10.0
+        result2 = fn(x)
+        self.assertEqual(result2, torch.tensor([40.0]))
+        self.assertEqual(cnt.frame_count, 2)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_tensor_set_data_cross_device(self, device):
+        def func(x):
+            x.data = x.data.to(device)
+            return x + 1
+
+        x_eager = torch.randn(4, device="cpu")
+        x_compiled = x_eager.clone()
+
+        out_eager = func(x_eager)
+        out_compiled = torch.compile(func, backend="eager", fullgraph=True)(x_compiled)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(x_eager.device, x_compiled.device)
+
+    def test_tensor_set_data_cross_device_shape_mismatch_graphbreaks(self, device):
+        def func(x):
+            x.data = torch.randn(8, device=device)
+            return x + 1
+
+        x = torch.randn(4, device="cpu")
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(func, backend="eager", fullgraph=True)(x)
+
+    def test_tensor_set_data_cross_device_placeholder_metadata(self, device):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def func(x):
+            x.data = x.data.to(device)
+            return x + 1
+
+        x = torch.randn(4, device="cpu")
+        torch.compile(func, backend=backend, fullgraph=True)(x)
+
+        gm = backend.graphs[0]
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                ev = node.meta.get("example_value")
+                if isinstance(ev, torch.Tensor):
+                    self.assertEqual(ev.device.type, "cpu")
+
     @serialTest()
-    @onlyAccelerator
     def test_mem_leak_guards(self, device):
         def gn(x0, x):
             return x0 * x
@@ -9074,7 +9125,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
     # https://github.com/pytorch/pytorch/issues/156580
     @serialTest()
-    @onlyAccelerator
     def test_dont_dce_rand(self, device):
         # https://github.com/pytorch/pytorch/issues/143431
         def f(image_latent):
@@ -9107,7 +9157,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
                 self.assertEqual(actual, expected)
 
     # https://github.com/pytorch/pytorch/issues/151670
-    @onlyAccelerator
     def test_diagonal_scatter_single_elem_cpu_with_gpu_tensor(self, device):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -9175,10 +9224,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             torch.set_default_device(None)
 
     @skipIfHpu
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "flash attention not supported",
-    )
+    @requires_capabilities(Capability.attention.flash_attention)
     def test_flash_attn_backward_mixed_strides(self, device):
         # in this repro, "grad_out" and "value" are transposed tensors,
         # but "key" and "value" are contiguous
@@ -9226,7 +9272,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(out3_ref.shape, out3_test.shape)
         self.assertEqual(out3_ref.stride(), out3_test.stride())
 
-    @onlyAccelerator
     def test_memleak_when_graph_input_has_tensor_attr(self, device):
         @torch.compile(backend="eager")
         def f(x):
@@ -9295,7 +9340,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             out = f_compiled(x, s0, s1, s2)
             self.assertEqual(out_ref, out)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "requires gpu with fp8 support")
+    @requires_capabilities(Capability.dtype.fp8)
     def test_partitioner_saves_weights_for_bw(self, device):
         def mul_tiled(a, *bs):
             for b in bs:
@@ -9549,7 +9594,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         out2 = torch.compile(model, backend="eager")(input.clone())
         self.assertEqual(out1, out2)
 
-    @onlyAccelerator
     def test_zero_dim_param_mixed_device_grad(self, device):
         # cpu 0-dim params with cuda grads
         # https://github.com/pytorch/pytorch/issues/160084
@@ -9943,63 +9987,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         result = f(torch.tensor(0.0))
         self.assertEqual(result.item(), 4.0)
 
-    def test_enum_with_class_values(self):
-        from enum import Enum
-
-        class AvgMetric:
-            def __init__(self):
-                self.sum = None
-                self.count = 0
-
-            def append(self, x):
-                if self.count > 0:
-                    self.sum = self.sum + x
-                else:
-                    self.sum = x.clone()
-                self.count += 1
-
-        class GlobalReduction(Enum):
-            AVG = AvgMetric
-
-        class ScalarLogger:
-            def __init__(self):
-                self.metrics = {}
-
-            def log(self, key, value, global_reduction):
-                if key not in self.metrics:
-                    self.metrics[key] = global_reduction.value()
-                self.metrics[key].append(value)
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(logger, x):
-            logger.log("test", x, GlobalReduction.AVG)
-            return x + 1
-
-        logger = ScalarLogger()
-        fn(logger, torch.tensor(1.0))
-
-    def test_class_attr_mutation_recompiles(self):
-        class GlobalState:
-            factor = 1.0
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt)
-        def fn(x):
-            return x * GlobalState.factor
-
-        x = torch.tensor([4.0])
-
-        GlobalState.factor = 1.0
-        result1 = fn(x)
-        self.assertEqual(result1, torch.tensor([4.0]))
-        self.assertEqual(cnt.frame_count, 1)
-
-        GlobalState.factor = 10.0
-        result2 = fn(x)
-        self.assertEqual(result2, torch.tensor([40.0]))
-        self.assertEqual(cnt.frame_count, 2)
-
     @skipIfHpu
     def test_deterministic_pad_replicate_compile(self, device):
         from torch.testing._internal.common_utils import DeterministicGuard
@@ -10015,10 +10002,9 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             ref_grad = torch.autograd.grad(ref.sum(), x)
             self.assertEqual(grad, ref_grad)
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "flash attention not supported",
-    )
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm not supported")
+    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @requires_capabilities(Capability.attention.flash_attention)
     def test_flex_attention_guard_on_constant_func_defaults(self, device):
         """
         Dynamo must guard on mask_mod.__defaults__ so that when a
@@ -10026,10 +10012,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mask_mod has the same __code__ but different __defaults__,
         Dynamo recompiles instead of reusing the stale first graph.
         """
-        from torch.utils._triton import has_triton
-
-        if not has_triton():
-            self.skipTest("requires triton")
 
         @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def flex_chunk(q, k, v, block_mask, scale):
@@ -10172,11 +10154,8 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             lambda msg: f"{msg}\nStrides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
         )
 
-
-class CUDAReproTests(torch._dynamo.test_case.TestCase):
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @torch._dynamo.config.patch(capture_scalar_outputs=False)
-    def test_aot_backward_context_reentry_after_graph_break(self):
+    def test_aot_backward_context_reentry_after_graph_break(self, device):
         def fn(x, y, scalar):
             cpu = x.cpu()
             other_cpu = x.cpu()
@@ -10185,48 +10164,74 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             after_break = y.cos()
             return before_break, after_break
 
-        x = torch.randn(8, device="cuda", requires_grad=True)
-        y = torch.randn(8, device="cuda", requires_grad=True)
-        scalar = torch.randn((), device="cuda")
+        x = torch.randn(8, device=device, requires_grad=True)
+        y = torch.randn(8, device=device, requires_grad=True)
+        scalar = torch.randn((), device=device)
 
         before_break, after_break = torch.compile(fn, backend="aot_eager")(x, y, scalar)
-        loss = before_break.sum().to("cuda") + after_break.sum()
+        loss = before_break.sum().to(device) + after_break.sum()
         loss.backward()
 
         self.assertEqual(x.grad, torch.ones_like(x))
         self.assertEqual(y.grad, -y.detach().sin())
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_sync(self):
+    def test_accelerator_sync(self, device):
         def fn(x):
             y = x + 1
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
             return y * 2
 
-        x = torch.ones(2, device="cuda")
+        x = torch.ones(2, device=device)
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(cnt.frame_count, 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_torch_cuda_is_initialized(self):
+    def test_device_context_matmul_avoids_native_bmm_router_graph_break(self, device):
+        torch._dynamo.utils.counters.clear()
+
+        @torch.compile(backend="inductor", dynamic=False)
+        def fn(q, k):
+            with torch.device(device):
+                a = torch.reshape(q, [-1, 8, 1, 32])
+                return torch.matmul(a, k)
+
+        q = torch.randn(64, 8 * 32, device=device, dtype=torch.float16)
+        k = torch.randn(1, 8, 32, 128, device=device, dtype=torch.float16)
+
+        out = fn(q, k)
+        torch.accelerator.synchronize()
+        self.assertEqual(out.shape, (64, 8, 1, 128))
+
+        graph_break_reasons = "\n".join(
+            torch._dynamo.utils.counters["graph_break"].keys()
+        )
+        # The native router should not run trace-unsafe eager predicates here.
+        # If it does, the COW probe on the reshaped operand graph-breaks before
+        # it can fold or install a guard.
+        self.assertNotIn("_is_cow_tensor", graph_break_reasons)
+        self.assertNotIn("call_boxed", graph_break_reasons)
+
+
+class CUDAReproTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_torch_cuda_is_initialized(self, device):
         @torch.compile(fullgraph=True, backend="eager")
         def f(x):
             if torch.cuda.is_initialized():
                 return x + 1
             return x + 2
 
-        inp = torch.randn(3)
+        inp = torch.randn(3, device=device)
         self.assertEqual(f(inp), inp + 1)
 
         with mock.patch("torch.cuda.is_initialized", lambda: False):
             self.assertEqual(f(inp), inp + 2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_graph_metadata_does_not_retain_cuda_fake_constants(self):
+    def test_graph_metadata_does_not_retain_cuda_fake_constants(self, device):
         def f():
-            x = torch.tensor(5, dtype=torch.float32, device="cuda")
+            x = torch.tensor(5, dtype=torch.float32, device=device)
             copy.deepcopy(x)
 
         def clear_cuda_memory(*, reset_dynamo):
@@ -10249,13 +10254,12 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
         # retained the real CUDA scalar through FakeTensor.constant.
         self.assertIsNotNone(opt_f)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16, "requires CUDA bf16 support")
-    def test_layer_norm_mixed_dtype_aot_eager_decomp_partition_errors(self):
+    @requires_capabilities(Capability.dtype.bf16)
+    def test_layer_norm_mixed_dtype_aot_eager_decomp_partition_errors(self, device):
         # https://github.com/pytorch/pytorch/issues/151478
         x = torch.tensor(
             [[1.0, 2.0, 3.0, 4.0], [2.0, 4.0, 6.0, 8.0]],
-            device="cuda",
+            device=device,
             dtype=torch.bfloat16,
         )
 
@@ -10302,39 +10306,12 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             "expected scalar type BFloat16 but found Long",
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_device_context_matmul_avoids_native_bmm_router_graph_break(self):
-        torch._dynamo.utils.counters.clear()
-
-        @torch.compile(backend="inductor", dynamic=False)
-        def fn(q, k):
-            with torch.device("cuda"):
-                a = torch.reshape(q, [-1, 8, 1, 32])
-                return torch.matmul(a, k)
-
-        q = torch.randn(64, 8 * 32, device="cuda", dtype=torch.float16)
-        k = torch.randn(1, 8, 32, 128, device="cuda", dtype=torch.float16)
-
-        out = fn(q, k)
-        torch.cuda.synchronize()
-        self.assertEqual(out.shape, (64, 8, 1, 128))
-
-        graph_break_reasons = "\n".join(
-            torch._dynamo.utils.counters["graph_break"].keys()
-        )
-        # The native router should not run trace-unsafe eager predicates here.
-        # If it does, the COW probe on the reshaped operand graph-breaks before
-        # it can fold or install a guard.
-        self.assertNotIn("_is_cow_tensor", graph_break_reasons)
-        self.assertNotIn("call_boxed", graph_break_reasons)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")
     # TODO: Remoe this skip once nccl issue if fixed
     @unittest.skip(
         "Failing with ncc update 2.25.1 : https://github.com/pytorch/pytorch/issues/147141"
     )
-    def test_ddp_checkpoint(self):
+    def test_ddp_checkpoint(self, device):
         # https://github.com/pytorch/pytorch/issues/144035
         DIM = 256
         SEQ_LEN = 32
@@ -10385,12 +10362,12 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             os.environ["MASTER_ADDR"] = "localhost"
             os.environ["MASTER_PORT"] = "12355"
             dist.init_process_group(backend="nccl", world_size=1, rank=0)
-            model = model.to("cuda")
+            model = model.to(device)
             model = nn.parallel.DistributedDataParallel(model)
 
             for batch in dataloader:
                 x, y = batch
-                x = x.to("cuda")
+                x = x.to(device)
                 output = model(x)
                 loss = output.sum()
                 loss.backward()
@@ -10409,10 +10386,15 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
 
 instantiate_parametrized_tests(ReproTests)
 
-devices = ["cuda", "hpu", "xpu"]
 instantiate_device_type_tests(
-    ReproTestsDevice, globals(), only_for=devices, allow_xpu=True
+    ReproTestsDevice,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
 )
+instantiate_device_type_tests(CUDAReproTests, globals(), only_for="cuda")
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
