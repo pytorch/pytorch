@@ -719,7 +719,10 @@ def _cpu_codegen_target_problem(
     The artifact carries kernel source tiled for the ISA pick_vec_isa() made at
     codegen, and the loading host compiles that source with the flags of its
     own pick_vec_isa(). The two must agree, so every component is compared
-    exactly; a wider host ISA is not a superset here, its masked loads
+    exactly (march is the unresolved config knob, so two hosts recording None
+    compare equal though -march=native expands differently -- benign, since the
+    loading host supplies the actual flags); a wider host ISA is not a superset
+    here, its masked loads
     zero-fill the lanes the narrower tiling never wrote. The ISA name and its
     bit width must both agree: VecSVE(128) and VecSVE(256) share the name
     "asimd", so the name alone would accept a kernel tiled for the wrong width.
@@ -729,10 +732,12 @@ def _cpu_codegen_target_problem(
     one.
     """
     if current is None:
+        # No current tuple to compare against, so no component-level reason is
+        # available -- the host simply reports no target of its own.
         return (
-            "This host has no usable CPU codegen target (no C++ toolchain or no "
-            "supported vector ISA), so it cannot build the artifact's vectorized "
-            "CPU kernels."
+            "This host reports no CPU codegen target (no C++ toolchain or no "
+            "supported vector ISA), so it cannot reproduce the target the "
+            "artifact's CPU kernels were built for."
         )
     machine, vec_isa, vec_isa_width, vec_isa_macro, simdlen, march = cached
     if machine != current[0]:
