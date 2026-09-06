@@ -3102,6 +3102,20 @@ class TestMPS(TestCaseMPS):
         # Expecting the inverted to yield the original signal
         self.assertEqual(ifft_result, signal)
 
+    def test_fft_c2r_invalid_last_dim_size(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/141448:
+        # an inconsistent last_dim_size used to abort MPSGraph uncatchably.
+        device = torch.device("mps")
+        t = torch.zeros(6, 3, dtype=torch.cfloat, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected size of last transformed dimension"):
+            torch._fft_c2r(t, [0], 0, 4)
+        with self.assertRaisesRegex(RuntimeError, "Invalid number of data points"):
+            torch._fft_c2r(t, [0], 0, 0)
+        # onesided and full-size inputs are accepted
+        for k in (3, 4):
+            x = torch.zeros(k, 3, dtype=torch.cfloat, device=device)
+            self.assertEqual(torch._fft_c2r(x, [0], 0, 4).shape, torch.Size([4, 3]))
+
     def test_fftfreq(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/135223
         freq_cpu = torch.fft.fftfreq(10**4, device='cpu')

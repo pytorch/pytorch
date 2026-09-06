@@ -50,6 +50,24 @@ inline int64_t infer_ft_real_to_complex_onesided_size(int64_t real_size) {
   return (real_size / 2) + 1;
 }
 
+// Validates inputs of the low-level _fft_c2r operator. A `last_dim_size`
+// inconsistent with the input's last transformed dimension can otherwise
+// overflow, assert, or abort inside the FFT backend. The input dimension must
+// be the canonical onesided size (last_dim_size / 2 + 1) or the full size
+// (last_dim_size); a larger input is rejected since only pocketfft, not
+// MKL/cuFFT/MPS, would handle it.
+inline void check_fft_c2r_input(int64_t last_dim_size,
+                                int64_t input_last_dim_size) {
+  TORCH_CHECK(last_dim_size >= 1,
+              "Invalid number of data points (", last_dim_size, ") specified");
+  const int64_t onesided = infer_ft_real_to_complex_onesided_size(last_dim_size);
+  TORCH_CHECK(input_last_dim_size == onesided ||
+              input_last_dim_size == last_dim_size,
+              "Expected size of last transformed dimension of input to be ",
+              onesided, " (= last_dim_size / 2 + 1) or ", last_dim_size,
+              " (= last_dim_size), but got ", input_last_dim_size);
+}
+
 inline int64_t infer_ft_complex_to_real_onesided_size(int64_t complex_size,
                                                       int64_t expected_size=-1) {
   int64_t base = (complex_size - 1) * 2;
