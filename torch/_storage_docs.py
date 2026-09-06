@@ -28,7 +28,7 @@ If ``shared`` is ``True``, then memory is shared between all processes.
 All changes are written to the file. If ``shared`` is ``False``, then the changes on
 the storage do not affect the file.
 
-``nbytes`` is the number of bytes of storage. If ``shared`` is ``False``,
+``nbytes`` is the number of bytes of the storage. If ``shared`` is ``False``,
 then the file must contain at least ``nbytes`` bytes. If ``shared`` is
 ``True`` the file will be created if needed. (Note that for ``UntypedStorage``
 this argument differs from that of ``TypedStorage.from_file``)
@@ -37,6 +37,6 @@ Args:
     filename (str): file name to map
     shared (bool): whether to share memory (whether ``MAP_SHARED`` or ``MAP_PRIVATE`` is passed to the
                     underlying `mmap(2) call <https://man7.org/linux/man-pages/man2/mmap.2.html>`_)
-    nbytes (int): number of bytes of storage
+    nbytes (int): number of bytes of the storage
 """,
 )
