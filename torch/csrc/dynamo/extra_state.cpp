@@ -700,9 +700,10 @@ void lookup(
     // artifacts of one model apart are exactly the ones precompile has to drop,
     // so a fallback here would serve another artifact's graph for a call this
     // region does not cover. A miss is the correct outcome instead: it becomes
-    // a recompile the serving path can reject loudly. The installer therefore
-    // registers each isolated region under its own id, never the default
-    // bucket.
+    // a recompile the serving path can reject loudly. So the installer must
+    // register each isolated region under its own id rather than the default
+    // bucket; the region-owned install that does so lands later in the stack
+    // (every install at this commit still passes the default id -1).
     for (const auto& entry : extra_state->precompile_entries) {
       if (entry.isolate_recompiles_id == isolate_recompiles_id) {
         precompile_candidates.push_back(&entry);
@@ -1207,7 +1208,10 @@ void _load_precompile_entry(
   std::vector<ExtraState::PendingEviction> reaped_evictions;
   CacheLock lock(extra->cache_mutex);
   // A parked CLEAR_ALL / PRECOMPILE_ALL applied by the next depth-zero holder
-  // would otherwise take this install with it; drain first, then add.
+  // would otherwise take this install with it; drain first, then add. Only
+  // evictions are drained, not pending invalidations: those relink cache
+  // entries, never precompile_entries, so a parked one cannot touch this push,
+  // and the next depth-zero holder applies it.
   extra->apply_pending_evictions(
       reaped_precompile, reaped_cache, reaped_evictions);
   extra->precompile_entries.push_back(std::move(entry));
