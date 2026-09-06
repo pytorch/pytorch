@@ -517,6 +517,7 @@
   - '**XPU**'
   - '**sycl**'
   - '**SYCL**'
+  - torch/_C/__init__.pyi.in
   approved_by:
   - EikanWang
   - jgong5

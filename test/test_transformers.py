@@ -2966,6 +2966,59 @@ class TestSDPACudaOnly(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention is not supported on this system")
+    def test_fused_attention_empty_batch(self, device):
+        # Attention over zero rows is an empty result, not an error. The composite
+        # scaled_dot_product_attention short-circuits an empty input before dispatching,
+        # so only a caller that reaches the backend op directly -- as a compiled graph
+        # does -- exercises this. ROCm used to abort here with "batch size must be
+        # positive" while CUDA returned the empty result.
+        dtype = torch.bfloat16
+        num_heads, seqlen, head_dim = 4, 8, 64
+
+        prev_fa_library = None
+        if TEST_WITH_ROCM:
+            # The internal build ships composable kernels, not AOTriton.
+            prev_fa_library = torch.backends.cuda.preferred_rocm_fa_library()
+            torch.backends.cuda.preferred_rocm_fa_library("ck")
+        try:
+            shape = (0, num_heads, seqlen, head_dim)
+            q, k, v = (torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+                       for _ in range(3))
+
+            out, lse = torch.ops.aten._scaled_dot_product_flash_attention(q, k, v)[:2]
+            self.assertEqual(out.shape, torch.Size(shape))
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(lse.shape, torch.Size((0, num_heads, seqlen)))
+
+            # An empty forward must also produce empty grads rather than abort in mha_bwd.
+            out.backward(torch.randn_like(out))
+            for name, tensor in (("query", q), ("key", k), ("value", v)):
+                self.assertIsNotNone(tensor.grad, f"{name} received no grad")
+                self.assertEqual(tensor.grad.shape, torch.Size(shape))
+
+            # The remaining entries are ROCm-only. CUDA implements the empty-batch early
+            # return in mha_fwd and mha_bwd but not in mha_varlen_fwd, whose
+            # TORCH_CHECK(batch_size > 0) still aborts (flash_api.cpp), and its
+            # mem-efficient path is separate code that makes no such guarantee.
+            if not TEST_WITH_ROCM:
+                return
+
+            eff_out = torch.ops.aten._scaled_dot_product_efficient_attention(
+                q.detach(), k.detach(), v.detach(), None, False)[0]
+            self.assertEqual(eff_out.shape, torch.Size(shape))
+
+            # Varlen entry: zero sequences, so cu_seqlens degenerates to a single 0.
+            varlen_shape = (0, num_heads, head_dim)
+            qv = torch.randn(varlen_shape, device=device, dtype=dtype)
+            cu_seqlens = torch.zeros(1, device=device, dtype=torch.int32)
+            varlen_out = torch.ops.aten._flash_attention_forward(
+                qv, qv, qv, cu_seqlens, cu_seqlens, 0, 0, 0.0, False, False, scale=None)[0]
+            self.assertEqual(varlen_out.shape, torch.Size(varlen_shape))
+        finally:
+            if prev_fa_library is not None:
+                torch.backends.cuda.preferred_rocm_fa_library(prev_fa_library)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_cudnn_attention_decode_disabled_on_affected_blackwell(self, device):
         # See #193893 and #194927 for reasoning

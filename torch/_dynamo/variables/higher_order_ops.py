@@ -67,7 +67,7 @@ from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
-from .sets import FrozensetVariable, SetVariable
+from .sets import DictKeySetVariable, FrozensetVariable, SetVariable
 
 
 if TYPE_CHECKING:
@@ -249,7 +249,7 @@ def find_mismatched_vars(
     elif isinstance(var, ConstDictVariable):
         for value in var.items.values():
             mismatched_vars.update(find_mismatched_vars(value, types, allow_none))
-    elif isinstance(var, (SetVariable, FrozensetVariable)):
+    elif isinstance(var, (SetVariable, FrozensetVariable, DictKeySetVariable)):
         for key in var.items:
             mismatched_vars.update(find_mismatched_vars(key.vt, types, allow_none))
     else:
@@ -4359,6 +4359,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ConstDictVariable,
                     SetVariable,
                     FrozensetVariable,
+                    DictKeySetVariable,
                 ),
             ):
                 unimplemented(
