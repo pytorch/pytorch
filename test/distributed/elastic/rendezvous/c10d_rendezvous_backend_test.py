@@ -288,3 +288,21 @@ class CreateBackendTest(TestCase):
             r"details.$",
         ):
             create_backend(self._params_filestore)
+
+    @mock.patch("os.close")
+    @mock.patch("tempfile.mkstemp")
+    def test_create_backend_closes_mkstemp_fd(
+        self, mkstemp_mock, close_mock
+    ) -> None:
+        dummy_fd = 12345
+        dummy_path = "/tmp/dummy_path"
+        mkstemp_mock.return_value = (dummy_fd, dummy_path)
+        self._params_filestore.endpoint = ""
+        with mock.patch(
+            "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"
+        ) as filestore_mock:
+            create_backend(self._params_filestore)
+        
+        mkstemp_mock.assert_called_once()
+        close_mock.assert_called_once_with(dummy_fd)
+        filestore_mock.assert_called_once_with(dummy_path)
