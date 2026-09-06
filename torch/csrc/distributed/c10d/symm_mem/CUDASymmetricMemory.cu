@@ -1,9 +1,9 @@
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -64,7 +64,8 @@ AllocationRef::~AllocationRef() {
 #endif
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(handle));
 #elif defined(USE_ROCM)
-  C10_CUDA_CHECK(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
+  C10_CUDA_CHECK(
+      hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
   C10_CUDA_CHECK(hipMemRelease(handle));
 #else
   TORCH_CHECK(
@@ -124,7 +125,9 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
 // This is mostly a shallow copy that shares the pointer to `CUDAPeerAllocInfo`
 // which corresponds to the base Block. The CUDASymmetricMemory handle is
 // specified by the offset to the base ptr.
-CUDASymmetricMemory::CUDASymmetricMemory(const c10::intrusive_ptr<CUDAPeerAllocInfo>& pai, size_t offset)
+CUDASymmetricMemory::CUDASymmetricMemory(
+    const c10::intrusive_ptr<CUDAPeerAllocInfo>& pai,
+    size_t offset)
     : local_device_idx_(pai->local_device_idx_),
       rank_(pai->rank_),
       world_size_(pai->world_size_),
@@ -340,9 +343,12 @@ void* CUDASymmetricMemoryAllocator::alloc(
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   prop.location.id = device_idx;
   bool has_fabric_support = at::cuda::get_fabric_access(device_idx);
-  LOG(INFO) << "CUDASymmetricMemoryAllocator::alloc: has_fabric_support " << has_fabric_support;
+  LOG(INFO) << "CUDASymmetricMemoryAllocator::alloc: has_fabric_support "
+            << has_fabric_support;
   if (handle_type_ == Expandable_Segments_Handle_Type::UNSPECIFIED) {
-    handle_type_ = has_fabric_support ? Expandable_Segments_Handle_Type::FABRIC_HANDLE : Expandable_Segments_Handle_Type::POSIX_FD;
+    handle_type_ = has_fabric_support
+        ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
+        : Expandable_Segments_Handle_Type::POSIX_FD;
   }
   if (handle_type_ == Expandable_Segments_Handle_Type::POSIX_FD) {
     prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
@@ -365,7 +371,8 @@ void* CUDASymmetricMemoryAllocator::alloc(
   block_size = at::round_up(block_size, granularity);
 
   HandleType handle;
-  C10_CUDA_DRIVER_CHECK(driver_api->cuMemCreate_(&handle, block_size, &prop, 0));
+  C10_CUDA_DRIVER_CHECK(
+      driver_api->cuMemCreate_(&handle, block_size, &prop, 0));
 
 #elif defined(USE_ROCM)
   handle_type_ = Expandable_Segments_Handle_Type::POSIX_FD;
@@ -396,19 +403,19 @@ void* CUDASymmetricMemoryAllocator::alloc(
   map_block(&alloc_base, handle, block_size, device_idx);
 
   // Zero the signal pad (at the front, [0, buffer_offset)) to initialize it for
-  // the CAS-based barrier() protocol; the data buffer that follows does not need
-  // zeroing. Zero on the current stream, then sync so the signal pad is fully
-  // zeroed before rendezvous can expose it to peers.
-  auto stream = at::cuda::getCurrentCUDAStream(
-      static_cast<c10::DeviceIndex>(device_idx));
+  // the CAS-based barrier() protocol; the data buffer that follows does not
+  // need zeroing. Zero on the current stream, then sync so the signal pad is
+  // fully zeroed before rendezvous can expose it to peers.
+  auto stream =
+      at::cuda::getCurrentCUDAStream(static_cast<c10::DeviceIndex>(device_idx));
   AT_CUDA_CHECK(cudaMemsetAsync(alloc_base, 0, buffer_offset, stream));
   AT_CUDA_CHECK(cudaStreamSynchronize(stream));
 
   // Hand back the data buffer pointer, not alloc_base; the signal pad stays
   // hidden in front. Returning the data ptr (rather than the alloc ptr) is safe
-  // for free(): the whole block is owned by the AllocationRef held in the Block,
-  // so free() only needs the data ptr to find and drop the Block; the block
-  // (and thus alloc_base) is released internally by ~AllocationRef.
+  // for free(): the whole block is owned by the AllocationRef held in the
+  // Block, so free() only needs the data ptr to find and drop the Block; the
+  // block (and thus alloc_base) is released internally by ~AllocationRef.
   void* buffer_ptr = static_cast<char*>(alloc_base) + buffer_offset;
 
   auto alloc_ref = c10::make_intrusive<AllocationRef>(
@@ -549,6 +556,199 @@ static bool check_group_multicast_support(
   }
 }
 
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) && \
+    defined(CUDART_SUPPORTS_MULTICAST)
+namespace {
+
+// Owns everything multicast setup acquires and releases it in reverse order
+// unless commit() hands it to the caller.
+template <bool use_fabric_handle>
+class MulticastSetup {
+ public:
+  using McHandleType =
+      std::conditional_t<use_fabric_handle, CUmemFabricHandle, int>;
+  static constexpr CUmemAllocationHandleType kHandleType = use_fabric_handle
+      ? CU_MEM_HANDLE_TYPE_FABRIC
+      : CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+
+  explicit MulticastSetup(c10::intrusive_ptr<Block> block)
+      : block_(std::move(block)), driver_api_(c10::cuda::DriverAPI::get()) {}
+  ~MulticastSetup() {
+    release();
+  }
+  MulticastSetup(const MulticastSetup&) = delete;
+  MulticastSetup& operator=(const MulticastSetup&) = delete;
+
+  // Rank 0 only. A multicast object is a handle that lets multiple devices or
+  // processes access the same allocation coherently.
+  bool create_and_export(int world_size, McHandleType& exported) {
+    CUmulticastObjectProp mc_prop{};
+    mc_prop.numDevices = world_size;
+    mc_prop.handleTypes = kHandleType;
+    mc_prop.size = block_->block_size;
+
+    auto err = driver_api_->cuMulticastCreate_(&created_handle_, &mc_prop);
+    if (err != CUDA_SUCCESS) {
+      created_handle_ = 0;
+      C10_CUDA_DRIVER_CHECK_WARN(
+          err,
+          "SymmetricMemory[CREATE_EXPORT]: failed to create multicast object");
+      return false;
+    }
+    err = driver_api_->cuMemExportToShareableHandle_(
+        &exported, created_handle_, kHandleType, 0);
+    if (err != CUDA_SUCCESS) {
+      C10_CUDA_DRIVER_CHECK_WARN(
+          err,
+          "SymmetricMemory[CREATE_EXPORT]: failed to export multicast handle");
+      return false;
+    }
+    return true;
+  }
+
+  void adopt_received_handle(const McHandleType& handle) {
+    recv_handle_ = handle;
+    if constexpr (!use_fabric_handle) {
+      owned_fd_ = handle;
+    }
+  }
+
+  bool import_and_add_device() {
+    CUresult err{};
+    if constexpr (!use_fabric_handle) {
+      // The fd is the handle: widen it to pointer size, then reinterpret it as
+      // the void* osHandle the driver expects.
+      err = driver_api_->cuMemImportFromShareableHandle_(
+          &imported_handle_,
+          reinterpret_cast<void*>(static_cast<uintptr_t>(recv_handle_)),
+          kHandleType);
+    } else {
+      err = driver_api_->cuMemImportFromShareableHandle_(
+          &imported_handle_, static_cast<void*>(&recv_handle_), kHandleType);
+    }
+    if (err != CUDA_SUCCESS) {
+      imported_handle_ = 0;
+      C10_CUDA_DRIVER_CHECK_WARN(
+          err,
+          "SymmetricMemory[IMPORT_HANDLE]: failed to import multicast handle");
+      return false;
+    }
+    err = driver_api_->cuMulticastAddDevice_(
+        imported_handle_, block_->device_idx);
+    if (err != CUDA_SUCCESS) {
+      C10_CUDA_DRIVER_CHECK_WARN(
+          err,
+          "SymmetricMemory[IMPORT_HANDLE]: failed to add device to "
+          "multicast object");
+      return false;
+    }
+    return true;
+  }
+
+  bool bind_and_map() {
+    auto err = driver_api_->cuMulticastBindMem_(
+        imported_handle_,
+        0,
+        block_->alloc_ref->handle,
+        0,
+        block_->block_size,
+        0);
+    if (err != CUDA_SUCCESS) {
+      C10_CUDA_DRIVER_CHECK_WARN(
+          err,
+          "SymmetricMemory[BIND_AND_MAP]: failed to bind memory to "
+          "multicast object");
+      return false;
+    }
+    bound_ = true;
+    // map_block throws, and addr_ holds whatever VA it reserved before it did,
+    // which release() still has to undo.
+    try {
+      map_block(
+          &addr_, imported_handle_, block_->block_size, block_->device_idx);
+    } catch (const std::exception& e) {
+      LOG(WARNING) << "SymmetricMemory[BIND_AND_MAP]: failed to map multicast "
+                      "handle.\n"
+                   << e.what();
+      return false;
+    }
+    return true;
+  }
+
+  // Hands the multicast handle and its mapping to the caller. The received
+  // handle stays owned here; the destructor closes it either way.
+  void commit(HandleType& out_handle, void*& out_addr) {
+    out_handle = imported_handle_;
+    out_addr = addr_;
+    imported_handle_ = 0;
+    addr_ = nullptr;
+    bound_ = false;
+    // Rank 0 may only drop the reference cuMulticastCreate gave it after every
+    // rank has completed setup. The exported handle stops resolving to this
+    // multicast object as soon as that reference is gone: a late importer
+    // silently gets a fresh, empty object instead, and then every rank blocks
+    // forever in cuMulticastBindMem waiting for a device that was added to
+    // somebody else's object.
+    HandleType created = created_handle_;
+    created_handle_ = 0;
+    if (created != 0) {
+      C10_CUDA_DRIVER_CHECK_MSG(
+          driver_api_->cuMemRelease_(created),
+          ". SymmetricMemory[COMMIT]: failed to release the multicast handle "
+          "cuMulticastCreate returned on rank 0.");
+    }
+  }
+
+ private:
+  void release() {
+    if (addr_ != nullptr) {
+      C10_CUDA_DRIVER_CHECK_WARN(
+          driver_api_->cuMemUnmap_(
+              reinterpret_cast<CUdeviceptr>(addr_), block_->block_size),
+          "SymmetricMemory[CLEANUP]: failed to unmap multicast address");
+      addr_ = nullptr;
+    }
+    if (imported_handle_ != 0) {
+      if (bound_) {
+        C10_CUDA_DRIVER_CHECK_WARN(
+            driver_api_->cuMulticastUnbind_(
+                imported_handle_, block_->device_idx, 0, block_->block_size),
+            "SymmetricMemory[CLEANUP]: failed to unbind multicast memory");
+        bound_ = false;
+      }
+      C10_CUDA_DRIVER_CHECK_WARN(
+          driver_api_->cuMemRelease_(imported_handle_),
+          "SymmetricMemory[CLEANUP]: failed to release imported multicast "
+          "handle");
+      imported_handle_ = 0;
+    }
+    if (created_handle_ != 0) {
+      C10_CUDA_DRIVER_CHECK_WARN(
+          driver_api_->cuMemRelease_(created_handle_),
+          "SymmetricMemory[CLEANUP]: failed to release created multicast "
+          "handle");
+      created_handle_ = 0;
+    }
+    if (owned_fd_ >= 0) {
+      close(owned_fd_);
+      owned_fd_ = -1;
+    }
+  }
+
+  c10::intrusive_ptr<Block> block_;
+  c10::cuda::DriverAPI* driver_api_;
+  HandleType created_handle_ = 0;
+  HandleType imported_handle_ = 0;
+  void* addr_ = nullptr;
+  bool bound_ = false;
+  McHandleType recv_handle_{};
+  // POSIX path only: the fd this object must close.
+  int owned_fd_ = -1;
+};
+
+} // namespace
+#endif
+
 template <bool use_fabric_handle>
 static void init_multicast_for_block(
     HandleType& mc_handle,
@@ -562,136 +762,75 @@ static void init_multicast_for_block(
     int world_size) {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) && \
     defined(CUDART_SUPPORTS_MULTICAST)
-  auto driver_api = c10::cuda::DriverAPI::get();
+  using Setup = MulticastSetup<use_fabric_handle>;
+  using McHandleType = typename Setup::McHandleType;
   auto store = group->getStore();
-  auto handleType = use_fabric_handle
-      ? CU_MEM_HANDLE_TYPE_FABRIC
-      : CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-  using McHandleType =
-      std::conditional_t<use_fabric_handle, CUmemFabricHandle, int>;
 
   McHandleType invalidator;
   std::memset(&invalidator, UINT8_MAX, sizeof(McHandleType));
 
-  // Phase 1: export handle (rank 0 only)
-  McHandleType mc_exported_handle{};
-  if (rank == 0) {
-    CUmulticastObjectProp mc_prop{};
-    mc_prop.numDevices = world_size;
-    mc_prop.handleTypes = handleType;
-    mc_prop.size = block->block_size;
-
-    // create a multicast object, which acts as a handle that allows multiple
-    // devices or processes to access the same memory allocation coherently.
-    try {
-      C10_CUDA_DRIVER_CHECK(
-          driver_api->cuMulticastCreate_(&mc_handle, &mc_prop));
-      // using the CUDA Driver API to export a multicast object into a POSIX file
-      // descriptor.
-      C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
-          &mc_exported_handle, mc_handle, handleType, 0));
-    } catch (const std::exception& e) {
-      // Allow peers gracefully skip multicast initialization by sending -1
-      mc_exported_handle = invalidator;
-      LOG(WARNING)
-          << "SymmetricMemory: fail to export multicast handle.\n"
-          << e.what();
+  // Every rank reaches both rendezvous points below no matter which step it
+  // failed at, so a rank never decides on its own to stop: it reports its own
+  // outcome and the whole group degrades together.
+  auto all_ranks_succeeded = [&](bool local_success) {
+    auto flag = static_cast<uint8_t>(local_success);
+    auto rank_flags = use_pg
+        ? pg_all_gather(group, block->device_idx, flag)
+        : storeExchange.all_gather(store, rank, world_size, flag);
+    bool all_succeed = true;
+    for (int r = 0; r < world_size; ++r) {
+      all_succeed &= (rank_flags[r] != 0);
     }
+    return all_succeed;
+  };
+
+  Setup setup(block);
+
+  // Phase 1: create and export the multicast object (rank 0 only). On failure
+  // rank 0 broadcasts the invalidator so that peers skip multicast gracefully.
+  McHandleType exported_handle{};
+  if (rank == 0 && !setup.create_and_export(world_size, exported_handle)) {
+    exported_handle = invalidator;
   }
 
-  // Phase 2: Exchange handle
-  McHandleType recv_handle;
+  // Phase 2: exchange the handle
+  McHandleType recv_handle = invalidator;
   if constexpr (!use_fabric_handle) {
-    recv_handle = ipc_channel.broadcast_fds(rank, 0, pids, mc_exported_handle);
+    recv_handle = ipc_channel.broadcast_fds(rank, 0, pids, exported_handle);
   } else if (use_pg) {
-    recv_handle = pg_broadcast(group, block->device_idx, 0, mc_exported_handle);
+    recv_handle = pg_broadcast(group, block->device_idx, 0, exported_handle);
   } else {
     // TODO implement storeExchange.broadcast
-    auto gathered_handles = storeExchange.all_gather(store, rank, world_size, mc_exported_handle);
+    auto gathered_handles =
+        storeExchange.all_gather(store, rank, world_size, exported_handle);
     recv_handle = std::move(gathered_handles[0]);
   }
-
-  // Check exchange result
   if (memcmp(&recv_handle, &invalidator, sizeof(McHandleType)) == 0) {
-    LOG(WARNING) << "Gracefully skipping multicast initialization.";
+    LOG(WARNING) << "SymmetricMemory[EXCHANGE_HANDLE]: gracefully skipping "
+                    "multicast initialization, rank 0 could not export a "
+                    "handle.";
+    return;
+  }
+  setup.adopt_received_handle(recv_handle);
+
+  // Phase 3: import the handle and join the device team, then agree before
+  // anyone binds.
+  if (!all_ranks_succeeded(setup.import_and_add_device())) {
+    LOG(WARNING) << "SymmetricMemory[IMPORT_HANDLE]: gracefully skipping "
+                    "multicast initialization, not every rank imported the "
+                    "handle and joined the multicast object.";
     return;
   }
 
-  // Flip to true after all CUDA steps finish
-  bool success_end = false;
-
-  // Phase 3: Import handle -- every rank, rank 0 included, which self-imports
-  // the handle it just exported so that every rank's multicast mapping has
-  // identical provenance. Rank 0's create reference is dropped further below,
-  // once every rank has imported.
-  //
-  // Provenance is not cosmetic: it selects the copy path the driver uses for a
-  // write into the multicast VA. Over a natively created handle the driver
-  // treats the write as a plain local device-to-device copy and schedules it on
-  // the copy engines that also service pinned HtoD/DtoH, so
-  // memcpy_to_multicast_ serializes behind concurrent host transfers; over an
-  // imported handle the same write takes the peer copy path on a separate
-  // engine. Only a rank 0 sitting on device 0 is affected, because the
-  // multicast aperture always reports device ordinal 0, so src != dst forces
-  // the peer path for every other device.
-  HandleType imported_mc_handle = 0;
-  if constexpr (!use_fabric_handle) {
-    // Convert back to a handle from the broadcasted POSIX file descriptor.
-    // The fd is the handle: widen it to pointer size, then reinterpret it as
-    // the void* osHandle the driver expects.
-    C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMemImportFromShareableHandle_(
-        &imported_mc_handle,
-        reinterpret_cast<void*>(static_cast<uintptr_t>(recv_handle)),
-        CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR), check_all);
-  } else {
-    C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMemImportFromShareableHandle_(
-        &imported_mc_handle, static_cast<void*>(&recv_handle), CU_MEM_HANDLE_TYPE_FABRIC), check_all);
-  }
-
-  // Phase 4: Bind memory
-  // All rank adds their physical allocation to the multicast object
-  C10_CUDA_DRIVER_CHECK_GOTO(
-      driver_api->cuMulticastAddDevice_(imported_mc_handle, block->device_idx), check_all);
-  C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMulticastBindMem_(
-      imported_mc_handle, 0, block->alloc_ref->handle, 0, block->block_size, 0), check_all);
-
-  success_end = true;
-
-check_all:
-  // Whether all ranks have succeeded
-  bool all_succeed = true;
-  // uint8_t rather than bool: std::vector<bool> is not memcpy-able, which
-  // pg_all_gather requires.
-  auto success_flag = static_cast<uint8_t>(success_end);
-  auto rank_successes = use_pg
-      ? pg_all_gather(group, block->device_idx, success_flag)
-      : storeExchange.all_gather(store, rank, world_size, success_flag);
-  for (int r = 0; r < world_size; ++r) {
-    all_succeed &= (rank_successes[r] != 0);
-  }
-  if (imported_mc_handle != 0) {
-    // Rank 0 may only drop the reference cuMulticastCreate gave it once every
-    // rank has imported, which the all_gather above guarantees. The exported
-    // handle stops resolving to this multicast object as soon as that reference
-    // is gone: a late importer silently gets a fresh, empty object instead, and
-    // then every rank blocks forever in cuMulticastBindMem waiting for a device
-    // that was added to somebody else's object.
-    if (rank == 0) {
-      C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(mc_handle));
-    }
-    mc_handle = imported_mc_handle;
-  }
-  // Close the file descriptor before exit
-  if constexpr (!use_fabric_handle) {
-    close(recv_handle);
-  }
-  if (!all_succeed) {
-    LOG(WARNING) << "Gracefully skipping multicast initialization.";
+  // Phase 4: bind and map, then publish success only once the mapping exists.
+  if (!all_ranks_succeeded(setup.bind_and_map())) {
+    LOG(WARNING) << "SymmetricMemory[BIND_AND_MAP]: gracefully skipping "
+                    "multicast initialization, not every rank bound and mapped "
+                    "the multicast object.";
     return;
   }
 
-  // Phase 5: Map to virtual memory
-  map_block(&mc_addr, mc_handle, block->block_size, block->device_idx);
+  setup.commit(mc_handle, mc_addr);
 #endif
 }
 
@@ -827,7 +966,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
 #if ROCM_VERSION >= 70100
         reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
 #else
-        (void*)(uintptr_t) & (imported_handles[r]),
+        (void*)(uintptr_t)&(imported_handles[r]),
 #endif
         hipMemHandleTypePosixFileDescriptor));
 #else
@@ -836,7 +975,8 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
 #endif
     // map_block returns the mapped base (== signal pad base); the data buffer
     // follows at buffer_offset.
-    map_block(&signal_pads[r], handles[r], block->block_size, block->device_idx);
+    map_block(
+        &signal_pads[r], handles[r], block->block_size, block->device_idx);
     buffers[r] = static_cast<char*>(signal_pads[r]) + block->buffer_offset;
     if constexpr (!use_fabric_handle) {
       close(imported_handles[r]);
@@ -856,15 +996,28 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   bool group_has_multicast_support = check_group_multicast_support(reqs);
   if (!allow_overlapping_devices() && group_has_multicast_support) {
     init_multicast_for_block<use_fabric_handle>(
-        mc_handle, mc_addr, block, ipc_channel, pids, group, use_pg, rank, world_size);
+        mc_handle,
+        mc_addr,
+        block,
+        ipc_channel,
+        pids,
+        group,
+        use_pg,
+        rank,
+        world_size);
   }
 
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs;
   for (int r = 0; r < world_size; ++r) {
     if (r == rank) {
       if (mc_addr != nullptr) {
-        alloc_refs.push_back(c10::make_intrusive<AllocationRef>(
-            mc_addr, mc_handle, block->block_size, block->device_idx, true));
+        alloc_refs.push_back(
+            c10::make_intrusive<AllocationRef>(
+                mc_addr,
+                mc_handle,
+                block->block_size,
+                block->device_idx,
+                true));
       }
       // Note that in B200, cuMulticastUnbind can error if the mapped buffers
       // are free'd before the multicast object is free'd. That's why the
@@ -876,8 +1029,9 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
     }
     // signal_pads[r] is peer r's mapped base, i.e. the address AllocationRef
     // unmaps.
-    alloc_refs.push_back(c10::make_intrusive<AllocationRef>(
-        signal_pads[r], handles[r], block->block_size, block->device_idx));
+    alloc_refs.push_back(
+        c10::make_intrusive<AllocationRef>(
+            signal_pads[r], handles[r], block->block_size, block->device_idx));
   }
 
   // The multicast mapping mirrors the block layout: the signal pad is at the
@@ -915,8 +1069,8 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   auto block = find_block_covering(ptr, offset);
   if (block == nullptr) {
     TORCH_WARN(
-      "Pointer not within any SymmetricMemory allocation, "
-      "is the tensor allocated from SymmetricMemory?");
+        "Pointer not within any SymmetricMemory allocation, "
+        "is the tensor allocated from SymmetricMemory?");
     return nullptr;
   }
   // The group_name passed to rendezvous() takes precedence over
@@ -979,22 +1133,25 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
 
 /* Search for a block that covers the given ptr, and write back the offset to
  * the base ptr; error out if not found */
-c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block_covering(void* ptr, size_t& offset) {
+c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block_covering(
+    void* ptr,
+    size_t& offset) {
   std::shared_lock lock(mutex_);
   // In case of MemPool, tensor.storage().data_ptr() may not match
   // exactly an allocation's base address. Thus we perform the search by
   // testing if the former is within an allocation's range.
-  auto alloc_it = std::find_if(ptr_to_block_.begin(), ptr_to_block_.end(),
-                             [&](const auto& pair){
-                                auto& block = pair.second;
-                                auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-                                // pair.first is buffer_ptr, the key alloc()
-                                // stored (alloc_base + buffer_offset), i.e. the
-                                // data buffer start past the signal pad.
-                                auto buffer_ptr = reinterpret_cast<uintptr_t>(pair.first);
-                                // Modify offset so that it is returned
-                                offset = ptr_int - buffer_ptr;
-                                return ptr_int >= buffer_ptr && offset < block->buffer_size; });
+  auto alloc_it = std::find_if(
+      ptr_to_block_.begin(), ptr_to_block_.end(), [&](const auto& pair) {
+        auto& block = pair.second;
+        auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+        // pair.first is buffer_ptr, the key alloc()
+        // stored (alloc_base + buffer_offset), i.e. the
+        // data buffer start past the signal pad.
+        auto buffer_ptr = reinterpret_cast<uintptr_t>(pair.first);
+        // Modify offset so that it is returned
+        offset = ptr_int - buffer_ptr;
+        return ptr_int >= buffer_ptr && offset < block->buffer_size;
+      });
 
   if (alloc_it == ptr_to_block_.end()) {
     return nullptr;
