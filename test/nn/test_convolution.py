@@ -1091,6 +1091,71 @@ class TestConvolutionNN(NNTestCase):
         )
         self.assertEqual(grad_weight_functional, grad_weight_autograd)
 
+    def test_functional_grad_conv_output_padding(self):
+        # A transposed convolution with a non-zero output_padding lands on a shape no
+        # forward convolution produces, so grad.convNd_input used to reject it with
+        # "grad_output[2:] shape ... must be equal to output size ...". It is the
+        # reference these ops are checked against, so it has to be able to say it.
+        for spatial, kernel, stride, padding, dilation, output_padding, groups in (
+            ((4,), (3,), (2,), (1,), (1,), (1,), 1),
+            ((4, 4), (4, 5), (3, 2), (1, 2), (4, 4), (2, 3), 2),
+            ((5, 7), (3, 3), (2, 3), (1, 1), (1, 1), (1, 2), 1),
+            ((3, 3, 3), (2, 2, 2), (2, 2, 2), (1, 1, 1), (1, 1, 1), (1, 1, 1), 1),
+        ):
+            dim = len(spatial)
+            conv_transpose = {
+                1: F.conv_transpose1d,
+                2: F.conv_transpose2d,
+                3: F.conv_transpose3d,
+            }[dim]
+            conv_input = {
+                1: torch.nn.grad.conv1d_input,
+                2: torch.nn.grad.conv2d_input,
+                3: torch.nn.grad.conv3d_input,
+            }[dim]
+
+            grad_output = torch.randn(2, 2 * groups, *spatial)
+            weight = torch.randn(2 * groups, 2, *kernel)
+
+            expected = conv_transpose(
+                grad_output,
+                weight,
+                None,
+                stride=stride,
+                padding=padding,
+                output_padding=output_padding,
+                groups=groups,
+                dilation=dilation,
+            )
+            actual = conv_input(
+                expected.shape,
+                weight,
+                grad_output,
+                stride,
+                padding,
+                dilation,
+                groups,
+                output_padding,
+            )
+            self.assertEqual(actual, expected)
+
+            # Control: the default output_padding still goes down the original path.
+            zero_padded = conv_transpose(
+                grad_output,
+                weight,
+                None,
+                stride=stride,
+                padding=padding,
+                groups=groups,
+                dilation=dilation,
+            )
+            self.assertEqual(
+                conv_input(
+                    zero_padded.shape, weight, grad_output, stride, padding, dilation, groups
+                ),
+                zero_padded,
+            )
+
     def test_functional_grad_conv2d(self):
         BATCH_SIZE = 4
         IN_CH = 8
