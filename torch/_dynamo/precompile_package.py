@@ -2121,36 +2121,6 @@ def _dynamo_entry_for_serve(cache_entry: PrecompileCacheEntry) -> _DynamoCacheEn
     return copy.deepcopy(cache_entry.dynamo)
 
 
-def prepare_cache_entry(
-    fn: Callable[..., object], cache_entry: PrecompileCacheEntry
-) -> CompilePackage:
-    """Build everything serving needs that does not touch the interpreter.
-
-    An installed artifact defers its mutation to the first served call, which is
-    the right default -- the mutation should happen where the caller can see it
-    -- but every way an artifact can be wrong for the host it landed on was
-    deferred with it, so the failure arrived several batches into a training
-    loop. The version and inlined-source checks run in the constructor here, and
-    the guard trees and backends are built now and CONSUMED by the later
-    install() rather than rebuilt, so this is not extra work, only earlier work.
-    """
-    package = CompilePackage(
-        _entry_fn_of(fn),
-        _dynamo_entry_for_serve(cache_entry),
-        serialization_guard_filter_fn=default_guard_filter_fn,
-        explicit_capture=True,
-    )
-    try:
-        package.prepare(cache_entry.backends)
-    except Exception as e:
-        raise PackageError(
-            f"precompile: this artifact does not fit this host, so serving it "
-            f"would fail inside the first call rather than here: "
-            f"{type(e).__name__}: {e}"
-        ) from e
-    return package
-
-
 def serve_cache_entry(
     fn: Callable[..., object],
     cache_entry: PrecompileCacheEntry,
@@ -2160,7 +2130,6 @@ def serve_cache_entry(
     | None = None,
     recompile_limit: int = 256,
     dynamic: bool | None = None,
-    prepared: CompilePackage | None = None,
 ) -> _ServedCallable:
     """Wire an already-loaded cache entry onto ``fn`` and install it.
 
@@ -2171,9 +2140,7 @@ def serve_cache_entry(
     place rather than being written twice.
     """
     entry_fn = _entry_fn_of(fn)
-    # prepare_cache_entry already built this package's guard trees and backends
-    # at load; install() below consumes them instead of rebuilding.
-    package = prepared or CompilePackage(
+    package = CompilePackage(
         entry_fn,
         _dynamo_entry_for_serve(cache_entry),
         serialization_guard_filter_fn=(
