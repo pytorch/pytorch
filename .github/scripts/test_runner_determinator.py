@@ -859,3 +859,51 @@ class TestRunnerDeterminatorNoRunnerExperimentsLabel(TestCase):
 
 if __name__ == "__main__":
     main()
+
+
+class TestScaleConfigPrefix(TestCase):
+    """Only wincanary/wincanarylf drive scale-config-label-type."""
+
+    SETTINGS = """
+experiments:
+  lf:
+    rollout_perc: 0
+  wincanary:
+    rollout_perc: 0
+  wincanarylf:
+    rollout_perc: 0
+---
+@lfuser,lf
+@wcuser,wincanary
+@wclfuser,wincanarylf
+@bothuser,lf,wincanarylf
+@plainuser,
+"""
+    ALL = frozenset({"lf", "wincanary", "wincanarylf"})
+
+    def _result(self, user: str) -> rd.RunnerPrefixResult:
+        return rd.get_runner_prefix(
+            self.SETTINGS, (user, user), "somebranch", self.ALL, frozenset()
+        )
+
+    def test_no_variant_means_no_prefix(self) -> None:
+        self.assertEqual("", self._result("plainuser").scale_config_prefix)
+
+    def test_lf_alone_does_not_set_a_prefix(self) -> None:
+        # lf rolls out over ALL workflows; it must not relocate Windows builds.
+        self.assertEqual("", self._result("lfuser").scale_config_prefix)
+
+    def test_wincanary(self) -> None:
+        self.assertEqual("wincanary.", self._result("wcuser").scale_config_prefix)
+
+    def test_wincanarylf(self) -> None:
+        self.assertEqual("wincanarylf.", self._result("wclfuser").scale_config_prefix)
+
+    def test_lf_does_not_compose_with_the_variant(self) -> None:
+        # never "lf.wincanarylf."
+        self.assertEqual("wincanarylf.", self._result("bothuser").scale_config_prefix)
+
+    def test_arc_label_type_is_untouched(self) -> None:
+        self.assertEqual("mt-", self._result("plainuser").prefix)
+        self.assertEqual("lf-", self._result("lfuser").prefix)
+        self.assertEqual("lf-", self._result("bothuser").prefix)

@@ -792,9 +792,7 @@ def _is_dim_dynamic_from_source_dynamism(
     if not isinstance(source, LocalSource) or source.dynamism is None:
         return False
 
-    source_dynamism: dict[str, tuple[bool, ...]] = dict(
-        typing.cast(Any, source.dynamism)
-    )
+    source_dynamism = dict(source.dynamism)
     dim_dynamism = source_dynamism.get(normalized_source_name)
     return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
 
@@ -1111,7 +1109,8 @@ class VariableBuilder:
             ErrorOnGraphBreakDecoratorContextManager,
         )
 
-        if has_triton():
+        # Triton runtime types are shared across backends, including CPU.
+        if has_triton(include_cpu=True):
             from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
         else:
@@ -1144,7 +1143,8 @@ class VariableBuilder:
             )
         if has_triton_tensor_descriptor_host_tma():
             from triton.tools.tensor_descriptor import TensorDescriptor
-        if has_triton():
+        # The allocator hook is shared across Triton backends, including CPU.
+        if has_triton(include_cpu=True):
             import triton as triton_mod
 
             if hasattr(triton_mod, "set_allocator"):
@@ -1824,14 +1824,22 @@ class VariableBuilder:
             if isinstance(value, torch.amp.autocast_mode._UnmanagedAutocast):
                 return self.wrap_user_defined(value)
             else:
-                self.install_guards(GuardBuilder.ID_MATCH)
+                # Guard the four fields the trace specializes on rather than the
+                # object's address. An ID_MATCH here cannot be serialized, so a
+                # precompile drops it and a sibling instance holding a DIFFERENT
+                # autocast object silently selects this variant; these guards
+                # also catch the object being mutated in place, which id() misses.
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                fields = ("device", "fast_dtype", "_enabled", "_cache_enabled")
+                if not is_constant_source(self.source):
+                    for field in fields:
+                        install_guard(
+                            AttrSource(self.source, field).make_guard(
+                                GuardBuilder.EQUALS_MATCH
+                            )
+                        )
                 return AutocastModeVariable(
-                    target_values=[
-                        value.device,
-                        value.fast_dtype,
-                        value._enabled,
-                        value._cache_enabled,
-                    ],
+                    target_values=[getattr(value, field) for field in fields],
                     source=self.source,
                 )
         elif TorchCtxManagerClassVariable.is_matching_cls(value):

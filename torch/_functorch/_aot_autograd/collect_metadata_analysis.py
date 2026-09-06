@@ -45,6 +45,7 @@ from .functional_utils import (
     from_fun,
     has_data_mutation,
     has_metadata_mutation,
+    has_same_metadata,
     MetadataKey,
     to_fun,
     ViewMetaSequence,
@@ -384,6 +385,9 @@ def run_functionalized_fw_and_collect_metadata(
                 #     "RuntimeError: Output 0 of UnbindBackward0 is a view and is being modified inplace. This view is
                 #      the output of a function that returns multiple views. Such functions do not allow the output
                 #      views to be modified inplace. You should replace the inplace operation by an out-of-place one."
+                #     A regenerated alias says SelectBackward0 instead: functionalization rebuilds one output of a
+                #     multi-output view directly rather than replaying the op. The error is the same, because it is
+                #     keyed off CreationMeta rather than off the grad_fn. See [Note: multi-output view replay].
                 # (b) What if we take a view of o_k and mutate it, o_k.view(o_k.shape).mul_(2)?
                 #     Autograd raises the same error- the "multi-output-view"ness of an alias propagates to future views.
                 # (c) What if we mutate o_k under no_grad?
@@ -633,6 +637,34 @@ from a multi-output view call"
                 existing_out_idx = out_tensor_ids[id(out_alias)]
                 output_type = OutputType.alias_of_intermediate_base_is_user_output
                 base_idx = existing_out_idx
+            elif (
+                o._base is not None
+                and not is_traceable_wrapper_subclass(o)
+                and has_same_metadata(o, o._base)
+                and id(o._base) in out_tensor_ids
+            ):
+                # o is a no-op view of another user output, but not
+                # differentiable, so none of the branches above fired. Left as
+                # non_alias, the backend is free to collapse the view and return
+                # one object for both outputs while eager returns two; an eager
+                # resize_() on the alias across a graph break then corrupts the
+                # base. Regenerate the view at runtime instead.
+                # See https://github.com/pytorch/pytorch/issues/191449
+                #
+                # Two shapes of this bug are knowingly still broken here and are
+                # tracked in #191449, which stays open for them: t.detach() leaves ._base as None so
+                # it never reaches this arm, and traceable wrapper subclasses
+                # are excluded because their view_meta_sequence is not captured
+                # and the as_strided fallback in gen_alias_from_base is not
+                # supported by e.g. DTensor. For both, the issue's own repro
+                # still returns a base of shape (12,) where eager gives (1,).
+                #
+                # o._base.requires_grad would imply o.requires_grad
+                # (DifferentiableViewMeta), which the branch above already
+                # handles, so o._base is never a saved intermediate base and
+                # this index is always in user-output space.
+                output_type = OutputType.alias_of_intermediate_base_is_user_output
+                base_idx = out_tensor_ids[id(o._base)]
             else:
                 output_type = OutputType.non_alias
                 base_idx = None

@@ -179,6 +179,10 @@ struct TraceEntry {
   trace_time_ time_{};
   std::string compile_context_;
   std::string user_metadata_;
+  // Tag attached by allocator internals (e.g. "mallocWithAddress" on the
+  // synthetic prefix-block malloc/free pair), kept separate so
+  // user_metadata_ stays verbatim what the user set.
+  std::string internal_metadata_;
 };
 
 inline TraceEntry::Action parseTraceEntryAction(std::string_view action) {

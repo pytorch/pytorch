@@ -1697,7 +1697,12 @@ class AsyncAutotuner:
         # from an earlier compilation. If that compilation aborted -- or its cache dir
         # has since been removed -- the subprocess cannot load the module, returns inf,
         # and every choice looks unbenchmarkable ("All choices failed to benchmark").
-        module_path = getattr(getattr(choice, "bmreq", None), "module_path", "") or ""
+        # isinstance rather than a truthiness check: a choice without a bmreq gives
+        # None, and a test double gives whatever its attribute access returns, neither
+        # of which can be concatenated onto the key.
+        module_path = getattr(getattr(choice, "bmreq", None), "module_path", None)
+        if not isinstance(module_path, str):
+            module_path = ""
         return choice.hash_key() + inputs_key + module_path
 
     @classmethod
