@@ -5,9 +5,12 @@ import torch
 from torch.onnx import symbolic_helper
 from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestHelperFunctions(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._initial_training_mode = GLOBALS.training_mode
