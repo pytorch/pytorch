@@ -45,7 +45,6 @@ import uuid
 import warnings
 import weakref
 from collections import Counter, OrderedDict
-from collections.abc import Iterable
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
@@ -103,6 +102,7 @@ if typing.TYPE_CHECKING:
         Container,
         Generator,
         ItemsView,
+        Iterable,
         Iterator,
         KeysView,
         Mapping,
@@ -1762,10 +1762,8 @@ class CompilationMetrics:
         def collection_to_json_str(metric: object | None) -> str | None:
             if metric is None:
                 return None
-            if not isinstance(metric, Iterable):
-                return "<unknown>"
             try:
-                return json.dumps(list(metric))
+                return json.dumps(list(cast("Iterable[object]", metric)))
             except Exception:
                 return "<unknown>"
 
