@@ -2182,7 +2182,7 @@ def _compute_indices_of_inps_to_detach(
 ) -> list[int]:
     # TODO: we should apply the below "detach inputs if their gradients are statically known to be None"
     # optimization even if we have subclass inputs/outputs (we do not handle this today).
-    # Computing which our our inputs get None gradients is a bit more complicated,
+    # Computing which of our inputs get None gradients is a bit more complicated,
     # if any of our inputs are subclasses. Why?
     # (a) we need to make sure that we call .detach() on the input subclasses, since autograd sees subclasses.
     # (b) The grad_outputs that we AOT computed in our backward graph are the desugared tensor tensors,
