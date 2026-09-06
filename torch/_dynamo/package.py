@@ -258,7 +258,8 @@ class FunctionPicklerBase(pickle.Pickler):
         # the proxies later. A caller that must SERIALIZE the annotations passes
         # resolve=True instead: it gets real values, and an empty dict when a
         # name will not resolve, because a ForwardRef -- even nested in
-        # list[Bar] -- is not picklable and the runtime never reads annotations.
+        # list[Bar] -- is not picklable. This resolves the whole set or nothing;
+        # a caller that also needs per-value picklability filters on top.
         if sys.version_info >= (3, 14):
             import annotationlib
 
