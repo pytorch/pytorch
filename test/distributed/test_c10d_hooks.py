@@ -7,7 +7,7 @@ import torch.distributed as dist
 from torch._C._distributed_c10d import HookOpName
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 class TestProcessGroupHooks(MultiProcessTestCase):
@@ -20,6 +20,8 @@ class TestProcessGroupHooks(MultiProcessTestCase):
     pure-Python or fake ProcessGroup overrides the collective methods and
     dispatches without going through the c10d ops, so it bypasses these hooks.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
