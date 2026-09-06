@@ -430,13 +430,15 @@ command runs tests such as `TestNN.test_BCELoss` and
 
 ### Local linting
 
-You can run the same linting steps that are used in CI locally via `make`:
+Use `spin quicklint` to lint the files changed in your latest commit and
+working tree:
 
 ```bash
-make lint
+spin quicklint
 ```
 
-Learn more about the linter on the [lintrunner wiki page](https://github.com/pytorch/pytorch/wiki/lintrunner)
+See [Linting before committing](#linting-before-committing) for the full lint
+and autofix commands.
 
 #### Running `pyrefly`
 
