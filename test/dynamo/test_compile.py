@@ -9,7 +9,7 @@ from unittest.mock import patch
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import munge_exc
+from torch.testing._internal.common_utils import HardwareClassification, munge_exc
 
 
 class ToyModel(torch.nn.Module):
@@ -23,6 +23,8 @@ class ToyModel(torch.nn.Module):
 
 
 class InPlaceCompilationTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_compilation(self):
         torch._dynamo.reset()
         model = ToyModel()
@@ -287,6 +289,8 @@ class InPlaceCompilationTests(TestCase):
 # The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good
 class PublicTorchCompilerTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def check_signature(self, public_fn_name, private_fn_name, private_namespace):
         public_fn = getattr(torch.compiler, public_fn_name)
         private_fn = getattr(private_namespace, private_fn_name)
@@ -322,6 +326,8 @@ class PublicTorchCompilerTests(TestCase):
 
 
 class FullgraphTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_fullgraph_errors_on_frame_skip_with_dispatch_mode(self):
         from torch.utils._python_dispatch import TorchDispatchMode
 
