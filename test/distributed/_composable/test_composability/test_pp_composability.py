@@ -28,14 +28,14 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     at_least_x_gpu,
     MultiProcContinuousTest,
-    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
@@ -45,14 +45,6 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 if TYPE_CHECKING:
     from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
-
-
-device_type = (
-    acc.type
-    if (acc := torch.accelerator.current_accelerator(check_available=True))
-    else "cpu"
-)
-backend = torch.distributed.get_default_backend_for_device(device_type)
 
 
 # MLP Layer
@@ -84,30 +76,31 @@ class MLPModuleEven(torch.nn.Module):
         return x
 
 
-class ComposabilityTest(MultiProcContinuousTest):
+class ComposabilityTestBase(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
-        # Testing with NCCL backend
-        return backend
+        return torch.distributed.get_default_backend_for_device(cls.device_type)
 
-    @classmethod
-    def device_type(cls) -> str:
-        return device_type
+    def _rank_device(self, device: str) -> torch.device:
+        # `device` is the framework-injected primary device ("{type}:0",
+        # rank-0); resolve to this worker's per-rank device for self.rank.
+        device_type = torch.device(device).type
+        return torch.device(device_type, self.rank)
+
+
+class ComposabilityTest(ComposabilityTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     world_size = 8
 
-    @property
-    def device(self):
-        return self.rank
-
-    @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @skip_if_lt_x_gpu(8)
-    def test_pp_and_dcp(self):
+    def test_pp_and_dcp(self, device):
         """
         Test that pipeline parallelism and distributed checkpointing can be used together and
         with saved correct FQNs
         """
+        rank_device = self._rank_device(device)
 
         class AppState(Stateful):
             def __init__(self, model, optimizer):
@@ -143,7 +136,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                     x = layer(x)
                 return x
 
-        torch.accelerator.set_device_index(self.device)
+        torch.accelerator.set_device_index(rank_device)
         # create "entire model"
         total_layers = 8
         dim = 10
@@ -155,7 +148,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         end_index = start_index + 1
         pp_model = PPModelChunk(full_model, start_index, end_index)
 
-        pp_model.to(self.device)
+        pp_model.to(rank_device)
         opt = torch.optim.Adam(pp_model.parameters(), lr=0.1)
 
         # perform work in a temp dir that is cleaned up after the test
@@ -183,7 +176,6 @@ class ComposabilityTest(MultiProcContinuousTest):
 
         _dcp_test(self)
 
-    @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @skip_if_lt_x_gpu(8)
     @parametrize(
@@ -203,15 +195,16 @@ class ComposabilityTest(MultiProcContinuousTest):
             torch.float32,
         ],
     )
-    def test_3d_with_tp_dp_pp(self, ScheduleClass, MixedPrecisionParam):
-        torch.accelerator.set_device_index(self.device)
+    def test_3d_with_tp_dp_pp(self, device, ScheduleClass, MixedPrecisionParam):
+        rank_device = self._rank_device(device)
+        torch.accelerator.set_device_index(rank_device)
         dim = 8
         tp_size = 2
         pp_size = 2
         num_microbatches = 8
         dp_size = self.world_size // (tp_size * pp_size)
         device_mesh = init_device_mesh(
-            device_type,
+            self.device_type,
             mesh_shape=(dp_size, pp_size, tp_size),
             mesh_dim_names=("dp", "pp", "tp"),
         )
@@ -272,7 +265,7 @@ class ComposabilityTest(MultiProcContinuousTest):
             end_layer = start_layer + layers_per_stage
             # divide the model layers by the number of stages
             partial_model = nn.Sequential(*full_model[start_layer:end_layer])
-            partial_model.to(self.device)
+            partial_model.to(rank_device)
             tp_model = apply_tp(partial_model, tp_mesh)
             dp_model = apply_fsdp(tp_model)
 
@@ -280,7 +273,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 dp_model,
                 stage_idx,
                 num_stages,
-                self.device,
+                rank_device,
                 group=pp_group,
             )
 
@@ -312,8 +305,8 @@ class ComposabilityTest(MultiProcContinuousTest):
         for _train_step in range(5):
             for optimizer in optimizers:
                 optimizer.zero_grad()
-            inputs = torch.rand((num_microbatches, dim), device=self.device)
-            labels = torch.rand((num_microbatches, dim), device=self.device)
+            inputs = torch.rand((num_microbatches, dim), device=rank_device)
+            labels = torch.rand((num_microbatches, dim), device=rank_device)
             is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
             if pp_mesh.get_local_rank() == 0:
                 pipeline_schedule.step(inputs)
@@ -326,7 +319,6 @@ class ComposabilityTest(MultiProcContinuousTest):
             for optimizer in optimizers:
                 optimizer.step()
 
-    @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @skip_if_lt_x_gpu(8)
     @parametrize(
@@ -346,14 +338,15 @@ class ComposabilityTest(MultiProcContinuousTest):
             torch.float32,
         ],
     )
-    def test_replicate_pp(self, ScheduleClass, MixedPrecisionParam):
-        torch.accelerator.set_device_index(self.device)
+    def test_replicate_pp(self, device, ScheduleClass, MixedPrecisionParam):
+        rank_device = self._rank_device(device)
+        torch.accelerator.set_device_index(rank_device)
         dim = 8
         pp_size = 2
         num_microbatches = 8
         replicate_size = self.world_size // (pp_size)
         device_mesh = init_device_mesh(
-            device_type,
+            self.device_type,
             mesh_shape=(replicate_size, pp_size),
             mesh_dim_names=("replicate", "pp"),
         )
@@ -409,10 +402,10 @@ class ComposabilityTest(MultiProcContinuousTest):
             end_layer = start_layer + layers_per_stage
             # divide the model layers by the number of stages
             partial_model = nn.Sequential(*full_model[start_layer:end_layer])
-            partial_model.to(self.device)
+            partial_model.to(rank_device)
 
             ref_partial_model = nn.Sequential(*ref_full_model[start_layer:end_layer])
-            ref_partial_model.to(self.device)
+            ref_partial_model.to(rank_device)
 
             dp_model = apply_replicate(partial_model)
             ref_dp_model = apply_same_precision(ref_partial_model)
@@ -421,7 +414,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 dp_model,
                 stage_idx,
                 num_stages,
-                self.device,
+                rank_device,
                 group=pp_group,
             )
 
@@ -429,7 +422,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 ref_dp_model,
                 stage_idx,
                 num_stages,
-                self.device,
+                rank_device,
                 group=pp_group,
             )
 
@@ -484,10 +477,10 @@ class ComposabilityTest(MultiProcContinuousTest):
                 ref_optimizer.zero_grad()
 
             inputs = torch.rand(
-                (num_microbatches, dim), device=self.device, dtype=MixedPrecisionParam
+                (num_microbatches, dim), device=rank_device, dtype=MixedPrecisionParam
             )
             labels = torch.rand(
-                (num_microbatches, dim), device=self.device, dtype=MixedPrecisionParam
+                (num_microbatches, dim), device=rank_device, dtype=MixedPrecisionParam
             )
             is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
             if pp_mesh.get_local_rank() == 0:
@@ -510,7 +503,6 @@ class ComposabilityTest(MultiProcContinuousTest):
             for ref_optimizer in ref_optimizers:
                 ref_optimizer.step()
 
-    @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @skip_if_lt_x_gpu(8)
     @parametrize(
@@ -523,14 +515,15 @@ class ComposabilityTest(MultiProcContinuousTest):
             ScheduleInterleavedZeroBubble,
         ],
     )
-    def test_replicate_pp_grads(self, ScheduleClass):
-        torch.accelerator.set_device_index(self.device)
+    def test_replicate_pp_grads(self, device, ScheduleClass):
+        rank_device = self._rank_device(device)
+        torch.accelerator.set_device_index(rank_device)
         dim = 8
         pp_size = 2
         num_microbatches = 8
         replicate_size = self.world_size // (pp_size)
         device_mesh = init_device_mesh(
-            device_type,
+            self.device_type,
             mesh_shape=(replicate_size, pp_size),
             mesh_dim_names=("replicate", "pp"),
         )
@@ -543,7 +536,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         # create "entire model"
         total_layers = 8
         full_model = nn.ModuleList([MLPModule(dim) for _ in range(total_layers)])
-        ref_model = nn.Sequential(*copy.deepcopy(full_model)).to(self.device)
+        ref_model = nn.Sequential(*copy.deepcopy(full_model)).to(rank_device)
 
         # dummy loss needed just to force backwards to run in schedule step
         def loss_fn(y, target):
@@ -653,7 +646,7 @@ class ComposabilityTest(MultiProcContinuousTest):
             end_layer = start_layer + layers_per_stage
             # divide the model layers by the number of stages
             partial_model = nn.Sequential(*full_model[start_layer:end_layer])
-            partial_model.to(self.device)
+            partial_model.to(rank_device)
 
             dp_model = apply_replicate(partial_model)
             pipelined_models_parameters(start_layer, dp_model)
@@ -661,7 +654,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 dp_model,
                 stage_idx,
                 num_stages,
-                self.device,
+                rank_device,
                 group=pp_group,
             )
 
@@ -712,8 +705,8 @@ class ComposabilityTest(MultiProcContinuousTest):
                 optimizer.zero_grad()
             ref_optimizer.zero_grad()
 
-            inputs = torch.rand((num_microbatches, dim), device=self.device)
-            labels = torch.rand((num_microbatches, dim), device=self.device)
+            inputs = torch.rand((num_microbatches, dim), device=rank_device)
+            labels = torch.rand((num_microbatches, dim), device=rank_device)
 
             # Ensure all ranks use the same inputs/labels for comparison
             torch.distributed.broadcast(inputs, 0)
@@ -758,7 +751,12 @@ class ComposabilityTest(MultiProcContinuousTest):
             )
 
 
-instantiate_parametrized_tests(ComposabilityTest)
+instantiate_device_type_tests(
+    ComposabilityTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
