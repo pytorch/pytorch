@@ -1024,27 +1024,29 @@ class GroupedLocalReduce(GroupedReduceBase):
     def _stitch_warps(self, gemm, state, frag, epi_coord, geom):
         """Stitch the ``group_warps`` warps of an M group through smem: each
         non-leader warp publishes its butterfly result once per column, the
-        leader warp folds the planes in ascending warp order."""
+        leader warp folds the planes in ascending warp order.
+
+        A group spans whole warps here, so the group index and the warp's role
+        are warp-uniform; the role predicates wrap the unrolled slot loops
+        instead of guarding each slot access.
+        """
         sReduce = state.smem
         assert sReduce is not None, "grouped M reduce across warps needs its smem buffer"
         combine_fn = const_expr(self.combine_fn)
         coord = cute.filter_zeros(state.coord[None, None, None, epi_coord[0], epi_coord[1]])
-        for i in cutlass.range(cute.size(frag), unroll_full=True):
-            row_idx, n_idx = coord[i][0], coord[i][1]
-            group_idx = row_idx // self.group
-            warp_in_group = state.warp_m_idx - group_idx * geom.group_warps
-            if warp_in_group > 0 and warp_in_group < geom.group_warps:
-                sReduce[n_idx, state.warp_m_idx - group_idx - 1] = frag[i]
+        group_idx = state.warp_m_idx // geom.group_warps
+        warp_in_group = state.warp_m_idx - group_idx * geom.group_warps
+        smem_base = group_idx * (geom.group_warps - 1) - 1
+        if warp_in_group > 0:
+            smem_warp = smem_base + warp_in_group
+            for i in cutlass.range(cute.size(frag), unroll_full=True):
+                sReduce[coord[i][1], smem_warp] = frag[i]
         gemm.epilogue_barrier.arrive_and_wait()
-        for i in cutlass.range(cute.size(frag), unroll_full=True):
-            row_idx, n_idx = coord[i][0], coord[i][1]
-            group_idx = row_idx // self.group
-            if state.warp_m_idx == group_idx * geom.group_warps:
+        if warp_in_group == 0:
+            for i in cutlass.range(cute.size(frag), unroll_full=True):
+                n_idx = coord[i][1]
                 for offset in cutlass.range_constexpr(1, geom.group_warps):
-                    frag[i] = combine_fn(
-                        frag[i],
-                        sReduce[n_idx, group_idx * geom.group_warps + offset - group_idx - 1],
-                    )
+                    frag[i] = combine_fn(frag[i], sReduce[n_idx, smem_base + offset])
 
     @cute.jit
     def end_loop(

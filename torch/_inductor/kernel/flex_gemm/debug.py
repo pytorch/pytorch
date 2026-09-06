@@ -236,12 +236,18 @@ def format_flex_gemm_lowering_plan(
     return "\n".join(lines)
 
 
-def format_flex_gemm_selection(choice: Any, *, tuned: bool) -> str:
-    """Render the single Inductor choice delegated to QuACK planning."""
-    return "\n".join(
-        (
-            f"mode: {'QuACK autotuned' if tuned else 'QuACK fixed-policy'}",
-            f"template: {getattr(choice, 'name', 'deferred')}",
-            "native config selection: QuACK-owned",
+def format_flex_gemm_config_candidates(configs: Any, *, tuned: bool) -> str:
+    """Render the QuACK configs Inductor will benchmark or pin."""
+    lines = [
+        f"mode: {'autotune' if tuned else 'default'}",
+        f"candidates: {len(configs)}",
+    ]
+    for config in configs:
+        fields = dict(config)
+        lines.append(
+            "  tile=({tile_m}, {tile_n}) cluster=({cluster_m}, {cluster_n}) "
+            "swap_ab={swap_ab} dynamic_persistent={is_dynamic_persistent}".format(
+                **fields
+            )
         )
-    )
+    return "\n".join(lines)
