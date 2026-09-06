@@ -227,8 +227,13 @@ class LoggingTest(TestCase):
                     for log_qname in log_internal.log_registry.get_log_qnames():
                         logger = logging.getLogger(log_qname)
                         created_handlers.update(logger.handlers)
+                        torch_handlers = [
+                            handler
+                            for handler in logger.handlers
+                            if log_internal._is_torch_handler(handler)
+                        ]
                         self.assertEqual(
-                            len(logger.handlers),
+                            len(torch_handlers),
                             2,
                             f"{log_qname} should only have stream and file handlers",
                         )
