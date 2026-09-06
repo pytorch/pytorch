@@ -6,6 +6,7 @@ import io
 import logging
 import os
 import pickle
+import sys
 import tempfile
 import types
 from collections.abc import Callable, Sequence
@@ -116,13 +117,21 @@ class AOTCompilePickler(FunctionPicklerBase):
         elif inspect.isfunction(obj) and "<locals>" in obj.__qualname__:
             # The runtime env has to RUN this function, so unlike the guard
             # pickler nothing it holds is pruned.
+            if sys.version_info >= (3, 14):
+                import annotationlib
+
+                annotations = annotationlib.get_annotations(
+                    obj, format=annotationlib.Format.FORWARDREF
+                )
+            else:
+                annotations = obj.__annotations__
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
                 kwdefaults=obj.__kwdefaults__,
                 closure=obj.__closure__,
                 attributes=obj.__dict__,
-                annotations=obj.__annotations__,
+                annotations=annotations,
                 type_params=getattr(obj, "__type_params__", None),
             )
 
@@ -222,21 +231,28 @@ class AOTCompiledFunction:
 
                 import_sources = self._artifacts.runtime_env.import_sources
                 for alias, module_name in import_sources.items():
+                    # A pre-reset compile may still own the alias via a
+                    # CleanupHook; drop it so it can't delete the binding once
+                    # collected, even when we leave an existing value in place.
+                    # See _install_global.
+                    CleanupHook.disown(guard_scope, alias)
                     if alias not in guard_scope:
-                        # A pre-reset compile may still own the alias via a
-                        # CleanupHook; drop it before we rebind. See _install_global.
-                        CleanupHook.disown(guard_scope, alias)
                         guard_scope[alias] = importlib.import_module(module_name)
                 builtins_key = (
                     guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
                 )
-                if builtins_key and builtins_key not in guard_scope:
-                    # A caller-supplied f_globals need not carry __builtins__;
-                    # exec would seed it, so fall back to the real builtins here.
-                    if "__builtins__" not in guard_scope:
-                        guard_scope["__builtins__"] = builtins.__dict__
+                if builtins_key:
+                    # A pre-reset compile's CleanupHook may still own this name
+                    # even when we leave its value alone; drop it so it can't
+                    # delete the binding once collected.
                     CleanupHook.disown(guard_scope, builtins_key)
-                    guard_scope[builtins_key] = get_builtins_dict(guard_scope)
+                    if builtins_key not in guard_scope:
+                        # A caller-supplied f_globals need not carry
+                        # __builtins__; exec would seed it, so fall back to the
+                        # real builtins here.
+                        if "__builtins__" not in guard_scope:
+                            guard_scope["__builtins__"] = builtins.__dict__
+                        guard_scope[builtins_key] = get_builtins_dict(guard_scope)
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
                 self._artifacts.original_code,
