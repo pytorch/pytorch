@@ -66,7 +66,7 @@ from torch.utils._triton import has_triton_reduction_ordering
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
-from .decomposition import decompositions, get_decompositions
+from .decomposition import _validate_clamp_scalar, decompositions, get_decompositions
 from .ir import (
     BaseView,
     DtypeView,
@@ -8712,8 +8712,20 @@ logical_xor = register_pointwise(
 )
 maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
-register_lowering(aten.clamp_min)(maximum)
-register_lowering(aten.clamp_max)(minimum)
+
+
+@register_lowering(aten.clamp_min)
+def clamp_min(x, min):
+    _validate_clamp_scalar(min, x.get_dtype(), x.get_device().type)
+    return maximum(x, min)
+
+
+@register_lowering(aten.clamp_max)
+def clamp_max(x, max):
+    _validate_clamp_scalar(max, x.get_dtype(), x.get_device().type)
+    return minimum(x, max)
+
+
 register_op_dtype_propagation_rules(
     "fmaximum",
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,

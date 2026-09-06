@@ -318,9 +318,30 @@ def sym_constrain_range_for_size(
     return
 
 
-@register_decomposition([aten.clamp])
+_CLAMP_SCALAR_TYPE_NAMES = {
+    torch.float16: "c10::Half",
+    torch.bfloat16: "c10::BFloat16",
+    torch.float32: "float",
+    torch.float64: "double",
+}
+
+
+def _validate_clamp_scalar(value: object, dtype: torch.dtype, device_type: str) -> None:
+    if dtype not in _CLAMP_SCALAR_TYPE_NAMES or type(value) not in (int, float):
+        return
+    if device_type == "cuda":
+        dtype = utils.get_computation_dtype(dtype)
+    scalar = cast(int | float, value)
+    if isinstance(scalar, float) and not math.isfinite(scalar):
+        return
+    limits = torch.finfo(dtype)
+    if scalar < limits.min or scalar > limits.max:
+        name = _CLAMP_SCALAR_TYPE_NAMES[dtype]
+        raise RuntimeError(f"value cannot be converted to type {name} without overflow")
+
+
 @pw_cast_for_opmath_non_tensor_args
-def clamp(
+def _clamp(
     x: torch.Tensor,
     min: torch.types.Number | None = None,
     max: torch.types.Number | None = None,
@@ -330,6 +351,21 @@ def clamp(
     if max is not None:
         x = x.clamp_max(max)
     return x
+
+
+@register_decomposition([aten.clamp])
+def clamp(
+    x: torch.Tensor,
+    min: torch.types.Number | None = None,
+    max: torch.types.Number | None = None,
+) -> torch.Tensor:
+    if x.dtype in _CLAMP_SCALAR_TYPE_NAMES and any(
+        type(bound) is float and math.isnan(bound) for bound in (min, max)
+    ):
+        return _clamp(x, math.nan, math.nan)
+    _validate_clamp_scalar(min, x.dtype, x.device.type)
+    _validate_clamp_scalar(max, x.dtype, x.device.type)
+    return _clamp(x, min, max)
 
 
 # Inductor-specific SiLU decomposition for exact eager matching.
