@@ -23,7 +23,9 @@ from torch.distributed.checkpoint.utils import (
     find_state_dict_object,
 )
 from torch.distributed.distributed_c10d import _object_to_tensor, _tensor_to_object
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -73,6 +75,8 @@ def create_sharded_tensor(rank, world_size, shards_per_rank):
 
 
 class TestMedatadaIndex(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_init_convert_offset(self):
         a = MetadataIndex("foo", [1, 2])
         b = MetadataIndex("foo", torch.Size([1, 2]))
@@ -143,6 +147,8 @@ class TestMedatadaIndex(TestCase):
 
 
 class TestWrapException(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_wrap_exception_serializable_via_object_to_tensor(self):
         """Verify _wrap_exception produces a result that _object_to_tensor can serialize.
 
@@ -181,6 +187,8 @@ class TestWrapException(TestCase):
 
 
 class TestReaderView(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         buffer = io.BytesIO(bytearray(range(ord("A"), ord("Z") + 1)))
@@ -238,14 +246,17 @@ class TestReaderView(TestCase):
 
 
 class TestDistWrapper(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return min(4, torch.accelerator.device_count())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_gather_object(self):
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+    def test_gather_object(self, device):
+        device_type = torch.device(device).type
+        mesh_2d = dist.init_device_mesh(device_type, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(
@@ -265,8 +276,9 @@ class TestDistWrapper(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_scatter_object(self):
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+    def test_scatter_object(self, device):
+        device_type = torch.device(device).type
+        mesh_2d = dist.init_device_mesh(device_type, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(
@@ -290,7 +302,7 @@ class TestDistWrapper(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_broadcast_object_with_nonzero_coordinator(self):
+    def test_broadcast_object_with_nonzero_coordinator(self, device):
         # Everybody uses WORLD, but src is coordinator_rank=1
         dist_wrapper = _DistWrapper(
             group=dist.group.WORLD,
@@ -309,10 +321,11 @@ class TestDistWrapper(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_broadcast_object_global_local_mismatch(self):
+    def test_broadcast_object_global_local_mismatch(self, device):
         # reproduces issue 152310
 
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+        device_type = torch.device(device).type
+        mesh_2d = dist.init_device_mesh(device_type, (2, self.world_size // 2))
         dist_wrapper = _DistWrapper(
             group=mesh_2d.get_group(1),
             use_dist=True,
@@ -334,8 +347,9 @@ class TestDistWrapper(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_barrier(self):
-        mesh_2d = dist.init_device_mesh(self.device_type, (2, self.world_size // 2))
+    def test_barrier(self, device):
+        device_type = torch.device(device).type
+        mesh_2d = dist.init_device_mesh(device_type, (2, self.world_size // 2))
         torch.random.manual_seed(dist.get_rank())
 
         dist_wrapper = _DistWrapper(
@@ -345,6 +359,13 @@ class TestDistWrapper(DTensorTestBase):
         # No exception should be raised.
         dist_wrapper.barrier()
 
+
+instantiate_device_type_tests(
+    TestDistWrapper,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
