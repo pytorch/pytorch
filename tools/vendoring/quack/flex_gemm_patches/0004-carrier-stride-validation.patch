@@ -1,5 +1,5 @@
 diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
-index 8c50ae0..ccb9743 100644
+index a16883f..48871d7 100644
 --- a/quack/grouped_reduce.py
 +++ b/quack/grouped_reduce.py
 @@ -264,0 +265 @@ class GroupedLocalReduceOutputLayout:
@@ -27,7 +27,7 @@ index 8c50ae0..ccb9743 100644
 +        if self.output_layout.validate_carrier_fn is not None:
 +            self.output_layout.validate_carrier_fn(value)
 diff --git a/tests/test_grouped_reduce.py b/tests/test_grouped_reduce.py
-index 3eab38c..0b32183 100644
+index 2c8ee5c..61531b5 100644
 --- a/tests/test_grouped_reduce.py
 +++ b/tests/test_grouped_reduce.py
 @@ -290,0 +291,32 @@ def test_two_argument_finalizer_rejects_swap_ab():
