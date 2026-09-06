@@ -5,6 +5,10 @@
 
 namespace at::native {
 
+struct ScatterAddOp;
+struct ScatterMinOp;
+struct ScatterMaxOp;
+
 template<int alignment>
 inline bool fast_gather_kernel_eligible(const TensorIterator& iter, char * const out_ptr, char * const in_ptr, const size_t index_stride_bytes, const size_t element_size) {
   using at::native::memory::get_alignment;
@@ -31,7 +35,7 @@ inline bool fast_gather_kernel_eligible(const TensorIterator& iter, char * const
 //   dim 0 (slice): self stride = elem_size, src stride = elem_size, index stride = 0
 //   dim 1 (index): self stride = 0 (restrided), src stride = D*elem_size, index stride = idx_elem_size
 template<int alignment>
-inline bool fast_scatter_add_kernel_eligible(const TensorIterator& iter, char * const self_ptr, char * const src_ptr, const size_t self_stride_bytes, const size_t element_size) {
+inline bool fast_scatter_kernel_eligible(const TensorIterator& iter, char * const self_ptr, char * const src_ptr, const size_t self_stride_bytes, const size_t element_size) {
   using at::native::memory::get_alignment;
   const auto index_element_size = iter.element_size(2);
   return iter.ndim() == 2 &&
@@ -50,14 +54,14 @@ void vectorized_gather_kernel_launch(char * out, char * inp, index_t * idx, int 
                                      int64_t slice_size_in_bytes, int64_t ind_dim_size, int64_t inp_stride_bytes, int64_t out_stride_bytes,
                                      bool allow_neg_indices=false);
 
-template <int64_t Alignment, typename scalar_t, typename index_t>
-void vectorized_scatter_add_kernel_launch(
+template <typename reduce_op, int64_t Alignment, typename scalar_t, typename index_t>
+void vectorized_scatter_kernel_launch(
     scalar_t* self_data, const scalar_t* src_data, index_t* idx, int num_ind,
     int64_t slice_size_in_bytes, int64_t self_dim_size,
     int64_t self_stride_bytes, int64_t src_stride_bytes);
 
-template <typename scalar_t, typename index_t>
-void tma_scatter_add_kernel_launch(
+template <typename reduce_op, typename scalar_t, typename index_t>
+void tma_scatter_kernel_launch(
     scalar_t* self_data, const scalar_t* src_data, index_t* idx, int num_ind,
     int D, int64_t self_dim_size,
     int64_t self_stride_bytes, int64_t src_stride_bytes);
