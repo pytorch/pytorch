@@ -313,11 +313,22 @@ def _multi_output_aliases(node: torch.fx.Node) -> Any:
             or not isinstance(all_bases, (list, tuple))
         ):
             return _UNRESOLVED_ALIASES
-        return {
+        aliases = {
             offset + i: base
             for i, base in enumerate(all_bases)
             if i not in to_clone  # type: ignore[operator]
         }
+        mutable_op = node.args[0]
+        if (
+            isinstance(mutable_op, torch._ops.OpOverload)
+            and torch.Tag.inplace in mutable_op.tags
+        ):
+            # The op's own return may be a view of the mutated base.
+            name = mutable_op._schema.arguments[0].name
+            base_index = node.kwargs.get(f"_{name}_base_index")
+            if isinstance(base_index, int) and offset + base_index in aliases:
+                aliases[0] = aliases[offset + base_index]
+        return aliases
 
     if target is torch.ops.higher_order.with_effects:
         # with_effects(token, op, *args) -> (token, *results). Once the pass

@@ -12155,6 +12155,48 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                         out.add_(100)
                         self.assertEqual(x, x_after_call)
 
+    @config.patch(implicit_fallbacks=True)
+    def test_reinplace_result_escapes_via_inplace_op_return(self):
+        device = self.device
+
+        def fn(x, diag):
+            updated = torch.diagonal_scatter(x, diag)
+            result = torch.ops.reinplace_return.inc_(updated.T)
+            x.copy_(result.T)
+            return result
+
+        def make_inputs():
+            return (
+                torch.arange(16.0, device=device).reshape(4, 4),
+                torch.full((4,), -1.0, device=device),
+            )
+
+        def inc_(x):
+            return x.add_(1.0)
+
+        with torch.library._scoped_library("reinplace_return", "FRAGMENT") as lib:
+            lib.define("inc_(Tensor(a!) x) -> Tensor(a!)", tags=[torch.Tag.inplace])
+            lib.impl("inc_", inc_, "CompositeExplicitAutograd")
+            torch.library.register_fake("reinplace_return::inc_", lambda x: x, lib=lib)
+
+            eager_args = make_inputs()
+            out_eager = fn(*eager_args)
+
+            compiled_args = make_inputs()
+            torch._dynamo.reset()
+            out = torch.compile(fn, fullgraph=True)(*compiled_args)
+
+            x = compiled_args[0]
+            self.assertEqual(out_eager, out)
+            self.assertEqual(eager_args[0], x)
+            self.assertNotEqual(
+                out.untyped_storage().data_ptr(),
+                x.untyped_storage().data_ptr(),
+            )
+            x_after_call = x.clone()
+            out.add_(100)
+            self.assertEqual(x, x_after_call)
+
     def test_scatter_reinplace_not_blocked_by_functional_user(self):
         # https://github.com/pytorch/pytorch/pull/195484
         # The scatter's escape check reads the graph this pass has already
