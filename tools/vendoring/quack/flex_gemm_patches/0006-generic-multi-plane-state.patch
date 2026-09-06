@@ -1,5 +1,5 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 749b5e8..25b4a70 100644
+index 7a37683..116a03d 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
 @@ -61,2 +61,3 @@ guesses about vectorization.
@@ -8,26 +8,31 @@ index 749b5e8..25b4a70 100644
 +  ``outs={name: sink_op}`` is the general form for any sink op. A sink declares
 +  ``sink_arity``; arity greater than one means the fn returns a tuple of
 +  independently collected value planes for the sink to combine.
-@@ -354,4 +355,6 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
+@@ -359,9 +360,6 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
 -            value = result[name]
--            sink_tmp = cute.make_rmem_tensor(value.shape, value.element_type)
--            sink_tmp.store(value)
--            sink_tmps.append(sink_tmp)
+-            # Scaled sinks return a (value, scale) pair; see _make_sink_tmps.
+-            planes = value if isinstance(value, tuple) else (value,)
+-            fragments = []
+-            for plane in planes:
+-                fragment = cute.make_rmem_tensor(plane.shape, plane.element_type)
+-                fragment.store(plane)
+-                fragments.append(fragment)
+-            sink_tmps.append(fragments[0] if len(fragments) == 1 else tuple(fragments))
 +            planes = []
 +            for value in self._value_planes(name, ops_by_name[name].sink_arity, result[name]):
 +                plane = cute.make_rmem_tensor(value.shape, value.element_type)
 +                plane.store(value)
 +                planes.append(plane)
 +            sink_tmps.append(tuple(planes))
-@@ -450 +453,3 @@ class EpiMod:
+@@ -460 +458,3 @@ class EpiMod:
 -            if getattr(op, "scaled", False) and self.mode == "acc_pair":
 +            if not isinstance(op.sink_arity, int) or op.sink_arity < 1:
 +                raise ValueError(f"sink {name!r}: sink_arity must be a positive integer")
 +            if op.sink_arity > 1 and self.mode == "acc_pair":
-@@ -452 +457 @@ class EpiMod:
+@@ -462 +462 @@ class EpiMod:
 -                    f"sink {name!r}: scaled reduces are not supported in acc_pair mode yet "
 +                    f"sink {name!r}: multi-plane sinks are not supported in acc_pair mode "
-@@ -454,0 +460,8 @@ class EpiMod:
+@@ -464,0 +465,8 @@ class EpiMod:
 +        for name in self.prepass_outs:
 +            op = self.ops.get(name)
 +            if op is None:
@@ -36,11 +41,11 @@ index 749b5e8..25b4a70 100644
 +                raise ValueError(
 +                    f"sink {name!r}: multi-plane sinks are not supported in prepass_outs"
 +                )
-@@ -795 +808 @@ class EpiMod:
+@@ -805 +813 @@ class EpiMod:
 -                raise ValueError("swap_ab requires element mode and orientation-aware epilogue ops")
 +                raise ValueError("swap_ab requires element-mode and orientation-aware epilogue ops")
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
-index e926728..3eaecdf 100644
+index ed61d53..83aeb4c 100644
 --- a/quack/epilogue/ops.py
 +++ b/quack/epilogue/ops.py
 @@ -18,2 +17,0 @@ import operator
@@ -66,7 +71,7 @@ index e926728..3eaecdf 100644
 +    return None if fn is None else semantic_value_key(fn, set(), force_source=True)
 @@ -325,0 +314 @@ class EpiOp:
 +    sink_arity = 1
-@@ -336,4 +325,6 @@ class EpiOp:
+@@ -355,4 +344,6 @@ class EpiOp:
 -    def fn_sink_flush(self, gemm, state, frag):
 -        """Fold a fragment of fn-produced values into this op's accumulator.
 -        ``state`` is the begin_loop result; ``frag`` is elementwise-congruent
@@ -77,7 +82,7 @@ index e926728..3eaecdf 100644
 +        ``state`` is the begin_loop result. Each fragment is elementwise-congruent
 +        with the accumulator tile and corresponds to one of ``sink_arity`` planes.
 +        """
-@@ -1588,0 +1580,5 @@ class VecReduce(EpiOp):
+@@ -1607,0 +1599,5 @@ class VecReduce(EpiOp):
 +    @property
 +    def sink_arity(self):
 +        """Number of value planes returned to this sink by the epilogue fn."""
@@ -217,7 +222,7 @@ index 2c39d57..8b3a369 100644
 +                f"cannot fingerprint callable dataclass {value!r}; implement __quack_semantic_key__"
 +            )
 diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
-index ccb9743..aa234a7 100644
+index 48871d7..a4abf35 100644
 --- a/quack/grouped_reduce.py
 +++ b/quack/grouped_reduce.py
 @@ -514,0 +515,5 @@ class GroupedReduceBase(EpiOp):
@@ -452,40 +457,37 @@ index ccb9743..aa234a7 100644
 +                for plane, value in zip(merged_planes, values):
 +                    plane[i] = value
 +        return merged_planes[0] if const_expr(self.reduce_planes == 1) else merged_planes
-@@ -1030 +1107 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1035 +1112 @@ class GroupedLocalReduce(GroupedReduceBase):
 -        combine_fn = const_expr(self.combine_fn)
 +        planes = self._state_planes(frag)
-@@ -1032 +1109 @@ class GroupedLocalReduce(GroupedReduceBase):
--        for i in cutlass.range(cute.size(frag), unroll_full=True):
-+        for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
-@@ -1037 +1114,6 @@ class GroupedLocalReduce(GroupedReduceBase):
--                sReduce[n_idx, state.warp_m_idx - group_idx - 1] = frag[i]
-+                smem_warp = state.warp_m_idx - group_idx - 1
+@@ -1042,2 +1119,7 @@ class GroupedLocalReduce(GroupedReduceBase):
+-            for i in cutlass.range(cute.size(frag), unroll_full=True):
+-                sReduce[coord[i][1], smem_warp] = frag[i]
++            for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
++                n_idx = coord[i][1]
 +                for plane_idx, plane in enumerate(planes):
 +                    if const_expr(self.reduce_planes == 1):
 +                        sReduce[n_idx, smem_warp] = plane[i]
 +                    else:
 +                        sReduce[n_idx, smem_warp, plane_idx] = plane[i]
-@@ -1039 +1121 @@ class GroupedLocalReduce(GroupedReduceBase):
--        for i in cutlass.range(cute.size(frag), unroll_full=True):
-+        for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
-@@ -1042,0 +1125 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1046 +1128 @@ class GroupedLocalReduce(GroupedReduceBase):
+-            for i in cutlass.range(cute.size(frag), unroll_full=True):
++            for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
+@@ -1047,0 +1130 @@ class GroupedLocalReduce(GroupedReduceBase):
 +                values = tuple(plane[i] for plane in planes)
-@@ -1044,3 +1127,6 @@ class GroupedLocalReduce(GroupedReduceBase):
--                    frag[i] = combine_fn(
--                        frag[i],
--                        sReduce[n_idx, group_idx * geom.group_warps + offset - group_idx - 1],
-+                    smem_warp = group_idx * geom.group_warps + offset - group_idx - 1
+@@ -1049 +1132,10 @@ class GroupedLocalReduce(GroupedReduceBase):
+-                    frag[i] = combine_fn(frag[i], sReduce[n_idx, smem_base + offset])
++                    smem_warp = smem_base + offset
 +                    others = tuple(
 +                        sReduce[n_idx, smem_warp]
 +                        if const_expr(self.reduce_planes == 1)
 +                        else sReduce[n_idx, smem_warp, plane_idx]
 +                        for plane_idx in range(self.reduce_planes)
-@@ -1047,0 +1134,3 @@ class GroupedLocalReduce(GroupedReduceBase):
++                    )
 +                    values = self._combine_state(values, others)
 +                for plane, value in zip(planes, values):
 +                    plane[i] = value
-@@ -1067 +1156,6 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1069 +1161,6 @@ class GroupedLocalReduce(GroupedReduceBase):
 -        frag = cute.filter_zeros(self._frag_slice(state, epi_coord))
 +        frag = self._frag_slice(state, epi_coord)
 +        frag = (
@@ -493,22 +495,22 @@ index ccb9743..aa234a7 100644
 +            if const_expr(self.reduce_planes == 1)
 +            else tuple(cute.filter_zeros(plane) for plane in frag)
 +        )
-@@ -1070,2 +1164,2 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1072,2 +1169,2 @@ class GroupedLocalReduce(GroupedReduceBase):
 -                if const_expr(geom.chunk > 1):
 -                    self._fold_fragment(frag, geom)
 +                if const_expr(not self.fragment_reduced and geom.chunk > 1):
 +                    self._fold_chunks(frag, geom.chunks)
-@@ -1078,2 +1172,4 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -1080,2 +1177,4 @@ class GroupedLocalReduce(GroupedReduceBase):
 -                if const_expr(any(len(chunk) > 1 for chunk in geom.row_chunks)):
 -                    self._fold_rows(frag, geom)
 +                if const_expr(
 +                    not self.fragment_reduced and any(len(chunk) > 1 for chunk in geom.row_chunks)
 +                ):
 +                    self._fold_chunks(frag, geom.row_chunks)
-@@ -1204 +1300 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
+@@ -1206 +1305 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
 -    scaled = True
 +    sink_arity = 2
-@@ -1252,5 +1348,5 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
+@@ -1254,5 +1353,5 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
 -    def fn_sink_flush(self, gemm, state, frag, scale=None):
 -        """Capture the sum source and prepass value emitted as a sink pair."""
 -        assert scale is not None
@@ -519,7 +521,7 @@ index ccb9743..aa234a7 100644
 +        assert len(fragments) == 2
 +        cute.autovec_copy(fragments[0], state.frag)
 +        cute.autovec_copy(fragments[1], state.finalize_arg)
-@@ -1286 +1382 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
+@@ -1288 +1387 @@ class GroupedLocalReduceWithFinalizeArg(GroupedLocalReduce):
 -            self._fold_fragment(frag, geom)
 +            self._fold_chunks(frag, geom.chunks)
 diff --git a/tests/test_epi_ops.py b/tests/test_epi_ops.py
@@ -601,7 +603,7 @@ index b1b4688..10b36a8 100644
 -from quack.epilogue.frontend import EpiMod, fragment_epilogue, gemm_epilogue, pack, unpack
 +from quack.epilogue.frontend import EpiMod, gemm_epilogue, pack, fragment_epilogue, unpack
 diff --git a/tests/test_grouped_reduce.py b/tests/test_grouped_reduce.py
-index 0b32183..745dc32 100644
+index 61531b5..04bfa59 100644
 --- a/tests/test_grouped_reduce.py
 +++ b/tests/test_grouped_reduce.py
 @@ -14,0 +15 @@ Two layers:

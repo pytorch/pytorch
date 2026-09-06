@@ -1,32 +1,32 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 531b066..749b5e8 100644
+index 8fbc0a1..7a37683 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
-@@ -1334 +1334,3 @@ class EpiMod:
+@@ -1344 +1344,3 @@ class EpiMod:
 -            bufs[name] = epi_args[name] = torch.empty(shape, dtype=torch.float32, device=device)
 +            bufs[name] = epi_args[name] = torch.empty(
 +                shape, dtype=op.sink_alloc_dtype(), device=device
 +            )
-@@ -1607 +1609 @@ class EpiMod:
+@@ -1619 +1621 @@ class EpiMod:
 -                for name, shape in sink_shapes:
 +                for name, shape, dtype in sink_shapes:
-@@ -1609 +1611 @@ class EpiMod:
+@@ -1621 +1623 @@ class EpiMod:
 -                        buf = _t.empty(shape, dtype=_t.float32, device=A.device)
 +                        buf = _t.empty(shape, dtype=dtype, device=A.device)
-@@ -1679 +1681,5 @@ class EpiMod:
+@@ -1691 +1693,5 @@ class EpiMod:
 -                        epi_args[name] = torch.empty(shape, dtype=torch.float32, device=A.device)
 +                        epi_args[name] = torch.empty(
 +                            shape,
 +                            dtype=self.sinks[name].sink_alloc_dtype(),
 +                            device=A.device,
 +                        )
-@@ -1789 +1795,3 @@ class EpiMod:
+@@ -1801 +1807,3 @@ class EpiMod:
 -            sink_shapes = tuple((name, tuple(b.shape)) for name, b in sink_bufs.items())
 +            sink_shapes = tuple(
 +                (name, tuple(buf.shape), buf.dtype) for name, buf in sink_bufs.items()
 +            )
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
-index 8248bd2..e926728 100644
+index 85bf548..ed61d53 100644
 --- a/quack/epilogue/ops.py
 +++ b/quack/epilogue/ops.py
 @@ -49,0 +50,5 @@ import quack.layout_utils as layout_utils
@@ -35,18 +35,18 @@ index 8248bd2..e926728 100644
 +}
 +
 +
-@@ -390,0 +396,4 @@ class EpiOp:
+@@ -409,0 +415,4 @@ class EpiOp:
 +    def sink_alloc_dtype(self):
 +        """Return the torch dtype for graph-owned sink storage."""
 +        return torch.float32
 +
-@@ -2898,0 +2908,5 @@ def _selp_pair_f16x2(
+@@ -2917,0 +2927,5 @@ def _selp_pair_f16x2(
 +class _ColVecSelectParams(NamedTuple):
 +    tensor: object
 +    logical_n: object
 +
 +
-@@ -2901 +2915,7 @@ class ColVecSelect(EpiOp):
+@@ -2920 +2934,7 @@ class ColVecSelect(EpiOp):
 -    column idx[m], written directly to an (l, m) / (m,) f32 colvec.
 +    column idx[m], written directly to an (l, m) / (m,) colvec.
 +
@@ -55,10 +55,10 @@ index 8248bd2..e926728 100644
 +    selects exact gather semantics: preserve every selected value, including
 +    ``-inf``, trap on indices outside ``[0, N)``, and store directly in the
 +    requested dtype.
-@@ -2960 +2980 @@ class ColVecSelect(EpiOp):
+@@ -2979 +2999 @@ class ColVecSelect(EpiOp):
 -    def __init__(self, name, idx_op):
 +    def __init__(self, name, idx_op, *, output_dtype=None):
-@@ -2967,0 +2988,9 @@ class ColVecSelect(EpiOp):
+@@ -2986,0 +3007,9 @@ class ColVecSelect(EpiOp):
 +        self.output_dtype = output_dtype
 +        try:
 +            self._sink_dtype = (
@@ -68,10 +68,10 @@ index 8248bd2..e926728 100644
 +            raise ValueError(
 +                f"ColVecSelect {name!r}: unsupported output dtype {output_dtype}"
 +            ) from None
-@@ -2970 +2999 @@ class ColVecSelect(EpiOp):
+@@ -2989 +3018 @@ class ColVecSelect(EpiOp):
 -        return (self.idx_op.cache_key(),)
 +        return (self.idx_op.cache_key(), self.output_dtype)
-@@ -2981 +3010,8 @@ class ColVecSelect(EpiOp):
+@@ -3000 +3029,8 @@ class ColVecSelect(EpiOp):
 -        return {self.name: assume_stride_divisibility(getattr(args, self.name))}
 +        tensor = assume_stride_divisibility(getattr(args, self.name))
 +        return {
@@ -81,12 +81,12 @@ index 8248bd2..e926728 100644
 +                else tensor
 +            )
 +        }
-@@ -2987,0 +3024,4 @@ class ColVecSelect(EpiOp):
+@@ -3006,0 +3043,4 @@ class ColVecSelect(EpiOp):
 +    def sink_alloc_dtype(self):
 +        """Return the requested exact-gather dtype, or Float32 for CE selection."""
 +        return self._sink_dtype
 +
-@@ -2994,0 +3035,7 @@ class ColVecSelect(EpiOp):
+@@ -3013,0 +3054,7 @@ class ColVecSelect(EpiOp):
 +        index_shapes = (expected,) if len(expected) == 1 else ((m,), expected)
 +        if tuple(idx.shape) not in index_shapes:
 +            raise ValueError(
@@ -94,7 +94,7 @@ index 8248bd2..e926728 100644
 +            )
 +        if idx.stride(-1) != 1:
 +            raise ValueError(f"'{self.idx_op.name}' must have unit innermost stride")
-@@ -2999,2 +3046,8 @@ class ColVecSelect(EpiOp):
+@@ -3018,2 +3065,8 @@ class ColVecSelect(EpiOp):
 -        if value.dtype != torch.float32:
 -            raise ValueError(f"sink '{self.name}' must be float32, got {value.dtype}")
 +        if value.stride(-1) != 1:
@@ -105,10 +105,10 @@ index 8248bd2..e926728 100644
 +            raise ValueError(
 +                f"sink '{self.name}' must have dtype {expected_dtype}, got {value.dtype}"
 +            )
-@@ -3010,0 +3064,2 @@ class ColVecSelect(EpiOp):
+@@ -3029,0 +3083,2 @@ class ColVecSelect(EpiOp):
 +        if const_expr(self.output_dtype is not None):
 +            param = param.tensor
-@@ -3052,0 +3108,49 @@ class ColVecSelect(EpiOp):
+@@ -3071,0 +3127,49 @@ class ColVecSelect(EpiOp):
 +    @cute.jit
 +    def end_loop_stage(
 +        self,
@@ -158,7 +158,7 @@ index 8248bd2..e926728 100644
 +            if row < limit_m and n_off + column == index:
 +                gVec[row] = values[i].to(gVec.element_type)
 +
-@@ -3054,0 +3159,3 @@ class ColVecSelect(EpiOp):
+@@ -3073,0 +3178,3 @@ class ColVecSelect(EpiOp):
 +        if const_expr(self.output_dtype is not None):
 +            self._flush_exact(gemm, state, frag)
 +            return

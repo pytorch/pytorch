@@ -1101,30 +1101,35 @@ class GroupedLocalReduce(GroupedReduceBase):
     def _stitch_warps(self, gemm, state, frag, epi_coord, geom):
         """Stitch the ``group_warps`` warps of an M group through smem: each
         non-leader warp publishes its butterfly result once per column, the
-        leader warp folds the planes in ascending warp order."""
+        leader warp folds the planes in ascending warp order.
+
+        A group spans whole warps here, so the group index and the warp's role
+        are warp-uniform; the role predicates wrap the unrolled slot loops
+        instead of guarding each slot access.
+        """
         sReduce = state.smem
         assert sReduce is not None, "grouped M reduce across warps needs its smem buffer"
         planes = self._state_planes(frag)
         coord = cute.filter_zeros(state.coord[None, None, None, epi_coord[0], epi_coord[1]])
-        for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
-            row_idx, n_idx = coord[i][0], coord[i][1]
-            group_idx = row_idx // self.group
-            warp_in_group = state.warp_m_idx - group_idx * geom.group_warps
-            if warp_in_group > 0 and warp_in_group < geom.group_warps:
-                smem_warp = state.warp_m_idx - group_idx - 1
+        group_idx = state.warp_m_idx // geom.group_warps
+        warp_in_group = state.warp_m_idx - group_idx * geom.group_warps
+        smem_base = group_idx * (geom.group_warps - 1) - 1
+        if warp_in_group > 0:
+            smem_warp = smem_base + warp_in_group
+            for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
+                n_idx = coord[i][1]
                 for plane_idx, plane in enumerate(planes):
                     if const_expr(self.reduce_planes == 1):
                         sReduce[n_idx, smem_warp] = plane[i]
                     else:
                         sReduce[n_idx, smem_warp, plane_idx] = plane[i]
         gemm.epilogue_barrier.arrive_and_wait()
-        for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
-            row_idx, n_idx = coord[i][0], coord[i][1]
-            group_idx = row_idx // self.group
-            if state.warp_m_idx == group_idx * geom.group_warps:
+        if warp_in_group == 0:
+            for i in cutlass.range(cute.size(planes[0]), unroll_full=True):
+                n_idx = coord[i][1]
                 values = tuple(plane[i] for plane in planes)
                 for offset in cutlass.range_constexpr(1, geom.group_warps):
-                    smem_warp = group_idx * geom.group_warps + offset - group_idx - 1
+                    smem_warp = smem_base + offset
                     others = tuple(
                         sReduce[n_idx, smem_warp]
                         if const_expr(self.reduce_planes == 1)
