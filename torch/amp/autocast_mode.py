@@ -21,6 +21,7 @@ __all__ = [
     "autocast",
     "is_autocast_available",
     "custom_fwd",
+    "custom_setup_context",
     "custom_bwd",
 ]
 
@@ -438,6 +439,19 @@ def _cast(value, device_type: str, dtype: _dtype):
         return value
 
 
+def _stash_fwd_autocast_state(
+    ctx: Any, device_type: str, cast_inputs: _dtype | None
+) -> None:
+    # ``custom_bwd`` reads these back so that ``backward`` runs under the same
+    # autocast state that ``forward`` ran under. When ``cast_inputs`` is given,
+    # ``custom_fwd`` casts the inputs and runs ``forward`` with autocast
+    # disabled, so ``backward`` must run with autocast disabled too.
+    ctx._dtype = torch.get_autocast_dtype(device_type)
+    ctx._fwd_used_autocast = (
+        torch.is_autocast_enabled(device_type) if cast_inputs is None else False
+    )
+
+
 def custom_fwd(
     fwd=None,
     *,
@@ -463,6 +477,12 @@ def custom_fwd(
     .. note::
         If the decorated ``forward`` is called outside an autocast-enabled region,
         :func:`custom_fwd<custom_fwd>` is a no-op and ``cast_inputs`` has no effect.
+
+    .. note::
+        If your autograd function defines ``setup_context`` separately from
+        ``forward``, then ``forward`` does not receive ``ctx`` and this decorator
+        cannot record the autocast state on it. In that case also decorate
+        ``setup_context`` with :func:`custom_setup_context<custom_setup_context>`.
     """
     if not isinstance(device_type, str):
         raise ValueError(
@@ -475,13 +495,16 @@ def custom_fwd(
 
     @functools.wraps(fwd)
     def decorate_fwd(*args, **kwargs):
-        args[0]._dtype = torch.get_autocast_dtype(device_type)
+        # ``forward`` only receives ``ctx`` when ``setup_context`` is not defined
+        # separately. Writing the autocast bookkeeping unconditionally would set
+        # private attributes on whatever the first argument happens to be, which
+        # for the separate-``setup_context`` flavor is a user input.
+        if args and isinstance(args[0], torch.autograd.function.FunctionCtx):
+            _stash_fwd_autocast_state(args[0], device_type, cast_inputs)
         if cast_inputs is None:
-            args[0]._fwd_used_autocast = torch.is_autocast_enabled(device_type)
             return fwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
         else:
             autocast_context = torch.is_autocast_enabled(device_type)
-            args[0]._fwd_used_autocast = False
             if autocast_context:
                 with autocast(device_type=device_type, enabled=False):
                     return fwd(  # pyrefly: ignore  # not-callable
@@ -492,6 +515,73 @@ def custom_fwd(
                 return fwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
 
     return decorate_fwd
+
+
+def custom_setup_context(
+    setup_context_fn=None,
+    *,
+    device_type: str,
+    cast_inputs: _dtype | None = None,
+):
+    """
+    Create a helper decorator for ``setup_context`` methods of custom autograd functions.
+
+    Autograd functions are subclasses of :class:`torch.autograd.Function`. An autograd
+    function may define ``setup_context`` separately from ``forward``, in which case
+    ``forward`` does not receive ``ctx`` and :func:`custom_fwd<custom_fwd>` alone cannot
+    record the autocast state that :func:`custom_bwd<custom_bwd>` needs. Applying this
+    decorator to ``setup_context`` records that state on ``ctx``.
+
+    Pass the same ``device_type`` and ``cast_inputs`` that were passed to
+    :func:`custom_fwd<custom_fwd>`, so that ``backward`` runs under the autocast state
+    ``forward`` actually ran under.
+
+    Args:
+        device_type(str):  Device type to use. 'cuda', 'cpu', 'mtia', 'maia', 'xpu' and so on.
+            The type is the same as the `type` attribute of a :class:`torch.device`.
+            Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
+        cast_inputs (:class:`torch.dtype` or None, optional, default=None):  Must match the
+            ``cast_inputs`` passed to :func:`custom_fwd<custom_fwd>`. When it is not ``None``,
+            ``forward`` runs with autocast disabled, so ``backward`` is run with autocast
+            disabled as well.
+
+    Examples::
+
+        >>> class MyMM(torch.autograd.Function):
+        ...     @staticmethod
+        ...     @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
+        ...     def forward(a, b):
+        ...         return a.mm(b)
+        ...
+        ...     @staticmethod
+        ...     @torch.amp.custom_setup_context(
+        ...         device_type="cuda", cast_inputs=torch.float32
+        ...     )
+        ...     def setup_context(ctx, inputs, output):
+        ...         a, b = inputs
+        ...         ctx.save_for_backward(a, b)
+        ...
+        ...     @staticmethod
+        ...     @torch.amp.custom_bwd(device_type="cuda")
+        ...     def backward(ctx, grad):
+        ...         a, b = ctx.saved_tensors
+        ...         return grad.mm(b.t()), a.t().mm(grad)
+    """
+    if not isinstance(device_type, str):
+        raise ValueError(
+            f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
+        )
+    if setup_context_fn is None:
+        return functools.partial(
+            custom_setup_context, device_type=device_type, cast_inputs=cast_inputs
+        )
+
+    @functools.wraps(setup_context_fn)
+    def decorate_setup_context(ctx, *args, **kwargs):
+        _stash_fwd_autocast_state(ctx, device_type, cast_inputs)
+        return setup_context_fn(ctx, *args, **kwargs)  # pyrefly: ignore [not-callable]
+
+    return decorate_setup_context
 
 
 # Autograd ensures incoming gradients are the same type as forward outputs.  Allowing a separate
@@ -519,10 +609,22 @@ def custom_bwd(bwd=None, *, device_type: str):
 
     @functools.wraps(bwd)
     def decorate_bwd(*args, **kwargs):
+        ctx = args[0]
+        try:
+            fwd_used_autocast = ctx._fwd_used_autocast
+            fwd_dtype = ctx._dtype
+        except AttributeError as exc:
+            raise RuntimeError(
+                "custom_bwd could not find the autocast state that custom_fwd records "
+                "on ctx. If this autograd function defines setup_context separately "
+                "from forward, then forward does not receive ctx, so setup_context must "
+                "also be decorated with torch.amp.custom_setup_context(device_type=...) "
+                "using the same device_type and cast_inputs as custom_fwd."
+            ) from exc
         with autocast(
             device_type=device_type,
-            enabled=args[0]._fwd_used_autocast,
-            dtype=args[0]._dtype,
+            enabled=fwd_used_autocast,
+            dtype=fwd_dtype,
         ):
             return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
 

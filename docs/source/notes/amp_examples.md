@@ -423,3 +423,30 @@ with autocast(device_type='cuda', dtype=torch.float16):
     # func will run in float32, regardless of the surrounding autocast state
     output = func(input)
 ```
+
+### Functions that define `setup_context` separately from `forward`
+
+{func}`custom_fwd <custom_fwd>` records the autocast state on `ctx` so that
+{func}`custom_bwd <custom_bwd>` can reapply it. When an autograd function defines
+`setup_context` separately from `forward`, `forward` is not passed `ctx`, so
+{func}`custom_fwd <custom_fwd>` has nowhere to record that state and `backward` fails.
+Also decorate `setup_context` with
+{func}`custom_setup_context <custom_setup_context>`, passing the same `device_type` and
+`cast_inputs` given to {func}`custom_fwd <custom_fwd>`:
+
+```python
+class MyFloat32Func(torch.autograd.Function):
+    @staticmethod
+    @custom_fwd(device_type='cuda', cast_inputs=torch.float32)
+    def forward(input):
+        ...
+        return fwd_output
+    @staticmethod
+    @custom_setup_context(device_type='cuda', cast_inputs=torch.float32)
+    def setup_context(ctx, inputs, output):
+        ctx.save_for_backward(*inputs)
+    @staticmethod
+    @custom_bwd(device_type='cuda')
+    def backward(ctx, grad):
+        ...
+```
