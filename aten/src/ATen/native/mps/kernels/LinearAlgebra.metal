@@ -3434,9 +3434,9 @@ kernel void svd_jacobi(
       ++rank;
     }
     // Accept a candidate as a null-space column when its squared residual after
-    // orthogonalization clears this: loose (well above the fp32 roundoff floor),
-    // but enough that the canonicals span the complement. Cf. Rutishauser/DGKS
-    // Gram-Schmidt reorthogonalization.
+    // orthogonalization clears this: loose (well above the fp32 roundoff
+    // floor), but enough that the canonicals span the complement. Cf.
+    // Rutishauser/DGKS Gram-Schmidt reorthogonalization.
     constexpr float kIndepThreshSq = 1e-2f;
     threadgroup T* col = Atg;
     uint32_t cand = 0;
