@@ -1,14 +1,20 @@
 # Owner(s): ["oncall: quantization"]
 
-from torch.ao.quantization.experimental.observer import APoTObserver
 import unittest
+
 import torch
+from torch.ao.quantization.experimental.observer import APoTObserver
+from torch.testing._internal.common_utils import HardwareClassification
+
 
 class TestNonUniformObserver(unittest.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """
         Test case 1: calculate_qparams
         Test that error is thrown when k == 0
     """
+
     def test_calculate_qparams_invalid(self):
         obs = APoTObserver(b=0, k=0)
         obs.min_val = torch.tensor([0.0])
