@@ -961,6 +961,12 @@ instantiate_device_type_tests(TestDeviceUtils, globals())
 
 
 class TestCppExtensionUtils(TestCase):
+    @unittest.skipIf(IS_FBCODE, "CMake package files are not shipped in fbcode")
+    def test_cmake_prefix_path(self):
+        prefix = torch.utils.cmake_prefix_path
+        config = os.path.join(prefix, "Torch", "TorchConfig.cmake")
+        self.assertTrue(os.path.isfile(config), f"{config} does not exist")
+
     def test_cpp_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("c++"))
 
