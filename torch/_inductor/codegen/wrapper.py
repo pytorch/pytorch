@@ -460,6 +460,23 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                     symbols_included.add(symbol_name)
                 elif (
                     symbol_name in unqualified_loads
+                    and symbol_name not in ("triton", "tl")
+                    and inspect.ismodule(symbol)
+                    and (
+                        # Include the root module for aliases such as
+                        # `import triton as triton_alias`.
+                        symbol.__name__ == "triton"
+                        or symbol.__name__.startswith("triton.")
+                    )
+                ):
+                    # Module objects have __name__ but not __module__, so they
+                    # need a qualified import rather than a from-import.
+                    compile_wrapper.writeline(
+                        f"import {symbol.__name__} as {symbol_name}"
+                    )
+                    symbols_included.add(symbol_name)
+                elif (
+                    symbol_name in unqualified_loads
                     and symbol_name != "tl"  # already imported
                     and hasattr(symbol, "__module__")
                     # only codegen imports from triton; JITFunctions

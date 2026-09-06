@@ -63,6 +63,11 @@ from torch.utils._triton import (
 )
 
 
+if has_triton_package():
+    import triton as source_triton
+    import triton.language as source_tl
+
+
 @contextlib.contextmanager
 def _dump_launch_params(value: str):
     launch_params_file = f"{os.path.abspath(sys.argv[0])}.launch_params"
@@ -1833,6 +1838,22 @@ def forward(self, x_1, output_1):
         if not triton_version_uses_attrs_dict():
             self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
         self.assertEqual(compiled_out, eager_out)
+
+    @unittest.skipUnless(has_triton_package(), "requires triton")
+    def test_triton_kernel_with_imported_module(self):
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        @source_triton.jit
+        def kernel(out_ptr, BLOCK_SIZE):
+            offsets = source_tl.arange(0, BLOCK_SIZE)
+            value = source_triton.cdiv(BLOCK_SIZE, 2)
+            source_tl.store(out_ptr + offsets, value)
+
+        source = user_defined_triton_kernel_transitive_closure_source_code(kernel)
+        self.assertIn("import triton as source_triton", source)
+        self.assertIn("import triton.language as source_tl", source)
 
     @requires_gpu
     def test_triton_kernel_with_imported_symbol(self):
