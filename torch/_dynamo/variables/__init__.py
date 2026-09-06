@@ -20,6 +20,7 @@ from .base import VariableTracker
 from .builtin import (
     BaseBuiltinVariable,
     BuiltinVariable,
+    ByteArrayBuiltinVariable,
     DictBuiltinVariable,
     GetAttrBuiltinVariable,
     HasAttrBuiltinVariable,
@@ -121,6 +122,8 @@ from .iter import (
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    ByteArrayIteratorVariable,
+    ByteArrayVariable,
     DequeIteratorVariable,
     DequeReverseIteratorVariable,
     DequeVariable,
@@ -220,8 +223,11 @@ __all__ = [
     "BackwardHookVariable",
     "BaseBuiltinVariable",
     "BaseListVariable",
-    "CallMethodVariable",
     "BuiltinVariable",
+    "ByteArrayBuiltinVariable",
+    "ByteArrayIteratorVariable",
+    "ByteArrayVariable",
+    "CallMethodVariable",
     "CatchWarningsCtxManagerVariable",
     "CellVariable",
     "ConstantVariable",

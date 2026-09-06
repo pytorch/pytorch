@@ -2869,7 +2869,7 @@ class GuardBuilder(GuardBuilderBase):
         else:
             np_types = ()
 
-        ok_mutable_types = (list, set)
+        ok_mutable_types = (list, set, bytearray)
 
         ok_types = tuple(
             common_constant_types
