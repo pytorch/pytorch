@@ -451,9 +451,10 @@ if (${tensor_name}_storage_saved.has_value() &&
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate(
     """\
-std::vector<::std::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
+std::vector<::std::optional<Storage>> ${tensorlist_name}_storage_saved;
+${tensorlist_name}_storage_saved.reserve(${tensorlist_name}.size());
 for (const Tensor& tensor : ${tensorlist_name})
-  ${tensorlist_name}_storage_saved.push_back(
+  ${tensorlist_name}_storage_saved.emplace_back(
     tensor.has_storage() ? ::std::optional<Storage>(tensor.storage()) : ::std::nullopt);
 """
 )
@@ -469,9 +470,10 @@ for (size_t i=0; i<${tensorlist_name}.size() && !at::impl::dispatch_mode_enabled
 
 SAVE_OPTIONALTENSORLIST_STORAGE = CodeTemplate(
     """\
-std::vector<::std::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
+std::vector<::std::optional<Storage>> ${tensorlist_name}_storage_saved;
+${tensorlist_name}_storage_saved.reserve(${tensorlist_name}.size());
 for (const ::std::optional<Tensor>& tensor : ${tensorlist_name})
-  ${tensorlist_name}_storage_saved.push_back(
+  ${tensorlist_name}_storage_saved.emplace_back(
     tensor.has_value() && tensor->has_storage() ? ::std::optional<Storage>(tensor->storage()) : ::std::nullopt);
 """
 )

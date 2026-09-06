@@ -75,10 +75,34 @@ _OPTIONAL_FNS = {
     "cpp_covers": 0,
 }
 
+# Every sm spelling this tooling can parse and target. export checks an explicit
+# --arch against it before touching the disk, so a typo bails out naming the set
+# instead of matching no declaration and exporting nothing at exit 0. Deliberately
+# WIDER than EXPORTABLE_ARCHES below: an explicit --arch is how a hand run targets
+# something the release wheels do not.
+KNOWN_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a", "sm_103", "sm_103a")
+
+# Which of them the STANDARD build ships: the TORCH_CUDA_ARCH_LIST entries eligible
+# on the automatic export path, which an explicit --arch bypasses. Both spellings of
+# a capability are listed because they are distinct nvcc targets for the same
+# hardware -- "10.0a" (needed by tcgen05/wgmma) in b200-native-aot.yml, plain "10.0"
+# in the manywheel lists -- and omitting either silently exports nothing there. Each
+# entry also costs another full set of compiled kernels in every wheel naming it, and
+# makes the DSL runtimes mandatory on a builder with that GPU. sm_103 stays out: no
+# arch list we see names 10.3.
+EXPORTABLE_ARCHES = ("sm_90", "sm_90a", "sm_100", "sm_100a")
+if not set(EXPORTABLE_ARCHES) <= set(KNOWN_ARCHES):
+    raise AssertionError(
+        f"EXPORTABLE_ARCHES names arches this tooling cannot target: "
+        f"{sorted(set(EXPORTABLE_ARCHES) - set(KNOWN_ARCHES))}"
+    )
+
 # Default ARCHS: every current kernel requires sm90+ features (TMA,
 # clusters, cp.async.bulk); Blackwell variants included. Declarations
 # override to narrow (e.g. a Blackwell-only kernel pins ("sm_100a",)).
-_DEFAULT_ARCHS = ("sm_90", "sm_90a", "sm_100", "sm_100a", "sm_103", "sm_103a")
+# The same tuple as KNOWN_ARCHES today, named separately because "the tooling can
+# target this arch" is not "every declaration's kernels work on it".
+_DEFAULT_ARCHS = KNOWN_ARCHES
 
 _SM_RE = r"sm_\d+a?"
 
@@ -109,6 +133,51 @@ def archs_of(d: AotDeclaration) -> tuple[str, ...]:
     Read this instead of d.ARCHS: ARCHS is optional in a source
     declaration and the loader validates it without writing it back."""
     return tuple(getattr(d, "ARCHS", _DEFAULT_ARCHS))
+
+
+# Majors a generated gate could plausibly match. Narrow on purpose: see cc_of.
+_KNOWN_MAJORS = range(3, 13)
+
+# The whole spelling in one pattern, digits included, rather than stripping the
+# prefix and suffix and re-testing the middle. ASCII classes, not \d or
+# str.isdigit(): both are Unicode-aware, and full-width or Arabic-Indic digits
+# then read as an ordinary capability.
+_SM_SPELLING = re.compile(r"sm_([1-9][0-9]{1,2})a?")
+
+
+def cc_of(arch: str) -> tuple[int, int]:
+    """sm string -> compute capability. "sm_90" -> (9, 0), "sm_103a" -> (10, 3).
+
+    Shared, because the exporter (matching a detected arch against ARCHS) and the
+    generator (grouping sidecars by capability) must agree what an sm string
+    means: they disagreed while one compared capabilities and the other strings,
+    and a declaration pinning ('sm_100a',) disowned the 'sm_100' its own on-device
+    export produced.
+
+    Refuses what it cannot parse rather than computing a capability: "sm_9" gives
+    (0, 9) and "sm_1000" (100, 0), each a gate no device satisfies, so the op
+    ships, links and declines every call unreported. Suffixes other than the
+    arch-conditional "a" (CUDA 12.9+'s family-conditional "f") are refused too --
+    they mean something the generator has not been taught.
+
+    _KNOWN_MAJORS would reject "sm_9" and "sm_1000" anyway (as capability 0.9 and
+    100.0), so the digit count in _SM_SPELLING is there for the DIAGNOSTIC: a
+    malformed string should be reported as unreadable, not as hardware that does
+    not exist."""
+    m = _SM_SPELLING.fullmatch(arch)
+    if m is None:
+        raise RuntimeError(
+            f"cannot read a compute capability from arch {arch!r}: expected "
+            f"sm_<major><minor>[a], e.g. sm_90a or sm_100"
+        )
+    major, minor = divmod(int(m.group(1)), 10)
+    if major not in _KNOWN_MAJORS:
+        raise RuntimeError(
+            f"arch {arch!r} parses as compute capability {major}.{minor}, "
+            f"outside the known range {_KNOWN_MAJORS.start}-"
+            f"{_KNOWN_MAJORS.stop - 1}; a gate for it would match no device"
+        )
+    return major, minor
 
 
 def _check_arity(mod, name: str, want: int, path: str) -> None:
@@ -152,6 +221,17 @@ def _validate(d, path: str, label: str) -> None:
             f"{path}: {label} ARCHS must be a non-empty sequence of sm "
             f"strings (e.g. ('sm_90a', 'sm_100a')), got {archs!r}"
         )
+    # ...and each one must name a capability, not merely look like an sm string.
+    # _SM_RE accepts "sm_9" and "sm_1000", which cc_of refuses -- and export
+    # compares ARCHS entries by STRING, so a typo silently matched nothing: the
+    # declaration exported no kernels, generation had no tree to complain about,
+    # and the build shipped without that op, green. Refused here because this is
+    # the only place that knows which file to name.
+    for a in archs:
+        try:
+            cc_of(a)
+        except RuntimeError as e:
+            raise RuntimeError(f"{path}: {label} ARCHS entry {a!r}: {e}") from e
 
     grid = d.kernel_precompile_grid()
     if not isinstance(grid, list) or not grid:

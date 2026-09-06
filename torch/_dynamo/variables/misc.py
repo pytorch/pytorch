@@ -80,10 +80,12 @@ from .base import (
     AsPythonConstantNotImplementedError,
     GetSet,
     getset_build,
-    getset_read,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
+    readonly_setter,
+    Setter,
+    unmodeled_setter,
     VariableTracker,
 )
 from .constant import ConstantVariable
@@ -467,10 +469,14 @@ class FrameSummaryVariable(VariableTracker):
     # traceback.FrameSummary is pure-Python with __slots__ (Lib/traceback.py);
     # each slot is exposed as a read-only member_descriptor.
     tp_members = {
-        "lineno": Member(getset_build(lambda s: s.frame_summary.lineno)),
-        "filename": Member(getset_build(lambda s: s.frame_summary.filename)),
-        "name": Member(getset_build(lambda s: s.frame_summary.name)),
-        "line": Member(getset_build(lambda s: s.frame_summary.line)),
+        "lineno": Member(
+            getset_build(lambda s: s.frame_summary.lineno), readonly_setter
+        ),
+        "filename": Member(
+            getset_build(lambda s: s.frame_summary.filename), readonly_setter
+        ),
+        "name": Member(getset_build(lambda s: s.frame_summary.name), readonly_setter),
+        "line": Member(getset_build(lambda s: s.frame_summary.line), readonly_setter),
     }
 
 
@@ -531,7 +537,7 @@ class TracebackVariable(VariableTracker):
     ) -> VariableTracker:
         name = name_var.as_python_constant()
         getset = self.lookup_tp_getset_member(name)
-        if getset is not None and getset.setter is not None:
+        if getset is not None:
             getset.setter(self, tx, val)
         return variables.ConstantVariable.create(None)
 
@@ -539,8 +545,10 @@ class TracebackVariable(VariableTracker):
         return self.tb_next
 
     def _set_tb_next(
-        self, tx: "InstructionTranslatorBase", val: VariableTracker
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
     ) -> VariableTracker:
+        if val is None:
+            raise_type_error(tx, "can't delete tb_next attribute")
         if not self.is_valid_traceback(val):
             raise_observed_exception(TypeError, tx)
         if not isinstance(val, (TracebackVariable, ConstantVariable)):
@@ -571,14 +579,14 @@ class TracebackVariable(VariableTracker):
     # (not a real CPython traceback attribute).
     tp_getset = {
         "tb_next": GetSet(_get_tb_next, _set_tb_next),
-        "tb_lineno": GetSet(_get_tb_lineno, None),
-        "frame_summary": GetSet(getset_read(lambda s: s.frame_summary)),
+        "tb_lineno": GetSet(_get_tb_lineno, readonly_setter),
+        "frame_summary": GetSet(lambda s, _: s.frame_summary, readonly_setter),
     }
 
     # ref: CPython Objects/traceback.c tb_memberlist, where tb_lasti is
     # READONLY. Dynamo graph breaks on read rather than modelling the value.
     tp_members = {
-        "tb_lasti": Member(_get_tb_lasti),
+        "tb_lasti": Member(_get_tb_lasti, readonly_setter),
     }
 
     def tp_richcompare_impl(
@@ -687,7 +695,7 @@ class ExceptionVariable(VariableTracker):
             # Writable attributes route through their tp_getset/tp_members
             # setter. Anything else becomes a custom instance-dict attribute.
             getset = self.lookup_tp_getset_member(attr)
-            if getset is not None and getset.setter is not None:
+            if getset is not None:
                 getset.setter(self, tx, args[1])
             else:
                 # Arbitrary user attribute -> store in the instance __dict__
@@ -717,9 +725,11 @@ class ExceptionVariable(VariableTracker):
             )
 
     def _set_context(
-        self, tx: "InstructionTranslatorBase", val: VariableTracker
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
     ) -> VariableTracker:
         # Constant can be either an Exception or None
+        if val is None:
+            raise_type_error(tx, "__context__ may not be deleted")
         if not (
             val.is_constant_none()
             or isinstance(
@@ -738,8 +748,10 @@ class ExceptionVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
     def _set_cause(
-        self, tx: "InstructionTranslatorBase", val: VariableTracker
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
     ) -> VariableTracker:
+        if val is None:
+            raise_type_error(tx, "__cause__ may not be deleted")
         if val.is_constant_none() or isinstance(
             val,
             (
@@ -758,19 +770,22 @@ class ExceptionVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
     def _set_suppress_context(
-        self, tx: "InstructionTranslatorBase", val: VariableTracker
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
     ) -> VariableTracker:
-        if val.is_constant_match(True, False):
+        # T_BOOL member: PyMember_SetOne rejects both deletion and non-bools.
+        if val is None:
+            raise_type_error(tx, "can't delete numeric/char attribute")
+        elif val.is_constant_match(True, False):
             self.__suppress_context__ = val
         else:
-            raise_type_error(
-                tx, "exception cause must be None or derive from BaseException"
-            )
+            raise_type_error(tx, "attribute value type must be bool")
         return variables.ConstantVariable.create(None)
 
     def _set_traceback(
-        self, tx: "InstructionTranslatorBase", val: VariableTracker
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
     ) -> VariableTracker:
+        if val is None:
+            raise_type_error(tx, "__traceback__ may not be deleted")
         if not TracebackVariable.is_valid_traceback(val):
             raise_type_error(tx, "__traceback__ must be a traceback or None")
         self.__traceback__ = val
@@ -828,24 +843,26 @@ class ExceptionVariable(VariableTracker):
         )
 
     def _set_args(
-        self, tx: "InstructionTranslatorBase", val: VariableTracker
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
     ) -> VariableTracker:
+        if val is None:
+            raise_type_error(tx, "args may not be deleted")
         # CPython coerces any iterable to a tuple (PySequence_Tuple).
         self.args = unpack_iterable(tx, val)
         return variables.ConstantVariable.create(None)
 
     tp_getset = {
-        "__class__": GetSet(getset_build(lambda s: s.exc_type)),
-        "__context__": GetSet(getset_read(lambda s: s.__context__), _set_context),
-        "__cause__": GetSet(getset_read(lambda s: s.__cause__), _set_cause),
-        "__traceback__": GetSet(getset_read(lambda s: s.__traceback__), _set_traceback),
+        "__class__": GetSet(getset_build(lambda s: s.exc_type), unmodeled_setter),
+        "__context__": GetSet(lambda s, _: s.__context__, _set_context),
+        "__cause__": GetSet(lambda s, _: s.__cause__, _set_cause),
+        "__traceback__": GetSet(lambda s, _: s.__traceback__, _set_traceback),
         "args": GetSet(_get_args, _set_args),
     }
     # __suppress_context__ is a writable PyMemberDef on BaseException, not a
     # getset, so it lives in tp_members.
     tp_members = {
         "__suppress_context__": Member(
-            getset_read(lambda s: s.__suppress_context__), _set_suppress_context
+            lambda s, _: s.__suppress_context__, _set_suppress_context
         ),
     }
 
@@ -894,10 +911,34 @@ class StopIterationVariable(ExceptionVariable):
         self.value = args[0] if args else variables.ConstantVariable.create(None)
         super().__init__(exc_type, args, init_kwargs, source, mutation_type)
 
+    def _set_value(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
+    ) -> VariableTracker:
+        self.value = val if val is not None else ConstantVariable.create(None)
+        return variables.ConstantVariable.create(None)
+
     # ref: StopIteration_members in CPython Objects/exceptions.c
     tp_members = {
-        "value": Member(getset_read(lambda s: s.value)),
+        "value": Member(lambda s, _: s.value, _set_value),
     }
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        super().reconstruct(codegen)
+        codegen.dup_top()
+        codegen(self.value)
+        codegen.extend_output(codegen.rot_n(2))
+        codegen.store_attr("value")
+
+
+def _set_kwarg_attr(name: str) -> Setter:
+    # T_OBJECT member: deleting clears the slot, and reads then give None.
+    def setter(
+        self, tx: "InstructionTranslatorBase", val: VariableTracker | None
+    ) -> VariableTracker:
+        self._attrs[name] = val if val is not None else ConstantVariable.create(None)
+        return ConstantVariable.create(None)
+
+    return setter
 
 
 class _KwargAttrExceptionVariable(ExceptionVariable):
@@ -934,15 +975,17 @@ class AttributeErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#AttributeError
     _kwarg_attrs = ("name", "obj")
     tp_members = {
-        "name": Member(getset_read(lambda s: s._attrs["name"])),
-        "obj": Member(getset_read(lambda s: s._attrs["obj"])),
+        "name": Member(lambda s, _: s._attrs["name"], _set_kwarg_attr("name")),
+        "obj": Member(lambda s, _: s._attrs["obj"], _set_kwarg_attr("obj")),
     }
 
 
 class NameErrorVariable(_KwargAttrExceptionVariable):
     # https://docs.python.org/3/library/exceptions.html#NameError
     _kwarg_attrs = ("name",)
-    tp_members = {"name": Member(getset_read(lambda s: s._attrs["name"]))}
+    tp_members = {
+        "name": Member(lambda s, _: s._attrs["name"], _set_kwarg_attr("name")),
+    }
 
 
 class UnknownVariable(VariableTracker):
@@ -2874,7 +2917,9 @@ class ContextVarVariable(VariableTracker):
         "reset": Method(reset),
     }
     # contextvars.ContextVar.name is a read-only member.
-    tp_members = {"name": Member(getset_build(lambda s: s.cv_obj.name))}
+    tp_members = {
+        "name": Member(getset_build(lambda s: s.cv_obj.name), readonly_setter)
+    }
 
 
 class RandomClassVariable(VariableTracker):
