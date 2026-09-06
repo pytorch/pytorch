@@ -73,12 +73,12 @@ class FlexGemmEpilogueConfig:
         alpha: Static alpha multiplier for addmm/baddbmm inputs.
         beta: Static beta multiplier for addmm/baddbmm bias inputs.
         quack_config_constraints: Optional native QuACK config field constraints.
+        quack_config: Exact QuACK GemmConfig fields pinned for this choice, or
+            None to take QuACK's untuned default within the constraints.
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
         aux_out_indices: Template input indices for same-shape aux outputs.
         local_reduce: Concrete local-reduce consumer rendered into runtime kwargs.
-        fragmentwise: Whether the generated function consumes a complete TensorSSA fragment.
-        tuned: Whether QuACK should autotune this call.
     """
 
     epilogue_name: str
@@ -87,13 +87,12 @@ class FlexGemmEpilogueConfig:
     alpha: float
     beta: float
     quack_config_constraints: tuple[tuple[str, Any], ...]
+    quack_config: tuple[tuple[str, Any], ...] | None
     epilogue_arg_indices: tuple[int, ...]
     epilogue_arg_kinds: tuple[str, ...]
     aux_out_indices: tuple[int, ...]
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
     main_transform: FlexGemmGroupedMainOutputTransform | None
-    fragmentwise: bool
-    tuned: bool
 
 
 class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
@@ -154,6 +153,12 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             f"""
             def {self.kernel_name}_main({", ".join(params)}):
                 flex_gemm_runtime({", ".join((*call_args, config.epilogue_name))}{call_kwargs})
+
+            def {self.kernel_name}_precompile(**metadata):
+                # Compile workers cannot initialize CUDA; the template caller
+                # precompiles each choice's pinned QuACK kernel from the parent
+                # through Inductor's pool instead (see FlexGemmEpilogueCaller).
+                pass
             """
         )
         return PartialRender(code.getvalue(), self.render_hooks)
@@ -214,10 +219,9 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
     ) -> str:
         """Render captured tensor and aux-output kwargs for runtime dispatch."""
         epilogue_args = [input_args[index] for index in config.epilogue_arg_indices]
-        kwargs = [
-            f", fragmentwise={config.fragmentwise!r}",
-            f", tuned={config.tuned!r}",
-        ]
+        kwargs = []
+        if config.quack_config is not None:
+            kwargs.append(f", config={config.quack_config!r}")
         if config.quack_config_constraints:
             kwargs.append(f", config_constraints={config.quack_config_constraints!r}")
         if epilogue_args:
@@ -240,8 +244,29 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
 
 
 class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):
-    def precompile(self) -> None:
-        """Defer QuACK EpiMod compilation and tuning to the first real call."""
+    @override
+    def _build_description(
+        self, name: str, template_kwargs: dict[str, Any] | None
+    ) -> str:
+        if template_kwargs is None:
+            raise AssertionError("FlexGEMM template kwargs must include a config")
+        config = template_kwargs["config"]
+        quack_config = config.quack_config
+        description = "default" if quack_config is None else dict(quack_config)
+        return f"CuteDSL template {name} (QUACK config={description})"
+
+    def precompile(self, *, wait: bool = True) -> None:
+        """Compile this choice's pinned QuACK kernel through Inductor's worker pool."""
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.kernel.flex_gemm.runtime import precompile_flex_gemm_kernel
+
+        if not AsyncCompile.wait_process_pool_ready():
+            return
+        inputs = [meta.to_tensor() for meta in self.bmreq.input_tensor_meta]
+        run = self.bmreq.make_run_fn(
+            *inputs, out=self.bmreq.output_tensor_meta.to_tensor()
+        )
+        precompile_flex_gemm_kernel(run, wait=wait)
 
 
 class FlexGemmEpilogueTemplate(CuteDSLTemplate):

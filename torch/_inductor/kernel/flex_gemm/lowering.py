@@ -7,6 +7,7 @@ lowering and routes QUACK requests through shared analysis and one EpiMod choice
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 from typing import Any, TYPE_CHECKING
 
@@ -23,6 +24,7 @@ from ... import config, ir
 from ...ir import IRNode, TensorBox
 from ...lowering import empty_strided, process_subgraph_nodes, register_lowering
 from ...utils import _IntLike, ceildiv
+from .configs import flex_gemm_search_space
 from .constraints import (
     is_flex_gemm_partial_reduction_shape,
     LOCAL_REDUCE_AUX_OUTPUT_CONTRACT_ERROR,
@@ -33,9 +35,9 @@ from .constraints import (
 from .debug import (
     format_flex_gemm_analysis,
     format_flex_gemm_analysis_details,
+    format_flex_gemm_config_candidates,
     format_flex_gemm_lowering_plan,
     format_flex_gemm_problem,
-    format_flex_gemm_selection,
     log_flex_gemm_artifact,
 )
 
@@ -194,29 +196,42 @@ def allocate_flex_gemm_aux_outs(
     )
 
 
-def flex_gemm_ordered_outputs(result, aux_outs, local_reduce_outs, local_reduce_index):
-    """Return generated outputs in the user-visible tuple order."""
-    match local_reduce_outs, local_reduce_index:
-        case (), _:
-            return (result, *aux_outs)
-        case (local_reduce_out,), None:
-            return (result, *aux_outs, local_reduce_out)
-        case (local_reduce_out,), index:
-            return (
-                result,
-                *aux_outs[:index],
-                local_reduce_out,
-                *aux_outs[index:],
-            )
-        case _:
-            raise AssertionError("FlexGEMM expects at most one local-reduce output")
-
-
 def flex_gemm_local_reduce_metas(local_reduce) -> tuple[Any, ...]:
     """Return metadata for the optional compressed local-reduce output."""
     if local_reduce is None or local_reduce.store is None:
         return ()
     return (local_reduce.store.node.meta["val"],)
+
+
+def flex_gemm_quack_configs(
+    template: Any, template_kwargs: dict[str, Any], config: Any
+) -> tuple[tuple[tuple[str, Any], ...], ...]:
+    """Ask QuACK which GemmConfigs this generated call may pin, default first."""
+    from torch._inductor.codecache import PyCodeCache
+    from torch._inductor.codegen.cutedsl.cutedsl_kernel import MAIN_SUFFIX
+    from torch._inductor.kernel.flex_gemm.runtime import select_flex_gemm_configs
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    probe: list[Any] = []
+    error = template.maybe_append_choice(probe, config=config, **template_kwargs)
+    if error is not None:
+        raise error
+    bmreq = probe[0].bmreq
+    module = PyCodeCache.load_by_key_path(
+        bmreq.module_cache_key, bmreq.module_path, set_sys_modules=False
+    )
+    main = getattr(module, f"{bmreq.kernel_name}_{MAIN_SUFFIX}")
+    with FakeTensorMode():
+        inputs = [meta.to_tensor() for meta in bmreq.input_tensor_meta]
+        output = bmreq.output_tensor_meta.to_tensor()
+    with select_flex_gemm_configs() as legal_configs:
+        main(*inputs, output, *bmreq.extra_args, stream=None)
+    if not legal_configs:
+        raise AssertionError("FlexGEMM config probe did not reach gemm_epimod")
+    return tuple(
+        tuple(sorted(dataclasses.asdict(quack_config).items()))
+        for quack_config in legal_configs
+    )
 
 
 def flex_gemm_autotune_view_input(node: ir.ReinterpretView) -> torch.Tensor:
@@ -255,9 +270,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError("FlexGEMM fast_math kernel option must be bool")
     if "config" in kernel_options and not isinstance(explicit_config, dict):
         raise NotImplementedError("FlexGEMM config kernel option must be a dict")
-    explicit_swap_ab = (
-        explicit_config is not None and explicit_config.get("swap_ab") is True
-    )
 
     from torch._inductor.kernel.flex_gemm.epilogue import (
         analyze_flex_gemm_epilogue,
@@ -427,14 +439,12 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     )
     epimod_source = materialize_flex_gemm_epimod(
         subgraph.graph_module,
-        gemm_op,
         epilogue_analysis,
         epilogue_arg_placeholders,
         float(alpha),
         float(beta),
         epilogue_arg_kinds,
         fast_math=fast_math,
-        swap_ab=explicit_swap_ab,
     )
     log_flex_gemm_artifact(
         "lowering_plan",
@@ -477,40 +487,59 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             len(gemm_input_nodes) + len(epilogue_input_nodes),
         )
     )
-    choices: list[Any] = []
-    error = flex_gemm_epilogue_template.maybe_append_choice(
-        choices,
+    template_config = FlexGemmEpilogueConfig(
+        epilogue_name=epimod_source.name,
+        epilogue_source=epimod_source.source,
+        gemm_op=op_spec,
+        alpha=float(alpha),
+        beta=float(beta),
+        quack_config_constraints=(
+            tuple(sorted(explicit_config.items()))
+            if explicit_config is not None
+            else ()
+        ),
+        quack_config=None,
+        epilogue_arg_indices=epilogue_arg_indices,
+        epilogue_arg_kinds=epilogue_arg_kinds,
+        aux_out_indices=aux_out_indices,
+        local_reduce=template_local_reduce,
+        main_transform=main_transform,
+    )
+    template_kwargs = dict(
         input_nodes=input_nodes,
         layout=layout,
         mutated_inputs=mutated_input_nodes or None,
-        config=FlexGemmEpilogueConfig(
-            epilogue_name=epimod_source.name,
-            epilogue_source=epimod_source.source,
-            gemm_op=op_spec,
-            alpha=float(alpha),
-            beta=float(beta),
-            quack_config_constraints=(
-                tuple(sorted(explicit_config.items()))
-                if explicit_config is not None
-                else ()
-            ),
-            epilogue_arg_indices=epilogue_arg_indices,
-            epilogue_arg_kinds=epilogue_arg_kinds,
-            aux_out_indices=aux_out_indices,
-            local_reduce=template_local_reduce,
-            main_transform=main_transform,
-            fragmentwise=epimod_source.fragmentwise,
-            tuned=tuned,
-        ),
     )
-    if error is not None:
-        raise error
+    legal_configs = flex_gemm_quack_configs(
+        flex_gemm_epilogue_template, template_kwargs, template_config
+    )
+    quack_configs = (
+        flex_gemm_search_space(legal_configs) if tuned else legal_configs[:1]
+    )
+    log_flex_gemm_artifact(
+        "config_candidates",
+        lambda: format_flex_gemm_config_candidates(quack_configs, tuned=tuned),
+        lowering_name=subgraph.name,
+    )
+    choices: list[Any] = []
+    for quack_config in quack_configs:
+        error = flex_gemm_epilogue_template.maybe_append_choice(
+            choices,
+            config=dataclasses.replace(
+                template_config,
+                quack_config=quack_config,
+                quack_config_constraints=(),
+            ),
+            **template_kwargs,
+        )
+        if error is not None:
+            raise error
     input_gen_fns = {
         index: flex_gemm_autotune_view_input
         for index, input_node in enumerate(input_nodes)
         if isinstance(input_node, ir.ReinterpretView)
     }
-    result, selected_choice = autotune_select_algorithm(
+    result, _ = autotune_select_algorithm(
         "flex_gemm_epilogue",
         choices,
         input_nodes,
@@ -518,17 +547,19 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         input_gen_fns=input_gen_fns or None,
         **({"return_multi_template": False} if mutated_input_nodes else {}),
     )
-    log_flex_gemm_artifact(
-        "selection",
-        lambda: format_flex_gemm_selection(selected_choice, tuned=tuned),
-        lowering_name=subgraph.name,
-    )
-    return flex_gemm_ordered_outputs(
-        result,
-        aux_outs,
-        local_reduce_outs,
-        None if local_reduce_store is None else local_reduce_store.aux_index,
-    )
+    if len(choices) == 1:
+        # A single choice skips autotuning, so overlap its kernel compile with
+        # the rest of Inductor's compilation instead of paying it at first call.
+        choices[0].precompile(wait=False)
+    structural_outs = {}
+    if local_reduce_store is not None:
+        structural_outs[local_reduce_store.node] = local_reduce_outs[0]
+    aux_iter = iter(aux_outs)
+    ordered_aux_outs = [
+        structural_outs[node] if node in structural_outs else next(aux_iter)
+        for node in outputs.returned_aux_outputs
+    ]
+    return (result, *ordered_aux_outs)
 
 
 @register_lowering(flex_gemm_hop, type_promotion_kind=None)
