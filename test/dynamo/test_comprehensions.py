@@ -16,6 +16,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import skipIfNotPy312
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def count_op(graph, op):
@@ -25,6 +26,8 @@ def count_op(graph, op):
 
 @skipIfNotPy312
 class ComprehensionTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_list_comprehension_graph_break(self):
         """Test that list comprehension with graph break creates 2 graphs."""
 
@@ -964,6 +967,8 @@ class ComprehensionTests(torch._dynamo.test_case.TestCase):
 
 @skipIfNotPy312
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_nested_function_calls_with_comprehension_graph_break_nested_graph_breaks_true(
         self,
     ):
