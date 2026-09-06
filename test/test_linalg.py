@@ -2206,18 +2206,18 @@ class TestLinalg(TestCase):
             expected = np.linalg.eig(a.cpu().numpy())
 
             # sort NumPy output
-            ind = np.argsort(expected[0], axis=-1)[::-1]
-            expected = (np.take_along_axis(expected[0], ind, axis=-1), np.take_along_axis(expected[1], ind[:, None], axis=-1))
+            ind = np.argsort(expected[0], axis=-1)[..., ::-1]
+            expected = (np.take_along_axis(expected[0], ind, axis=-1), np.take_along_axis(expected[1], ind[..., None, :], axis=-1))
 
             # sort PyTorch output
             # torch.argsort doesn't work with complex inputs, NumPy sorting on CPU is used instead
             # RuntimeError: _th_sort not supported on CUDAType for ComplexDouble
             # RuntimeError: "sorting_kernel_method_name" not implemented for 'ComplexDouble'
-            ind = np.argsort(actual[0].cpu().numpy(), axis=-1)[::-1]
+            ind = np.argsort(actual[0].cpu().numpy(), axis=-1)[..., ::-1]
             actual_np = [x.cpu().numpy() for x in actual]
             sorted_actual = (
                 np.take_along_axis(actual_np[0], ind, axis=-1),
-                np.take_along_axis(actual_np[1], ind[:, None], axis=-1))
+                np.take_along_axis(actual_np[1], ind[..., None, :], axis=-1))
 
             self.assertEqual(expected[0], sorted_actual[0], exact_dtype=False)
             self.assertEqual(abs(expected[1]), abs(sorted_actual[1]), exact_dtype=False)
@@ -2226,7 +2226,7 @@ class TestLinalg(TestCase):
                   (5, 5),  # Single matrix
                   (0, 0, 0), (0, 5, 5),  # Zero batch dimension tensors
                   (2, 5, 5),  # 3-dim tensors
-                  (2, 1, 5, 5)]  # 4-dim tensors
+                  (2, 1, 5, 5), (2, 3, 5, 5)]  # 4-dim tensors
         for shape in shapes:
             run_test(shape)
             run_test(shape, symmetric=True)
@@ -2591,14 +2591,14 @@ class TestLinalg(TestCase):
             expected = np.linalg.eigvals(a.cpu().numpy())
 
             # sort NumPy output
-            ind = np.argsort(expected, axis=-1)[::-1]
+            ind = np.argsort(expected, axis=-1)[..., ::-1]
             expected = np.take_along_axis(expected, ind, axis=-1)
 
             # sort PyTorch output
             # torch.argsort doesn't work with complex inputs, NumPy sorting on CPU is used instead
             # RuntimeError: _th_sort not supported on CUDAType for ComplexDouble
             # RuntimeError: "sorting_kernel_method_name" not implemented for 'ComplexDouble'
-            ind = np.argsort(actual.cpu().numpy(), axis=-1)[::-1]
+            ind = np.argsort(actual.cpu().numpy(), axis=-1)[..., ::-1]
             actual_np = actual.cpu().numpy()
             sorted_actual = np.take_along_axis(actual_np, ind, axis=-1)
 
@@ -2608,7 +2608,7 @@ class TestLinalg(TestCase):
                   (5, 5),  # Single matrix
                   (0, 0, 0), (0, 5, 5),  # Zero batch dimension tensors
                   (2, 5, 5),  # 3-dim tensors
-                  (2, 1, 5, 5)]  # 4-dim tensors
+                  (2, 1, 5, 5), (2, 3, 5, 5)]  # 4-dim tensors
         for shape in shapes:
             run_test(shape)
             run_test(shape, symmetric=True)
