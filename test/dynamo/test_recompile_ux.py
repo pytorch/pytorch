@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import faulthandler
 import gc
 import operator
 import queue
@@ -517,8 +516,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         the GIL before it waits. A short switch interval makes the handoff
         frequent.
 
-        Stress test; not a deterministic reproduction. A wedge shows up as a
-        harness timeout, since join() never returns.
+        Stress test; not a deterministic reproduction. A wedge fails this test:
+        the joins are bounded by a shared deadline and any thread still alive
+        after it trips the assertion below.
         """
 
         def f(x):
@@ -536,7 +536,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                 for _ in range(200):
                     for arg in args:
                         opt(arg)
-            except BaseException as e:
+            except Exception as e:
                 errors.put(e)
 
         threads = [threading.Thread(target=hammer, daemon=True) for _ in range(4)]
@@ -545,18 +545,19 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         try:
             for thread in threads:
                 thread.start()
+            deadline = time.monotonic() + 120
             for thread in threads:
-                thread.join(timeout=120)
-            self.assertFalse(any(t.is_alive() for t in threads), "a call wedged")
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
         finally:
             sys.setswitchinterval(prior_interval)
         raised = []
         while not errors.empty():
             raised.append(errors.get_nowait())
-        # Re-raise the worker's exception so its traceback survives -- for
-        # a concurrency failure the traceback is the finding. Threads joined.
+        # Re-raise a worker's exception first: for a concurrency failure the
+        # traceback is the finding, and a bare "a call wedged" would mask it.
         if raised:
             raise raised[0]
+        self.assertFalse(any(t.is_alive() for t in threads), "a call wedged")
 
     def test_reset_code_racing_lookup_does_not_destroy_the_cache_state(self):
         """reset_code can run while other threads are parked on the same
@@ -585,7 +586,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                 while not stop.is_set():
                     for arg in args:
                         opt(arg)
-            except BaseException as e:
+            except Exception as e:
                 errors.put(e)
 
         def resetter():
@@ -595,7 +596,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                     # races the LOOKUPS here (which take no compile lock) but
                     # not an in-flight compile's cache-entry snapshot.
                     torch._dynamo.eval_frame.remove_from_cache(f.__code__)
-            except BaseException as e:
+            except Exception as e:
                 errors.put(e)
             finally:
                 stop.set()
@@ -607,19 +608,20 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         try:
             for thread in threads:
                 thread.start()
+            deadline = time.monotonic() + 120
             for thread in threads:
-                thread.join(timeout=120)
-            self.assertFalse(any(t.is_alive() for t in threads), "a call wedged")
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
         finally:
             stop.set()
             sys.setswitchinterval(prior_interval)
         raised = []
         while not errors.empty():
             raised.append(errors.get_nowait())
-        # Re-raise the worker's exception so its traceback survives -- for
-        # a concurrency failure the traceback is the finding. Threads joined.
+        # Re-raise a worker's exception first: for a concurrency failure the
+        # traceback is the finding, and a bare "a call wedged" would mask it.
         if raised:
             raise raised[0]
+        self.assertFalse(any(t.is_alive() for t in threads), "a call wedged")
         self.assertEqual(opt(args[0]), f(args[0]))
 
     def test_concurrent_install_and_reset_against_lookups(self):
@@ -630,11 +632,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         installer takes the same lock to append to or splice the list; the
         raised depth parks any destroy until the readers holding the snapshot
         finish, so a reader never touches a freed node. The threads are joined
-        with a timeout and asserted not alive, so a wedge fails this test; the
-        faulthandler timer only dumps every thread's stack for diagnostics if
-        the run overruns its deadline. Stress test; not a deterministic
-        reproduction, and it passes on the lock-free parent as well: it
-        guards the locking against regressions.
+        under a shared deadline and asserted not alive, so a wedge fails this
+        test. Stress test; not a deterministic reproduction, and it passes on
+        the lock-free parent as well: it guards the locking against
+        regressions.
         """
         from torch._C._dynamo.eval_frame import (
             _debug_get_cache_entry_list,
@@ -669,7 +670,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                     for arg, want in zip(args, expected):
                         if not torch.equal(opt(arg), want):
                             raise AssertionError("lookup served the wrong result")
-            except BaseException as e:
+            except Exception as e:
                 errors.put(e)
 
         def installer(owner):
@@ -680,7 +681,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
                             code, guard_manager, dynamo_code, -1, owner
                         )
                     _reset_precompile_entries_for_owner(code, -1, owner)
-            except BaseException as e:
+            except Exception as e:
                 errors.put(e)
 
         callers = [threading.Thread(target=caller, daemon=True) for _ in range(8)]
@@ -691,28 +692,27 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         prior_interval = sys.getswitchinterval()
         sys.setswitchinterval(1e-6)
         try:
-            # A real fd: under pytest's capture sys.stderr has no fileno.
-            faulthandler.dump_traceback_later(120, exit=False, file=sys.__stderr__)
             for thread in callers + installers:
                 thread.start()
+            deadline = time.monotonic() + 120
             for thread in installers:
-                thread.join(timeout=120)
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
             stop.set()
             for thread in callers:
-                thread.join(timeout=120)
-            self.assertFalse(
-                any(t.is_alive() for t in callers + installers), "a call wedged"
-            )
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
         finally:
-            faulthandler.cancel_dump_traceback_later()
+            stop.set()
             sys.setswitchinterval(prior_interval)
         raised = []
         while not errors.empty():
             raised.append(errors.get_nowait())
-        # Re-raise the worker's exception so its traceback survives -- for
-        # a concurrency failure the traceback is the finding. Threads joined.
+        # Re-raise a worker's exception first: for a concurrency failure the
+        # traceback is the finding, and a bare "a call wedged" would mask it.
         if raised:
             raise raised[0]
+        self.assertFalse(
+            any(t.is_alive() for t in callers + installers), "a call wedged"
+        )
         # A reset that arrived while a lookup held the lock was parked; the
         # entry reader applies whatever is still parked, and nothing survives.
         for owner in owners:
@@ -840,7 +840,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             try:
                 opt2 = torch._dynamo.optimize(backend=second, dynamic=False)(f)
                 opt2(x)
-            except BaseException as e:
+            except Exception as e:
                 errors.put(e)
 
         thread = threading.Thread(target=caller, daemon=True)
@@ -2377,7 +2377,12 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         def f(x):
             return x + 1
 
-        code = f.__code__
+        # A fresh, unattached code object each run: f is a constant of this
+        # method, so f.__code__ is the same object across in-process reruns
+        # (--repeat, --flake-runs) and its ExtraState -- and thus its nonzero
+        # strategy_generation -- would survive to fail the generation-0 asserts
+        # below. replace() mints a distinct object; nothing here runs it.
+        code = f.__code__.replace()
         # Never-touched code object: DEFAULT strategy, generation 0, and a
         # compare-and-set against it fails outright (no state to write).
         self.assertEqual(get_code_exec_strategy(code).cur_action, FrameAction.DEFAULT)
@@ -2421,7 +2426,8 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         def g(x):
             return x + 2
 
-        code2 = g.__code__
+        # Fresh object per run, same reason as `code` above.
+        code2 = g.__code__.replace()
         set_code_region_exec_strategy(
             code2, 3, FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.DEFAULT)
         )
