@@ -839,8 +839,8 @@ def add(x, y):
     def test_two_packages_from_one_artifact_coexist(self):
         # Two loads of one artifact serve the same frame at once: their
         # precompile entries are told apart by owner and their resume functions
-        # by per-install names, so each is served while the other is live and
-        # unloads without disturbing it.
+        # by per-install names, so one can be served while the other is live and
+        # each unloads without disturbing the other.
         ctx = DiskDynamoStore()
 
         def fn(x):
