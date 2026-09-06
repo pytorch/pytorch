@@ -16,7 +16,7 @@ import sys
 import tempfile
 import uuid
 from contextlib import closing, redirect_stderr, redirect_stdout
-from unittest import mock, skipIf
+from unittest import mock
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -31,10 +31,11 @@ from torch.distributed.elastic.utils.distributed import get_free_port
 from torch.testing._internal.common_distributed import (
     skip_if_rocm_ver_atleast_multiprocess,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
@@ -72,6 +73,8 @@ class MockException(Exception):
 
 
 class ElasticLaunchTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.test_dir = tempfile.mkdtemp()
@@ -658,6 +661,9 @@ class ElasticLaunchTest(TestCase):
         )
         # nothing to validate, just make sure it runs
 
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
+    )
     def test_capture_logs_using_default_logs_specs(self):
         run_id = str(uuid.uuid4().int)
         nnodes = 1
@@ -686,17 +692,21 @@ class ElasticLaunchTest(TestCase):
         for i in range(nproc_per_node):
             self.assertTrue(f"[rank{i}]: creating " in captured_out.getvalue())
 
+
+class ElasticLaunchTestCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
-    @skipIf(not TEST_CUDA, "requires CUDA")
-    # ElasticLaunchTest is a plain TestCase, but this test launches
-    # `torchrun --nproc-per-node=2` which needs 2 GPUs. That process spawning
-    # happens via torchrun, not MultiProcessTestCase, so the conftest heuristic
-    # (see test/conftest.py) can't detect it; mark it multigpu explicitly.
+    # ElasticLaunchTestCUDA uses instantiate_device_type_tests(only_for="cuda"),
+    # but this test launches `torchrun --nproc-per-node=2` which needs 2 GPUs.
+    # That process spawning happens via torchrun, not MultiProcessTestCase, so
+    # the conftest heuristic (see test/conftest.py) can't detect it; mark it
+    # multigpu explicitly.
     @pytest.mark.multigpu
     @skip_if_rocm_ver_atleast_multiprocess([7, 14])
-    def test_virtual_local_rank(self):
+    def test_virtual_local_rank(self, device):
         """
         Test that virtual-local-rank ensures consistent device IDs across ranks.
         Without it, ranks may compile to different devices, leading to different code.
@@ -782,6 +792,12 @@ class ElasticLaunchTest(TestCase):
             rank0, rank1, "Expected identical compiled code with --virtual-local-rank"
         )
 
+
+instantiate_device_type_tests(
+    ElasticLaunchTestCUDA,
+    globals(),
+    only_for="cuda",
+)
 
 if __name__ == "__main__":
     run_tests()
