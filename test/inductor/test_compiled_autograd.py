@@ -3803,7 +3803,7 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], True, 6)]);  getitem = None
         getitem_25 = validate_outputs[0];  validate_outputs = None
 
-        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_25], [True], [unwrap_maybe_dynamic_int, unwrap_maybe_dynamic_int_1]);  getitem_25 = unwrap_maybe_dynamic_int = unwrap_maybe_dynamic_int_1 = None
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_25], [True], 6, [unwrap_maybe_dynamic_int, unwrap_maybe_dynamic_int_1]);  getitem_25 = unwrap_maybe_dynamic_int = unwrap_maybe_dynamic_int_1 = None
         getitem_26 = sum_backward0[0];  sum_backward0 = None
         validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_26], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_2, unwrap_maybe_dynamic_int_3], True, 6)]);  getitem_26 = unwrap_maybe_dynamic_int_2 = unwrap_maybe_dynamic_int_3 = None
         getitem_27 = validate_outputs_1[0];  validate_outputs_1 = None
@@ -4064,7 +4064,7 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False, 6)]);  getitem = None
         getitem_14 = validate_outputs[0];  validate_outputs = None
 
-        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_14], [True], [unwrap_maybe_dynamic_int, unwrap_maybe_dynamic_int_1]);  getitem_14 = unwrap_maybe_dynamic_int = unwrap_maybe_dynamic_int_1 = None
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_14], [True], 6, [unwrap_maybe_dynamic_int, unwrap_maybe_dynamic_int_1]);  getitem_14 = unwrap_maybe_dynamic_int = unwrap_maybe_dynamic_int_1 = None
         getitem_15 = sum_backward0[0];  sum_backward0 = None
         validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_15], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_2, unwrap_maybe_dynamic_int_3], False, 6)]);  getitem_15 = unwrap_maybe_dynamic_int_2 = unwrap_maybe_dynamic_int_3 = None
         getitem_16 = validate_outputs_1[0];  validate_outputs_1 = None
