@@ -989,7 +989,7 @@ class FlexGemmTestCase(TestCase):
                 raise unittest.SkipTest("requires CuTeDSL")
 
     @contextlib.contextmanager
-    def limitEpiModAutotune(self, device):
+    def limitEpiModAutotune(self):
         """Limit tests after production legality pruning has selected candidates."""
         import torch._vendor.quack.gemm_runtime.autotune as epi_autotune
 
@@ -1325,7 +1325,6 @@ class TestFlexGemmAnalysis(TestCase):
             FlexGemmLocalReduceGeometry,
         )
         from torch._inductor.kernel.flex_gemm.epilogue import (
-            FlexGemmEpilogueGraph,
             FlexGemmLocalReduceAnalysis,
             FlexGemmLocalReduceMatch,
             FlexGemmLocalReduceStore,
@@ -1333,13 +1332,14 @@ class TestFlexGemmAnalysis(TestCase):
             FlexGemmOutputPlan,
             tuple_output_plan,
         )
+        from torch._inductor.kernel.gemm_epilogue import GemmEpilogueGraph
 
         graph = torch.fx.Graph()
         node = graph.placeholder("x")
         aux = graph.placeholder("aux")
         geometry = FlexGemmLocalReduceGeometry(8, 0)
         match = FlexGemmLocalReduceMatch(aux, geometry)
-        analysis = FlexGemmLocalReduceAnalysis(FlexGemmEpilogueGraph({}))
+        analysis = FlexGemmLocalReduceAnalysis(GemmEpilogueGraph({}, {}))
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
             FlexGemmOutputPlan(object())
         with self.assertRaisesRegex(RuntimeError, "output nodes"):
@@ -1351,11 +1351,9 @@ class TestFlexGemmAnalysis(TestCase):
         with self.assertRaisesRegex(RuntimeError, "output plans"):
             FlexGemmOutputLocalReducePlan(match)
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmLocalReduceStore(object(), 0)
+            FlexGemmLocalReduceStore(object())
         with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmLocalReduceStore(aux, 0, object())
-        with self.assertRaisesRegex(RuntimeError, "output plans"):
-            FlexGemmLocalReduceStore(aux, -1)
+            FlexGemmLocalReduceStore(aux, object())
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
             tuple_output_plan(object(), (), analysis)
         with self.assertRaisesRegex(NotImplementedError, "tensor outputs"):
@@ -1363,9 +1361,7 @@ class TestFlexGemmAnalysis(TestCase):
         FlexGemmOutputPlan(
             node,
             (aux,),
-            FlexGemmOutputLocalReducePlan(
-                match, store=FlexGemmLocalReduceStore(aux, 0)
-            ),
+            FlexGemmOutputLocalReducePlan(match, store=FlexGemmLocalReduceStore(aux)),
         )
         FlexGemmOutputPlan(
             node,
@@ -1405,20 +1401,6 @@ class TestFlexGemmAnalysis(TestCase):
         self.assertEqual(len(storage.nodes), expected_nodes)
         self.assertIs(storage.nodes[-1], output)
         self.assertEqual(storage.source.op, "placeholder")
-
-    def test_ordered_outputs_restore_local_reduce_position(self):
-        from torch._inductor.kernel.flex_gemm.lowering import flex_gemm_ordered_outputs
-
-        expected_outputs = (
-            ("main", "local", "aux0", "aux1"),
-            ("main", "aux0", "local", "aux1"),
-            ("main", "aux0", "aux1", "local"),
-        )
-        for index, expected in enumerate(expected_outputs):
-            self.assertEqual(
-                flex_gemm_ordered_outputs("main", ("aux0", "aux1"), ("local",), index),
-                expected,
-            )
 
 
 @instantiate_parametrized_tests
@@ -1653,11 +1635,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 },
             )
 
-        tune_context = (
-            self.limitEpiModAutotune(torch.device("cuda"))
-            if tuned
-            else contextlib.nullcontext()
-        )
+        tune_context = self.limitEpiModAutotune() if tuned else contextlib.nullcontext()
         with tune_context:
             actual, (code,) = run_and_get_code(
                 torch.compile(fn, backend="inductor", fullgraph=True), a, b
@@ -2759,7 +2737,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 },
             )
 
-        with self.limitEpiModAutotune(torch.device("cuda")):
+        with self.limitEpiModAutotune():
             compiled = torch.compile(
                 fn, backend="inductor", fullgraph=True, dynamic=True
             )
@@ -2807,7 +2785,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             )
 
         compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
-        with self.limitEpiModAutotune("cuda"):
+        with self.limitEpiModAutotune():
             for m, k, n in ((128, 64, 128), (256, 64, 192)):
                 a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
                 b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
@@ -3055,7 +3033,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(k, n, device="cuda", dtype=torch.bfloat16)
         scale = torch.tensor([[-0.25]], device="cuda", dtype=torch.float32)
-        with self.limitEpiModAutotune(a.device):
+        with self.limitEpiModAutotune():
             actual, (code,) = run_and_get_code(
                 torch.compile(fn, backend="inductor", fullgraph=True), a, b, scale
             )
@@ -4070,7 +4048,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(n, k, device="cuda", dtype=torch.bfloat16)
 
-        with self.limitEpiModAutotune(a.device):
+        with self.limitEpiModAutotune():
             actual, aux = torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
         self.assertLocalReduceAuxMatches(actual, aux, a, b.mT, epilogue_fn)
@@ -6178,7 +6156,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
 
-        with self.limitEpiModAutotune(a.device):
+        with self.limitEpiModAutotune():
             actual, (code,) = run_and_get_code(
                 torch.compile(fn, backend="inductor", fullgraph=True), a, b
             )
@@ -6211,7 +6189,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
 
-        with self.limitEpiModAutotune(a.device):
+        with self.limitEpiModAutotune():
             (actual, aux), (code,) = run_and_get_code(
                 torch.compile(fn, backend="inductor", fullgraph=True), a, b
             )
@@ -6455,7 +6433,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         a = torch.randn(2, 128, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
 
-        with self.limitEpiModAutotune(a.device):
+        with self.limitEpiModAutotune():
             actual, (code,) = run_and_get_code(
                 torch.compile(fn, backend="inductor", fullgraph=True), a, b
             )
@@ -6558,7 +6536,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
         b = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
 
-        with self.limitEpiModAutotune(a.device):
+        with self.limitEpiModAutotune():
             actual, (code,) = run_and_get_code(
                 torch.compile(fn, backend="inductor", fullgraph=True), bias, a, b
             )
@@ -6686,7 +6664,7 @@ class TestFlexGemmTransposedOutputDevice(FlexGemmTestCase):
 
         a = self.makeTensor(m, k, device=device)
         b = self.makeTensor(k, n, device=device)
-        with self.limitEpiModAutotune(a.device):
+        with self.limitEpiModAutotune():
             (actual, normalized, dw), (code,) = run_and_get_code(
                 torch.compile(fn, backend="inductor", fullgraph=True), a, b
             )
@@ -7033,7 +7011,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
         a = torch.randn(128, 64, device=device, dtype=torch.bfloat16)
         b = torch.randn(64, 128, device=device, dtype=torch.bfloat16)
-        with self.limitEpiModAutotune(device):
+        with self.limitEpiModAutotune():
             actual, (code,) = run_and_get_code(
                 torch.compile(fn, backend="inductor", fullgraph=True), a, b
             )
@@ -7406,7 +7384,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         rows = torch.arange(k, device=device)[:, None]
         cols = torch.arange(n, device=device)[None, :]
         b = (1 + (rows % 4) + ((cols // group) % 4)).to(torch.bfloat16)
-        with self.limitEpiModAutotune(device):
+        with self.limitEpiModAutotune():
             (actual, blocked), (code,) = run_and_get_code(
                 torch.compile(fn, backend="inductor", fullgraph=True), a, b
             )
@@ -7595,7 +7573,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
 
         a = self.makeTensor(m, 64, device=device)
         b = self.makeTensor(64, n, device=device)
-        with self.limitEpiModAutotune(device):
+        with self.limitEpiModAutotune():
             (actual, aux), (code,) = run_and_get_code(
                 torch.compile(fn, backend="inductor", fullgraph=True), a, b
             )

@@ -194,24 +194,6 @@ def allocate_flex_gemm_aux_outs(
     )
 
 
-def flex_gemm_ordered_outputs(result, aux_outs, local_reduce_outs, local_reduce_index):
-    """Return generated outputs in the user-visible tuple order."""
-    match local_reduce_outs, local_reduce_index:
-        case (), _:
-            return (result, *aux_outs)
-        case (local_reduce_out,), None:
-            return (result, *aux_outs, local_reduce_out)
-        case (local_reduce_out,), index:
-            return (
-                result,
-                *aux_outs[:index],
-                local_reduce_out,
-                *aux_outs[index:],
-            )
-        case _:
-            raise AssertionError("FlexGEMM expects at most one local-reduce output")
-
-
 def flex_gemm_local_reduce_metas(local_reduce) -> tuple[Any, ...]:
     """Return metadata for the optional compressed local-reduce output."""
     if local_reduce is None or local_reduce.store is None:
@@ -255,9 +237,6 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         raise NotImplementedError("FlexGEMM fast_math kernel option must be bool")
     if "config" in kernel_options and not isinstance(explicit_config, dict):
         raise NotImplementedError("FlexGEMM config kernel option must be a dict")
-    explicit_swap_ab = (
-        explicit_config is not None and explicit_config.get("swap_ab") is True
-    )
 
     from torch._inductor.kernel.flex_gemm.epilogue import (
         analyze_flex_gemm_epilogue,
@@ -427,14 +406,12 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     )
     epimod_source = materialize_flex_gemm_epimod(
         subgraph.graph_module,
-        gemm_op,
         epilogue_analysis,
         epilogue_arg_placeholders,
         float(alpha),
         float(beta),
         epilogue_arg_kinds,
         fast_math=fast_math,
-        swap_ab=explicit_swap_ab,
     )
     log_flex_gemm_artifact(
         "lowering_plan",
@@ -523,12 +500,15 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         lambda: format_flex_gemm_selection(selected_choice, tuned=tuned),
         lowering_name=subgraph.name,
     )
-    return flex_gemm_ordered_outputs(
-        result,
-        aux_outs,
-        local_reduce_outs,
-        None if local_reduce_store is None else local_reduce_store.aux_index,
-    )
+    structural_outs = {}
+    if local_reduce_store is not None:
+        structural_outs[local_reduce_store.node] = local_reduce_outs[0]
+    aux_iter = iter(aux_outs)
+    ordered_aux_outs = [
+        structural_outs[node] if node in structural_outs else next(aux_iter)
+        for node in outputs.returned_aux_outputs
+    ]
+    return (result, *ordered_aux_outs)
 
 
 @register_lowering(flex_gemm_hop, type_promotion_kind=None)

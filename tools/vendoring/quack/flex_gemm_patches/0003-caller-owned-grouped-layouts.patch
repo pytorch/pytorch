@@ -222,7 +222,7 @@ index e9b8038..2c39d57 100644
 +        semantic_value_key(fn.__defaults__, seen, force_source=False),
 +        semantic_value_key(fn.__kwdefaults__, seen, force_source=False),
 diff --git a/quack/grouped_reduce.py b/quack/grouped_reduce.py
-index c1f8786..8c50ae0 100644
+index d1daf22..a16883f 100644
 --- a/quack/grouped_reduce.py
 +++ b/quack/grouped_reduce.py
 @@ -112,0 +113 @@ import operator
@@ -423,7 +423,7 @@ index c1f8786..8c50ae0 100644
 +                logical_extent = cute.size(mReduce, mode=[1])
 +                limit_groups = cute.size(mReduce, mode=[0])
 +            limit = min(logical_extent - tile_coord_mnkl[1] * tile_N, tile_N)
-@@ -963,97 +1082,0 @@ class GroupedLocalReduce(GroupedReduceBase):
+@@ -965,97 +1084,0 @@ class GroupedLocalReduce(GroupedReduceBase):
 -class Blocked128x4GroupedLocalReduce(GroupedLocalReduce):
 -    """Axis-1 grouped sink stored directly into a padded cuBLAS 128x4 carrier.
 -
@@ -522,7 +522,7 @@ index c1f8786..8c50ae0 100644
 -
 -
 diff --git a/tests/test_grouped_reduce.py b/tests/test_grouped_reduce.py
-index cad73ab..3eab38c 100644
+index 833ac3e..2c8ee5c 100644
 --- a/tests/test_grouped_reduce.py
 +++ b/tests/test_grouped_reduce.py
 @@ -14,0 +15 @@ Two layers:
@@ -991,18 +991,18 @@ index cad73ab..3eab38c 100644
 +        @gemm_epilogue(outs={"g": op})
 +        def grouped_store(acc):
 +            return {"D": acc, "g": acc}
-@@ -472,2 +866,2 @@ def test_grouped_store_blocked_128x4():
+@@ -478,2 +872,2 @@ def test_grouped_store_blocked_128x4():
 -    """The EpiOp owns the physical 128x4 swizzle and writes no follow-up kernel."""
 -    l, m, n, k, group = 1, 256, 256, 256, 32
 +    """The callback preserves the physical swizzle and independent batch carriers."""
 +    l, m, n, k, group = 2, 256, 256, 256, 32
-@@ -477 +871 @@ def test_grouped_store_blocked_128x4():
+@@ -483 +877 @@ def test_grouped_store_blocked_128x4():
 -        (blocked_128x4_numel(m, n // group),),
 +        (_blocked_numel(m, n // group, batch=l),),
-@@ -482 +876 @@ def test_grouped_store_blocked_128x4():
+@@ -488 +882 @@ def test_grouped_store_blocked_128x4():
 -    view = blocked_128x4_carrier_view(carrier, m, n // group)
 +    view = _blocked_carrier(carrier, m, n // group, batch=l)
-@@ -494,10 +888 @@ def test_grouped_store_blocked_128x4():
+@@ -500,10 +894 @@ def test_grouped_store_blocked_128x4():
 -    reduced = _grouped_ref(D, 1, group, "max", None)[0]
 -    padded = torch.zeros((256, 8), device="cuda", dtype=torch.float32)
 -    padded[:m, : n // group] = reduced
@@ -1014,16 +1014,16 @@ index cad73ab..3eab38c 100644
 -        .reshape(-1)
 -    )
 +    reduced = _grouped_ref(D, 1, group, "max", None)
-@@ -505 +890 @@ def test_grouped_store_blocked_128x4():
+@@ -511 +896 @@ def test_grouped_store_blocked_128x4():
 -    assert torch.equal(carrier, expected)
 +    assert torch.equal(carrier, _blocked_ref(reduced))
-@@ -514 +899 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
+@@ -520 +905 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
 -        (blocked_128x4_numel(m, n // group),),
 +        (_blocked_numel(m, n // group),),
-@@ -522 +907 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
+@@ -528 +913 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
 -        epi_args=dict(g=blocked_128x4_carrier_view(carrier, m, n // group)),
 +        epi_args=dict(g=_blocked_carrier(carrier, m, n // group)),
-@@ -530,9 +914,0 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
+@@ -536,9 +920,0 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
 -    padded = torch.zeros((256, 8), device="cuda", dtype=torch.float32)
 -    padded[:m, : n // group] = reduced
 -    expected = (
@@ -1033,10 +1033,10 @@ index cad73ab..3eab38c 100644
 -        .transpose(1, 2)
 -        .reshape(-1)
 -    )
-@@ -540 +916 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
+@@ -546 +922 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
 -    assert torch.equal(carrier, expected)
 +    assert torch.equal(carrier, _blocked_ref(reduced))
-@@ -543,3 +919,5 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
+@@ -549,3 +925,5 @@ def test_grouped_store_blocked_128x4_zero_fills_padding():
 -def test_grouped_store_blocked_128x4_swap_ab():
 -    """The same logical blocked carrier works for the validated swapped sink."""
 -    l, m, n, k, group = 1, 257, 288, 64, 32
@@ -1045,16 +1045,16 @@ index cad73ab..3eab38c 100644
 +def test_grouped_store_blocked_128x4_swap_ab(group, fragmentwise):
 +    """Both epilogue frontends preserve validated swapped blocked groups."""
 +    l, m, n, k = 1, 257, 288, 64
-@@ -549 +927 @@ def test_grouped_store_blocked_128x4_swap_ab():
+@@ -555 +933 @@ def test_grouped_store_blocked_128x4_swap_ab():
 -        (blocked_128x4_numel(m, n // group),),
 +        (_blocked_numel(m, n // group),),
-@@ -553 +931 @@ def test_grouped_store_blocked_128x4_swap_ab():
+@@ -559 +937 @@ def test_grouped_store_blocked_128x4_swap_ab():
 -    _blocked_store_mod(group, combine="max").gemm(
 +    _blocked_store_mod(group, combine="max", fragmentwise=fragmentwise).gemm(
-@@ -557 +935 @@ def test_grouped_store_blocked_128x4_swap_ab():
+@@ -563 +941 @@ def test_grouped_store_blocked_128x4_swap_ab():
 -        epi_args=dict(g=blocked_128x4_carrier_view(carrier, m, n // group)),
 +        epi_args=dict(g=_blocked_carrier(carrier, m, n // group)),
-@@ -567,8 +945,64 @@ def test_grouped_store_blocked_128x4_swap_ab():
+@@ -573,8 +951,64 @@ def test_grouped_store_blocked_128x4_swap_ab():
 -    padded = torch.zeros((384, 12), device="cuda", dtype=torch.float32)
 -    padded[:m, : n // group] = reduced
 -    expected = (
@@ -1127,6 +1127,6 @@ index cad73ab..3eab38c 100644
 +        (_grouped_ref(D, 1, group, "max", None)[0] / 6.0)
 +        .clamp(0.015625, 448.0)
 +        .to(torch.float8_e4m3fn)
-@@ -577 +1011 @@ def test_grouped_store_blocked_128x4_swap_ab():
+@@ -583 +1017 @@ def test_grouped_store_blocked_128x4_swap_ab():
 -    assert torch.equal(carrier, expected)
 +    assert torch.equal(carrier, _blocked_ref(reduced))

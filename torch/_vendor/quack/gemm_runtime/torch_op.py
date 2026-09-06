@@ -227,7 +227,7 @@ def _gemm_epi_f(digest: str, ins: list[torch.Tensor], meta: str) -> list[torch.T
     fake — one graph-insertable node per epilogue-GEMM call. Graph-owned
     buffers only; caller-provided out=/partial buffers take the mutating op."""
     outs = _alloc_outs_from_meta(digest, ins, meta)
-    torch.ops.quack.gemm_epi(digest, ins, outs, meta)
+    torch.ops.torch_vendor_quack.gemm_epi(digest, ins, outs, meta)
     return outs
 
 
@@ -362,7 +362,7 @@ def compile_call(
             outs.append(out["D"])
         outs.extend(out[name] for name in mod.outputs)
         outs.extend(partials.values())
-        torch.ops.quack.gemm_epi(mod.semantic_digest, ins, outs, meta)
+        torch.ops.torch_vendor_quack.gemm_epi(mod.semantic_digest, ins, outs, meta)
     else:
         if cu_seqlens_m is not None and any(
             getattr(mod.sinks[name], "dim", 0) == 1 for name in sink_names
@@ -375,7 +375,7 @@ def compile_call(
                 "per-sequence partials"
             )
         cta_tile_m = None
-        outs = torch.ops.quack.gemm_epi_f(mod.semantic_digest, ins, meta)
+        outs = torch.ops.torch_vendor_quack.gemm_epi_f(mod.semantic_digest, ins, meta)
         i = 1 if store_d else 0
         out = {"D": outs[0]} if store_d else {}
         for j, name in enumerate(mod.outputs):
