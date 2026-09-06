@@ -12992,6 +12992,16 @@ if __name__ == '__main__':
         with self.assertRaisesRegex(RuntimeError, "Lower bound should be less than or equal to the upper bound"):
             F.rrelu(x, lower=0.5, upper=0.3)
 
+    @onlyCUDA
+    def test_rrelu_with_noise_cuda_noncontiguous_noise_rejected(self, device):
+        # A non-contiguous noise used to be copied into a temporary that
+        # the kernel wrote into and never copied back.
+        x = torch.randn(64, device=device)
+        noise = torch.empty(128, device=device)[::2]
+        out = torch.empty(64, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected contiguous tensor"):
+            torch._C._nn.rrelu_with_noise(x, noise, 0.1, 0.3, True, None, out=out)
+
     @onlyCPU
     def test_softshrink(self, device):
         x = torch.tensor([[1.21, 0.56, 0.5001, 0.4999, 1.2357, -0.4999, -0.5001, -1.154,
