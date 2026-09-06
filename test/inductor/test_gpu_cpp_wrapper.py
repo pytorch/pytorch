@@ -327,6 +327,32 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn("aoti_custom_ops::forward_maybe_weighted", code)
         self.assertIn("c10::IValue(at::Tensor())", code)
 
+    @skipIfXpu(msg="tests CUDA TMA helper codegen")
+    def test_tma_descriptor_separates_global_and_kernel_shapes(self):
+        if torch.version.hip is not None:
+            self.skipTest("requires CUDA TMA helpers")
+
+        helpers = CUDADeviceOpOverrides().tma_descriptor_helpers()
+        self.assertNotIn("int32_t* shape", helpers)
+        self.assertIn("uint64_t* shape", helpers)
+        self.assertIn("int32_t kernel_shape[5];", helpers)
+        self.assertIn("uint64_t global_shape[5];", helpers)
+        self.assertIn("uint64_t dim = shape[i];", helpers)
+
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        wrapper.arg_var_id = itertools.count()
+        launch_args = wrapper.generate_args_decl(
+            IndentedBuffer(),
+            ["descriptor"],
+            [torch.float32],
+            ["tensordesc<fp32[16, 32]>"],
+        )
+        self.assertEqual(
+            launch_args,
+            "&var_0.m, &var_0.kernel_shape[0], &var_0.kernel_shape[1], "
+            "&var_0.strides[0], &var_0.strides[1]",
+        )
+
     @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
     def test_cpp_scratch_scales_with_grid_size_for_tma(self):
         scratch_def, scratch_var = CUDADeviceOpOverrides().cpp_scratch(

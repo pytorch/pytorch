@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import functools
 import itertools
 import unittest
 import uuid
@@ -2717,6 +2718,58 @@ instantiate_parametrized_tests(AssociativeScanTests)
 instantiate_parametrized_tests(ScanTests)
 instantiate_parametrized_tests(MapTests)
 instantiate_parametrized_tests(SwitchTests)
+
+
+# CondTests cases that fail under the cpp wrapper: both declare an unbacked SymInt
+# inside a branch, which the inlined C++ does not bind correctly.
+_CPP_WRAPPER_XFAIL = frozenset(
+    f"test_cond_unbacked_symint_inner{variant}_device_{device}"
+    for variant in ("", "_to_outer")
+    for device in ("cpu", GPU_TYPE)
+)
+
+
+# Re-runs a control-flow suite under config.cpp_wrapper=True; these HOPs reach
+# CppWrapperCpu.codegen_subgraph, which the default python wrapper never exercises.
+# WhileLoopTests and ScanTests are not re-run yet: a branch subgraph declares its
+# buffers in the parent's C++ scope, so two branches reusing a name collide
+# (`redefinition of 'true_graph_0_bufN'`), and while_loop_stack_output is NYI here.
+class _CppWrapperMixin:
+    def setUp(self):
+        super().setUp()
+        patcher = torch._inductor.config.patch(cpp_wrapper=True)
+        patcher.__enter__()
+        self.addCleanup(patcher.__exit__, None, None, None)
+
+
+class CondTestsCppWrapper(_CppWrapperMixin, CondTests):
+    pass
+
+
+class AssociativeScanTestsCppWrapper(_CppWrapperMixin, AssociativeScanTests):
+    pass
+
+
+class MapTestsCppWrapper(_CppWrapperMixin, MapTests):
+    pass
+
+
+class SwitchTestsCppWrapper(_CppWrapperMixin, SwitchTests):
+    pass
+
+
+# instantiate_parametrized_tests expanded CondTests in place, so the subclass inherits
+# concrete methods. Rebind each through a fresh function before marking it:
+# unittest.expectedFailure mutates and returns its argument, so marking the inherited
+# method would mark CondTests' own copy too.
+for _name in _CPP_WRAPPER_XFAIL:
+    _inherited = getattr(CondTests, _name)
+
+    @functools.wraps(_inherited)
+    def _xfail(self, _inherited=_inherited):
+        return _inherited(self)
+
+    setattr(CondTestsCppWrapper, _name, unittest.expectedFailure(_xfail))
 
 
 if __name__ == "__main__":
