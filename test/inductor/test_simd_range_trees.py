@@ -10,7 +10,11 @@ from torch._inductor.codegen.simd import DerivedIterationRangesRoot, IterationRa
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import IndexingOptions, TritonKernel, TritonSymbols
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import MockGraphHandler
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv
@@ -25,6 +29,8 @@ except ImportError:
 
 
 class TestSIMDRangeTrees(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _make_graph(self):
         return MockGraphHandler()
 

@@ -4,9 +4,12 @@ import operator
 import torch
 from torch._inductor.fx_passes.pad_mm import get_non_view_def
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class PadMMUtilsTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_get_non_view_def_traverses_getitem(self):
         graph = torch.fx.Graph()
         arg = graph.placeholder("arg")
