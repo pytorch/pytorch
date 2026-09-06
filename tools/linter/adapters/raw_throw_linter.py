@@ -64,6 +64,9 @@ ALLOWED_EXCEPTION_TYPES = {
     "py::stop_iteration": "",
     # Carries the device error code alongside the message.
     "c10::AcceleratorError": "",
+    # Same shape as AcceleratorError: carries the ncclResult_t alongside the
+    # message, and is what this backend's own NCCL_CHECK macros raise.
+    "NCCLException": "torch/csrc/distributed/c10d/nccl2/",
 }
 
 

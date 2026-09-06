@@ -1,6 +1,6 @@
 """Locate a sufficiently-new CUPTI header (``cupti_activity.h``) for the CUPTI
 field-id codegen (``tools/gen_cupti_stubs.py``), which parses the header to emit
-``torch/profiler/_cupti/_cupti_stubs.py``. Kept as a small standalone helper the
+``torch/profiler/_cuspy/_cupti_stubs.py``. Kept as a small standalone helper the
 CMake build and the CI build scripts both import at configure time.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 # CUPTI 13.3.0 (CUPTI_API_VERSION == 130300). The field-id codegen needs the v2
 # user-defined-record field-id enums, which the CUPTI ABI header only gained at
-# 13.3; an older header would emit an incomplete catalog. Mirrors the monitor's
+# 13.3; an older header would emit an incomplete catalog. Mirrors Cuspy's
 # runtime floor.
 _MIN_CUPTI_API_VERSION = 130300
 
