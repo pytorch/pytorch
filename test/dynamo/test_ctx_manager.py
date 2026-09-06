@@ -5,6 +5,7 @@ import sys
 import unittest
 from collections import defaultdict
 from contextlib import contextmanager
+from unittest import mock
 
 import torch
 import torch._dynamo.test_case
@@ -91,6 +92,29 @@ def customized_ctx_manager_with_graph_break(mode):
 
 
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
+    def test_privateuse1_autocast_class_match(self):
+        from torch._dynamo.variables import torch as torch_variables
+
+        base = torch.amp.autocast_mode.autocast
+        registered = type("BackendAutocast", (base,), {"__module__": __name__})
+        sibling = type("SiblingAutocast", (base,), {"__module__": __name__})
+
+        with mock.patch.object(
+            torch_variables,
+            "_get_privateuse1_autocast",
+            return_value=registered,
+        ) as get_privateuse1_autocast:
+            self.assertTrue(torch_variables._is_privateuse1_autocast(registered))
+            self.assertFalse(torch_variables._is_privateuse1_autocast(sibling))
+            self.assertFalse(
+                torch_variables._is_privateuse1_autocast(
+                    torch.amp.autocast_mode._UnmanagedAutocast
+                )
+            )
+            get_privateuse1_autocast.reset_mock()
+            self.assertFalse(torch_variables._is_privateuse1_autocast(object))
+            get_privateuse1_autocast.assert_not_called()
+
     def test_no_grad(self):
         def fn1(a, b):
             x = a + 1
