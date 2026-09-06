@@ -146,8 +146,11 @@ def fuse_seed_creation_pass(graph: torch.fx.Graph):
             combined = graph.call_function(inductor_prims.seeds, (len(seeds), device))
             combined.meta.update(seeds[0].meta)
             with V.fake_mode:
+                # The graph argument above may be a coor current_device() node, which
+                # is what keeps the fused seed rank-agnostic. Only this meta value
+                # needs a real torch.device.
                 combined.meta["val"] = torch.empty(
-                    [len(seeds)], device=device, dtype=torch.int64
+                    [len(seeds)], device=_concrete_device(device), dtype=torch.int64
                 )
                 combined.meta["tensor_meta"] = _extract_tensor_metadata(
                     combined.meta["val"]
@@ -169,7 +172,35 @@ def default_kwargs(device):
     return {}
 
 
+def _concrete_device(device):
+    """A real torch.device for a device operand that may still be a CooR node."""
+    if isinstance(device, torch.fx.Node):
+        if device.target is torch.ops.coor.current_device.default:
+            from torch.fx.experimental.proxy_tensor import _coor_current_device
+
+            return _coor_current_device()
+        raise AssertionError(
+            f"replace_random: device operand is an unexpected graph node: {device}"
+        )
+    return device
+
+
 def get_device(device):
+    if isinstance(device, torch.fx.Node):
+        # compile-on-one-rank: this pass runs on the joint graph, where a factory op's
+        # device operand is still a coor current_device() node rather than a
+        # torch.device -- respecialize_current_device_nodes does not concretise those
+        # until post_grad. Resolve it the way that pass does, from the op's runtime
+        # value rather than the consumer's meta. Nothing is pinned by doing so: the
+        # replacement is re-traced through make_fx, which re-applies the substitution,
+        # and respecialize would concretise it a few passes later regardless.
+        if device.target is torch.ops.coor.current_device.default:
+            from torch.fx.experimental.proxy_tensor import _coor_current_device
+
+            return _coor_current_device()
+        raise AssertionError(
+            f"replace_random: device operand is an unexpected graph node: {device}"
+        )
     if device is not None:
         return device
     return torch.empty([]).device  # default device
