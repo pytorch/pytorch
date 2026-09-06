@@ -521,7 +521,7 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
   m_active_bytes.decrease(buffer_block->size);
   if (buffer_block->event) {
     // returns the MPSEvent back to MPSEventPool
-    buffer_block->event.reset(nullptr);
+    buffer_block->event.reset();
   }
   buffer_block->in_use = false;
   HeapBlock* heap = buffer_block->heap;

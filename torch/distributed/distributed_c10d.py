@@ -6678,16 +6678,6 @@ def _get_backend_from_str(backend: str | None = None) -> str:
     return Backend(backend)
 
 
-def _is_safe_to_split() -> bool:
-    """
-    Checks if it is safe to split the any process group in the world.
-    This is only safe if the default pg has a bound device id, otherwise
-    users must be aware that a pg is only splittable after the first collective is
-    issued.
-    """
-    return _get_default_group().bound_device_id is not None
-
-
 @_time_logger
 def split_group(
     parent_pg: ProcessGroup | None = None,
@@ -6746,11 +6736,6 @@ def split_group(
 
     global _world
     default_pg = _get_default_group()
-    device_id = default_pg.bound_device_id
-    if not device_id and not _use_torchcomms_enabled():
-        raise RuntimeError(
-            "No device associated with the default pg, not safe to split any process groups"
-        )
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
 
@@ -6794,6 +6779,8 @@ def split_group(
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
+
+    device_id = parent_pg.bound_device_id
 
     # set the group_desc before the color or no_color split
     if hasattr(parent_backend, "comm_split_count") and group_desc is None:

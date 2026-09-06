@@ -2,6 +2,7 @@
 
 #include <exception>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 
@@ -103,6 +104,11 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
 
 #define CATCH_ALL_ERRORS(retstmnt)               \
   CATCH_TH_ERRORS(retstmnt)                      \
+  catch (const std::out_of_range& e) {           \
+    auto msg = torch::processErrorMsg(e.what()); \
+    PyErr_SetString(PyExc_IndexError, msg);      \
+    retstmnt;                                    \
+  }                                              \
   catch (const std::exception& e) {              \
     auto msg = torch::processErrorMsg(e.what()); \
     PyErr_SetString(PyExc_RuntimeError, msg);    \

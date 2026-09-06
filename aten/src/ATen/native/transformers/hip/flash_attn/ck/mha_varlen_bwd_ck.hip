@@ -402,7 +402,6 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
     const int head_size_8x = sizes[2];
     const int total_k = k.size(0);
     const int num_heads_k = k.size(1);
-    TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size_8x % 8 == 0, "head_size should be a multiple of 8");
     TORCH_CHECK(head_size_8x <= 128, "CK FlashAttention backward only supports head dimension at most 128");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
@@ -515,7 +514,9 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
     }
     auto drop_seed_offset = std::make_pair(&drop_seed, &drop_offset);
 
-    if (max_seqlen_q > 0) {
+    // An empty batch or query sequence has no work: the grads allocated above are
+    // already the correct empty result, so skip the launch rather than reject it.
+    if (batch_size > 0 && max_seqlen_q > 0) {
         ck_tile::stream_config stream_config{stream};
         dq.zero_(); // ck use atomic operation on dq
 
@@ -575,7 +576,9 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
         float t = aiter::mha_bwd(args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
     } else {
-        // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.
+        // No kernel ran, so nothing wrote the grads. All three are empty when
+        // batch_size == 0; when only max_seqlen_q is 0 they are not, and the grad of an
+        // output that consumed no queries is zero.
         dk_expanded.zero_();
         dv_expanded.zero_();
         softmax_d.zero_();
