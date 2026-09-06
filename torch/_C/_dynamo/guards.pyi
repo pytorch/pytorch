@@ -310,6 +310,7 @@ class GuardManager:
         user_stack: traceback.StackSummary | None,
         ptype: Any,
         dispatch_keys: Any,
+        device_index_is_current: bool = ...,
     ) -> None: ...
     def add_dimension_marking_guard(
         self,
@@ -366,11 +367,13 @@ class GuardManager:
     ) -> None: ...
     def add_float_is_nan_guard(
         self,
+        value: float,
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
     def add_complex_is_nan_guard(
         self,
+        value: complex,
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
