@@ -104,6 +104,21 @@ struct ViewMeta {
 
   virtual ~ViewMeta() = default;
 
+  // Note [multi-output view replay]
+  //
+  // A multi-output view rebuilds just the output this ViewMeta describes,
+  // rather than replaying the whole operation and discarding the sibling views:
+  // one output of `unbind` comes back as a `select` of the base. Replaying the
+  // operation is O(number of outputs), so rebuilding every view of one base
+  // that way is quadratic.
+  //
+  // The one thing the replayed operation provides that a `select` does not is
+  // autograd's restriction on mutating an output of a multi-output view.
+  // apply_view_meta_sequence restores that directly, through the marker
+  // torch/csrc/autograd registers with setMultiOutputViewMarker, which sets
+  // CreationMeta::MULTI_OUTPUT_NODE on the regenerated view. The grad_fn is a
+  // SelectBackward rather than an UnbindBackward, which computes the same
+  // gradient.
   virtual Tensor forward(const Tensor& base) = 0;
   virtual Tensor reverse(const Tensor& base, const Tensor& mutated_view) = 0;
 
