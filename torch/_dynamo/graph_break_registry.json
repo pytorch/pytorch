@@ -2577,6 +2577,16 @@
       ]
     }
   ],
+  "GB6956": [
+    {
+      "Gb_type": "Sourceless _DecoratorContextManager method reconstruction unsupported",
+      "Context": "{type(value.__self__)}.{value.__func__.__name__}",
+      "Explanation": "{type(value.__self__)} was reached without a source (e.g. via a closure cell) and {value.__func__.__name__} cannot be reconstructed safely, so Dynamo cannot safely inline it without risking a mutation on an object it can't track.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB8335": [
     {
       "Gb_type": "Generator reconstruction with mutations",
@@ -5519,6 +5529,16 @@
       "Explanation": "Expected additional_inputs to be a list/tuple but got {additional_inputs.python_type()}",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB2710": [
+    {
+      "Gb_type": "Sourceless context manager entered without mutation support",
+      "Context": "{value_type.__module__}.{value_type.__qualname__}",
+      "Explanation": "{value_type} was reached without a source (e.g. via a closure cell) and Dynamo cannot safely enter it or call its methods without a way to replay any resulting mutation on the real object.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
