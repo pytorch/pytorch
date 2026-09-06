@@ -2480,9 +2480,12 @@ def solve_min_cut(
     node_info: NodeInfo,
     min_cut_options: MinCutOptions,
     dont_ban: OrderedSet[fx.Node] | None = None,
+    fusible_cat_nodes: OrderedSet[fx.Node] | None = None,
 ) -> tuple[list[fx.Node], OrderedSet[fx.Node]]:
     if dont_ban is None:
         dont_ban = OrderedSet()
+    if fusible_cat_nodes is None:
+        fusible_cat_nodes = OrderedSet()
     op_types = get_default_op_list()
 
     if AOT_PARTITIONER_DEBUG:
@@ -2530,9 +2533,10 @@ def solve_min_cut(
         return False
 
     def is_fusible(a: fx.Node, b: fx.Node) -> bool:
-        # We can perform "memory fusion" into a cat, but cat cannot be a
-        # producer to a fusion
+        # We can perform "memory fusion" into a cat.
         if get_aten_target(b) == aten.cat:
+            return True
+        if a in fusible_cat_nodes:
             return True
         if can_fuse_into_auto_functionalized(a, b):
             return True
@@ -2583,7 +2587,7 @@ def solve_min_cut(
             return None
 
         if min_cut_options.ban_if_not_in_allowlist:
-            if not op_types.is_recomputable(node):
+            if not op_types.is_recomputable(node) and node not in fusible_cat_nodes:
                 return "not in recomputable allowlist"
         else:
             if op_types.is_random(node):
@@ -2628,11 +2632,38 @@ def solve_min_cut(
                 return "reduction op"
         return None
 
+    banned_nodes: OrderedSet[fx.Node] = OrderedSet()
+
     def is_materialized(node: fx.Node) -> bool:
         if node.op == "placeholder":
             return True
 
         return not all(is_fusible(node, user) for user in node.users)
+
+    def get_cat_recompute_boundary_nodes(
+        cat_nodes: OrderedSet[fx.Node],
+    ) -> OrderedSet[fx.Node]:
+        result = OrderedSet(cat_nodes)
+        pending = [
+            (input_node, cat) for cat in cat_nodes for input_node in cat.all_input_nodes
+        ]
+        visited: OrderedSet[tuple[fx.Node, fx.Node]] = OrderedSet()
+        while pending:
+            node, user = pending.pop()
+            if (node, user) in visited:
+                continue
+            visited.add((node, user))
+            if (
+                node.op != "call_function"
+                or not is_fusible(node, user)
+                or node in banned_nodes
+            ):
+                result.add(node)
+                continue
+            pending.extend((input_node, node) for input_node in node.all_input_nodes)
+        return result
+
+    cat_recompute_boundary_nodes: OrderedSet[fx.Node] = OrderedSet()
 
     def get_node_weight(
         node: fx.Node, static_lifetime_input_nodes: OrderedSet[fx.Node]
@@ -2663,6 +2694,11 @@ def solve_min_cut(
             if not isinstance(node.meta["val"], torch.SymInt):
                 return INT_INF, "SymFloat (non-SymInt symbolic value)"
 
+        if node in cat_recompute_boundary_nodes:
+            # Compare a fusible cat with the inputs that would replace it using
+            # their actual sizes. Other nodes keep the normal min-cut biases.
+            return mem_sz, None
+
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value
         mem_sz = int(
@@ -2675,7 +2711,7 @@ def solve_min_cut(
             return mem_sz * 2, None
 
     nx_graph = nx.DiGraph()
-    banned_nodes: OrderedSet[fx.Node] = OrderedSet()
+    tensor_weight_nodes: OrderedSet[fx.Node] = OrderedSet()
 
     def ban_recomputation_if_allowed(node: fx.Node, reason: str = "") -> bool:
         if op_types.is_view(node):
@@ -2777,6 +2813,8 @@ def solve_min_cut(
                 weight = math.inf
                 cannot_save_reason = "non-tensor output"
         else:
+            if fusible_cat_nodes:
+                tensor_weight_nodes.add(node)
             weight, cannot_save_reason = get_node_weight(
                 node, node_info.static_lifetime_input_nodes
             )
@@ -2920,6 +2958,30 @@ def solve_min_cut(
                         and user not in banned_nodes
                     ):
                         heapq.heappush(fusible, (node_info.get_fw_order(user), user))
+
+    if fusible_cat_nodes:
+        # Existing recomputation bans determine the first values that would replace
+        # a rematerialized cat. Compare only those boundaries and the cat at raw size.
+        active_cat_nodes = OrderedSet(
+            node
+            for node in fusible_cat_nodes
+            if node in tensor_weight_nodes and node not in banned_nodes
+        )
+        cat_recompute_boundary_nodes.update(
+            get_cat_recompute_boundary_nodes(active_cat_nodes)
+        )
+        for node in cat_recompute_boundary_nodes:
+            if node not in tensor_weight_nodes:
+                continue
+            weight, cannot_save_reason = get_node_weight(
+                node, node_info.static_lifetime_input_nodes
+            )
+            edge = nx_graph[node.name + "_in"][node.name + "_out"]
+            edge["capacity"] = weight
+            if cannot_save_reason and (weight == math.inf or weight == INT_INF):
+                edge["reason"] = f"cannot save: {cannot_save_reason}"
+            else:
+                edge.pop("reason", None)
 
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
@@ -3481,7 +3543,10 @@ def choose_saved_values_set(
     joint_graph: fx.Graph,
     node_info: NodeInfo,
     memory_budget: float = 1,
+    fusible_cat_nodes: OrderedSet[fx.Node] | None = None,
 ) -> list[fx.Node]:
+    if fusible_cat_nodes is None:
+        fusible_cat_nodes = OrderedSet()
     if memory_budget > 1 or memory_budget < 0:
         raise RuntimeError(
             f"The valid ranges for memory budget are 0 <= m <= 1. The provided value is {memory_budget}"
@@ -3509,6 +3574,7 @@ def choose_saved_values_set(
         joint_graph,
         node_info,
         min_cut_options,
+        fusible_cat_nodes=fusible_cat_nodes,
     )
     # return runtime_optimized_saved_values
     if memory_budget == 1:
@@ -3538,7 +3604,10 @@ def choose_saved_values_set(
         ban_if_materialized_backward=False,
     )
     more_aggressive_saved_values, _ = solve_min_cut(
-        joint_graph, node_info, more_aggressive_options
+        joint_graph,
+        node_info,
+        more_aggressive_options,
+        fusible_cat_nodes=fusible_cat_nodes,
     )
     more_aggressive_saved_values_mem_ratio = get_mem_ratio(more_aggressive_saved_values)
     if more_aggressive_saved_values_mem_ratio < memory_budget:
@@ -3549,7 +3618,10 @@ def choose_saved_values_set(
         ban_if_not_in_allowlist=False,
     )
     aggressive_recomputation_saved_values, banned_nodes = solve_min_cut(
-        joint_graph, node_info, aggressive_options
+        joint_graph,
+        node_info,
+        aggressive_options,
+        fusible_cat_nodes=fusible_cat_nodes,
     )
 
     aggressive_recomputation_saved_values_mem_ratio = get_mem_ratio(
@@ -3640,7 +3712,8 @@ def choose_saved_values_set(
             joint_graph,
             node_info,
             aggressive_options,
-            dont_ban,
+            dont_ban=dont_ban,
+            fusible_cat_nodes=fusible_cat_nodes,
         )
         if AOT_PARTITIONER_DEBUG:
             create_structured_trace_for_min_cut_info(
@@ -4240,7 +4313,19 @@ def min_cut_rematerialization_partition(
             static_lifetime_input_nodes=node_info.static_lifetime_input_nodes,
         )
 
+    # The joint output also contains forward-only results, so it cannot seed
+    # backward reachability.
+    backward_reachable_nodes = (
+        OrderedSet(node for node in node_info.required_bw_nodes if node.op != "output")
+        if compiler == "inductor"
+        else OrderedSet()
+    )
     for node in reversed(joint_module.graph.nodes):
+        if compiler == "inductor" and any(
+            user in backward_reachable_nodes for user in node.users
+        ):
+            backward_reachable_nodes.add(node)
+
         if node.op == "output":
             node.dist_from_bw = int(1e9)
         elif not node_info.is_required_fw(node):
@@ -4249,6 +4334,18 @@ def min_cut_rematerialization_partition(
             node.dist_from_bw = int(1e9)
             for user in node.users:
                 node.dist_from_bw = min(node.dist_from_bw, user.dist_from_bw + 1)
+
+    fusible_cat_nodes: OrderedSet[fx.Node] = OrderedSet()
+    if compiler == "inductor":
+        from torch._inductor.lowering import can_fuse_cat_as_producer
+
+        fusible_cat_nodes = OrderedSet(
+            node
+            for node in joint_graph.nodes
+            if node_info.is_required_fw(node)
+            and node in backward_reachable_nodes
+            and can_fuse_cat_as_producer(node)
+        )
 
     # memory_budget override resolution, in increasing precedence:
     #   1. config.activation_memory_budget (global default).
@@ -4317,6 +4414,7 @@ def min_cut_rematerialization_partition(
         joint_graph,
         node_info,
         memory_budget=memory_budget,
+        fusible_cat_nodes=fusible_cat_nodes,
     )
     # pyrefly: ignore [unbound-name]
     if config._sync_decision_cross_ranks:
