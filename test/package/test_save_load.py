@@ -8,7 +8,7 @@ from unittest import skipIf
 
 import torch
 from torch.package import PackageExporter, PackageImporter, sys_importer
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 try:
@@ -25,6 +25,8 @@ packaging_directory = Path(__file__).parent
 
 class TestSaveLoad(PackageTestCase):
     """Core save_* and loading API tests."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_saving_source(self):
         buffer = BytesIO()

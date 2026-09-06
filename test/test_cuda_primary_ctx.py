@@ -10,6 +10,7 @@ from torch.testing._internal.common_cuda import (
     TEST_MULTIGPU,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     NoTest,
     run_tests,
     TEST_WITH_ROCM,
@@ -26,6 +27,8 @@ if not TEST_CUDA:
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaPrimaryCtx(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     CTX_ALREADY_CREATED_ERR_MSG = (
         "Tests defined in test_cuda_primary_ctx.py must be run in a process "
         "where CUDA contexts are never created. Use either run_test.py or add "
