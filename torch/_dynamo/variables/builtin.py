@@ -2052,10 +2052,18 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
         if check_constant_args(args[1:], kwargs):
-            r = builtins.__build_class__(
-                fn,  # type: ignore[possibly-undefined]
-                *[a.as_python_constant() for a in args[1:]],
-            )
+            const_args = [a.as_python_constant() for a in args[1:]]
+            try:
+                r = builtins.__build_class__(
+                    fn,  # type: ignore[possibly-undefined]
+                    *const_args,
+                )
+            except Exception as exc:
+                # A class body that fails CPython's own validation (e.g. an
+                # invalid enum member name) must surface as a traceable
+                # exception so a surrounding except can catch it, instead of
+                # escaping the compiled region.
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
             return VariableTracker.build(tx, r)
         else:
             fail(args, kwargs)
