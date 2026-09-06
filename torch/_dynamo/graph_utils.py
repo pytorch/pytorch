@@ -93,6 +93,13 @@ def _graph_device_types(graph: Graph | None) -> frozenset[str]:
             return x.type
         if isinstance(x, torch.Tensor):
             return x.device.type
+        if isinstance(x, str):
+            # A device named as a string: device="mps", x.to("cpu"). Not every
+            # string is a device, so let torch.device reject the ones that fail.
+            try:
+                return torch.device(x).type
+            except (RuntimeError, ValueError):
+                return None
         return None
 
     def _flatten_meta(node: Node, key: str) -> list[Any]:
@@ -119,4 +126,5 @@ def _graph_device_types(graph: Graph | None) -> frozenset[str]:
         for obj in flat_args:
             if (device := _device_type(obj)) is not None:
                 devices.add(device)
-    return frozenset(devices)
+    # meta is an abstract device, never a runtime requirement of the host.
+    return frozenset(devices) - {"meta"}
