@@ -835,7 +835,7 @@ def _unflatten_optim_state_dict(
     for param_group in optim.param_groups:
         pg_state.append({_PARAMS: []})
         for param in param_group[_PARAMS]:
-            for fqn in info.fqn_param_mapping[param]:
+            for fqn in cast(FQNS_T, info.fqn_param_mapping[param]):
                 # If a parameter is shared, only one of the FQN will be used.
                 # So we need to verify which if this fqn is actually used in
                 # the state_dict.
@@ -863,27 +863,34 @@ def _unflatten_optim_state_dict(
                 if not param.requires_grad:
                     continue
 
-                # Reconstruct state for this parameter
-                # pyrefly: ignore [unsupported-operation]
-                state[fqn] = {}
-                for state_name in optim.state[param]:
+                # Reconstruct state for this parameter.
+                param_state_names = optim.state[param]
+                if not param_state_names:
+                    continue
+
+                param_state: DictValueType = {}
+                for state_name in param_state_names:
                     flattened_state_key = f"{_STATE}.{fqn}.{state_name}"
 
-                    if flattened_state_key not in state_dict:
-                        # Try to reconstruct the value
-                        reconstructed_value = _reconstruct_nested_dict(
-                            flattened_state_key, state_dict
-                        )
-                        # pyrefly: ignore [bad-index]
-                        cast(DictValueType, state[fqn])[state_name] = (
-                            reconstructed_value
-                        )
-                    else:
+                    if flattened_state_key in state_dict:
                         # Existing keys mean no nesting, directly use the value.
-                        # pyrefly: ignore [bad-index]
-                        cast(DictValueType, state[fqn])[state_name] = state_dict[
-                            flattened_state_key
-                        ]
+                        param_state[state_name] = state_dict[flattened_state_key]
+                        continue
+
+                    reconstructed_value = _reconstruct_nested_dict(
+                        flattened_state_key, state_dict
+                    )
+                    if reconstructed_value:
+                        param_state[state_name] = reconstructed_value
+
+                if param_state:
+                    state[fqn] = param_state
+                elif info.strict:
+                    raise RuntimeError(
+                        f"Missing optimizer state for parameter '{fqn}' in checkpoint. "
+                        "The parameter requires gradients but has no saved optimizer state. "
+                        "To load anyway, use StateDictOptions(strict=False)."
+                    )
 
         first_param_fqn = cast(list[str], pg_state[-1][_PARAMS])[0]
         for k in param_group:
@@ -1011,7 +1018,7 @@ def _split_optim_state_dict(
     for param_group in optim.param_groups:
         pg_state.append({_PARAMS: []})
         for param in param_group[_PARAMS]:
-            for fqn in info.fqn_param_mapping[param]:
+            for fqn in cast(FQNS_T, info.fqn_param_mapping[param]):
                 if fqn in info.shared_params_mapping:
                     in_params = False
                     for loaded_param_group in cast(

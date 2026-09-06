@@ -422,6 +422,62 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self._test_strict,
         )
 
+    def _test_optimizer_missing_state_strict(
+        self, *, flatten_optimizer_state_dict: bool
+    ) -> None:
+        torch.manual_seed(0)
+        model = nn.Sequential(
+            nn.Linear(2, 2, device=device_type, bias=False),
+            nn.Linear(2, 2, device=device_type, bias=False),
+        )
+        optim = torch.optim.AdamW(model.parameters())
+        model(torch.rand(2, 2, device=device_type)).sum().backward()
+        optim.step()
+        optim.zero_grad()
+
+        options = StateDictOptions(
+            flatten_optimizer_state_dict=flatten_optimizer_state_dict
+        )
+        osd = get_optimizer_state_dict(model, optim, options=options)
+        if flatten_optimizer_state_dict:
+            for key in list(osd):
+                if key.startswith("state.1.weight."):
+                    del osd[key]
+        else:
+            del osd["state"]["1.weight"]
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Missing optimizer state for parameter '1.weight'"
+        ):
+            set_optimizer_state_dict(
+                model,
+                torch.optim.AdamW(model.parameters()),
+                osd,
+                options=options,
+            )
+
+        strict_false_optim = torch.optim.AdamW(model.parameters())
+        set_optimizer_state_dict(
+            model,
+            strict_false_optim,
+            osd,
+            options=StateDictOptions(
+                flatten_optimizer_state_dict=flatten_optimizer_state_dict,
+                strict=False,
+            ),
+        )
+        strict_false_state = strict_false_optim.state_dict()["state"]
+        self.assertEqual(set(strict_false_state), {0})
+        self.assertEqual(strict_false_state[0], optim.state_dict()["state"][0])
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_optimizer_missing_state_strict(self) -> None:
+        self.run_subtests(
+            {"flatten_optimizer_state_dict": [False, True]},
+            self._test_optimizer_missing_state_strict,
+        )
+
     def _test_cpu_offload_full_state_dict(
         self, optimizer_class: type[Optimizer]
     ) -> None:
