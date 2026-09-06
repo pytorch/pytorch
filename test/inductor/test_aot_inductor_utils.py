@@ -100,14 +100,16 @@ class AOTIRunnerUtil:
                     temp_so_path, device == "cpu"
                 )
         else:
-            if device == "cpu":
-                return torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
-            elif device == "xpu":
-                return torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)
-            elif device == "mps":
-                return torch._C._aoti.AOTIModelContainerRunnerMps(so_path, 1)
-            else:
-                return torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
+            runner_cls_name = f"AOTIModelContainerRunner{device.capitalize()}"
+            runner_cls = getattr(torch._C._aoti, runner_cls_name, None)
+            if runner_cls is None:
+                raise RuntimeError(
+                    f"Unsupported device '{device}': expected {runner_cls_name} "
+                    f"in torch._C._aoti"
+                )
+            if device in ("cpu", "mps"):
+                return runner_cls(so_path, 1)
+            return runner_cls(so_path, 1, device)
 
     @staticmethod
     def legacy_load(device, so_path):
