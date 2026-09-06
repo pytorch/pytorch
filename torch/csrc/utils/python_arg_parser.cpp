@@ -1708,6 +1708,12 @@ bool FunctionSignature::parse(
 
     py::object failed_item;
     bool varargs_eligible = allow_varargs_intlist && arg_pos == 0 && !is_kwd;
+    // With extra positional args after a single int-list parameter, the
+    // var-args collapse below is the only valid parse; param.check would let
+    // a leading __torch_function__ object or a broadcastable int greedily
+    // consume one slot and fail on the leftover args (#191275).
+    bool must_collapse =
+        varargs_eligible && static_cast<size_t>(nargs) > max_pos_args;
     if ((!obj && param.optional) || (Py_IsNone(obj) && param.allow_none)) {
       dst[i++] = nullptr;
     } else if (!obj) {
@@ -1716,7 +1722,8 @@ bool FunctionSignature::parse(
         missing_args(*this, i);
       }
       return false;
-    } else if (param.check(obj, overloaded_args, i, &failed_item)) {
+    } else if (
+        !must_collapse && param.check(obj, overloaded_args, i, &failed_item)) {
       dst[i++] = obj;
       // XXX: the Variable check is necessary because sizes become tensors when
       // tracer is enabled. This behavior easily leads to ambiguities, and we

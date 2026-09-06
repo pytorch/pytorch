@@ -7955,6 +7955,11 @@ class TestTorch(TestCase):
         # ensure ones() throws an error when extra positional (non-keyword) arguments are given.
         self.assertRaises(TypeError, lambda: torch.ones((3, 3), torch.float32))
 
+        # the var-args intlist collapse also applies when the leading int would
+        # broadcast via a sized int list (IntArrayRef[1]), see gh-191275
+        t = torch.arange(6).reshape(2, 3)
+        self.assertEqual(t.hash_tensor(0, 1), t.hash_tensor((0, 1)))
+
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
         self.assertEqual(torch.ByteStorage.from_buffer(a).tolist(), [1, 2, 3, 4])
