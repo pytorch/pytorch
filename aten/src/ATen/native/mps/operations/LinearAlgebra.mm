@@ -1126,11 +1126,20 @@ static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const
   result.copy_(tmp);
 }
 
+// No matmul family Metal kernel is instantiated for Bool (see INSTANTIATE_MM_OPS
+// in LinearAlgebra.metal), so Bool inputs must be rejected before dispatch;
+// otherwise Metal fails to create the "..._bool" function state with an opaque
+// RuntimeError. See https://github.com/pytorch/pytorch/issues/191693
+static void check_matmul_dtype_supported(const Tensor& self, const char* name) {
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool, name, ": not implemented for 'Bool' on MPS");
+}
+
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
   static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
 
   using CachedGraph = MPSBinaryCachedGraph;
+  check_matmul_dtype_supported(self, "mm");
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
   TORCH_CHECK(self.dtype() == other.dtype(),
               "expected mat1 and mat2 to have the same dtype, but got: ",
@@ -1212,7 +1221,8 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
   TORCH_CHECK(batch2.is_mps());
   TORCH_CHECK(result.is_mps());
 
-  TORCH_CHECK(supportedFloatingOrComplexType(batch1) || c10::isIntegralType(batch1.scalar_type(), true),
+  check_matmul_dtype_supported(batch1, opType == ADDBMM_OP_TYPE ? "addbmm" : "baddbmm");
+  TORCH_CHECK(supportedFloatingOrComplexType(batch1) || c10::isIntegralType(batch1.scalar_type(), false),
               "MPS device does not support addbmm or baddbmm for this input type");
 
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
@@ -1334,6 +1344,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
                                   Tensor& output) {
   using namespace mps;
 
+  check_matmul_dtype_supported(self, "addmm");
   TORCH_CHECK(output.is_mps());
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
 
@@ -1585,6 +1596,7 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
               batch1.scalar_type(),
               " and ",
               batch2.scalar_type());
+  check_matmul_dtype_supported(batch1, "bmm");
   using namespace mps;
 
   // Matmul not supported if any output dimension size is larger than 2**32

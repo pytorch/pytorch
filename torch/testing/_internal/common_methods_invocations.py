@@ -1215,6 +1215,19 @@ def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((S, 0)), args=(make_arg(0, M),))
 
 
+def error_inputs_mm(op_info, device, **kwargs):
+    # bool matmul is not implemented on any backend (see gh-191693). CPU raises a
+    # plain RuntimeError from AT_DISPATCH; MPS raises NotImplementedError (a
+    # RuntimeError subclass) via TORCH_CHECK_NOT_IMPLEMENTED, so check the common
+    # base type and rely on the shared message substring.
+    make_arg = partial(make_tensor, device=device, dtype=torch.bool)
+    yield ErrorInput(
+        SampleInput(make_arg((S, M)), args=(make_arg((M, S)),)),
+        error_type=RuntimeError,
+        error_regex="not implemented for 'Bool'",
+    )
+
+
 def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6 if dtype.is_floating_point else 2)
     beta_val = kwargs.get('beta', 1 + 2j if dtype.is_complex else 0.2 if dtype.is_floating_point else 3)
@@ -18011,6 +18024,7 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_mm,
+           error_inputs_func=error_inputs_mm,
            skips=(
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
                DecorateInfo(
