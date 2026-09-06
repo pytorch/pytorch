@@ -491,6 +491,21 @@ def _count_add_graphs(graphs):
     return _count_graphs(graphs, "call_function", operator.add)
 
 
+def _reraise_worker_error(raised):
+    # For a concurrency failure the worker traceback is the finding, and a bare
+    # "a call wedged" would mask it. Surface the first with its traceback, but
+    # name the rest: two threads failing differently is the diagnostic, not one.
+    if not raised:
+        return
+    first = raised[0]
+    extra = raised[1:]
+    if extra and hasattr(first, "add_note"):
+        first.add_note(
+            f"+{len(extra)} more worker error(s): " + "; ".join(repr(e) for e in extra)
+        )
+    raise first
+
+
 class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
     """Tests for isolate_recompiles=True on torch.compile().
 
@@ -553,10 +568,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         raised = []
         while not errors.empty():
             raised.append(errors.get_nowait())
-        # Re-raise a worker's exception first: for a concurrency failure the
-        # traceback is the finding, and a bare "a call wedged" would mask it.
-        if raised:
-            raise raised[0]
+        _reraise_worker_error(raised)
         self.assertFalse(any(t.is_alive() for t in threads), "a call wedged")
 
     def test_reset_code_racing_lookup_does_not_destroy_the_cache_state(self):
@@ -617,10 +629,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         raised = []
         while not errors.empty():
             raised.append(errors.get_nowait())
-        # Re-raise a worker's exception first: for a concurrency failure the
-        # traceback is the finding, and a bare "a call wedged" would mask it.
-        if raised:
-            raise raised[0]
+        _reraise_worker_error(raised)
         self.assertFalse(any(t.is_alive() for t in threads), "a call wedged")
         self.assertEqual(opt(args[0]), f(args[0]))
 
@@ -698,6 +707,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             for thread in installers:
                 thread.join(timeout=max(0.0, deadline - time.monotonic()))
             stop.set()
+            # Callers cannot begin exiting until stop.set() above, so a slow
+            # installer phase must not spend their grace: give them their own
+            # window rather than the already-drawn-down shared deadline.
+            deadline = max(deadline, time.monotonic() + 30)
             for thread in callers:
                 thread.join(timeout=max(0.0, deadline - time.monotonic()))
         finally:
@@ -706,10 +719,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         raised = []
         while not errors.empty():
             raised.append(errors.get_nowait())
-        # Re-raise a worker's exception first: for a concurrency failure the
-        # traceback is the finding, and a bare "a call wedged" would mask it.
-        if raised:
-            raise raised[0]
+        _reraise_worker_error(raised)
         self.assertFalse(
             any(t.is_alive() for t in callers + installers), "a call wedged"
         )
@@ -871,16 +881,15 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             inv_thread.start()
             self.assertTrue(invalidator_done.wait(timeout=60))
         finally:
+            # Join inside finally: an assertion above must not leave the caller
+            # running a compile into the next test, holding compile_lock.
             release_eq.set()
-        thread.join(timeout=120)
+            thread.join(timeout=120)
         self.assertFalse(thread.is_alive())
         raised = []
         while not errors.empty():
             raised.append(errors.get_nowait())
-        # Re-raise the worker's exception so its traceback survives -- for
-        # a concurrency failure the traceback is the finding. Threads joined.
-        if raised:
-            raise raised[0]
+        _reraise_worker_error(raised)
         # A later lock holder drains the parked request: the entry reports
         # itself invalidated and a fresh compile serves the next call.
         self.assertEqual(opt1(x), f(x))
@@ -1004,8 +1013,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ctx(f)(x), f(x))
         # Still walked by the interrupted lookup, so nothing was gone yet.
         self.assertEqual(seen, [1])
-        # The guard-evaluating lookup that runs after the fast-path bail
-        # applied the parked clear, then missed and recompiled into the region.
+        # The next depth-zero lookup applies the parked clear before scanning
+        # candidates, so the bucket is already empty: it misses with no guard to
+        # evaluate and recompiles into the region.
         self.assertEqual(len(compiles), 2)
         self.assertEqual(len(_get_cache_entries_for_region(code, region)), 1)
 
@@ -2505,9 +2515,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             _clear_cache_entries_for_region(code, -1)
 
         _clear_cache_entries_for_region(code, region_a)
-        self.assertEqual(len(_get_cache_entries_for_region(f, region_a)), 0)
+        self.assertEqual(len(_get_cache_entries_for_region(code, region_a)), 0)
         # The neighbour region is untouched and still serves its entry.
-        self.assertEqual(len(_get_cache_entries_for_region(f, region_b)), 1)
+        self.assertEqual(len(_get_cache_entries_for_region(code, region_b)), 1)
         opt_b(torch.randn(3))
         self.assertEqual(cnt.frame_count, 2)
         # Clearing an already-empty region is a no-op.
@@ -2516,10 +2526,10 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
     def test_force_callback_on_cache_miss_marker_overrides_run_only(self):
         """Contract of the `_torchdynamo_force_callback_on_cache_miss` marker
         (read by eval_frame_cpp.cpp): a RUN_ONLY frame whose installed callback
-        carries it still reaches the callback on a cache miss, and its callee
-        frames consult their own strategy instead of inheriting run-only. A
-        precompile serving callback sets it so a miss errors or recaptures
+        carries it still reaches the callback on a cache miss. A precompile
+        serving callback is the intended setter, so a miss errors or recaptures
         instead of silently running eager."""
+        from torch._C._dynamo.eval_frame import reset_code
         from torch._dynamo.eval_frame import set_code_exec_strategy
 
         cnt = torch._dynamo.testing.CompileCounter()
@@ -2543,6 +2553,9 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnt.frame_count, 2)
         finally:
             del ctx.callback._torchdynamo_force_callback_on_cache_miss
+            # reset_code drops the RUN_ONLY strategy this test set on f.__code__
+            # so it does not leak into the next test.
+            reset_code(f.__code__)
 
     def test_isolate_recompiles_debug_cache_entry_list_deterministic_order(self):
         """_debug_get_cache_entry_list returns entries sorted by
