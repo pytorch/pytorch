@@ -22,6 +22,10 @@
 #include <ATen/Parallel.h>
 #endif
 
+#include <cmath>
+#include <utility>
+#include <vector>
+
 #if AT_USE_EIGEN_SPARSE()
 #include <ATen/native/sparse/eigen/SparseBlasImpl.h>
 #endif
@@ -389,6 +393,90 @@ void addmv_out_sparse_csr(
         result.stride(0));
   }
 }
+
+template <typename scalar_t, typename idx_t>
+void triangular_solve_out_sparse_csr_reference(
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& X,
+    bool upper,
+    bool transpose,
+    bool unitriangular) {
+  const auto n = A.size(0);
+  const auto nrhs = B.size(1);
+  const auto* crow_index = A.crow_indices().const_data_ptr<idx_t>();
+  const auto* col_index = A.col_indices().const_data_ptr<idx_t>();
+  const auto values = A.values().contiguous();
+  const auto* values_ptr = values.const_data_ptr<scalar_t>();
+
+  std::vector<int64_t> row_counts(n);
+  for (const auto row : c10::irange(n)) {
+    for (const auto idx : c10::irange(crow_index[row], crow_index[row + 1])) {
+      const auto col = static_cast<int64_t>(col_index[idx]);
+      if ((upper && col < row) || (!upper && col > row)) {
+        continue;
+      }
+      ++row_counts[transpose ? col : row];
+    }
+  }
+
+  std::vector<std::vector<std::pair<int64_t, scalar_t>>> rows(n);
+  for (const auto row : c10::irange(n)) {
+    rows[row].reserve(row_counts[row]);
+  }
+  for (const auto row : c10::irange(n)) {
+    for (const auto idx : c10::irange(crow_index[row], crow_index[row + 1])) {
+      const auto col = static_cast<int64_t>(col_index[idx]);
+      if ((upper && col < row) || (!upper && col > row)) {
+        continue;
+      }
+      const auto value = values_ptr[idx];
+      if (transpose) {
+        rows[col].emplace_back(row, value);
+      } else {
+        rows[row].emplace_back(col, value);
+      }
+    }
+  }
+
+  const bool effective_upper = transpose ? !upper : upper;
+  const auto B_ = B.is_same(X) ? B.clone() : B;
+  const auto* B_ptr = B_.const_data_ptr<scalar_t>();
+  auto* X_ptr = X.data_ptr<scalar_t>();
+  const auto B_row_stride = B_.stride(0);
+  const auto B_col_stride = B_.stride(1);
+  const auto X_row_stride = X.stride(0);
+  const auto X_col_stride = X.stride(1);
+
+  const auto solve_row = [&](int64_t row) {
+    for (const auto rhs : c10::irange(nrhs)) {
+      scalar_t acc = B_ptr[row * B_row_stride + rhs * B_col_stride];
+      scalar_t diagonal = unitriangular ? scalar_t(1) : scalar_t(0);
+
+      for (const auto& [col, value] : rows[row]) {
+        if (col == row) {
+          if (!unitriangular) {
+            diagonal = value;
+          }
+          continue;
+        }
+        acc -= value * X_ptr[col * X_row_stride + rhs * X_col_stride];
+      }
+
+      X_ptr[row * X_row_stride + rhs * X_col_stride] = acc / diagonal;
+    }
+  };
+
+  if (effective_upper) {
+    for (int64_t row = n - 1; row >= 0; --row) {
+      solve_row(row);
+    }
+  } else {
+    for (const auto row : c10::irange(n)) {
+      solve_row(row);
+    }
+  }
+}
 } // anonymous namespace
 #endif // !AT_USE_MKL_SPARSE()
 
@@ -462,11 +550,41 @@ void triangular_solve_out_sparse_csr(
     bool unitriangular) {
 #if !AT_USE_MKL_SPARSE()
   TORCH_CHECK(
-      false,
-      "Calling triangular_solve on a sparse CPU tensor requires compiling PyTorch with MKL. ",
+      A.layout() == kSparseCsr,
+      "Calling triangular_solve on a sparse BSR CPU tensor requires compiling PyTorch with MKL. ",
       "Please use PyTorch built MKL support.");
+  TORCH_CHECK(
+      B.dim() == 2 && X.dim() == 2,
+      "triangular_solve: non-MKL sparse CPU reference implementation only "
+      "supports 2-D dense inputs.");
+  TORCH_CHECK(
+      A.size(0) == A.size(1) && B.size(0) == A.size(0) &&
+          X.sizes() == B.sizes(),
+      "triangular_solve: input sizes are not compatible.");
+  TORCH_CHECK(
+      A.scalar_type() == B.scalar_type() && B.scalar_type() == X.scalar_type(),
+      "triangular_solve: expected all inputs to have the same dtype.");
+
+  if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
+    X.fill_(NAN);
+    return;
+  }
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      X.scalar_type(), "triangular_solve_out_sparse_csr_impl_reference", [&] {
+        if (A.crow_indices().scalar_type() == kLong) {
+          triangular_solve_out_sparse_csr_reference<scalar_t, int64_t>(
+              A, B, X, upper, transpose, unitriangular);
+        } else {
+          triangular_solve_out_sparse_csr_reference<scalar_t, int32_t>(
+              A, B, X, upper, transpose, unitriangular);
+        }
+      });
 #else
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.layout() == kSparseCsr || A.layout() == kSparseBsr);
+  TORCH_CHECK(
+      A.layout() == kSparseCsr || A.layout() == kSparseBsr,
+      "Unexpected layout",
+      A.layout());
   sparse::impl::mkl::triangular_solve_out_sparse_csr(A, B, X, upper, transpose, unitriangular);
 #endif
 }
