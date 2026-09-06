@@ -2570,6 +2570,51 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
         self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
 
+    def test_RNN_cell_invalid_hx(self):
+        for cell_cls in (nn.RNNCell, nn.GRUCell):
+            cell = cell_cls(3, 3)
+            # Passing non-tensor
+            with self.assertRaises(TypeError):
+                cell(torch.randn(3), "invalid")
+            with self.assertRaises(TypeError):
+                cell(torch.randn(3), (torch.zeros(3), torch.zeros(3)))
+            # Passing invalid dimensions (>2D)
+            with self.assertRaises(ValueError):
+                cell(torch.randn(3), torch.zeros(2, 3, 3))
+            with self.assertRaises(ValueError):
+                cell(torch.randn(2, 3), torch.zeros(2, 3, 3))
+
+    def test_LSTM_cell_invalid_hx(self):
+        lstm = nn.LSTMCell(3, 3)
+        input_1d = torch.randn(3)
+        input_2d = torch.randn(2, 3)
+
+        # Passing a single tensor instead of a tuple/list of two tensors (issue #193823)
+        with self.assertRaises(TypeError):
+            lstm(input_1d, torch.zeros(2, 3, 3))
+        with self.assertRaises(TypeError):
+            lstm(input_2d, torch.zeros(2, 3, 3))
+        with self.assertRaises(TypeError):
+            lstm(input_1d, torch.zeros(3, 3))
+
+        # Passing a tuple of wrong length
+        with self.assertRaises(TypeError):
+            lstm(input_1d, (torch.zeros(3),))
+        with self.assertRaises(TypeError):
+            lstm(input_1d, (torch.zeros(3), torch.zeros(3), torch.zeros(3)))
+
+        # Passing non-tensors inside tuple
+        with self.assertRaises(TypeError):
+            lstm(input_1d, ("invalid", torch.zeros(3)))
+        with self.assertRaises(TypeError):
+            lstm(input_1d, (torch.zeros(3), "invalid"))
+
+        # Passing invalid dimensions inside tuple
+        with self.assertRaises(ValueError):
+            lstm(input_1d, (torch.zeros(2, 3, 3), torch.zeros(3)))
+        with self.assertRaises(ValueError):
+            lstm(input_2d, (torch.zeros(3), torch.zeros(2, 3, 3)))
+
 
     def test_Transformer_cell(self):
         # this is just a smoke test; these modules are implemented through
