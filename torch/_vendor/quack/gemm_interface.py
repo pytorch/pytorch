@@ -3626,8 +3626,8 @@ gemm_norm_gated_ref = gemm_norm_act_ref
 # try:
 #     from torch._inductor.fx_passes.reinplace import InplaceableOp
 #     torch._inductor.fx_passes.reinplace.inplaceable_ops.update({
-#         torch.ops.quack.gemm_add_out.default:
-#         InplaceableOp(torch.ops.quack.gemm_add_inplace.default, mutated_arg=2)
+#         torch.ops.torch_vendor_quack.gemm_add_out.default:
+#         InplaceableOp(torch.ops.torch_vendor_quack.gemm_add_inplace.default, mutated_arg=2)
 #     })
 # except ImportError:
 #     pass

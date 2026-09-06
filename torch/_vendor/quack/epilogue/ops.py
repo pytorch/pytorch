@@ -333,6 +333,25 @@ class EpiOp:
     def fn_apply(self, gemm, pstate, i, value):
         raise NotImplementedError
 
+    def fn_apply_fragment(self, gemm, pstate):
+        """Return the TensorSSA callable for a whole-fragment (fragmentwise) fn.
+
+        The default applies ``fn_apply`` to every element of the fragment, so an
+        apply-port op written for the per-element loop also composes with
+        TensorSSA callbacks; ops with a native fragment formulation override it.
+        """
+
+        @cute.jit
+        def apply(value):
+            source = cute.make_rmem_tensor(value.shape, value.element_type)
+            source.store(value)
+            result = cute.make_rmem_tensor(value.shape, value.element_type)
+            for i in cutlass.range(cute.size(source), unroll_full=True):
+                result[i] = self.fn_apply(gemm, pstate, i, source[i])
+            return result.load()
+
+        return apply
+
     def fn_sink_flush(self, gemm, state, frag):
         """Fold a fragment of fn-produced values into this op's accumulator.
         ``state`` is the begin_loop result; ``frag`` is elementwise-congruent

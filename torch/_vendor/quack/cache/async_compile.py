@@ -44,7 +44,7 @@ import fcntl
 import importlib
 import os
 import pickle
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import Executor, Future, ProcessPoolExecutor
 from multiprocessing import get_context
 from typing import NamedTuple, Optional
 
@@ -378,7 +378,7 @@ class CompilePool:
     cancelled.
     """
 
-    def __init__(self, jobs: Optional[int] = None, executor: Optional[ProcessPoolExecutor] = None):
+    def __init__(self, jobs: Optional[int] = None, executor: Optional[Executor] = None):
         self._own_executor = executor is None
         self._executor = executor if executor is not None else _make_executor(jobs)
         self._futures: dict[str, Future] = {}
