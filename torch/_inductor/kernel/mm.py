@@ -2,7 +2,7 @@
 import functools
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from torch._dynamo.utils import counters
@@ -17,7 +17,7 @@ from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.remote_gemm_autotune_cache import gen_best_config
 from torch._inductor.virtualized import ops, V
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
+from torch.nn.functional import ScalingType, SwizzleType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
 
@@ -87,6 +87,7 @@ except ImportError:
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
+MXFPFormat = Literal["mxfp4", "mxfp8"]
 
 # We define each template kernel in a separate file which is the name of the input to load_kernel_template
 # (e.g. triton_mm for templates/triton_mm.py.jinja).
@@ -130,6 +131,11 @@ scaled_mm_device_tma_main_loop_scaling_template = TritonTemplate(
     name="scaled_mm_device_tma_main_loop_scaling",
     grid=persistent_mm_grid,
     source=load_kernel_template("triton_main_loop_scaled_mm"),
+)
+
+flydsl_mxfp_scaled_mm_template = FlyDSLTemplate(
+    name="scaled_mm_mxfp_flydsl",
+    source=load_kernel_template("flydsl_mxfp_scaled_mm"),
 )
 
 flydsl_mm_template = FlyDSLTemplate(
@@ -1114,6 +1120,158 @@ def get_scaling_options(
     )  # verify that shapes are supported by at least one existing pairing
 
 
+def _get_rocm_mxfp_v2_format(
+    mat_a: Any,
+    mat_b: Any,
+    scale_a: list[Any],
+    recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[Any],
+    recipe_b: list[int],
+    swizzle_b: list[int],
+    bias: Any,
+    out_dtype: torch.dtype | None,
+    contraction_dim: list[int] | None,
+    use_fast_accum: bool,
+) -> MXFPFormat | None:
+    common_contract = (
+        torch.version.hip is not None
+        and len(scale_a) == 1
+        and len(scale_b) == 1
+        and recipe_a == [ScalingType.BlockWise1x32.value]
+        and recipe_b == [ScalingType.BlockWise1x32.value]
+        and swizzle_a == [SwizzleType.NO_SWIZZLE.value]
+        and swizzle_b == [SwizzleType.NO_SWIZZLE.value]
+        and scale_a[0].get_dtype() == torch.float8_e8m0fnu
+        and scale_b[0].get_dtype() == torch.float8_e8m0fnu
+        and bias is None
+        and out_dtype in (torch.bfloat16, torch.float16)
+        and not contraction_dim
+        and use_fast_accum is False
+    )
+    if not common_contract:
+        return None
+    operand_dtypes = (mat_a.get_dtype(), mat_b.get_dtype())
+    if operand_dtypes == (torch.float8_e4m3fn, torch.float8_e4m3fn):
+        return "mxfp8"
+    if operand_dtypes == (torch.float4_e2m1fn_x2, torch.float4_e2m1fn_x2):
+        return "mxfp4"
+    return None
+
+
+def get_flydsl_mxfp_template_kwargs(
+    mxfp_format: MXFPFormat,
+    layout: Layout,
+    mat_a: Any,
+    mat_b: Any,
+    scale_a: Any,
+    scale_b: Any,
+) -> list[dict[str, Any]]:
+    """Return shape-compatible configs for one gfx950 MXFP operand format."""
+    from ..heuristics.template.flydsl import get_mxfp_gemm_configs_for_shape
+
+    if not use_flydsl_gemm_template(layout):
+        return []
+
+    nodes = (mat_a, mat_b, scale_a, scale_b)
+    if any(node.get_device() != layout.device for node in nodes):
+        return []
+
+    if is_unaligned(mat_a) or is_unaligned(mat_b):
+        return []
+
+    if any(len(node.get_size()) != 2 for node in nodes):
+        return []
+
+    static_ints = PythonWrapperCodegen.statically_known_list_of_ints_or_none
+    a_shape = static_ints(mat_a.get_size())
+    b_shape = static_ints(mat_b.get_size())
+    scale_a_shape = static_ints(scale_a.get_size())
+    scale_b_shape = static_ints(scale_b.get_size())
+    out_shape = static_ints(layout.size)
+    if any(
+        shape is None
+        for shape in (a_shape, b_shape, scale_a_shape, scale_b_shape, out_shape)
+    ):
+        return []
+
+    if mxfp_format == "mxfp4":
+        elements_per_byte = 2
+        expected_dtype = torch.float4_e2m1fn_x2
+    elif mxfp_format == "mxfp8":
+        elements_per_byte = 1
+        expected_dtype = torch.float8_e4m3fn
+    else:
+        raise AssertionError(f"unsupported MXFP format: {mxfp_format}")
+    m, k_storage = a_shape
+    b_k_storage, n = b_shape
+    k = k_storage * elements_per_byte
+    if (
+        m <= 0
+        or n <= 0
+        or k_storage <= 0
+        or b_k_storage != k_storage
+        or m % 32 != 0
+        or n % 32 != 0
+        or k % 128 != 0
+        or scale_a_shape != [m, k // 32]
+        or scale_b_shape != [n, k // 32]
+        or out_shape != [m, n]
+    ):
+        return []
+
+    a_stride = static_ints(mat_a.get_stride())
+    b_stride = static_ints(mat_b.get_stride())
+    scale_a_stride = static_ints(scale_a.get_stride())
+    scale_b_stride = static_ints(scale_b.get_stride())
+    out_stride = static_ints(layout.stride)
+    if (
+        a_stride != [k_storage, 1]
+        or b_stride != [1, k_storage]
+        or scale_a_stride != [k // 32, 1]
+        or scale_b_stride != [k // 32, 1]
+        or out_stride != [n, 1]
+    ):
+        return []
+
+    static_int = PythonWrapperCodegen.statically_known_int_or_none
+    offsets = [
+        mat_a.get_layout().offset,
+        mat_b.get_layout().offset,
+        scale_a.get_layout().offset,
+        scale_b.get_layout().offset,
+        layout.offset,
+    ]
+    if any(static_int(offset) != 0 for offset in offsets):
+        return []
+
+    if (
+        mat_a.get_dtype() != expected_dtype
+        or mat_b.get_dtype() != expected_dtype
+        or scale_a.get_dtype() != torch.float8_e8m0fnu
+        or scale_b.get_dtype() != torch.float8_e8m0fnu
+        or layout.dtype not in (torch.bfloat16, torch.float16)
+    ):
+        return []
+
+    out_dtype_name = "bfloat16" if layout.dtype == torch.bfloat16 else "float16"
+    # Config generation validates tile construction without a concrete shape;
+    # the selector drops the ones this shape cannot use before autotuning.
+    return [
+        {
+            **gemm_config,
+            "MXFP_FORMAT": mxfp_format,
+            "GEMM_M": m,
+            "GEMM_N": n,
+            "GEMM_K": k,
+            "OUT_DTYPE": out_dtype_name,
+        }
+        for gemm_config in get_mxfp_gemm_configs_for_shape(
+            mxfp_format, m, n, k, out_dtype_name
+        )
+    ]
+
+
 # Inductor has no template or extern choice that understands swizzled scale
 # layouts for _scaled_mm_v2 yet; defer those to the eager op. add_to_fallback_set
 # is False because this handler is invoked manually from the lowering below, not
@@ -1147,6 +1305,74 @@ def tuned_scaled_mm_v2(
     swizzle patterns alongside the scale tensors, and supports multi-level
     scaling via lists.
     """
+
+    mxfp_format = _get_rocm_mxfp_v2_format(
+        mat_a,
+        mat_b,
+        scale_a,
+        recipe_a,
+        swizzle_a,
+        scale_b,
+        recipe_b,
+        swizzle_b,
+        bias,
+        out_dtype,
+        contraction_dim,
+        use_fast_accum,
+    )
+    if mxfp_format is not None:
+        m, n, k, mxfp_layout, mxfp_a, mxfp_b = mm_args(
+            mat_a, mat_b, layout=layout, out_dtype=out_dtype
+        )
+        mxfp_scale_a, mxfp_scale_b = realize_inputs(scale_a[0], scale_b[0])
+        mxfp_input_nodes = [mxfp_a, mxfp_b, mxfp_scale_a, mxfp_scale_b]
+        mxfp_kernel_inputs = MMKernelInputs(
+            mxfp_input_nodes,
+            mat1_idx=0,
+            mat2_idx=1,
+            out_dtype=out_dtype,
+        )
+        mxfp_configs = get_flydsl_mxfp_template_kwargs(
+            mxfp_format,
+            mxfp_layout,
+            mxfp_a,
+            mxfp_b,
+            mxfp_scale_a,
+            mxfp_scale_b,
+        )
+        mxfp_choices: list[ChoiceCaller] = []
+        for mxfp_kwargs in mxfp_configs:
+            flydsl_mxfp_scaled_mm_template.maybe_append_choice(
+                mxfp_choices,
+                input_nodes=list(mxfp_kernel_inputs.nodes()),
+                layout=mxfp_layout,
+                **mxfp_kwargs,
+            )
+        if mxfp_choices:
+            counters["aten_mm_info"][f"aten._scaled_mm_v2.default_{m}_{n}_{k}"] += 1
+            node, _ = autotune_select_algorithm(
+                "scaled_mm",
+                mxfp_choices,
+                mxfp_kernel_inputs.nodes(),
+                mxfp_layout,
+            )
+            return node
+
+        fallback_contraction_dim = [] if contraction_dim is None else contraction_dim
+        return scaled_mm_v2_fallback(
+            mat_a,
+            mat_b,
+            scale_a,
+            recipe_a,
+            swizzle_a,
+            scale_b,
+            recipe_b,
+            swizzle_b,
+            bias,
+            out_dtype,
+            fallback_contraction_dim,
+            use_fast_accum,
+        )
 
     # Inductor only has Triton/extern lowerings for single-level, fp32-scaled,
     # non-swizzled _scaled_mm_v2 with the "supported" recipes (TensorWise,

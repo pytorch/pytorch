@@ -1,0 +1,170 @@
+import contextlib
+import os
+import threading
+
+from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_mxfp_gfx950 import (
+    make_mxfp_scaled_mm_gfx950,
+    MXFPGemmParams,
+)
+from torch._inductor.runtime.flydsl_cache import (
+    configure_flydsl_cache_dir,
+    run_cached_flydsl,
+)
+
+{{gen_defines()}}
+
+
+_mxfp_param = MXFPGemmParams(
+    mxfp_format=MXFP_FORMAT,
+    m=GEMM_M,
+    n=GEMM_N,
+    k=GEMM_K,
+    out_dtype=OUT_DTYPE,
+    block_m=TILE_M,
+    block_n=TILE_N,
+    block_k=TILE_K,
+    stages=STAGES,
+    m_waves=BLOCK_M_WARPS,
+    n_waves=BLOCK_N_WARPS,
+    group_m=GROUP_M,
+    lds_scale=LDS_SCALE,
+)
+_mxfp_launcher = make_mxfp_scaled_mm_gfx950(
+    mxfp_format=MXFP_FORMAT,
+    m=GEMM_M,
+    n=GEMM_N,
+    k=GEMM_K,
+    out_dtype=OUT_DTYPE,
+    block_m=TILE_M,
+    block_n=TILE_N,
+    block_k=TILE_K,
+    stages=STAGES,
+    m_waves=BLOCK_M_WARPS,
+    n_waves=BLOCK_N_WARPS,
+    group_m=GROUP_M,
+    lds_scale=LDS_SCALE,
+)
+_mxfp_executor = None
+_mxfp_init_lock = threading.Lock()
+
+
+def _inductor_tensor_arg(tensor):
+    return flyc.from_torch_tensor(tensor).mark_layout_dynamic()
+
+
+@contextlib.contextmanager
+def _temporary_env(updates):
+    old_values = {key: os.environ.get(key) for key in updates}
+    os.environ.update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
+    try:
+        yield
+    finally:
+        for key, old_value in old_values.items():
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
+{{def_kernel("mat1", "mat2", "scale_a", "scale_b")}}
+    output = {{get_output()}}
+    # The API RHS is column-major over its physical K dimension. Its transpose
+    # is the zero-copy row-major view consumed by the kernel. Both operand
+    # formats use byte views; the format policy maps storage K to logical K.
+    mat2_nk = mat2.transpose(0, 1)
+    mat1_u8 = mat1.view(torch.uint8)
+    mat2_nk_u8 = mat2_nk.view(torch.uint8)
+    scale_a_u8 = scale_a.view(torch.uint8)
+    scale_b_u8 = scale_b.view(torch.uint8)
+
+    global _mxfp_executor
+    executor = _mxfp_executor
+    if executor is not None:
+        executor(mat1_u8, mat2_nk_u8, scale_a_u8, scale_b_u8, output, stream)
+        return output
+
+    with _mxfp_init_lock:
+        executor = _mxfp_executor
+        if executor is None:
+            configure_flydsl_cache_dir()
+            compile_args = (
+                _inductor_tensor_arg(mat1_u8),
+                _inductor_tensor_arg(mat2_nk_u8),
+                _inductor_tensor_arg(scale_a_u8),
+                _inductor_tensor_arg(scale_b_u8),
+                _inductor_tensor_arg(output),
+                stream,
+            )
+            if os.environ.get("COMPILE_ONLY"):
+                flyc.compile(_mxfp_launcher, *compile_args)
+            else:
+                executor = run_cached_flydsl(
+                    _mxfp_launcher,
+                    *compile_args,
+                    constexpr_param=_mxfp_param,
+                    compiler=flyc.compile,
+                    dispatch_args=(
+                        mat1_u8,
+                        mat2_nk_u8,
+                        scale_a_u8,
+                        scale_b_u8,
+                        output,
+                        stream,
+                    ),
+                )
+                _mxfp_executor = executor
+            return output
+
+    executor(mat1_u8, mat2_nk_u8, scale_a_u8, scale_b_u8, output, stream)
+    return output
+
+
+def {{kernel_name}}_precompile(
+    precompile_shapes,
+    precompile_strides,
+    precompile_dtypes,
+    device_index=0,
+    device_capability=None,
+    flydsl_gpu_arch=None,
+):
+    """Warm the FlyDSL disk cache using metadata-only fake tensors."""
+    del device_index, device_capability
+
+    env_updates = {"COMPILE_ONLY": "1"}
+    if flydsl_gpu_arch is not None:
+        env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
+
+    with _temporary_env(env_updates):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+
+            def _fake_proxy(name):
+                return torch.empty_strided(
+                    tuple(precompile_shapes[name]),
+                    tuple(precompile_strides[name]),
+                    dtype=getattr(torch, precompile_dtypes[name]),
+                    device="cpu",
+                )
+
+            mat1 = _fake_proxy("mat1")
+            mat2 = _fake_proxy("mat2")
+            scale_a = _fake_proxy("scale_a")
+            scale_b = _fake_proxy("scale_b")
+            output = _fake_proxy("output")
+
+            try:
+                {{kernel_name}}_main(
+                    mat1,
+                    mat2,
+                    scale_a,
+                    scale_b,
+                    output,
+                    stream=0,
+                )
+            finally:
+                global _mxfp_executor
+                with _mxfp_init_lock:
+                    _mxfp_executor = None
