@@ -660,6 +660,27 @@ class TestConvolutionNN(NNTestCase):
 
                 self.assertEqual(without_onednn, with_onednn)
 
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
+    def test_Conv3d_bfloat16_mkldnn_degenerate_strided_innermost(self):
+        # oneDNN AMX bf16 Conv3d miscomputed the ow == 1, sw > 1 case;
+        # the mkldnn path must match the mkldnn-disabled reference.
+        torch.manual_seed(0)
+        for mf in (torch.contiguous_format, torch.channels_last_3d):
+            # in_w=4 with kernel 3 and stride 2 or 3 both give out_w == 1
+            for stride in (2, 3):
+                x = torch.randn(19, 313, 12, 14, 4, dtype=torch.bfloat16).to(
+                    memory_format=mf
+                )
+                w = torch.randn(96, 313, 3, 3, 3, dtype=torch.bfloat16).to(
+                    memory_format=mf
+                )
+                with torch.backends.mkldnn.flags(enabled=False):
+                    ref = F.conv3d(x, w, stride=stride)
+                with torch.backends.mkldnn.flags(enabled=True):
+                    out = F.conv3d(x, w, stride=stride)
+                self.assertEqual(ref.shape[-1], 1)
+                self.assertEqual(out, ref)
+
     def test_Conv2d_missing_argument(self):
         c = nn.Conv2d(3, 3, 3)
         self.assertRaises(TypeError, lambda: c(None))
