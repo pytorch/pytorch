@@ -13494,6 +13494,33 @@ class TestSDPA(TestCaseMPS):
         y_scale2 = F.scaled_dot_product_attention(q, q, q, scale=2.0)
         self.assertNotEqual(y_default, y_scale2)
 
+    def test_sdpa_bf16_long_sequence(self):
+        """SDPA with bf16 + long sequence — triggers chunking in sdpa_general_mps.
+
+        The chunking threshold is 3068 tokens (kChunkSize in Attention.mm).
+        L=5000 and S=14000 ensure the chunked path is exercised.  fp32 on
+        the same shapes is the reference.
+        """
+        torch.manual_seed(1729)
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            q = torch.randn([1, 24, 5000, 128], dtype=torch.bfloat16, device="mps")
+            k = torch.randn([1, 24, 14000, 128], dtype=torch.bfloat16, device="mps")
+            v = torch.randn([1, 24, 14000, 128], dtype=torch.bfloat16, device="mps")
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+            y_ref = F.scaled_dot_product_attention(
+                q.cpu().float(), k.cpu().float(), v.cpu().float(), is_causal=True)
+            self._compare_tensors(y.cpu(), y_ref)
+
+        # Also test asymmetric: short Q, long KV (FramePack text+image layout)
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            q2 = torch.randn([1, 24, 5000, 128], dtype=torch.bfloat16, device="mps")
+            k2 = torch.randn([1, 24, 14000, 128], dtype=torch.bfloat16, device="mps")
+            v2 = torch.randn([1, 24, 14000, 128], dtype=torch.bfloat16, device="mps")
+            y2 = F.scaled_dot_product_attention(q2, k2, v2, is_causal=False)
+            y2_ref = F.scaled_dot_product_attention(
+                q2.cpu().float(), k2.cpu().float(), v2.cpu().float(), is_causal=False)
+            self._compare_tensors(y2.cpu(), y2_ref)
+
 class TestSDPAMetaDispatchMode(TorchDispatchMode):
     """
     TorchDispatchMode which intercepts the
