@@ -3352,6 +3352,36 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         test_pixel_shuffle_unshuffle_4D()
         test_pixel_shuffle_unshuffle_5D()
 
+    def test_pixel_shuffle_unshuffle_non_positive_factor(self):
+        """The meta and decomposition paths must reject a non-positive factor
+        the same way eager does, rather than dividing by it."""
+        from torch._refs.nn.functional import (
+            pixel_shuffle as pixel_shuffle_decomp,
+            pixel_unshuffle as pixel_unshuffle_decomp,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        x = torch.randn(1, 4, 4, 4)
+
+        for factor in (0, -2):
+            # eager, for reference
+            with self.assertRaisesRegex(RuntimeError, "positive upscale_factor"):
+                torch.pixel_shuffle(x, factor)
+            with self.assertRaisesRegex(RuntimeError, "positive downscale_factor"):
+                torch.pixel_unshuffle(x, factor)
+
+            # decompositions
+            with self.assertRaisesRegex(RuntimeError, "positive upscale_factor"):
+                pixel_shuffle_decomp(x, factor)
+            with self.assertRaisesRegex(RuntimeError, "positive downscale_factor"):
+                pixel_unshuffle_decomp(x, factor)
+
+            # meta registration
+            with FakeTensorMode():
+                fake = torch.randn(1, 4, 4, 4)
+                with self.assertRaisesRegex(RuntimeError, "positive upscale_factor"):
+                    torch.ops.aten.pixel_shuffle(fake, factor)
+
     @set_default_dtype(torch.double)
     def test_pixel_shuffle_nhwc_cpu(self):
         input = torch.randn(3, 18, 4, 4, device='cpu')
