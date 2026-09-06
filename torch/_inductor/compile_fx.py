@@ -2729,6 +2729,7 @@ class CompilerConfigExtra:
 def create_compiler_config_extra(
     gm: GraphModule | GmWrapper,
 ) -> CompilerConfigExtra:
+    """Compute state shared by the AOT forward and backward compilers."""
     dynamo_graph_metadata = gm.meta if isinstance(gm, GraphModule) else None
 
     # Although cudagraphs may have been enabled via config, various

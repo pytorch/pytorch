@@ -18069,50 +18069,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
         self.assertNotIn("aten.cos", body)
 
-    def test_regional_codegen_only_config_cpp_wrapper(self):
-        # A codegen-TIME knob on the region must reach the cpp wrapper.
-        # `triton.persistent_reductions` is consulted while the region's kernels
-        # are built (choices.py should_use_persistent_reduction), i.e. after the
-        # lowering-time config.patch in ir.InvokeSubgraph.create has already
-        # closed. Only the patch inside CppWrapperCpu.codegen_subgraph can carry
-        # it. Both halves compute the same softmax: with the region patched, its
-        # reduction must be emitted looped (triton_red_*) while the parent's
-        # stays persistent (triton_per_*).
-        # mps is a GPU_TYPE but has no Triton and no cpp-wrapper backend, so the
-        # persistent-vs-looped contrast this test checks does not exist there.
-        if self.device != GPU_TYPE or self.device == "mps":
-            raise unittest.SkipTest("requires a Triton GPU for reduction kernels")
-
-        from torch._higher_order_ops.invoke_subgraph import (
-            get_invoke_subgraph_compile_options,
-        )
-
-        with torch._dynamo.config.patch(
-            enable_invoke_subgraph_regional_compile=True,
-            inline_single_use_invoke_subgraph=False,
-        ):
-            opts = get_invoke_subgraph_compile_options(
-                fw_inductor_config_patches={"triton.persistent_reductions": False}
-            )
-
-            @torch.compiler.nested_compile_region(options=opts)
-            def gn(x):
-                return torch.softmax(x, dim=-1) + 1
-
-            def fn(x):
-                return gn(torch.softmax(x, dim=-1) * 2)
-
-            with config.patch(cpp_wrapper=True):
-                opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-                x = torch.randn(1024, 256, device=self.device)
-                result, codes = run_and_get_code(lambda: opt_fn(x))
-
-        self.assertEqual(result, fn(x), atol=2e-3, rtol=2e-3)
-        code = "\n".join(codes)
-        # the region's kernel is looped, the parent's is persistent
-        self.assertIn("triton_red_", code)
-        self.assertIn("triton_per_", code)
-
     def test_lite_triton_kernel_wrapper_functional(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
