@@ -475,8 +475,7 @@
 
 - func: conj_physical.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, XPU: conj_physical_out
-    MPS: conj_physical_out_mps
+    CPU, CUDA, XPU, MPS: conj_physical_out
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: conj_physical_out_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta, SparseCsrXPU: conj_physical_sparse_csr_out
   tags: pointwise
@@ -7172,6 +7171,7 @@
   dispatch:
     CompositeExplicitAutograd: _grouped_mm
     CUDA: _grouped_mm_cuda
+    MPS: _grouped_mm_mps
 
 # NOTE [ Sparse: autograd and API ]
 #

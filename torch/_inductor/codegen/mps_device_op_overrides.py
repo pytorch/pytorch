@@ -25,5 +25,8 @@ class MPSDeviceOpOverrides(DeviceOpOverrides):
     def cpp_kernel_type(self) -> str:
         return "MTLFunction_t"
 
+    def aten_device_type(self) -> str:
+        return "at::kMPS"
+
 
 register_device_op_overrides("mps", MPSDeviceOpOverrides())

@@ -656,38 +656,6 @@ def _get_subgraph_names(
     yield from fx_subgraph_names
 
 
-def _iter_graph_referenced_submodules(
-    gm: GraphModule,
-) -> Generator[GraphModule, None, None]:
-    visited: OrderedSet[int] = OrderedSet()
-    for node in gm.graph.find_nodes(op="get_attr"):
-        if not isinstance(node.target, str):
-            continue
-        try:
-            subgraph = attrgetter(node.target)(gm)
-        except AttributeError:
-            continue
-        if isinstance(subgraph, GraphModule) and id(subgraph) not in visited:
-            visited.add(id(subgraph))
-            yield subgraph
-
-
-def _iter_reachable_graph_modules(
-    gm: GraphModule,
-) -> Generator[GraphModule, None, None]:
-    visited: OrderedSet[int] = OrderedSet()
-
-    def visit(current_gm: GraphModule) -> Generator[GraphModule, None, None]:
-        if id(current_gm) in visited:
-            return
-        visited.add(id(current_gm))
-        yield current_gm
-        for subgraph in _iter_graph_referenced_submodules(current_gm):
-            yield from visit(subgraph)
-
-    yield from visit(gm)
-
-
 def _get_nested_region_inductor_config_patches(
     gm: GraphModule,
 ) -> dict[str, Any] | None:
@@ -702,47 +670,7 @@ def _patch_nested_region_inductor_config(
     patches = _get_nested_region_inductor_config_patches(gm)
     if patches is None:
         return contextlib.nullcontext()
-
-    from torch._higher_order_ops.invoke_subgraph import (
-        _validate_nested_region_inductor_config_patches,
-    )
-
-    _validate_nested_region_inductor_config_patches(patches)
     return config.patch(patches)
-
-
-def _validate_nested_region_inductor_configs(
-    gm: GraphModule, *, effective_direction: str | None = None
-) -> None:
-    from torch._higher_order_ops.invoke_subgraph import (
-        _validate_nested_region_inductor_config_patches,
-        NestedCompileRegionOptions,
-    )
-
-    validated: OrderedSet[int] = OrderedSet()
-
-    def validate(nested_config: Any) -> None:
-        if (
-            not isinstance(nested_config, NestedCompileRegionOptions)
-            or id(nested_config) in validated
-        ):
-            return
-        validated.add(id(nested_config))
-        if effective_direction is None:
-            nested_config.validate_inductor_config_patches()
-        else:
-            # AOTAutograd stores the selected backward patches in this effective
-            # field when it constructs the partitioned backward graph.
-            _validate_nested_region_inductor_config_patches(
-                nested_config.inductor_config_patches, effective_direction
-            )
-
-    for module in _iter_reachable_graph_modules(gm):
-        validate(getattr(module, "meta", {}).get("nested_region_config"))
-        for node in module.graph.find_nodes(
-            op="call_function", target=torch.ops.higher_order.invoke_subgraph
-        ):
-            validate(node.meta.get("custom", {}).get("nested_region_config"))
 
 
 def _propagate_invoke_subgraph_nested_region_config(gm: GraphModule) -> None:
@@ -1125,10 +1053,12 @@ def compile_fx_inner(
             config.triton.use_tensor_descriptor and config.assume_aligned_inputs
         ):
             warnings.warn(
-                "config.triton.enable_host_side_tma has no effect unless both "
+                "config.triton.enable_host_side_tma requires both "
                 "config.triton.use_tensor_descriptor and "
-                "config.assume_aligned_inputs are also enabled; host-side TMA "
-                "will be skipped.",
+                "config.assume_aligned_inputs for pointwise/reduction kernels; "
+                "host-side TMA will be skipped for those. GEMM templates are "
+                "unaffected: their operands are validated by can_use_tma() "
+                "before the template is offered as a choice.",
                 stacklevel=2,
             )
         stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
@@ -2801,9 +2731,6 @@ def create_compiler_config_extra(
 ) -> CompilerConfigExtra:
     """Compute state shared by the AOT forward and backward compilers."""
     dynamo_graph_metadata = gm.meta if isinstance(gm, GraphModule) else None
-    pre_aot_graph = gm if isinstance(gm, GraphModule) else getattr(gm, "gm", None)
-    if pre_aot_graph is not None:
-        _validate_nested_region_inductor_configs(pre_aot_graph)
 
     # Although cudagraphs may have been enabled via config, various
     # conditions (which are tested within the bowels of Inductor) may
@@ -2884,8 +2811,6 @@ def compile_fx_forward(
         inner_compile: The inner compile function to use.
         is_inference: Whether this is an inference graph.
     """
-
-    _validate_nested_region_inductor_configs(gm, effective_direction="forward")
 
     if is_inference:
         # partition_fn won't be called
@@ -3036,7 +2961,6 @@ def compile_fx_backward(
     from torch._dynamo.convert_frame import compile_lock
 
     with compile_lock:
-        _validate_nested_region_inductor_configs(gm, effective_direction="backward")
         model_outputs_node = output_node(gm)
         if config.bw_outputs_user_visible:
             model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
