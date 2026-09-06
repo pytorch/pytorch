@@ -104,6 +104,9 @@ THManagedMapAllocatorInit::THManagedMapAllocatorInit(
     }
     AllocInfo info = get_alloc_info(filename);
     socket->register_allocation(info);
+  } catch (const c10::Error&) {
+    // Already carries its own location; re-wrapping would nest a second one.
+    throw;
   } catch (std::exception& e) {
     TORCH_CHECK(false, e.what());
   }

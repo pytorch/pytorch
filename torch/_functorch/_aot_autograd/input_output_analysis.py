@@ -40,6 +40,12 @@ from .utils import strict_zip
 zip = strict_zip
 
 
+# The only output types whose base_idx is an index into the graph inputs. The
+# alias_of_intermediate* types index into graph intermediates or user outputs
+# instead, so input renumbering must skip them. See OutputAliasInfo.base_idx.
+INPUT_ALIAS_TYPES = (OutputType.alias_of_input, OutputType.is_input)
+
+
 def remove_dupe_metadata(
     m: ViewAndMutationMeta,
     keep_arg_mask: list[bool],
@@ -89,12 +95,17 @@ def remove_dupe_metadata(
         input_info=[x for i, x in enumerate(m.input_info) if keep_arg_mask[i]],
         # For outputs that are views of inputs, we store the index of the input that the output
         # was generated from. Need to update that index to account for removed dupes.
+        # Dedup renumbers inputs only, so this skips the non-input index spaces.
         output_info=[
             OutputAliasInfo(
                 output_type=o.output_type,
                 raw_type=o.raw_type,
                 dynamic_dims=o.dynamic_dims,
-                base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx],
+                base_idx=(
+                    add_dupe_map[o.base_idx]
+                    if o.base_idx is not None and o.output_type in INPUT_ALIAS_TYPES
+                    else o.base_idx
+                ),
                 requires_grad=o.requires_grad,
                 requires_grad_for_backward=o.requires_grad_for_backward,
                 view_meta_sequence=o.view_meta_sequence,
@@ -236,28 +247,26 @@ def create_synthetic_base_metadata(
     ]
     existing_output_infos = []
     for o in m.output_info:
-        synthetic_base_info_for_output = (
-            None if o.base_idx is None else synthetic_base_info[o.base_idx]
-        )
-        new_base_idx = (
-            None
-            if o.base_idx is None
-            else (
-                synthetic_base_info_for_output
-                if isinstance(synthetic_base_info_for_output, int)
-                else synthetic_base_info_for_output[0]  # type: ignore[index]
+        if o.base_idx is None or o.output_type not in INPUT_ALIAS_TYPES:
+            # base_idx is not an input index for these, so synthetic bases
+            # leave it alone. See OutputAliasInfo.base_idx.
+            new_base_idx = o.base_idx
+            new_output_type = o.output_type
+        else:
+            synthetic_base_info_for_output = synthetic_base_info[o.base_idx]
+            # If the original input was merged into a synthetic base, then an
+            # output that was literally that input is now a view of the base.
+            input_merged = isinstance(synthetic_base_info_for_output, tuple)
+            new_base_idx = (
+                synthetic_base_info_for_output[0]  # type: ignore[index]
+                if input_merged
+                else synthetic_base_info_for_output  # type: ignore[assignment]
             )
-        )
-        # If the original input was merged into a synthetic base, then an
-        # output that was literally that input is now a view of the base.
-        input_merged = o.base_idx is not None and isinstance(
-            synthetic_base_info[o.base_idx], tuple
-        )
-        new_output_type = (
-            OutputType.alias_of_input
-            if o.output_type == OutputType.is_input and input_merged
-            else o.output_type
-        )
+            new_output_type = (
+                OutputType.alias_of_input
+                if o.output_type == OutputType.is_input and input_merged
+                else o.output_type
+            )
         existing_output_infos.append(
             OutputAliasInfo(
                 output_type=new_output_type,

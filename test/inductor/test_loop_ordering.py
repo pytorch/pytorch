@@ -918,16 +918,18 @@ class LoopOrderingTest(TestCase):
         # Block reduction + broadcast pointwise should fuse into 1 kernel
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    def test_floordiv_broadcast_with_preceding_reduction(self):
+    @parametrize("nested_reduction", (False, True))
+    def test_floordiv_broadcast_with_preceding_reduction(self, nested_reduction):
         """
         RMSNorm followed by block-wise quantization: two reductions
         with different rnumel (variance over K, then amax over
         block_size=32) separated by pointwise ops.
 
-        Expected: 2 kernels (variance reduction fused with norm,
-        block reduction fused with broadcast pointwise).
-        The FloorDiv broadcast between block reduction and the final
-        pointwise must not cause a third kernel.
+        Expected: 2 kernels (variance reduction fused with norm, block
+        reduction fused with broadcast pointwise), or 1 when nested
+        reductions stage both into a single kernel. The FloorDiv broadcast
+        between block reduction and the final pointwise must not cause an
+        extra kernel in either configuration.
 
         Regression test for https://github.com/pytorch/pytorch/issues/183542
         """
@@ -956,10 +958,10 @@ class LoopOrderingTest(TestCase):
         torch._dynamo.reset()
         metrics.reset()
         expect = f(x, weight)
-        actual = torch.compile(f)(x, weight)
+        with inductor_config.patch({"triton.nested_reduction": nested_reduction}):
+            actual = torch.compile(f)(x, weight)
         self.assertTrue(same(expect, actual, tol=1e-2))
-        # variance reduction + block reduction = 2 kernels
-        self.assertEqual(2, metrics.generated_kernel_count)
+        self.assertEqual(1 if nested_reduction else 2, metrics.generated_kernel_count)
 
     @inductor_config.patch(
         layout_optimization=True,

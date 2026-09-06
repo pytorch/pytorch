@@ -116,7 +116,7 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
       auto pipeline_state = lib.getPipelineStateForFunc(
           fmt::format("embedding_bag_{}_{}", scalarToMetalTypeString(weight), scalarToMetalTypeString(indices)));
 
-      getMPSProfiler().beginProfileKernel(pipeline_state, "embedding_bag", {weight, indices, offsets});
+      getMPSProfiler().beginProfileKernel(pipeline_state, "embedding_bag", {weight, indices, offsets}, stream);
       [computeEncoder setComputePipelineState:pipeline_state];
       mtl_setArgs(computeEncoder,
                   weight,
@@ -131,7 +131,7 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
                   stream->getErrorBuffer());
 
       mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 
@@ -198,6 +198,10 @@ Tensor _embedding_bag_dense_backward_mps(const Tensor& output_grad,
   // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml
   // for more details.
 
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic due to atomic_add
+  at::globalContext().alertNotDeterministic("_embedding_bag_dense_backward_mps");
+
   int64_t feature_size = output_grad.size(1);
   auto weight_grad = at::zeros({num_weights, feature_size}, output_grad.options());
   EmbeddingBagBackwardParams<uint32_t> params;
@@ -230,7 +234,7 @@ Tensor _embedding_bag_dense_backward_mps(const Tensor& output_grad,
                                                                     mps::scalarToMetalTypeString(indices)));
 
       getMPSProfiler().beginProfileKernel(
-          pipeline_state, "embedding_bag", {output_grad, indices, offset2bag, bag_size});
+          pipeline_state, "embedding_bag", {output_grad, indices, offset2bag, bag_size}, stream);
       [computeEncoder setComputePipelineState:pipeline_state];
       mps::mtl_setArgs(computeEncoder,
                        output_grad,
@@ -243,7 +247,7 @@ Tensor _embedding_bag_dense_backward_mps(const Tensor& output_grad,
                        params);
 
       mps::mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 
@@ -258,6 +262,11 @@ Tensor _embedding_bag_per_sample_weights_backward_mps(const Tensor& output_grad,
                                                       int64_t mode,
                                                       int64_t padding_idx) {
   TORCH_INTERNAL_ASSERT(static_cast<EmbeddingBagMode>(mode) == EmbeddingBagMode::SUM);
+
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic due to atomic_add
+  at::globalContext().alertNotDeterministic("_embedding_bag_per_sample_weights_backward_mps");
+
   int64_t num_indices = indices.size(0);
   int64_t feature_size = output_grad.size(1);
   auto per_sample_weights_grad = at::zeros({num_indices}, output_grad.options());
@@ -282,13 +291,15 @@ Tensor _embedding_bag_per_sample_weights_backward_mps(const Tensor& output_grad,
                                                                     mps::scalarToMetalTypeString(output_grad),
                                                                     mps::scalarToMetalTypeString(indices)));
 
-      getMPSProfiler().beginProfileKernel(
-          pipeline_state, "embedding_bag_per_sample_weights_backward", {output_grad, weight, indices, offset2bag});
+      getMPSProfiler().beginProfileKernel(pipeline_state,
+                                          "embedding_bag_per_sample_weights_backward",
+                                          {output_grad, weight, indices, offset2bag},
+                                          stream);
       [computeEncoder setComputePipelineState:pipeline_state];
       mps::mtl_setArgs(computeEncoder, output_grad, weight, indices, offset2bag, per_sample_weights_grad, params);
 
       mps::mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-      getMPSProfiler().endProfileKernel(pipeline_state);
+      getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }
   });
 

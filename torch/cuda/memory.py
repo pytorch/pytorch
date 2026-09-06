@@ -4,6 +4,7 @@ r"""This package adds support for device memory management implemented in CUDA."
 import collections
 import contextlib
 import ctypes
+import json
 import pickle
 import sys
 import threading
@@ -1126,6 +1127,12 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
             frames: List[Frame]
             size: int
             stream: int
+            user_metadata: str  # the calling thread's metadata at the time of
+            # the event, as set via _set_memory_metadata (dicts appear as
+            # their JSON serialization)
+            internal_metadata: str  # only present when allocator internals
+            # tagged the event (e.g. "mallocWithAddress" on the synthetic
+            # prefix-block malloc/free pair)
             device_free: int  # only present for OOM, the amount of
             # memory cuda still reports to be free
             pool_id: Tuple[int, int]  # id of the memory pool for this entry
@@ -1183,7 +1190,7 @@ def _memory_metadata_supported() -> bool:
     return torch._C._cuda_memoryMetadataSupported()
 
 
-def _set_memory_metadata(metadata: str):
+def _set_memory_metadata(metadata: str | dict[str, Any]):
     """
     Set custom metadata to be recorded on memory history trace entries.
 
@@ -1204,10 +1211,19 @@ def _set_memory_metadata(metadata: str):
     backends (e.g. ``cudaMallocAsync`` or a pluggable allocator) it is
     silently ignored.
 
+    A dict is accepted as a convenience and is serialized to a compact JSON
+    string; trace entries always carry the string form (the allocator stores a
+    single string, which is what :func:`_snapshot` and the visualizer show).
+    Consequently :func:`_get_memory_metadata` returns the JSON string, not the
+    original dict, and serialization errors (e.g. non-JSON-serializable
+    values) raise at call time.
+
     Args:
-        metadata (str): Custom metadata string to record on trace entries.
-                       Pass an empty string to clear the metadata.
+        metadata (str or dict): Custom metadata to record on trace entries.
+                               Pass an empty string to clear the metadata.
     """
+    if isinstance(metadata, dict):
+        metadata = json.dumps(metadata, separators=(",", ":"))
     # pyrefly: ignore [missing-attribute]
     torch._C._cuda_setMemoryMetadata(metadata)
 
@@ -1218,7 +1234,10 @@ def _get_memory_metadata() -> str:
 
     See :func:`_set_memory_metadata`. Note that with allocator backends that
     do not support metadata this always returns the empty string, which is
-    indistinguishable from no metadata being set.
+    indistinguishable from no metadata being set. Metadata set as a dict is
+    returned as its JSON serialization; passing the returned string back to
+    :func:`_set_memory_metadata` restores the same metadata, which makes
+    save/set/restore patterns work without special-casing.
 
     Returns:
         str: The current metadata string, or empty string if no metadata is set.

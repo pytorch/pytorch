@@ -22,18 +22,17 @@ def _is_supported(input: torch.Tensor) -> bool:
     if input.dtype not in (torch.float16, torch.bfloat16, torch.float32):
         return False
     major, _ = torch.cuda.get_device_capability(input.device)
-    return major in (9, 10)
+    return major in (9, 10, 12)
 
 
-# quack splits each row across a CTA cluster (at most 16 on SM90/SM100, the
-# only archs _is_supported accepts) and stages the per-CTA row tile in shared
-# memory. Rows whose tile exceeds the smem budget even at the max cluster size
-# cannot launch, and far beyond that (e.g. N=2^28) the CuTe DSL compiler hangs
-# or crashes before any smem check could fire (gh-186800). Bound N here so
-# such rows fall back to aten. The reserve covers the reduction buffer,
-# mbarriers, and smem alignment (mirrors quack's _BWD_SMEM_RESERVED_BYTES).
+# quack splits each row across a CTA cluster (at most 16 on SM90/SM100 and 8
+# on SM12x) and stages the per-CTA row tile in shared memory. Rows whose tile
+# exceeds the smem budget even at the max cluster size cannot launch, and far
+# beyond that (e.g. N=2^28) the CuTe DSL compiler hangs or crashes before any
+# smem check could fire (gh-186800). Bound N here so such rows fall back to
+# aten. The reserve covers the reduction buffer, mbarriers, and smem alignment
+# (mirrors quack's _BWD_SMEM_RESERVED_BYTES).
 _SMEM_RESERVED_BYTES = 4 * 1024
-_MAX_CLUSTER_N = 16
 # The kernel rounds the per-CTA tile up to vecsize * threads_per_row elements
 # (reduction_base._get_tiled_copy). Both are powers of 2 with vecsize <= 8 and
 # threads_per_row <= 256, so rounding up to 2048 never under-estimates.
@@ -50,14 +49,21 @@ def _smem_budget_bytes(device: torch.device) -> int:
     return smem - _SMEM_RESERVED_BYTES
 
 
-def _row_tile_elems(n: int) -> int:
-    per_cta = -(-n // _MAX_CLUSTER_N)
+def _max_cluster_n(device: torch.device) -> int:
+    major, _ = torch.cuda.get_device_capability(device)
+    return 8 if major == 12 else 16
+
+
+def _row_tile_elems(device: torch.device, n: int) -> int:
+    per_cta = -(-n // _max_cluster_n(device))
     return -(-per_cta // _TILE_ROUND_ELEMS) * _TILE_ROUND_ELEMS
 
 
 def _fwd_fits_smem(input: torch.Tensor, n: int) -> bool:
     # Fwd smem holds one row tile of x (rmsnorm.py sX).
-    return _row_tile_elems(n) * input.element_size() <= _smem_budget_bytes(input.device)
+    return _row_tile_elems(
+        input.device, n
+    ) * input.element_size() <= _smem_budget_bytes(input.device)
 
 
 def _bwd_fits_smem(input: torch.Tensor, grad_out: torch.Tensor, n: int) -> bool:
@@ -68,7 +74,7 @@ def _bwd_fits_smem(input: torch.Tensor, grad_out: torch.Tensor, n: int) -> bool:
     # Bwd smem holds smem_stages buffers of both x and dout (rmsnorm.py
     # sX/sdO).
     tile_bytes = (
-        _row_tile_elems(n)
+        _row_tile_elems(input.device, n)
         * _BWD_SMEM_STAGES
         * (input.element_size() + grad_out.element_size())
     )

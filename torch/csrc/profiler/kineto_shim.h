@@ -112,7 +112,7 @@ using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
 using ActivityFilter = std::unordered_map<
     torch::autograd::profiler::ActivityType,
     std::unordered_set<std::string>>;
-void prepareTrace(
+TORCH_API void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config,

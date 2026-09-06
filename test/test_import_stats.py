@@ -10,9 +10,9 @@ class TestImportTime(TestCase):
     def test_time_import_torch(self):
         TestCase.runWithPytorchAPIUsageStderr("import torch")
 
-    def test_time_cuda_device_count(self):
+    def test_time_device_count(self):
         TestCase.runWithPytorchAPIUsageStderr(
-            "import torch; torch.cuda.device_count()",
+            "import torch;torch.accelerator.device_count()",
         )
 
 

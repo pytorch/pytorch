@@ -6,8 +6,8 @@
 #include <string>
 #include <unordered_map>
 
-// `TorchScript` offers a simple logging facility that can enabled by setting an
-// environment variable `PYTORCH_JIT_LOG_LEVEL`.
+// `TorchScript` offers a simple logging facility that can be enabled by setting
+// an environment variable `PYTORCH_JIT_LOG_LEVEL`.
 
 // Logging is enabled on a per file basis. To enable logging in
 // `dead_code_elimination.cpp`, `PYTORCH_JIT_LOG_LEVEL` should be

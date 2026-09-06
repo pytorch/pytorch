@@ -20,7 +20,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
-    parametrize, serialTest,
+    parametrize, serialTest, subtest,
     gradcheck, gradgradcheck,
     skipIfMPS,
     skipIfTorchDynamo,
@@ -1211,7 +1211,7 @@ class TestReductions(TestCase):
     @dtypes(*complex_types())
     @dtypesIfMPS(torch.complex64)
     def test_invalid_0dim_aminmax(self, device, dtype):
-        with self.assertRaisesRegex(RuntimeError, 'not implemented'):
+        with self.assertRaisesRegex(TypeError, 'not implemented'):
             torch.aminmax(torch.tensor(1., dtype=dtype, device=device), dim=0)
 
     # TODO: bincount isn't a classic reduction -- maybe this test suite is
@@ -2496,7 +2496,6 @@ class TestReductions(TestCase):
         run_test(torch.zeros(64, 1, dtype=dtype, device=device))
 
     @onlyAccelerator
-    @skipIfMPS
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
         x = torch.zeros(2**31, device=device, dtype=torch.int8)
@@ -2506,6 +2505,30 @@ class TestReductions(TestCase):
         x[-1] = -1
         self.assertEqual(x.argmin(0), x.shape[0] - 1)
         self.assertEqual(x.min(0).indices, x.shape[0] - 1)
+
+    @onlyAccelerator
+    @serialTest()
+    @largeMPSBufferTest("5GB")
+    @largeTensorTest("5GB")
+    @parametrize("fn,expected", [
+        subtest((lambda x: x.max(), 1), name="max"),
+        subtest((lambda x: x.argmax(), (1 << 32) + 4095), name="argmax"),
+        subtest((lambda x: x.min(), 0), name="min"),
+        subtest((lambda x: x.argmin(), 0), name="argmin"),
+        # sum promotes int8 to int64, materializing a 32GB cast of the input on CUDA
+        subtest((lambda x: x.sum(), 1), name="sum", decorators=[largeTensorTest("36GB", device="cuda")]),
+        subtest((lambda x: x.any(), True), name="any"),
+        subtest((lambda x: x.all(), False), name="all"),
+        subtest((lambda x: x.view(-1, 4096).max(0).indices[4095], 1 << 20), name="max_dim"),
+    ])
+    def test_reductions_above_uint32(self, device, fn, expected):
+        x = torch.zeros((1 << 32) + 4096, device=device, dtype=torch.int8)
+        x[-1] = 1
+        # MPS reduction kernels index in 32 bits and should raise
+        if self.device_type == "mps":
+            self.assertRaisesRegex(NotImplementedError, "64-bit indexing", fn, x)
+        else:
+            self.assertEqual(fn(x), expected)
 
     def test_argminmax_axis_with_dim_one(self, device):
         # See: https://github.com/pytorch/pytorch/issues/38922

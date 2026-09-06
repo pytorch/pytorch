@@ -76,6 +76,14 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 # Discovered on gfx950 CI after ROCm 7.2 upgrade, eager mode non determinism
                 "alexnet",
                 "demucs",
+                # Same class of eager non determinism, surfaced on gfx950 by the
+                # ROCm 7.2 -> 7.14 upgrade in #188429. Each of these was observed
+                # both passing and failing across consecutive runs of the same
+                # commit, so a pinned expected value goes red on whichever
+                # outcome it did not predict. See #192862.
+                "convnextv2_nano.fcmae_ft_in22k_in1k",
+                "vit_base_patch14_dinov2.lvd142m",
+                "torch_multimodal_clip",
             }
         )
 

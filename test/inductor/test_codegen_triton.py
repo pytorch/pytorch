@@ -1,7 +1,10 @@
 # Owner(s): ["module: inductor"]
 import ast
 import contextlib
+import dataclasses
 import unittest
+from collections import namedtuple, OrderedDict
+from enum import Enum, IntEnum
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -12,13 +15,16 @@ import torch._inductor.config as inductor_config
 from torch._inductor import ir
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen import triton_utils
-from torch._inductor.codegen.common import CSEVariable, SizeArg, TensorArg
+from torch._inductor.codegen.common import ArgName, CSEVariable, SizeArg, TensorArg
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
+    FixedTritonConfig,
     get_triton_reduction_function,
+    IndexingOptions,
+    TritonCSEVariable,
     TritonKernel,
     TritonKernelOverrides,
     TritonSymbols,
@@ -29,6 +35,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
+    get_importable_constexpr_types,
     is_triton_fp8_dtype_supported,
     run_and_get_code,
     run_and_get_kernels,
@@ -41,8 +48,35 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU_AND_TRITON,
 )
 from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
+from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils._triton import has_triton_package
+
+
+try:
+    from .triton_constexpr_configs import (
+        tl as TritonLanguageShadowConfig,
+        UserDefinedAttrsLikeConfig,
+        UserDefinedPydanticLikeConfig,
+        UserDefinedTritonKernelConfigMode,
+        UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelEnumConfig,
+        UserDefinedTritonKernelHiddenConfig,
+        UserDefinedTritonKernelNestedConfig,
+        UserDefinedTritonKernelNonInitConfig,
+    )
+except ImportError:
+    from triton_constexpr_configs import (
+        tl as TritonLanguageShadowConfig,
+        UserDefinedAttrsLikeConfig,
+        UserDefinedPydanticLikeConfig,
+        UserDefinedTritonKernelConfigMode,
+        UserDefinedTritonKernelConfigNamespace,
+        UserDefinedTritonKernelEnumConfig,
+        UserDefinedTritonKernelHiddenConfig,
+        UserDefinedTritonKernelNestedConfig,
+        UserDefinedTritonKernelNonInitConfig,
+    )
 
 
 class TestCodegenTriton(InductorTestCase):
@@ -147,6 +181,122 @@ class TestCodegenTriton(InductorTestCase):
             finally:
                 kernel.range_trees = saved_range_trees
 
+    def test_importable_constexpr_types_nested_values(self):
+        type_specs = get_importable_constexpr_types(
+            [
+                {
+                    "cfg": UserDefinedTritonKernelNestedConfig(
+                        nested=UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+                    )
+                }
+            ]
+        )
+        self.assertEqual(
+            type_specs,
+            [
+                (
+                    UserDefinedTritonKernelConfigNamespace.__module__,
+                    "UserDefinedTritonKernelConfigNamespace.Nested",
+                    "UserDefinedTritonKernelConfigNamespace",
+                ),
+                (
+                    UserDefinedTritonKernelNestedConfig.__module__,
+                    "UserDefinedTritonKernelNestedConfig",
+                    "UserDefinedTritonKernelNestedConfig",
+                ),
+            ],
+        )
+
+    def test_importable_constexpr_types_sibling_nested_classes(self):
+        namespace = UserDefinedTritonKernelConfigNamespace
+        type_specs = get_importable_constexpr_types(
+            [namespace.Nested(offset=1), namespace.Sibling(offset=2)]
+        )
+        self.assertEqual(len(type_specs), 1)
+        self.assertEqual(type_specs[0].module, namespace.__module__)
+        self.assertEqual(type_specs[0].root_name, namespace.__name__)
+
+    def test_importable_constexpr_types_bare_nested_class_repr(self):
+        nested_type = UserDefinedTritonKernelConfigNamespace.BareNested
+        value = nested_type(offset=2)
+        with self.assertRaisesRegex(ImportError, "uses the bare name BareNested"):
+            get_importable_constexpr_types([value])
+
+    def test_importable_constexpr_types_skip_hidden_dataclass_field(self):
+        @dataclasses.dataclass
+        class LocalHiddenValue:
+            offset: int
+
+        type_specs = get_importable_constexpr_types(
+            [UserDefinedTritonKernelHiddenConfig(2, LocalHiddenValue(3))]
+        )
+        self.assertEqual(len(type_specs), 1)
+        self.assertEqual(
+            type_specs[0].qualname,
+            UserDefinedTritonKernelHiddenConfig.__qualname__,
+        )
+
+    def test_importable_constexpr_types_non_init_dataclass_field_error(self):
+        value = UserDefinedTritonKernelNonInitConfig(offset=2)
+        with self.assertRaisesRegex(
+            ImportError, "repr-visible field derived with init=False"
+        ):
+            get_importable_constexpr_types([value])
+
+    def test_importable_constexpr_types_skip_builtin_repr(self):
+        with patch("builtins.repr") as repr_mock:
+            self.assertEqual(get_importable_constexpr_types([{"values": [1, 2]}]), [])
+        repr_mock.assert_not_called()
+
+    def test_importable_constexpr_types_reserved_name_error(self):
+        with self.assertRaisesRegex(ImportError, "import name tl.*reserved"):
+            get_importable_constexpr_types([TritonLanguageShadowConfig(offset=2)])
+
+    def test_importable_constexpr_types_set(self):
+        namespace = UserDefinedTritonKernelConfigNamespace
+        type_specs = get_importable_constexpr_types(
+            [
+                {
+                    UserDefinedTritonKernelNestedConfig(namespace.Nested(offset=2)),
+                    UserDefinedTritonKernelHiddenConfig(3, "hidden"),
+                }
+            ]
+        )
+        root_names = [type_spec.root_name for type_spec in type_specs]
+        self.assertEqual(root_names, sorted(root_names))
+        self.assertEqual(
+            root_names,
+            [
+                "UserDefinedTritonKernelConfigNamespace",
+                "UserDefinedTritonKernelHiddenConfig",
+                "UserDefinedTritonKernelNestedConfig",
+            ],
+        )
+
+    def test_importable_constexpr_types_repr_protocols(self):
+        nested_type = UserDefinedTritonKernelConfigNamespace.Nested
+
+        @dataclasses.dataclass
+        class LocalHiddenValue:
+            offset: int
+
+        for config_type in (UserDefinedAttrsLikeConfig, UserDefinedPydanticLikeConfig):
+            type_specs = get_importable_constexpr_types(
+                [config_type(nested_type(offset=2), LocalHiddenValue(3))]
+            )
+            self.assertEqual(
+                [type_spec.qualname for type_spec in type_specs],
+                [config_type.__qualname__, nested_type.__qualname__],
+            )
+
+    def test_importable_constexpr_types_local_class_error(self):
+        @dataclasses.dataclass(frozen=True)
+        class LocalConfig:
+            offset: int
+
+        with self.assertRaisesRegex(ImportError, "not importable"):
+            get_importable_constexpr_types([LocalConfig(offset=2)])
+
     def test_escape_triton_kernel_source_for_wrapper(self):
         source = """\
 @triton.jit
@@ -192,6 +342,350 @@ def helper(x):
 
         self.assertFalse(kernel.persistent_reduction)
         self.assertEqual(seen_scores, [tiling_scores])
+
+    def test_reduction_invariant_load_indexing(self):
+        self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+
+        with V.set_kernel_handler(kernel):
+            x_tree, r_tree = kernel.range_trees
+            invariant_index = sympy.Symbol("s0", integer=True, positive=True)
+            x_index = x_tree.full_range().symbol()
+            r_index = r_tree.full_range().symbol()
+            scalar_mask = TritonCSEVariable(
+                "tmp0", ValueRanges.unknown(), torch.bool, shape=("1", "1")
+            )
+
+            def indexing(index):
+                options = kernel.indexing(
+                    index,
+                    allow_reduction_invariant_indexing=True,
+                )
+                self.assertIsInstance(options, IndexingOptions)
+                return options
+
+            with patch.object(kernel, "_load_mask", scalar_mask):
+                invariant_options = indexing(invariant_index)
+                x_options = indexing(x_index)
+                reduction_options = indexing(r_index)
+
+            self.assertEqual(
+                tuple(map(str, invariant_options.expand_shape or ())), ("1", "1")
+            )
+            self.assertEqual(
+                tuple(map(str, x_options.expand_shape or ())), ("XBLOCK", "1")
+            )
+            self.assertTrue(invariant_options.reduction_axes_omitted)
+            self.assertTrue(x_options.reduction_axes_omitted)
+            self.assertFalse(reduction_options.reduction_axes_omitted)
+
+            x_mask = TritonCSEVariable(
+                "tmp1", ValueRanges.unknown(), torch.bool, shape=("XBLOCK", "1")
+            )
+            with patch.object(kernel, "_load_mask", x_mask):
+                predicate_options = indexing(invariant_index)
+            self.assertEqual(
+                tuple(map(str, predicate_options.expand_shape or ())),
+                ("XBLOCK", "1"),
+            )
+            self.assertTrue(predicate_options.reduction_axes_omitted)
+
+    def test_reduction_invariant_load_indexing_extents(self):
+        self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+
+        with V.set_kernel_handler(kernel):
+            x_tree, r_tree = kernel.range_trees
+            self.assertTrue(r_tree.is_loop)
+            invariant_index = sympy.Symbol("s0", integer=True, positive=True)
+
+            def indexing(mask):
+                with patch.object(kernel, "_load_mask", mask):
+                    options = kernel.indexing(
+                        invariant_index,
+                        allow_reduction_invariant_indexing=True,
+                    )
+                self.assertIsInstance(options, IndexingOptions)
+                return options
+
+            scalar_mask = TritonCSEVariable(
+                "tmp0", ValueRanges.unknown(), torch.bool, shape=("1", "1")
+            )
+            for reduction_numel in (
+                sympy.Symbol("u1", integer=True, nonnegative=True),
+                sympy.S.Zero,
+            ):
+                with (
+                    self.subTest(reduction_numel=reduction_numel),
+                    patch.object(r_tree, "numel", reduction_numel),
+                ):
+                    self.assertTrue(indexing(scalar_mask).reduction_axes_omitted)
+
+        persistent_kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            optimize_mask=False,
+            override_persistent_reduction=True,
+            override_cooperative_reduction=False,
+        )
+        with V.set_kernel_handler(persistent_kernel):
+            r_tree = persistent_kernel.range_trees[1]
+            self.assertFalse(r_tree.is_loop)
+            scalar_mask = TritonCSEVariable(
+                "tmp1", ValueRanges.unknown(), torch.bool, shape=("1", "1")
+            )
+
+            def persistent_indexing():
+                with patch.object(persistent_kernel, "_load_mask", scalar_mask):
+                    options = persistent_kernel.indexing(
+                        sympy.Symbol("s1", integer=True, positive=True),
+                        allow_reduction_invariant_indexing=True,
+                    )
+                self.assertIsInstance(options, IndexingOptions)
+                return options
+
+            self.assertTrue(persistent_indexing().reduction_axes_omitted)
+            for reduction_numel in (
+                sympy.Symbol("u2", integer=True, nonnegative=True),
+                sympy.S.Zero,
+            ):
+                with (
+                    self.subTest(persistent_reduction_numel=reduction_numel),
+                    patch.object(r_tree, "numel", reduction_numel),
+                ):
+                    self.assertFalse(persistent_indexing().reduction_axes_omitted)
+
+        no_x_kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            fixed_config=FixedTritonConfig({"XBLOCK": 1, "R0_BLOCK": 128}),
+            is_combo_kernel=True,
+            optimize_mask=False,
+            per_subkernel_blocks=True,
+            override_persistent_reduction=True,
+            override_cooperative_reduction=False,
+        )
+        with V.set_kernel_handler(no_x_kernel):
+            x_tree, r_tree = no_x_kernel.range_trees
+            self.assertTrue(no_x_kernel.no_x_dim)
+            self.assertIsNone(x_tree.tensor_dim)
+            self.assertEqual(r_tree.tensor_dim, 0)
+            scalar_mask = TritonCSEVariable(
+                "tmp2", ValueRanges.unknown(), torch.bool, shape=("1",)
+            )
+
+            def no_x_indexing():
+                with patch.object(no_x_kernel, "_load_mask", scalar_mask):
+                    options = no_x_kernel.indexing(
+                        sympy.Symbol("s1", integer=True, positive=True),
+                        allow_reduction_invariant_indexing=True,
+                    )
+                self.assertIsInstance(options, IndexingOptions)
+                return options
+
+            self.assertEqual(
+                tuple(map(str, no_x_indexing().expand_shape or ())),
+                ("1",),
+            )
+            for pointwise_numel in (
+                sympy.Symbol("u0", integer=True, nonnegative=True),
+                sympy.S.Zero,
+            ):
+                with (
+                    self.subTest(pointwise_numel=pointwise_numel),
+                    patch.object(x_tree, "numel", pointwise_numel),
+                ):
+                    self.assertTrue(no_x_indexing().reduction_axes_omitted)
+
+    def test_reduction_invariant_load_indexing_device_gate(self):
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+
+        with V.set_kernel_handler(kernel):
+            x_index = kernel.range_trees[0].full_range().symbol()
+            x_mask = TritonCSEVariable(
+                "tmp0", ValueRanges.unknown(), torch.bool, shape=("XBLOCK", "1")
+            )
+            self.assertIsNone(self._graph.current_device)
+            for device, expected_narrowing in (
+                (None, False),
+                (torch.device("cpu"), False),
+                (torch.device("cuda"), True),
+            ):
+                device_context = (
+                    contextlib.nullcontext()
+                    if device is None
+                    else self._graph.set_current_device(device)
+                )
+                with (
+                    self.subTest(device=device),
+                    device_context,
+                    patch.object(kernel, "_load_mask", x_mask),
+                ):
+                    options = kernel.indexing(
+                        x_index,
+                        allow_reduction_invariant_indexing=True,
+                    )
+                self.assertIsInstance(options, IndexingOptions)
+                self.assertEqual(expected_narrowing, options.reduction_axes_omitted)
+
+    def test_reduction_invariant_load_indexing_unknown_mask(self):
+        self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+
+        with V.set_kernel_handler(kernel):
+            scalar_mask = TritonCSEVariable(
+                "tmp0", ValueRanges.unknown(), torch.bool, shape=("1", "1")
+            )
+            indirect = kernel.cse.namedvar("tmp1", dtype=torch.int64, shape=("1", "1"))
+            self.assertIsInstance(indirect, TritonCSEVariable)
+            indirect_index = sympy.Symbol(indirect.name, integer=True)
+
+            with patch.object(kernel, "_load_mask", scalar_mask):
+                resolved_options = kernel.indexing(
+                    indirect_index,
+                    allow_reduction_invariant_indexing=True,
+                )
+                indirect.mask_vars.add("unknown_mask")
+                options = kernel.indexing(
+                    indirect_index,
+                    allow_reduction_invariant_indexing=True,
+                )
+
+            self.assertIsInstance(resolved_options, IndexingOptions)
+            self.assertTrue(resolved_options.reduction_axes_omitted)
+            self.assertIsInstance(options, IndexingOptions)
+            self.assertFalse(options.reduction_axes_omitted)
+            self.assertEqual(
+                tuple(map(str, options.expand_shape or ())),
+                ("XBLOCK", "R0_BLOCK"),
+            )
+
+    def test_reduction_invariant_load_indexing_schedule_guards(self):
+        self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+
+        with V.set_kernel_handler(kernel):
+            x_tree = kernel.range_trees[0]
+            x_index = x_tree.full_range().symbol()
+            scalar_mask = TritonCSEVariable(
+                "tmp0", ValueRanges.unknown(), torch.bool, shape=("1", "1")
+            )
+            x_mask = TritonCSEVariable(
+                "tmp1", ValueRanges.unknown(), torch.bool, shape=("XBLOCK", "1")
+            )
+            invariant_index = sympy.Symbol("s0", integer=True, positive=True)
+            for guarded_mode in (
+                "cooperative_reduction",
+                "mix_order_reduction",
+            ):
+                with (
+                    self.subTest(guarded_mode=guarded_mode),
+                    patch.object(kernel, guarded_mode, True),
+                ):
+                    with patch.object(kernel, "_load_mask", scalar_mask):
+                        options = kernel.indexing(
+                            invariant_index,
+                            allow_reduction_invariant_indexing=True,
+                        )
+                        self.assertIsInstance(options, IndexingOptions)
+                        self.assertFalse(options.reduction_axes_omitted)
+                    with patch.object(kernel, "_load_mask", x_mask):
+                        options = kernel.indexing(
+                            x_index,
+                            allow_reduction_invariant_indexing=True,
+                        )
+                        self.assertIsInstance(options, IndexingOptions)
+                        self.assertFalse(options.reduction_axes_omitted)
+
+    def test_reduction_invariant_load_indexing_copy_shape(self):
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+
+        with V.set_kernel_handler(kernel):
+            x_index = kernel.range_trees[0].full_range().symbol()
+            x_mask = TritonCSEVariable(
+                "tmp0", ValueRanges.unknown(), torch.bool, shape=("XBLOCK", "1")
+            )
+            with patch.object(kernel, "_load_mask", x_mask):
+                options = kernel.indexing(
+                    x_index,
+                    copy_shape=("XBLOCK", "R0_BLOCK"),
+                    allow_reduction_invariant_indexing=True,
+                )
+
+        self.assertIsInstance(options, IndexingOptions)
+        self.assertFalse(options.reduction_axes_omitted)
+        self.assertEqual(options.expand_shape, ("XBLOCK", "R0_BLOCK"))
+
+    def test_reduction_invariant_load_indexing_override_mask(self):
+        xnumel = sympy.Integer(65)
+        rnumel = sympy.Integer(65)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+
+        with V.set_kernel_handler(kernel):
+            x_tree, r_tree = kernel.range_trees
+            x_index = x_tree.full_range().symbol()
+            override_mask = r_tree.mask_name()
+            x_mask = TritonCSEVariable(
+                "tmp0", ValueRanges.unknown(), torch.bool, shape=("XBLOCK", "1")
+            )
+            with patch.object(kernel, "_load_mask", x_mask):
+                options = kernel.indexing(
+                    x_index,
+                    override_mask=override_mask,
+                    allow_reduction_invariant_indexing=True,
+                )
+
+        self.assertIsInstance(options, IndexingOptions)
+        self.assertFalse(options.reduction_axes_omitted)
+        self.assertEqual(options.expand_shape, ("XBLOCK", "R0_BLOCK"))
+        self.assertIn(override_mask, options.mask_vars)
 
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):
@@ -648,6 +1142,37 @@ def helper(x):
                 triton_utils.signature_of(arg, size_dtype=None), "*fp8e4nv"
             )
 
+    @inductor_config.patch("_use_fp64_for_unbacked_floats", True)
+    @patch(
+        "torch._inductor.codegen.triton_utils.device_supports_fp64",
+        return_value=True,
+    )
+    def test_signature_to_meta_can_match_triton_python_float_signature(self, mock):
+        class FakeGraph:
+            current_device = torch.device("cuda")
+
+        signature = [
+            SizeArg("scale", 0.5),
+            SizeArg("runtime_scale", make_symbol(SymT.UNBACKED_FLOAT, 0)),
+        ]
+        argdefs = [ArgName("scale"), ArgName("runtime_scale")]
+        with V.set_graph_handler(FakeGraph()):
+            self.assertEqual(
+                triton_utils.signature_to_meta(
+                    signature, size_dtype=None, argdefs=argdefs
+                ),
+                {"scale": "fp64", "runtime_scale": "fp64"},
+            )
+            self.assertEqual(
+                triton_utils.signature_to_meta(
+                    signature,
+                    size_dtype=None,
+                    argdefs=argdefs,
+                    use_fp64_for_python_float=False,
+                ),
+                {"scale": "fp32", "runtime_scale": "fp32"},
+            )
+
     @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @patch("torch._inductor.codegen.triton.device_supports_fp64", return_value=False)
     @patch(
@@ -718,6 +1243,88 @@ def helper(x):
         code_str = " ".join(code)
         self.assertNotIn("tt.pointer_range", code_str)
 
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        "requires CPU or GPU Triton",
+    )
+    def test_user_defined_triton_kernel_non_builtin_constexpr(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_constexpr_kernel(
+            x,
+            out,
+            n_elements,
+            cfg: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(x + offsets, mask=mask)
+            tl.store(out + offsets, values + cfg.nested.offset, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            add_constexpr_kernel[grid](
+                x,
+                out,
+                n_elements,
+                cfg=UserDefinedTritonKernelNestedConfig(
+                    nested=UserDefinedTritonKernelConfigNamespace.Nested(offset=2)
+                ),
+                BLOCK_SIZE=128,
+            )
+            return out
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(1024, device=device)
+        actual = torch.compile(fn)(x)
+        self.assertEqual(actual, x + 2)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        "requires CPU or GPU Triton",
+    )
+    def test_user_defined_triton_kernel_python_float_arg_signature_matches_triton(self):
+        import triton
+        import triton.language as tl
+        from triton.runtime.jit import mangle_type
+
+        @triton.jit
+        def scale_kernel(in_ptr, out_ptr, n_elements, scale, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x * scale, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            n = x.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n, meta["BLOCK_SIZE"]),)
+
+            scale_kernel[grid](x, out, n, 0.5, BLOCK_SIZE=128)
+            return out
+
+        device = GPU_TYPE if HAS_GPU_AND_TRITON else "cpu"
+        x = torch.randn(64, 64, device=device)
+        result, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, x * 0.5)
+        code_str = " ".join(code)
+        expected_signature = mangle_type(0.5)
+        self.assertIn(f"'scale': '{expected_signature}'", code_str)
+        if expected_signature != "fp64":
+            self.assertNotIn("'scale': 'fp64'", code_str)
+
     def test_imports_for_benchmark_kernel_multiline_get_raw_stream(self):
         # Regression: a backend whose import_get_raw_stream_as returns a
         # multi-line snippet (e.g. the CPU override, which MTIA uses) must not
@@ -742,6 +1349,152 @@ def helper(x):
             compile(imports, "<benchmark_kernel_imports>", "exec")
             self.assertIn("\nfrom torch._dynamo.testing import rand_strided\n", imports)
             self.assertIn("\nimport torch\n", imports)
+
+    def test_sanitize_for_repr(self):
+        from torch._inductor.codegen.wrapper import _sanitize_for_repr
+
+        class Color(Enum):
+            RED = "red"
+            BLUE = "blue"
+
+        class Priority(IntEnum):
+            LOW = 0
+            HIGH = 1
+
+        # Enum -> value
+        self.assertEqual(_sanitize_for_repr(Color.RED), "red")
+        self.assertEqual(_sanitize_for_repr(Priority.HIGH), 1)
+
+        # Recursion into containers
+        self.assertEqual(
+            _sanitize_for_repr({"a": Color.RED, "b": [Priority.LOW, 42]}),
+            {"a": "red", "b": [0, 42]},
+        )
+
+        # Tuples
+        self.assertEqual(
+            _sanitize_for_repr((Color.BLUE, 1)),
+            ("blue", 1),
+        )
+
+        # Namedtuples
+        Pair = namedtuple("Pair", ["x", "y"])
+        result = _sanitize_for_repr(Pair(Color.RED, Priority.HIGH))
+        self.assertIsInstance(result, Pair)
+        self.assertEqual(result, Pair("red", 1))
+
+        # Enum as dict key
+        self.assertEqual(
+            _sanitize_for_repr({Color.RED: 1}),
+            {"red": 1},
+        )
+
+        # Nested enum value
+        class Outer(Enum):
+            INNER = Color.RED
+
+        self.assertEqual(_sanitize_for_repr(Outer.INNER), "red")
+
+        config = UserDefinedTritonKernelEnumConfig(
+            UserDefinedTritonKernelConfigMode.FAST
+        )
+        self.assertEqual(len(get_importable_constexpr_types([config])), 1)
+        sanitized_config = _sanitize_for_repr(config)
+        self.assertIsInstance(sanitized_config, UserDefinedTritonKernelEnumConfig)
+        self.assertEqual(sanitized_config.mode, 1)
+        compile(repr(sanitized_config), "<sanitized-constexpr>", "eval")
+
+        for config_type in (UserDefinedAttrsLikeConfig, UserDefinedPydanticLikeConfig):
+            config = config_type(UserDefinedTritonKernelConfigMode.FAST, "hidden")
+            self.assertEqual(len(get_importable_constexpr_types([config])), 1)
+            sanitized_config = _sanitize_for_repr(config)
+            self.assertIsInstance(sanitized_config.nested, int)
+            compile(repr(sanitized_config), "<sanitized-constexpr>", "eval")
+
+            unchanged_config = config_type(1, "hidden")
+            self.assertIs(_sanitize_for_repr(unchanged_config), unchanged_config)
+
+        sanitized_set = _sanitize_for_repr({UserDefinedTritonKernelConfigMode.FAST})
+        self.assertIsInstance(next(iter(sanitized_set)), int)
+        unchanged_set = {1}
+        self.assertIs(_sanitize_for_repr(unchanged_set), unchanged_set)
+        sanitized_frozenset = _sanitize_for_repr(
+            frozenset({UserDefinedTritonKernelConfigMode.FAST})
+        )
+        self.assertIsInstance(next(iter(sanitized_frozenset)), int)
+
+        mapping = OrderedDict([("mode", UserDefinedTritonKernelConfigMode.FAST)])
+        sanitized_mapping = _sanitize_for_repr(mapping)
+        self.assertIsInstance(sanitized_mapping, OrderedDict)
+        self.assertIsInstance(sanitized_mapping["mode"], int)
+
+        unchanged_mapping = OrderedDict([("mode", 1)])
+        self.assertIs(_sanitize_for_repr(unchanged_mapping), unchanged_mapping)
+
+        class ComputedReprArgs:
+            @property
+            def computed(self):
+                return 1
+
+            def __repr_args__(self):
+                return (("computed", self.computed),)
+
+        computed = ComputedReprArgs()
+        self.assertIs(_sanitize_for_repr(computed), computed)
+
+        class PositionalReprArgs:
+            def __repr_args__(self):
+                return ((None, 1),)
+
+        positional = PositionalReprArgs()
+        self.assertIs(_sanitize_for_repr(positional), positional)
+
+        class LabelledMapping(dict):
+            def __init__(self, label, values):
+                super().__init__(values)
+                self.label = label
+
+        labelled_mapping = LabelledMapping("config", {"mode": 1})
+        self.assertIs(_sanitize_for_repr(labelled_mapping), labelled_mapping)
+
+        # Non-enum passthrough
+        self.assertEqual(_sanitize_for_repr(42), 42)
+        self.assertEqual(_sanitize_for_repr("hello"), "hello")
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_enum_constexpr_in_user_defined_triton_kernel(self):
+        """Custom Triton kernel with IntEnum constexpr generates valid code."""
+        import triton
+        import triton.language as tl
+
+        class Mode(IntEnum):
+            ADD = 1
+            MUL = 2
+
+        @triton.jit
+        def enum_kernel(
+            in_ptr, out_ptr, numel, MODE: tl.constexpr, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < numel
+            x = tl.load(in_ptr + offsets, mask=mask)
+            if MODE == 1:
+                output = x + 1
+            else:
+                output = x * 2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            enum_kernel[(1,)](x, y, x.numel(), Mode.ADD, 256)
+            return y
+
+        x = torch.randn(128, device=GPU_TYPE)
+        fn_c = torch.compile(fn)
+        res, code = run_and_get_code(fn_c, x)
+        self.assertEqual(fn(x), res)
+        # Verify generated code doesn't contain invalid Enum repr like <Mode.ADD: 1>
+        self.assertNotIn("<Mode.", code[0])
 
 
 if __name__ == "__main__":

@@ -39,7 +39,7 @@ class TestTSan(TestCase):
 
         def profile_work():
             for _ in range(30):
-                with torch.profiler.profile(with_stack=True, with_modules=True):
+                with torch.profiler.profile(with_stack=True):
                     torch.ones(10)
 
         run_concurrently([profile_work] + [work] * 8)

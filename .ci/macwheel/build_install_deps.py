@@ -29,7 +29,7 @@ NUMPY_PINS: dict[str, str] = {
     "3.12": "2.0.2",
     "3.13": "2.1.0",
     "3.14": "2.3.4",
-    "3.15": "2.5.1",
+    "3.15": "2.5.2",
 }
 
 OMP_PREFIX = Path("/opt/llvm-openmp")
@@ -63,6 +63,14 @@ def numpy_pin() -> str:
     return pin
 
 
+def preinstall_cp315_build_deps() -> list[str]:
+    """Pin Cython < 3.3.0 for cp315 sdist builds. See pytorch/pytorch#194618."""
+    if sys.version_info[:2] != (3, 15):
+        return []
+    pip_install("-q", "cython<3.3.0", "setuptools>=77.0.0,<82", "wheel")
+    return ["--no-build-isolation"]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("package_dir", type=Path)
@@ -71,9 +79,10 @@ def main() -> None:
     os.chdir(args.package_dir)
     # requirements-build.txt supplies the build backend for `python -m build
     # --no-isolation` (the previous shell build relied on it being preinstalled).
-    pip_install("-qU", "-r", "requirements-build.txt")
-    pip_install("-q", "-r", "requirements.txt")
-    pip_install("-q", f"numpy=={numpy_pin()}")
+    build_flags = preinstall_cp315_build_deps()
+    pip_install("-qU", *build_flags, "-r", "requirements-build.txt")
+    pip_install("-q", *build_flags, "-r", "requirements.txt")
+    pip_install("-q", *build_flags, f"numpy=={numpy_pin()}")
     # Skip when sharing build/ across Pythons in the per-host loop -- the
     # per-Python bits (libtorch_python, _C.so) are invalidated by
     # tools/setup_helpers/cmake.py, so libtorch_cpu is reused. spin (from

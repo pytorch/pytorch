@@ -98,6 +98,41 @@ jobs:
       cuda-version: "13.0"
     secrets: inherit
 
+  linux-jammy-cuda13_4-py3_10-gcc11-build:
+    name: linux-jammy-cuda13.4-py3.10-gcc11
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-cuda13.4-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: 7.5
+      test-matrix: |
+        { include: [
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.4xlarge.nvidia.gpu" },
+        ]}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.4"
+    secrets: inherit
+
+  linux-jammy-cuda13_4-py3_10-gcc11-test:
+    name: linux-jammy-cuda13.4-py3.10-gcc11
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda13_4-py3_10-gcc11-build
+      - target-determination
+      - get-label-type
+    with:
+      build-environment: ${{ needs.linux-jammy-cuda13_4-py3_10-gcc11-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda13_4-py3_10-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_4-py3_10-gcc11-build.outputs.test-matrix }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.4"
+    secrets: inherit
+
   linux-jammy-cuda13_0-py3_10-gcc11-debug-build:
     name: linux-jammy-cuda13.0-py3.10-gcc11-debug
     uses: ./.github/workflows/_linux-build.yml
@@ -137,6 +172,45 @@ jobs:
       python-version: "3.10"
       compiler: gcc11
       cuda-version: "13.0"
+    secrets: inherit
+
+  linux-jammy-py3_10-gcc11-debug-distributed-build:
+    name: linux-jammy-py3.10-gcc11-debug-distributed
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.10-gcc11-debug
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang21
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      test-matrix: |
+        { include: [
+          { config: "distributed", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
+          { config: "distributed", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", owners: ["oncall:distributed", "oncall:debug-build"] },
+        ]}
+      python-version: "3.10"
+      compiler: gcc11
+    secrets: inherit
+
+  linux-jammy-py3_10-gcc11-debug-distributed-test:
+    name: linux-jammy-py3.10-gcc11-debug-distributed
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-py3_10-gcc11-debug-distributed-build
+      - target-determination
+      - get-label-type
+    with:
+      build-environment: ${{ needs.linux-jammy-py3_10-gcc11-debug-distributed-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_10-gcc11-debug-distributed-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-debug-distributed-build.outputs.test-matrix }}
+      python-version: "3.10"
+      compiler: gcc11
     secrets: inherit
 
   linux-jammy-cuda13_0-py3-gcc11-slow-gradcheck-build:

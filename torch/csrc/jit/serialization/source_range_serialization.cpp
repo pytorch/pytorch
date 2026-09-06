@@ -119,7 +119,7 @@ int64_t SourceRangeSerializer::store_text_and_get_index(
 
 c10::IValue SourceRangeSerializer::serialize_source(
     const std::shared_ptr<Source>& s) {
-  if (serialized_sources.count(s)) {
+  if (serialized_sources.contains(s)) {
     return serialized_sources.at(s);
   }
   c10::intrusive_ptr<c10::ivalue::Tuple> serialized;

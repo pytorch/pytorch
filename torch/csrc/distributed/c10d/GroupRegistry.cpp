@@ -38,6 +38,12 @@ class GroupRegistry {
     return group;
   }
 
+  bool has_group(const std::string& group_name) {
+    std::shared_lock read_lock(lock_);
+    auto it = registry_.find(group_name);
+    return it != registry_.end() && it->second.lock() != nullptr;
+  }
+
   void unregister_group(const std::string& group_name) {
     std::unique_lock write_lock(lock_);
     registry_.erase(group_name);
@@ -84,6 +90,14 @@ c10::intrusive_ptr<c10d::ProcessGroup> resolve_process_group(
     return RankLocal<::GroupRegistry>::get().resolve_group(group_name);
   } else {
     return process_registry.resolve_group(group_name);
+  }
+}
+
+bool is_process_group_registered(const std::string& group_name) {
+  if (thread_isolation_mode) {
+    return RankLocal<::GroupRegistry>::get().has_group(group_name);
+  } else {
+    return process_registry.has_group(group_name);
   }
 }
 

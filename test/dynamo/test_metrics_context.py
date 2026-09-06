@@ -2,9 +2,12 @@
 
 from torch._dynamo.metrics_context import MetricsContext, TopN
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestMetricsContext(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.metrics = {}

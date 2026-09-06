@@ -81,7 +81,7 @@ def scatter(tensors, src=0, group=group.WORLD):
 
     Arguments:
         tensors (list[Tensor]): List of tensors to scatter on the source rank.
-            Receivers must pass ``None`.
+            Receivers must pass ``None``.
         src (int, optional): Source rank (default is 0).
         group (ProcessGroup, optional): The process group to work on.
 
@@ -415,7 +415,7 @@ class _AllGather(Function):
             gx = torch.empty_like(grad_outputs[rank])
             gx = _Reduce_Scatter.apply(ReduceOp.SUM, ctx.group, gx, *grad_outputs)
         else:
-            # As many backends doesn't support ReduceScatter, we use AlltoAll with .sum()
+            # As many backends don't support ReduceScatter, we use AlltoAll with .sum()
             # to emulate the ReduceScatter behavior
             tensor_list = [torch.empty_like(tensor) for tensor in grad_outputs]
             gxs = _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)

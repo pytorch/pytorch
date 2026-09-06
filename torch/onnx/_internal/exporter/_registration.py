@@ -198,7 +198,7 @@ class ONNXRegistry:
         target: TorchOp,
         onnx_decomposition: OnnxDecompMeta,
     ) -> None:
-        """Registers a OnnxDecompMeta to an operator.
+        """Registers an OnnxDecompMeta to an operator.
 
         Args:
             target: The PyTorch node callable target.

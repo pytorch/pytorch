@@ -3,6 +3,7 @@ import gc
 import os
 import random
 import tempfile
+import unittest
 import weakref
 from types import SimpleNamespace
 from unittest import mock
@@ -28,9 +29,11 @@ from torch._inductor.runtime.triton_heuristics import (
     StaticTritonCompileResult,
 )
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.utils._triton import has_triton_tma_device
 
 
 if HAS_XPU_AND_TRITON:
@@ -48,6 +51,33 @@ def _patched_getitem(self, grid):
 
 
 class TestStaticTritonLauncherUnit(TestCase):
+    @staticmethod
+    def _global_scratch_kernel(kernel_cls=StaticallyLaunchedCudaKernel):
+        fn = SimpleNamespace(__name__="scratch_kernel", arg_names=["out"], params=[])
+        src = SimpleNamespace(fn=fn, signature={0: "*fp32"}, constants={})
+        metadata = SimpleNamespace(
+            num_warps=4,
+            shared=0,
+            num_ctas=1,
+            global_scratch_size=32,
+            global_scratch_align=16,
+        )
+
+        class FakeCompiledKernel(SimpleNamespace):
+            launch_enter_hook = None
+            launch_exit_hook = None
+
+        compiled_kernel = FakeCompiledKernel(
+            src=src,
+            metadata=metadata,
+            _cubin_path="/tmp/scratch_kernel.cubin",
+            hash="hash",
+            asm={"cubin": b"cubin"},
+        )
+        kernel = kernel_cls(compiled_kernel)
+        kernel.function = 1
+        return kernel
+
     def test_xpu_load_kernel_uses_existing_three_tuple_abi(self):
         load_calls = []
         kernel_capsule = object()
@@ -61,6 +91,9 @@ class TestStaticTritonLauncherUnit(TestCase):
         launcher = object.__new__(StaticallyLaunchedXpuKernel)
         launcher.function = None
         launcher.module = None
+        launcher.device_agnostic = False
+        launcher.functions = {}
+        launcher.modules = {}
         launcher.cubin_path = "/tmp/kernel.zebin"
         launcher.cubin_raw = b"zebin"
         launcher.name = "kernel"
@@ -133,6 +166,71 @@ class TestStaticTritonLauncherUnit(TestCase):
         del fast_launcher
         gc.collect()
         self.assertIsNone(owner_ref())
+
+    def test_resolve_load_device_cpu_stays_none(self):
+        # CPU has no device index; its DeviceGuard is a no-op. Resolving its None to a
+        # concrete index makes the guard call exchange_device, which CPU does not
+        # implement, breaking the triton CPU backend's _make_launchers.
+        from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
+        from torch._inductor.runtime.triton_heuristics import _resolve_load_device
+
+        self.assertIsNone(_resolve_load_device(None, "cpu"))
+        self.assertEqual(_resolve_load_device(3, "cpu"), 3)
+        # The resolved CPU value must be usable in a DeviceGuard without raising.
+        iface = get_interface_for_device("cpu")
+        with DeviceGuard(iface, _resolve_load_device(None, "cpu")):
+            pass
+
+    @skipIfRocm
+    def test_global_scratch_allocation(self):
+        kernel = self._global_scratch_kernel()
+        scratch = SimpleNamespace(data_ptr=lambda: 2)
+        alloc_fn = mock.Mock(return_value=scratch)
+        launch_kernel = mock.Mock()
+        kernel.C_impl = SimpleNamespace(_launch_kernel=launch_kernel)
+
+        allocator_var = SimpleNamespace(get=lambda: alloc_fn)
+        with mock.patch(
+            "torch._inductor.runtime.static_triton_launcher._triton_allocator_var",
+            return_value=allocator_var,
+        ):
+            kernel.run(2, 3, 1, 4, 5)
+
+        alloc_fn.assert_called_once_with(192, 16, 4)
+        launch_kernel.assert_called_once_with(1, 2, 3, 1, 4, 0, "OO", (5, scratch), 4)
+
+    @skipIfRocm
+    def test_fast_launcher_rejects_global_scratch(self):
+        import types
+
+        kernel = self._global_scratch_kernel()
+
+        def launcher_body(grid_0, grid_1, grid_2, stream, *args):
+            runner(grid_0, grid_1, grid_2, stream, *args)  # noqa: F821
+
+        launcher = types.FunctionType(
+            launcher_body.__code__, {"runner": kernel.run}, "launcher"
+        )
+        launcher._is_static = True
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {"use_fast_triton_launcher": True}
+        autotuner.device_props = SimpleNamespace(type="cuda")
+        with mock.patch("torch._C._FastCudaLauncher", create=True) as fast_launcher:
+            self.assertIsNone(autotuner._build_fast_launcher(launcher))
+        fast_launcher.assert_not_called()
+
+    def test_xpu_rejects_global_scratch(self):
+        with self.assertRaisesRegex(
+            NotImplementedError, "Global scratch not yet supported"
+        ):
+            self._global_scratch_kernel(StaticallyLaunchedXpuKernel)
+
+    @unittest.skipUnless(torch.version.hip, "ROCm only")
+    def test_rocm_rejects_global_scratch(self):
+        with self.assertRaisesRegex(
+            NotImplementedError, "Global scratch not yet supported"
+        ):
+            self._global_scratch_kernel()
 
     @staticmethod
     def _autotuner_with_static_cubin(cubin_raw):
@@ -291,6 +389,71 @@ class TestStaticTritonLauncher(TestCase):
         launcher.run(1, 1, 1, stream, new_arg0, 50, 50, 50, 50)
         self.assertEqual(new_arg0, arg0)
 
+    def test_float_scalars(self):
+        @triton.jit
+        def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3
+            tl.store(arg0, x + y)
+
+        # Just above the fp16 midpoint between 1.0 and 1.0 + 2**-10. Triton
+        # rounds this directly from fp64 to fp16; narrowing through fp32 first
+        # incorrectly rounds it down to 1.0.
+        scalar = float.fromhex("0x1.0020000000001p+0")
+        arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        compiled_kernel = floats[(1,)](arg0, scalar, 1.0, 1.0)
+        launcher = self._make_launcher(compiled_kernel)
+        self.assertEqual(
+            arg0,
+            torch.tensor([3.0 + 2**-10], dtype=torch.float64, device=GPU_TYPE),
+        )
+        self.assertEqual(launcher.arg_tys, "Oefd")
+
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
+        self.assertEqual(new_arg0, arg0)
+
+        with self.assertRaisesRegex(OverflowError, "too large to pack"):
+            launcher.run(1, 1, 1, stream, new_arg0, 65520.0, 0.0, 0.0)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not HAS_XPU_AND_TRITON and not SM80OrLater,
+        "uses bfloat16 which requires SM >= 80 or XPU",
+    )
+    def test_bfloat16_scalar(self):
+        @triton.jit
+        def bfloat16(arg0, arg1: tl.bfloat16, arg2: tl.float32, arg3: tl.float64):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3
+            tl.store(arg0, x + y)
+
+        # Triton's launcher truncates the fp32 representation to bf16. A
+        # round-to-nearest conversion would instead produce 1.0078125.
+        scalar = float.fromhex("0x1.018p+0")
+        arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        compiled_kernel = bfloat16[(1,)](arg0, scalar, 1.0, 1.0)
+        launcher = self._make_launcher(compiled_kernel)
+        self.assertEqual(
+            arg0, torch.tensor([3.0], dtype=torch.float64, device=GPU_TYPE)
+        )
+        self.assertEqual(launcher.arg_tys, "Oyfd")
+
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
+        self.assertEqual(new_arg0, arg0)
+
+        new_arg0.zero_()
+        launcher.run(1, 1, 1, stream, new_arg0, 1e300, 0.0, 0.0)
+        self.assertEqual(
+            new_arg0,
+            torch.tensor([float("inf")], dtype=torch.float64, device=GPU_TYPE),
+        )
+
     def test_basic_1arg(self):
         @triton.jit
         def simple_kernel_1_arg(arg0):
@@ -418,7 +581,8 @@ class TestStaticTritonLauncher(TestCase):
         arg1 = 5
         args = (arg0, arg1)
         compiled_kernel = simple_kernel[(1,)](*args)
-        # Allocate 50 KB of memory
+        # Allocate 50 KB without adding a local-accessor kernel parameter. On
+        # XPU this exercises the static shared-memory argument-count path.
         compiled_kernel.shared = 50000
         launcher = self._make_launcher(compiled_kernel)
         self.assertEqual(arg0, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE))
@@ -429,6 +593,31 @@ class TestStaticTritonLauncher(TestCase):
         launcher.slow_launch_kernel = True
         launcher.run(1, 1, 1, stream, new_arg0, arg1)
         self.assertEqual(new_arg0, arg0)
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_kernel_arg_count_mismatch(self):
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        launcher = self._make_launcher(compiled_kernel)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+
+        with self.assertRaisesRegex(RuntimeError, "Kernel argument count mismatch"):
+            launcher.C_impl._launch_kernel(
+                launcher.function,
+                1,
+                1,
+                1,
+                launcher.num_warps,
+                launcher.shared,
+                f"{launcher.arg_tys}i",
+                (arg0, 0),
+                stream,
+            )
 
     @skipIfXpu(msg="Only testing CUDA OOM behavior")
     def test_too_high_shared_mem(self):
@@ -560,6 +749,8 @@ def kernel_many_args(out_tensor, {decl}):
                 self.name = "fake_kernel"
                 self.module = 0xC0FFEE
                 self.function = 0xF00D
+                self.functions = {}
+                self.modules = {}
                 self.C_impl = FakeImpl
 
             def close(self):
@@ -805,6 +996,51 @@ class TestFastCudaLauncher(TestCase):
             new_arg0, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE)
         )
 
+    def test_float_scalars(self):
+        @triton.jit
+        def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3
+            tl.store(arg0, x + y)
+
+        scalar = float.fromhex("0x1.0020000000001p+0")
+        arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        compiled_kernel = floats[(1,)](arg0, scalar, 1.0, 1.0)
+        launcher = self._make_launcher(compiled_kernel)
+        expected = torch.tensor([3.0 + 2**-10], dtype=torch.float64, device=GPU_TYPE)
+        self.assertEqual(arg0, expected)
+        self.assertEqual(launcher.arg_tys, "Oefd")
+        fast = self._make_fast_launcher(launcher)
+
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        fast(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
+        self.assertEqual(new_arg0, expected)
+
+    @unittest.skipIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_bfloat16_scalar(self):
+        @triton.jit
+        def bfloat16(arg0, arg1: tl.bfloat16, arg2: tl.float32, arg3: tl.float64):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3
+            tl.store(arg0, x + y)
+
+        scalar = float.fromhex("0x1.018p+0")
+        arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        compiled_kernel = bfloat16[(1,)](arg0, scalar, 1.0, 1.0)
+        launcher = self._make_launcher(compiled_kernel)
+        expected = torch.tensor([3.0], dtype=torch.float64, device=GPU_TYPE)
+        self.assertEqual(arg0, expected)
+        self.assertEqual(launcher.arg_tys, "Oyfd")
+        fast = self._make_fast_launcher(launcher)
+
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        fast(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
+        self.assertEqual(new_arg0, expected)
+
     def test_multiple_tensor_args(self):
         """Verify _FastCudaLauncher handles multiple tensor pointer args correctly."""
 
@@ -954,6 +1190,110 @@ class TestFastCudaLauncherCompileResult(TestCase):
                 any(results),
                 "_FastCudaLauncher should not be built when config is disabled",
             )
+
+    @skipIfXpu(msg="Tests CUDA device-side TMA global scratch")
+    @unittest.skipIf(
+        not has_triton_tma_device(),
+        "requires Triton device-side TMA support",
+    )
+    @torch._inductor.config.patch(
+        {"compile_threads": 1, "static_launch_user_defined_triton_kernels": True}
+    )
+    def test_device_tma_gemm_falls_back_from_fast_launcher(self):
+        """A global-scratch kernel repeatedly uses the regular static launcher."""
+
+        @triton.jit
+        def device_tma_gemm(
+            a_ptr,
+            b_ptr,
+            c_ptr,
+            M: tl.constexpr,
+            N: tl.constexpr,
+            K: tl.constexpr,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+            BLOCK_K: tl.constexpr,
+        ):
+            a_desc = tl.make_tensor_descriptor(
+                a_ptr,
+                [M, K],
+                [K, 1],
+                [BLOCK_M, BLOCK_K],
+            )
+            b_desc = tl.make_tensor_descriptor(
+                b_ptr,
+                [N, K],
+                [K, 1],
+                [BLOCK_N, BLOCK_K],
+            )
+            c_desc = tl.make_tensor_descriptor(
+                c_ptr,
+                [M, N],
+                [N, 1],
+                [BLOCK_M, BLOCK_N],
+            )
+
+            pid_m = tl.program_id(0)
+            pid_n = tl.program_id(1)
+            offset_m = pid_m * BLOCK_M
+            offset_n = pid_n * BLOCK_N
+            accumulator = tl.zeros((BLOCK_M, BLOCK_N), tl.float32)
+            for offset_k in range(0, K, BLOCK_K):
+                a = a_desc.load([offset_m, offset_k])
+                b = b_desc.load([offset_n, offset_k])
+                accumulator = tl.dot(a, b.T, accumulator)
+            c_desc.store([offset_m, offset_n], accumulator.to(tl.bfloat16))
+
+        M = 64
+        N = 64
+        K = 32
+        BLOCK_M = 32
+        BLOCK_N = 32
+        BLOCK_K = 32
+
+        @torch.compile(fullgraph=True)
+        def gemm(a, b):
+            out = torch.empty((M, N), device=a.device, dtype=a.dtype)
+            device_tma_gemm[(M // BLOCK_M, N // BLOCK_N)](
+                a,
+                b,
+                out,
+                M=M,
+                N=N,
+                K=K,
+                BLOCK_M=BLOCK_M,
+                BLOCK_N=BLOCK_N,
+                BLOCK_K=BLOCK_K,
+            )
+            return out
+
+        from triton.runtime._allocation import _allocator
+
+        previous_allocator = _allocator.get()
+        patcher, results = self._patch_build_fast_launcher()
+        alloc_fn = mock.Mock(
+            side_effect=lambda size, _alignment, _stream: torch.empty(
+                size, dtype=torch.uint8, device="cuda"
+            )
+        )
+        triton.set_allocator(alloc_fn)
+        try:
+            with patcher:
+                for _ in range(3):
+                    a = torch.randn((M, K), device="cuda", dtype=torch.bfloat16)
+                    b = torch.randn((N, K), device="cuda", dtype=torch.bfloat16)
+                    self.assertEqual(gemm(a, b), a @ b.T, atol=1e-2, rtol=1e-2)
+        finally:
+            triton.set_allocator(previous_allocator)
+
+        self.assertGreater(alloc_fn.call_count, 0)
+        for call in alloc_fn.call_args_list:
+            self.assertGreater(call.args[0], 0)
+        self.assertTrue(results, "_build_fast_launcher was not reached")
+        self.assertFalse(
+            any(results),
+            "global-scratch kernels must use the regular static launcher",
+        )
 
 
 if __name__ == "__main__":

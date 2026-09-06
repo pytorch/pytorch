@@ -9,6 +9,8 @@ import unittest
 from unittest import skipUnless
 from unittest.mock import MagicMock, patch, PropertyMock
 
+import sympy
+
 import torch
 from torch._dynamo.testing import rand_strided
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
@@ -50,6 +52,7 @@ from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
     _enforce_reduction_config_block_minimums,
+    _find_names,
     _num_warps,
     _persistent_reduction_configs,
     _reduction_configs,
@@ -65,6 +68,12 @@ from torch._inductor.runtime.triton_heuristics import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
+
+
+class _FindNamesProbe:
+    # A gc-tracked stand-in for a CachingAutotuner; object() is untracked, so a
+    # dict holding one can itself stay untracked and escape gc.get_referrers.
+    pass
 
 
 @triton.jit
@@ -94,6 +103,41 @@ def get_autotuned_amd_sqr_kernel():
 @instantiate_parametrized_tests
 class TestTritonHeuristics(TestCase):
     device_type = GPU_TYPE
+
+    def test_find_names_ignores_frame_locals(self):
+        """
+        A kernel held only by frame locals has no name, so DebugAutotuner can
+        fall back to inductor_meta["kernel_name"]. The stack walk used to leak
+        _find_names' own `obj` and the caller's `self` into the result.
+        """
+        probe = _FindNamesProbe()
+        self.assertEqual(_find_names(probe), [])
+
+    def test_find_names_finds_namespace_binding(self):
+        probe = _FindNamesProbe()
+        namespace = {"triton_poi_fused_add_0": probe}
+        try:
+            self.assertIn("triton_poi_fused_add_0", _find_names(probe))
+        finally:
+            del namespace
+
+    def test_unbound_kernel_falls_back_to_inductor_meta_name(self):
+        """
+        The label DebugAutotuner.run derives for an unbound kernel. The stack
+        walk made _find_names return ['obj', 'self'], so max(..., key=len)
+        picked "self" instead of reaching the inductor_meta fallback.
+        """
+
+        class FakeAutotuner:
+            inductor_meta = {"kernel_name": "triton_poi_fused_add_0"}
+
+            def kernel_name(self):
+                possible_names = _find_names(self)
+                if possible_names:
+                    return f"{max(possible_names, key=len)}"
+                return self.inductor_meta["kernel_name"]
+
+        self.assertEqual(FakeAutotuner().kernel_name(), "triton_poi_fused_add_0")
 
     def test_triton_config(self):
         """
@@ -488,6 +532,27 @@ class TestTritonHeuristics(TestCase):
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
 
+    @runOnRocm
+    def test_rocm_exhaustive_configs_do_not_enumerate_num_stages(self):
+        """ROCmConfigHeuristic._filter_configs forces num_stages to
+        default_num_stages, so enumerating num_stages in exhaustive_configs would
+        only yield duplicates that get deduped again in _finalize_mm_configs.
+        """
+        from torch._inductor.heuristics.template.triton import (
+            GemmConfig,
+            ROCmConfigHeuristic,
+        )
+
+        heuristic = ROCmConfigHeuristic()
+        self.assertEqual(
+            {c.num_stages for c in heuristic.exhaustive_configs},
+            {heuristic.default_num_stages},
+        )
+
+        # the invariant above is only safe because _filter_configs clobbers it
+        filtered = heuristic._filter_configs([GemmConfig(32, 32, 32, 1, 4, group_m=8)])
+        self.assertEqual(filtered[0].num_stages, heuristic.default_num_stages)
+
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
@@ -520,6 +585,77 @@ class TestTritonHeuristics(TestCase):
                 config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
             )
             self.assertEqual(len(configs), expected_count)
+
+    @runOnRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_flex_default_configs_gated_on_arch_name(self):
+        """A gfx target gets tuned flex defaults only if registered for them.
+
+        get_device_capability() on ROCm reports the gfx major/minor, which
+        neither orders by capability nor identifies the product line, so gating
+        on `>= (9, 5)` also matches gfx1030, gfx1100 and gfx1250 (MI450) and
+        hands them tables measured on gfx950.
+        """
+        from torch._inductor.heuristics.template.triton import ROCmConfigHeuristic
+        from torch._inductor.utils import rocm_gfx_arch
+
+        heuristic = ROCmConfigHeuristic()
+        dtype, head_dim = torch.float16, 128
+
+        # the registries are keyed on the bare target, so the features that
+        # gcnArchName carries ("gfx950:sramecc+:xnack-") have to be stripped
+        self.assertNotIn(":", rocm_gfx_arch())
+        self.assertTrue(
+            torch.cuda.get_device_properties(0).gcnArchName.startswith(rocm_gfx_arch())
+        )
+
+        # stands in for any target that has no measured values of its own, and
+        # gives the fallback to compare against without pinning its values here
+        unregistered = "gfx000"
+        # RDNA3 is deliberately absent: it has its own branch, keyed by sequence
+        # length rather than by target, so it is not part of this dispatch.
+        targets = ("gfx942", "gfx950", "gfx1250", unregistered)
+
+        def configs_for(arch, get_configs):
+            with (
+                patch(
+                    "torch._inductor.heuristics.template.triton.rocm_gfx_arch",
+                    lambda: arch,
+                ),
+                patch(
+                    "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
+                    lambda: False,
+                ),
+            ):
+                return get_configs()
+
+        paths = (
+            (
+                "forward",
+                heuristic.flex_fwd_config_by_arch,
+                lambda: heuristic.get_flex_attn_fwd_configs(
+                    head_dim, sympy.Integer(1024), dtype
+                ),
+            ),
+            (
+                "backward",
+                heuristic.flex_bwd_config_by_arch,
+                lambda: heuristic.get_flex_attn_bwd_configs(head_dim, dtype),
+            ),
+        )
+        for path, registry, get_configs in paths:
+            with self.subTest(path=path):
+                self.assertIn("gfx950", registry)
+                self.assertNotIn(unregistered, registry)
+                fallback = configs_for(unregistered, get_configs)
+                for arch in targets:
+                    configs = configs_for(arch, get_configs)
+                    tuned = registry.get(arch, {}).get((dtype, head_dim))
+                    if tuned is None:
+                        self.assertEqual(configs, fallback, msg=arch)
+                    else:
+                        self.assertEqual(configs, [tuned], msg=arch)
+                        self.assertNotEqual(configs, fallback, msg=arch)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_compile_time_autotune_not_repeated_at_runtime(self):
@@ -1658,6 +1794,7 @@ class TestMakeLaunchersMemory(TestCase):
             launchers=[],
             compile_results=results,
             triton_meta={"device": 0},
+            device_props=types.SimpleNamespace(type="cuda"),
             inductor_meta={},
             get_device_interface=lambda: None,
             _make_launcher=fake_make_launcher,

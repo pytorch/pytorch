@@ -709,7 +709,8 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
         hook_real = getattr(real_fn_callable, "_leaf_hook_real_fn", None)
         hook_fake = getattr(real_fn_callable, "_leaf_hook_fake_fn", None)
         if hook_real is not None:
-            assert hook_fake is not None  # noqa: S101
+            if hook_fake is None:
+                raise AssertionError("expected hook_fake to be not None")
             hook_captured_out_spec: list[pytree.TreeSpec | None] = [None]
             wrapped_hook_real, wrapped_hook_fake = make_leaf_function_wrappers(
                 hook_real, hook_fake, hook_captured_out_spec

@@ -45,6 +45,10 @@ if(NOT BUILD_LIBTORCHLESS)
   endif()
 
   # ---[ Dependency of c10_hip
+  # The -rpath-link fix for hip::amdhip64's own libhsa-runtime64.so lookup
+  # (see cmake/public/LoadHIP.cmake) is attached directly to the hip::amdhip64
+  # imported target, so every consumer -- this one included -- inherits it
+  # regardless of how many levels of target_link_libraries separate them.
   target_link_libraries(c10_hip PUBLIC ${C10_LIB} hip::host)
 
   target_include_directories(

@@ -120,7 +120,11 @@ from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .exc import InductorError
 from .fx_passes.joint_graph import joint_graph_passes
-from .fx_passes.post_grad import post_grad_passes, view_to_reshape
+from .fx_passes.post_grad import (
+    decompose_triton_kernel_wrapper_functional,
+    post_grad_passes,
+    view_to_reshape,
+)
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
@@ -248,6 +252,142 @@ static_inputs_log = torch._logging.getArtifactLogger(
 inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metrics")
 
 
+# Note: [static_input_idxs semantics]
+#
+# static_input_idxs, confusingly, describes the compiler's expectations about
+# inputs sent to the compiled function in two ways:
+#
+# - ADDRESS-stable: we expect the same data_ptr every call. cudagraphs cares
+#   about this, since stable inputs can be burned into the recorded cudagraph
+#   instead of being copied into graph-owned buffers.
+#
+# - ALIGNMENT-stable: we expect data_ptr % 16 is the same every call. Most Triton
+#   kernels are more efficient if they can assume alignment, and if we chose to
+#   compile kernels for aligned inputs (because the input to be compiled
+#   happened to be aligned), if we run into an unaligned input we will
+#   copy_if_misaligned at runtime (nonstatic inputs only -- see the tables).
+#
+# Note that an ADDRESS-stable input doesn't have to be aligned, but it will
+# be ALIGNMENT-stable (since the alignment will always be the same each
+# time around.)
+#
+# Both of these properties are tracked together via `static_input_idxs`.
+# However, this is mostly for the benefit of the wrapper code (in this file);
+# when we do triton codegen, whether or not it gets to do aligned or unaligned
+# code simply depends on the precise real tensors it happens to get
+# JIT-compiled with (see Note: [Input Alignment handling in Inductor]).
+# Although traditional triton launcher would check (and recompile) a kernel if
+# alignment on inputs changed, for performance reasons Inductor bypasses this:
+# the wrapper code here is responsible for safety checks / recompiling if
+# necessary.
+#
+# Another confusing thing about these properties is that in some cases, a user
+# can SAFELY violate the compiler expectation.  If you obey the expectation you
+# get good performance, but the runtime wrapper can (inefficiently) fix things
+# up if you had got it wrong.  For example, if a param's address changes
+# (because you used one torch.compile for multiple instances, e.g.,
+# inline_inbuilt_nn_modules, #126822).  But there's quite a lot of variation
+# of WHO notices and WHAT repairs the problem, and it has also been a bit
+# of a bug farm (thus this comment!)
+#
+# Every input is classified into one of three classes:
+#
+#   STATIC-G  static, guarded:
+#       Only explicitly via mark_static_address(guard=True).
+#   STATIC-U  static, unguarded:
+#       Inferred from nn.Module params/buffers (#130391),
+#       some saved-for-backward tensors (see the backward table) and
+#       explicitly via mark_static_address(guard=False).
+#   NONSTATIC everything else:
+#       plain user inputs, tangents.
+#
+# We now enumerate the detector/repair apparatus for each property under
+# certain situations:
+#
+# ADDRESS changes. Addresses are only baked in where a CUDA graph records
+# the input (no cudagraphs => addresses are passed fresh to every kernel
+# launch and nothing needs detecting). Under cudagraphs:
+#
+#   class     | detector on address change               | repair
+#   ----------+------------------------------------------+-----------
+#   STATIC-U  | data_ptr comparison at replay            | re-record
+#             | (check_invariants /                      |
+#             | cudagraphify_impl assert)                |
+#             |                                          |
+#   STATIC-G  | dynamo data_ptr guard                    | recompile
+#             |                                          |
+#   NONSTATIC | no detector needed: copied into graph-owned buffer
+#             | every replay
+#
+# Without cudagraphs, we do nothing (but the alignment checks, see below.)
+#
+# ALIGNMENT changes. Alignment is only baked in if the example input was
+# statically known 16-byte aligned (tensor_is_aligned; a symbolic
+# storage_offset that cannot be proven aligned counts as misaligned even
+# if the example happens to be). A misaligned example produces
+# no-assumption codegen: correct for any alignment, nothing to detect.
+# (config.assume_aligned_inputs, non-default, disables that escape:
+# everything is assumed aligned.) For an aligned example:
+#
+#   class     | detector on align change                 | repair
+#   ----------+------------------------------------------+-----------
+#   STATIC-U  | NOBODY: misaligned-address crash.        | (TODO: needs
+#             | A misaligned static at cudagraph record  | a dynamo
+#             | time is demoted to NONSTATIC             | alignment
+#             | (remove_unaligned_input_idxs), but that  | guard ->
+#             | only helps if the flip happens to        | recompile)
+#             | coincide with a record                   |
+#             |                                          |
+#   STATIC-G  | dynamo data_ptr guard                    | recompile
+#             | (same ptr => same alignment)             |
+#             |                                          |
+#   NONSTATIC | per-call check emitted before first use  | clone
+#             | (copy_if_misaligned)                     |
+#
+# BACKWARD inputs are tangents plus saved tensors.  We infer a class
+# for these as follows:
+#
+#   backward input                    | class
+#   ----------------------------------+------------------------------------
+#   saved fw input                    | same class as that input in the
+#                                     | forward (requires the
+#                                     | is_static_input stamp; see below)
+#                                     |
+#   saved inductor intermediate       | STATIC-U; sound with NO detector [1]
+#                                     |
+#   saved fallback (custom) op output | STATIC-U, but alignment can
+#                                     | genuinely vary: detector is NOBODY.
+#                                     | KNOWN HOLE [2]
+#                                     |
+#   tangent                           | NONSTATIC
+#
+# [1] Alignment cannot change: allocator-aligned base + deterministic
+#     codegen offsets (a saved odd-offset view is *stably* misaligned and
+#     gets no-assumption codegen). Address is baked in only where a CUDA
+#     graph records the backward, and then the same pool serves the
+#     forward, so replay keeps pool offsets stable. Piecewise caveat:
+#     "cudagraphs is on" does not imply pool-owned. Tensors allocated by
+#     eager code BETWEEN graph partitions (graph_partition mode) or
+#     between dynamo graphs move per call; partitioned forwards therefore
+#     demote ALL saved activations, conservatively including pool-owned
+#     ones (forward_is_cudagraph_partitioned -> get_static_bw_input_idxs, see
+#     compile_fx_backward), and across dynamo graph breaks staticness only
+#     transfers within a pool lineage (cudagraph_managed_idxs, cudagraph
+#     trees).
+# [2] Allocated by arbitrary user code, so alignment may differ call to
+#     call with no address-stability contract to lean on; but it is
+#     classified static (unstamped, non-primal) and gets no runtime check,
+#     so an alignment flip IMAs in the backward. Inductor judges fallback
+#     output alignment from the fake tensor (ir.py,
+#     V.graph.unaligned_buffers), which cannot express "sometimes
+#     misaligned". TORCHINDUCTOR_ALIGNMENT_ASSERTS (default on in OSS)
+#     catches the fake-vs-real mismatch in the forward;
+#     TORCHINDUCTOR_ASSUME_UNALIGNED_FALLBACK_OUTPUT=1 is the workaround.
+#
+# A part of the bug farm is that static_input_idxs covers both address changes
+# and alignment changes.  In particular, it's easy to elide a test for
+# alignment which is OK assuming the address checks are on (cudagraphs), but
+# then forget to restore this test when cudagraphs are off.
 def get_static_input_idxs(num_fixed: int) -> list[int]:
     # If we are inlining NNModules, we treat all torch.nn.Parameters as static for the purposes
     # of cudagraphs. Rather than copying these into cudagraph-owned memory
@@ -327,11 +467,7 @@ def _step_logger() -> Callable[..., None]:
 
 @functools.cache
 def _warn_tf32_disabled() -> None:
-    if (
-        torch.cuda.is_available()
-        and torch.backends.cuda.matmul.fp32_precision != "tf32"
-        and torch.cuda.get_device_capability() >= (8, 0)
-    ):
+    if torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0):
         perf_hint_log.info(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
@@ -642,6 +778,31 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         _propagate_invoke_subgraph_nested_region_config(gm)
         with _patch_nested_region_inductor_config(gm):
             if not config.use_post_grad_passes:
+                # triton_kernel_wrapper_functional (a user-defined Triton kernel already
+                # in the model) has no inductor lowering; post_grad_passes normally
+                # decomposes it into its mutation form, which lowers to a
+                # UserDefinedTritonKernel and compiles into the AOT artifact. With
+                # post-grad passes disabled (e.g. lite mode / fallback_by_default), still
+                # run just that decomposition -- it is a correctness pass, not an
+                # optimization -- so such kernels keep compiling instead of hard-erroring
+                # at lowering (the functional HOP is neither an OpOverload with a lowering
+                # nor serializable by the proxy executor). Gated on the graph actually
+                # containing one so a lite-mode graph without user Triton kernels -- the
+                # common case -- pays neither the pattern match nor the recompile.
+                #
+                # Reinplacing must run FIRST: the decomposition emits "clone(s) + the
+                # mutation node" and relies on it to mark which clones are unnecessary,
+                # so without it every user Triton kernel pays a device-to-device copy.
+                if gm.graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops.higher_order.triton_kernel_wrapper_functional,
+                ):
+                    from .fx_passes.reinplace import reinplace_inplaceable_ops
+                    from .fx_utils import FakeTensorUpdater
+
+                    reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
+                    decompose_triton_kernel_wrapper_functional(gm.graph)
+                    gm.recompile()
                 return
 
             for subgraph_name in _get_subgraph_names(gm):
@@ -892,10 +1053,12 @@ def compile_fx_inner(
             config.triton.use_tensor_descriptor and config.assume_aligned_inputs
         ):
             warnings.warn(
-                "config.triton.enable_host_side_tma has no effect unless both "
+                "config.triton.enable_host_side_tma requires both "
                 "config.triton.use_tensor_descriptor and "
-                "config.assume_aligned_inputs are also enabled; host-side TMA "
-                "will be skipped.",
+                "config.assume_aligned_inputs for pointwise/reduction kernels; "
+                "host-side TMA will be skipped for those. GEMM templates are "
+                "unaffected: their operands are validated by can_use_tma() "
+                "before the template is offered as a choice.",
                 stacklevel=2,
             )
         stack.enter_context(torch.utils._python_dispatch._disable_current_modes())
@@ -1414,7 +1577,10 @@ class _InProcessFxCompile(FxCompile):
                 )
                 time.sleep(sleep_sec)
 
-            if is_tf32_warning_applicable(gm):
+            if torch.backends.cuda.matmul.fp32_precision not in (
+                "tf32",
+                "bfx9",
+            ) and is_tf32_warning_applicable(gm):
                 _warn_tf32_disabled()
 
             inductor_counters = counters["inductor"].copy()
@@ -1430,11 +1596,22 @@ class _InProcessFxCompile(FxCompile):
                 f"graph {graph_id}",
             )
 
-            fd = io.StringIO()
-            torch._dynamo.repro.after_aot.save_graph_repro(
-                fd, gm, example_inputs, "inductor", save_dir=None
-            )
-            runnable_graph_str = fd.getvalue()
+            # Building this parses the source of every Triton kernel in the
+            # graph, and it is only ever used as a structured-trace artifact:
+            # logged here, and logged again by the FX graph cache when this
+            # graph is loaded from it. Produce it from payload_fn so that
+            # trace_structured's own "is anyone listening" check decides
+            # whether the work happens at all, and keep what it produced for
+            # the cache to replay.
+            produced: list[str] = []
+
+            def _fx_graph_runnable_payload() -> str:
+                fd = io.StringIO()
+                torch._dynamo.repro.after_aot.save_graph_repro(
+                    fd, gm, example_inputs, "inductor", save_dir=None
+                )
+                produced.append(fd.getvalue())
+                return produced[0]
 
             trace_structured(
                 "artifact",
@@ -1442,8 +1619,9 @@ class _InProcessFxCompile(FxCompile):
                     "name": "fx_graph_runnable",
                     "encoding": "string",
                 },
-                payload_fn=lambda: runnable_graph_str,
+                payload_fn=_fx_graph_runnable_payload,
             )
+            runnable_graph_str = produced[0] if produced else ""
 
             V.debug.fx_graph(gm, example_inputs)
             # TODO: Should we actually dump this?  It should be redundant with the aot
@@ -2009,6 +2187,10 @@ def get_input_idxs_to_check(
         with maybe_get_suppress_shape_guards_ctx():
             # suppress guards so that tensor_is_aligned and should_assume_input_aligned
             # do not add guards on input's storage offset
+            #
+            # Static inputs are address-stable, so compile-time alignment
+            # holds for every call and cloning would break the address
+            # cudagraphs recorded; see Note: [static_input_idxs semantics].
             if i in static_input_idxs and tensor_is_aligned(input):
                 continue
             if not should_assume_input_aligned(input):
@@ -2299,10 +2481,7 @@ def fw_compiler_freezing(
     dynamo_model: GraphModule,
     num_example_inputs: int,
     inner_compile: Callable[..., Any],
-    # TODO: Take compiler_config_extra instead
-    cudagraphs: BoxedBool,
-    graph_id: int,
-    forward_device: BoxedDeviceIndex,
+    compiler_config_extra: CompilerConfigExtra,
 ) -> Callable[[list[object]], Sequence[torch.Tensor]]:
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
@@ -2382,10 +2561,10 @@ def fw_compiler_freezing(
             opt_model,
             aot_example_inputs,
             static_input_idxs=static_input_idxs,
-            cudagraphs=cudagraphs,
-            graph_id=graph_id,
+            cudagraphs=compiler_config_extra.cudagraphs,
+            graph_id=compiler_config_extra.graph_id,
             is_inference=True,
-            boxed_forward_device_index=forward_device,
+            boxed_forward_device_index=compiler_config_extra.forward_device_index,
             layout_opt=layout_opt,
         )
 
@@ -2418,8 +2597,11 @@ def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]
     autotune_at_compile_time = (
         config.triton.autotune_at_compile_time
         if config.triton.autotune_at_compile_time is not None
-        # Default to True for AOTI. Subject to change in future.
-        else has_triton() and V.aot_compilation
+        # Default to True for AOTI when an accelerator or the selected CPU
+        # Triton backend is available. Subject to change in future.
+        else (
+            has_triton(include_cpu=config.cpu_backend == "triton") and V.aot_compilation
+        )
     )
     return {
         "triton.autotune_at_compile_time": autotune_at_compile_time,
@@ -2539,15 +2721,15 @@ def cudagraph_annotation_context(
 class CompilerConfigExtra:
     cudagraphs: BoxedBool
     graph_id: int
-    forward_device: BoxedDeviceIndex
-    forward_is_partitioned: BoxedBool
+    forward_device_index: BoxedDeviceIndex
+    forward_is_cudagraph_partitioned: BoxedBool
     cudagraphs_bwd_override: bool | None = None
 
 
 def create_compiler_config_extra(
     gm: GraphModule | GmWrapper,
 ) -> CompilerConfigExtra:
-    gm_meta = gm.meta if isinstance(gm, GraphModule) else None
+    dynamo_graph_metadata = gm.meta if isinstance(gm, GraphModule) else None
 
     # Although cudagraphs may have been enabled via config, various
     # conditions (which are tested within the bowels of Inductor) may
@@ -2561,8 +2743,9 @@ def create_compiler_config_extra(
     # Disabling fwd disables bwd (copying activations isn't profitable),
     # so cudagraphs_bwd_override is only needed for fwd=True / bwd=False.
     if (
-        gm_meta is not None
-        and (annotation := gm_meta.get("cudagraph_annotation")) is not None
+        dynamo_graph_metadata is not None
+        and (annotation := dynamo_graph_metadata.get("cudagraph_annotation"))
+        is not None
     ):
         if annotation.fwd is not None and annotation.fwd != config.triton.cudagraphs:
             cudagraphs = BoxedBool(annotation.fwd)
@@ -2590,19 +2773,19 @@ def create_compiler_config_extra(
     graph_id = next(_graph_counter)
 
     # See [Backward Generation Handling]
-    forward_device = BoxedDeviceIndex(None)
+    forward_device_index = BoxedDeviceIndex(None)
 
     # Set by the forward compilation when it is partitioned for CUDA graphs.
     # The backward reads this to decide whether saved tensors can be assumed
     # to have fixed addresses.
-    forward_is_partitioned = BoxedBool(False)
+    forward_is_cudagraph_partitioned = BoxedBool(False)
 
     return CompilerConfigExtra(
         cudagraphs=cudagraphs,
         graph_id=graph_id,
-        forward_device=forward_device,
+        forward_device_index=forward_device_index,
         cudagraphs_bwd_override=cudagraphs_bwd_override,
-        forward_is_partitioned=forward_is_partitioned,
+        forward_is_cudagraph_partitioned=forward_is_cudagraph_partitioned,
     )
 
 
@@ -2745,7 +2928,7 @@ def compile_fx_forward(
             cudagraphs=compiler_config_extra.cudagraphs,
             graph_id=compiler_config_extra.graph_id,
             is_inference=is_inference,
-            boxed_forward_device_index=compiler_config_extra.forward_device,
+            boxed_forward_device_index=compiler_config_extra.forward_device_index,
         )
 
         if (
@@ -2754,7 +2937,7 @@ def compile_fx_forward(
             and result.partition_maps
             and len(result.partition_maps) > 1
         ):
-            compiler_config_extra.forward_is_partitioned.value = True
+            compiler_config_extra.forward_is_cudagraph_partitioned.value = True
 
         return result
 
@@ -2795,13 +2978,27 @@ def compile_fx_backward(
         if compiler_config_extra.cudagraphs_bwd_override is not None:
             cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
 
-        # When the forward was partitioned, saved activations from inline
-        # code between partitions are NOT at fixed addresses. Only mark
-        # primals (params/buffers) as static.
-        if compiler_config_extra.forward_is_partitioned.value:
-            static_input_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
+        # Static backward inputs (see Note: [static_input_idxs semantics])
+        # are the saved tensors, minus two over-approximations of the
+        # name-based classification:
+        # 1. When the forward was partitioned, saved activations from inline
+        #    code between partitions are NOT at fixed addresses; keep only
+        #    "primals_*" (get_static_bw_input_idxs).
+        # 2. A saved-for-backward plain user input is a "primals_*" but gets
+        #    a fresh tensor every call; the partitioner stamps
+        #    meta["is_static_input"] to demote it to the runtime
+        #    copy_if_misaligned treatment. Unstamped placeholders default to
+        #    static, preserving the name-based classification.
+        if compiler_config_extra.forward_is_cudagraph_partitioned.value:
+            candidate_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
         else:
-            static_input_idxs = list(range(fixed))
+            candidate_idxs = range(fixed)
+        placeholders = gm.graph.find_nodes(op="placeholder")
+        static_input_idxs = [
+            i
+            for i in candidate_idxs
+            if placeholders[i].meta.get("is_static_input", True)
+        ]
         with (
             (
                 config.patch(get_cpp_wrapper_config())
@@ -2817,7 +3014,7 @@ def compile_fx_backward(
                 cudagraphs=cudagraphs,
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
-                boxed_forward_device_index=compiler_config_extra.forward_device,
+                boxed_forward_device_index=compiler_config_extra.forward_device_index,
             )
 
 
@@ -2948,6 +3145,28 @@ def compile_fx(
         torch._inductor.async_compile.AsyncCompile.wakeup()
 
     if config.cpp_wrapper or config.fx_wrapper:
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+        if _coor_enabled():
+            # cpp_wrapper/AOTInductor bakes the compile-time device index into the C++
+            # device guard, and fx_wrapper's device-context codegen is a no-op (see
+            # wrapper_fxir.py); neither is rank-portable, so refuse rather than silently
+            # emit a non-portable artifact.
+            #
+            # NB cudagraphs is deliberately NOT refused here. Its device dependence
+            # (CompiledFxGraph.device_idxs, which cudagraph_post_compile passes to
+            # cudagraphify as device_index) lives in the wrapper-level artifact, and that
+            # artifact is not shared across ranks today: the FX graph cache key embeds the
+            # device, so each rank builds its own. Only the kernel/cubin layer is shared,
+            # and that is what the device-agnostic launcher handles. Whoever makes the FX
+            # graph cache key device-agnostic must revisit device_idxs (and re-check that
+            # graph-partition functions still define _coor_device_idx in their own scope)
+            # before cudagraphs can ride on a shared artifact.
+            raise RuntimeError(
+                "compile-on-one-rank (device-as-parameter) is not supported with "
+                "cpp_wrapper/AOTInductor or fx_wrapper: the device guard bakes the "
+                "compile-time device index, which is not rank-portable."
+            )
         from torch._export.non_strict_utils import _fakify_script_objects
 
         cpp_wrapper_config = config.cpp_wrapper
@@ -3116,6 +3335,12 @@ def _compile_fx_main(
 
         compiler_config_extra = create_compiler_config_extra(model_)
 
+        # Load device backends (privateuse1 vendors) before the decomposition
+        # table is snapshotted below: _inductor_backend_init may register
+        # decompositions, custom passes, and codegen backends, all of which are
+        # consumed from this point on.
+        init_backend_registration()
+
         decompositions = get_decomp_fn()
         inner_compile = functools.partial(inner_compile, get_decomp_fn=get_decomp_fn)
 
@@ -3150,9 +3375,7 @@ def _compile_fx_main(
                 dynamo_model=model_,
                 num_example_inputs=num_example_inputs,
                 inner_compile=inner_compile,
-                cudagraphs=compiler_config_extra.cudagraphs,
-                graph_id=compiler_config_extra.graph_id,
-                forward_device=compiler_config_extra.forward_device,
+                compiler_config_extra=compiler_config_extra,
             )
         else:
             inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
@@ -3287,7 +3510,7 @@ def _compile_fx_main(
             except ShortenTraceback as e:
                 # We will also shorten the traceback inside dynamo.
                 # This is only useful if inductor is called directly with an FX graph.
-                raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+                raise e.remove_dynamo_frames() from None
 
 
 def graph_returns_tuple(gm: GraphModule) -> bool:

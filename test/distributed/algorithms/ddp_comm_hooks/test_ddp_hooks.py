@@ -36,17 +36,6 @@ device_type = (
 )
 
 
-def gpus_for_rank(world_size):
-    visible_devices = list(range(torch.accelerator.device_count()))
-    gpus_per_process = torch.accelerator.device_count() // world_size
-    gpus_for_rank = []
-    for rank in range(world_size):
-        gpus_for_rank.append(
-            visible_devices[rank * gpus_per_process : (rank + 1) * gpus_per_process]
-        )
-    return gpus_for_rank
-
-
 class Task(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -77,7 +66,7 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
         return local_model
 
     def _get_grads(self, process_group, hook_type=None):
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = torch.accelerator.current_device_index()
         gpu_model = DistributedDataParallel(
             TestDdpCommHook().to(device_id),
             device_ids=[device_id],
@@ -202,7 +191,7 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
             return fut
 
         flags = []
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = torch.accelerator.current_device_index()
         model = nn.Sequential(
             nn.Linear(2, 4000, bias=False),
             *[nn.Linear(4000, 4000, bias=False) for _ in range(10)],

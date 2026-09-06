@@ -2,6 +2,22 @@
 
 #include <gmock/gmock.h>
 
+#include <string>
+#include <unordered_map>
+
+TEST(StringViewTest, TransparentStringHash) {
+  std::unordered_map<
+      std::string,
+      int,
+      c10::TransparentStringHash,
+      std::equal_to<>>
+      values{{"value", 1}};
+
+  const std::string_view key = "value";
+  EXPECT_EQ(values.find(key)->second, 1);
+  EXPECT_TRUE(values.contains(key));
+}
+
 // NOLINTBEGIN(modernize*, readability*, bugprone-string-constructor)
 using string_view = c10::c10_string_view;
 

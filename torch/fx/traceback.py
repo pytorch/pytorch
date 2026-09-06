@@ -126,11 +126,9 @@ class NodeSource:
             self.node_info = self.NodeInfo(
                 name=node.name, target=str(node.target), graph_id=id(node.graph)
             )
-            self.from_node = (
-                copy.deepcopy(node.meta["from_node"])
-                if "from_node" in node.meta
-                else []
-            )
+            # NodeSource records are immutable after construction, so share them
+            # while copying the outer list to preserve its snapshot semantics.
+            self.from_node = list(node.meta.get("from_node", ()))
         else:
             self.node_info = None
             self.from_node = []
@@ -368,6 +366,15 @@ def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
 # writer and the reader below so the partitioner / AOTAutograd cache read it the
 # same way.
 MEMORY_BUDGET_ANNOTATION_KEY = "_region_activation_memory_budget"
+
+
+@contextmanager
+def _dynamo_region_activation_memory_budget(budget: float) -> Iterator[None]:
+    with (
+        annotate({MEMORY_BUDGET_ANNOTATION_KEY: budget}),
+        preserve_node_meta(),
+    ):
+        yield
 
 
 def _get_memory_budget_annotation(node: Node) -> float | None:

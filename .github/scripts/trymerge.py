@@ -7,10 +7,11 @@ import json
 import os
 import re
 import time
+import traceback
 import urllib.parse
 from collections import defaultdict
 from dataclasses import dataclass
-from functools import cache
+from functools import cache, partial
 from pathlib import Path
 from re import Pattern
 from typing import Any, cast, NamedTuple, TYPE_CHECKING
@@ -19,6 +20,7 @@ from warnings import warn
 import yaml
 from github_utils import (
     gh_close_pr,
+    gh_fetch_json_dict,
     gh_fetch_json_list,
     gh_fetch_merge_base,
     gh_fetch_url,
@@ -27,6 +29,7 @@ from github_utils import (
     gh_post_commit_comment,
     gh_post_pr_comment,
     gh_update_pr_state,
+    GITHUB_API_URL,
     GitHubComment,
 )
 from gitutils import (
@@ -37,6 +40,13 @@ from gitutils import (
     patterns_to_regex,
     retries_decorator,
 )
+from greenlight_guard import (
+    evaluate_greenlight_guard,
+    GreenlightWaitWindow,
+    GuardVerdict,
+    PRUnderMerge,
+)
+from greenlight_identity import is_greenlight, normalize_login
 from label_utils import (
     gh_add_labels,
     gh_remove_label,
@@ -446,6 +456,9 @@ HAS_NO_CONNECTED_DIFF_TITLE = (
 # This could be set to -1 to ignore all flaky and broken trunk failures. On the
 # other hand, using a large value like 10 here might be useful in sev situation
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
+
+REVIEWS_PER_PAGE = 100
+REVIEW_PAGE_LIMIT = 10
 
 # CI docker images are keyed by the git tree hash of the .ci/docker directory
 # (see .github/workflows/docker-builds.yml, which tags the images it builds with
@@ -1035,6 +1048,65 @@ class GitHubPR:
     def get_approved_by(self) -> list[str]:
         return [login for (login, state) in self._get_reviews() if state == "APPROVED"]
 
+    def get_changes_requested_by(self) -> list[str]:
+        return [
+            login
+            for (login, state) in self._get_reviews()
+            if state == "CHANGES_REQUESTED"
+        ]
+
+    def get_updated_at(self) -> str | None:
+        """The PR's `updated_at` timestamp, or None if it could not be read.
+
+        Read over REST rather than added to GH_GET_PR_INFO_QUERY because that query's
+        text is the cache key for test_trymerge.py's recorded GraphQL fixtures, so
+        adding a field to it invalidates every one of them.
+        """
+        try:
+            info = gh_fetch_json_dict(
+                f"{GITHUB_API_URL}/repos/{self.org}/{self.project}/pulls/{self.pr_num}"
+            )
+            updated_at = info.get("updated_at")
+            return str(updated_at) if updated_at else None
+        except Exception as e:
+            print(f"Warning: failed to read updated_at for PR #{self.pr_num}: {e}")
+            traceback.print_exc()
+            return None
+
+    def get_bot_reviewers(self) -> frozenset[str] | None:
+        """Logins of this PR's reviewers that GitHub reports as Bot accounts, or None.
+
+        GraphQL renders an App's login bare, so `_get_reviews` cannot tell a GitHub App
+        apart from a human; only the REST reviews payload carries `user.type`. GitHub
+        returns reviews oldest first, so every page has to be walked to see the recent
+        ones; a PR with more than `REVIEW_PAGE_LIMIT` pages of reviews leaves the tail
+        unclassified.
+
+        None means GitHub could not be asked, which callers must not read as "this PR
+        has no App reviewers": that would turn a transient GitHub failure into a
+        permanent merge refusal.
+        """
+        bots = set()
+        try:
+            for page in range(1, REVIEW_PAGE_LIMIT + 1):
+                reviews = gh_fetch_json_list(
+                    f"{GITHUB_API_URL}/repos/{self.org}/{self.project}/pulls/{self.pr_num}/reviews",
+                    params={"per_page": REVIEWS_PER_PAGE, "page": page},
+                )
+                for review in reviews:
+                    user = review.get("user")
+                    if not isinstance(user, dict):
+                        continue
+                    if str(user.get("type", "")).lower() == "bot" and user.get("login"):
+                        bots.add(str(user["login"]))
+                if len(reviews) < REVIEWS_PER_PAGE:
+                    break
+        except Exception as e:
+            print(f"Warning: failed to read reviewer types for PR #{self.pr_num}: {e}")
+            traceback.print_exc()
+            return None
+        return frozenset(bots)
+
     def get_commit_count(self) -> int:
         return int(self.info["commits_with_authors"]["totalCount"])
 
@@ -1407,7 +1479,9 @@ class GitHubPR:
         dry_run: bool = False,
         comment_id: int,
         ignore_current_checks: list[str] | None = None,
+        greenlight_wait: GreenlightWaitWindow | None = None,
     ) -> None:
+        skip_internal_checks = can_skip_internal_checks(self, comment_id)
         # Raises exception if matching rule is not found
         (
             merge_rule,
@@ -1418,7 +1492,7 @@ class GitHubPR:
             self,
             repo,
             skip_mandatory_checks=skip_mandatory_checks,
-            skip_internal_checks=can_skip_internal_checks(self, comment_id),
+            skip_internal_checks=skip_internal_checks,
             ignore_current_checks=ignore_current_checks,
         )
         ghstack_prs: list[tuple[GitHubPR, str]] | None = None
@@ -1426,6 +1500,17 @@ class GitHubPR:
         if self.is_ghstack_pr():
             ghstack_prs = get_ghstack_prs(repo, self, open_only=False)
             prs_to_merge = [pr for pr, _ in ghstack_prs if not pr.is_closed()]
+
+        check_greenlight_reviewed_head_sha(
+            self,
+            repo,
+            prs_to_merge,
+            wait_window=greenlight_wait,
+            dry_run=dry_run,
+            skip_mandatory_checks=skip_mandatory_checks,
+            skip_internal_checks=skip_internal_checks,
+            ignore_current_checks=ignore_current_checks,
+        )
 
         # A ghstack merge lands all open PRs below this one. Use the topmost
         # docker-affecting PR because its cumulative head has the final docker
@@ -1449,10 +1534,9 @@ class GitHubPR:
                 ghstack_prs=ghstack_prs,
             )
 
-            # Now that the merge commit exists locally, make sure it doesn't
-            # reference docker images that were never built due to a land race.
+            # Log, but do not block on, a docker land race.
             if docker_pr is not None:
-                check_no_docker_merge_skew(repo, docker_pr)
+                warn_on_docker_merge_skew(repo, docker_pr)
 
             repo.push(self.default_branch(), dry_run)
             # When the merge process reaches this part, we can assume that the
@@ -1644,6 +1728,53 @@ def read_merge_rules(repo: GitRepo | None, org: str, project: str) -> list[Merge
         return [MergeRule(**x) for x in rc]
 
 
+def rule_approvers(rule: MergeRule) -> set[str]:
+    """The logins one rule accepts, with its `org/team-slug` refs expanded to members."""
+    approvers: set[str] = set()
+    for approver in rule.approved_by:
+        if "/" in approver:
+            team_org, _, team_name = approver.partition("/")
+            if "/" in team_name:
+                # gh_get_team_members warns and returns [] for a team that does not
+                # exist, and find_matching_merge_rule skips its approver check when a
+                # rule resolves to no approvers: a mis-typed ref would match anything.
+                raise ValueError(
+                    f"approved_by team ref must be 'org/team-slug', got {approver!r}"
+                )
+            approvers.update(gh_get_team_members(team_org, team_name))
+        else:
+            approvers.add(approver)
+    return approvers
+
+
+def merge_authorized_logins(
+    repo: GitRepo | None, org: str, project: str
+) -> frozenset[str]:
+    """Every login that authorizes a merge under some rule, lowercased, patterns ignored.
+
+    This is deliberately coarser than `find_matching_merge_rule`, which is case-sensitive
+    and only consults the rules whose file patterns cover a PR. It mirrors greenlight's
+    `merge_authz.resolve_authorized_logins` (pytorch/test-infra, under
+    `greenlight/src/greenlight/`), which is the set greenlight itself tests an approver
+    against before deciding a human has already handled a PR. Answering that question
+    with a different set would have the guard wait for a review that never comes.
+
+    An unusable rules file yields the empty set rather than an error: the guard would
+    otherwise invent a refusal out of a failure the real merge gate hits on the same
+    pass, and would blame the wrong thing when it did.
+    """
+    try:
+        rules = read_merge_rules(repo, org, project)
+        # frozenset() forces the generator, so rule_approvers' GraphQL calls run here.
+        return frozenset(
+            normalize_login(login) for rule in rules for login in rule_approvers(rule)
+        )
+    except Exception as e:
+        print(f"Warning: failed to resolve {MERGE_RULE_PATH} for {org}/{project}: {e}")
+        traceback.print_exc()
+        return frozenset()
+
+
 def _find_non_matching_files(patterns: list[str], files: list[str]) -> list[str]:
     """Return files that do not match the given patterns.
 
@@ -1667,6 +1798,7 @@ def find_matching_merge_rule(
     skip_mandatory_checks: bool = False,
     skip_internal_checks: bool = False,
     ignore_current_checks: list[str] | None = None,
+    approved_by_override: set[str] | None = None,
 ) -> tuple[
     MergeRule,
     list[tuple[str, str | None, int | None]],
@@ -1677,11 +1809,18 @@ def find_matching_merge_rule(
     Returns merge rule matching to this pr together with the list of associated pending
     and failing jobs OR raises an exception.
 
+    approved_by_override replaces the PR's real approver set, so a caller can ask what
+    would happen if a given approval were absent. None keeps the PR's real approvers.
+
     NB: this function is used in Meta-internal workflows, see the comment at the top of
     this file for details.
     """
     changed_files = pr.get_changed_files()
-    approved_by = set(pr.get_approved_by())
+    approved_by = (
+        set(pr.get_approved_by())
+        if approved_by_override is None
+        else set(approved_by_override)
+    )
 
     issue_link = gen_new_issue_link(
         org=pr.org,
@@ -1743,16 +1882,10 @@ def find_matching_merge_rule(
             continue
 
         # Does the PR have the required approvals for this rule?
-        rule_approvers = set()
-        for approver in rule.approved_by:
-            if "/" in approver:
-                org, name = approver.split("/")
-                rule_approvers.update(gh_get_team_members(org, name))
-            else:
-                rule_approvers.add(approver)
-        approvers_intersection = approved_by.intersection(rule_approvers)
+        this_rule_approvers = rule_approvers(rule)
+        approvers_intersection = approved_by.intersection(this_rule_approvers)
         # If rule requires approvers but they aren't the ones that reviewed PR
-        if len(approvers_intersection) == 0 and len(rule_approvers) > 0:
+        if len(approvers_intersection) == 0 and len(this_rule_approvers) > 0:
             # Less than or equal is intentionally used here to gather all potential
             # approvers
             if reject_reason_score <= 10000:
@@ -1852,6 +1985,146 @@ def find_matching_merge_rule(
     raise MergeRuleFailedError(reject_reason, rule)
 
 
+# One merge command runs as one process, and its retry loop re-asks this question every
+# five minutes with the same answer. The repeated call is not free: find_matching_merge_rule
+# posts to Dr.CI, which rewrites the PR's Dr.CI comment as a side effect.
+_AUTHORIZED_WITHOUT_GREENLIGHT: dict[tuple[Any, ...], bool] = {}
+
+
+def is_authorized_without_greenlight(
+    pr: GitHubPR,
+    repo: GitRepo | None,
+    *,
+    skip_mandatory_checks: bool = False,
+    skip_internal_checks: bool = False,
+    ignore_current_checks: list[str] | None = None,
+) -> bool:
+    """Whether some merge rule still matches once greenlight's approval is dropped.
+
+    Asking "is greenlight the only approver" instead would be unsound: pytorch/pytorch
+    is public, so any stranger can approve a PR, and that would switch the land-time
+    greenlight check off without contributing anything to the merge's authorization.
+
+    The caller passes the same gate arguments `merge_into` gives the real
+    `find_matching_merge_rule`. Relaxing any of them here would let a rule that the real
+    gate rejects answer this question, and the real gate would then fall through to the
+    Greenlight rule -- leaving greenlight the sole authority with the guard switched off.
+
+    An answer is cached per approver set and head commit. Both are re-read from GitHub on
+    every retry, so an approval added mid-merge still takes effect; what the cache drops
+    is the identical re-run, and with it a redundant Dr.CI comment rewrite.
+    """
+    approvers = pr.get_approved_by()
+    key = (
+        pr.org,
+        pr.project,
+        pr.pr_num,
+        pr.last_commit_sha(default=""),
+        frozenset(approvers),
+        skip_mandatory_checks,
+        skip_internal_checks,
+        tuple(ignore_current_checks or ()),
+    )
+    if key in _AUTHORIZED_WITHOUT_GREENLIGHT:
+        return _AUTHORIZED_WITHOUT_GREENLIGHT[key]
+    remaining = {login for login in approvers if not is_greenlight(login)}
+    try:
+        find_matching_merge_rule(
+            pr,
+            repo,
+            skip_mandatory_checks=skip_mandatory_checks,
+            skip_internal_checks=skip_internal_checks,
+            ignore_current_checks=ignore_current_checks,
+            approved_by_override=remaining,
+        )
+        authorized = True
+    except MergeRuleFailedError as e:
+        print(
+            f"PR #{pr.pr_num} has no merge rule without greenlight's approval, so the "
+            f"greenlight land-time check applies: {e}"
+        )
+        authorized = False
+    except RuntimeError as e:
+        # An unusable rule set or an internal-changes PR: the real gate would refuse the
+        # merge outright, so this hypothetical proves nothing about greenlight's role.
+        print(
+            f"PR #{pr.pr_num} could not be evaluated without greenlight's approval, so "
+            f"the greenlight land-time check applies: {e}"
+        )
+        traceback.print_exc()
+        authorized = False
+    _AUTHORIZED_WITHOUT_GREENLIGHT[key] = authorized
+    return authorized
+
+
+def check_greenlight_reviewed_head_sha(
+    pr: GitHubPR,
+    repo: GitRepo | None,
+    prs_to_merge: list[GitHubPR],
+    *,
+    wait_window: GreenlightWaitWindow | None,
+    dry_run: bool = False,
+    skip_mandatory_checks: bool = False,
+    skip_internal_checks: bool = False,
+    ignore_current_checks: list[str] | None = None,
+) -> None:
+    """Block a merge that only greenlight authorizes and that greenlight has not
+    approved at the head commit being landed.
+
+    Raises MandatoryChecksMissingError to wait, because merge()'s retry loop catches
+    exactly that type and re-enters merge_into five minutes later. wait_window is what
+    bounds that waiting across those re-entries; None means the caller cannot retry.
+
+    The gate arguments are the ones `merge_into` gave the real `find_matching_merge_rule`,
+    so that asking whether greenlight's approval is load-bearing asks it of the same gate.
+
+    The ghstack path lands a cherry-pick of each PR's head rather than the head itself,
+    but get_ghstack_prs has already proven the two carry identical content, and the head
+    is what greenlight records, so the head is what gets compared.
+    """
+    # One rules file governs the whole stack, so every PR asks the same question of it.
+    authorized_logins = partial(merge_authorized_logins, repo, pr.org, pr.project)
+    result = evaluate_greenlight_guard(
+        f"{pr.org}/{pr.project}",
+        [
+            PRUnderMerge(
+                pr_num=stacked.pr_num,
+                head_sha=stacked.last_commit_sha(default=""),
+                approved_by=stacked.get_approved_by(),
+                changes_requested_by=stacked.get_changes_requested_by(),
+                labels=stacked.get_labels(),
+                get_updated_at=stacked.get_updated_at,
+                get_bot_reviewers=stacked.get_bot_reviewers,
+                get_merge_authorized_logins=authorized_logins,
+                is_authorized_without_greenlight=partial(
+                    is_authorized_without_greenlight,
+                    stacked,
+                    repo,
+                    skip_mandatory_checks=skip_mandatory_checks,
+                    skip_internal_checks=skip_internal_checks,
+                    ignore_current_checks=ignore_current_checks,
+                ),
+            )
+            for stacked in prs_to_merge
+        ],
+        wait_window=wait_window,
+    )
+    if result.comment:
+        try:
+            gh_post_pr_comment(pr.org, pr.project, pr.pr_num, result.comment, dry_run)
+        except Exception as e:
+            # The comment is a courtesy; failing to post it must not end a merge that
+            # the guard itself is willing to keep waiting on.
+            print(
+                f"Warning: failed to comment the greenlight wait on PR #{pr.pr_num}: {e}"
+            )
+            traceback.print_exc()
+    if result.verdict is GuardVerdict.WAIT:
+        raise MandatoryChecksMissingError(result.message)
+    if result.verdict is GuardVerdict.DENY:
+        raise MergeRuleFailedError(result.message)
+
+
 def get_topmost_docker_pr(prs: list[GitHubPR]) -> GitHubPR | None:
     """Find the highest docker-affecting PR in a bottom-to-top stack."""
     return next((pr for pr in reversed(prs) if pr.is_docker_affecting()), None)
@@ -1911,19 +2184,16 @@ def check_docker_builds_ready(pr: GitHubPR) -> None:
         )
 
 
-def check_no_docker_merge_skew(repo: GitRepo, pr: GitHubPR) -> None:
-    """Block merge if a docker-affecting PR raced with another docker change.
+def warn_on_docker_merge_skew(repo: GitRepo, pr: GitHubPR) -> None:
+    """Log when a docker-affecting PR raced with another docker change.
 
-    The CI docker images are tagged by the git tree hash of .ci/docker.  The
-    images built and tested on the PR head are tagged with the PR head's tree
-    hash, but trunk jobs after the merge request the tree hash of the *merge*
-    commit.  If another docker-affecting PR landed on the base branch after this
-    PR's images were built, those two hashes disagree and the images trunk needs
-    were never built or tested.  Refuse the merge and ask for a rebase, which
-    re-runs ciflow/docker against the new base.
+    The CI docker images are tagged by the git tree hash of .ci/docker, so a
+    docker change landing on the base after this PR's images were built leaves
+    the merge commit asking for an untested tree. This used to refuse the merge
+    (#191508); it now only warns, since docker-builds.yml publishes the merged
+    tree's images on push and jobs wait for them.
 
-    Must be called after the merge commit has been created locally but before it
-    is pushed.
+    Must be called after the merge commit has been created locally.
     """
     if not pr.is_docker_affecting():
         return
@@ -1940,15 +2210,14 @@ def check_no_docker_merge_skew(repo: GitRepo, pr: GitHubPR) -> None:
     pr_head_tree = repo.rev_parse(f"{pr_head_sha}:{DOCKER_CI_PATH}")
 
     if merge_commit_tree != pr_head_tree:
-        raise MergeRuleFailedError(
-            "Refusing to merge: this PR modifies the CI docker images, but the "
-            f"{DOCKER_CI_PATH} tree of the merge commit ({merge_commit_tree}) does "
-            f"not match the tree that ciflow/docker built and tested on the PR "
-            f"head ({pr_head_tree}). Another docker-affecting change landed on the "
-            "base branch after your docker images were built, so the images "
-            "required after this merge were never built or tested (a land race). "
-            "Please rebase this PR (e.g. `@pytorchbot rebase`), let the "
-            "`ciflow/docker` builds re-run, and then merge again."
+        print(
+            f"WARNING: docker land race on PR #{pr.pr_num}: the {DOCKER_CI_PATH} "
+            f"tree of the merge commit ({merge_commit_tree}) does not match the "
+            f"tree that ciflow/docker built and tested on the PR head "
+            f"({pr_head_tree}). Another docker-affecting change landed on the base "
+            "branch after these images were built, so the first trunk jobs after "
+            "this merge may wait for docker-builds to publish the merged tree's "
+            "images, or rebuild them locally. Merging anyway."
         )
 
 
@@ -2686,11 +2955,14 @@ def merge(
 
     if skip_mandatory_checks:
         post_starting_merge_comment(repo, pr, explainer, dry_run)
+        # This return is outside the retry loop below, so there is no iteration for
+        # the greenlight check to wait in: it has to decide now or refuse.
         return pr.merge_into(
             repo,
             dry_run=dry_run,
             skip_mandatory_checks=skip_mandatory_checks,
             comment_id=comment_id,
+            greenlight_wait=None,
         )
 
     # Check for approvals
@@ -2718,6 +2990,9 @@ def merge(
     start_time = time.time()
     last_exception = ""
     elapsed_time = 0.0
+    # Owned out here so the greenlight wait budget spans every iteration below rather
+    # than restarting each time merge_into is re-entered.
+    greenlight_wait = GreenlightWaitWindow()
     ignore_current_checks = [
         x[0] for x in ignore_current_checks_info
     ]  # convert to List[str] for convenience
@@ -2793,6 +3068,7 @@ def merge(
                 skip_mandatory_checks=skip_mandatory_checks,
                 comment_id=comment_id,
                 ignore_current_checks=ignore_current_checks,
+                greenlight_wait=greenlight_wait,
             )
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
@@ -2839,8 +3115,6 @@ def main() -> None:
         msg = "\n".join((f"## {title}", f"{exception}", "", f"{internal_debugging}"))
 
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
-        import traceback
-
         traceback.print_exc()
 
     if args.revert:

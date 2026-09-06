@@ -291,6 +291,107 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             res = torch.compile(f, backend="inductor")(*inputs)
             self.assertTrue(torch.allclose(res, f(*inputs)))
 
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @skipIfNoDynamoSupport
+    def test_inductor_preserves_effect_order_across_kernel_types(self):
+        # Two ORDERED-effectful ops must keep program order even when they lower
+        # to different inductor kernel types (op_a -> FallbackKernel, op_b ->
+        # _CollectiveKernel).
+        import torch.utils._pytree as pytree
+        from torch._inductor import ir
+        from torch._inductor.lowering import lowerings, register_lowering
+        from torch._inductor.utils import run_and_get_code
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define("mylib::op_a", "(Tensor x) -> ()", lib=lib)
+            torch.library.define("mylib::op_b", "(Tensor x) -> Tensor", lib=lib)
+            lib.impl("op_a", lambda x: None, "CompositeExplicitAutograd")
+            lib.impl("op_a", lambda x: None, "Meta")
+            lib.impl("op_b", lambda x: x + 1, "CompositeExplicitAutograd")
+            lib.impl("op_b", lambda x: torch.empty_like(x), "Meta")
+            torch.library._register_effectful_op(
+                "mylib::op_a", _EffectType.ORDERED, lib=lib
+            )
+            torch.library._register_effectful_op(
+                "mylib::op_b", _EffectType.ORDERED, lib=lib
+            )
+
+            op_b = torch.ops.mylib.op_b.default
+
+            def op_b_lowering(*args):
+                return pytree.tree_map(
+                    lambda t: ir.TensorBox.create(t) if isinstance(t, ir.IRNode) else t,
+                    ir._CollectiveKernel.create_out_of_place(op_b, *args),
+                )
+
+            register_lowering(op_b)(op_b_lowering)
+            try:
+
+                def f(x):
+                    torch.ops.mylib.op_a(x)
+                    y = torch.ops.mylib.op_b(x)
+                    return y * 10
+
+                torch._dynamo.reset()
+                _, (code,) = run_and_get_code(
+                    torch.compile(f, fullgraph=True, backend="inductor"),
+                    torch.ones(8),
+                )
+                # op_a must be emitted before op_b; a dropped ordering dep lets
+                # the scheduler reorder op_b ahead of op_a.
+                pos_a = code.find("op_a")
+                pos_b = code.find("op_b")
+                self.assertNotEqual(pos_a, -1, "op_a missing from generated code")
+                self.assertNotEqual(pos_b, -1, "op_b missing from generated code")
+                self.assertLess(pos_a, pos_b, "op_a must be emitted before op_b")
+            finally:
+                del lowerings[op_b]
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @skipIfNoDynamoSupport
+    def test_inductor_effect_order_does_not_extend_lifetimes(self):
+        # The effect edge between two ORDERED ops is an ordering constraint only.
+        # It must not be modelled as a real read of the previous op's output
+        # buffer: that would count as a use, keep the buffer live until the
+        # later op runs, and suppress its deallocation.
+        #
+        # keep() produces a real output buffer, and stash() is ordered after it
+        # while also consuming a value derived from that buffer, so stash cannot
+        # be hoisted above the buffer's last true use. With a weak ordering dep
+        # the buffer is freed right after that use; modelling the effect edge as
+        # a real read holds it live across the stash call instead.
+        from torch._inductor.utils import run_and_get_code
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define("mylib::keep", "(Tensor x) -> Tensor", lib=lib)
+            torch.library.define("mylib::stash", "(Tensor x) -> ()", lib=lib)
+            lib.impl("keep", lambda x: x.clone(), "CompositeExplicitAutograd")
+            lib.impl("keep", lambda x: torch.empty_like(x), "Meta")
+            lib.impl("stash", lambda x: None, "CompositeExplicitAutograd")
+            lib.impl("stash", lambda x: None, "Meta")
+            for name in ("keep", "stash"):
+                torch.library._register_effectful_op(
+                    f"mylib::{name}", _EffectType.ORDERED, lib=lib
+                )
+
+            def f(x):
+                y = torch.ops.mylib.keep(x)
+                z = y * 2
+                torch.ops.mylib.stash(z)
+                return z + 1
+
+            x = torch.arange(64, dtype=torch.float32)
+            torch._dynamo.reset()
+            code = run_and_get_code(
+                torch.compile(f, fullgraph=True, backend="inductor"), x
+            )[1][0]
+
+            # Both effectful ops still run, in program order.
+            FileCheck().check("keep").check("stash").run(code)
+            # keep's output buffer is freed before the stash it is ordered
+            # before, rather than being held live by the effect edge.
+            FileCheck().check("keep").check("del buf0").check("stash").run(code)
+
     def test_compile_aot_eager_requires_grad(self):
         def f(x):
             torch.ops.aten._print("moo")

@@ -907,7 +907,7 @@ class _RendezvousJoinOp:
             rollback_period = 5  # 5 seconds
 
             # If we still have time to rollback (a short period on top of the
-            # operation deadline), try to remove ourself from the rendezvous.
+            # operation deadline), try to remove ourselves from the rendezvous.
             # It is okay if we can't though as our keep-alive will eventually
             # expire.
             if now <= deadline + rollback_period:
@@ -924,7 +924,7 @@ class _RendezvousJoinOp:
         if state.complete:
             # If we are here, it means we are not part of the rendezvous. In
             # case the rendezvous has capacity for additional participants add
-            # ourself to the wait list for the next round.
+            # ourselves to the wait list for the next round.
             if len(state.participants) < ctx.settings.max_nodes:
                 if ctx.node not in state.wait_list:
                     return _Action.ADD_TO_WAIT_LIST

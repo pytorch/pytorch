@@ -1,0 +1,17 @@
+diff --git a/gemm_act.py b/gemm_act.py
+index dc3cb57..9752966 100644
+--- a/gemm_act.py
++++ b/gemm_act.py
+@@ -496 +496 @@ class GemmActMixin(ComposableEpiMixin):
+-                tRS_rD.store(epilogue_result[0])
++                tRS_rD.store(epilogue_result[0].to(self.acc_dtype))
+@@ -521,5 +521,4 @@ class GemmActMixin(ComposableEpiMixin):
+-                        tRS_rD.store(main_result)
+-                result_dtype = self.acc_dtype
+-                if const_expr(self.grouped_n_contract_group != 1):
+-                    result_dtype = main_result.element_type
+-                tRS_rAuxOut = cute.make_rmem_tensor(main_result.shape, result_dtype)
++                        tRS_rD.store(main_result.to(self.acc_dtype))
++                tRS_rAuxOut = cute.make_rmem_tensor(
++                    main_result.shape, main_result.element_type
++                )

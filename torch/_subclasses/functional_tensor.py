@@ -195,6 +195,13 @@ class FunctionalTensor(torch.Tensor):
             FunctionalTensor._extra_dispatch_keys & torch._C._dispatch_keys(elem)
         )
 
+        # Hand over the storage size instead of letting _make_wrapper_subclass
+        # recompute it: computeStorageNbytes walks the dimensions doing symbolic
+        # arithmetic, and elem already knows the answer. The storage exists only
+        # to track aliasing, and mirroring elem's is the faithful value. On a 4d
+        # symbolic tensor this takes the call from 144us to 21us.
+        storage_size = None if is_sparse_any(elem) else elem.untyped_storage().size()
+
         out = torch.Tensor._make_wrapper_subclass(
             # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
             # Calling the overload that has kwargs causes us to go down the first overload path,
@@ -216,6 +223,7 @@ class FunctionalTensor(torch.Tensor):
             False,  # dispatch_device
             False,  # dispatch_layout
             extra_dispatch_keys,  # _extra_dispatch_keys
+            storage_size,  # storage_size
         )
         torch._C._set_throw_on_mutable_data_ptr(out)
         out.elem = elem

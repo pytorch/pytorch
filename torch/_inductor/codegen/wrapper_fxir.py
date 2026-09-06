@@ -86,16 +86,22 @@ log = logging.getLogger(__name__)
 @dataclasses.dataclass
 class SymbolBuffer(CodegenSymbol):
     """
-    Represents a sympy.Symbol graph input.
+    Represents a symbolic graph input. Expressions more complex than a single
+    sympy.Symbol require a name.
     """
 
-    symbol: sympy.Symbol
+    expr: sympy.Expr
+    name: str | None = None
 
     def get_name(self) -> str:
-        return str(self.symbol)
+        if self.name is not None:
+            return self.name
+        if not isinstance(self.expr, sympy.Symbol):
+            raise AssertionError(f"expression requires a name: {self.expr}")
+        return str(self.expr)
 
     def get_example(self) -> torch.Tensor | torch.SymInt:
-        sym_int = convert_to_symint(self.symbol)
+        sym_int = convert_to_symint(self.expr)
         if not isinstance(sym_int, torch.SymInt):
             raise AssertionError(f"expected torch.SymInt, got {type(sym_int)}")
         return sym_int
@@ -366,18 +372,36 @@ class FxConverter:
         name = buffer.get_name()
         del self.buffer_to_node[name]
 
-    def _lookup_args(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
+    def _lookup_args(
+        self, args: tuple[Any, ...], raw_args: Sequence[Any] | None
+    ) -> tuple[Any, ...]:
         """
-        Maps call args back to FX nodes.
+        Maps call args back to FX nodes. raw_args positionally pairs with args and
+        holds the IR node behind each; it is None for scheduler-generated kernels.
         """
-        return tuple(
-            self.buffer_to_node[arg]
-            if isinstance(arg, str)
-            else arg.inner_expr
-            if isinstance(arg, SymbolicCallArg)
-            else arg
-            for arg in args
-        )
+
+        def lookup(arg: Any, raw_arg: Any) -> Any:
+            if isinstance(arg, SymbolicCallArg):
+                return arg.inner_expr
+            if not isinstance(arg, str):
+                return arg
+            if arg in self.buffer_to_node:
+                return self.buffer_to_node[arg]
+            # If the buffer name cannot be resolved, try to unwrap `raw_args`.
+            # For example, the view `reinterpret_tensor(...)` will have a
+            # corresponding ir.ReinterpretView in raw_args.
+            if not isinstance(raw_arg, ir.IRNode):
+                raise AssertionError(f"Unrecognized arg type: {type(raw_arg)}")
+            return self._generate_buffer(raw_arg)
+
+        if raw_args is None:
+            raw_args = [None] * len(args)
+        elif len(raw_args) != len(args):
+            raise AssertionError(
+                f"call_args and raw_args do not match: {len(args)} vs {len(raw_args)}"
+            )
+
+        return tuple(lookup(arg, raw_arg) for arg, raw_arg in zip(args, raw_args))
 
     def _get_buffer(self, node: ir.IRNode) -> CodegenBuffer:
         """
@@ -412,11 +436,22 @@ class FxConverter:
 
             # Introduce a new symbol for constant inputs.
             is_constant = isinstance(ir_node, (int, float, sympy.Integer, sympy.Float))
-            buffer = (
-                SymbolBuffer(sympy.Symbol(name, is_integer=True))
-                if is_constant
-                else self._get_buffer(ir_node)
+
+            # Special handling for dynamic shapes which are not simple symbols.
+            is_expr = isinstance(ir_node, sympy.Expr) and not isinstance(
+                ir_node, (sympy.Symbol, sympy.Integer, sympy.Float)
             )
+            if is_expr and ir_node.is_integer is not True:
+                raise NotImplementedError(
+                    f"Unsupported non-integer symbolic graph input: {ir_node}"
+                )
+
+            if is_constant:
+                buffer = SymbolBuffer(sympy.Symbol(name, is_integer=True))
+            elif is_expr:
+                buffer = SymbolBuffer(ir_node, name=name)
+            else:
+                buffer = self._get_buffer(ir_node)
             placeholder_node = self.gm.graph.placeholder(buffer.get_name())
             placeholder_node.meta["val"] = (
                 ir_node if is_constant else buffer.get_example()
@@ -424,7 +459,7 @@ class FxConverter:
             self._record_allocation(buffer, placeholder_node)
 
             # Record symbol definitions for dynamic shapes.
-            if isinstance(ir_node, sympy.Symbol):
+            if isinstance(ir_node, sympy.Expr) and not is_constant:
                 self._generate_size_proxy(placeholder_node, ir_node)
 
     def _generate_graph_input_shapes(self) -> None:
@@ -463,7 +498,9 @@ class FxConverter:
                     self._sympy_interp(sym_or_exp)
                     return
                 elif len(undefined_symbols) > 1:
-                    raise ValueError(f"Underdetermined input expression: {sym_or_exp}")
+                    raise NotImplementedError(
+                        f"Underdetermined input expression: {sym_or_exp}"
+                    )
 
                 # Define a new symbol for the input size.
                 size_proxy = codegen_proxy()
@@ -472,27 +509,9 @@ class FxConverter:
                 )
                 self.expr_to_proxy[size_symbol] = size_proxy
 
-                # Solve for the undefined symbol.
-                undefined_symbol = undefined_symbols[0]
-                solution = try_solve(
-                    sympy.Eq(sym_or_exp, size_symbol), undefined_symbol
+                self._define_symbol_by_solving(
+                    sym_or_exp, size_symbol, undefined_symbols[0]
                 )
-                if solution is None:
-                    raise ValueError(f"Cannot solve input expression: {sym_or_exp}")
-
-                # Since the symbol is a size, it must be an integer.
-                # Therefore, we can convert division to FloorDiv.
-                undefined_symbol_expr = solution[1]
-                if undefined_symbol.is_integer:
-                    undefined_symbol_expr = replace_floor_div(
-                        sympy.floor(undefined_symbol_expr)
-                    )
-
-                # Generate FX for the symbol.
-                self._sympy_interp(undefined_symbol_expr)
-                self.expr_to_proxy[undefined_symbol] = self.expr_to_proxy[
-                    undefined_symbol_expr
-                ]
 
         for ir_node in self.graph_inputs.values():
             if isinstance(ir_node, ir.TensorBox):
@@ -507,6 +526,36 @@ class FxConverter:
                     _codegen_symbol(
                         stride, placeholder_node, torch.ops.aten.sym_stride.int, dim
                     )
+
+        # A compound input binds its whole expression to one placeholder, so a
+        # symbol appearing only inside it has no node of its own. Recover it
+        # from that placeholder, after the loop above has defined every symbol
+        # the tensor shapes determine.
+        for ir_node in self.graph_inputs.values():
+            if not isinstance(ir_node, sympy.Expr) or isinstance(ir_node, sympy.Symbol):
+                continue
+            proxy = self.expr_to_proxy.get(ir_node)
+            if proxy is None:
+                continue
+            undefined = [
+                sym for sym in ir_node.free_symbols if sym not in self.expr_to_proxy
+            ]
+            if len(undefined) == 0:
+                continue
+            elif len(undefined) > 1:
+                # One bound value cannot determine several symbols. This is a
+                # branch closing over an expression whose symbols come from
+                # tensors it does not take, such as y.shape[0] + z.shape[0].
+                raise NotImplementedError(
+                    f"Compound input {ir_node} leaves these symbols undefined: "
+                    f"{sorted(undefined, key=str)}"
+                )
+
+            # A tensor-derived FX node does not reserve its symbol's name, so a
+            # Dummy is what keeps the anchor from colliding with one.
+            anchor = sympy.Dummy(proxy.node.name, integer=True)
+            self.expr_to_proxy[anchor] = proxy
+            self._define_symbol_by_solving(ir_node, anchor, undefined[0])
 
     def _generate_graph_constants(self) -> None:
         for name, value in V.graph.constants.items():
@@ -672,6 +721,28 @@ class FxConverter:
         )
         return self.expr_to_proxy[expr]
 
+    def _define_symbol_by_solving(
+        self, expr: sympy.Expr, anchor: sympy.Symbol, symbol: sympy.Symbol
+    ) -> None:
+        """
+        Define symbol by solving expr == anchor, which already maps to a proxy.
+        """
+        # A returned solution directly defines the symbol in terms of the anchor.
+        solution = try_solve(sympy.Eq(expr, anchor), symbol)
+        if solution is None:
+            raise NotImplementedError(
+                f"Cannot solve input expression {expr} for {symbol}"
+            )
+
+        symbol_expr = solution[1]
+        # If the symbol is an integer, division becomes FloorDiv.
+        if symbol.is_integer:
+            symbol_expr = replace_floor_div(sympy.floor(symbol_expr))
+
+        # Generate FX for the symbol.
+        self._sympy_interp(symbol_expr)
+        self.expr_to_proxy[symbol] = self.expr_to_proxy[symbol_expr]
+
     def _generate_sym_node(self, s: int | sympy.Expr) -> int | torch.fx.Node:
         if isinstance(s, (int, sympy.Integer)):
             return int(s)
@@ -760,6 +831,9 @@ class FxConverter:
         self._record_allocation(ir_node, fx_node)
 
     def _generate_assert_size_stride(self, line: WrapperLine) -> None:
+        pass
+
+    def _generate_assert_alignment(self, line: WrapperLine) -> None:
         pass
 
     def _generate_comment(self, line: WrapperLine) -> None:
@@ -1031,7 +1105,7 @@ class FxConverter:
             raise AssertionError(f"expected KernelCallLine, got {type(line)}")
 
         # Collect all kwargs, including autotuned block sizes.
-        call_args = self._lookup_args(line.call_args)
+        call_args = self._lookup_args(line.call_args, line.raw_args)
         kernel = self.kernels[line.kernel_name]
         tuner = kernel.tuner
 

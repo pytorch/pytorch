@@ -292,6 +292,11 @@ static void upsample_kernel_backward_out_template(const Tensor& grad_input,
   if (grad_output.numel() == 0) {
     return;
   }
+
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic due to atomic_add
+  at::globalContext().alertNotDeterministic(fmt::format("upsample_{}_backward", name));
+
   UpsampleParams<N> params(grad_input, grad_output, align_corners, scales);
   dispatch_upsample(fmt::format("upsample_{}_backward_{}", name, scalarToMetalTypeString(grad_input)),
                     grad_input,

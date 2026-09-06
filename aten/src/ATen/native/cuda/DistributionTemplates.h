@@ -352,10 +352,10 @@ void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t bas
 template<typename RNG>
 void random_full_64_bits_range_kernel(TensorIteratorBase& iter, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, iter.dtype(), "random_full_64_bits_range_kernel_cuda", [&] {
-    if (std::is_same_v<scalar_t, int64_t> ||
-        std::is_same_v<scalar_t, double> ||
-        std::is_same_v<scalar_t, float> ||
-        std::is_same_v<scalar_t, at::BFloat16>) {
+    if constexpr (std::is_same_v<scalar_t, int64_t> ||
+                  std::is_same_v<scalar_t, double> ||
+                  std::is_same_v<scalar_t, float> ||
+                  std::is_same_v<scalar_t, at::BFloat16>) {
       auto random_func = [] __device__ (uint64_t rand) {
         return transformation::uniform_int_full_range<scalar_t>(rand);
       };
@@ -388,7 +388,7 @@ struct RandomFromToKernel {
 template<typename RNG>
 void random_kernel(TensorIteratorBase& iter, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, iter.dtype(), "random_kernel_cuda", [&] {
-    if (std::is_same_v<scalar_t, double> || std::is_same_v<scalar_t, int64_t>) {
+    if constexpr (std::is_same_v<scalar_t, double> || std::is_same_v<scalar_t, int64_t>) {
       auto random_func = [] __device__ (uint64_t rand) {
         return transformation::uniform_int<scalar_t>(rand);
       };
@@ -426,7 +426,7 @@ struct RandomKernel {
 
 template<typename scalar_t, typename accscalar_t, typename RNG, typename transform_t>
 void uniform_and_transform(TensorIteratorBase& iter, RNG gen, transform_t transform) {
-  if (std::is_same_v<scalar_t, double>) {
+  if constexpr (std::is_same_v<scalar_t, double>) {
     distribution_nullary_kernel<scalar_t, accscalar_t, double2>(iter,
       gen,
       [] __device__ (curandStatePhilox4_32_10_t* state) -> double2 { return curand_uniform2_double(state); },
@@ -441,7 +441,7 @@ void uniform_and_transform(TensorIteratorBase& iter, RNG gen, transform_t transf
 
 template<typename scalar_t, typename accscalar_t, typename RNG, typename transform_t>
 void normal_and_transform(TensorIteratorBase& iter, RNG gen, transform_t transform) {
-  if (std::is_same_v<scalar_t, double>) {
+  if constexpr (std::is_same_v<scalar_t, double>) {
     distribution_nullary_kernel<scalar_t, accscalar_t, double2>(iter,
       gen,
       [] __device__ (curandStatePhilox4_32_10_t* state) -> double2 { return curand_normal2_double(state); },
@@ -663,7 +663,7 @@ void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG gen) {
   auto p = expand_inplace(self, p_cuda);
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
-      if (std::is_same_v<scalar_t, double>) {
+      if constexpr (std::is_same_v<scalar_t, double>) {
         return bernoulli_tensor_cuda_kernel<double, double>(self, *p, rng_engine_inputs);
       } else {
         return bernoulli_tensor_cuda_kernel<scalar_t, float>(self, *p, rng_engine_inputs);

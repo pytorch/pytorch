@@ -72,6 +72,10 @@ source names stay consistent. You can also use this to mark integers as dynamic.
 You can also use regexes, for example, `"L\['x.*'\], L\['y.*'\]")`.
 This whitelist takes precedence over other flags like `dynamic=False` `force_nn_module_property_static_shapes`, and `force_parameter_static_shapes`.
 
+The mirror image is `TORCH_COMPILE_STATIC_SOURCES` / `torch.compiler.config.static_sources`,
+which pins the listed sources static. It accepts the same source-name, regex and `:N` per-dim
+syntax, and takes precedence over automatic dynamic shapes, PGO and `dynamic=True`.
+
 Sometimes it can be cumbersome to find the right inputs to mark as dynamic. If
 you're willing to take a performance hit for the first batch, one other affordable
 option we have are the `eager_then_compile` stances which derive dynamism for you.

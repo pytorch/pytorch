@@ -979,6 +979,33 @@ class TestAutograd(TestCase):
         test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
         test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
 
+    @skipIfTorchDynamo("dynamo inlines setup_context, so the value stays live")
+    def test_custom_function_setup_context_releases_return_value(self):
+        class Sentinel:
+            pass
+
+        sentinel_ref = None
+
+        class MyFunc(Function):
+            @staticmethod
+            def forward(x):
+                return x.clone()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                nonlocal sentinel_ref
+                sentinel = Sentinel()
+                sentinel_ref = weakref.ref(sentinel)
+                return sentinel
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO
+
+        MyFunc.apply(torch.randn(3, requires_grad=True))
+
+        self.assertIsNone(sentinel_ref())
+
     def test_multiple_insert_removal_caching(self):
         torch._C._set_cached_tensors_enabled(True)
         try:
@@ -4066,13 +4093,11 @@ class TestAutograd(TestCase):
         leaf.grad_dtype = None  # Allow any dtype
         self.assertIsNone(leaf.grad_dtype)
 
-        # get/set grad_dtype is only allowed on leaf tensors
+        # Non-leaf tensors read grad_dtype from their producing Function's
+        # output metadata, but setting grad_dtype is still limited to leaves.
         non_leaf = leaf * 2
         self.assertFalse(non_leaf.is_leaf)
-        with self.assertRaisesRegex(
-            RuntimeError, "grad_dtype can only be accessed on leaf tensors"
-        ):
-            _ = non_leaf.grad_dtype
+        self.assertEqual(non_leaf.grad_dtype, torch.float32)
         with self.assertRaisesRegex(
             RuntimeError, "grad_dtype can only be set on leaf tensors"
         ):
@@ -4179,6 +4204,316 @@ class TestAutograd(TestCase):
         z2 = l * 3
         z2.sum().backward()
         self.assertEqual(l.grad.dtype, torch.float32)
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    @parametrize(
+        "declared,expected",
+        [
+            # unset -> slot defaults to storage dtype; explicit up/down casts the
+            # incoming fp64 grad; None passes it through uncast; the output's own
+            # dtype requests the default explicitly.
+            ("unset", torch.bfloat16),
+            (torch.float32, torch.float32),
+            (torch.float16, torch.float16),
+            (None, torch.float64),
+            (torch.bfloat16, torch.bfloat16),
+        ],
+    )
+    def test_ctx_output_grad_dtype(self, declared, expected):
+        # ctx.set_output_grad_dtype controls the dtype of the gradient the
+        # engine hands to backward, independent of the output's storage dtype.
+        # The output is bf16; a downstream node returns an fp64 gradient for it.
+        class Downstream(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                Downstream.input_grad_dtype = x.grad_dtype
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return torch.ones_like(g, dtype=torch.float64)
+
+        class DeclareOutput(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, declared):
+                out = x.to(torch.bfloat16)
+                if declared != "unset":
+                    ctx.set_output_grad_dtype(declared)
+                return out
+
+            @staticmethod
+            def backward(ctx, g):
+                DeclareOutput.seen = g.dtype
+                return g.to(torch.float32), None
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        out = DeclareOutput.apply(x, declared)
+        self.assertEqual(out.dtype, torch.bfloat16)
+        self.assertFalse(out.is_leaf)
+        expected_grad_dtype = out.dtype if declared == "unset" else declared
+        self.assertEqual(out.grad_dtype, expected_grad_dtype)
+        if expected_grad_dtype is not None and expected_grad_dtype != out.dtype:
+            with self.assertRaisesRegex(RuntimeError, "must match.*grad_dtype"):
+                out.grad = torch.ones_like(out)
+        assigned_dtype = expected_grad_dtype
+        if assigned_dtype is None:
+            assigned_dtype = torch.float64
+        out.grad = torch.ones_like(out, dtype=assigned_dtype)
+        out.grad = None
+        downstream_out = Downstream.apply(out)
+        self.assertEqual(Downstream.input_grad_dtype, expected_grad_dtype)
+        downstream_out.sum().backward()
+        self.assertEqual(DeclareOutput.seen, expected)
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_multiple_outputs(self):
+        # Positional declarations line up with returned values: a concrete
+        # dtype, the default (via the output's own dtype), and None for a
+        # non-tensor output.
+        class MultiOutput(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                t1 = x.sin()
+                t2 = x.cos()
+                ctx.set_output_grad_dtype(torch.float64, t2.dtype, None)
+                return t1, t2, "not a tensor"
+
+            @staticmethod
+            def backward(ctx, g1, g2, g3):
+                MultiOutput.seen = (g1.dtype, g2.dtype, g3)
+                return g1.to(torch.float32) + g2.to(torch.float32)
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        t1, t2, s = MultiOutput.apply(x)
+        self.assertEqual(s, "not a tensor")
+        self.assertEqual(t1.grad_dtype, torch.float64)
+        self.assertEqual(t2.grad_dtype, torch.float32)
+        (t1.sum() + t2.sum()).backward()
+        self.assertEqual(MultiOutput.seen[0], torch.float64)
+        self.assertEqual(MultiOutput.seen[1], torch.float32)
+        self.assertIsNone(MultiOutput.seen[2])
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_aliased_outputs(self):
+        # setup_context can declare distinct grad dtypes for output slots whose
+        # tensors alias the same storage.
+        class SetupContext(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                base = x.to(torch.bfloat16)
+                return base.view_as(base), base.view_as(base)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.set_output_grad_dtype(torch.float32, torch.float64)
+
+            @staticmethod
+            def backward(ctx, g0, g1):
+                SetupContext.output_grad_dtypes = (g0.dtype, g1.dtype)
+                return g0.to(torch.float32) + g1.to(torch.float32)
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        out0, out1 = SetupContext.apply(x)
+        (out0.sum() + out1.sum()).backward()
+        self.assertEqual(
+            SetupContext.output_grad_dtypes, (torch.float32, torch.float64)
+        )
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_accumulation(self):
+        # A declared grad dtype also governs the dtype the engine accumulates
+        # in when the output fans out to multiple consumers: the two fp64
+        # incoming gradients are accumulated as fp32 (the declared dtype), so
+        # backward sees fp32.
+        class Consumer(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return torch.ones_like(g, dtype=torch.float64)
+
+        class Fanout(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x.to(torch.bfloat16)
+                ctx.set_output_grad_dtype(torch.float32)
+                return out
+
+            @staticmethod
+            def backward(ctx, g):
+                Fanout.seen = g.dtype
+                return g.to(torch.float32)
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        out = Fanout.apply(x)
+        (Consumer.apply(out).sum() + Consumer.apply(out).sum()).backward()
+        self.assertEqual(Fanout.seen, torch.float32)
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_setup_context(self):
+        # The API is equally usable from setup_context.
+        class UseSetup(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x.to(torch.bfloat16)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.set_output_grad_dtype(torch.float32)
+
+            @staticmethod
+            def backward(ctx, g):
+                UseSetup.seen = g.dtype
+                return g.to(torch.float32)
+
+        class Downstream(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return torch.ones_like(g, dtype=torch.float64)
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        out = UseSetup.apply(x)
+        Downstream.apply(out).sum().backward()
+        self.assertEqual(UseSetup.seen, torch.float32)
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_validation(self):
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+
+        class CountMismatch(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.set_output_grad_dtype(torch.float32, torch.float32)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        with self.assertRaisesRegex(RuntimeError, "number of declarations to match"):
+            CountMismatch.apply(x)
+
+        class TooFewDeclarations(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.set_output_grad_dtype(torch.float32)
+                return x.clone(), x.clone()
+
+            @staticmethod
+            def backward(ctx, g0, g1):
+                return g0 + g1
+
+        with self.assertRaisesRegex(RuntimeError, "number of declarations to match"):
+            TooFewDeclarations.apply(x)
+
+        class BadDeclarationType(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.set_output_grad_dtype("float32")
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        with self.assertRaisesRegex(RuntimeError, "torch.dtype or None"):
+            BadDeclarationType.apply(x)
+
+        class DtypeForNonTensor(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.set_output_grad_dtype(None, torch.float32)
+                return x.clone(), "not a tensor"
+
+            @staticmethod
+            def backward(ctx, g, gs):
+                return g
+
+        with self.assertRaisesRegex(RuntimeError, "not a differentiable tensor"):
+            DtypeForNonTensor.apply(x)
+
+        class DtypeForNonDifferentiable(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out = x.clone()
+                ctx.mark_non_differentiable(out)
+                ctx.set_output_grad_dtype(torch.float32)
+                return out
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        with self.assertRaisesRegex(RuntimeError, "not a differentiable tensor"):
+            DtypeForNonDifferentiable.apply(x)
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_called_twice(self):
+        # set_output_grad_dtype may be called at most once per invocation.
+        class CalledTwice(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.set_output_grad_dtype(torch.float32)
+                ctx.set_output_grad_dtype(torch.float64)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "can only be called once"):
+            CalledTwice.apply(x)
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_return_as_is_non_differentiable(self):
+        # mark_non_differentiable records the raw output's TensorImpl, so
+        # differentiability must be checked on the raw output, not its wrapper.
+        class ReturnAsIs(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                out = x.to(torch.bfloat16)
+                ctx.mark_non_differentiable(y)
+                ctx.set_output_grad_dtype(torch.float32, None)
+                return out, y
+
+            @staticmethod
+            def backward(ctx, g_out, g_y):
+                ReturnAsIs.seen_grad_dtype = g_out.dtype
+                return g_out.to(torch.float32), None
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        y = torch.tensor([3.0, 4.0])
+        out, out_y = ReturnAsIs.apply(x, y)
+        self.assertFalse(out_y.requires_grad)
+        out.sum().backward()
+        self.assertEqual(ReturnAsIs.seen_grad_dtype, torch.float32)
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_ctx_output_grad_dtype_no_leak_from_returned_input(self):
+        # The output defaults to its dtype while leaf accumulation uses x.grad_dtype.
+        class ReturnInput(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, g):
+                ReturnInput.seen_grad_dtype = g.dtype
+                return g
+
+        x = torch.tensor([1.0, 2.0], dtype=torch.float32, requires_grad=True)
+        x.grad_dtype = torch.float64
+        out = ReturnInput.apply(x)
+        out.sum().backward()
+        self.assertEqual(ReturnInput.seen_grad_dtype, torch.float32)
+        self.assertEqual(x.grad.dtype, torch.float64)
 
     def test_gc_in_destructor(self):
         """
@@ -5889,7 +6224,7 @@ Done""",
         # real and imag are only implemented for complex tensors.
         y = torch.randn(10, 10, dtype=torch.cfloat)
         imag_key = "imag"
-        self.assertRaises(RuntimeError, lambda: hasattr(x, imag_key))
+        self.assertRaises(TypeError, lambda: hasattr(x, imag_key))
         self.assertTrue(hasattr(y, imag_key))
         keys.remove(imag_key)
 
@@ -6509,6 +6844,13 @@ Done""",
 
         check(fast_mode=True)
         check(fast_mode=False)
+
+    def test_gradcheck_mixed_differentiable_outputs(self):
+        def fn(x):
+            return torch.ones_like(x), x.square()
+
+        x = torch.randn(2, dtype=torch.double, requires_grad=True)
+        self.assertTrue(gradcheck(fn, (x,), fast_mode=True))
 
     @parametrize(
         "layout",
@@ -7249,6 +7591,58 @@ Done""",
 
         check(fast_mode=True)
         check(fast_mode=False)
+
+    def test_gradcheck_fast_mode_forward_ad_error_indexing(self):
+        from torch.autograd.gradcheck import FAST_FAIL_SLOW_OK_MSG, GradcheckError
+
+        class BadMul(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.mul(2)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad.mul(2)
+
+            @staticmethod
+            def jvp(ctx, grad):
+                return grad.mul(5)
+
+        x = torch.ones(2, dtype=torch.double, requires_grad=True)
+        a = torch.ones(3, dtype=torch.double)
+        cases = (
+            (
+                "non-differentiable output",
+                lambda x: (torch.zeros_like(x), BadMul.apply(x)),
+                (x,),
+                1,
+            ),
+            (
+                "integer output",
+                lambda x: (torch.ones_like(x, dtype=torch.int64), BadMul.apply(x)),
+                (x,),
+                0,
+            ),
+            ("non-differentiable input", lambda a, x: BadMul.apply(x), (a, x), 0),
+        )
+        kwargs = {
+            "fast_mode": True,
+            "check_backward_ad": False,
+            "check_batched_grad": False,
+            "check_forward_ad": True,
+        }
+
+        for name, fn, inputs, output_idx in cases:
+            with self.subTest(name=name):
+                err_msg = (
+                    "Jacobian computed with forward mode mismatch for output "
+                    f"{output_idx} with respect to input 0"
+                )
+                with self.assertRaisesRegex(GradcheckError, err_msg) as cm:
+                    gradcheck(fn, inputs, **kwargs)
+                if name == "integer output":
+                    self.assertNotIn(FAST_FAIL_SLOW_OK_MSG, str(cm.exception))
+                self.assertFalse(gradcheck(fn, inputs, raise_exception=False, **kwargs))
 
     def test_gradcheck_forward_ad(self):
         def fn(x, y):
@@ -8758,6 +9152,23 @@ for shape in [(1,), ()]:
         ret = self._test_reentrant_with_callbacks([0, 1])
         self.assertEqual(ret["outer"], 1)
         self.assertEqual(ret["inner"], 1)
+
+    @skipIfTorchDynamo(
+        "callbacks don't fire when backward runs under compiled autograd"
+    )
+    def test_graph_queue_callback(self):
+        # The public API matches Variable._execution_engine.queue_callback.
+        counter = [0]
+        t = torch.rand(3, requires_grad=True)
+        t.register_hook(
+            lambda _: torch.autograd.graph.queue_callback(
+                lambda: counter.__setitem__(0, counter[0] + 1)
+            )
+        )
+        t.sum().backward()
+        self.assertEqual(counter[0], 1)
+        with self.assertRaisesRegex(RuntimeError, "during backward"):
+            torch.autograd.graph.queue_callback(lambda: None)
 
     def test_reentrant_with_leaf_variable_hook(self):
         handle = None
@@ -17966,7 +18377,10 @@ from autograd.test_logging import TestAutogradLogging  # noqa: F401
 instantiate_device_type_tests(TestAutogradDeviceType, globals(), except_for=None)
 
 instantiate_device_type_tests(
-    TestAutogradMultipleDispatch, globals(), only_for=("cpu", "cuda")
+    TestAutogradMultipleDispatch,
+    globals(),
+    only_for=("cpu", "xpu", "cuda"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
     TestAutogradStreamSynchronization, globals(), except_for=None

@@ -7,13 +7,6 @@
 
 namespace at::mps {
 
-static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& device) {
-  // MPS Advanced Indexing needs at least Metal 2.0 (support for Argument Buffers and function constants)
-  // host_name attribute needs at least Metal 2.2 and ulong needs Metal 2.3 (supported on MacOS 11+
-  TORCH_CHECK([device supportsFamily:MTLGPUFamilyMac2], "Missing Metal support for MTLGPUFamilyMac2");
-  return MTLLanguageVersion3_0;
-}
-
 MPSDevice* MPSDevice::getInstance() {
   static MPSDevice mps_device;
   return &mps_device;
@@ -37,9 +30,6 @@ MPSDevice::MPSDevice() : _mtl_device(nil) {
   NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0; i < [devices count]; i++) {
     id<MTLDevice> device = devices[i];
-    if ([device isLowPower]) { // exclude Intel GPUs
-      continue;
-    }
     if (![device supportsFamily:MTLGPUFamilyMac2]) {
       // Exclude devices that does not support Metal 2.0
       // Virtualised MPS device on MacOS 12.6 should fail this check

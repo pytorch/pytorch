@@ -289,7 +289,7 @@ class _OverlapInfo:
 
 class ZeroRedundancyOptimizer(Optimizer, Joinable):
     r"""
-    Wrap an arbitrary :class:`optim.Optimizer <torch.optim.Optimizer>` and shards its states across ranks in the group.
+    Wrap an arbitrary :class:`optim.Optimizer <torch.optim.Optimizer>` and shard its states across ranks in the group.
 
     The sharing is done as described by `ZeRO <https://arxiv.org/abs/1910.02054>`_.
 
@@ -817,7 +817,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         This rank sends its shard of the parameters to all other ranks and
         receives a shard from each other rank. This is done using
         ``broadcast()``. Parameters are sent bucket-by-bucket if
-        ``parameters_as_bucket_view=True``and sent parameter-by-parameter
+        ``parameters_as_bucket_view=True`` and sent parameter-by-parameter
         otherwise.
         """
         handles = []
@@ -906,9 +906,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         assigned_ranks_per_bucket: list[set[int]],
     ) -> None:
         r"""
-        Assign ``bucket_params`` to the rank with the least size assigned so far and collects relevant information.
+        Assign ``bucket_params`` to the rank with the least size assigned so far and collect relevant information.
 
-        The model parameters given by ``bucket_params`` represents a (possibly non-strict)
+        The model parameters given by ``bucket_params`` represent a (possibly non-strict)
         subset of the parameters corresponding to a :class:`DistributedDataParallel` bucket.
 
         Arguments:
@@ -1127,7 +1127,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         **kwargs: Any,
     ) -> float | None:
         r"""
-        Perform a single optimizer step and syncs parameters across all ranks.
+        Perform a single optimizer step and sync parameters across all ranks.
 
         Arguments:
             closure (Callable): a closure that re-evaluates the model and
@@ -1423,7 +1423,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         params: Any,
     ) -> list[torch.Tensor] | list[dict]:
         r"""
-        Verify the type of ``params`` and initializes ``self._all_params`` as a :class:`list` of all parameters.
+        Verify the type of ``params`` and initialize ``self._all_params`` as a :class:`list` of all parameters.
 
         The initialization will first make sure that provided ``params`` is valid.
 

@@ -14,6 +14,14 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # shellcheck source=./rocm_utils.sh
   source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
   export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH};gfx1033"
+
+  if command -v sccache >/dev/null; then
+    SCCACHE_PATH="$(command -v sccache)"
+    export CMAKE_C_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export CMAKE_CXX_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export CMAKE_HIP_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export HIP_CLANG_LAUNCHER="${SCCACHE_PATH}"
+  fi
 fi
 
 echo "Python version:"
@@ -183,12 +191,17 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
   exit 1
 fi
 
-# FlashAttention CUDA kernels (built for CUDA 8.0+) need large amounts of memory
-# to compile and can OOM at full build parallelism. The previous mitigation set
-# BUILD_CUSTOM_STEP to pre-build the flash_attention target at a reduced job
-# count; it was consumed by the setuptools build path removed in this stack, so
-# it is dropped here. Re-homing the throttle as a CMake JOB_POOLS constraint is
-# tracked in https://github.com/pytorch/pytorch/issues/190663.
+# FlashAttention kernels need large amounts of memory to compile and can OOM at
+# full build parallelism. Only workflows that select a reviewed high-memory
+# build runner should opt in to the larger target-specific pool.
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  FLASH_ATTENTION_MAX_JOBS=2
+  if [[ "${FLASH_ATTENTION_LARGE_MEMORY_BUILD:-false}" == "true" ]]; then
+    FLASH_ATTENTION_MAX_JOBS=24
+  fi
+  export FLASH_ATTENTION_MAX_JOBS
+  echo "Limiting FlashAttention compilation to ${FLASH_ATTENTION_MAX_JOBS} jobs"
+fi
 
 # TODO: Removeme once all the wrappers are gone
 if [[ "$BUILD_ENVIRONMENT" == *clang* ]] && [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -270,6 +283,32 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   fi
   pip_install_whl "$(echo dist/*.whl)"
 
+  # native-AOT stage 2: export DSL kernels, relink torch_cuda with them embedded, and
+  # patch the library back into the wheel test jobs get (tools/native_aot/build_stage2.py).
+  #
+  # CUDA-only, as in .ci/manywheel/build.sh: --wheel makes stage 2 refuse a torch that
+  # does not import, and in the ASan and TSan images `import torch` cannot work.
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    # Installed HERE, not in .ci/docker/requirements-ci.txt, which every image
+    # shares: that would put ~190 MB of CUDA-only tooling into the CPU/ROCm/XPU images.
+    #
+    # ONE owner of the decision: stage 2 prints the verdict, we install only on RUN.
+    if [[ "$(python tools/native_aot/build_stage2.py --print-verdict)" == "RUN" ]]; then
+      install_cutlass_dsl
+    fi
+    # One wheel expected; a stale second would be glued into one argument. nullglob
+    # so an empty dist/ counts as zero.
+    naot_wheels=()
+    shopt -s nullglob
+    naot_wheels=(dist/*.whl)
+    shopt -u nullglob
+    if [[ ${#naot_wheels[@]} -ne 1 ]]; then
+      echo "native-AOT: expected exactly one wheel in dist/, found ${#naot_wheels[@]}" >&2
+      exit 1
+    fi
+    python tools/native_aot/build_stage2.py --wheel "${naot_wheels[0]}"
+  fi  # BUILD_ENVIRONMENT == *cuda*
+
   # Smoke-test tools/build_with_debinfo.py against the real build tree: it must
   # still emit a debug-rebuild plan with a -g compile and the libtorch_python
   # relink. This guards against build-system changes (e.g. a new
@@ -336,26 +375,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-    # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
-    sudo rm -f /opt/cache/bin/cc
-    sudo rm -f /opt/cache/bin/c++
-    sudo rm -f /opt/cache/bin/gcc
-    sudo rm -f /opt/cache/bin/g++
-    # Restore original clang compilers that were backed up during sccache wrapping.
-    # Skip for theRock nightly: sccache wrapping is disabled, so no backup exists.
-    # theRock also uses ${ROCM_PATH}/lib/llvm/bin instead of /opt/rocm/llvm/bin.
-    if [[ -d /opt/rocm/llvm/bin ]]; then
-      pushd /opt/rocm/llvm/bin
-      if [[ -d original ]]; then
-        sudo mv original/clang .
-        sudo mv original/clang++ .
-      fi
-      sudo rm -rf original
-      popd
-    fi
-
     # Build rocm-composable-kernel (ck4inductor) wheel alongside PyTorch.
-    # Placed outside the /opt/rocm/llvm/bin pushd so `dist/` resolves to the repo root.
     build_rocm_ck_wheel dist/
   fi
 

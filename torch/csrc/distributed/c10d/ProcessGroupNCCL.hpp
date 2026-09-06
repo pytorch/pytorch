@@ -11,10 +11,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <future>
 #include <iostream>
 #include <list>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -177,15 +180,6 @@ enum ErrorHandlingMode {
 #define PRINT_COLLECTIVE_HASH_SIGNATURE(phase, opType, numel, hashValue)      \
   LOG(WARNING) << logPrefix() << "Hash of " << phase << " to NCCL " << opType \
                << " with size " << numel << " is " << hashValue;
-
-// If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
-// caching allocator safety for tensors used on both user-facing and
-// internal comm streams.
-// Instead, it stashes live references to those tensors until after
-// user-facing streams are synced with comm streams.
-// See stashed_for_allocator_safety_ below.
-static std::vector<std::string> TORCH_NCCL_AVOID_RECORD_STREAMS = {
-    "TORCH_NCCL_AVOID_RECORD_STREAMS"};
 
 // If set, ProcessGroupNCCL registers postAlloc and preFree hooks to cuda cache
 // allocator so that whenever a tensor is allocated or freed, ProcessGroupNCCL
@@ -485,7 +479,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // give a more descriptive message when representing the Work as a string.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
 
-    // TORCH_NCCL_AVOID_RECORD_STREAMS implementation helper.
+    // Stashing implementation helper.
     // Stores references to participating non-output tensors (ie inputs,
     // flattened intermediates).
     // We'll clear this list in synchronizeStream, just after user-facing
@@ -529,6 +523,24 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       return c10::make_intrusive<Options>(is_high_priority_stream);
     }
 
+    c10::intrusive_ptr<Backend::Options> clone() const override {
+      auto copy = c10::make_intrusive<Options>(*this);
+      if (config.netName != nullptr) {
+        // ncclConfig_t::netName is a strdup'ed const char* (see the NCCLConfig
+        // pybind setter) and ncclConfig_t records no owner, so a plain copy
+        // would leave two Options sharing one allocation. Give the clone its
+        // own and tie the allocation to it: copies of this Options share it and
+        // free it once, when the last of them goes away. A netName from
+        // anywhere else -- the pybind setter, a config also handed to NCCL --
+        // is untracked and untouched.
+        copy->owned_net_name_ = std::shared_ptr<const char>(
+            strdup(config.netName),
+            [](const char* p) { std::free(const_cast<char*>(p)); });
+        copy->config.netName = copy->owned_net_name_.get();
+      }
+      return copy;
+    }
+
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
 
@@ -550,6 +562,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // raise a RuntimeError saying type is incompatible. See also
     // `_process_group_color` in `distributed_c10d.py`.
     int split_color{NCCL_SPLIT_NOCOLOR - 1};
+
+   private:
+    // Keeps clone()'s strdup'ed config.netName alive; see clone().
+    std::shared_ptr<const char> owned_net_name_;
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
@@ -823,9 +839,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   c10::intrusive_ptr<Work> endCoalescing() override;
 
-  void startTimeEstimate();
+  void startTimeEstimate() override;
 
-  float endTimeEstimate();
+  float endTimeEstimate() override;
 
   // For specifying a composite optype, such as ALLGATHER and REDUCE_SCATTER
   c10::intrusive_ptr<Work> endCoalescing(OpType optype);
@@ -994,7 +1010,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void performNocolorSplit(at::Device device);
 
   // If all comms on this PG are fully initialized, return true.
-  bool isInitialized();
+  bool isInitialized() override;
 
   ErrorType getError() override;
 
@@ -1451,9 +1467,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // verification.
   std::atomic<bool> enableCollectiveHashDebug_;
 
-  // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
-  bool avoidRecordStreams_ = false;
-
   // The number of active ncclGroupStart() calls. This counter will be increased
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()
   // is called.
@@ -1473,6 +1486,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // The number of ProcessGroupNCCL created on the current rank.
   size_t local_id_;
+
+  // Identity rank mapping [0, size_), used by groupRanks() when
+  // options_->global_ranks_in_group is empty. Filled in the constructor.
+  std::vector<uint64_t> defaultRanks_;
 
   std::string logPrefix_;
 

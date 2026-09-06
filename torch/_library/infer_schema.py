@@ -39,7 +39,7 @@ def infer_schema(
       | assumed to be torch.*. Similarly, string type annotations "Optional, List, Sequence, Union"
       | without library specification are assumed to be typing.*.
     * | Only the args listed in ``mutates_args`` are being mutated. If ``mutates_args`` is "unknown",
-      | it assumes that all inputs to the operator are being mutates.
+      | it assumes that all inputs to the operator are being mutated.
 
     Callers (e.g. the custom ops API) are responsible for checking these assumptions.
 

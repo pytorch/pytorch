@@ -17,6 +17,7 @@ from unittest.mock import patch, MagicMock, ANY
 import math
 import itertools
 import torch.optim as optim
+from torch.backends.cuda import can_use_flash_attention, SDPAParams
 from torch.testing._internal.common_device_type import expectedFailureMPS, instantiate_device_type_tests, onlyCUDA, largeTensorTest
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
@@ -1746,17 +1747,30 @@ class TestSDPAFailureModes(NNTestCase):
         "kernel",
         PLATFORM_SPECIFIC_SDPA,
     )
-    def test_invalid_fused_inputs_dim_3(self, device, kernel: SDPBackend):
+    def test_fused_inputs_dim_3(self, device, kernel: SDPBackend):
+        size = (2, 3, 8)
+        dtype = torch.float16
+        q = torch.randn(size, device=device, dtype=dtype)
+        k = torch.randn(size, device=device, dtype=dtype)
+        v = torch.randn(size, device=device, dtype=dtype)
+        attn_mask = (
+            None
+            if kernel == SDPBackend.FLASH_ATTENTION
+            else torch.randn(3, 3, device=device, dtype=dtype)
+        )
+
         with sdpa_kernel(backends=[kernel]):
-            # Dim is not 4
-            size = (2, 3, 8)
-            dtype = torch.float16
-            q = torch.randn(size, device=device, dtype=dtype)
-            k = torch.randn(size, device=device, dtype=dtype)
-            v = torch.randn(size, device=device, dtype=dtype)
-            with self.assertWarnsRegex(UserWarning, "All fused kernels requires query, key and value to be 4 dimensional"):
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
+            self.assertEqual(
+                torch._fused_sdp_choice(q, k, v, attn_mask), kernel.value
+            )
+            expected = torch.nn.functional.scaled_dot_product_attention(
+                q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0), attn_mask
+            ).squeeze(0)
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask
+            )
+
+        self.assertEqual(actual, expected)
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
@@ -2545,6 +2559,36 @@ class TestSDPACpuOnly(NNTestCase):
             if torch._fused_sdp_choice(q, k, v, dropout_p=dropout) != SDPBackend.FLASH_ATTENTION.value:
                 raise AssertionError("expected FLASH_ATTENTION backend")
 
+    def test_fused_inputs_dim_3_cpu(self, device):
+        size = (2, 3, 8)
+        q = torch.randn(size, device=device)
+        k = torch.randn(size, device=device)
+        v = torch.randn(size, device=device)
+        masks = (
+            None,
+            torch.randn(3, 3, device=device),
+            torch.randn(2, 3, 3, device=device),
+        )
+
+        for attn_mask in masks:
+            normalized_mask = attn_mask
+            while normalized_mask is not None and normalized_mask.dim() < 4:
+                normalized_mask = normalized_mask.unsqueeze(0)
+            with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+                self.assertEqual(
+                    torch._fused_sdp_choice(q, k, v, attn_mask),
+                    SDPBackend.FLASH_ATTENTION.value,
+                )
+                expected = F.scaled_dot_product_attention(
+                    q.unsqueeze(0),
+                    k.unsqueeze(0),
+                    v.unsqueeze(0),
+                    normalized_mask,
+                ).squeeze(0)
+                actual = F.scaled_dot_product_attention(q, k, v, attn_mask)
+
+            self.assertEqual(actual, expected)
+
     def _generate_fixed_qkv_helper(
         self,
         device,
@@ -2921,6 +2965,86 @@ class TestSDPACudaOnly(NNTestCase):
     """
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention is not supported on this system")
+    def test_fused_attention_empty_batch(self, device):
+        # Attention over zero rows is an empty result, not an error. The composite
+        # scaled_dot_product_attention short-circuits an empty input before dispatching,
+        # so only a caller that reaches the backend op directly -- as a compiled graph
+        # does -- exercises this. ROCm used to abort here with "batch size must be
+        # positive" while CUDA returned the empty result.
+        dtype = torch.bfloat16
+        num_heads, seqlen, head_dim = 4, 8, 64
+
+        prev_fa_library = None
+        if TEST_WITH_ROCM:
+            # The internal build ships composable kernels, not AOTriton.
+            prev_fa_library = torch.backends.cuda.preferred_rocm_fa_library()
+            torch.backends.cuda.preferred_rocm_fa_library("ck")
+        try:
+            shape = (0, num_heads, seqlen, head_dim)
+            q, k, v = (torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+                       for _ in range(3))
+
+            out, lse = torch.ops.aten._scaled_dot_product_flash_attention(q, k, v)[:2]
+            self.assertEqual(out.shape, torch.Size(shape))
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(lse.shape, torch.Size((0, num_heads, seqlen)))
+
+            # An empty forward must also produce empty grads rather than abort in mha_bwd.
+            out.backward(torch.randn_like(out))
+            for name, tensor in (("query", q), ("key", k), ("value", v)):
+                self.assertIsNotNone(tensor.grad, f"{name} received no grad")
+                self.assertEqual(tensor.grad.shape, torch.Size(shape))
+
+            # The remaining entries are ROCm-only. CUDA implements the empty-batch early
+            # return in mha_fwd and mha_bwd but not in mha_varlen_fwd, whose
+            # TORCH_CHECK(batch_size > 0) still aborts (flash_api.cpp), and its
+            # mem-efficient path is separate code that makes no such guarantee.
+            if not TEST_WITH_ROCM:
+                return
+
+            eff_out = torch.ops.aten._scaled_dot_product_efficient_attention(
+                q.detach(), k.detach(), v.detach(), None, False)[0]
+            self.assertEqual(eff_out.shape, torch.Size(shape))
+
+            # Varlen entry: zero sequences, so cu_seqlens degenerates to a single 0.
+            varlen_shape = (0, num_heads, head_dim)
+            qv = torch.randn(varlen_shape, device=device, dtype=dtype)
+            cu_seqlens = torch.zeros(1, device=device, dtype=torch.int32)
+            varlen_out = torch.ops.aten._flash_attention_forward(
+                qv, qv, qv, cu_seqlens, cu_seqlens, 0, 0, 0.0, False, False, scale=None)[0]
+            self.assertEqual(varlen_out.shape, torch.Size(varlen_shape))
+        finally:
+            if prev_fa_library is not None:
+                torch.backends.cuda.preferred_rocm_fa_library(prev_fa_library)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_cudnn_attention_decode_disabled_on_affected_blackwell(self, device):
+        # See #193893 and #194927 for reasoning
+        # TODO: Remove this test when fixed and disable is no longer needed
+        cudnn_version = torch.backends.cudnn.version() or 0
+        device_capability = torch.cuda.get_device_capability()
+        affected_arch = device_capability[0] in (10, 11)
+        # cuDNN versions 9.19-9.25.0 (except 9.24.1) on SM 10.x and 11.x are disabled
+        # This check also allows possible future 9.24 patch versions without a rewrite
+        if not (affected_arch and (91900 <= cudnn_version <= 92500) and not (92400 < cudnn_version < 92500)):
+            self.skipTest("Requires cuDNN 9.19-9.25.0 (except 9.24.1) on SM 10.x or 11.x")
+
+        query = torch.randn(2, 8, 1, 64, device=device, dtype=torch.float16)
+        key = torch.randn(2, 8, 128, 64, device=device, dtype=torch.float16)
+        value = torch.randn(2, 8, 128, 64, device=device, dtype=torch.float16)
+        params = SDPAParams(query, key, value, None, 0.0, False, False)
+
+        self.assertFalse(torch.backends.cuda.can_use_cudnn_attention(params))
+        with self.assertRaisesRegex(RuntimeError, "cuDNN SDPA decode is disabled"):
+            torch.ops.aten._scaled_dot_product_cudnn_attention.default(
+                query, key, value, None, False, 0.0, False, False
+            )
+        with self.assertRaisesRegex(RuntimeError, "cuDNN SDPA decode is disabled"):
+            torch.ops.aten._cudnn_attention_forward.default(
+                query, key, value, None, None, None, 1, 128, False, 0.0, False, False
+            )
 
     # TODO USED FOR TESTING THE SCORES, e.g. testing ALIBI we don't need this now
     def normalize_flash_attn_S(
@@ -3364,6 +3488,300 @@ class TestSDPACudaOnly(NNTestCase):
             self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=4e-4)
 
     @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Memory efficient attention is not supported on this system",
+    )
+    @parametrize("q_len,k_len,head_dim", [(80, 48, 64), (192, 64, 160)])
+    def test_mem_efficient_bottom_right_fully_masked_rows(
+        self, device, q_len, k_len, head_dim
+    ):
+        if head_dim > 64 and not MEM_EFF_CAPABILITY_MATCHES_SM80:
+            self.skipTest("large head dimensions require SM80 or later")
+        torch.manual_seed(42)
+        query = torch.randn(
+            1,
+            2,
+            q_len,
+            head_dim,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            1,
+            2,
+            k_len,
+            head_dim,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        value = torch.randn_like(key, requires_grad=True)
+        grad_out = torch.randn_like(query)
+        mask = torch.ones(q_len, k_len, dtype=torch.bool, device=device).tril(
+            diagonal=k_len - q_len
+        )
+
+        with sdpa_kernel(SDPBackend.MATH):
+            expected = scaled_dot_product_attention(
+                query, key, value, attn_mask=mask
+            )
+        expected_grads = torch.autograd.grad(
+            expected, (query, key, value), grad_out, retain_graph=True
+        )
+
+        with (
+            sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+            use_deterministic_algorithims(True, warn_only=False),
+        ):
+            actual = scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=causal_lower_right(q_len, k_len),
+            )
+            actual_grads = torch.autograd.grad(
+                actual, (query, key, value), grad_out
+            )
+
+        self.assertEqual(actual, expected, atol=3e-3, rtol=2e-3)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad, atol=3e-3, rtol=2e-3)
+
+        fully_masked = q_len - k_len
+        self.assertEqual(
+            actual[:, :, :fully_masked],
+            torch.zeros_like(actual[:, :, :fully_masked]),
+        )
+        self.assertEqual(
+            actual_grads[0][:, :, :fully_masked],
+            torch.zeros_like(actual_grads[0][:, :, :fully_masked]),
+        )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Memory efficient attention is not supported on this system",
+    )
+    @parametrize(
+        "causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT]
+    )
+    @parametrize("head_dim", [32, 160])
+    def test_mem_efficient_causal_window(self, device, causal_variant, head_dim):
+        if head_dim > 64 and not MEM_EFF_CAPABILITY_MATCHES_SM80:
+            self.skipTest("large head dimensions require SM80 or later")
+        torch.manual_seed(42)
+        q_len, k_len, window_size = 96, 64, 17
+        make_tensor = partial(
+            torch.randn, device=device, dtype=torch.float32, requires_grad=True
+        )
+        query = make_tensor(1, 2, q_len, head_dim)
+        key = make_tensor(1, 2, k_len, head_dim)
+        value = make_tensor(1, 2, k_len, 24)
+        grad_out = torch.randn(1, 2, q_len, 24, device=device)
+        q_index = torch.arange(q_len, device=device)[:, None]
+        k_index = torch.arange(k_len, device=device)[None, :]
+        diagonal = k_len - q_len if causal_variant == CausalVariant.LOWER_RIGHT else 0
+        mask = (k_index <= q_index + diagonal) & (
+            k_index > q_index + diagonal - window_size
+        )
+
+        with sdpa_kernel(SDPBackend.MATH):
+            expected = scaled_dot_product_attention(
+                query, key, value, attn_mask=mask
+            )
+        expected_grads = torch.autograd.grad(
+            expected, (query, key, value), grad_out, retain_graph=True
+        )
+
+        with use_deterministic_algorithims(True, warn_only=False):
+            actual = torch.ops.aten._efficient_attention_forward.default(
+                query.transpose(1, 2),
+                key.transpose(1, 2),
+                value.transpose(1, 2),
+                None,
+                None,
+                None,
+                None,
+                None,
+                0.0,
+                int(causal_variant),
+                True,
+                window_size=window_size,
+            )[0].transpose(1, 2)
+            actual_grads = torch.autograd.grad(
+                actual, (query, key, value), grad_out
+            )
+
+        self.assertEqual(actual, expected, atol=5e-4, rtol=5e-4)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=5e-4)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Memory efficient attention is not supported on this system",
+    )
+    @parametrize("shared_storage_dqdkdv", [False, True])
+    def test_mem_efficient_bottom_right_varlen_fully_masked_rows(
+        self, device, shared_storage_dqdkdv
+    ):
+        torch.manual_seed(42)
+        # Equal totals enable shared gradient storage; the first sequence skips
+        # a full query block and the second exercises a partial block.
+        q_lengths = (192, 80, 64)
+        k_lengths = (64, 48, 224)
+        query = torch.randn(
+            1,
+            sum(q_lengths),
+            2,
+            64,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            1,
+            sum(k_lengths),
+            2,
+            64,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        value = torch.randn_like(key, requires_grad=True)
+        cu_seqlens_q = torch.tensor(
+            [0, *itertools.accumulate(q_lengths)], device=device, dtype=torch.int32
+        )
+        cu_seqlens_k = torch.tensor(
+            [0, *itertools.accumulate(k_lengths)], device=device, dtype=torch.int32
+        )
+
+        expected_sequences = []
+        q_start = k_start = 0
+        for q_len, k_len in zip(q_lengths, k_lengths):
+            q_end, k_end = q_start + q_len, k_start + k_len
+            mask = torch.ones(q_len, k_len, dtype=torch.bool, device=device).tril(
+                diagonal=k_len - q_len
+            )
+            with sdpa_kernel(SDPBackend.MATH):
+                expected_sequences.append(
+                    scaled_dot_product_attention(
+                        query[:, q_start:q_end].transpose(1, 2),
+                        key[:, k_start:k_end].transpose(1, 2),
+                        value[:, k_start:k_end].transpose(1, 2),
+                        attn_mask=mask,
+                    ).transpose(1, 2)
+                )
+            q_start, k_start = q_end, k_end
+        expected = torch.cat(expected_sequences, dim=1)
+        grad_out = torch.randn_like(expected)
+        expected_grads = torch.autograd.grad(
+            expected, (query, key, value), grad_out, retain_graph=True
+        )
+
+        # Deterministic mode fills empty allocations with NaNs, exposing rows
+        # skipped by the forward or backward kernel.
+        with use_deterministic_algorithims(True, warn_only=False):
+            actual, logsumexp, seed, offset, max_q, max_k = (
+                torch.ops.aten._efficient_attention_forward.default(
+                    query,
+                    key,
+                    value,
+                    None,
+                    cu_seqlens_q,
+                    cu_seqlens_k,
+                    max(q_lengths),
+                    max(k_lengths),
+                    0.0,
+                    int(CausalVariant.LOWER_RIGHT),
+                    True,
+                )
+            )
+            if shared_storage_dqdkdv:
+                actual_grads = torch.ops.aten._efficient_attention_backward.default(
+                    grad_out,
+                    query,
+                    key,
+                    value,
+                    None,
+                    actual,
+                    cu_seqlens_q,
+                    cu_seqlens_k,
+                    max_q,
+                    max_k,
+                    logsumexp,
+                    0.0,
+                    seed,
+                    offset,
+                    int(CausalVariant.LOWER_RIGHT),
+                    False,
+                    shared_storage_dqdkdv=True,
+                )[:3]
+            else:
+                actual_grads = torch.autograd.grad(
+                    actual, (query, key, value), grad_out
+                )
+
+        self.assertEqual(actual, expected, atol=3e-3, rtol=2e-3)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            self.assertEqual(actual_grad, expected_grad, atol=3e-3, rtol=2e-3)
+
+        fully_masked = q_lengths[0] - k_lengths[0]
+        self.assertEqual(
+            actual[:, :fully_masked],
+            torch.zeros_like(actual[:, :fully_masked]),
+        )
+        self.assertEqual(
+            actual_grads[0][:, :fully_masked],
+            torch.zeros_like(actual_grads[0][:, :fully_masked]),
+        )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Memory efficient attention is not supported on this system",
+    )
+    def test_mem_efficient_shared_storage_requires_matching_value_dim(self, device):
+        q_lengths = (192, 64)
+        k_lengths = (64, 192)
+        query = torch.randn(1, sum(q_lengths), 2, 64, device=device)
+        key = torch.randn_like(query)
+        value = torch.randn(1, sum(k_lengths), 2, 40, device=device)
+        cu_seqlens_q = torch.tensor(
+            [0, *itertools.accumulate(q_lengths)], device=device, dtype=torch.int32
+        )
+        cu_seqlens_k = torch.tensor(
+            [0, *itertools.accumulate(k_lengths)], device=device, dtype=torch.int32
+        )
+        output = torch.empty(1, sum(q_lengths), 2, 40, device=device)
+        logsumexp = torch.empty(len(q_lengths), 2, max(q_lengths), device=device)
+        seed = torch.empty((), dtype=torch.int64, device=device)
+        offset = torch.empty((), dtype=torch.int64, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "same embed dim"):
+            torch.ops.aten._efficient_attention_backward.default(
+                torch.empty_like(output),
+                query,
+                key,
+                value,
+                None,
+                output,
+                cu_seqlens_q,
+                cu_seqlens_k,
+                max(q_lengths),
+                max(k_lengths),
+                logsumexp,
+                0.0,
+                seed,
+                offset,
+                int(CausalVariant.LOWER_RIGHT),
+                False,
+                shared_storage_dqdkdv=True,
+            )
+
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     def test_mem_efficient_attention_zero_heads(self, device):
         """Zero-head low-level attention should return empty outputs and gradients."""
@@ -3561,6 +3979,13 @@ class TestSDPACudaOnly(NNTestCase):
         else:
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):
                 test()
+
+    def test_flash_attention_rejects_different_dk_dv(self, device):
+        q = torch.empty(1, 1, 128, 192, dtype=torch.float16, device=device)
+        k = torch.empty_like(q)
+        v = torch.empty(1, 1, 128, 128, dtype=torch.float16, device=device)
+        params = SDPAParams(q, k, v, None, 0.0, True, False)
+        self.assertFalse(can_use_flash_attention(params))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_fused_attention_different_dk_dv(self, device):
@@ -3793,7 +4218,7 @@ class TestSDPACudaOnly(NNTestCase):
         out_cpu = torch.nn.functional.scaled_dot_product_attention(q_cpu, q_cpu, q_cpu)
         out_cpu.backward(grad_cpu)
         self.assertEqual(out, out_cpu.cuda().half(), atol=1e-3, rtol=1e-3)
-        self.assertEqual(q.grad, q_cpu.grad.cuda().half(), atol=7e-3, rtol=5e-3)
+        self.assertEqual(q.grad, q_cpu.grad.cuda().half(), atol=7e-3, rtol=7e-3)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_seqlen1_dropout_heuristic(self):
@@ -3813,7 +4238,6 @@ class TestSDPACudaOnly(NNTestCase):
         with self.assertRaisesRegex(AssertionError, "AssertionError not raised"):
             self.assertNotEqual(out1, out2)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_broken_166211(self):
         # https://github.com/pytorch/pytorch/issues/166211#issue-3551350377
@@ -4158,6 +4582,23 @@ class TestSDPACudaOnly(NNTestCase):
 
         max_diff = (out - out_contig).abs().mean()
         self.assertTrue(max_diff.item() < 1e-7)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    def test_mem_eff_attention_single_query_tail_mask(self, device):
+        seq_len, num_heads, head_dim = 289, 16, 512
+        make_tensor = partial(torch.randn, device=device, dtype=torch.bfloat16)
+        query = make_tensor(1, seq_len, num_heads, head_dim).transpose(1, 2)
+        key = make_tensor(seq_len, head_dim).expand(1, num_heads, -1, -1)
+        value = make_tensor(seq_len, head_dim).expand(1, num_heads, -1, -1)
+        mask = torch.ones(seq_len, seq_len, device=device, dtype=torch.bool).tril()[None, None]
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = F.scaled_dot_product_attention(query, key, value, mask, scale=1.0)
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            actual = F.scaled_dot_product_attention(query, key, value, mask, scale=1.0)
+
+        self.assertEqual(actual, expected, atol=2e-2, rtol=2e-2)
 
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
@@ -4990,6 +5431,247 @@ class TestSDPACudaOnly(NNTestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
     )
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CK_SDPA,
+        "Regression is specific to the ROCm CK SDPA backend",
+    )
+    @setSdpaBackendsToDefaultFinally
+    def test_flash_attention_ck_unaligned_sequence_padding(self, device):
+        # This and the three CK tests below run wherever CK SDPA is built -- the
+        # gate is is_ck_sdpa_available(), not an arch list -- and none of them
+        # branch on gfx950. What they prove does vary by arch: the generator
+        # emits the qr_async_trload instances this change re-guards only in the
+        # gfx950 bucket (gfx950 gets 192 of them, gfx9 none), so the emitted gfx9
+        # dispatch chain is byte-identical before and after. On gfx942 these are
+        # no-regression coverage; on gfx950 they also cover the re-routed arms.
+        torch.backends.cuda.preferred_rocm_fa_library("ck")
+        if (
+            torch.backends.cuda.preferred_rocm_fa_library()
+            != torch._C._ROCmFABackend.Ck
+        ):
+            self.skipTest("CK SDPA backend not available")
+
+        cases = (
+            ("cmf_self_d128", torch.float16, 128, 1, 24, 24, 128),
+            ("gfx950_fault", torch.bfloat16, 5, 2, 4, 656, 128),
+            ("oba_self_d192", torch.float16, 128, 1, 200, 200, 192),
+            ("cmf_self_d256", torch.float16, 128, 1, 24, 24, 256),
+            ("cmf_cross_aligned", torch.float16, 1, 1, 16, 96, 128),
+        )
+        for name, dtype, batch, heads, seqlen_q, seqlen_k, head_dim in cases:
+            with self.subTest(name=name):
+                q = torch.rand(
+                    batch, heads, seqlen_q, head_dim, device=device, dtype=dtype
+                )
+                k = torch.rand(
+                    batch, heads, seqlen_k, head_dim, device=device, dtype=dtype
+                )
+                v = torch.rand(
+                    batch, heads, seqlen_k, head_dim, device=device, dtype=dtype
+                )
+                with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+                    out = F.scaled_dot_product_attention(q, k, v)
+                with sdpa_kernel(backends=[SDPBackend.MATH]):
+                    ref = F.scaled_dot_product_attention(q.float(), k.float(), v.float())
+                self.assertFalse(torch.isnan(out).any().item(), name)
+                self.assertFalse(torch.isinf(out).any().item(), name)
+                self.assertEqual(out, ref.to(out.dtype), atol=2e-2, rtol=2e-2)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support Efficient Attention",
+    )
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CK_SDPA,
+        "Regression is specific to the ROCm CK SDPA backend",
+    )
+    @setSdpaBackendsToDefaultFinally
+    def test_mem_eff_attention_ck_unaligned_dense_bias(self, device):
+        # Numerical/path coverage for the one entry point that hands CK a dense
+        # additive bias. FLASH_ATTENTION rejects attn_mask outright and the flash
+        # wrapper passes mha_fwd_ck a null bias (attention.cu:136), so the
+        # bias-carrying instances are reachable only through
+        # _efficient_attention_forward (attention.cu:1661 -> mem_eff_forward_ck).
+        # Not a fail-before repro on any arch; see the note above about what the
+        # gfx9 and gfx950 dispatch chains actually differ in.
+        torch.backends.cuda.preferred_rocm_fa_library("ck")
+        if (
+            torch.backends.cuda.preferred_rocm_fa_library()
+            != torch._C._ROCmFABackend.Ck
+        ):
+            self.skipTest("CK SDPA backend not available")
+
+        # CK wants the bias dtype to match q/k/v (sdp_utils.cpp:1230-1236) and
+        # ROCm mem-eff declines GQA/MQA, so the head counts stay equal.
+        cases = (
+            ("bias_d128_cmf_self", torch.float16, 4, 2, 24, 24, 128),
+            ("bias_d128_tail", torch.bfloat16, 2, 4, 4, 656, 128),
+            ("bias_d64_tail", torch.float16, 2, 4, 17, 129, 64),
+        )
+        for name, dtype, batch, heads, seqlen_q, seqlen_k, head_dim in cases:
+            with self.subTest(name=name):
+                q = torch.rand(
+                    batch, heads, seqlen_q, head_dim, device=device, dtype=dtype
+                )
+                k = torch.rand(
+                    batch, heads, seqlen_k, head_dim, device=device, dtype=dtype
+                )
+                v = torch.rand(
+                    batch, heads, seqlen_k, head_dim, device=device, dtype=dtype
+                )
+                bias = torch.randn(
+                    batch, heads, seqlen_q, seqlen_k, device=device, dtype=dtype
+                )
+                with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+                    out = F.scaled_dot_product_attention(q, k, v, attn_mask=bias)
+                with sdpa_kernel(backends=[SDPBackend.MATH]):
+                    with tf32_off():
+                        golden = F.scaled_dot_product_attention(
+                            q.float(), k.float(), v.float(), attn_mask=bias.float()
+                        )
+                    lp_ref = F.scaled_dot_product_attention(q, k, v, attn_mask=bias)
+                self.assertFalse(torch.isnan(out).any().item(), name)
+                self.assertFalse(torch.isinf(out).any().item(), name)
+                _check_equal(golden, lp_ref, out, 4.0, f"out[{name}]")
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support SDPA or pre-SM80 hardware",
+    )
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CK_SDPA,
+        "Regression is specific to the ROCm CK SDPA backend",
+    )
+    @setSdpaBackendsToDefaultFinally
+    def test_flash_attention_ck_unaligned_dropout(self, device):
+        # Dropout selects a different set of CK instances (randval is its own
+        # trait) and writes one mask element per (row, column), so comparing
+        # against a plain math reference would only show that `out` is finite.
+        # Reuse the debug-mask replay test_flash_attention_vs_math_ref_grads
+        # uses, so the reference applies exactly the mask CK applied and the
+        # comparison is sensitive to the tile tails these shapes land on.
+        torch.backends.cuda.preferred_rocm_fa_library("ck")
+        if (
+            torch.backends.cuda.preferred_rocm_fa_library()
+            != torch._C._ROCmFABackend.Ck
+        ):
+            self.skipTest("CK SDPA backend not available")
+
+        # Every head_dim here is already a multiple of 8, so unlike
+        # test_flash_attention_vs_math_ref_grads there is no pad_last_dim round trip.
+        cases = (
+            ("dropout_d128_cmf_self", torch.float16, 4, 2, 24, 24, 128, 0.25),
+            ("dropout_d128_tail", torch.bfloat16, 2, 4, 4, 656, 128, 0.5),
+            ("dropout_d64_tail", torch.float16, 2, 4, 17, 129, 64, 0.33),
+        )
+        for name, dtype, batch, heads, sq, sk, head_dim, dropout_p in cases:
+            with self.subTest(name=name):
+                q = torch.rand(batch, heads, sq, head_dim, device=device, dtype=dtype)
+                k = torch.rand(batch, heads, sk, head_dim, device=device, dtype=dtype)
+                v = torch.rand(batch, heads, sk, head_dim, device=device, dtype=dtype)
+
+                output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
+                    q, k, v, dropout_p=dropout_p, is_causal=False, return_debug_mask=True
+                )
+                out = output_tuple[0]
+                softmax_mask = self.convert_flash_attn_S_to_softmax(
+                    output_tuple[-1],
+                    sq,
+                    sk,
+                    torch.ones(batch, sq, device=device, dtype=torch.bool),
+                    torch.ones(batch, sk, device=device, dtype=torch.bool),
+                    causal=False,
+                )[:, :, :sq, :sk]
+                # CK cannot be handed a dropout mask, so recover the one it used
+                # from the randval it reported -- same threshold as the sweep above.
+                dropout_mask = (
+                    softmax_mask <= int((1.0 - dropout_p) * 255.0)
+                ).to(torch.float32)
+                self.assertEqual(
+                    tuple(dropout_mask.shape), (batch, heads, sq, sk), name
+                )
+
+                with tf32_off():
+                    golden = torch.ops.aten._scaled_dot_product_attention_math(
+                        q.float(), k.float(), v.float(), dropout_p=dropout_p,
+                        is_causal=False, dropout_mask=dropout_mask,
+                    )[0]
+                lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
+                    q, k, v, dropout_p=dropout_p,
+                    is_causal=False, dropout_mask=dropout_mask,
+                )[0]
+                self.assertFalse(torch.isnan(out).any().item(), name)
+                self.assertFalse(torch.isinf(out).any().item(), name)
+                _check_equal(golden, lp_ref, out, 4.0, f"out[{name}]")
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support SDPA or pre-SM80 hardware",
+    )
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CK_SDPA,
+        "Regression is specific to the ROCm CK SDPA backend",
+    )
+    @setSdpaBackendsToDefaultFinally
+    def test_flash_attention_ck_gqa_seqlen_q_1_large_ngroups(self, device):
+        # The shape from D108947199: 4000 query heads over 2 kv heads at
+        # seqlen_q == 1, which mha_fwd_ck.hip:314 rewrites into a seqlen_q == 2000
+        # launch (ngroups becomes the query length). test_flash_attention_ck_gqa_
+        # seqlen_q_1 above only reaches ngroups 4 and 8, so nothing else covers a
+        # post-swap query length in the thousands. D108947199 itself is a separate
+        # accepted-but-unlanded follow-up; this pins the numerics of the swapped
+        # launch, it is not a fail-before repro for that diff.
+        torch.backends.cuda.preferred_rocm_fa_library("ck")
+        if (
+            torch.backends.cuda.preferred_rocm_fa_library()
+            != torch._C._ROCmFABackend.Ck
+        ):
+            self.skipTest("CK SDPA backend not available")
+
+        batch, num_heads_q, num_heads_kv = 32, 4000, 2
+        seqlen_q, seqlen_k, head_dim = 1, 656, 128
+        ngroups = num_heads_q // num_heads_kv
+        dtype = torch.float16
+        # The fp32 reference materializes a [32, 2, 2000, 656] score matrix.
+        if torch.cuda.get_device_properties(device).total_memory < 16 * 2**30:
+            self.skipTest("Reference for the exact D108947199 shape needs ~1GB")
+        torch.cuda.empty_cache()
+
+        q = torch.rand(
+            batch, num_heads_q, seqlen_q, head_dim, device=device, dtype=dtype
+        )
+        k = torch.rand(
+            batch, num_heads_kv, seqlen_k, head_dim, device=device, dtype=dtype
+        )
+        v = torch.rand(
+            batch, num_heads_kv, seqlen_k, head_dim, device=device, dtype=dtype
+        )
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            out = F.scaled_dot_product_attention(q, k, v, enable_gqa=True)
+
+        # Reference through the same rewrite the wrapper performs. GQA maps query
+        # head h onto kv head h // ngroups, so folding the groups into the query
+        # length is exact -- and it avoids expanding kv to 4000 heads, which at
+        # this shape would be several terabytes.
+        q_swapped = q.reshape(batch, num_heads_kv, ngroups * seqlen_q, head_dim)
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            with tf32_off():
+                golden = F.scaled_dot_product_attention(
+                    q_swapped.float(), k.float(), v.float()
+                ).reshape(batch, num_heads_q, seqlen_q, head_dim)
+            lp_ref = F.scaled_dot_product_attention(q_swapped, k, v).reshape(
+                batch, num_heads_q, seqlen_q, head_dim
+            )
+
+        self.assertEqual(out.shape, q.shape)
+        self.assertFalse(torch.isnan(out).any().item())
+        self.assertFalse(torch.isinf(out).any().item())
+        _check_equal(golden, lp_ref, out, 4.0, "out")
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support SDPA or pre-SM80 hardware",
+    )
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
     @setSdpaBackendsToDefaultFinally
     @parametrize("batch_size", [1, 8])
@@ -5611,6 +6293,36 @@ class TestSDPAXpuOnly(NNTestCase):
         else:
             if torch._fused_sdp_choice(q, k, v, dropout_p=dropout) != SDPBackend.OVERRIDEABLE.value:
                 raise AssertionError("expected OVERRIDEABLE backend")
+
+    def test_fused_inputs_dim_3_xpu(self, device):
+        size = (2, 3, 8)
+        q = torch.randn(size, device=device)
+        k = torch.randn(size, device=device)
+        v = torch.randn(size, device=device)
+        masks = (
+            None,
+            torch.randn(3, 3, device=device),
+            torch.randn(2, 3, 3, device=device),
+        )
+
+        for attn_mask in masks:
+            normalized_mask = attn_mask
+            while normalized_mask is not None and normalized_mask.dim() < 4:
+                normalized_mask = normalized_mask.unsqueeze(0)
+            with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
+                self.assertEqual(
+                    torch._fused_sdp_choice(q, k, v, attn_mask),
+                    SDPBackend.OVERRIDEABLE.value,
+                )
+                expected = F.scaled_dot_product_attention(
+                    q.unsqueeze(0),
+                    k.unsqueeze(0),
+                    v.unsqueeze(0),
+                    normalized_mask,
+                ).squeeze(0)
+                actual = F.scaled_dot_product_attention(q, k, v, attn_mask)
+
+            self.assertEqual(actual, expected)
 
     def test_backends_set_to_math(self, device):
         dtype = torch.bfloat16

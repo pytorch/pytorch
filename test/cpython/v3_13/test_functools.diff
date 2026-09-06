@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_functools.py b/test/cpython/v3_13/test_functools.py
-index 9793df50a3d..52cf3718d2d 100644
+index 9793df50a3d4a810ae1745b8836a2b1828a6489a..52cf3718d2df4d3bb11847184f46c1bbd1f10a71 100644
 --- a/test/cpython/v3_13/test_functools.py
 +++ b/test/cpython/v3_13/test_functools.py
 @@ -1,3 +1,22 @@

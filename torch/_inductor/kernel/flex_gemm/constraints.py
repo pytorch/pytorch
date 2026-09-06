@@ -5,11 +5,20 @@ import dataclasses
 from collections.abc import Sequence
 from typing import Any, Final
 
-from torch._inductor.kernel.gemm_epilogue import GemmReductionGeometry
+from torch._inductor.kernel.flex_gemm.output_layout import (
+    FlexGemmOutputStorageLayout,
+    output_layout_supports_config,
+)
+from torch._inductor.kernel.gemm_epilogue import (
+    GEMM_REDUCTION_FRAGMENT_WIDTH,
+    GemmReductionGeometry,
+)
 from torch._inductor.kernel.gemm_epilogue_utils import (
     statically_known,
     statically_known_shape_equal,
 )
+from torch._inductor.utils import _IntLike
+from torch.types import IntLikeType
 
 
 LOCAL_REDUCE_FEED_MAIN_ARG_NAME: Final = "local_reduce0"
@@ -23,7 +32,7 @@ LOCAL_REDUCE_FINALIZE_KEY_SUFFIX: Final = ":local_reduce_finalize"
 # group; cross-warp M stitching needs the two-phase/replay path used by
 # compressed aux reductions. Axis-1 feeds whose groups fit in one TensorSSA
 # fragment lower as plain generated TensorSSA without a feed plan.
-LOCAL_REDUCE_FRAGMENT_WIDTH = 32
+LOCAL_REDUCE_FRAGMENT_WIDTH = GEMM_REDUCTION_FRAGMENT_WIDTH
 LOCAL_REDUCE_FEED_MAIN_AXIS_ERROR = (
     "FlexGEMM local-reduce feed-main currently supports only axis 0"
 )
@@ -66,7 +75,7 @@ LOCAL_REDUCE_C_ALPHA_BETA_ERROR = (
     "FlexGEMM local reductions cannot be combined with C/alpha/beta yet"
 )
 LOCAL_REDUCE_SWAP_AB_ERROR = (
-    "FlexGEMM local reductions do not support swap_ab configs yet"
+    "FlexGEMM swap_ab local reductions require physical callbacks"
 )
 LOCAL_REDUCE_AUX_TENSORSSA_ERROR = (
     "FlexGEMM local-reduce aux output must be produced by a grouped TensorSSA reduction"
@@ -114,6 +123,9 @@ LOCAL_REDUCE_MIXED_MATCH_ERROR = (
 LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR = (
     "FlexGEMM local-reduce broadcast values must share one grouped layout"
 )
+FLEX_GEMM_OUTPUT_LAYOUT_USAGE_ERROR = (
+    "FlexGEMM output layout transforms must be returned directly as a validated output"
+)
 FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR = "FlexGEMM output plans require tensor output nodes"
 FLEX_GEMM_OUTPUT_TENSOR_ERROR = "FlexGEMM expects tensor outputs"
 LOCAL_REDUCE_MATCH_NODE_ERROR = "local-reduce matches require tensor nodes"
@@ -123,18 +135,50 @@ LOCAL_REDUCE_RUNTIME_DENSE_MM_ERROR = (
     "FlexGEMM local reductions currently support only 2-D aten.mm"
 )
 LOCAL_REDUCE_OUT_SHAPE_ERROR = "local_reduce_out shape must be {expected}, got {actual}"
+LOCAL_REDUCE_BLOCKED_AXIS_ERROR = (
+    "FlexGEMM blocked local-reduce outputs currently support only axis 1"
+)
 LOCAL_REDUCE_CALLBACKS_REQUIRED_ERROR = (
     "physical local reductions require generated local-reduce callbacks"
 )
+FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
+    "FlexGEMM output contractions do not compose with full-shape aux outputs, "
+    "C, alpha/beta, or batched GEMMs yet"
+)
+FLEX_GEMM_OUTPUT_CONTRACTION_CAPTURE_ERROR = (
+    "FlexGEMM output contractions currently support only numeric [1, 1] and "
+    "[M, 1] captured tensors"
+)
+FLEX_GEMM_CHUNKED_OUTPUT_CONTRACTION_REDUCE_ERROR = (
+    "FlexGEMM concat-layout output contractions do not compose with grouped "
+    "reductions because concat layout permutes accumulator columns"
+)
+FLEX_GEMM_CHUNKED_CONTIGUOUS_B_ERROR = (
+    "FlexGEMM concat-layout output contractions require B's output dimension to "
+    "be non-contiguous, as in linear weight.t()"
+)
+FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
+    "unsupported FlexGEMM epilogue: contracted output shape must equal the "
+    "physical GEMM output shape with N divided by the contraction group"
+)
+FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = (
+    "unsupported FlexGEMM epilogue: main output shape must equal the physical "
+    "GEMM output shape"
+)
 
 
-def statically_known_multiple(value: Any, divisor: int) -> bool:
-    """Return whether a symbolic shape value is known divisible without guards."""
+def statically_known_multiple(value: _IntLike | IntLikeType, divisor: _IntLike) -> bool:
+    """Return whether a symbolic shape value is known divisible without guards.
+
+    ``value`` spans both worlds: inductor sizes reach it as ``int``/``sympy.Expr``,
+    while the local-reduce validators below pass ``torch.Size``-derived dims whose
+    dynamic entries are ``SymInt``.
+    """
     return statically_known(value % divisor == 0)
 
 
 def is_flex_gemm_partial_reduction_shape(
-    aux_size: Sequence[Any], output_size: Sequence[Any]
+    aux_size: Sequence[_IntLike], output_size: Sequence[_IntLike]
 ) -> bool:
     """Recognize aux shapes that imply a final PyTorch reduction, not local reduce.
 
@@ -189,7 +233,7 @@ def validate_local_reduce_group_axis(group: int, axis: int) -> None:
 
 
 def validate_local_reduce_selected_dim_divisible(
-    shape: Sequence[Any], group: int, axis: int
+    shape: Sequence[IntLikeType], group: int, axis: int
 ) -> None:
     """Reject selected M/N dimensions known not to have an integral compressed shape."""
     validate_local_reduce_group_axis(group, axis)
@@ -217,11 +261,6 @@ def validate_local_reduce_tensorssa_group_size(axis: int, group: int) -> None:
         and LOCAL_REDUCE_FRAGMENT_WIDTH % group != 0
     ):
         raise NotImplementedError(LOCAL_REDUCE_TENSORSSA_FRAGMENT_DIVISIBLE_ERROR)
-
-
-def local_reduce_needs_physical_callbacks(axis: int, group: int) -> bool:
-    """Return whether QuACK must merge TensorSSA partials outside the fragment path."""
-    return axis == 0 or group > LOCAL_REDUCE_FRAGMENT_WIDTH
 
 
 def validate_local_reduce_runtime_dense_mm(ndim: int) -> None:
@@ -267,8 +306,8 @@ def validate_local_reduce_feed_main_capability(axis: int, group: int) -> None:
 
 
 def local_reduce_compressed_shape(
-    shape: Sequence[Any], group: int, axis: int
-) -> tuple[Any, ...]:
+    shape: Sequence[IntLikeType], group: int, axis: int
+) -> tuple[IntLikeType, ...]:
     """Compute the explicit aux shape that mirrors QuACK's grouped store."""
     validate_local_reduce_selected_dim_divisible(shape, group, axis)
     result = list(shape)
@@ -284,13 +323,23 @@ def validate_local_reduce_no_c_alpha_beta(
         raise NotImplementedError(LOCAL_REDUCE_C_ALPHA_BETA_ERROR)
 
 
-def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -> bool:
+def validate_flex_gemm_local_reduce_config(
+    config: Any, group: int, axis: int, *, allow_swap_ab: bool = False
+) -> bool:
     """Return whether a QuACK config has a validated grouped-reduction layout.
+
+    Swap-ab transposes the physical accumulator, so the logical reduction axis
+    is reversed before checking tile ownership. The generated epilogue emits
+    physical callbacks for the transposed reduction geometry, including groups
+    that fit within one fragment before reorientation.
 
     This matches ``GemmConfig`` fields against layout families covered by forced
     kernel tests; tile divisibility alone is not sufficient. Axis-1 groups within
     one 32-value epilogue fragment need no cross-fragment combine. Some SM100
     two-CTA layouts expose only 16 contiguous N values, reducing that local limit.
+
+    Non-SM100 devices retain the conservative single-CTA families because the
+    expanded fragment and clustered layouts have only been validated on SM100.
 
     Axis-0 groups and larger axis-1 groups use ``GroupedLocalReduce``'s physical
     callback path, which combines epilogue fragments inside one CTA and directly
@@ -304,14 +353,19 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
     temporal fragment combine supports a full-tile group without cross-CTA state.
     Axis-0 full groups still exceed the per-CTA M tile and remain unsupported.
     """
-    match axis:
-        case 0:
-            tile = config.tile_m
-        case 1:
-            tile = config.tile_n
-        case _:
+    if axis not in (0, 1) or group <= 0:
+        return False
+    swapped = config.swap_ab
+    if swapped:
+        if (
+            not allow_swap_ab
+            or not GemmReductionGeometry(group, 1 - axis).needs_physical_callbacks
+        ):
             return False
-    if group <= 0 or config.swap_ab:
+        axis = 1 - axis
+    tile = config.tile_m if axis == 0 else config.tile_n
+    is_sm100 = config.device_capacity == 10
+    if not is_sm100 and (swapped or config.tile_n < 128 or config.tile_n % 64 != 0):
         return False
     if config.tile_n % LOCAL_REDUCE_FRAGMENT_WIDTH != 0 or tile % group != 0:
         return False
@@ -332,6 +386,8 @@ def validate_flex_gemm_local_reduce_config(config: Any, group: int, axis: int) -
         return False
 
     is_single_cta_layout = config.tile_m == 128 and config.cluster_m == 1
+    if not is_sm100:
+        return is_single_cta_layout
     is_wide_m_two_cta_layout = config.tile_m == 256 and config.cluster_m == 2
     is_split_n_warp_two_cta_layout = (
         axis == 1
@@ -384,7 +440,113 @@ def flex_gemm_local_reduce_config_error(
     )
 
 
+# NOTE [Non-shape-preserving FlexGEMM outputs]
+# FlexGEMM normally returns one value per physical GEMM accumulator. Output
+# contraction is the current exception: it exposes grouped physical N values to
+# the ordinary FX epilogue, requires the main expression to consume the complete
+# group, and stores one logical value per group. Interleaved groups use
+# ``view(M, logical_N, group)``; chunked groups use
+# ``view(M, group, logical_N)`` or ``split(logical_N, dim=-1)``. This covers
+# SwiGLU-like pointwise combinations without claiming to support arbitrary slices,
+# permutations, expansions, or M-axis contraction.
+#
+# Numeric ``[1, 1]`` and ``[M, 1]`` captures are N-invariant. QuACK loads their
+# one value per epilogue thread and lets generated pointwise code broadcast it in
+# either the physical or contracted layout. N-varying ``[1, N]`` and ``[M, N]``
+# captures need the same concat-to-interleave mapping as B for chunked outputs.
+@dataclasses.dataclass(frozen=True)
+class FlexGemmOutputContraction:
+    """Describe the contraction in NOTE [Non-shape-preserving FlexGEMM outputs].
+
+    Attributes:
+        group: Number of physical N values contracted into each logical output.
+        chunked: Whether group values are contiguous N chunks rather than interleaved.
+    """
+
+    group: int
+    chunked: bool = False
+
+    def __post_init__(self) -> None:
+        if self.group <= 0:
+            raise ValueError("output-contraction group must be positive")
+
+    @property
+    def concat_layout(self) -> tuple[str, ...]:
+        """Return the QuACK ABI tag that interleaves chunked B columns."""
+        return ("B",) if self.chunked else ()
+
+    def validate_quack(self, device_capacity: int) -> None:
+        if device_capacity == 12:
+            raise NotImplementedError(
+                "FlexGEMM output contractions are not yet supported on SM120"
+            )
+        if device_capacity not in (10, 11):
+            raise NotImplementedError(
+                "FlexGEMM output contractions are currently validated only on "
+                "SM100 and SM110"
+            )
+        if self.group == 2 or (
+            self.group == 4 and not self.chunked and device_capacity == 10
+        ):
+            return
+        raise NotImplementedError(
+            "FlexGEMM output-contraction stores support group 2 on SM100 and "
+            "SM110, plus interleaved group 4 on SM100"
+        )
+
+
+def output_contraction_capture_supported(kind: str, is_boolean: bool) -> bool:
+    """Return whether output-contraction codegen can broadcast a captured tensor."""
+    return kind in ("scalar", "col") and not is_boolean
+
+
+def output_contraction_config_supported(config: Any, n: _IntLike) -> bool:
+    """Return whether a config has validated output-contraction store ownership.
+
+    Keep the physical M/N orientation, one CTA per cluster along N, and require
+    the physical N tile not to exceed the problem. Admit only M-cluster families
+    whose row ownership has been validated: a single M CTA or the wide-M two-CTA
+    layout. Multiple N tiles and partial final tiles are supported by the ordinary
+    tile scheduler and store predicates.
+    """
+    supported_m_cluster = config.cluster_m == 1 or (
+        config.tile_m == 256 and config.cluster_m == 2
+    )
+    return (
+        not config.swap_ab
+        and supported_m_cluster
+        and config.cluster_n == 1
+        and statically_known(config.tile_n <= n)
+    )
+
+
 FlexGemmLocalReduceGeometry = GemmReductionGeometry
+
+
+def flex_gemm_output_config_supported(
+    config: Any,
+    n: _IntLike,
+    local_reduce_geometries: Sequence[FlexGemmLocalReduceGeometry],
+    output_contraction: FlexGemmOutputContraction | None,
+    output_layout: FlexGemmOutputStorageLayout | None,
+    output_layout_geometry: FlexGemmLocalReduceGeometry | None,
+    *,
+    allow_local_reduce_swap_ab: bool = False,
+) -> bool:
+    """Return whether one config satisfies the complete output-plan contract."""
+    return (
+        (output_contraction is None or output_contraction_config_supported(config, n))
+        and all(
+            validate_flex_gemm_local_reduce_config(
+                config,
+                geometry.group,
+                geometry.axis,
+                allow_swap_ab=allow_local_reduce_swap_ab,
+            )
+            for geometry in local_reduce_geometries
+        )
+        and output_layout_supports_config(output_layout, config, output_layout_geometry)
+    )
 
 
 @dataclasses.dataclass(frozen=True)

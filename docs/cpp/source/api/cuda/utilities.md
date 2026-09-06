@@ -72,6 +72,11 @@ call cuBLAS, cuSPARSE, or cuSOLVER directly.
 ```{doxygenfunction} at::cuda::getCurrentCUDABlasHandle
 ```
 
+The returned cuBLAS handle uses cuBLAS's default workspace unless ATen
+workspace caching is explicitly enabled. Internal ATen operations may
+temporarily bind an eager workspace to this handle, but restore the default
+workspace before releasing that allocation.
+
 ```{doxygenfunction} at::cuda::getCurrentCUDABlasLtHandle
 ```
 

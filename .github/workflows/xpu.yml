@@ -3,6 +3,8 @@ name: xpu
 
 on:
   push:
+    branches:
+      - viable/strict
     tags:
       - ciflow/xpu/*
   workflow_dispatch:

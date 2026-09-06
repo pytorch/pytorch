@@ -308,7 +308,7 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
         return {}
 
     # SM103 and SM107 reuse the SM100 generator, but the CUTLASS manifest must keep
-    # the 103a or 107a feature arch so unsupported arch-conditional kernels are skipped.
+    # their architecture-specific baseline rather than treating them as SM100.
     if arch in ("103", "107"):
         gen_arch = "100"
         manifest_arch = f"{arch}a"
@@ -324,6 +324,10 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
         device_type=device_type,
     )
     manifest = cutlass_manifest.Manifest(args)
+    if arch == "107":
+        # CUTLASS uses 103a as the SM100-family feature marker for architectures
+        # without INT8 UMMA. Keep the SM107 baseline while sharing that feature.
+        manifest.compute_capabilities_feature_set.append("103a")
 
     start_time = time.time()
     if device_type == "xpu":

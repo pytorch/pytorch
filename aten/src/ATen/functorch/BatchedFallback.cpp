@@ -13,10 +13,10 @@
 #include <ATen/MatrixRef.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/accumulate.h>
-#include <c10/util/llvmMathExtras.h>
 #include <c10/util/irange.h>
 
 #include <atomic>
+#include <bit>
 
 namespace at::functorch {
 
@@ -145,7 +145,7 @@ static void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, t
     if (self_vmap_levels != (self_vmap_levels | other_vmap_levels)) {
       // Find one vmap level to complain about
       auto additional_bdims = (self_vmap_levels | other_vmap_levels) ^ self_vmap_levels;
-      [[maybe_unused]] auto offending_level = llvm::findLastSet(additional_bdims.to_ulong());
+      [[maybe_unused]] auto offending_level = std::bit_width(additional_bdims.to_ulong()) - 1;
       // The following prints out "vmap: aten::add_(tensor, ...) is not possible",
       // but it would be better to print out "tensor.add_(...) is not possible".
       // Afaict there's no official way to get the add_ and there is no way to

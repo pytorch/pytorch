@@ -479,7 +479,7 @@ def _unpack_efficient_attention_nested_shapes(
     max_seqlen_k,
 ) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...] | None]]:
     """
-    Given inputs to a efficient_attention_(forward|backward) kernel, this will handle behavior for
+    Given inputs to an efficient_attention_(forward|backward) kernel, this will handle behavior for
     NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
     each batch element.
 

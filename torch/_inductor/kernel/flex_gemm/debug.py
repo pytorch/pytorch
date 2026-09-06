@@ -12,9 +12,13 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch._inductor.kernel.gemm_epilogue import (
     NormalizedGetItem,
+    NormalizedNode,
     NormalizedPrepareSoftmax,
     NormalizedReduction,
+    NormalizedSelect,
+    NormalizedSplit,
     NormalizedSqueeze,
+    NormalizedToBlocked,
     NormalizedUnsupportedReduction,
     NormalizedView,
 )
@@ -27,6 +31,8 @@ if TYPE_CHECKING:
     from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
         FlexGemmEpilogueAnalysis,
     )
+
+    from .constraints import FlexGemmLocalReduceGeometry, FlexGemmOutputContraction
 
 
 flex_gemm_log = logging.getLogger(__name__)
@@ -136,13 +142,21 @@ def _format_fx_tensor(node: torch.fx.Node) -> str:
     )
 
 
-def _format_geometry(geometry: Any) -> str:
+def _format_geometry(geometry: "FlexGemmLocalReduceGeometry") -> str:
     """Format grouped GEMM geometry in logical M/N terms."""
     axis = "M" if geometry.axis == 0 else "N"
     return f"axis={axis}, group={geometry.group}"
 
 
-def _format_normalized_dataflow(node: torch.fx.Node, normalized: Any) -> str:
+def _format_output_contraction(contraction: "FlexGemmOutputContraction | None") -> str:
+    """Format the logical contraction applied to the main output."""
+    if contraction is None:
+        return "none"
+    layout = "chunked" if contraction.chunked else "interleaved"
+    return f"N-axis, group={contraction.group}, layout={layout}"
+
+
+def _format_normalized_dataflow(node: torch.fx.Node, normalized: NormalizedNode) -> str:
     """Render one normalized FX operation as compact dataflow."""
     match normalized:
         case NormalizedView(shape=shape):
@@ -159,9 +173,16 @@ def _format_normalized_dataflow(node: torch.fx.Node, normalized: Any) -> str:
             operation = "squeeze"
         case NormalizedGetItem(index=index):
             operation = f"getitem(index={index})"
+        case NormalizedSplit(split_size=split_size, dim=dim):
+            operation = f"split(size={split_size}, dim={dim})"
+        case NormalizedSelect(dim=dim, index=index):
+            operation = f"select(dim={dim}, index={index})"
+        case NormalizedToBlocked():
+            operation = "to_blocked"
         case NormalizedUnsupportedReduction():
             operation = f"unsupported_reduction({node.target})"
         case _:
+            # NormalizedDtypeView keeps its full dataclass repr for dtype details.
             return repr(normalized)
     return f"{normalized.source.name} -> {operation}"
 
@@ -172,6 +193,7 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
     lines = [
         "outputs:",
         f"  main: {_format_fx_tensor(outputs.output)}",
+        f"  output_contraction: {_format_output_contraction(outputs.output_contraction)}",
     ]
     if outputs.aux_outputs:
         lines.append("  auxiliary:")
@@ -186,7 +208,7 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
         lines.append("local_reduction: none")
     else:
         local_reduce = outputs.local_reduce
-        store = local_reduce.store
+        store = outputs.local_reduce_store
         consumers = []
         if local_reduce.feeds_main:
             consumers.append("main")
@@ -210,10 +232,13 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
             )
         )
         if store is not None:
+            layout = (
+                "dense" if store.output_layout is None else store.output_layout.value
+            )
             lines.extend(
                 (
                     f"  returned_as: {store.node.name}",
-                    "  output_layout: dense",
+                    f"  output_layout: {layout}",
                 )
             )
 
@@ -233,8 +258,12 @@ def format_flex_gemm_analysis_details(
     lines: list[str] = []
     for label, values in (
         ("normalized_nodes", analysis.local_reduce.graph.normalized_nodes),
-        ("grouped_tensors", analysis.local_reduce.grouped_tensors),
+        ("grouped_layouts", analysis.local_reduce.grouped_tensors),
         ("local_reduce_matches", analysis.local_reduce.matches),
+        (
+            "output_contraction_select_indices",
+            analysis.output_contraction_select_indices,
+        ),
     ):
         _append_items(
             lines,
@@ -253,16 +282,22 @@ def _format_tensor_meta(meta: torch.Tensor) -> str:
 
 
 def format_flex_gemm_lowering_plan(
-    output_size: Sequence[Any],
+    logical_output_size: Sequence[Any],
+    physical_output_size: Sequence[Any],
     output_dtype: torch.dtype,
     capture_kinds: Sequence[tuple[str, str]],
     aux_metas: Sequence[torch.Tensor],
     local_reduce_metas: Sequence[torch.Tensor],
+    *,
+    local_reduce_layout: Any,
+    swap_ab_alignment: int,
 ) -> str:
     """Render buffer allocation and runtime-ABI decisions."""
     lines = [
         "output_storage:",
-        f"  shape={tuple(output_size)}, dtype={output_dtype}",
+        f"  logical: shape={tuple(logical_output_size)}, dtype={output_dtype}",
+        f"  physical: shape={tuple(physical_output_size)}",
+        f"  swap_ab_alignment: {swap_ab_alignment} elements",
         "",
     ]
     _append_items(
@@ -282,7 +317,10 @@ def format_flex_gemm_lowering_plan(
                 for index, meta in enumerate(local_reduce_metas)
             ),
         )
-        lines.append("  layout: dense")
+        layout = "dense" if local_reduce_layout is None else local_reduce_layout.value
+        lines.append(f"  layout: {layout}")
+        if local_reduce_layout is not None:
+            lines.append("  initialization: zero-filled at runtime when padded")
     else:
         lines.append("local_reduction_storage: (none)")
     return "\n".join(lines)

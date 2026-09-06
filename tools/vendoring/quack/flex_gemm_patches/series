@@ -14,3 +14,7 @@
 0009-flex-gemm-fragment-group-32.patch
 0010-flex-gemm-scalar-epilogue-args.patch
 0011-flex-gemm-local-reduce-layout-assert.patch
+0012-flex-gemm-grouped-main-output.patch
+0013-flex-gemm-output-storage-layouts.patch
+0014-flex-gemm-bool-main-output.patch
+0015-inductor-symmetric-gemm.patch

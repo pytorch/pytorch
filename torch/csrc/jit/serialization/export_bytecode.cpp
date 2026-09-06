@@ -78,8 +78,7 @@ static std::vector<Method> findAllDependentFunctions(
 
   for (const auto& submodule : module.modules()) {
     for (const auto& m : submodule.get_methods()) {
-      if (called_method_names.find(m.function().qualname().name()) !=
-          called_method_names.end()) {
+      if (called_method_names.contains(m.function().qualname().name())) {
         methods.emplace_back(m);
       }
     }
@@ -108,7 +107,7 @@ static std::vector<std::unique_ptr<GraphFunction>> inlineFunctions(
     auto tup = std::make_pair(
         cur.owner()._ivalue()->type()->name()->qualifiedName(),
         &cur.function());
-    if (visited.find(tup) != visited.end()) {
+    if (visited.contains(tup)) {
       continue;
     }
     visited.insert(tup);
