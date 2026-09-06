@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import base64
+import contextvars
 import copy
 import copyreg
 import dataclasses
@@ -373,7 +374,12 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
     )
 
 
-_CURRENT_DESERIALIZER: Optional["GraphModuleDeserializer"] = None
+# Context-local so concurrent torch.export.load() calls each see their own
+# deserializer. It is passed out of band because the pickle __reduce__ path
+# (_reconstruct_fake_tensor) cannot take it as an argument.
+_CURRENT_DESERIALIZER: contextvars.ContextVar[Optional["GraphModuleDeserializer"]] = (
+    contextvars.ContextVar("_CURRENT_DESERIALIZER", default=None)
+)
 
 
 def _reduce_fake_tensor(fake_tensor: FakeTensor):
@@ -392,9 +398,10 @@ def _reconstruct_fake_tensor(
     json_tensor_meta = json.loads(serialized_tensor_meta.decode("utf-8"))
     tensor_meta = _dict_to_dataclass(TensorMeta, json_tensor_meta)
     # Find the current fake mode
-    if _CURRENT_DESERIALIZER is None:
+    current_deserializer = _CURRENT_DESERIALIZER.get()
+    if current_deserializer is None:
         raise AssertionError("Need access to current deserializer state")
-    fake_tensor = _CURRENT_DESERIALIZER.deserialize_tensor_meta(tensor_meta)
+    fake_tensor = current_deserializer.deserialize_tensor_meta(tensor_meta)
     if is_parameter:
         fake_tensor = torch.nn.Parameter(fake_tensor)  # type: ignore[assignment]
     # pyrefly: ignore [bad-return]
@@ -2926,10 +2933,9 @@ class GraphModuleDeserializer(metaclass=Final):
         | None = None,
         symbol_name_to_range: dict[str, symbolic_shapes.ValueRanges] | None = None,
     ) -> Result:
-        global _CURRENT_DESERIALIZER
-        if _CURRENT_DESERIALIZER is not None:
+        if _CURRENT_DESERIALIZER.get() is not None:
             raise AssertionError("_CURRENT_DESERIALIZER is already set")
-        _CURRENT_DESERIALIZER = self
+        deserializer_token = _CURRENT_DESERIALIZER.set(self)
         try:
             log.debug("\n[deserialize]")
             self.shape_env = symbolic_shapes.ShapeEnv(assume_static_by_default=True)
@@ -3037,7 +3043,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 example_inputs=self.example_inputs,
             )
         finally:
-            _CURRENT_DESERIALIZER = None
+            _CURRENT_DESERIALIZER.reset(deserializer_token)
 
     def sync_fx_node(self, name: str, fx_node: torch.fx.Node):
         if name in self.serialized_name_to_node:
