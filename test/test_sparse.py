@@ -18,9 +18,8 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
 from typing import Any
-from packaging import version
 from torch.testing._internal.common_cuda import \
-    (SM80OrLater, TEST_MULTIGPU)
+    (ROCM_VERSION, SM80OrLater, TEST_MULTIGPU)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS,
@@ -135,7 +134,7 @@ CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda
 ) or (not IS_WINDOWS and not TEST_WITH_ROCM)
 
-HIPSPARSE_SPMM_COMPLEX128_SUPPORTED = torch.version.hip and version.parse(torch.version.hip.split("-")[0]) >= version.parse("6.0")
+HIPSPARSE_SPMM_COMPLEX128_SUPPORTED = ROCM_VERSION >= (6, 0)
 
 def all_sparse_layouts(test_name='layout', include_strided=False):
     return parametrize(test_name, [

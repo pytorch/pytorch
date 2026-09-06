@@ -53,17 +53,57 @@ def get_cuda_version():
     return TorchVersion(cuda_str_version)
 
 
-def get_rocm_version():
-    from torch.torch_version import TorchVersion
+def _find_rocm_home():
     from torch.utils import cpp_extension
 
-    ROCM_HOME = cpp_extension._find_rocm_home()
-    if not ROCM_HOME:
+    rocm_home = cpp_extension._find_rocm_home()
+    if not rocm_home:
         raise VerifyDynamoError(
             "ROCM was not found on the system, please set ROCM_HOME environment variable"
         )
+    return rocm_home
 
-    hipcc = os.path.join(ROCM_HOME, "bin", "hipcc")
+
+def _parse_version(version_str, components=None):
+    from torch.torch_version import TorchVersion
+
+    version = version_str.split("-", maxsplit=1)[0]
+    parts = version.split(".")
+    if components is not None:
+        parts = parts[:components]
+    return TorchVersion(".".join(parts))
+
+
+def get_rocm_sdk_version():
+    """System ROCm SDK version from rocm-core/rocm_version.h, or None if absent.
+
+    LoadHIP.cmake parses the same header to produce torch.version.rocm. Old
+    consumer HIP SDKs do not ship it.
+    """
+    from torch.torch_version import TorchVersion
+
+    rocm_home = _find_rocm_home()
+    header = os.path.join(rocm_home, "include", "rocm-core", "rocm_version.h")
+    if not os.path.isfile(header):
+        return None
+
+    with open(header) as f:
+        content = f.read()
+    major = re.search(r"ROCM_VERSION_MAJOR\s+(\d+)", content)
+    minor = re.search(r"ROCM_VERSION_MINOR\s+(\d+)", content)
+    patch = re.search(r"ROCM_VERSION_PATCH\s+(\d+)", content)
+    if major is None or minor is None or patch is None:
+        return None
+    return TorchVersion(f"{major.group(1)}.{minor.group(1)}.{patch.group(1)}")
+
+
+def get_hip_version():
+    """System HIP version from `hipcc --version`."""
+    from torch.torch_version import TorchVersion
+    from torch.utils import cpp_extension
+
+    rocm_home = _find_rocm_home()
+    hipcc = os.path.join(rocm_home, "bin", "hipcc")
     hip_version_str = (
         subprocess.check_output([hipcc, "--version"])
         .strip()
@@ -74,9 +114,7 @@ def get_rocm_version():
     if hip_version is None:
         raise VerifyDynamoError("HIP version not found in `hipcc --version` output")
 
-    hip_str_version = hip_version.group(1)
-
-    return TorchVersion(hip_str_version)
+    return TorchVersion(hip_version.group(1))
 
 
 def check_cuda():
@@ -114,16 +152,20 @@ def check_cuda():
 
 def check_rocm():
     import torch
-    from torch.torch_version import TorchVersion
 
     if not torch.cuda.is_available() or torch.version.hip is None:
         return None
 
-    # Extracts main ROCm version from full string
-    torch_rocm_ver = TorchVersion(".".join(list(torch.version.hip.split(".")[0:2])))
-
-    # check if torch rocm version matches system rocm version
-    rocm_ver = get_rocm_version()
+    # Compare SDK to SDK when both sides have it; else HIP-to-HIP.
+    # Truncate to major.minor so 7.14.0 vs 7.14.1 does not warn.
+    system_sdk = get_rocm_sdk_version()
+    torch_sdk = getattr(torch.version, "rocm", None)
+    if system_sdk is not None and torch_sdk:
+        torch_rocm_ver = _parse_version(torch_sdk, components=2)
+        rocm_ver = _parse_version(str(system_sdk), components=2)
+    else:
+        torch_rocm_ver = _parse_version(torch.version.hip, components=2)
+        rocm_ver = get_hip_version()
     if rocm_ver != torch_rocm_ver:
         warnings.warn(
             f"ROCm version mismatch, `torch` version: {torch_rocm_ver}, env version: {rocm_ver}"
