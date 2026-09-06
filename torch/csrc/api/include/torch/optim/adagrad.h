@@ -71,13 +71,8 @@ class TORCH_API Adagrad : public Optimizer {
 
     for (const auto& group : param_groups_) {
       for (const auto& p : group.params()) {
-        auto state = std::make_unique<AdagradParamState>();
-        state->step(0);
-        state->sum(torch::full_like(
-            p.data(),
-            defaults.initial_accumulator_value(),
-            at::MemoryFormat::Preserve));
-        state_[p.unsafeGetTensorImpl()] = std::move(state);
+        state_[p.unsafeGetTensorImpl()] =
+            make_param_state(p, defaults.initial_accumulator_value());
       }
     }
   }
@@ -91,6 +86,12 @@ class TORCH_API Adagrad : public Optimizer {
   void load(serialize::InputArchive& archive) override;
 
  private:
+  // Shared by the constructor and by the on-first-use path in step(), so the
+  // two can never seed a parameter differently.
+  static std::unique_ptr<AdagradParamState> make_param_state(
+      const Tensor& param,
+      double initial_accumulator_value);
+
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
     _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(Adagrad);
