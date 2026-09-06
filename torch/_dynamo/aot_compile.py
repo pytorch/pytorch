@@ -93,15 +93,20 @@ class AOTCompilePickler(FunctionPicklerBase):
                 return reduced
         elif inspect.isfunction(obj) and "<locals>" in obj.__qualname__:
             # The runtime env has to RUN this function, so unlike the guard
-            # pickler nothing it holds is pruned.
+            # pickler nothing it holds is pruned -- except a 3.14 FORWARDREF
+            # proxy for an unresolved annotation, which carries an owner
+            # back-reference to obj that pickle cannot follow. The runtime
+            # assigns annotations back verbatim and never evaluates them, so
+            # dropping an unresolvable one costs nothing.
+            annotations = self._read_raw_annotations(obj)
             if sys.version_info >= (3, 14):
                 import annotationlib
 
-                annotations = annotationlib.get_annotations(
-                    obj, format=annotationlib.Format.FORWARDREF
-                )
-            else:
-                annotations = obj.__annotations__
+                annotations = {
+                    name: value
+                    for name, value in annotations.items()
+                    if not isinstance(value, annotationlib.ForwardRef)
+                }
             return self._reduce_function(
                 obj,
                 defaults=obj.__defaults__,
