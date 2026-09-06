@@ -1409,7 +1409,7 @@ class AutogradFunctionVariable(VariableTracker):
 
     def _resolve_staticmethod(
         self,
-        obj: object,
+        obj: Any,
         source: Source | None,
         descriptor_source: Source | None,
         name: str,
@@ -2539,7 +2539,7 @@ class DebuggingVariable(VariableTracker):
 
     @staticmethod
     def is_reorderable_logging_function(
-        obj: Any,
+        obj: object,
     ) -> TypeGuard[types.FunctionType | types.BuiltinFunctionType]:
         return (
             callable(obj)
