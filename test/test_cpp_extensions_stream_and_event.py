@@ -8,6 +8,7 @@ import torch
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_LINUX,
     skipIfTorchDynamo,
@@ -40,6 +41,7 @@ TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 class TestCppExtensionStreamAndEvent(common.TestCase):
     """Tests Stream and Event with C++ extensions."""
 
+    hw_classification = HardwareClassification.GENERIC
     module = None
 
     def setUp(self):
