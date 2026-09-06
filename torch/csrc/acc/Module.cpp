@@ -81,11 +81,19 @@ struct PythonDeviceGuard final : public c10::impl::DeviceGuardImplInterface {
     return c10::Stream(c10::Stream::DEFAULT, getDevice());
   }
 
-  c10::Stream getNewStream(c10::Device /*unused*/, int priority = 0)
+  // Dispatches to a `get_new_stream` defined on the Python subclass, if there
+  // is one. Otherwise falls back to DeviceGuardImplInterface::getNewStream,
+  // which raises: a backend that has not defined streams should say so rather
+  // than silently hand back the default stream.
+  c10::Stream getNewStream(c10::Device device, int priority = 0)
       const override {
-    // no-op
-    (void)priority;
-    return c10::Stream(c10::Stream::DEFAULT, getDevice());
+    PYBIND11_OVERRIDE_NAME(
+        c10::Stream,
+        c10::impl::DeviceGuardImplInterface,
+        "get_new_stream",
+        getNewStream,
+        device,
+        priority);
   }
 
   c10::Stream exchangeStream(c10::Stream /*unused*/) const noexcept override {

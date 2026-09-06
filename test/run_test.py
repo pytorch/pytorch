@@ -321,6 +321,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_autograd_fallback",
     "inductor/test_compiler_bisector",
     "test_privateuseone_python_backend",
+    "test_privateuseone_python_backend_streams",
     "functorch/test_control_flow_cuda_initialization",
 ] + FSDP_TEST
 

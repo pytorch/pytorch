@@ -558,6 +558,7 @@
 # /test/test_per_overload_api.py
 # /test/test_prims.py
 # /test/test_privateuseone_python_backend.py
+# /test/test_privateuseone_python_backend_streams.py
 # /test/test_proxy_tensor.py
 # /test/test_pruning_op.py
 # /test/test_python_dispatch.py
