@@ -7551,6 +7551,161 @@ def forward(self, primals_1, tangents_1):
         # so the producer op does not appear in the backward graph.
         self.assertNotIn("topk", bw_graph["gm"].code)
 
+    @staticmethod
+    def _isolate_with_graph_breaks(module):
+        orig_forward = module.forward
+
+        def wrapped_forward(*args, **kwargs):
+            torch._dynamo.graph_break()
+            out = orig_forward(*args, **kwargs)
+            torch._dynamo.graph_break()
+            return out
+
+        module.forward = wrapped_forward
+
+    @staticmethod
+    def _three_leaf_model(break_in_target):
+        class Leaf(torch.nn.Module):
+            def __init__(self, brk):
+                super().__init__()
+                self.brk = brk
+                self.a = torch.nn.Linear(16, 16)
+                self.b = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                x = self.a(x).relu()
+                if self.brk:
+                    torch._dynamo.graph_break()
+                return self.b(x).relu()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pre = Leaf(False)
+                self.target = Leaf(break_in_target)
+                self.post = Leaf(False)
+
+            def forward(self, x):
+                return self.post(self.target(self.pre(x))).sum()
+
+        return Model()
+
+    def _graph_budgets(self, model, by_module_id):
+        """Memory budget the partitioner chose for each joint graph, in order."""
+        import torch._functorch.config as functorch_config
+        import torch._functorch.partitioners as partitioners
+        from torch._dynamo.backends.common import aot_autograd
+
+        used = []
+        orig_choose = partitioners.choose_saved_values_set
+
+        def spy(joint_graph, node_info, memory_budget=1):
+            used.append(memory_budget)
+            return orig_choose(joint_graph, node_info, memory_budget=memory_budget)
+
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: gm.forward,
+            bw_compiler=lambda gm, _: gm.forward,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+
+        torch._dynamo.reset()
+        partitioners.choose_saved_values_set = spy
+        try:
+            with functorch_config.patch(
+                activation_memory_budget=0.1,
+                activation_memory_budget_by_module_id=by_module_id,
+            ):
+                model_c = torch.compile(model, backend=backend)
+                model_c(torch.randn(16, 16, requires_grad=True)).backward()
+        finally:
+            partitioners.choose_saved_values_set = orig_choose
+        return used
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_module_memory_budget_survives_internal_graph_break(self):
+        model = self._three_leaf_model(break_in_target=True)
+        # A graph break makes the module's forward its own frame, which drops the
+        # module itself out of nn_module_stack and leaves only its children, so
+        # the whole subtree has to be registered.
+        by_module_id = {id(m): 0.55 for m in model.target.modules()}
+        self._isolate_with_graph_breaks(model.target)
+
+        budgets = self._graph_budgets(model, by_module_id)
+
+        # Both graphs the module was split into carry its budget; the surrounding
+        # modules keep the global one.
+        self.assertEqual(sorted(budgets), [0.1, 0.1, 0.55, 0.55])
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_module_memory_budget_disabled_by_default(self):
+        model = self._three_leaf_model(break_in_target=True)
+        self._isolate_with_graph_breaks(model.target)
+
+        budgets = self._graph_budgets(model, {})
+
+        self.assertEqual(set(budgets), {0.1})
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_module_memory_budget_falls_back_when_graph_spans_modules(self):
+        # Not isolated, so a single graph covers all three leaves. No one module
+        # owns it and the global budget must win.
+        model = self._three_leaf_model(break_in_target=False)
+        by_module_id = {id(m): 0.55 for m in model.target.modules()}
+
+        budgets = self._graph_budgets(model, by_module_id)
+
+        self.assertEqual(set(budgets), {0.1})
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_module_memory_budget_falls_back_on_conflicting_budgets(self):
+        # Every leaf is configured, at a different budget, and none is isolated,
+        # so one graph carries several budgets at once. The partitioner applies a
+        # single budget per graph, so there is no honest choice but the global.
+        model = self._three_leaf_model(break_in_target=False)
+        by_module_id = {}
+        for leaf, budget in ((model.pre, 0.2), (model.target, 0.55), (model.post, 0.8)):
+            by_module_id.update({id(m): budget for m in leaf.modules()})
+
+        budgets = self._graph_budgets(model, by_module_id)
+
+        self.assertEqual(set(budgets), {0.1})
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_module_memory_budget_deepest_module_wins(self):
+        class Child(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                return self.lin(x).relu().sum()
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x):
+                return self.child(x)
+
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.parent = Parent()
+
+            def forward(self, x):
+                return self.parent(x)
+
+        model = Root()
+        # Every op is enclosed by both, so the budget on the deeper module wins.
+        by_module_id = {id(model.parent): 0.5}
+        by_module_id.update({id(m): 0.25 for m in model.parent.child.modules()})
+
+        budgets = self._graph_budgets(model, by_module_id)
+
+        self.assertEqual(set(budgets), {0.25})
+
     def test_disable_functionalization_ignores_effect_token_metadata(self):
         def fn(args):
             (x,) = args
