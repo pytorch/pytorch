@@ -212,9 +212,7 @@ def maybe_stamp_capture_root(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     _capture_root_graph_id = None
     if not _annotations_enabled or _is_tools_id_unavailable():
         return
-    stream_handle = _cuda_runtime.cudaStream_t(  # pyrefly: ignore[missing-attribute]
-        init_value=torch.cuda.current_stream().cuda_stream
-    )
+    stream_handle = torch.cuda.current_stream().cuda_stream
     state = _get_capture_state(stream_handle)
     if state is None:
         return
@@ -559,9 +557,7 @@ class _KernelScope(NamedTuple):
 
 def _begin_kernel_scope() -> _KernelScope | None:
     """Snapshot the current stream's capture frontier; ``None`` if not capturing."""
-    stream = _cuda_runtime.cudaStream_t(  # pyrefly: ignore[missing-attribute]
-        init_value=torch.cuda.current_stream().cuda_stream
-    )
+    stream = torch.cuda.current_stream().cuda_stream
     capture_state = _get_capture_state(stream)
     if capture_state is None:
         return None
