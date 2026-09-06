@@ -5,7 +5,6 @@ import dataclasses
 from collections.abc import Sequence
 from typing import Any, Final
 
-import torch
 from torch._inductor.kernel.gemm_epilogue_utils import (
     statically_known,
     statically_known_shape_equal,
@@ -108,53 +107,9 @@ FLEX_GEMM_NESTED_TENSORSSA_CAPTURE_ERROR = (
 FLEX_GEMM_NESTED_TENSORSSA_LANES_ERROR = (
     "FlexGEMM nested TensorSSA composition requires complete physical lane coverage"
 )
-FLEX_GEMM_PACKED_TRANSPORT_CAPTURE_ERROR = (
-    "FlexGEMM packed transport requires one exclusively owned packed capture"
-)
-FLEX_GEMM_PACKED_TRANSPORT_COMPOSITION_ERROR = (
-    "FlexGEMM packed transport does not yet compose with structural outputs, "
-    "local reductions, or terminal storage views"
-)
-FLEX_GEMM_PACKED_TRANSPORT_DTYPE_ERROR = (
-    "FlexGEMM packed transport requires matching float16 or bfloat16 values"
-)
 LOCAL_REDUCE_MATCH_NODE_ERROR = "local-reduce matches require tensor nodes"
 LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR = "local-reduce output plans require tensor nodes"
 LOCAL_REDUCE_RUNTIME_OUT_ERROR = "compressed local reductions require local_reduce_out"
-
-
-PACKED_TRANSPORT_MODES = {
-    (torch.float16, 2): "packed_cd_b16x2",
-    (torch.bfloat16, 2): "packed_cd_b16x2",
-}
-
-
-@dataclasses.dataclass(frozen=True)
-class FlexGemmPackedTransport:
-    """Describe one QuACK-owned packed C/D operand and main-store transport."""
-
-    dtype: torch.dtype
-    group: int
-
-    def __post_init__(self) -> None:
-        if (self.dtype, self.group) not in PACKED_TRANSPORT_MODES:
-            raise RuntimeError(FLEX_GEMM_PACKED_TRANSPORT_DTYPE_ERROR)
-
-    @property
-    def quack_mode(self) -> str:
-        """Return the QuACK transport mode for this descriptor."""
-        return PACKED_TRANSPORT_MODES[(self.dtype, self.group)]
-
-
-def flex_gemm_packed_transport(
-    dtype: torch.dtype, group: int
-) -> FlexGemmPackedTransport | None:
-    """Return the physical transport descriptor supported by QuACK."""
-    return (
-        FlexGemmPackedTransport(dtype, group)
-        if (dtype, group) in PACKED_TRANSPORT_MODES
-        else None
-    )
 
 
 def statically_known_multiple(value: _IntLike | IntLikeType, divisor: _IntLike) -> bool:

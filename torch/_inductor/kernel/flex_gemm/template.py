@@ -13,12 +13,20 @@ from torch._inductor.codegen.cutedsl.cutedsl_template import (
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmGroupedMainOutputTransform,
     FlexGemmLocalReduceGeometry,
-    FlexGemmPackedTransport,
     LOCAL_REDUCE_PREPASS_FN_SUFFIX,
 )
 from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputLayout
 from torch._inductor.select_algorithm import PartialRender
 from torch.utils._ordered_set import OrderedSet
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmEpilogueBlockScaledConfig:
+    """Shared QuACK A/B block-scaled format and template positions of SFA/SFB."""
+
+    format: str
+    sfa_index: int
+    sfb_index: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -31,10 +39,9 @@ class FlexGemmEpilogueIndexedOutputConfig:
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueLocalReduceConfig:
-    """Template-time local-reduce metadata for output and/or feed-main consumers."""
+    """Template-time local-reduce metadata; geometry is in physical accumulator columns."""
 
     geometry: FlexGemmLocalReduceGeometry
-    physical_span: int = 1
     out_index: int | None = None
     output_layout: FlexGemmOutputLayout | None = None
     feeds_main: bool = False
@@ -64,8 +71,7 @@ class FlexGemmEpilogueLocalReduceConfig:
         if local_reduce is None:
             return None
         return FlexGemmEpilogueLocalReduceConfig(
-            local_reduce.match.geometry,
-            local_reduce.match.physical_span,
+            local_reduce.match.physical_geometry,
             out_index,
             (None if local_reduce.store is None else local_reduce.store.output_layout),
             local_reduce.feeds_main,
@@ -89,16 +95,15 @@ class FlexGemmEpilogueConfig:
         gemm_op: Original aten GEMM op spec used to map inputs into QuACK.
         alpha: Static alpha multiplier for addmm/baddbmm inputs.
         beta: Static beta multiplier for addmm/baddbmm bias inputs.
-        blockscaled_format: Optional shared QuACK A/B format name.
-        blockscaled_scale_indices: Template input indices for the two block scales.
+        blockscaled: Shared block-scaled format and SFA/SFB input positions.
         quack_config_constraints: Optional native QuACK config field constraints.
+        quack_config: Exact QuACK GemmConfig fields pinned for this choice, or
+            None to take QuACK's untuned default within the constraints.
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
         aux_out_indices: Template input indices for same-shape aux outputs.
         indexed_output: Runtime input positions for one indexed auxiliary output.
         local_reduce: Concrete local-reduce consumer rendered into runtime kwargs.
-        fragmentwise: Whether the generated function consumes a complete TensorSSA fragment.
-        tuned: Whether QuACK should autotune this call.
     """
 
     epilogue_name: str
@@ -106,19 +111,15 @@ class FlexGemmEpilogueConfig:
     gemm_op: FlexGemmOpSpec
     alpha: float
     beta: float
-    blockscaled_format: str | None
-    blockscaled_scale_indices: tuple[int, int] | None
+    blockscaled: FlexGemmEpilogueBlockScaledConfig | None
     quack_config_constraints: tuple[tuple[str, Any], ...]
+    quack_config: tuple[tuple[str, Any], ...] | None
     epilogue_arg_indices: tuple[int, ...]
     epilogue_arg_kinds: tuple[str, ...]
     aux_out_indices: tuple[int, ...]
     indexed_output: FlexGemmEpilogueIndexedOutputConfig | None
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
     main_transform: FlexGemmGroupedMainOutputTransform | None
-    packed_transport: FlexGemmPackedTransport | None
-    packed_capture_index: int | None
-    fragmentwise: bool
-    tuned: bool
 
 
 class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
@@ -164,13 +165,11 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             from torch._inductor.kernel.flex_gemm.constraints import (
                 FlexGemmGroupedMainOutputTransform,
                 FlexGemmLocalReduceGeometry,
-                FlexGemmPackedTransport,
             )
             from torch._inductor.kernel.flex_gemm import (
                 output_layout as flex_gemm_output_layout,
             )
             from torch._inductor.kernel.flex_gemm.runtime import (
-                FlexGemmEpiModIndexedOutputPlan,
                 FlexGemmEpiModLocalReducePlan,
                 gemm_epimod as flex_gemm_runtime,
             )
@@ -181,6 +180,12 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             f"""
             def {self.kernel_name}_main({", ".join(params)}):
                 flex_gemm_runtime({", ".join((*call_args, config.epilogue_name))}{call_kwargs})
+
+            def {self.kernel_name}_precompile(**metadata):
+                # Compile workers cannot initialize CUDA; the template caller
+                # precompiles each choice's pinned QuACK kernel from the parent
+                # through Inductor's pool instead (see FlexGemmEpilogueCaller).
+                pass
             """
         )
         return PartialRender(code.getvalue(), self.render_hooks)
@@ -210,8 +215,6 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
     ) -> str:
         """Render one structural local-reduce plan for runtime dispatch."""
         plan = f"FlexGemmEpiModLocalReducePlan({local_reduce.geometry!r}"
-        if local_reduce.physical_span != 1:
-            plan += f", physical_span={local_reduce.physical_span}"
         if local_reduce.out_index is not None:
             plan += f", out={input_args[local_reduce.out_index]}"
         if local_reduce.output_layout is not None:
@@ -249,22 +252,16 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
     ) -> str:
         """Render captured tensor and aux-output kwargs for runtime dispatch."""
         epilogue_args = [input_args[index] for index in config.epilogue_arg_indices]
-        kwargs = [
-            f", fragmentwise={config.fragmentwise!r}",
-            f", tuned={config.tuned!r}",
-        ]
+        kwargs = []
+        if config.quack_config is not None:
+            kwargs.append(f", config={config.quack_config!r}")
         if config.quack_config_constraints:
             kwargs.append(f", config_constraints={config.quack_config_constraints!r}")
-        if config.blockscaled_format is not None:
-            if config.blockscaled_scale_indices is None:
-                raise RuntimeError(
-                    "block-scaled FlexGEMM config requires scale indices"
-                )
-            scale_a_index, scale_b_index = config.blockscaled_scale_indices
+        if config.blockscaled is not None:
             kwargs.append(
-                f", SFA={input_args[scale_a_index]}, SFB={input_args[scale_b_index]}, "
-                f"bs_format_a={config.blockscaled_format!r}, "
-                f"bs_format_b={config.blockscaled_format!r}"
+                f", SFA={input_args[config.blockscaled.sfa_index]}, "
+                f"SFB={input_args[config.blockscaled.sfb_index]}, "
+                f"blockscaled_format={config.blockscaled.format!r}"
             )
         if epilogue_args:
             kwargs.append(
@@ -276,9 +273,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             kwargs.append(f", aux_outs=({aux_outs},)")
         if config.indexed_output is not None:
             kwargs.append(
-                ", indexed_output=FlexGemmEpiModIndexedOutputPlan("
-                f"out={input_args[config.indexed_output.out_index]}, "
-                f"indices={input_args[config.indexed_output.indices_index]})"
+                f", indexed_out={input_args[config.indexed_output.out_index]}, "
+                f"indexed_indices={input_args[config.indexed_output.indices_index]}"
             )
         if config.local_reduce is not None:
             kwargs.append(
@@ -288,21 +284,33 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             )
         if config.main_transform is not None:
             kwargs.append(f", main_transform={config.main_transform!r}")
-        if (config.packed_transport is None) != (config.packed_capture_index is None):
-            raise RuntimeError(
-                "packed FlexGEMM config requires both transport and capture index"
-            )
-        if config.packed_capture_index is not None:
-            kwargs.append(
-                f", packed_capture={input_args[config.packed_capture_index]}, "
-                f"packed_transport={config.packed_transport!r}"
-            )
         return "".join(kwargs)
 
 
 class FlexGemmEpilogueCaller(CuteDSLTemplateCaller):
-    def precompile(self) -> None:
-        """Defer QuACK EpiMod compilation and tuning to the first real call."""
+    @override
+    def _build_description(
+        self, name: str, template_kwargs: dict[str, Any] | None
+    ) -> str:
+        if template_kwargs is None:
+            raise AssertionError("FlexGEMM template kwargs must include a config")
+        config = template_kwargs["config"]
+        quack_config = config.quack_config
+        description = "default" if quack_config is None else dict(quack_config)
+        return f"CuteDSL template {name} (QUACK config={description})"
+
+    def precompile(self, *, wait: bool = True) -> None:
+        """Compile this choice's pinned QuACK kernel through Inductor's worker pool."""
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.kernel.flex_gemm.runtime import precompile_flex_gemm_kernel
+
+        if not AsyncCompile.wait_process_pool_ready():
+            return
+        inputs = [meta.to_tensor() for meta in self.bmreq.input_tensor_meta]
+        run = self.bmreq.make_run_fn(
+            *inputs, out=self.bmreq.output_tensor_meta.to_tensor()
+        )
+        precompile_flex_gemm_kernel(run, wait=wait)
 
 
 class FlexGemmEpilogueTemplate(CuteDSLTemplate):

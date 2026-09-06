@@ -321,8 +321,13 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
                 assert fragment is not None
                 values[name] = fragment.load()
                 continue
+            if const_expr(kind == "apply"):
+                op = ops_by_name[name]
+                pstate = op.fn_prepare(self, epi_loop_tensors[name], False)
+                values[name] = op.fn_apply_fragment(self, pstate)
+                continue
             assert kind in ("c", "row", "col", "tile"), (
-                "TensorSSA callbacks support c/row/col/tile/scalar/value operands"
+                "TensorSSA callbacks support c/row/col/tile/scalar/value/apply operands"
             )
             fragment = tRS_rC if const_expr(kind == "c") else epi_loop_tensors[name]
             assert fragment is not None
@@ -1461,6 +1466,7 @@ class EpiMod:
         #                           the resolved config's tile_M/tile_K)
         add_to_output=False,  # D += result via the TMA reduce-add store atom (see
         #                       EpiMod.gemm); requires out={"D": buf} and C=None
+        compile_dispatch: bool = True,
         **operands,  # epilogue operand tensors/scalars by fn-parameter name
     ):
         """Eager torch-facing call: resolve config (autotune via
@@ -1483,7 +1489,8 @@ class EpiMod:
         transform_a rides the same op: the handle crosses by semantic digest
         (bind it to a module global for cross-process graphs), runtime
         operand tensors ride the op's input list, and the bundle is rebuilt
-        inside the op body."""
+        inside the op body. Generated runtime callers set ``compile_dispatch=False``
+        because they are already below torch.compile."""
         import torch
 
         constraints = canonicalize_config_constraints(config_constraints)
@@ -1500,7 +1507,7 @@ class EpiMod:
         transform_key = None
         if transform_a is not None:
             if not hasattr(transform_a, "semantic_digest"):
-                if torch.compiler.is_compiling():
+                if compile_dispatch and torch.compiler.is_compiling():
                     raise NotImplementedError(
                         "transform_a under torch.compile needs a digest-carrying handle "
                         "(@a_transform / dropout_a / w4_transform)"
@@ -1539,7 +1546,7 @@ class EpiMod:
             if not store_d or out is None or out.get("D") is None:
                 raise ValueError('add_to_output requires the accumulator as out={"D": buf}')
 
-        if torch.compiler.is_compiling():
+        if compile_dispatch and torch.compiler.is_compiling():
             if dynamic_scheduler or epi_key_overrides is not None:
                 raise NotImplementedError(
                     "dynamic_scheduler/epi_key_overrides under torch.compile: not supported yet"
