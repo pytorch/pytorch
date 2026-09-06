@@ -6,6 +6,7 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
@@ -1244,9 +1245,16 @@ void aoti_torch_save_tensor_handle(
     const char* kernel_name) {
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 #ifndef C10_MOBILE
-  // Save tensor to tmp .pt file for tensors and can be torch.load'ed later
-  auto cwd = c10::filesystem::current_path();
-  auto tmp_folder = cwd / "tmp" / "aoti_torch";
+  // Save tensor to tmp .pt file for tensors and can be torch.load'ed later.
+  // Defaults to <cwd>/tmp/aoti_torch so schedulers that collect a job's working
+  // directory pick the dumps up; AOTI_TORCH_SAVE_DIR writes them elsewhere.
+  // Read per call rather than cached, so a caller can redirect dumps per test
+  // or per session within one process.
+  const std::optional<std::string> save_dir_env =
+      c10::utils::get_env("AOTI_TORCH_SAVE_DIR");
+  auto tmp_folder = (save_dir_env.has_value() && !save_dir_env->empty())
+      ? c10::filesystem::path(*save_dir_env)
+      : c10::filesystem::current_path() / "tmp" / "aoti_torch";
   if (!c10::filesystem::exists(tmp_folder)) {
     std::cout
         << "aoti_torch_save_tensor_handle: Path does not exist, creating it..."
@@ -1259,8 +1267,13 @@ void aoti_torch_save_tensor_handle(
       return;
     }
   }
-  std::string tensor_filepath_to_save = tmp_folder.string() + launch_prefix +
-      "_" + kernel_name + "_" + tensor_name + "_" + t->device().str() + ".pt";
+  // Join as a path component: plain concatenation had no separator, so files
+  // landed beside the created directory rather than inside it.
+  std::string tensor_filepath_to_save =
+      (tmp_folder /
+       (std::string(launch_prefix) + "_" + kernel_name + "_" + tensor_name +
+        "_" + t->device().str() + ".pt"))
+          .string();
 
   auto bytes = torch::jit::pickle_save(c10::IValue(*t));
   std::ofstream fout(tensor_filepath_to_save, std::ios::out | std::ios::binary);
