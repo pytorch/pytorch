@@ -6094,6 +6094,29 @@
       "Hints": []
     }
   ],
+  "GB1323": [
+    {
+      "Gb_type": "Tensor subclass __getattr__ swallows missing attributes",
+      "Context": "type(value).__name__",
+      "Explanation": "{type(value).__name__}.__getattr__ returns for missing names instead of raising AttributeError, so Dynamo cannot safely inspect the tensor.",
+      "Hints": [
+        "Raise AttributeError from `__getattr__` for unknown names.",
+        "Prefer an explicit method on the subclass instead of `__getattr__`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6174": [
+    {
+      "Gb_type": "Tensor subclass method not defined on Tensor",
+      "Context": "{self.class_type.__name__}.{name}",
+      "Explanation": "`torch.compile` cannot trace `{self.class_type.__name__}.{name}` because it is not a torch.Tensor method.",
+      "Hints": [
+        "Avoid calling `{name}` on this tensor subclass inside torch.compile.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0355": [
     {
       "Gb_type": "non-single Tensor return unsupported",

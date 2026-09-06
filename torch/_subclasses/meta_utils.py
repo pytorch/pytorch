@@ -394,10 +394,6 @@ class MetaTensorDescriber:
         ctx = None
         type_v = None
         if is_traceable_wrapper_subclass_v:
-            if not hasattr(t, "__tensor_flatten__"):
-                raise AssertionError(
-                    "Traceable wrapper subclass must have __tensor_flatten__ method"
-                )
             raw_attrs, ctx = t.__tensor_flatten__()
             attrs = {}
             opaque_attrs = {}
