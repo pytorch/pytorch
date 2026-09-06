@@ -64,6 +64,12 @@ class _EpilogueABI:
 
 @functools.lru_cache(maxsize=256)
 def _epilogue_signature(epilogue_fn) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    schema = get_cutedsl_epilogue_schema(epilogue_fn)
+    if schema is not None:
+        return (
+            tuple(name for name in schema.inputs if name != "accum"),
+            schema.outputs,
+        )
     from cutlass.operators.fusion import trace_in_out
 
     inputs, outputs = trace_in_out(epilogue_fn)
@@ -417,6 +423,21 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         from cutlass.operators.arguments import ScaledOperand
 
         reduction = getattr(args, "local_reduce", None)
+        epilogue = getattr(args, "epilogue", None)
+        schema = (
+            None
+            if epilogue is None
+            else get_cutedsl_epilogue_schema(epilogue.epilogue_fn)
+        )
+        if (
+            reduction is not None
+            and reduction.enabled
+            and reduction.tensor_epilogue_returns_local_reduce
+            != (schema is not None and schema.returns_local_reduce)
+        ):
+            return Status.fail(
+                "Block-scaled local reduction contract must match the tensor epilogue return"
+            )
         if (
             reduction is not None
             and reduction.enabled
@@ -721,7 +742,6 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         operator_list = []
 
         for operands in cls._metadata_operand_combinations():
-            # pyrefly: ignore[no-matching-overload]
             for values in itertools.product(*param_values):
                 design = Sm100DesignMetadata(**dict(zip(param_names, values)))
 

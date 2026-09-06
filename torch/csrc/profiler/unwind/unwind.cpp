@@ -46,6 +46,7 @@ Stats stats() {
 #include <climits>
 #include <cstring>
 #include <limits>
+#include <numeric>
 #include <vector>
 
 #include <c10/util/irange.h>
@@ -279,7 +280,7 @@ struct UnwindCache {
     uint64_t low = 0;
     uint64_t high = all_libraries_.size();
     while (low + 1 < high) {
-      auto mid = (low + high) / 2;
+      auto mid = std::midpoint(low, high);
       if (addr < all_libraries_.at(mid).first_addr()) {
         high = mid;
       } else {
