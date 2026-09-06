@@ -104,10 +104,6 @@ _EXCEPTION_STATE_ATTRS_TO_DROP = frozenset(
 )
 
 
-def _safe_exception_args(args: tuple[object, ...]) -> tuple[object, ...]:
-    return args
-
-
 class _SerializedException(RuntimeError):
     _dynamo_original_exception_type: str
 
@@ -162,7 +158,7 @@ class TorchDynamoException(RuntimeError):
     def __reduce__(self) -> tuple[object, ...]:
         return (
             _reconstruct_torch_dynamo_exception,
-            (type(self), _safe_exception_args(self.args)),
+            (type(self), self.args),
             self.__getstate__(),
         )
 
@@ -292,7 +288,7 @@ class BackendCompilerFailed(ShortenTraceback):
         inner_exception: Exception,
         first_useful_frame: types.FrameType | None,
     ) -> None:
-        self.backend_name: object = getattr(backend_fn, "__name__", "?")
+        self.backend_name: str = getattr(backend_fn, "__name__", "?")
         self.inner_exception = inner_exception
         msg = f"backend={self.backend_name!r} raised:\n{type(inner_exception).__name__}: {inner_exception}"
         super().__init__(msg, first_useful_frame=first_useful_frame)
@@ -448,6 +444,8 @@ class ObservedException(TorchDynamoException):
 
 class ObservedUserStopIteration(ObservedException):
     # An UserStopIteration exception observed during the Dynamo tracing (e.g Dynamo tracing __next__)
+    # Preserve CPython's value attribute for external inspection; Dynamo tracks the
+    # symbolic payload separately through ExceptionVariable.args.
     value: object | None
 
     # Reference `StopIteration_init` in CPython

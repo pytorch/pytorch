@@ -45,6 +45,7 @@ import uuid
 import warnings
 import weakref
 from collections import Counter, OrderedDict
+from collections.abc import Iterable
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
@@ -102,7 +103,6 @@ if typing.TYPE_CHECKING:
         Container,
         Generator,
         ItemsView,
-        Iterable,
         Iterator,
         KeysView,
         Mapping,
@@ -1744,7 +1744,7 @@ class CompilationMetrics:
         def us_to_ms(metric: int | None) -> int | None:
             return metric // 1000 if metric is not None else None
 
-        def collection_to_str(metric: Any | None) -> str | None:
+        def collection_to_str(metric: object | None) -> str | None:
             def safe_str(item: object) -> str:
                 try:
                     return str(item)
@@ -1759,9 +1759,11 @@ class CompilationMetrics:
 
             return ",".join(safe_str(item) for item in sorted(metric))
 
-        def collection_to_json_str(metric: Any | None) -> str | None:
+        def collection_to_json_str(metric: object | None) -> str | None:
             if metric is None:
                 return None
+            if not isinstance(metric, Iterable):
+                return "<unknown>"
             try:
                 return json.dumps(list(metric))
             except Exception:
