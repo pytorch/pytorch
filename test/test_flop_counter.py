@@ -10,17 +10,23 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
-from torch.testing._internal.common_device_type import e4m3_type
+from torch.testing._internal.common_device_type import (
+    Capability,
+    e4m3_type,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.utils._triton import has_triton
 from torch.utils.flop_counter import sdpa_backward_flop_count, sdpa_flop_count
 
 
@@ -998,56 +1004,6 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(get_total_flops(mode), """9001""")
 
     @requires_cuda_and_triton
-    def test_flop_counter_custom_triton_manual_decomp(self):
-        import triton
-        import triton.language as tl
-
-        from torch.utils.flop_counter import _FlopCounterMode, register_flop_formula
-
-        @triton.jit
-        def sin_kernel(x_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(x_ptr + offsets, mask=mask)
-            out = tl.sin(x)
-            tl.store(out_ptr + offsets, out, mask=mask)
-
-        x = torch.randn(3, device="cuda")
-        out = torch.empty(3, device="cuda")
-
-        @register_flop_formula(sin_kernel)
-        def compute_sin_kernel_flops(*args, **kwargs) -> int:
-            # dummy implementation
-            return 2
-
-        def sin_grid(meta):
-            return (triton.cdiv(3, meta["BLOCK_SIZE"]),)
-
-        with FlopCounterMode() as m:
-            torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
-
-        self.assertExpectedInline(get_total_flops(m), """2""")
-
-        # Now, wrap in a triton op and do the decomp
-        @torch._library.triton.triton_op("mylib::sin_op", mutates_args=())
-        def op() -> None:
-            torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
-
-        def op_decompose(mode, *args, **kwargs):
-            with mode:
-                torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
-
-        torch.library.register_torch_dispatch(
-            "mylib::sin_op", _FlopCounterMode, op_decompose
-        )
-        # Should now output 2 flops; previously would be 0
-        with FlopCounterMode() as m2:
-            torch.ops.mylib.sin_op()
-        self.assertExpectedInline(get_total_flops(m2), """2""")
-
-    @requires_cuda_and_triton
     def test_flop_counter_custom_triton_op_two_kernels_manual_decomp(self):
         import triton
         import triton.language as tl
@@ -1246,24 +1202,6 @@ class TestFlopCounter(TestCase):
 
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
-    )
-    def test_scaled_mm(self):
-        dtype = e4m3_type
-        with FlopCounterMode() as mode:
-            torch._scaled_mm(
-                torch.randn((3 * 16, 5 * 16), device="cuda").to(dtype),
-                torch.randn((7 * 16, 5 * 16), device="cuda").to(dtype).t(),
-                scale_a=torch.ones((), device="cuda"),
-                scale_b=torch.ones((), device="cuda"),
-                out_dtype=torch.bfloat16,
-            )
-
-        self.assertExpectedInline(get_total_flops(mode), """860160""")
-
-    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
-    @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Flash attention not supported (pre-SM80 hardware on CUDA)",
     )
@@ -1349,6 +1287,77 @@ class TestFlopCounter(TestCase):
         # fw=2 bmms, bw=5 bmms (flash recomputes scores), fw+bw = fw * 7/2
         self.assertEqual(fw_bw_flops, fw_flops * 7 // 2)
         self.assertExpectedInline(str(fw_bw_flops), """146800640""")
+
+
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
+)
+class TestFlopCounterDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_capabilities(Capability.dtype.fp8)
+    def test_scaled_mm(self, device):
+        dtype = e4m3_type
+        with FlopCounterMode() as mode:
+            torch._scaled_mm(
+                torch.randn((3 * 16, 5 * 16), device=device).to(dtype),
+                torch.randn((7 * 16, 5 * 16), device=device).to(dtype).t(),
+                scale_a=torch.ones((), device=device),
+                scale_b=torch.ones((), device=device),
+                out_dtype=torch.bfloat16,
+            )
+
+        self.assertExpectedInline(get_total_flops(mode), """860160""")
+
+    @unittest.skipIf(not has_triton(), "requires Triton")
+    def test_flop_counter_custom_triton_manual_decomp(self, device):
+        import triton
+        import triton.language as tl
+
+        from torch.utils.flop_counter import _FlopCounterMode, register_flop_formula
+
+        @triton.jit
+        def sin_kernel(x_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            out = tl.sin(x)
+            tl.store(out_ptr + offsets, out, mask=mask)
+
+        x = torch.randn(3, device=device)
+        out = torch.empty(3, device=device)
+
+        @register_flop_formula(sin_kernel)
+        def compute_sin_kernel_flops(*args, **kwargs) -> int:
+            # dummy implementation
+            return 2
+
+        def sin_grid(meta):
+            return (triton.cdiv(3, meta["BLOCK_SIZE"]),)
+
+        with FlopCounterMode() as m:
+            torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
+
+        self.assertExpectedInline(get_total_flops(m), """2""")
+
+        # Now, wrap in a triton op and do the decomp
+        @torch._library.triton.triton_op("mylib::sin_op", mutates_args=())
+        def op() -> None:
+            torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
+
+        def op_decompose(mode, *args, **kwargs):
+            with mode:
+                torch.library.wrap_triton(sin_kernel)[sin_grid](x, out, 3, 256)
+
+        torch.library.register_torch_dispatch(
+            "mylib::sin_op", _FlopCounterMode, op_decompose
+        )
+        # Should now output 2 flops; previously would be 0
+        with FlopCounterMode() as m2:
+            torch.ops.mylib.sin_op()
+        self.assertExpectedInline(get_total_flops(m2), """2""")
 
 
 class TestFlexAttentionEstimation(TestCase):
@@ -1519,6 +1528,14 @@ class TestFlexAttentionEstimation(TestCase):
         sparse_flops = get_flops(sparse_node)
         self.assertGreater(dense_flops, 0)
         self.assertEqual(sparse_flops, dense_flops // 2)
+
+
+instantiate_device_type_tests(
+    TestFlopCounterDeviceType,
+    globals(),
+    except_for=("cpu", "mps", "hpu", "privateuse1"),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
