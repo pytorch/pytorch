@@ -25,6 +25,7 @@ from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
 from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     make_dynamo_test,
     munge_exc,
@@ -65,6 +66,8 @@ class FakeMapping:
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dict_subclass_instantiation(self):
         def fn(x):
             sd = SimpleDict(x=5)
@@ -2648,6 +2651,8 @@ instantiate_parametrized_tests(DictTests)
 
 
 class DictGuardTests(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = dict
 
     @make_logging_test(recompiles=True)
@@ -2784,6 +2789,8 @@ class DictGuardTests(LoggingTestCase):
 
 
 class DictMethodsTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = dict
 
     # Methods:
@@ -3333,10 +3340,14 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
 
 class DictSubclassMethodsTests(DictMethodsTests):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = SimpleDict
 
 
 class OrderedDictMethodsTests(DictMethodsTests):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = OrderedDict
 
     # Methods:
@@ -3406,6 +3417,8 @@ class OrderedDictMethodsTests(DictMethodsTests):
 
 
 class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self._prev_trace_unittest = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -3442,6 +3455,8 @@ class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
 
 class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
     """Tests for DunderDictVariable (object.__dict__ handling in Dynamo)"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_dunder_dict_items_includes_mutations(self):
         """Test that __dict__.items() includes both original and mutated keys"""
