@@ -1334,7 +1334,11 @@ class VariableBuilder:
                 for i, v in enumerate(L)
             ]
             result = set_var_cls(items, source=self.source)
-            return self.tx.output.side_effects.track_object_existing(value, result)
+            # Value mutation, like the literal-set path through wrap_literal:
+            # track_object_existing would give AttributeMutationExisting, which
+            # SideEffects.mutation never flags, so add/discard/|= on a
+            # passed-in set or OrderedSet would silently not reach the caller.
+            return self.tx.output.side_effects.track_mutable(value, result)
         elif istype(value, frozenset) and all(
             (
                 # For DBR quantization, we could get a frozenset of torch funcs.

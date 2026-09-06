@@ -1082,6 +1082,518 @@ class FrozensetHierarchyTests(_BaseSetTests):
         self.assertEqual(s, {2, 3, 4, 10})
 
 
+class OrderedSetHierarchyTests(torch._dynamo.test_case.TestCase):
+    """``OrderedSet`` is a ``MutableSet``, not a ``set``. Part of #192874.
+
+    ``torch.utils._ordered_set.OrderedSet`` has ``set``'s whole named-method
+    surface, so unlike the frozenset and dict_keys rows nothing is removed
+    here. What differs is that insertion order is observable and that the
+    in-place operators are ``collections.abc.MutableSet``'s.
+    """
+
+    # Deliberately not in hash order. A result that comes back as [1, 2, 3]
+    # was rebuilt from a set, not from the OrderedSet's own order.
+    BASE = [3, 1, 2]
+    OTHER = [5, 4, 9]
+
+    @staticmethod
+    def _snapshot(value):
+        # OrderedSet.__eq__ ignores order (it compares the backing dicts), so
+        # order has to be checked through list().
+        from torch.utils._ordered_set import OrderedSet
+
+        if isinstance(value, OrderedSet):
+            return ("OrderedSet", list(value))
+        if isinstance(value, tuple):
+            return tuple(OrderedSetHierarchyTests._snapshot(v) for v in value)
+        return value
+
+    def _assert_matches_eager(self, fn, *args, fullgraph=True):
+        expected = self._snapshot(fn(*args))
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="eager", fullgraph=fullgraph)
+        self.assertEqual(self._snapshot(compiled(*args)), expected)
+
+    def test_ordered_set_is_not_a_set_variable(self):
+        """Structural guard against the classes being merged again."""
+        from collections.abc import MutableSet
+
+        from torch._dynamo.variables.sets import (
+            BaseSetVariable,
+            OrderedSetVariable,
+            SetVariable,
+        )
+        from torch.utils._ordered_set import OrderedSet
+
+        self.assertFalse(issubclass(OrderedSetVariable, SetVariable))
+        self.assertTrue(issubclass(OrderedSetVariable, BaseSetVariable))
+        # Matches real CPython.
+        self.assertFalse(issubclass(OrderedSet, set))
+        self.assertTrue(issubclass(OrderedSet, MutableSet))
+
+    def test_named_methods_match_eager(self):
+        """All 17 named set methods trace and agree with eager, order included."""
+        from torch.utils._ordered_set import OrderedSet
+
+        base, other = list(self.BASE), list(self.OTHER)
+        calls = {
+            "isdisjoint": (other,),
+            "intersection": ([2, 1, 9],),
+            "union": (other,),
+            "difference": ([1],),
+            "symmetric_difference": (other,),
+            "issubset": ([3, 1, 2, 9],),
+            "issuperset": ([1],),
+            "copy": (),
+            "add": (9,),
+            "pop": (),
+            "remove": (1,),
+            "discard": (1,),
+            "clear": (),
+            "update": (other,),
+            "intersection_update": ([2, 1, 9],),
+            "difference_update": ([1],),
+            "symmetric_difference_update": (other,),
+        }
+        self.assertEqual(
+            sorted(calls), sorted(n for n in dir(set) if not n.startswith("_"))
+        )
+        for name, args in calls.items():
+            with self.subTest(method=name):
+
+                def fn(_name=name, _args=args):
+                    s = OrderedSet(base)
+                    r = getattr(s, _name)(*_args)
+                    return r, s
+
+                self._assert_matches_eager(fn)
+
+    def test_pop_is_lifo(self):
+        """OrderedSet.pop is dict.popitem: the most recently inserted element."""
+        from torch.utils._ordered_set import OrderedSet
+
+        def fn():
+            s = OrderedSet([3, 1, 2])
+            a = s.pop()
+            b = s.pop()
+            return a, b, list(s)
+
+        self.assertEqual(fn(), (2, 1, [3]))
+        self._assert_matches_eager(fn)
+
+    def test_reconstruction_preserves_insertion_order(self):
+        """An OrderedSet leaving the compiled region keeps its order."""
+        from torch.utils._ordered_set import OrderedSet
+
+        def fn():
+            s = OrderedSet([3, 1, 2])
+            return (
+                s,
+                repr(s),
+                s.copy(),
+                OrderedSet(s),
+                s | [9, 0],
+                OrderedSet([7, 0, 3]),
+            )
+
+        self.assertEqual(
+            self._snapshot(fn())[0:2],
+            (("OrderedSet", [3, 1, 2]), "OrderedSet([3, 1, 2])"),
+        )
+        self._assert_matches_eager(fn)
+
+    def test_inplace_operators_mutate_in_place(self):
+        """MutableSet's in-place operators take any iterable and keep identity.
+
+        set's slots return NotImplemented for a non-set operand, which falls
+        back to the binary operator and rebinds the name to a new object.
+        """
+        from torch.utils._ordered_set import OrderedSet
+
+        base, other = list(self.BASE), list(self.OTHER)
+
+        def ior(ctor):
+            s = OrderedSet(base)
+            alias = s
+            s |= ctor(other)
+            return s is alias, s
+
+        def iand(ctor):
+            s = OrderedSet(base)
+            alias = s
+            s &= ctor([2, 1, 9])
+            return s is alias, s
+
+        def isub(ctor):
+            s = OrderedSet(base)
+            alias = s
+            s -= ctor([1])
+            return s is alias, s
+
+        def ixor(ctor):
+            s = OrderedSet(base)
+            alias = s
+            s ^= ctor(other)
+            return s is alias, s
+
+        for fn in (ior, iand, isub, ixor):
+            for ctor in (OrderedSet, list, tuple):
+                with self.subTest(op=fn.__name__, operand=ctor.__name__):
+                    self.assertTrue(fn(ctor)[0])
+                    self._assert_matches_eager(fn, ctor)
+
+        # set operands as literals: CPython folds a literal of constants into
+        # one frozenset constant, so eager and Dynamo iterate it in the same
+        # order. set([5, 4, 9]) would not: Dynamo keeps the list's order.
+        def with_set_operands():
+            s = OrderedSet(base)
+            alias = s
+            s |= {4, 5, 9}
+            a = s is alias
+            s &= {1, 2, 4}
+            b = s is alias
+            s -= {1}
+            c = s is alias
+            s ^= {2, 7}
+            d = s is alias
+            return (a, b, c, d), s
+
+        self.assertEqual(
+            self._snapshot(with_set_operands()),
+            ((True, True, True, True), ("OrderedSet", [4, 7])),
+        )
+        self._assert_matches_eager(with_set_operands)
+
+    def test_binary_operators_match_eager(self):
+        """Set's operators accept any iterable, on either side, and build an
+        OrderedSet (Set._from_iterable) even when the OrderedSet is the right
+        operand."""
+        from torch.utils._ordered_set import OrderedSet
+
+        base, other = list(self.BASE), list(self.OTHER)
+
+        def forward(ctor):
+            s = OrderedSet(base)
+            o = ctor(other)
+            return s | o, s & o, s - o, s ^ o
+
+        def reflected(ctor):
+            s = OrderedSet(base)
+            o = ctor(other)
+            return o | s, o & s, o - s, o ^ s
+
+        for fn in (forward, reflected):
+            for ctor in (OrderedSet, list, tuple):
+                with self.subTest(op=fn.__name__, operand=ctor.__name__):
+                    for r in fn(ctor):
+                        self.assertIs(type(r), OrderedSet)
+                    self._assert_matches_eager(fn, ctor)
+
+        def reflected_from_set():
+            s = OrderedSet(base)
+            r = {5, 4, 9} - s
+            return type(r), r
+
+        self._assert_matches_eager(reflected_from_set)
+
+    def test_unbound_class_method_calls(self):
+        """OrderedSet.method(obj, ...) is dispatched only for an OrderedSet obj."""
+        from torch.utils._ordered_set import OrderedSet
+
+        base = list(self.BASE)
+
+        def on_ordered_set():
+            s = OrderedSet(base)
+            OrderedSet.add(s, 9)
+            popped = OrderedSet.pop(s)
+            return OrderedSet.union(s, [4]), popped, s
+
+        self._assert_matches_eager(on_ordered_set)
+
+        # With a plain set as the receiver the pure-Python method bodies run
+        # against a set and raise in eager. Before the split Dynamo routed
+        # these to SetVariable and returned a value instead.
+        def add_on_set():
+            s = {3, 1, 2}
+            OrderedSet.add(s, 9)
+            return s
+
+        def union_on_set():
+            return OrderedSet.union({3, 1, 2}, [4])
+
+        for fn, exc in ((add_on_set, AttributeError), (union_on_set, TypeError)):
+            with self.subTest(fn=fn.__name__):
+                with self.assertRaises(exc):
+                    fn()
+                torch._dynamo.reset()
+                with self.assertRaises(exc):
+                    torch.compile(fn, backend="eager", fullgraph=False)()
+                torch._dynamo.reset()
+                with self.assertRaises(Unsupported):
+                    torch.compile(fn, backend="eager", fullgraph=True)()
+
+    def test_unbound_calls_with_unknown_name_or_no_receiver(self):
+        """Names set lacks, or a missing receiver, fall through instead of
+        escaping as IndexError / InternalTorchDynamoError."""
+        from torch.utils._ordered_set import OrderedSet
+
+        def no_receiver():
+            return OrderedSet.union()
+
+        def private_name():
+            return OrderedSet._wrap_iter_in_set(OrderedSet([3, 1, 2]), [1])
+
+        for fn in (no_receiver, private_name):
+            with self.subTest(fn=fn.__name__):
+                # fullgraph=False: graph break, eager semantics (TypeError for
+                # the first two, [2, 1, 3] for the third).
+                torch._dynamo.reset()
+                compiled = torch.compile(fn, backend="eager", fullgraph=False)
+                try:
+                    expected = fn()
+                except TypeError as e:
+                    with self.assertRaises(TypeError) as cm:
+                        compiled()
+                    self.assertEqual(str(cm.exception), str(e))
+                else:
+                    self.assertEqual(compiled(), expected)
+                torch._dynamo.reset()
+                with self.assertRaises(Unsupported):
+                    torch.compile(fn, backend="eager", fullgraph=True)()
+
+    def test_passed_in_ordered_set_reads(self):
+        """Membership and iteration on an OrderedSet argument, and the guards
+        that go with them.
+
+        VariableBuilder guards the argument through ``_dict`` (DICT_KEYS_MATCH
+        with key order). The per-key SET_CONTAINS guard evaluated
+        ``set.__contains__`` on the OrderedSet and failed on the frame that
+        created it, and registering the object's own source for key-order
+        guarding hit ``Expected dict`` in the guard manager.
+        """
+        from torch._dynamo.testing import CompileCounter
+        from torch.utils._ordered_set import OrderedSet
+
+        def fn(x, s):
+            out = []
+            for v in s:  # the iteration protocol itself is under test
+                out.append(v)  # noqa: PERF402
+            return 2 in s, 9 in s, out, list(s), s.union([9]), x + 1
+
+        cnt = CompileCounter()
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.ones(1)
+        # Same content twice, then a different order, different contents and
+        # an empty one: every distinct input must recompile and agree with
+        # eager, including iteration order.
+        inputs = [[3, 1, 2], [3, 1, 2], [2, 1, 3], [3, 1], [3, 1, 2, 9], []]
+        for items in inputs:
+            self.assertEqual(
+                self._snapshot(compiled(x, OrderedSet(items))),
+                self._snapshot(fn(x, OrderedSet(items))),
+            )
+        self.assertEqual(cnt.frame_count, 5)
+
+    def test_passed_in_ordered_set_mutations_reach_caller(self):
+        """Mutating an OrderedSet argument must mutate the caller's object.
+
+        The builder registered a passed-in OrderedSet with
+        ``track_object_existing`` (AttributeMutationExisting), which
+        ``SideEffects.mutation`` never flags, so every mutation was traced
+        and then dropped. A literal ``set`` argument goes through
+        ``wrap_literal`` and ``track_mutable`` instead, which is why sets
+        appeared to work.
+        """
+        from torch.utils._ordered_set import OrderedSet
+
+        base = list(self.BASE)
+
+        def add(s):
+            s.add(9)
+
+        def discard(s):
+            s.discard(1)
+
+        def remove(s):
+            s.remove(1)
+
+        def pop(s):
+            return s.pop()
+
+        def clear(s):
+            s.clear()
+
+        def update(s):
+            s.update([9, 8])
+
+        def intersection_update(s):
+            s.intersection_update([2, 1, 9])
+
+        def difference_update(s):
+            s.difference_update([1])
+
+        def symmetric_difference_update(s):
+            s.symmetric_difference_update([1, 9])
+
+        def ior(s):
+            s |= [9, 8]
+
+        def iand(s):
+            s &= [2, 1, 9]
+
+        def isub(s):
+            s -= [1]
+
+        def ixor(s):
+            s ^= [1, 9]
+
+        def unbound_add(s):
+            OrderedSet.add(s, 9)
+
+        def chain(s):
+            s.add(9)
+            s.discard(3)
+            s |= [7]
+            return s.pop()
+
+        for mutate in (
+            add,
+            discard,
+            remove,
+            pop,
+            clear,
+            update,
+            intersection_update,
+            difference_update,
+            symmetric_difference_update,
+            ior,
+            iand,
+            isub,
+            ixor,
+            unbound_add,
+            chain,
+        ):
+            for fullgraph in (True, False):
+                with self.subTest(op=mutate.__name__, fullgraph=fullgraph):
+
+                    def fn(x, s):
+                        r = mutate(s)
+                        return r, x + 1
+
+                    eager_s = OrderedSet(base)
+                    expected = fn(torch.ones(1), eager_s)
+                    torch._dynamo.reset()
+                    compiled_s = OrderedSet(base)
+                    got = torch.compile(fn, backend="eager", fullgraph=fullgraph)(
+                        torch.ones(1), compiled_s
+                    )
+                    self.assertEqual(self._snapshot(got), self._snapshot(expected))
+                    self.assertEqual(list(compiled_s), list(eager_s))
+
+    def test_passed_in_non_literal_set_mutation_reaches_caller(self):
+        """Same builder branch as OrderedSet: a set whose elements are not all
+        literals was also registered for attribute mutation and lost its
+        mutations. A literal set never hit it."""
+
+        def fn(x, s):
+            s.add(9)
+            s.discard(slice(0, 1))
+            return x + 1
+
+        for make in (lambda: {slice(0, 1), 3}, lambda: {3, 1, 2}):
+            with self.subTest(literal=all(isinstance(v, int) for v in make())):
+                eager_s = make()
+                fn(torch.ones(1), eager_s)
+                torch._dynamo.reset()
+                compiled_s = make()
+                torch.compile(fn, backend="eager", fullgraph=True)(
+                    torch.ones(1), compiled_s
+                )
+                self.assertEqual(compiled_s, eager_s)
+
+    def test_constructor_none_and_iterables(self):
+        """OrderedSet(None) is the documented empty constructor."""
+        from torch.utils._ordered_set import OrderedSet
+
+        def fn():
+            return (
+                OrderedSet(None),
+                OrderedSet(),
+                OrderedSet(iterable=[3, 1]),
+                OrderedSet("cab"),
+                OrderedSet(range(3, 0, -1)),
+                OrderedSet(v * 2 for v in [3, 1, 2]),
+            )
+
+        self._assert_matches_eager(fn)
+
+    def test_dict_attribute_reads(self):
+        """``s._dict`` exposes the backing dict so inlined OrderedSet methods
+        that read it (e.g. ``elem in self._dict``) trace instead of graph
+        breaking on an unmodeled attribute."""
+        from torch.utils._ordered_set import OrderedSet
+
+        def reads(x, s):
+            return 3 in s._dict, 9 in s._dict, list(s._dict), len(s._dict), x + 1
+
+        self._assert_matches_eager(reads, torch.ones(1), OrderedSet([3, 1, 2]))
+
+    def test_reversed_matches_eager(self):
+        """OrderedSet.__reversed__ gives reverse insertion order; set has none."""
+        from torch.utils._ordered_set import OrderedSet
+
+        def in_region():
+            return list(reversed(OrderedSet([3, 1, 2])))
+
+        def unbound():
+            return list(OrderedSet.__reversed__(OrderedSet([3, 1, 2])))
+
+        self.assertEqual(in_region(), [2, 1, 3])
+        self._assert_matches_eager(in_region)
+        self._assert_matches_eager(unbound)
+
+        def passed_in(x, s):
+            return list(reversed(s)), x + 1
+
+        x = torch.ones(1)
+        self.assertEqual(
+            self._snapshot(passed_in(x, OrderedSet([3, 1, 2]))),
+            self._snapshot(
+                torch.compile(passed_in, backend="eager", fullgraph=True)(
+                    x, OrderedSet([3, 1, 2])
+                )
+            ),
+        )
+
+    def test_is_unhashable(self):
+        from torch.utils._ordered_set import OrderedSet
+
+        def fn():
+            return hash(OrderedSet([1]))
+
+        with self.assertRaises(TypeError):
+            fn()
+        torch._dynamo.reset()
+        with self.assertRaises(TypeError):
+            torch.compile(fn, backend="eager", fullgraph=False)()
+
+    def test_regular_set_behaviour_unaffected(self):
+        def fn(s):
+            s.add(4)
+            s |= {10}
+            return (
+                s.union({3}),
+                s.pop() in {1, 2, 4, 10},
+                s == {1, 2},
+                s.isdisjoint({9}),
+            )
+
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled({1, 2}), fn({1, 2}))
+
+
 class DictKeySetHierarchyTests(torch._dynamo.test_case.TestCase):
     """`dict_keys` is not a `set`.
 
