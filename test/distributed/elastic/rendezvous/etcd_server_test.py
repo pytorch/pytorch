@@ -6,17 +6,57 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import os
+import socket
 import sys
 import unittest
+from unittest.mock import patch
 
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
-from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer, find_free_port
 
 
 if os.getenv("CIRCLECI"):
     print("T85992919 temporarily disabling in circle ci", file=sys.stderr)
     sys.exit(0)
+
+
+class FindFreePortTest(unittest.TestCase):
+    # Two IPv4 entries so the fallthrough case does not depend on IPv6
+    # being available on the test host.
+    _ADDRS = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0)),
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0)),
+    ]
+
+    def test_socket_constructor_failure_tries_next_addr(self):
+        real_socket = socket.socket
+        calls = []
+
+        def flaky_socket(*args, **kwargs):
+            calls.append(args)
+            if len(calls) == 1:
+                raise OSError("socket failed")
+            return real_socket(*args, **kwargs)
+
+        with (
+            patch("socket.getaddrinfo", return_value=self._ADDRS),
+            patch("socket.socket", side_effect=flaky_socket),
+        ):
+            sock = find_free_port()
+        try:
+            self.assertEqual(2, len(calls))
+            self.assertGreater(sock.getsockname()[1], 0)
+        finally:
+            sock.close()
+
+    def test_all_socket_constructors_fail_raises_runtime_error(self):
+        with (
+            patch("socket.getaddrinfo", return_value=self._ADDRS),
+            patch("socket.socket", side_effect=OSError("socket failed")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Failed to create a socket"):
+                find_free_port()
 
 
 class EtcdServerTest(unittest.TestCase):
