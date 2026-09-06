@@ -486,39 +486,38 @@ class TestCudagraphFqnAnnotations(TestCase):
             "saved annotations must be lists of dicts",
         )
 
-    def test_shared_mask_attn_annotation_discovery(self):
-        """Print all annotation strings to discover expected values for the
-        exact-match test. The key property to verify: the causal-mask Triton
-        kernel annotation must contain only ``where`` and ``full_default`` ops
-        — not the qkv view/permute/split ops that it only reads (over-attribution
-        from the old origins-walk). No cross-layer bleed either.
+    def test_kernel_annotations_match_expected(self):
+        """The full set of kernel FQN annotations must match exactly.
 
-        Once the GPU CI output is confirmed, replace this with an exact assertEqual.
+        SharedMaskAttn compiles, per layer, to: an extern qkv addmm, a fused
+        Triton causal-mask kernel (``where`` + ``full_default``), an extern SDPA,
+        an extern proj mm, and a Triton proj bias-add. The key over-attribution
+        guard is the mask kernel: its annotation must be exactly
+        ``where + full_default``. Before the compute-tracking fix,
+        get_fused_kernel_module_fqn walked origins and the mask kernel was also
+        attributed the qkv view/permute/split ops it only reads.
+
+        Expected values validated on B300/CUDA 13.1.
         """
         model = SharedMaskAttn(n_layers=2, dim=32, n_heads=2).cuda()
         x = torch.randn(1, 16, 32, device="cuda")
 
         self._run_inductor_cg(model, x, annotate=True)
-        all_strs = sorted(_all_fqn_strings(dict(get_kernel_annotations())))
-        for s in all_strs:
+        all_strs = set(_all_fqn_strings(dict(get_kernel_annotations())))
+        # Print for diagnostics if the assertEqual below fails.
+        for s in sorted(all_strs):
             print(f"  annotation: {s!r}")
-        self.assertTrue(all_strs, "expected non-empty annotations")
 
-        # Guard: no annotation spans FQNs from two different layer indices.
-        import re as _re
-
-        for s in all_strs:
-            layer_indices = {
-                m.group(1)
-                for part in s.split(" + ")
-                for m in [_re.search(r"L\.layers\.(\d+)", part)]
-                if m
+        expected: set[str] = set()
+        for i in (0, 1):
+            expected |= {
+                f"L.layers.{i}.qkv.addmm",
+                f"L.layers.{i}.where + L.layers.{i}.full_default",
+                f"L.layers.{i}._scaled_dot_product_efficient_attention",
+                f"L.layers.{i}.proj.mm_default",
+                f"L.layers.{i}.proj.add_tensor",
             }
-            self.assertLessEqual(
-                len(layer_indices),
-                1,
-                f"annotation spans multiple layers (cross-layer bleed): {s!r}",
-            )
+        self.assertEqual(all_strs, expected)
 
 
 class TestGraphViewHelpers(TestCase):
