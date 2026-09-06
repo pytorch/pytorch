@@ -668,6 +668,12 @@ class DeviceTypeTestBase(TestCase):
                 guard_precision = self.precision
                 guard_rel_tol = self.rel_tol
                 try:
+                    resolve = getattr(self, "_resolve_injected_device", None)
+                    if resolve is not None and "device" in param_kwargs:
+                        param_kwargs = {
+                            **param_kwargs,
+                            "device": resolve(param_kwargs["device"]),
+                        }
                     self._apply_precision_override_for_test(test, param_kwargs)
                     result = test(self, **param_kwargs)
                 except RuntimeError as rte:
