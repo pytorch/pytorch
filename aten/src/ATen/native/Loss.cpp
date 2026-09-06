@@ -73,29 +73,46 @@ namespace {
 
 namespace at::meta {
 
+// For Mean/Sum reductions the result is 0-dim and the IMPL computes the
+// elementwise loss into its own temporary, so building *this* would allocate
+// a full broadcast-size output only to be shrunk by resize_({}), permanently
+// retaining the large storage (#185647). Validate the inputs with a throwaway
+// iterator instead and declare the 0-dim output directly.
+static void loss_reduction_meta(TensorIteratorBase& meta, const Tensor& input, const Tensor& target) {
+  Tensor unused;
+  auto iter = TensorIterator::borrowing_binary_op(unused, input, target);
+  auto options = iter.output().options();
+  const auto& out = meta.maybe_get_output(0);
+  if (out.defined()) {
+    TORCH_CHECK(canCast(iter.common_dtype(), out.scalar_type()),
+                "result type ", iter.common_dtype(),
+                " can't be cast to the desired output type ", out.scalar_type());
+    options = options.dtype(out.scalar_type());
+  }
+  meta.set_output_raw_strided(0, {}, {}, options);
+}
+
 TORCH_META_FUNC(smooth_l1_loss)
 (const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
   TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.")
-  // TODO: Reduce this extra TensorIterator construction for Reduction::Mean & Sum.
-  // We do another TensorIterator construction in the IMPL for the two cases.
-  build_borrowing_binary_op(maybe_get_output(), input, target);
   if (reduction == Reduction::None) {
+    build_borrowing_binary_op(maybe_get_output(), input, target);
     return;
   }
 
   TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
-  maybe_get_output().resize_({});
+  loss_reduction_meta(*this, input, target);
 }
 
 TORCH_META_FUNC(mse_loss)
 (const Tensor& input, const Tensor& target, const int64_t reduction) {
-  build_borrowing_binary_op(maybe_get_output(), input, target);
   if (reduction == Reduction::None) {
+    build_borrowing_binary_op(maybe_get_output(), input, target);
     return;
   }
 
   TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
-  maybe_get_output().resize_({});
+  loss_reduction_meta(*this, input, target);
 }
 
 } // namespace at::meta

@@ -9129,6 +9129,45 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
             F.mse_loss(i, t)
 
+    @parametrize_test("loss_name", ["mse_loss", "smooth_l1_loss"])
+    @parametrize_test("reduction", ["mean", "sum"])
+    def test_loss_reduction_scalar_storage(self, device, loss_name, reduction):
+        # Regression test for #185647: the 0-dim result must not retain the
+        # full elementwise-loss buffer.
+        loss_fn = getattr(F, loss_name)
+        x = torch.rand(3, 16, 16, device=device)
+        y = torch.rand(3, 16, 16, device=device)
+        result = loss_fn(x, y, reduction=reduction)
+        self.assertEqual(result.untyped_storage().nbytes(), result.element_size())
+        unreduced = loss_fn(x, y, reduction='none')
+        expected = unreduced.mean() if reduction == 'mean' else unreduced.sum()
+        self.assertEqual(result, expected)
+        out = torch.empty((), device=device)
+        reduction_enum = torch.nn._reduction.get_enum(reduction)
+        loss_out = getattr(torch._C._nn, loss_name)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            loss_out(x, y, reduction_enum, out=out)
+        self.assertEqual(len(w), 0)
+        self.assertEqual(out.untyped_storage().nbytes(), out.element_size())
+        self.assertEqual(out, expected)
+        out_int = torch.empty((), device=device, dtype=torch.int32)
+        with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
+            loss_out(x, y, reduction_enum, out=out_int)
+        out_f64 = torch.empty((), device=device, dtype=torch.float64)
+        loss_out(x, y, reduction_enum, out=out_f64)
+        self.assertEqual(out_f64.dtype, torch.float64)
+        self.assertEqual(out_f64.untyped_storage().nbytes(), out_f64.element_size())
+        self.assertEqual(out_f64, expected, exact_dtype=False)
+        out_full = torch.empty(3, 16, 16, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            loss_out(x, y, reduction_enum, out=out_full)
+        self.assertEqual(len(w), 1)
+        self.assertIn("resized", str(w[0].message))
+        self.assertEqual(out_full.dim(), 0)
+        self.assertEqual(out_full, expected)
+
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)

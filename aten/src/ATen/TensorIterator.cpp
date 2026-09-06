@@ -1542,6 +1542,13 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 // unconditionally returns a real Tensor (prior to output setting,
 // this function may return an undefined tensor.)
 void TensorIteratorBase::set_output_raw_strided(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options) {
+  if (operands_.empty()) {
+    // A structured kernel's meta function may declare its output without
+    // building this iterator when the impl does not use it (e.g. mse_loss
+    // with Mean/Sum reduction); there is no iterator state to synchronize.
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(num_outputs_ == 0);
+    return;
+  }
   auto& op = operands_[output_idx];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
   const auto& t = maybe_get_output(output_idx);
