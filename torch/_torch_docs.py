@@ -1433,6 +1433,13 @@ When :attr:`obj` is none of the above but a scalar, or a sequence of scalars the
 returned tensor will, by default, infer its datatype from the scalar values, be on the
 current default device, and not share its memory.
 
+.. versionchanged:: 2.14
+   When a default device is set (via :func:`torch.set_default_device` or a
+   ``with torch.device(...):`` block) and :attr:`device` is not given, the device of a
+   device-bearing :attr:`obj` (a tensor, NumPy array, DLPack producer, or buffer) is now
+   preserved instead of being overridden by the default device. The default device still
+   applies to Python scalars and sequences.
+
 .. seealso::
 
     :func:`torch.tensor` creates a tensor that always copies the data from the input object.
@@ -1457,7 +1464,8 @@ Keyword args:
            error is thrown if it cannot.
     device (:class:`torch.device`, optional): the device of the returned tensor.
            Default: ``None``, which causes the device of :attr:`obj` to be used. Or, if
-           :attr:`obj` is a Python sequence, the current default device will be used.
+           :attr:`obj` is a Python scalar or sequence, the current default device will
+           be used.
     requires_grad (bool, optional): whether the returned tensor requires grad.
            Default: ``None``, which causes requires_grad for the returned tensor to be
            inferred from :attr:`obj`. If ``True``, then the returned tensor will require
