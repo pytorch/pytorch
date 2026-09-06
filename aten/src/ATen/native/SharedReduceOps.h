@@ -361,32 +361,72 @@ inline C10_DEVICE acc_t abs_if_complex(c10::complex<scalar_t> data, AbsSwitch<ac
 // value. These types differ for complex number input support.
 // `apply_root` controls whether to apply the final sqrt: if true, returns
 // sqrt(sum(|x|^2)); if false, returns sum(|x|^2) (used by linalg._powsum).
+//
+// Internally accumulates as (scale, ssq) with norm^2 == scale^2 * ssq,
+// rescaling on the fly (LAPACK dnrm2-style) so no intermediate term can
+// overflow even when the final norm is well within the dtype's range.
+// scale == 0 is the identity/empty accumulator, so this composes
+// correctly with binary_kernel_reduce's tree/parallel combine.
+template <typename acc_t>
+struct NormTwoAccumulator {
+  acc_t scale{0};
+  acc_t ssq{0};
+};
+
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = acc_t, bool apply_root = true>
 struct NormTwoOps {
-  inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
-    acc_t data_ = abs_if_complex(data, AbsSwitch<acc_t>());
-    return acc + data_ * data_;
-  }
-
-  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
-    return a + b;
-  }
-
-  inline C10_DEVICE out_t project(acc_t a) const {
-    if constexpr (apply_root) {
-      return device_sqrt(a);
+  inline C10_DEVICE NormTwoAccumulator<acc_t> reduce(NormTwoAccumulator<acc_t> acc, scalar_t data, int64_t /*idx*/) const {
+    acc_t ax = abs_if_complex(data, AbsSwitch<acc_t>());
+    if (ax == acc_t(0)) {
+      return acc;
+    }
+    if (acc.scale < ax) {
+      acc_t r = acc.scale / ax;
+      acc.ssq = acc_t(1) + acc.ssq * r * r;
+      acc.scale = ax;
     } else {
+      acc_t r = ax / acc.scale;
+      acc.ssq = acc.ssq + r * r;
+    }
+    return acc;
+  }
+
+  inline C10_DEVICE NormTwoAccumulator<acc_t> combine(NormTwoAccumulator<acc_t> a, NormTwoAccumulator<acc_t> b) const {
+    if (a.scale == acc_t(0)) {
+      return b;
+    }
+    if (b.scale == acc_t(0)) {
       return a;
+    }
+    if (a.scale > b.scale) {
+      acc_t r = b.scale / a.scale;
+      a.ssq = a.ssq + b.ssq * r * r;
+      return a;
+    } else {
+      acc_t r = a.scale / b.scale;
+      b.ssq = b.ssq + a.ssq * r * r;
+      return b;
     }
   }
 
-  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+  inline C10_DEVICE out_t project(NormTwoAccumulator<acc_t> a) const {
+    if constexpr (apply_root) {
+      return static_cast<out_t>(a.scale * device_sqrt(a.ssq));
+    } else {
+      return static_cast<out_t>(a.scale * a.scale * a.ssq);
+    }
+  }
+
+  static C10_DEVICE NormTwoAccumulator<acc_t> translate_idx(NormTwoAccumulator<acc_t> acc, int64_t /*base_idx*/) {
     return acc;
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  inline C10_DEVICE acc_t warp_shfl_down(acc_t acc, int offset) const {
-    return WARP_SHFL_DOWN(acc, offset);
+  inline C10_DEVICE NormTwoAccumulator<acc_t> warp_shfl_down(NormTwoAccumulator<acc_t> acc, int offset) const {
+    NormTwoAccumulator<acc_t> out;
+    out.scale = WARP_SHFL_DOWN(acc.scale, offset);
+    out.ssq   = WARP_SHFL_DOWN(acc.ssq, offset);
+    return out;
   }
 #endif
 };
