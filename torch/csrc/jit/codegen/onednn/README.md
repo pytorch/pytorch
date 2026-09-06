@@ -8,7 +8,7 @@ We have registered optimization passes in the custom pre-passes set of PyTorch:
 
 1. Alias and mutation reduction
 
-    The operators of oneDNN graph are pure functional while PyTorch has operators in in-place forms or create views for buffer sharing.
+    The operators of oneDNN graph are pure functional while PyTorch has operators in in-place form or creates views for buffer sharing.
     Due to the semantic gaps between the backend operators and the PyTorch operators, we have a pass to reduce mutation with best effort at the beginning.
 
 2. Graph passing
