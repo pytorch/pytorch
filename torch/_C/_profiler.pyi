@@ -243,16 +243,16 @@ def _set_record_concrete_inputs_enabled_val(val: bool) -> None: ...
 def _set_fwd_bwd_enabled_val(val: bool) -> None: ...
 def _set_cuda_sync_enabled_val(val: bool) -> None: ...
 
-# Approximate-clock helpers used by the experimental CUPTI monitor.
+# Approximate-clock helpers used by Cuspy (experimental).
 class _ApproximateClockToUnixTimeConverter:
     def __init__(self) -> None: ...
     def to_unix_ns(self, t: int) -> int: ...
 
 def _get_approximate_time() -> int: ...
 
-# GIL-free CUPTI monitor buffer pool (torch/csrc/profiler/cupti/monitor_native).
-# Exposed as the torch._C._profiler._cupti_monitor submodule.
-class _CuptiMonitorModule:
+# GIL-free Cuspy buffer pool (torch/csrc/profiler/cuspy/cuspy_native).
+# Exposed as the torch._C._profiler._cuspy submodule.
+class _CuspyModule:
     @staticmethod
     def approximate_time_callback_address() -> int: ...
     @staticmethod
@@ -332,7 +332,7 @@ class _CuptiMonitorModule:
         compression_level: int = 1,
     ) -> bytes: ...
 
-_cupti_monitor: _CuptiMonitorModule
+_cuspy: _CuspyModule
 
 class CapturedTraceback: ...
 

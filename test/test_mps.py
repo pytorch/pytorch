@@ -3671,6 +3671,15 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 8, 4, 5))
 
+        # Regression for complex half pow: the polar form exp(y*log(x)) must be
+        # evaluated in float, otherwise moderately large magnitudes overflow half
+        # (e.g. (300+0j)**1 -> NaN). TODO: migrate to the pow OpInfo once chalf is
+        # in its dtype list.
+        base = torch.tensor([300 + 0j, 200 + 200j, 3 + 4j], dtype=torch.chalf, device='mps')
+        exp = torch.tensor([1 + 0j, 1 + 0j, 1.5 + 0j], dtype=torch.chalf, device='mps')
+        ref = torch.pow(base.cpu().to(torch.cfloat), exp.cpu().to(torch.cfloat))
+        self.assertEqual(torch.pow(base, exp).cpu().to(torch.cfloat), ref, atol=1e-2, rtol=1e-2)
+
     # Test addcmul
     def test_addcmul(self):
         def helper(shape, value, xtype=torch.float32, ytype=None, ztype=None):
@@ -5750,6 +5759,25 @@ class TestMPS(TestCaseMPS):
         mps_log_softmax.backward(gradient=mps_grad)
 
         self.assertEqual(cpu_x.grad, mps_x.grad.to('cpu'))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("shape,dim", [((3, 8192), -1), ((4100, 7), 0), ((600, 3000), -1)])
+    def test_log_softmax_metal_paths(self, dtype, shape, dim):
+        # Shapes pin the non-row Metal kernels: the split partial/finalize pair
+        # (dim > 2048, few rows), the 2D kernel (dim not innermost), and the 2D
+        # fallback for long rows (num_rows > 256 disables the split).
+        cpu_x = torch.randn(shape, dtype=dtype)
+        mps_out = F.log_softmax(cpu_x.to('mps'), dim=dim)
+        self.assertEqual(mps_out.cpu(), F.log_softmax(cpu_x, dim=dim))
+
+    def test_log_softmax_split_inf_chunk(self):
+        # A 2048-wide all -inf chunk must not poison the split-path logsumexp;
+        # a fully -inf row stays NaN to match CPU.
+        cpu_x = torch.randn(3, 8192)
+        cpu_x[1, 2048:6144] = -math.inf
+        cpu_x[2] = -math.inf
+        mps_out = F.log_softmax(cpu_x.to('mps'), dim=-1)
+        self.assertEqual(mps_out.cpu(), F.log_softmax(cpu_x, dim=-1))
 
     def test_eq(self):
         values1 = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
@@ -12092,7 +12120,7 @@ class TestPad(TestCaseMPS):
         helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
 
     def test_constant_pad_nd_preserves_memory_format(self):
-        nchw_tensor = torch.rand((1, 2, 5, 3))
+        nchw_tensor = torch.rand((1, 2, 5, 3), device="mps")
         nchw_padded = torch.constant_pad_nd(nchw_tensor, [1, 2], 0.5)
         self.assertTrue(nchw_padded.is_contiguous(memory_format=torch.contiguous_format))
 
@@ -12384,6 +12412,34 @@ class TestLinalgMPS(TestCaseMPS):
         # Fitted values A@x are unique for full column rank even where the raw
         # solution is sensitive to conditioning of individual batch members.
         self.assertEqual(A @ xm, A @ xc, atol=1e-4, rtol=1e-4)
+
+    @dtypes(torch.float32, torch.complex64)
+    def test_linalg_svd_rank_deficient(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196112:
+        # the native Jacobi kernel forms U as (A V) / sigma, which collapses to
+        # zero for sigma ~ 0, leaving U non-orthonormal for rank-deficient
+        # inputs. The null-space columns must be an orthonormal completion.
+        q = torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q
+        v = torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q
+        spectrum = torch.linspace(0.5, 2.0, 32)
+        spectrum[:16] = 0  # exact rank 16, 16384 elements over the gate
+        A = (q * spectrum) @ v.mH
+        U, S, Vh = torch.linalg.svd(A.to(device), full_matrices=False)
+        gram = U.mH @ U
+        self.assertEqual(gram, torch.eye(32, dtype=dtype, device=device).expand_as(gram), atol=1e-4, rtol=1e-4)
+        self.assertEqual(((U * S.unsqueeze(-2)) @ Vh).cpu(), A, atol=1e-4, rtol=1e-4)
+
+    def test_linalg_svd_large_batch_conj(self, device="mps"):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196113:
+        # for m<n the native SVD runs the kernel on A.mH(); .contiguous() leaves
+        # the conjugate bit unresolved when that view is already contiguous (a
+        # column-major or conjugated input), and the Jacobi kernel reads the raw
+        # buffer, so it silently returned SVD(conj(A)). 12288 elements is over
+        # the gate. Row-major inputs stay correct, so this needs the other layouts.
+        A = torch.randn(8, 32, 48, dtype=torch.complex64, device=device)  # m < n
+        for Am in (A, A.mT.contiguous().mT, A.conj()):  # row-major, column-major, conj
+            U, S, Vh = torch.linalg.svd(Am, full_matrices=False)
+            self.assertEqual(((U * S.unsqueeze(-2)) @ Vh).cpu(), Am.cpu(), atol=1e-4, rtol=1e-4)
 
     @dtypes(torch.float32, torch.complex64, torch.float16, torch.bfloat16)
     @parametrize("out", ["none", "zeros", "ones"])
@@ -15876,6 +15932,182 @@ class TestAdvancedIndexing(TestCaseMPS):
             self.assertEqual(na, na_cpu)
 
 
+class TestNondeterministic(TestCaseMPS):
+    def _case_embedding_dense_backward(self, device):
+        weight = torch.randn(10, 3, device=device, requires_grad=True)
+        idx = torch.tensor([1, 2, 3, 1], device=device)
+        res = F.embedding(idx, weight)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_embedding_bag_dense_backward(self, device):
+        weight = torch.randn(10, 3, device=device, requires_grad=True)
+        idx = torch.tensor([1, 2, 3, 1], device=device)
+        offsets = torch.tensor([0, 2], device=device)
+        res = F.embedding_bag(idx, weight, offsets)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_embedding_bag_per_sample_weights_backward(self, device):
+        weight = torch.randn(10, 3, device=device)
+        idx = torch.tensor([1, 2, 3, 1], device=device)
+        offsets = torch.tensor([0, 2], device=device)
+        per_sample_weights = torch.randn(4, device=device, requires_grad=True)
+        res = F.embedding_bag(idx, weight, offsets, mode="sum", per_sample_weights=per_sample_weights)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_grid_sampler_2d_backward(self, device):
+        input = torch.randn(1, 1, 4, 4, device=device, requires_grad=True)
+        grid = torch.rand(1, 3, 3, 2, device=device) * 2 - 1
+        res = F.grid_sample(input, grid, align_corners=False)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_grid_sampler_3d_backward(self, device):
+        input = torch.randn(1, 1, 4, 4, 4, device=device, requires_grad=True)
+        grid = torch.rand(1, 3, 3, 3, 3, device=device) * 2 - 1
+        res = F.grid_sample(input, grid, align_corners=False)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_max_pool3d_backward(self, device):
+        module = torch.nn.MaxPool3d(2)
+        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+        res = module(input)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_adaptive_max_pool2d_backward(self, device):
+        module = torch.nn.AdaptiveMaxPool2d(2)
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        res = module(input)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_avg_pool3d_backward(self, device):
+        module = torch.nn.AvgPool3d(2)
+        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+        res = module(input)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_upsample_bilinear2d_aa_backward(self, device):
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        res = F.interpolate(input, size=12, mode="bilinear", align_corners=False, antialias=True)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_upsample_bicubic2d_backward(self, device):
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        res = F.interpolate(input, size=12, mode="bicubic", align_corners=False)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_upsample_trilinear_backward(self, device):
+        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+        res = F.interpolate(input, size=12, mode="trilinear", align_corners=False)
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_upsample_nearest_3d_backward(self, device):
+        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+        res = F.interpolate(input, size=12, mode="nearest")
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_upsample_nearest_exact_3d_backward(self, device):
+        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+        res = F.interpolate(input, size=12, mode="nearest-exact")
+        grad = torch.ones_like(res)
+        return lambda: res.backward(grad)
+
+    def _case_scatter_reduce(self, device):
+        src = torch.tensor([1., 2., 3., 4., 5., 6.], device=device)
+        index = torch.tensor([0, 1, 0, 1, 2, 1], device=device)
+        input = torch.tensor([1., 2., 3., 4.], device=device)
+        return lambda: input.scatter_reduce(0, index, src, reduce="sum")
+
+    def _case_index_put_accumulate(self, device):
+        input = torch.randn(10, device=device)
+        indices = (torch.randint(0, 10, (10,), device=device),)
+        values = torch.randn(10, device=device)
+        return lambda: input.index_put(indices, values, accumulate=True)
+
+    def _case_index_reduce(self, device):
+        input = torch.randn(10, device=device)
+        index = torch.randint(0, 10, (10,), device=device)
+        return lambda: input.index_reduce(0, index, input, reduce='prod')
+
+
+    def _case_kthvalue(self, device):
+        input = torch.randn(10, device=device)
+        return lambda: torch.kthvalue(input, 5)
+
+    # Maps a test case name to (builder method, alert message caller name). The
+    # builder method must return a callable which, when called, will exercise
+    # the nondeterministic alert.
+    ALERT_CASES = {
+        "embedding_dense_backward": (
+            _case_embedding_dense_backward, "embedding_dense_backward_mps"
+        ),
+        "embedding_bag_dense_backward": (
+            _case_embedding_bag_dense_backward, "_embedding_bag_dense_backward_mps"
+        ),
+        "embedding_bag_per_sample_weights_backward": (
+            _case_embedding_bag_per_sample_weights_backward,
+            "_embedding_bag_per_sample_weights_backward_mps",
+        ),
+        "grid_sampler_2d_backward": (
+            _case_grid_sampler_2d_backward, "grid_sampler_2d_backward_mps"
+        ),
+        "grid_sampler_3d_backward": (
+            _case_grid_sampler_3d_backward, "grid_sampler_3d_backward_mps"
+        ),
+        "max_pool3d_backward": (
+            _case_max_pool3d_backward, "max_pool3d_backward"
+        ),
+        "adaptive_max_pool2d_backward": (
+            _case_adaptive_max_pool2d_backward, "adaptive_max_pool2d_backward"
+        ),
+        "avg_pool3d_backward": (
+            _case_avg_pool3d_backward, "avg_pool3d_backward"
+        ),
+        "upsample_bilinear2d_aa_backward": (
+            _case_upsample_bilinear2d_aa_backward, "upsample_bilinear2d_aa_backward"),
+        "upsample_bicubic2d_backward": (
+            _case_upsample_bicubic2d_backward, "upsample_bicubic2d_backward"
+        ),
+        "upsample_trilinear_backward": (
+            _case_upsample_trilinear_backward, "upsample_trilinear_backward"
+        ),
+        "upsample_nearest_3d_backward": (
+            _case_upsample_nearest_3d_backward, "upsample_nearest_3d_backward"
+        ),
+        "upsample_nearest_exact_3d_backward": (
+            _case_upsample_nearest_exact_3d_backward, "upsample_nearest_exact_3d_backward"),
+        "scatter_reduce": (
+            _case_scatter_reduce, "scatter_reduce_mps"
+        ),
+        "index_put_accumulate": (
+            _case_index_put_accumulate, "index_put_with_accumulate_mps"
+        ),
+        "index_reduce": (
+            _case_index_reduce, "index_reduce_mps"
+        ),
+        "kthvalue": (
+            _case_kthvalue, "kthvalue MPS"
+        ),
+    }
+
+    # Tests that nondeterministic operators raise a nondeterministic alert
+    @parametrize("case_name", list(ALERT_CASES.keys()))
+    def test_nondeterministic_alert(self, case_name, device="mps"):
+        case_fn, caller_name = self.ALERT_CASES[case_name]
+        fn = case_fn(self, device)
+        self.check_nondeterministic_alert(fn, caller_name)
+
+
 class TestRNNMPS(TestCaseMPS):
     def _lstm_helper(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,
                      seq_len=3, batch_size=5, hidden_size=7, input_size=11, backward=False):
@@ -16446,6 +16678,11 @@ class TestConsistency(TestCaseMPS):
         if dtype == torch.complex64:
             if op.name == "mv":
                 return (2e-5, 1e-5)
+            # Complex pow uses the float32 polar form exp(y*log(x)); its
+            # precise:: transcendentals round differently than CPU libm, and
+            # the phase error is amplified by the result magnitude.
+            if op.name in ("pow", "__rpow__"):
+                return (1e-4, 3e-5)
         return (None, None)
 
     # Used for accept mode only
@@ -17647,6 +17884,7 @@ instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="m
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestInnerContiguous, globals(), allow_mps=True, only_for="mps")
 instantiate_parametrized_tests(TestAdvancedIndexing)
+instantiate_parametrized_tests(TestNondeterministic)
 instantiate_parametrized_tests(TestAutocastMPS)
 instantiate_parametrized_tests(MatmulTest)
 instantiate_parametrized_tests(TestBinaryIteratorConformance)

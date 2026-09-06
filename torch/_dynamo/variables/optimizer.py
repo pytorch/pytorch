@@ -41,7 +41,7 @@ from ..source import (
     GradSource,
 )
 from ..utils import GLOBAL_KEY_PREFIX, unpack_iterable
-from .base import GetSet, Method, VariableTracker
+from .base import GetSet, Method, readonly_setter, VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .hashable import HashableTracker
@@ -158,7 +158,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         return None
 
     tp_getset = {
-        "param_groups": GetSet(_get_param_groups),
+        "param_groups": GetSet(_get_param_groups, readonly_setter),
     }
 
     def graph_break_if_pending_mutation(self, tx: "InstructionTranslatorBase") -> None:
