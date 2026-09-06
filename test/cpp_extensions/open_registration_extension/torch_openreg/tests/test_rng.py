@@ -91,6 +91,51 @@ class TestRNG(TestCase):
         # Should produce same sequence with same seed
         self.assertEqual(x0.cpu(), x1.cpu())
 
+    def test_run_and_save_rng_state_dispatch(self):
+        """PrivateUse1 backend dispatches run_and_save_rng_state without
+        hitting the hardcoded whitelist AssertionError (#193112)."""
+        from torch._prims.rng_prims import run_and_save_rng_state
+
+        def dummy_op(x):
+            return x * 2
+
+        x = torch.tensor(3.0, device="openreg:0")
+        state, result = run_and_save_rng_state(dummy_op, x)
+        self.assertEqual(result.item(), 6.0)
+        # openreg.get_rng_state returns a tensor
+        self.assertIsInstance(state, torch.Tensor)
+
+    def test_run_with_rng_state_dispatch(self):
+        """PrivateUse1 backend dispatches run_with_rng_state and restores
+        the original state afterwards (#193112)."""
+        from torch._prims.rng_prims import run_with_rng_state
+
+        def dummy_op(x):
+            return x + 1
+
+        x = torch.tensor(2.0, device="openreg:0")
+        original_state = torch.openreg.get_rng_state(0)
+
+        new_state = torch.openreg.get_rng_state(0)
+        result = run_with_rng_state(new_state, dummy_op, x)
+        self.assertEqual(result.item(), 3.0)
+
+        # Verify original state was restored
+        restored_state = torch.openreg.get_rng_state(0)
+        self.assertEqual(original_state, restored_state)
+
+    def test_rng_state_compile_privateuse1(self):
+        """Regression test for #193112: graph-safe RNG under torch.compile
+        on a PrivateUse1 backend must not raise AssertionError."""
+
+        @torch.compile
+        def fn(x):
+            return x + torch.rand_like(x)
+
+        x = torch.randn(4, device="openreg:0")
+        out = fn(x)
+        self.assertEqual(out.shape, x.shape)
+
 
 if __name__ == "__main__":
     run_tests()
